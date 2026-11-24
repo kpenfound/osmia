@@ -3,13 +3,14 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -39,7 +40,7 @@ func newAmendmentAskFixture(t *testing.T, script func(f *journey.ShedFixture)) *
 	a := &amendmentAskFixture{ShedFixture: f, stream: stream}
 	a.reopen(t)
 	t.Cleanup(func() { a.repo.Close() })
-	seedAmendment(t, f.ArchitectFixture, a.repo, stream)
+	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, a.repo, stream)
 	return a
 }
 

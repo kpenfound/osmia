@@ -2,8 +2,9 @@ package lifecycle_test
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -20,13 +21,13 @@ func TestAvailabilityPassesPreserveTraceErrors(t *testing.T) {
 			if subject == "edge" {
 				id, path = lifecycle.EdgeObservationDocument, lifecycle.EdgeObservationPath
 			}
-			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: f.downstream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: f.downstream, At: f.s.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 			fixturekit.Must(t, f.repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: "{"}}))
 			var err error
 			if subject == "base" {
-				err = f.s.lifecycle().BaseWaitPass(context.Background(), f.repository)
+				err = f.s.Lifecycle().BaseWaitPass(context.Background(), f.repository)
 			} else {
-				err = f.s.lifecycle().EdgeWaitPass(context.Background(), f.repository)
+				err = f.s.Lifecycle().EdgeWaitPass(context.Background(), f.repository)
 			}
 			if err == nil {
 				t.Fatal("corrupt live trace did not fail the scheduling pass")

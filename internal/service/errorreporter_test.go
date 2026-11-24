@@ -470,7 +470,7 @@ func TestErrorReporterAdoptsAnIssueWhoseResponseWasLost(t *testing.T) {
 		r.awaitIssues(reportRepo, 1)
 		intakefixture.Soon(t, "the lost response to be noticed", func() bool { return len(r.state().Intents) == 1 })
 		r.stop()
-		r.files.write(t, r.files.topText+section(reportRepo, `labels = ["changed"]`))
+		r.files.Write(t, r.files.TopText+section(reportRepo, `labels = ["changed"]`))
 		r.launch()
 		r.awaitResolved()
 		r.clock.Advance(2 * time.Minute)

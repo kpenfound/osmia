@@ -2,12 +2,14 @@ package executionjourney
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/osmia/internal/config"
@@ -24,7 +26,7 @@ import (
 )
 
 type triageKit struct {
-	f          *shedFixture
+	f          *journey.ShedFixture
 	stream     string
 	decide     func(subject string) string
 	triage     func(finding, decision, note string) string
@@ -34,33 +36,33 @@ type triageKit struct {
 
 func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageKit {
 	t.Helper()
-	f, stream, repository, a := newFinalFixture(t, key)
-	_, op := assembleBoth(t, f, repository, a, stream,
+	f, stream, repository, a := journey.NewFinalFixture(t, key)
+	_, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."},
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#1"}, "finding": "Resume ignores the last acknowledged chunk."},
 			map[string]any{"severity": "advisory", "finding": "The resume log is noisy."}}})
 		return err
 	})
-	if result := settleOperation(t, f.s, repository, stream, op, a); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, op, a); result.Outcome != "succeeded" {
 		t.Fatalf("the review %+v", result)
 	}
-	f.s.setSole(&activeProject{repository: repository})
-	inspect := service.InspectForTest(f.s.core())
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	inspect := service.InspectForTest(f.S.Core())
 	now := func() time.Time { return fixturekit.DemoStart }
 	if provider == nil {
 		inspect.SetJudge(jevfixture.Unconfigured(now))
 	} else {
 		inspect.SetJudge(jevfixture.Answering(now, provider))
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repository, f.project, stream, now, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, now, intakefixture.ChiefTurnInput{
 		Turn: "events_1", Prompt: "The final review is recorded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	decide, triage := inspect.DecideTool(repository, scope), inspect.TriageTool(repository, scope)
-	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.s.now)
+	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.S.Now)
 	fixturekit.Must(t, err)
 	i := slices.IndexFunc(list, func(tool coreadapter.Tool) bool { return tool.Name == questions.RouteAmendmentTool })
 	if i < 0 {

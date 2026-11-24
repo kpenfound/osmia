@@ -4,13 +4,15 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
+	fs "io/fs"
+	os "os"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	fs "io/fs"
-	os "os"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	filepath "path/filepath"
 	reflect "reflect"
@@ -86,11 +88,11 @@ func deliverOn(t *testing.T, backend string) delivered {
 func deliverOnProject(t *testing.T, backend string, sameRepository bool) delivered {
 	t.Helper()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 1, fixturekit.ValidPlan)
-	defer func() { f.stop(t) }()
+	f, masons := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer func() { f.Stop(t) }()
 
-	f.stop(t)
-	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
+	f.Stop(t)
+	configPath := filepath.Join(f.Opts.Config.Root, "config.toml")
 	text, err := os.ReadFile(configPath)
 	fixturekit.Must(t, err)
 	lines := strings.Split(string(text), "\n")
@@ -102,14 +104,14 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	fixturekit.Must(t, os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0600))
 
 	var stream config.WorkstreamID
-	home := filepath.Dir(f.clone)
+	home := filepath.Dir(f.Clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
 	if sameRepository {
 		fork = filepath.Join(home, "remotes", "dagger", "dagger.git")
-		fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "rename", "upstream", "origin")
-		fixturekit.EditProjectSettings(t, f.opts.Config.Root, f.s.cfg.Project.ID, func(text string) string {
+		fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "rename", "upstream", "origin")
+		fixturekit.EditProjectSettings(t, f.Opts.Config.Root, f.S.Cfg.Project.ID, func(text string) string {
 			var kept []string
 			for _, line := range strings.Split(text, "\n") {
 				if !strings.HasPrefix(strings.TrimSpace(line), "fork") {
@@ -119,14 +121,14 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 			return strings.Join(kept, "\n")
 		})
 	} else {
-		fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+		fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "add", "origin", fork)
 	}
 	originalBase := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "main"))
 	forkBranch := func() string {
 		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}
 	prs := &fixturekit.FakePulls{Fork: forkBranch, SyncHead: true}
-	f.opts.PullRequests = prs
+	f.Opts.PullRequests = prs
 
 	problems := &demoProblems{}
 	p := &intakefixture.Faults{}
@@ -143,14 +145,14 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		return nil
 	}
 	masons.Mu.Unlock()
-	f.engine.Mu.Lock()
-	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
-	f.engine.Turns[answered] = masons.Turn
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.Engine.Turns[answered] = masons.Turn
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}
@@ -164,12 +166,12 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
-	f.start(t)
+	f.Engine.Mu.Unlock()
+	f.Start(t)
 
 	noJJ := func(when string) {
 		t.Helper()
-		fixturekit.Must(t, filepath.WalkDir(f.clone, func(path string, d fs.DirEntry, err error) error {
+		fixturekit.Must(t, filepath.WalkDir(f.Clone, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					return nil
@@ -183,35 +185,35 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}))
 	}
 
-	all, err := f.c.Statuses(ctx)
+	all, err := f.C.Statuses(ctx)
 	fixturekit.Must(t, err)
 	if all.Workspaces.Setting != backend || all.Workspaces.Backend != backend {
 		t.Fatalf("service status workspaces %+v, want %s", all.Workspaces, backend)
 	}
-	stream = f.shedAs(t, "jujutsu-workspaces")
-	st, err := f.c.Status(ctx, stream)
+	stream = f.ShedAs(t, "jujutsu-workspaces")
+	st, err := f.C.Status(ctx, stream)
 	fixturekit.Must(t, err)
 	if st.Workspaces != backend {
 		t.Fatalf("workstream %s status reports %q workspaces, want %q", stream, st.Workspaces, backend)
 	}
 	noJJ("sealed")
-	f.ratifiedBuild(t, stream)
+	f.RatifiedBuild(t, stream)
 
 	intakefixture.Eventually(t, "question 1 was never escalated", func() bool {
-		asked, err := f.repository().Questions(stream)
+		asked, err := f.Repository().Questions(stream)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.ID == "1" && q.State == trace.QuestionEscalated })
 	})
-	f.rule(t, "1")
+	f.Rule(t, "1")
 
-	f.awaitMerged(t, stream, "resume")
+	f.AwaitMerged(t, stream, "resume")
 	noJJ("resume landed")
-	f.awaitMerged(t, stream, "dedupe")
+	f.AwaitMerged(t, stream, "dedupe")
 	noJJ("dedupe landed")
-	cfg := f.s.current()
+	cfg := f.S.Current()
 	for name, w := range map[string]intake.StreamWorkspaces{
-		"unit":    newUnitWorkspaces(cfg, f.repository()).streamWorkspaces,
-		"feature": intake.FeatureWorkspaces(cfg, f.repository()),
+		"unit":    journey.NewUnitWorkspaces(cfg, f.Repository()).StreamWorkspaces,
+		"feature": intake.FeatureWorkspaces(cfg, f.Repository()),
 	} {
 		provider := intakefixture.ProviderOf(t, w, stream)
 		_, onJJ := provider.(*workspace.Jujutsu)
@@ -224,15 +226,15 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 	}
 
-	f.awaitFeature(t, stream, intake.AssembledState)
+	f.AwaitFeature(t, stream, intake.AssembledState)
 	var presented api.DeliveryPresentation
 	intakefixture.Eventually(t, "final review never presented the delivery", func() bool {
-		presented, err = f.c.Delivery(ctx, stream)
+		presented, err = f.C.Delivery(ctx, stream)
 		return err == nil
 	})
-	_, err = f.c.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	_, err = f.C.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	fixturekit.Must(t, err)
-	f.awaitFeature(t, stream, intake.DeliveredState)
+	f.AwaitFeature(t, stream, intake.DeliveredState)
 	problems.check(t)
 	p.Check(t)
 	masons.Check(t)
@@ -241,7 +243,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		t.Fatalf("pull requests %+v", prs.Prs)
 	}
 	prs.Mu.Unlock()
-	st, err = f.c.Status(ctx, stream)
+	st, err = f.C.Status(ctx, stream)
 	fixturekit.Must(t, err)
 	if st.Workspaces != backend {
 		t.Fatalf("delivered workstream %s status reports %q workspaces, want %q", stream, st.Workspaces, backend)

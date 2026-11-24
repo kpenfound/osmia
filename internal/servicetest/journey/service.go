@@ -2,40 +2,48 @@ package journey
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
-	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
-	"net/http"
-	"sync/atomic"
-	"testing"
-	"time"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Options struct {
+	ConversationTicks <-chan time.Time
 	service.Options
 	Boundary       func(context.Context, string) error
 	SchedulePassed func()
 	NotifyInbox    func(context.Context) (api.InboxResponse, *api.APIError)
 	ReviewChecks   service.ReviewChecks
 	Controls       *RuntimeControls
+
+	TelemetryExporter sdktrace.SpanExporter
 }
 
 func (o Options) Hooks() service.TestHooks {
-	h := service.TestHooks{Boundary: o.Boundary, SchedulePassed: o.SchedulePassed, NotifyInbox: o.NotifyInbox, ReviewChecks: o.ReviewChecks}
+	h := service.TestHooks{ConversationTicks: o.ConversationTicks, Boundary: o.Boundary, SchedulePassed: o.SchedulePassed, NotifyInbox: o.NotifyInbox, ReviewChecks: o.ReviewChecks, TelemetryExporter: o.TelemetryExporter}
 	if o.Controls != nil {
 		h.Enforcement = o.Controls.Binding
 	}
@@ -58,16 +66,15 @@ func StartT(t *testing.T, o Options) (*Service, *Client) {
 }
 
 func Start(ctx context.Context, o Options) (*Service, error) {
-	s := &Service{Options: o}
+	s := &Service{Options: o, BoundaryHook: o.Boundary}
 	s.Polls = PollsAccess{S: s}
 	h := o.Hooks()
-	boundary := h.Boundary
 	h.Boundary = func(ctx context.Context, name string) error {
 		if s.Boundary != nil {
 			return s.Boundary(name)
 		}
-		if boundary != nil {
-			return boundary(ctx, name)
+		if s.BoundaryHook != nil {
+			return s.BoundaryHook(ctx, name)
 		}
 		return nil
 	}
@@ -75,16 +82,26 @@ func Start(ctx context.Context, o Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.bind(core)
+	if o.Controls != nil {
+		o.Controls.Service.Store(s)
+	}
+	return s, nil
+}
+
+func (s *Service) bind(core *service.Service) {
 	s.Service = core
+	s.Mu.S = s
+	s.Cfg = service.InspectForTest(core).Config()
+	for _, p := range service.InspectForTest(core).Projects() {
+		s.Projects = append(s.Projects, &ActiveProject{Id: p.ID, Repository: p.Repository, Pipeline: service.InspectForTest(core).Pipeline(p.ID)})
+	}
+	s.Options.ReviewChecks = service.InspectForTest(core).Execution().Checks
 	s.Store = service.InspectForTest(core).Intake().Store()
 	s.Options.Issues = service.InspectForTest(core).Intake().Options.Issues
 	s.Done = core.DoneForTest()
 	s.Lifetime = core.LifetimeForTest()
 	s.Ready = ReadyAccess{S: core}
-	if o.Controls != nil {
-		o.Controls.Service.Store(s)
-	}
-	return s, nil
 }
 
 func FixtureAt(t *testing.T, home string) Options {
@@ -104,25 +121,38 @@ func ServiceChanges(t *testing.T, s *Service) (func(), func()) {
 	return servicetest.ServiceChanges(t, s.Core())
 }
 
-func WriteCharter(t *testing.T, c *Client, p config.ProjectID, content string) trace.Document {
-	return servicetest.WriteCharter(t, c.Client, p, content)
-}
-
-func Mutation(t *testing.T, c *Client, method, kind string, input any) {
-	servicetest.Mutation(t, c.Client, method, kind, input)
-}
-
 type Service struct {
 	*service.Service
-	Cfg      *config.Config
-	Options  Options
-	Store    *runtime.Store
-	Boundary func(string) error
-	Done     <-chan struct{}
-	Lifetime context.Context
-	Ready    ReadyAccess
-	Projects []*ActiveProject
-	Polls    PollsAccess
+	Cfg          *config.Config
+	Options      Options
+	Jev          *jev.Judge
+	Store        *runtime.Store
+	Boundary     func(string) error
+	BoundaryHook func(context.Context, string) error
+	Done         <-chan struct{}
+	Lifetime     context.Context
+	Ready        ReadyAccess
+	Projects     []*ActiveProject
+	Polls        PollsAccess
+	Mu           FixtureMutex
+	Activity     *activity.Registry
+	Logger       *slog.Logger
+	Hub          *eventstream.Hub
+}
+
+type FixtureMutex struct {
+	S *Service
+	sync.Mutex
+}
+
+func (m *FixtureMutex) Unlock() {
+	s := m.S
+	var ps []service.TestProject
+	for _, p := range s.Projects {
+		ps = append(ps, service.TestProject{ID: p.Id, Repository: p.Repository})
+	}
+	service.InspectForTest(s.Core()).SetFixtureState(s.Cfg, s.Options.Options, s.Store, ps)
+	m.Mutex.Unlock()
 }
 
 type ReadyAccess struct{ S *service.Service }
@@ -132,15 +162,33 @@ func (a ReadyAccess) Load() bool { return a.S.ReadyForTest() }
 type ActiveProject struct {
 	Id         config.ProjectID
 	Repository *trace.Repository
+	Pipeline   *service.TestPipeline
 }
 
 func (s *Service) Core() *service.Service {
 	if s.Service == nil {
+		s.Mu.S = s
 		var repos []*trace.Repository
 		for _, p := range s.Projects {
 			repos = append(repos, p.Repository)
 		}
+		if s.Logger != nil {
+			s.Options.Logger = s.Logger
+		}
 		s.Service = service.NewFixtureForTest(s.Cfg, s.Options.Options, s.Store, repos)
+		s.Polls = PollsAccess{S: s}
+	}
+	if s.Done == nil {
+		service.InspectForTest(s.Service).SetFixtureStore(s.Store)
+		if s.Logger != nil {
+			service.InspectForTest(s.Service).SetFixtureLogger(s.Logger)
+		}
+	}
+	if s.Activity != nil {
+		service.InspectForTest(s.Service).SetActivity(s.Activity)
+	}
+	if s.Hub != nil {
+		service.InspectForTest(s.Service).SetHub(s.Hub)
 	}
 	return s.Service
 }
@@ -149,6 +197,24 @@ func (s *Service) Intake() *intake.Controller {
 	c := service.InspectForTest(s.Core()).Intake()
 	c.Options.Architect = s.Options.Architect
 	c.Options.Committee = s.Options.Committee
+	if s.Boundary != nil {
+		c.Step = s.Boundary
+	}
+	return c
+}
+
+func (s *Service) Delivery() *delivery.Controller {
+	c := service.InspectForTest(s.Core()).DeliveryController()
+	if s.Jev != nil {
+		c.Jev = s.Jev
+	}
+	c.Committee = s.Options.Committee
+	c.PullRequests = s.Options.PullRequests
+	c.CloudStatuses, c.CloudRerun, c.CloudTrace, c.PostPushWait = s.Options.CloudStatuses, s.Options.CloudRerun, s.Options.CloudTrace, s.Options.FinalChecksWait
+	if s.Options.Reconciliation.Now != nil {
+		c.Now = s.Options.Reconciliation.Now
+	}
+	c.Execution = s.Execution
 	if s.Boundary != nil {
 		c.Step = s.Boundary
 	}
@@ -170,7 +236,7 @@ func (s *Service) Sole() *ActiveProject {
 	if r == nil {
 		return nil
 	}
-	return &ActiveProject{Id: r.Project(), Repository: r}
+	return &ActiveProject{Id: r.Project(), Repository: r, Pipeline: service.InspectForTest(s.Core()).Pipeline(r.Project())}
 }
 
 func (s *Service) SetSole(p *ActiveProject) {
@@ -178,6 +244,10 @@ func (s *Service) SetSole(p *ActiveProject) {
 		service.InspectForTest(s.Core()).SetTrace(nil)
 		return
 	}
+	if p.Id == "" {
+		p.Id = p.Repository.Project()
+	}
+	s.Projects = []*ActiveProject{p}
 	service.InspectForTest(s.Core()).SetTrace(p.Repository)
 }
 
@@ -187,6 +257,20 @@ func (s *Service) RoleExecution(c *config.Config, r string) (coreadapter.Profile
 
 func (s *Service) Handle(w http.ResponseWriter, r *http.Request) {
 	service.InspectForTest(s.Core()).Handle(w, r)
+}
+
+func (s *Service) ShedAction(raw string, states ...string) (*intake.ShedOwner, *api.APIError) {
+	return service.InspectForTest(s.Core()).ShedAction(raw, states...)
+}
+
+func (s *Service) ClearBoundary() {
+	s.Boundary = nil
+	s.BoundaryHook = nil
+}
+
+func (s *Service) ProjectViews() []*ActiveProject {
+	_, ps := s.Runtimes()
+	return ps
 }
 
 func (s *Service) TestError() error { return s.Core().ErrForTest() }
@@ -227,120 +311,6 @@ func NewClient(socket string) *Client {
 	return &Client{Client: c, DefaultTimeout: c.TimeoutForTest()}
 }
 
-type Masons struct {
-	S          *Service
-	Cfg        *config.Config
-	Repository *trace.Repository
-}
-
-func (m *Masons) Driver() *service.TestUnitDriver {
-	var s *service.Service
-	if m.S != nil {
-		s = m.S.Core()
-	}
-	return service.UnitsForTest(s, m.Repository)
-}
-
-func (m *Masons) Read(w config.WorkstreamID) (service.TestBuilding, bool, error) {
-	return m.Driver().Read(w)
-}
-
-func (m *Masons) Start(ctx context.Context, b service.TestBuilding, u string) (bool, bool, error) {
-	return m.Driver().Start(ctx, b, u)
-}
-
-func (m *Masons) Finish(ctx context.Context, b service.TestBuilding, u string) (bool, bool, error) {
-	return m.Driver().Finish(ctx, b, u)
-}
-
-func (m *Masons) Bundle(ctx context.Context, w config.WorkstreamID, u string) (bundle.Mason, error) {
-	return m.Driver().Bundle(ctx, w, u)
-}
-
-type Foreman struct{ *Masons }
-
-func (f *Foreman) Driver() *service.TestLandingDriver {
-	return service.LandingForTest(f.Masons.Driver())
-}
-
-func (f *Foreman) Pass(ctx context.Context) error { return f.Driver().Pass(ctx) }
-
-func (f *Foreman) Apply(ctx context.Context, o coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return f.Driver().Apply(ctx, o)
-}
-
-func (f *Foreman) Approval(w config.WorkstreamID, u string, v int) (trace.Document, service.UnitReviewResult, bool, error) {
-	return f.Driver().Approval(w, u, v)
-}
-
-func (f *Foreman) Current(ctx context.Context, w config.WorkstreamID, in execution.LandInput, r service.UnitReviewResult) (string, error) {
-	return f.Driver().Current(ctx, w, in, r)
-}
-
-type Reviewers struct{ *Masons }
-
-func (r *Reviewers) PrepareUnitReview(ctx context.Context, w config.WorkstreamID, u string) (coreadapter.ReviewRequest, service.UnitReviewIdentity, error) {
-	return service.ReviewsForTest(r.Driver()).Prepare(ctx, w, u)
-}
-
-func (r *Reviewers) One(ctx context.Context, w config.WorkstreamID, u string, st trace.WorkflowState, p bool) error {
-	return service.ReviewsForTest(r.Driver()).One(ctx, w, u, st, p)
-}
-
-type Checkers struct{ *Masons }
-
-func (c *Checkers) Pass(ctx context.Context) error {
-	return service.ChecksForTest(c.Driver()).Pass(ctx)
-}
-
-func (c *Checkers) Apply(ctx context.Context, o coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return service.ChecksForTest(c.Driver()).Apply(ctx, o)
-}
-
-func (c *Checkers) Inspect(ctx context.Context, o coreadapter.Operation) (coreadapter.Observation, error) {
-	return service.ChecksForTest(c.Driver()).Inspect(ctx, o)
-}
-
-type FinalReviewer struct {
-	S          *Service
-	Repository *trace.Repository
-}
-
-func (f *FinalReviewer) Driver() *service.TestFinalDriver {
-	return service.FinalForTest(f.S.Core(), f.Repository)
-}
-
-func (f *FinalReviewer) Pass(ctx context.Context) error { return f.Driver().Pass(ctx) }
-
-func (f *FinalReviewer) Apply(ctx context.Context, o coreadapter.Operation) (coreadapter.OperationResult, error) {
-	return f.Driver().Apply(ctx, o)
-}
-
-func (f *FinalReviewer) Inspect(ctx context.Context, o coreadapter.Operation) (coreadapter.Observation, error) {
-	return f.Driver().Inspect(ctx, o)
-}
-
-func (f *FinalReviewer) FinalGate(ctx context.Context, w config.WorkstreamID) (api.FinalReport, string, error) {
-	return f.Driver().Gate(ctx, w)
-}
-
-func (f *FinalReviewer) Governing(ctx context.Context, w config.WorkstreamID) (service.TestFinalInput, seal.Seal, error) {
-	return f.Driver().Governing(ctx, w)
-}
-
-type Publisher struct {
-	S          *Service
-	Repository *trace.Repository
-}
-
-func (p *Publisher) Refuse(ctx context.Context, w config.WorkstreamID, in delivery.PublishInput, reason string) (coreadapter.OperationResult, error) {
-	return service.RefusePublicationForTest(ctx, p.S.Core(), p.Repository, w, in, reason)
-}
-
-func NewUnitWorkspaces(c *config.Config, r *trace.Repository) service.TestUnitWorkspaces {
-	return service.UnitWorkspacesForTest(c, r)
-}
-
 func (s *Service) DecideAmendment(ctx context.Context, raw string, id string, req api.AmendmentDecisionRequest) (api.AmendmentResponse, *api.APIError) {
 	return s.Intake().DecideAmendment(ctx, raw, id, req)
 }
@@ -362,7 +332,10 @@ func (s *Service) StartDesignWorkgroup(ctx context.Context, raw string) (api.Des
 }
 
 func (s *Service) Inbox(ctx context.Context) (api.InboxResponse, *api.APIError) {
-	return s.Intake().Inbox(ctx)
+	c := s.Intake()
+	c.DeliveryEntry = s.Delivery().DeliveryEntry
+	c.PublicationEntry = s.Delivery().PublicationEntry
+	return c.Inbox(ctx)
 }
 
 func (s *Service) Answer(ctx context.Context, raw string, req api.AnswerRequest) (api.AnswerResponse, *api.APIError) {
@@ -385,8 +358,21 @@ func (s *Service) Runtimes() (*config.Config, []*ActiveProject) {
 	cfg, ps := s.Intake().Runtimes()
 	var out []*ActiveProject
 	for _, p := range ps {
-		out = append(out, &ActiveProject{Id: p.ID, Repository: p.Repository})
+		var view *ActiveProject
+		for _, old := range s.Projects {
+			if old.Id == p.ID {
+				view = old
+				break
+			}
+		}
+		if view == nil {
+			view = &ActiveProject{Id: p.ID}
+		}
+		view.Repository = p.Repository
+		view.Pipeline = service.InspectForTest(s.Core()).Pipeline(p.ID)
+		out = append(out, view)
 	}
+	s.Projects = out
 	return cfg, out
 }
 
@@ -395,11 +381,11 @@ func (s *Service) FeedList(raw string) (api.FeedResponse, *api.APIError) {
 }
 
 func (s *Service) DeliveryPresentation(ctx context.Context, raw string) (api.DeliveryPresentation, *api.APIError) {
-	return service.InspectForTest(s.Core()).Delivery(ctx, raw)
+	return s.Delivery().DeliveryPresentation(ctx, raw)
 }
 
 func (s *Service) ApproveDelivery(ctx context.Context, raw string, r api.DeliveryDecision) (api.DeliveryApproval, *api.APIError) {
-	return service.InspectForTest(s.Core()).ApproveDelivery(ctx, raw, r)
+	return s.Delivery().ApproveDelivery(ctx, raw, r)
 }
 
 func (s *Service) RuleContested(ctx context.Context, w, u string, r api.ContestedRulingRequest) (api.ContestedRulingResponse, *api.APIError) {
@@ -415,10 +401,6 @@ func (s *Service) Holds(p config.ProjectID, r *trace.Repository, c scheduler.Can
 }
 
 func (s *Service) Halt(p *ActiveProject) error { return service.InspectForTest(s.Core()).Halt(p.Id) }
-
-func (m *Masons) CandidateEvidence(ctx context.Context, w config.WorkstreamID, u string) (coreadapter.ReviewRequest, service.UnitReviewIdentity, error) {
-	return m.Driver().CandidateEvidence(ctx, w, u)
-}
 
 func InspectForTest(s *Service) service.TestAccess { return service.InspectForTest(s.Core()) }
 
@@ -452,7 +434,10 @@ type PageFixture struct {
 func NewPageFixture(t *testing.T) *PageFixture {
 	t.Helper()
 	f := servicetest.NewPageFixture(t)
-	return &PageFixture{S: &Service{Service: f.S}, C: &Client{Client: f.C, DefaultTimeout: f.C.TimeoutForTest()}, Chief: f.Chief}
+	s := &Service{}
+	s.Polls = PollsAccess{S: s}
+	s.bind(f.S)
+	return &PageFixture{S: s, C: &Client{Client: f.C, DefaultTimeout: f.C.TimeoutForTest()}, Chief: f.Chief}
 }
 
 // Until re-evaluates cond whenever the service announces a change, and on a
@@ -466,4 +451,13 @@ func (s *Service) Until(t testing.TB, what string, cond func() bool) {
 	}
 	defer release()
 	fixturekit.Until(t, what, wake, cond)
+}
+
+func (c *RuntimeControls) Execution() *execution.Controls {
+	return &execution.Controls{Load: func() *execution.Controller {
+		if c == nil || c.Service.Load() == nil {
+			return nil
+		}
+		return c.Service.Load().Execution()
+	}}
 }

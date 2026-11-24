@@ -3,6 +3,7 @@ package execution
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func TestDaggerFixtureProcess(t *testing.T) { daggerfixture.Process() }
 func TestUnitSelectedLinksReachDagger(t *testing.T) {
 	for _, picks := range []int{0, 2} {
 		t.Run(string(rune('0'+picks)), func(t *testing.T) {
-			links := []string{daggerfixture.PackageA, daggerfixture.TestB}
+			links := []string{fixturekit.SmartPackageA, daggerfixture.TestB}
 			cli := daggerfixture.Install(t, daggerfixture.Config{Links: append(slices.Clone(links), daggerfixture.Version)})
 			f, stream, repo := newChecksFixture(t, "selected-links", checkrun.DaggerChecks{})
 			score := .9
@@ -72,8 +73,8 @@ func TestUnitSelectedLinksReachDagger(t *testing.T) {
 }
 
 func TestUnitPicksLateRefusalRecordsFullRun(t *testing.T) {
-	links := []string{daggerfixture.PackageA, daggerfixture.TestB}
-	a1 := daggerfixture.PackageA + "&go-test=T1"
+	links := []string{fixturekit.SmartPackageA, daggerfixture.TestB}
+	a1 := fixturekit.SmartPackageA + "&go-test=T1"
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links, Attempts: []daggerfixture.Attempt{
 		{Fail: a1}, {}, {}, {Refusal: daggerfixture.Refusal}, {},
 	}})
@@ -121,7 +122,7 @@ func TestUnitCollectionOptionsReachDagger(t *testing.T) {
 			listing, offered := daggerfixture.CollectionOptions()
 			cli := daggerfixture.Install(t, listing)
 			f, stream, repo := newChecksFixture(t, "collection-options", checkrun.DaggerChecks{})
-			selected := []string{daggerfixture.PackageA, daggerfixture.PackageB, daggerfixture.PathA, daggerfixture.Version}
+			selected := []string{fixturekit.SmartPackageA, fixturekit.SmartPackageB, daggerfixture.PathA, daggerfixture.Version}
 			answers := map[string]systemone.Answer{}
 			for i, link := range offered {
 				score := .01
@@ -154,7 +155,7 @@ func TestUnitCollectionOptionsReachDagger(t *testing.T) {
 				}
 			}
 			cli.AssertRun(t, selected)
-			grouped := daggerfixture.PackageA + "&go-package=b"
+			grouped := fixturekit.SmartPackageA + "&go-package=b"
 			if slices.Contains(offered, grouped) || !slices.Contains(run.Command, grouped) {
 				t.Fatalf("package grouping changed: %q", run.Command)
 			}
@@ -174,7 +175,7 @@ func TestUnitCollectionOptionsReachDagger(t *testing.T) {
 func TestUnitCollectionTooManyChecksRunsFull(t *testing.T) {
 	var links []string
 	for i := range checkselect.MaxQuestions + 1 {
-		links = append(links, fmt.Sprintf("%s&go-test=T%d", daggerfixture.PackageA, i))
+		links = append(links, fmt.Sprintf("%s&go-test=T%d", fixturekit.SmartPackageA, i))
 	}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links})
 	f, stream, repo := newChecksFixture(t, "too-many-options", checkrun.DaggerChecks{})

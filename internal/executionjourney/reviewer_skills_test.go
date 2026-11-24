@@ -4,11 +4,6 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	io "io"
 	slog "log/slog"
 	os "os"
@@ -18,6 +13,13 @@ import (
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -73,7 +75,7 @@ func putFile(t *testing.T, path, content string) {
 	fixturekit.Must(t, os.WriteFile(path, []byte(content), 0600))
 }
 
-func newSkillReviewFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *skills.Manager) {
+func newSkillReviewFixture(t *testing.T, key string) (*journey.ShedFixture, config.WorkstreamID, *trace.Repository, *skills.Manager) {
 	t.Helper()
 	repo := t.TempDir()
 	putFile(t, filepath.Join(repo, "fake-skill", "SKILL.md"), fakeSkillMarkdown)
@@ -84,19 +86,19 @@ func newSkillReviewFixture(t *testing.T, key string) (*shedFixture, config.Works
 	manager.Git = skillClones{fakeSkillRepo: repo}.run
 	manager.Refresh = func() string { return "never" }
 	manager.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	f := newDebateFixtureWith(t, 1, 1, codexReviewerRoles, func(opts *Options) {
+	f := journey.NewDebateFixtureWith(t, 1, 1, codexReviewerRoles, func(opts *journey.Options) {
 		opts.WriteTimeout = time.Minute
 		engine := skillEngine{opts.Committee.Engine.(*fixturekit.DemoEngine), manager}
-		enforced := Enforce(*opts, service.Enforcement{Engine: engine, Hosts: opts.Committee.Hosts})
-		opts.Threads, opts.controls = enforced.Threads, enforced.controls
+		enforced := journey.Enforce(*opts, service.Enforcement{Engine: engine, Hosts: opts.Committee.Hosts})
+		opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
 		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, config.WorkspacesGit, "masons = 1\n", opts.Threads)
 	})
-	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: independentPlan}, nil)
-	f.upstream(t)
-	intakefixture.ScriptMasons(f.engine, execution.MasonTurnID)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
-	seedReview(t, f, repository, stream, "resume", resumeReport)
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: intakefixture.IndependentPlan}, nil)
+	f.Upstream(t)
+	intakefixture.ScriptMasons(f.Engine, execution.MasonTurnID)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	stream, repository := journey.SeedBuild(t, f, key, intakefixture.IndependentPlan, config.WorkspacesGit, base)
+	journey.SeedReview(t, f, repository, stream, "resume", journey.ResumeReport)
 	return f, stream, repository, manager
 }
 
@@ -149,10 +151,10 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		"traversal out of the view":         "../secret.txt",
 	}
 
-	r := &reviewers{masons: newMasonController(f.s, repository)}
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repository)}
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, r.one(ctx, stream, "resume", state, false))
+	fixturekit.Must(t, r.One(ctx, stream, "resume", state, false))
 	reviewer := intake.ReviewerAgent("resume")
 	th, err := repository.Thread(stream, reviewer)
 	fixturekit.Must(t, err)
@@ -173,8 +175,8 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		return text, nil
 	}
 	seen := &reviewerReads{refusals: map[string]string{}}
-	f.engine.Mu.Lock()
-	f.engine.Turns[queued.TurnID] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[queued.TurnID] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		seen.request = req
 		var err error
 		if seen.skillMD, err = read(ctx, tools, skillMD); err != nil {
@@ -194,18 +196,18 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 			}
 			seen.refusals[name] = ""
 		}
-		v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []api.ReviewFinding{}}
+		v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary, Findings: []api.ReviewFinding{}}
 		body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 		if err != nil || !strings.Contains(body, `"recorded":true`) {
 			return nil, fmt.Errorf("verdict %s: %v", body, err)
 		}
 		return &agent.Result{ClaudeID: req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
-	bound, err := f.s.options.Threads(repository, f.s.cfg)
+	bound, err := f.S.Options.Threads(repository, f.S.Cfg)
 	fixturekit.Must(t, err)
-	op, err := thread.TurnOperation(f.project, "codex-skills-review", thread.TurnInput{Workstream: stream, Agent: reviewer, Turn: queued.TurnID})
+	op, err := thread.TurnOperation(f.Project, "codex-skills-review", thread.TurnInput{Workstream: stream, Agent: reviewer, Turn: queued.TurnID})
 	fixturekit.Must(t, err)
 	if _, err := bound.Apply(ctx, op); err != nil {
 		t.Fatalf("the review turn: %v", err)

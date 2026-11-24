@@ -14,3 +14,6 @@ const (
 ]}
 `
 )
+
+// ReviewSummary is how a fixture reviewer says it verified the acceptance.
+const ReviewSummary = "The candidate does the task and its acceptance holds"

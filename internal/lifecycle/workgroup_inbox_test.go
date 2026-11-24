@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -37,7 +39,7 @@ const (
 )
 
 type crossRepoInboxFixture struct {
-	cfg                Options
+	cfg                journey.Options
 	clock              *fixturekit.FixedClock
 	engine             *fixturekit.DemoEngine
 	ticks              chan time.Time
@@ -56,10 +58,10 @@ func newCrossRepoInboxFixture(t *testing.T) *crossRepoInboxFixture {
 	home, err := os.MkdirTemp("", "wgi-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	root := opts.Config.Root
 	home2 := filepath.Join(home, "repo2")
-	fixturekit.RegisterProject(t, root, otherProject, `version = 1
+	fixturekit.RegisterProject(t, root, fixturekit.OtherProject, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+home2+`"
@@ -70,7 +72,7 @@ clone = "`+home2+`"
 
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	f := &crossRepoInboxFixture{cfg: opts, clock: clock, project1: fixturekit.Project, project2: otherProject, stream1: fixturekit.Stream, stream2: otherStream,
+	f := &crossRepoInboxFixture{cfg: opts, clock: clock, project1: fixturekit.Project, project2: fixturekit.OtherProject, stream1: fixturekit.Stream, stream2: fixturekit.OtherStream,
 		ticks: make(chan time.Time), live: map[config.ProjectID]*trace.Repository{}}
 	f.cfg.Logger = slog.New(crossRepoInboxLog{fixture: f, Handler: slog.NewJSONHandler(os.Stderr, nil)})
 	type member struct {
@@ -78,8 +80,8 @@ clone = "`+home2+`"
 		agent, thread string
 	}
 	byProject := map[config.ProjectID][]member{
-		fixturekit.Project: {{f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
-		otherProject:       {{f.stream2, "agent_mason2", "thread_mason2"}, {unrelatedStream2, "agent_u2", "thread_u2"}},
+		fixturekit.Project:      {{f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
+		fixturekit.OtherProject: {{f.stream2, "agent_mason2", "thread_mason2"}, {unrelatedStream2, "agent_u2", "thread_u2"}},
 	}
 	for _, p := range cfg.Projects {
 		fixturekit.Must(t, os.MkdirAll(p.Clone, 0700))
@@ -162,34 +164,34 @@ func (h crossRepoInboxLog) Handle(ctx context.Context, r slog.Record) error {
 	return err
 }
 
-func (f *crossRepoInboxFixture) observePasses(s *Service) {
+func (f *crossRepoInboxFixture) observePasses(s *journey.Service) {
 	f.mu.Lock()
 	f.passes = map[config.ProjectID]int{}
 	f.mu.Unlock()
-	projects := s.projectViews()
+	projects := s.ProjectViews()
 	for _, p := range projects {
-		observed := *p.pipeline.Current.Load()
+		observed := *p.Pipeline.Current.Load()
 		observed.Hooks = append(slices.Clone(observed.Hooks), service.TestScheduleHook{Name: "inbox-fixture-observer", Pass: func(context.Context) error {
 			f.mu.Lock()
-			f.passes[p.id]++
+			f.passes[p.Id]++
 			f.mu.Unlock()
 			return nil
 		}})
-		p.pipeline.Current.Store(&observed)
+		p.Pipeline.Current.Store(&observed)
 	}
 }
-func (f *crossRepoInboxFixture) diagnostics(s *Service) string {
+func (f *crossRepoInboxFixture) diagnostics(s *journey.Service) string {
 	f.mu.Lock()
 	problems, lifecycle := slices.Clone(f.problems), slices.Clone(f.lifecycle)
 	passes := fmt.Sprint(f.passes)
 	f.mu.Unlock()
 	state := "live"
 	select {
-	case <-s.done:
+	case <-s.Done:
 		state = fmt.Sprintf("stopped: %v", s.Wait())
 	default:
-		if !s.ready.Load() || s.lifetime.Err() != nil {
-			state = fmt.Sprintf("stopping: %v", s.lifetime.Err())
+		if !s.Ready.Load() || s.Lifetime.Err() != nil {
+			state = fmt.Sprintf("stopping: %v", s.Lifetime.Err())
 		}
 	}
 	durable := make(chan string, 1)
@@ -203,11 +205,11 @@ func (f *crossRepoInboxFixture) diagnostics(s *Service) string {
 	case <-time.After(200 * time.Millisecond):
 		details = "trace snapshot blocked"
 	}
-	return fmt.Sprintf("service=%s ready=%v completed schedules=%s lifecycle=%v activity=%+v durable=%s tool problems=%v", state, s.ready.Load(), passes, lifecycle, s.activityView().Activity, details, problems)
+	return fmt.Sprintf("service=%s ready=%v completed schedules=%s lifecycle=%v activity=%+v durable=%s tool problems=%v", state, s.Ready.Load(), passes, lifecycle, journey.InspectForTest(s).ActivityView().Activity, details, problems)
 }
 
-func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
-	projects := s.projectViews()
+func (f *crossRepoInboxFixture) snapshot(s *journey.Service) (bool, string) {
+	projects := s.ProjectViews()
 	if len(projects) != 2 {
 		return false, fmt.Sprintf("active projects=%d", len(projects))
 	}
@@ -241,9 +243,9 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 			return
 		}
 		for _, e := range outbox {
-			window := s.current().EventWindow()
+			window := s.Current().EventWindow()
 			if e.Event.Kind == trace.ProgressKind {
-				window = s.current().EventProgressWindow()
+				window = s.Current().EventProgressWindow()
 			}
 			if e.Event.Operation == nil && !e.Acknowledged && (e.Claim != nil || !f.clock.Now().Before(e.At.Add(window))) {
 				complete = false
@@ -267,15 +269,15 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 		}
 	}
 	for _, p := range projects {
-		streams, err := p.repository.Workstreams()
+		streams, err := p.Repository.Workstreams()
 		if err != nil {
-			return false, fmt.Sprintf("%s streams: %v", p.id, err)
+			return false, fmt.Sprintf("%s streams: %v", p.Id, err)
 		}
 		for _, stream := range streams {
-			inspect(p.repository, stream)
+			inspect(p.Repository, stream)
 		}
 	}
-	target, host, _, close, err := s.lifecycle().ChiefRepository(context.Background(), projects[0].repository, f.stream1)
+	target, host, _, close, err := s.Lifecycle().ChiefRepository(context.Background(), projects[0].Repository, f.stream1)
 	if err != nil {
 		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
 	}
@@ -283,7 +285,7 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 	close()
 	return complete, strings.Join(details, "; ")
 }
-func (f *crossRepoInboxFixture) waitCompleted(t *testing.T, s *Service, label string) {
+func (f *crossRepoInboxFixture) waitCompleted(t *testing.T, s *journey.Service, label string) {
 	t.Helper()
 	f.driveTicksUntil(t, s, label, func() bool {
 		complete, _ := f.snapshot(s)
@@ -296,7 +298,7 @@ func (f *crossRepoInboxFixture) problem(format string, args ...any) {
 	f.problems = append(f.problems, fmt.Sprintf(format, args...))
 }
 
-func (f *crossRepoInboxFixture) repositories(t *testing.T, s *Service) (repo1, repo2 *trace.Repository) {
+func (f *crossRepoInboxFixture) repositories(t *testing.T, s *journey.Service) (repo1, repo2 *trace.Repository) {
 	t.Helper()
 	intakefixture.Eventually(t, "both projects' own repositories were never opened", func() bool {
 		f.mu.Lock()
@@ -307,7 +309,7 @@ func (f *crossRepoInboxFixture) repositories(t *testing.T, s *Service) (repo1, r
 	return repo1, repo2
 }
 
-func (f *crossRepoInboxFixture) driveTicksUntil(t *testing.T, s *Service, label string, condition func() bool) {
+func (f *crossRepoInboxFixture) driveTicksUntil(t *testing.T, s *journey.Service, label string, condition func() bool) {
 	t.Helper()
 	deadline := time.NewTimer(fixturekit.DemoTimeout)
 	defer deadline.Stop()
@@ -328,7 +330,7 @@ retry:
 				if checked == nil {
 					continue retry
 				}
-			case <-s.done:
+			case <-s.Done:
 				t.Fatalf("%s: %s", label, f.diagnostics(s))
 			case f.ticks <- f.clock.Now():
 			case <-deadline.C:
@@ -422,7 +424,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 
-	s, err := Start(ctx, f.cfg)
+	s, err := journey.Start(ctx, f.cfg)
 	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed := false
@@ -432,10 +434,10 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		}
 	}()
 	repo1, repo2 := f.repositories(t, s)
-	c := NewClient(s.Socket())
+	c := journey.NewClient(s.Socket())
 	defer c.Close()
 
-	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -492,7 +494,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			consolidated = e
 		case fixturekit.Project:
 			entryU1 = e
-		case otherProject:
+		case fixturekit.OtherProject:
 			entryU2 = e
 		default:
 			t.Fatalf("entry with an unexpected project %s: %+v", e.Project, e)
@@ -583,7 +585,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		t.Fatalf("inbox after the relay: %+v", inbox)
 	}
 	for _, e := range inbox.Entries {
-		if e.Number != 1 || (e.Project != fixturekit.Project && e.Project != otherProject) {
+		if e.Number != 1 || (e.Project != fixturekit.Project && e.Project != fixturekit.OtherProject) {
 			t.Fatalf("unrelated entry after the relay: %+v", e)
 		}
 	}
@@ -604,7 +606,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
-		target, host, _, close, err := s.lifecycle().ChiefRepository(ctx, repo1, f.stream1)
+		target, host, _, close, err := s.Lifecycle().ChiefRepository(ctx, repo1, f.stream1)
 		fixturekit.Must(t, err)
 		defer close()
 		th, err := target.ChiefOfStaffThread(host)
@@ -622,11 +624,11 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	c.Close()
 	fixturekit.Must(t, s.Close())
 	closed = true
-	s, err = Start(ctx, f.cfg)
+	s, err = journey.Start(ctx, f.cfg)
 	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed = false
-	c = NewClient(s.Socket())
+	c = journey.NewClient(s.Socket())
 	defer c.Close()
 	repo1, repo2 = f.repositories(t, s)
 	f.waitCompleted(t, s, "completed state after restart")

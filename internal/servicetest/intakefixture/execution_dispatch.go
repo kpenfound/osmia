@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -93,4 +94,13 @@ func MasonStarts(transitions []trace.Transition) []string {
 }
 func LowHigh(a, b config.WorkstreamID) (config.WorkstreamID, config.WorkstreamID) {
 	return min(a, b), max(a, b)
+}
+
+// MasonCapacity is the capacity settings of a root that runs masons at a time.
+func MasonCapacity(masons int) string { return fmt.Sprintf("masons = %d\n", masons) }
+
+// ParallelCapacity is the capacity settings of a root that runs masons at a
+// time and perWorkstream of them on one workstream.
+func ParallelCapacity(masons, perWorkstream int) string {
+	return fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream)
 }

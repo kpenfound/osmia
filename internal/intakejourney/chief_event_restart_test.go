@@ -3,14 +3,15 @@ package intakejourney
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync/atomic"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	"strings"
-	"sync/atomic"
-	"testing"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"

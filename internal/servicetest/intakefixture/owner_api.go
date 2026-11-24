@@ -2,8 +2,9 @@ package intakefixture
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -37,4 +38,12 @@ func Mutation(t *testing.T, c MutationClient, method, kind string, input any) {
 	if !result.Applied {
 		t.Fatal("not acknowledged")
 	}
+}
+
+// ReadFeed reads a workstream's feed through the real endpoint.
+func ReadFeed(t *testing.T, c MutationClient, id config.WorkstreamID) api.FeedResponse {
+	t.Helper()
+	var out api.FeedResponse
+	fixturekit.Must(t, c.Do(context.Background(), "GET", api.Prefix+"/feed/"+string(id), nil, &out))
+	return out
 }

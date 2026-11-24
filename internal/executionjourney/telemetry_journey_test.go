@@ -3,11 +3,6 @@ package executionjourney
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +10,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/jev/jevtest"
@@ -24,7 +26,6 @@ import (
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -44,7 +45,7 @@ const (
 
 var journeyContent = []string{
 	journeyReport, journeyReply, journeyEvidence, journeyAction, journeyPause, journeyCheck,
-	"Resume from the last chunk", "Send chunks", "Record acknowledged chunks", "Resumable uploads", reviewSummary,
+	"Resume from the last chunk", "Send chunks", "Record acknowledged chunks", "Resumable uploads", fixturekit.ReviewSummary,
 	"Build unit resume of this workstream.", "You are a mason of the",
 }
 
@@ -55,7 +56,7 @@ const (
 )
 
 type telemetryJourney struct {
-	f      *shedFixture
+	f      *journey.ShedFixture
 	stream config.WorkstreamID
 
 	created time.Time
@@ -64,7 +65,7 @@ type telemetryJourney struct {
 
 	openState trace.Transition
 
-	beforeRestart servicetest.Spans
+	beforeRestart fixturekit.Spans
 
 	stopTook time.Duration
 
@@ -83,24 +84,24 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 
 	hosted := &fixturekit.FakePulls{}
-	prepare := func(o *Options) {
-		o.reviewChecks = checker
+	prepare := func(o *journey.Options) {
+		o.ReviewChecks = checker
 		o.PullRequests = hosted
 		if exporter != nil {
-			o.telemetryExporter = exporter
+			o.TelemetryExporter = exporter
 		}
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
-	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, execution.MasonTurnID, intake.OwnerActor)
-	defer f.stop(t)
+	f, masons := journey.NewMasonFixtureWith(t, config.WorkspacesGit, capacity, intakefixture.DisjointPlan, prepare)
+	intakefixture.ExtendParallelMasons(t, f.Clone, f.Repository(), f.Clock.Now(), f.Engine, masons, execution.MasonTurnID, intake.OwnerActor)
+	defer f.Stop(t)
 	j := &telemetryJourney{f: f}
 
 	selection := make([]jevtest.Result, 24)
 	for i := range selection {
 		selection[i] = jevtest.Result{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.92), "check-1": jevtest.Noul(.05)}}}
 	}
-	useJevProvider(f.s, &jevtest.Provider{Results: selection})
+	useJevProvider(f.S, &jevtest.Provider{Results: selection})
 
 	masons.Response = map[string]string{}
 	units := []string{"resume", "upload", "audit"}
@@ -124,12 +125,12 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	var reviewing atomic.Int32
 	var resumeReviews atomic.Int32
-	f.engine.Mu.Lock()
-	chief := f.engine.Turns["*"]
-	f.engine.Turns[execution.MasonTurnID("resume")] = gated
-	f.engine.Turns[execution.MasonTurnID("upload")] = gated
-	f.engine.Turns[execution.MasonTurnID("audit")] = gated
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns[execution.MasonTurnID("resume")] = gated
+	f.Engine.Turns[execution.MasonTurnID("upload")] = gated
+	f.Engine.Turns[execution.MasonTurnID("audit")] = gated
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, intake.MasonAgent("resume")+"-revise-"):
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/retry.go"), []byte("package trace\n// retry token handled\n"), 0600); err != nil {
@@ -151,9 +152,9 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 					return nil, ctx.Err()
 				}
 			}
-			verdict := map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}}
+			verdict := map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}}
 			if strings.Contains(req.Name, "resume") && resumeReviews.Add(1) == 1 {
-				verdict = map[string]any{"decision": "material_findings", "summary": reviewSummary, "findings": []api.ReviewFinding{{Severity: "material", Evidence: journeyEvidence, Action: journeyAction}}}
+				verdict = map[string]any{"decision": "material_findings", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{{Severity: "material", Evidence: journeyEvidence, Action: journeyAction}}}
 			}
 			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, verdict)
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
@@ -169,24 +170,24 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: journeyReply, SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
 	factory := runtime.Target{Scope: "factory"}
 
 	var stream config.WorkstreamID
-	hostFork, host := hostService(t, f, func() config.WorkstreamID { return stream })
+	hostFork, host := journey.HostService(t, f, func() config.WorkstreamID { return stream })
 	hosted.Mu.Lock()
 	hosted.Fork, hosted.Branches, hosted.SyncHead = host.Fork, host.Branches, host.SyncHead
 	hosted.Mu.Unlock()
-	f.s.options.PullRequests, f.opts.PullRequests = hosted, hosted
-	stream = f.builtPaused(t, factory, "telemetry")[0]
+	f.S.Options.PullRequests, f.Opts.PullRequests = hosted, hosted
+	stream = builtPaused(f, t, factory, "telemetry")[0]
 	j.stream = stream
 	var err error
-	j.created, err = f.repository().WorkstreamCreated(stream)
+	j.created, err = f.Repository().WorkstreamCreated(stream)
 	fixturekit.Must(t, err)
 
-	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
-	mutation(t, f.c, "DELETE", "pause", factory)
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
 
 	for range journeyMasons {
 		select {
@@ -197,8 +198,8 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	awaitRole(t, f, intake.MasonRole, journeyMasons, 0)
 
-	rewriteCapacity(t, f.opts.Config.Root, fmt.Sprintf("masons = %d\n", journeyMasons), fmt.Sprintf("masons = %d\n", journeyReloaded))
-	_, err = f.c.Reload(ctx)
+	rewriteCapacity(t, f.Opts.Config.Root, fmt.Sprintf("masons = %d\n", journeyMasons), fmt.Sprintf("masons = %d\n", journeyReloaded))
+	_, err = f.C.Reload(ctx)
 	fixturekit.Must(t, err)
 	awaitRole(t, f, intake.MasonRole, journeyReloaded, 0)
 	close(masonGate)
@@ -207,16 +208,16 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	close(reviewGate)
 
 	for _, unit := range units {
-		f.awaitMerged(t, stream, unit)
+		f.AwaitMerged(t, stream, unit)
 	}
-	f.awaitFeature(t, stream, intake.AssembledState)
+	f.AwaitFeature(t, stream, intake.AssembledState)
 	intakefixture.Soon(t, "the final review to report", func() bool {
-		return len(intakefixture.StreamDocuments(t, f.repository(), stream, delivery.FinalReportDocument)) >= 1
+		return len(intakefixture.StreamDocuments(t, f.Repository(), stream, delivery.FinalReportDocument)) >= 1
 	})
 	masons.Check(t)
 
-	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
-	rt, err := f.c.Runtime(ctx)
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
+	rt, err := f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
 	for _, p := range rt.Effective.Pauses {
 		if p.Target == factory {
@@ -226,26 +227,26 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	if j.pauseSetAt.IsZero() {
 		t.Fatalf("runtime pauses %+v", rt.Effective.Pauses)
 	}
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.Subject == trace.FeatureSubject {
 			j.openState = tr
 		}
 	}
 	j.stop(t)
 	if mem, ok := exporter.(interface{ GetSpans() tracetest.SpanStubs }); ok {
-		j.beforeRestart = servicetest.Spans(mem.GetSpans())
+		j.beforeRestart = fixturekit.Spans(mem.GetSpans())
 	}
 
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repository, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
-	f.s.setSole(&activeProject{repository: repository})
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, fork: hostFork, pulls: hosted}
-	p.approve(t, nil)
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	p := &journey.PublicationFixture{ShedFixture: f, Stream: stream, Repository: repository, Fork: hostFork, Pulls: hosted}
+	p.Approve(t, nil)
 	fixturekit.Must(t, repository.Close())
-	f.opts.PullRequests = p.pulls
+	f.Opts.PullRequests = p.Pulls
 
-	f.start(t)
-	rt, err = f.c.Runtime(ctx)
+	f.Start(t)
+	rt, err = f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
 	var kept bool
 	for _, pause := range rt.Effective.Pauses {
@@ -254,13 +255,13 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	if !kept {
 		t.Fatalf("the pause did not survive the restart: %+v", rt.Effective.Pauses)
 	}
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitFeature(t, stream, intake.DeliveredState)
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
+	f.AwaitFeature(t, stream, intake.DeliveredState)
 	j.delivered = true
-	_, err = f.c.Archive(ctx, stream)
+	_, err = f.C.Archive(ctx, stream)
 	fixturekit.Must(t, err)
 
-	j.sinkOn, j.sinkStats = service.InspectForTest(f.s.core()).Telemetry()
+	j.sinkOn, j.sinkStats = service.InspectForTest(f.S.Core()).Telemetry()
 	j.stop(t)
 	return j
 }
@@ -268,14 +269,14 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 func (j *telemetryJourney) stop(t *testing.T) {
 	t.Helper()
 	began := time.Now()
-	j.f.stop(t)
+	j.f.Stop(t)
 	j.stopTook = max(j.stopTook, time.Since(began))
 }
 
-func awaitRole(t *testing.T, f *shedFixture, role string, used, waiting int) {
+func awaitRole(t *testing.T, f *journey.ShedFixture, role string, used, waiting int) {
 	t.Helper()
 	intakefixture.Soon(t, fmt.Sprintf("the %s pool to reach %d in use and %d waiting", role, used, waiting), func() bool {
-		status, err := f.c.Statuses(context.Background())
+		status, err := f.C.Statuses(context.Background())
 		fixturekit.Must(t, err)
 		if status.Capacity == nil {
 			return false
@@ -316,12 +317,12 @@ const (
 )
 
 func hasAttr(sp tracetest.SpanStub, key string) bool {
-	_, ok := servicetest.Attr(sp, key)
+	_, ok := fixturekit.Attr(sp, key)
 	return ok
 }
 
 func attrOf(sp tracetest.SpanStub, key string) string {
-	v, _ := servicetest.Attr(sp, key)
+	v, _ := fixturekit.Attr(sp, key)
 	return v
 }
 
@@ -329,7 +330,7 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
 	j := driveTelemetryJourney(t, exporter)
-	spans := servicetest.SpansOf(exporter)
+	spans := fixturekit.SpansOf(exporter)
 	stream := string(j.stream)
 	fail := func(format string, args ...any) {
 		t.Helper()
@@ -406,7 +407,7 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	for _, c := range recordspans.UnitCauses {
 		causes[c] = true
 	}
-	byUnit := map[string]servicetest.Spans{}
+	byUnit := map[string]fixturekit.Spans{}
 	for _, sp := range unitStates {
 		byUnit[attrOf(sp, attrUnit)] = append(byUnit[attrOf(sp, attrUnit)], sp)
 		if !causes[attrOf(sp, attrCause)] {
@@ -500,7 +501,7 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	runOne := limits.Where(func(sp tracetest.SpanStub) bool { return sp.Parent.SpanID() == uptimes[0].SpanContext.SpanID() })
 	runTwo := limits.Where(func(sp tracetest.SpanStub) bool { return sp.Parent.SpanID() == uptimes[1].SpanContext.SpanID() })
 	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "checks"} {
-		for run, list := range map[string]servicetest.Spans{"first": runOne.With(attrPool, pool), "second": runTwo.With(attrPool, pool)} {
+		for run, list := range map[string]fixturekit.Spans{"first": runOne.With(attrPool, pool), "second": runTwo.With(attrPool, pool)} {
 			if len(list) == 0 {
 				fail("no pool limit span for %s in the %s run", pool, run)
 			}
@@ -546,7 +547,7 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	}
 
 	pauses := spans.Named("osmia.pause")
-	var open servicetest.Spans
+	var open fixturekit.Spans
 	for _, sp := range pauses {
 		if sp.StartTime.Equal(j.pauseSetAt) {
 			open = append(open, sp)
@@ -587,7 +588,7 @@ func TestTelemetryOffJourneySendsNoSpans(t *testing.T) {
 	if !j.delivered || j.sinkOn || (j.sinkStats != telemetry.Stats{}) {
 		t.Fatalf("delivered %v, sink on %v, counted %+v", j.delivered, j.sinkOn, j.sinkStats)
 	}
-	root := j.f.s.cfg.Root
+	root := j.f.S.Cfg.Root
 	for _, ledger := range []func() (string, error){root.SlotIntervals, root.ServiceIntervals} {
 		path, err := ledger()
 		fixturekit.Must(t, err)
@@ -599,8 +600,8 @@ func TestTelemetryOffJourneySendsNoSpans(t *testing.T) {
 
 func TestTelemetryJourneyContinuesWhenTheCollectorRefusesOrHangs(t *testing.T) {
 	t.Parallel()
-	refusing := &servicetest.RefusingExporter{}
-	hanging := servicetest.NewHangingExporter()
+	refusing := &fixturekit.RefusingExporter{}
+	hanging := fixturekit.NewHangingExporter()
 	t.Cleanup(hanging.Release)
 	for name, exporter := range map[string]interface {
 		sdktrace.SpanExporter
@@ -622,12 +623,12 @@ func TestTelemetryJourneyContinuesWhenTheCollectorRefusesOrHangs(t *testing.T) {
 func TestTelemetryServiceWithoutWorkSendsAPoolLimitSpanForEveryConfiguredPool(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
-	opts := fixture(t)
-	opts.telemetryExporter = exporter
-	s, err := Start(context.Background(), opts)
+	opts := journey.Fixture(t)
+	opts.TelemetryExporter = exporter
+	s, err := journey.Start(context.Background(), opts)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, s.Close())
-	spans := servicetest.SpansOf(exporter)
+	spans := fixturekit.SpansOf(exporter)
 	uptime := spans.Named("osmia.service.uptime")
 	limits := spans.Named("osmia.pool.limit")
 	if len(uptime) != 1 || len(limits) != 5 {

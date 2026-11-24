@@ -2,13 +2,15 @@ package executionjourney
 
 import (
 	context "context"
+	os "os"
+	filepath "path/filepath"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	os "os"
-	filepath "path/filepath"
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
@@ -18,36 +20,36 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 	for _, step := range []string{"mason-implementing", "mason-turn-queued"} {
 		t.Run(step, func(t *testing.T) {
 			ctx := context.Background()
-			gate := &intakefixture.ChangeRaceGate{Step: step, Reached: make(chan struct{}), Released: make(chan struct{})}
-			cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
+			gate := &intakefixture.ChangeRaceGate{Step: step, Reached: make(chan struct{})}
+			cleanup := &journey.LifecycleCleanupGate{Reached: make(chan struct{})}
 			t.Cleanup(gate.Release)
-			t.Cleanup(cleanup.release)
-			f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{
-				wait: lifecycleAwait,
-				options: func(opts *Options) {
+			t.Cleanup(cleanup.Release)
+			f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{
+				Wait: journey.LifecycleAwait,
+				Options: func(opts *journey.Options) {
 					file, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
 					fixturekit.Must(t, err)
 					_, err = file.WriteString("[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
 					fixturekit.Must(t, err)
 					fixturekit.Must(t, file.Close())
 				},
-				checkpoint: func(ctx context.Context, step string) error {
+				Checkpoint: func(ctx context.Context, step string) error {
 					if err := gate.Checkpoint(ctx, step); err != nil {
 						return err
 					}
-					return cleanup.checkpoint(ctx, step)
+					return cleanup.Checkpoint(ctx, step)
 				},
 			})
-			defer f.stop(t)
-			f.startOwner(t)
-			packet := f.awaitPacket(t)
-			address, unit := f.stream1, "accept"
+			defer f.Stop(t)
+			f.StartOwner(t)
+			packet := f.AwaitPacket(t)
+			address, unit := f.Stream1, "accept"
 			gate.Step = step + ":" + string(address) + ":" + unit
 			gate.Armed.Store(true)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+			_, err := f.C.Ratify(ctx, f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 			fixturekit.Must(t, err)
 			gate.Await(t)
-			repo, err := f.s.repository(f.project)
+			repo, err := f.S.Repository(f.Project)
 			fixturekit.Must(t, err)
 			state, err := repo.Workflow(address, trace.UnitSubject(unit))
 			fixturekit.Must(t, err)
@@ -65,12 +67,12 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 					t.Fatalf("checkpoint did not hold an unclaimed request: %+v", th)
 				}
 			}
-			_, err = f.c.Abandon(ctx, address, "Owner cancelled the member at its enqueue boundary.")
+			_, err = f.C.Abandon(ctx, address, "Owner cancelled the member at its enqueue boundary.")
 			fixturekit.Must(t, err)
-			_, err = f.c.Archive(ctx, address)
+			_, err = f.C.Archive(ctx, address)
 			fixturekit.Must(t, err)
 			gate.Release()
-			cleanup.await(t)
+			cleanup.Await(t)
 			th, err := repo.Thread(address, intake.MasonAgent(unit))
 			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 {
@@ -91,15 +93,15 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("late request has %d cancellation responses", count)
 			}
-			cleanup.release()
-			lifecycleAwait(t, f, "same-session late-request archive cleanup", func() bool {
-				a, found := intakefixture.ArchiveRecord(t, f.s.store, address)
+			cleanup.Release()
+			journey.LifecycleAwait(t, f, "same-session late-request archive cleanup", func() bool {
+				a, found := intakefixture.ArchiveRecord(t, f.S.Store, address)
 				return found && !a.CleanedAt.IsZero()
 			})
 			project := repo.Project()
-			root := f.s.current().Root
-			f.stop(t)
-			f.start(t)
+			root := f.S.Current().Root
+			f.Stop(t)
+			f.Start(t)
 			if gone, err := trace.WorkstreamTraceGone(root, project, address); err != nil || !gone {
 				t.Fatalf("restart recreated retired member history: gone=%v error=%v", gone, err)
 			}

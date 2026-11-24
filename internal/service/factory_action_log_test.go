@@ -139,8 +139,8 @@ func runFactoryLogScenario(t *testing.T) factoryLogRun {
 	fixturekit.Must(t, err)
 
 	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
 
 	_, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
@@ -213,13 +213,13 @@ func TestFactoryActionLogDoesNotChangeOutcomeWhenTheWriterFails(t *testing.T) {
 	opts.Logger = slog.New(slog.NewJSONHandler(failingWriter{}, nil))
 	_, c := start(t, opts)
 	target := runtime.Target{Scope: "factory"}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
 	health, err := c.Health(context.Background())
 	fixturekit.Must(t, err)
 	if !health.Ready {
 		t.Fatal(health)
 	}
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
 }
 
 func TestDescribeQueuedTurnReadsRoleProfileAndUnit(t *testing.T) {
@@ -238,24 +238,24 @@ func TestDescribeQueuedTurnReadsRoleProfileAndUnit(t *testing.T) {
 
 func TestFactoryActionLogRecordsNotificationAttemptWithoutTheWebhookURL(t *testing.T) {
 	t.Parallel()
-	hook := newFakeWebhook(t)
+	hook := fixturekit.NewWebhook(t)
 	opts, inbox := notifyFixture(t, "")
-	hook.records(opts)
-	setWebhook(t, opts, hook.hook())
+	hook.Records(opts.Config.Root)
+	fixturekit.SetWebhook(t, opts.Config.Root, hook.Hook())
 	var buf fixturekit.SyncBuffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
 	s, _ := startNotifying(t, opts, inbox)
-	intakefixture.Soon(t, "the ledger enabled", func() bool { return readLedger(t, opts).Enabled })
-	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
-	hook.await(t, 1)
+	intakefixture.Soon(t, "the ledger enabled", func() bool { return fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root).Enabled })
+	inbox.Set(fixturekit.NotificationEntry(InboxEscalation, 1))
+	intakefixture.AwaitWebhook(t, hook, 1)
 	intakefixture.Soon(t, "the Notification recorded as sent", func() bool {
-		rec := readLedger(t, opts).Notifications[NotificationKey(fixturekit.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
+		rec := fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root).Notifications[NotificationKey(fixturekit.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
 		return rec != nil && rec.State == NotificationSent
 	})
 	fixturekit.Must(t, s.Close())
 
 	text := buf.String()
-	if strings.Contains(text, hook.hook()) || strings.Contains(text, hook.URL) {
+	if strings.Contains(text, hook.Hook()) || strings.Contains(text, hook.URL) {
 		t.Fatalf("log output carries the webhook URL: %s", text)
 	}
 	records := decodeFactoryLog(t, buf.String())

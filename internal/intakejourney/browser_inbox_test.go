@@ -2,6 +2,11 @@ package intakejourney
 
 import (
 	context "context"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/execution"
@@ -10,10 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	slices "slices"
-	strings "strings"
-	testing "testing"
-	time "time"
 
 	cdppage "github.com/chromedp/cdproto/page"
 	chromedp "github.com/chromedp/chromedp"

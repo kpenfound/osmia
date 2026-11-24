@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync/atomic"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"strings"
-	"sync/atomic"
-	"testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
@@ -21,10 +23,10 @@ import (
 
 func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t, func(o *Options) { withListen(t, *o, "web = \"127.0.0.1:0\"\n") })
+	f := journey.NewArchitectFixture(t, func(o *journey.Options) { fixturekit.WithListen(t, o.Config.Root, "web = \"127.0.0.1:0\"\n") })
 	held, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
-	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		if calls.Add(1) == 1 {
 			close(held)
 			select {
@@ -35,16 +37,18 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 		}
 		return nil
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 	defer close(release)
-	f.handIn(t, "held-draft", fixturekit.HandedDesign)
+	f.HandIn(t, "held-draft", fixturekit.HandedDesign)
 	<-held
-	second := f.handIn(t, "independent-draft", fixturekit.HandedDesign)
-	f.await(t, second, intakefixture.Sketched)
-	f.await(t, second, func(_, _ string) bool { return InspectForTest(f.s).Pool().Slots(nil).Used[intake.ArchitectRole] == 1 })
+	second := f.HandIn(t, "independent-draft", fixturekit.HandedDesign)
+	f.Await(t, second, intakefixture.Sketched)
+	f.Await(t, second, func(_, _ string) bool {
+		return journey.InspectForTest(f.S).Pool().Slots(nil).Used[intake.ArchitectRole] == 1
+	})
 
 	var status json.RawMessage
-	fixturekit.Must(t, f.c.Do(context.Background(), "GET", service.Prefix+"/status", nil, &status))
+	fixturekit.Must(t, f.C.Do(context.Background(), "GET", service.Prefix+"/status", nil, &status))
 	roles := fixturekit.CapacityWire(t, status)
 	var used, limit, architect float64
 	for _, r := range roles {
@@ -61,7 +65,7 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	}
 
 	p := openBrowser(t)
-	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.AwaitText(`#capacity [data-role=architect] [data-field=slots]`, fmt.Sprintf("%d active (unbounded; 1 per workstream)", int(architect)))
 	for _, role := range []string{"architect"} {

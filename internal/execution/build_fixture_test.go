@@ -150,7 +150,7 @@ func approvedReview(t *testing.T, repository *trace.Repository, stream config.Wo
 }
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.LandOperations(t, repository, stream, LandAction)
+	return intakefixture.OperationsOf(t, repository, stream, LandAction)
 }
 func (f *buildFixture) landedCommits(t *testing.T, stream config.WorkstreamID, base string) []string {
 	t.Helper()

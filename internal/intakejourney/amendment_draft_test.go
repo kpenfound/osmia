@@ -3,12 +3,13 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -16,11 +17,6 @@ import (
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
-
-func seedAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID) {
-	t.Helper()
-	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, repo, stream)
-}
 
 func fileAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID, id string) {
 	t.Helper()
@@ -56,7 +52,7 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
 			fixturekit.Must(t, err)
 			defer func() { _ = repo.Close() }()
-			seedAmendment(t, f, repo, stream)
+			intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, repo, stream)
 			if tc.name == "plan-only" {
 				_, err := repo.MoveFeatureState(context.Background(), trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assembled", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, intake.BuildingState, intake.AssembledState, "final review began")
 				fixturekit.Must(t, err)
@@ -174,7 +170,7 @@ func TestAmendmentDraftReconcilesThroughRunningService(t *testing.T) {
 	workstream := f.HandIn(t, "amendment-reconcile", fixturekit.HandedDesign)
 	f.Await(t, workstream, intakefixture.Sketched)
 
-	seedAmendment(t, f, f.Repository(), workstream)
+	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, f.Repository(), workstream)
 	operations := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
 		t.Helper()
 		ops, err := f.Repository().Operations(workstream)
@@ -229,7 +225,7 @@ func TestAmendmentDraftInspectRunningTurnHasEvidence(t *testing.T) {
 	repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
-	seedAmendment(t, f, repo, workstream)
+	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, repo, workstream)
 	adapter := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: repo}}
 	fixturekit.Must(t, adapter.Pass(context.Background()))
 	operations, err := repo.Operations(workstream)

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -15,22 +17,22 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func tickWorkgroupPasses(t *testing.T, f *crossRepoRatifyFixture) {
+func tickWorkgroupPasses(t *testing.T, f *journey.CrossRepoRatifyFixture) {
 	t.Helper()
-	for _, project := range []config.ProjectID{f.project, f.project2} {
-		repo := mustRepo(t, f.s, project)
-		fixturekit.Must(t, f.s.lifecycle().ChangePass(context.Background(), repo))
-		fixturekit.Must(t, (&workgroupResolver{s: f.s, repository: repo}).Pass(context.Background()))
-		fixturekit.Must(t, f.s.lifecycle().ProjectSpecDraftPass(context.Background(), repo))
-		fixturekit.Must(t, f.s.lifecycle().ProjectSpecRefreshPass(context.Background(), repo))
+	for _, project := range []config.ProjectID{f.Project, f.Project2} {
+		repo := mustRepo(t, f.S, project)
+		fixturekit.Must(t, f.S.Lifecycle().ChangePass(context.Background(), repo))
+		fixturekit.Must(t, (&journey.WorkgroupResolver{S: f.S, Repository: repo}).Pass(context.Background()))
+		fixturekit.Must(t, f.S.Lifecycle().ProjectSpecDraftPass(context.Background(), repo))
+		fixturekit.Must(t, f.S.Lifecycle().ProjectSpecRefreshPass(context.Background(), repo))
 	}
 }
 
-func resolvedTickFixture(t *testing.T) (*crossRepoRatifyFixture, *trace.Repository, trace.Workgroup, trace.ProjectSpec) {
+func resolvedTickFixture(t *testing.T) (*journey.CrossRepoRatifyFixture, *trace.Repository, trace.Workgroup, trace.ProjectSpec) {
 	t.Helper()
 	f, id, _ := projectSliceRefreshFixture(t)
 	ctx := context.Background()
-	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
+	wt, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, id)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { fixturekit.Must(t, wt.Close()) })
 	groups, _, err := trace.Workgroups(wt)
@@ -43,10 +45,10 @@ func resolvedTickFixture(t *testing.T) (*crossRepoRatifyFixture, *trace.Reposito
 		t.Fatal("missing project spec")
 	}
 	approval := trace.GroupApproval{Workgroup: id, ProjectSpec: spec, Complete: true, Members: []trace.GroupMemberApproval{
-		{Project: f.project, Workstream: f.stream1, Record: json.RawMessage(`{}`)},
-		{Project: f.project2, Workstream: f.stream2, Record: json.RawMessage(`{}`)},
+		{Project: f.Project, Workstream: f.Stream1, Record: json.RawMessage(`{}`)},
+		{Project: f.Project2, Workstream: f.Stream2, Record: json.RawMessage(`{}`)},
 	}}
-	fixturekit.Must(t, trace.RecordGroupApproval(ctx, wt, host, approval, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, trace.RecordGroupApproval(ctx, wt, host, approval, f.S.Now(), intake.OwnerActor))
 	return f, wt, g, spec
 }
 
@@ -57,7 +59,7 @@ func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testin
 	id, host := g.ID, g.Members[0]
 	docs := make([]trace.Document, 1200)
 	for i := range docs {
-		docs[i] = trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("history-%d", i), Revision: 1, Project: wt.Project(), Workstream: host, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: fmt.Sprintf("tools/history-%d.json", i), Content: `{}`}
+		docs[i] = trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("history-%d", i), Revision: 1, Project: wt.Project(), Workstream: host, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: fmt.Sprintf("tools/history-%d.json", i), Content: `{}`}
 	}
 	fixturekit.Must(t, wt.RecordDocuments(ctx, docs))
 	before := trace.WorkgroupTraceOpenCount(id)
@@ -65,11 +67,11 @@ func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testin
 	if trace.WorkgroupTraceOpenCount(id) <= before {
 		t.Fatal("live workgroup was skipped")
 	}
-	fixturekit.Must(t, f.s.refreshRuntime())
-	first := runtime.Archive{Project: f.project, Workstream: f.stream1, Workgroup: id, Title: "Cancelled member", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.s.now()}
-	second := runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: id, Title: "Open publication", State: intake.DeliveredState, ResolutionEvidence: "unresolved", ArchivedAt: f.s.now(), Publication: runtime.ArchivePublication{Upstream: "upstream/second", Fork: "owner/second", Branch: "osmia/second", PullRequest: 7}}
-	fixturekit.Must(t, f.s.store.SetArchived(first))
-	fixturekit.Must(t, f.s.store.SetArchived(second))
+	fixturekit.Must(t, f.S.RefreshRuntime())
+	first := runtime.Archive{Project: f.Project, Workstream: f.Stream1, Workgroup: id, Title: "Cancelled member", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.S.Now()}
+	second := runtime.Archive{Project: f.Project2, Workstream: f.Stream2, Workgroup: id, Title: "Open publication", State: intake.DeliveredState, ResolutionEvidence: "unresolved", ArchivedAt: f.S.Now(), Publication: runtime.ArchivePublication{Upstream: "upstream/second", Fork: "owner/second", Branch: "osmia/second", PullRequest: 7}}
+	fixturekit.Must(t, f.S.Store.SetArchived(first))
+	fixturekit.Must(t, f.S.Store.SetArchived(second))
 	before = trace.WorkgroupTraceOpenCount(id)
 	tickWorkgroupPasses(t, f)
 	if trace.WorkgroupTraceOpenCount(id) <= before {
@@ -80,7 +82,7 @@ func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testin
 	if len(resolved) != 0 || rev != 0 {
 		t.Fatalf("premature resolution %v revision %d", resolved, rev)
 	}
-	fixturekit.Must(t, f.s.store.RecordArchivePullRequestMerge(second.Project, second.Workstream, second.Publication, "merged-second"))
+	fixturekit.Must(t, f.S.Store.RecordArchivePullRequestMerge(second.Project, second.Workstream, second.Publication, "merged-second"))
 	tickWorkgroupPasses(t, f)
 	resolved, rev, err = trace.ResolvedWorkgroups(wt)
 	fixturekit.Must(t, err)
@@ -106,8 +108,8 @@ func TestArchivedResolvedWorkgroupTicksAvoidTraceReadsAndObserveReopen(t *testin
 	}
 	assertQuiet()
 	spec.Behavior += "\nOwner-approved clarification."
-	fixturekit.Must(t, trace.RecordWorkgroupRevision(ctx, wt, g, "approved-clarification", spec, f.s.now(), intake.OwnerActor))
-	fixturekit.Must(t, trace.ReopenWorkgroup(ctx, wt, id, f.s.now(), intake.OwnerActor, "approved-clarification"))
+	fixturekit.Must(t, trace.RecordWorkgroupRevision(ctx, wt, g, "approved-clarification", spec, f.S.Now(), intake.OwnerActor))
+	fixturekit.Must(t, trace.ReopenWorkgroup(ctx, wt, id, f.S.Now(), intake.OwnerActor, "approved-clarification"))
 	if trace.WorkgroupResolutionCurrent(id) {
 		t.Fatal("reopen left resolution cached")
 	}
@@ -133,18 +135,18 @@ func TestApprovedChangeReactivatesResolvedWorkgroupWithoutRestart(t *testing.T) 
 	t.Parallel()
 	f, wt, g, spec := resolvedTickFixture(t)
 	ctx := context.Background()
-	first, second := mustRepo(t, f.s, f.project), mustRepo(t, f.s, f.project2)
+	first, second := mustRepo(t, f.S, f.Project), mustRepo(t, f.S, f.Project2)
 	for _, member := range []struct {
 		repo   *trace.Repository
 		stream config.WorkstreamID
-	}{{first, f.stream1}, {second, f.stream2}} {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-fixture", Revision: 1, Project: member.repo.Project(), Workstream: member.stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+	}{{first, f.Stream1}, {second, f.Stream2}} {
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-fixture", Revision: 1, Project: member.repo.Project(), Workstream: member.stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 		_, err := member.repo.SetFeatureState(ctx, h, intake.AbandonedState, "cancelled fixture work")
 		fixturekit.Must(t, err)
 	}
-	fixturekit.Must(t, f.s.refreshRuntime())
-	fixturekit.Must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project, Workstream: f.stream1, Workgroup: g.ID, Title: "Cancelled source", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.s.now()}))
-	resolver := &workgroupResolver{s: f.s, repository: first}
+	fixturekit.Must(t, f.S.RefreshRuntime())
+	fixturekit.Must(t, f.S.Store.SetArchived(runtime.Archive{Project: f.Project, Workstream: f.Stream1, Workgroup: g.ID, Title: "Cancelled source", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.S.Now()}))
+	resolver := &journey.WorkgroupResolver{S: f.S, Repository: first}
 	fixturekit.Must(t, resolver.Pass(ctx))
 	resolved, rev, err := trace.ResolvedWorkgroups(wt)
 	fixturekit.Must(t, err)
@@ -160,13 +162,13 @@ func TestApprovedChangeReactivatesResolvedWorkgroupWithoutRestart(t *testing.T) 
 	}
 	after := spec
 	after.Behavior += "\nClarify the approved shared intent."
-	c := lifecycle.WorkgroupChange{ID: "clarification", Workgroup: g.ID, Host: g.Members[0], Origin: f.stream2, Request: lifecycle.ChangeRequest{Key: "clarification", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared prose"}, Before: spec, After: after, State: "presented"}
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, wt, &c))
-	c, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.stream2), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
+	c := lifecycle.WorkgroupChange{ID: "clarification", Workgroup: g.ID, Host: g.Members[0], Origin: f.Stream2, Request: lifecycle.ChangeRequest{Key: "clarification", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared prose"}, Before: spec, After: after, State: "presented"}
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, wt, &c))
+	c, apiFault := f.S.Lifecycle().DecideChange(ctx, string(f.Stream2), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	fixturekit.Must(t, f.s.lifecycle().ApplyChange(ctx, wt, g, &c))
+	fixturekit.Must(t, f.S.Lifecycle().ApplyChange(ctx, wt, g, &c))
 	if c.State != "applied" || trace.WorkgroupResolutionCurrent(g.ID) {
 		t.Fatalf("approved change did not reopen: %+v", c)
 	}
@@ -175,7 +177,7 @@ func TestApprovedChangeReactivatesResolvedWorkgroupWithoutRestart(t *testing.T) 
 	if len(resolved) != 0 || rev != 2 {
 		t.Fatalf("reopen %v revision %d", resolved, rev)
 	}
-	fixturekit.Must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: g.ID, Title: "Cancelled survivor", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.s.now()}))
+	fixturekit.Must(t, f.S.Store.SetArchived(runtime.Archive{Project: f.Project2, Workstream: f.Stream2, Workgroup: g.ID, Title: "Cancelled survivor", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.S.Now()}))
 	opens = trace.WorkgroupTraceOpenCount(g.ID)
 	tickWorkgroupPasses(t, f)
 	if trace.WorkgroupTraceOpenCount(g.ID) <= opens {

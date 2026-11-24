@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"net"
 	"net/http"
 	"os"
@@ -15,14 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
-
-func withWeb(t *testing.T, opts Options, addr string) {
-	t.Helper()
-	intakefixture.WithWeb(t, opts.Config.Root, addr)
-}
 
 func socketHTTP(socket string) *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -50,7 +46,7 @@ func TestWebListenerDisabledByDefault(t *testing.T) {
 func TestWebListenerServesTheSocketAPI(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 	s, c := start(t, opts)
 	addr := s.WebAddr()
 	if host, _, err := net.SplitHostPort(addr); err != nil || host != "127.0.0.1" {
@@ -80,7 +76,7 @@ func TestWebListenerServesTheSocketAPI(t *testing.T) {
 func TestWebListenerRefusesCrossSiteRequests(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "localhost:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "localhost:0")
 	s, c := start(t, opts)
 	web, base := intakefixture.WebHTTP(), "http://"+s.WebAddr()
 	_, port, err := net.SplitHostPort(s.WebAddr())
@@ -118,12 +114,12 @@ func TestReloadKeepsTheWebListener(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
-	files := configFiles(t, opts)
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	addr := s.WebAddr()
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "[::1]:0", 1))
+	files.Write(t, strings.Replace(files.TopText, "127.0.0.1:0", "[::1]:0", 1))
 	reloaded, err := c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) {
@@ -138,15 +134,15 @@ func TestReloadKeepsTheWebListener(t *testing.T) {
 		t.Fatalf("web after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1))
+	files.Write(t, strings.Replace(files.TopText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) || s.WebAddr() != addr {
 		t.Fatalf("removed listen.web: %+v, bound %s", reloaded, s.WebAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "0.0.0.0:0", 1))
-	reloadFails(t, c, files.top, "listen.web")
+	files.Write(t, strings.Replace(files.TopText, "127.0.0.1:0", "0.0.0.0:0", 1))
+	intakefixture.ReloadFails(t, c.Reload, files.Top, "listen.web")
 }
 
 // A web address that cannot be bound fails startup and leaves neither the
@@ -157,7 +153,7 @@ func TestWebListenerBindFailureFailsStartup(t *testing.T) {
 	fixturekit.Must(t, err)
 	defer taken.Close()
 	opts := fixture(t)
-	withWeb(t, opts, taken.Addr().String())
+	intakefixture.WithWeb(t, opts.Config.Root, taken.Addr().String())
 	s, err := Start(context.Background(), opts)
 	if err == nil {
 		s.Close()
@@ -180,7 +176,7 @@ func TestWebListenerBindFailureFailsStartup(t *testing.T) {
 func TestShutdownClosesBothListeners(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 	s, err := Start(context.Background(), opts)
 	fixturekit.Must(t, err)
 	addr, socket := s.WebAddr(), s.Socket()

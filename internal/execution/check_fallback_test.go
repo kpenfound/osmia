@@ -201,7 +201,7 @@ func TestIncompleteCloudAttemptKeepsTheRetryAndContest(t *testing.T) {
 
 func TestLinksThatNeededCloudRunThereDirectlyLater(t *testing.T) {
 	t.Parallel()
-	links := []string{daggerfixture.PackageA, daggerfixture.TestB}
+	links := []string{fixturekit.SmartPackageA, daggerfixture.TestB}
 	local := &fakeChecks{Links: append(slices.Clone(links), daggerfixture.Version), Outcomes: []checkOutcome{
 		{Result: api.CheckResult{Output: passedReport}}, {Block: true}, {Result: api.CheckResult{Output: passedReport}},
 	}}

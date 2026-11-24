@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/lifecyclefixture"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -22,7 +25,7 @@ func TestAbandonRunningTurnReturningWaitingSettlesOperation(t *testing.T) {
 	s.setSole(runtimeFor(repo))
 	d := a.Reconciler.(thread.Dispatcher)
 	calls := 0
-	d.Runner.Turns = turnFunc(func(run context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	d.Runner.Turns = fixturekit.TurnsFunc(func(run context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		calls++
 		th, err := repo.Thread(fixturekit.Stream, "agent-0")
 		fixturekit.Must(t, err)
@@ -55,7 +58,7 @@ func TestAbandonRunningTurnReturningWaitingSettlesOperation(t *testing.T) {
 	records, err := repo.Operations(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil {
-		logUnsettledLifecycleOperations(t, repo, fixturekit.Stream)
+		lifecyclefixture.LogUnsettled(t, repo, fixturekit.Stream, nil)
 		t.Fatalf("returned turn stranded its operation: %+v", records)
 	}
 	th, err = repo.Thread(fixturekit.Stream, "agent-0")
@@ -87,7 +90,7 @@ func TestAbandonRunningTurnReturningWaitingSettlesOperation(t *testing.T) {
 		t.Fatal("eligible archive cleanup did not finish")
 	}
 	fixturekit.Must(t, cleanup.Pass(ctx))
-	archived, found := archiveRecord(t, s.store, fixturekit.Stream)
+	archived, found := intakefixture.ArchiveRecord(t, s.store, fixturekit.Stream)
 	if !found || archived.CleanedAt.IsZero() {
 		t.Fatalf("waiting operation blocked same-session cleanup: %+v", archived)
 	}

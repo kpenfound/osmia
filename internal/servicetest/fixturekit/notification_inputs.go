@@ -3,12 +3,13 @@ package fixturekit
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
 )
 
 // NotificationEntry is an open inbox entry of kind, told apart by n.

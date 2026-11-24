@@ -5,20 +5,21 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
 	sync "sync"
-	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -28,14 +29,6 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, drafted string) (*shedFixture, *intakefixture.FakeMasons, *atomic.Int64) {
-	t.Helper()
-	passed, prepare := countingSchedule()
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, execution.MasonTurnID, intake.OwnerActor)
-	return f, fake, passed
-}
 
 type demoProblems struct {
 	mu   sync.Mutex
@@ -51,12 +44,12 @@ func (p *demoProblems) check(t *testing.T) {
 	intakefixture.CheckProblems(t, &p.mu, &p.list)
 }
 
-func completedTurn(t *testing.T, f *shedFixture, stream config.WorkstreamID, agent string, i int) trace.QueuedTurn {
+func completedTurn(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, agent string, i int) trace.QueuedTurn {
 	t.Helper()
 	var th trace.Thread
 	intakefixture.Eventually(t, fmt.Sprintf("turn %d of %s never completed", i, agent), func() bool {
 		var err error
-		th, err = f.repository().Thread(stream, agent)
+		th, err = f.Repository().Thread(stream, agent)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
@@ -65,12 +58,7 @@ func completedTurn(t *testing.T, f *shedFixture, stream config.WorkstreamID, age
 	return th.Turns[i]
 }
 
-func unitStatus(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit string) api.UnitStatus {
-	t.Helper()
-	return intakefixture.ReadUnitStatus(t, f.c, stream, unit)
-}
-
-func factoryPauseOf(t *testing.T, c *Client) (runtime.Pause, bool) {
+func factoryPauseOf(t *testing.T, c *journey.Client) (runtime.Pause, bool) {
 	t.Helper()
 	return intakefixture.FactoryPauseOf(t, c.Runtime)
 }
@@ -80,11 +68,11 @@ var resumeLimitResets = fixturekit.DemoStart.Add(1000 * time.Hour)
 func TestReliabilityDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons, passed := newParallelMasonFixtureCounting(t, 1, 4, intakefixture.ReliabilityPlan)
-	defer func() { f.stop(t) }()
-	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
+	f, masons, passed := journey.NewParallelMasonFixtureCounting(t, 1, 4, intakefixture.ReliabilityPlan)
+	defer func() { f.Stop(t) }()
+	configPath := filepath.Join(f.Opts.Config.Root, "config.toml")
 
-	f.stop(t)
+	f.Stop(t)
 	configText, err := os.ReadFile(configPath)
 	fixturekit.Must(t, err)
 	if !strings.Contains(string(configText), "per_workstream = 4\n") {
@@ -95,13 +83,13 @@ func TestReliabilityDemonstration(t *testing.T) {
 	fixturekit.Must(t, err)
 	_, err = configFile.WriteString("[budget]\nper_day = \"1.00\"\n")
 	fixturekit.Must(t, errors.Join(err, configFile.Close()))
-	f.opts.Location = time.UTC
+	f.Opts.Location = time.UTC
 
-	enforced := Enforce(f.opts, service.Enforcement{Engine: f.engine, Hosts: f.opts.Committee.Hosts})
-	f.opts.Threads, f.opts.controls = enforced.Threads, enforced.controls
+	enforced := journey.Enforce(f.Opts, service.Enforcement{Engine: f.Engine, Hosts: f.Opts.Committee.Hosts})
+	f.Opts.Threads, f.Opts.Controls = enforced.Threads, enforced.Controls
 	const crash = "crash: the feature branch moved"
 	crashed := make(chan struct{})
-	f.opts.boundary = func(lifetime context.Context, name string) error {
+	f.Opts.Boundary = func(lifetime context.Context, name string) error {
 		if name == "land-advanced" {
 			close(crashed)
 			<-lifetime.Done()
@@ -109,10 +97,10 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return nil
 	}
-	f.start(t)
+	f.Start(t)
 
 	problems := &demoProblems{}
-	c := f.c
+	c := f.C
 	auditRecovered := intake.MasonAgent("audit") + "-recover-1"
 	dedupeClarified := intake.MasonAgent("dedupe") + "-clarify-1"
 	const auditFile = "internal/audit/audit.go"
@@ -146,10 +134,10 @@ func TestReliabilityDemonstration(t *testing.T) {
 	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
 	masons.Mu.Unlock()
 
-	f.engine.Mu.Lock()
-	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	f.Engine.Mu.Lock()
+	f.Engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
-	f.engine.Turns[execution.MasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[execution.MasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
@@ -157,7 +145,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return result, err
 	}
 
-	f.engine.Turns[execution.MasonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[execution.MasonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		path := filepath.Join(req.Workspace.Directory(), auditFile)
 		if err := errors.Join(os.MkdirAll(filepath.Dir(path), 0755), os.WriteFile(path, []byte("package audit\n"), 0644)); err != nil {
 			return nil, err
@@ -166,14 +154,14 @@ func TestReliabilityDemonstration(t *testing.T) {
 		<-ctx.Done()
 		return &agent.Result{ClaudeID: "session-audit", ResultText: "Half of audit is built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 	}
-	f.engine.Turns[auditRecovered] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[auditRecovered] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		auditContinuation = req
 		mu.Unlock()
 		return masons.Turn(ctx, req, verified, tools)
 	}
 
-	f.engine.Turns[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
 		mu.Unlock()
@@ -184,7 +172,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return masons.Turn(ctx, req, verified, tools)
 	}
 
-	f.engine.Turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[dedupeClarified] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeContinuation = req
 		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
@@ -198,7 +186,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return masons.Turn(ctx, req, verified, tools)
 	}
 
-	f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		backend := req.Profile.Agent
 		mu.Lock()
 		resumeAttempts = append(resumeAttempts, req)
@@ -209,10 +197,10 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return masons.Turn(ctx, req, verified, tools)
 	}
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
-			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}
@@ -220,11 +208,11 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return chief(ctx, req, verified, tools)
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
-	stream, _ := f.builtAs(t, "reliability")
+	stream, _ := f.BuiltAs(t, "reliability")
 
-	f.awaitUnit(t, stream, "upload", execution.UnitChecking)
+	f.AwaitUnit(t, stream, "upload", execution.UnitChecking)
 	var budgetPause runtime.Pause
 	intakefixture.Eventually(t, "the daily budget never paused the factory", func() bool {
 		var ok bool
@@ -245,48 +233,48 @@ func TestReliabilityDemonstration(t *testing.T) {
 	})
 	budgetWait := api.UnitDispatch{Reason: execution.DeferPaused, Pause: &runtime.Pause{Target: factoryTarget}, Message: "Waits while a factory pause is in force, set by daily-budget."}
 	intakefixture.Eventually(t, "audit never waited for the budget pause", func() bool {
-		return reflect.DeepEqual(unitStatus(t, f, stream, "audit"), f.deferred(t, stream, "audit", budgetWait))
+		return reflect.DeepEqual(journey.UnitStatus(t, f, stream, "audit"), deferred(f, t, stream, "audit", budgetWait))
 	})
 	intakefixture.AwaitPasses(t, passed, 3)
-	intakefixture.Settled(t, func() int { return len(starts(t, f, stream)) })
-	if got := starts(t, f, stream); !slices.Equal(got, []string{trace.UnitSubject("upload")}) {
+	intakefixture.Settled(t, func() int { return len(journey.Starts(t, f, stream)) })
+	if got := journey.Starts(t, f, stream); !slices.Equal(got, []string{trace.UnitSubject("upload")}) {
 		t.Fatalf("units started under the budget pause: %v", got)
 	}
 
-	mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(factoryTarget))
+	intakefixture.Mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(factoryTarget))
 	select {
 	case <-auditEntered:
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("audit's mason never started after the owner resumed")
 	}
 
-	workstream := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	mutation(t, c, "PUT", "pause", api.PauseRequest{Target: workstream, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
+	workstream := runtime.Target{Scope: "workstream", Project: f.Project, Workstream: stream}
+	intakefixture.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: workstream, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
 	stopped := completedTurn(t, f, stream, intake.MasonAgent("audit"), 0)
 	intakefixture.CheckPauseStop(t, stopped, "workstream", "Stop the mason")
 	attempts := func() int {
 		n := 0
-		for _, q := range f.thread(t, stream, intake.MasonAgent("audit")).Turns[1:] {
+		for _, q := range f.Thread(t, stream, intake.MasonAgent("audit")).Turns[1:] {
 			n += len(q.Attempts)
 		}
 		return n
 	}
 	intakefixture.AwaitPasses(t, passed, 3)
 	intakefixture.Settled(t, attempts)
-	for _, q := range f.thread(t, stream, intake.MasonAgent("audit")).Turns[1:] {
+	for _, q := range f.Thread(t, stream, intake.MasonAgent("audit")).Turns[1:] {
 		if len(q.Attempts) != 0 {
 			t.Fatalf("turn %s of audit's mason ran under the hard pause: %+v", q.Request.TurnID, q.Attempts)
 		}
 	}
-	if u := unitStatus(t, f, stream, "audit"); u.State != intake.UnitImplementing {
+	if u := journey.UnitStatus(t, f, stream, "audit"); u.State != intake.UnitImplementing {
 		t.Fatalf("stopped audit is %+v", u)
 	}
 	if p, ok := factoryPauseOf(t, c); ok {
 		t.Fatalf("the budget paused the factory again the same day: %+v", p)
 	}
 
-	mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(workstream))
-	f.awaitUnit(t, stream, "audit", intake.UnitReviewing)
+	intakefixture.Mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(workstream))
+	f.AwaitUnit(t, stream, "audit", intake.UnitReviewing)
 	recovered := completedTurn(t, f, stream, intake.MasonAgent("audit"), 1)
 	if recovered.Request.TurnID != auditRecovered || recovered.Request.ThreadID != stopped.Request.ThreadID || !strings.Contains(recovered.Request.Prompt, "A hard pause stopped your last turn.") || recovered.Status() != "idle" {
 		t.Fatalf("audit's continuation %+v", recovered)
@@ -312,7 +300,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	if rt.Profiles[intake.MasonRole] != (api.EffectiveProfile{Name: "other", Source: "owner_override"}) {
 		t.Fatalf("mason profile after the switch: %+v", rt.Profiles[intake.MasonRole])
 	}
-	th := f.thread(t, stream, intake.MasonAgent("dedupe"))
+	th := f.Thread(t, stream, intake.MasonAgent("dedupe"))
 	if len(th.Turns) != 2 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[0].Attempts[0].Profile.Backend != agent.AgentClaude || th.Turns[0].Status() != "idle" {
 		t.Fatalf("dedupe's first turn %+v", th.Turns)
 	}
@@ -329,8 +317,8 @@ func TestReliabilityDemonstration(t *testing.T) {
 	}
 	mu.Unlock()
 
-	mutation(t, c, "DELETE", "profile", api.ClearProfileRequest{Role: intake.MasonRole})
-	if u := unitStatus(t, f, stream, "resume"); !reflect.DeepEqual(u, f.deferred(t, stream, "resume", slotless(1))) {
+	intakefixture.Mutation(t, c, "DELETE", "profile", api.ClearProfileRequest{Role: intake.MasonRole})
+	if u := journey.UnitStatus(t, f, stream, "resume"); !reflect.DeepEqual(u, deferred(f, t, stream, "resume", slotless(1))) {
 		t.Fatalf("resume while dedupe holds the slot: %+v", u)
 	}
 
@@ -345,7 +333,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return []byte(strings.Replace(string(data), "model = \"test\"\n", "model = \"test\"\nfallback = \""+profile+"\"\n", 1))
 	}
 	fixturekit.Must(t, os.WriteFile(configPath, withFallback("missing"), 0600))
-	reloadFails(t, c, configPath, "profiles.default.fallback")
+	intakefixture.ReloadFails(t, c.Reload, configPath, "profiles.default.fallback")
 	now, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
 	if now.Digest != before.Digest || now.Effective.Profiles["default"].Fallback != "" || now.LastError == nil || now.LastError.Path != configPath || now.LastError.Field != "profiles.default.fallback" {
@@ -361,9 +349,9 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("reload %+v; configuration digest %s, last error %+v", reloaded, now.Digest, now.LastError)
 	}
 	close(releaseClarify)
-	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 	limited := completedTurn(t, f, stream, intake.MasonAgent("resume"), 0)
 	if a := limited.Attempts; len(a) != 2 || a[0].Profile.Name != "default" || a[0].FailureClass != coreadapter.Infrastructure ||
 		a[1].Profile.Name != "other" || a[1].Path != "replay" || !strings.HasPrefix(a[1].Reason, "fallback from profile default to other after 1 infrastructure failures: provider usage limit") || limited.Status() != "idle" {
@@ -383,39 +371,39 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("provider limits %+v", st.ProviderLimits)
 	}
 
-	f.awaitUnit(t, stream, "resume", intake.UnitApproved)
-	_, approval := approvedReview(t, f.repository(), stream, "resume")
+	f.AwaitUnit(t, stream, "resume", intake.UnitApproved)
+	_, approval := journey.ApprovedReview(t, f.Repository(), stream, "resume")
 	base := approval.Identity.Candidate.BaseRevision
 	select {
 	case <-crashed:
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the landing never reached its interruption boundary")
 	}
-	f.stop(t)
-	moved := f.landedCommits(t, stream, base)
+	f.Stop(t)
+	moved := landedCommits(f, t, stream, base)
 	if len(moved) != 1 {
 		t.Fatalf("the interrupted landing left %v on the feature branch", moved)
 	}
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repository, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
-	landings := landingByUnit(t, repository, stream)
+	landings := journey.LandingByUnit(t, repository, stream)
 	fixturekit.Must(t, repository.Close())
 	if state.Value != intake.UnitApproved || len(landings) != 0 {
 		t.Fatalf("after the crash resume is %s with landings %+v", state.Value, landings)
 	}
 
-	f.opts.boundary = nil
-	f.start(t)
-	c = f.c
-	f.awaitMerged(t, stream, "resume")
+	f.Opts.Boundary = nil
+	f.Start(t)
+	c = f.C
+	f.AwaitMerged(t, stream, "resume")
 	masons.Check(t)
 	problems.check(t)
-	if commits := f.landedCommits(t, stream, base); !slices.Equal(commits, moved) {
+	if commits := landedCommits(f, t, stream, base); !slices.Equal(commits, moved) {
 		t.Fatalf("the feature branch holds %v; the interrupted landing made %v", commits, moved)
 	}
-	ops := landOperations(t, f.repository(), stream)
+	ops := journey.LandOperations(t, f.Repository(), stream)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("landing operations %+v", ops)
 	}
@@ -432,12 +420,12 @@ func TestReliabilityDemonstration(t *testing.T) {
 		t.Fatalf("the restarted landing observed %+v", observed)
 	}
 	var landing api.UnitLanding
-	fixturekit.Must(t, json.Unmarshal([]byte(landingByUnit(t, f.repository(), stream)["resume"].Content), &landing))
+	fixturekit.Must(t, json.Unmarshal([]byte(journey.LandingByUnit(t, f.Repository(), stream)["resume"].Content), &landing))
 	if landing.Commit != moved[0] || landing.Operation != ops[0].Operation.ID || landing.Base != base {
 		t.Fatalf("landing %+v; the feature branch holds %s", landing, moved[0])
 	}
 	merged := 0
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.Subject == trace.UnitSubject("resume") && tr.To == intake.UnitMerged {
 			merged++
 		}
@@ -445,7 +433,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	if merged != 1 {
 		t.Fatalf("resume merged %d times", merged)
 	}
-	if u := unitStatus(t, f, stream, "resume"); u.State != intake.UnitMerged || u.Landing == nil || u.Landing.Commit != moved[0] {
+	if u := journey.UnitStatus(t, f, stream, "resume"); u.State != intake.UnitMerged || u.Landing == nil || u.Landing.Commit != moved[0] {
 		t.Fatalf("status of resume %+v", u)
 	}
 

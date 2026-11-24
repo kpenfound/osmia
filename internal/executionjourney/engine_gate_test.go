@@ -3,12 +3,13 @@ package executionjourney
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"testing"
 
 	"github.com/kpenfound/osmia/internal/service"
 )
@@ -23,14 +24,14 @@ func TestEngineGateReleasesCancelledCheck(t *testing.T) {
 	checker := newSlotChecks()
 	f, stream, repo := newChecksFixture(t, "engine-cancel-check", checker)
 	defer repo.Close()
-	c, op := requestUnitCheck(t, f.s, repo, stream)
+	c, op := requestUnitCheck(t, f.S, repo, stream)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	finished := intakefixture.ApplyCheck(ctx, c, op)
-	awaitCheck(t, checker.entered)
+	intakefixture.AwaitCheck(t, checker.entered)
 	control := &heldEngineControl{inside: make(chan struct{}), finish: make(chan struct{})}
 	close(control.finish)
-	err := f.s.RestartEngine(t.Context(), control)
+	err := f.S.RestartEngine(t.Context(), control)
 	var busy *service.EngineBusyError
 	if !errors.As(err, &busy) || len(busy.Checks) != 1 || busy.Checks[0].Unit != "resume" {
 		t.Fatalf("running check refusal: %v", err)
@@ -41,12 +42,12 @@ func TestEngineGateReleasesCancelledCheck(t *testing.T) {
 	default:
 	}
 	cancel()
-	if err := awaitCheck(t, finished); !errors.Is(err, context.Canceled) {
+	if err := intakefixture.AwaitCheck(t, finished); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled check: %v", err)
 	}
-	awaitCheckSlots(t, f.s, 0, 0)
-	fixturekit.Must(t, f.s.RestartEngine(t.Context(), control))
-	awaitCheck(t, control.inside)
+	awaitCheckSlots(t, f.S, 0, 0)
+	fixturekit.Must(t, f.S.RestartEngine(t.Context(), control))
+	intakefixture.AwaitCheck(t, control.inside)
 }
 
 func (*heldEngineControl) Applicable(string) error { return nil }
@@ -75,15 +76,15 @@ func TestEngineMaintenanceWaitCreatesNoCheckEvidence(t *testing.T) {
 			checker := newSlotChecks()
 			f, stream, repo := newChecksFixture(t, "engine-wait-"+action.name, checker)
 			defer repo.Close()
-			c, op := requestUnitCheck(t, f.s, repo, stream)
+			c, op := requestUnitCheck(t, f.S, repo, stream)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			control := &heldEngineControl{inside: make(chan struct{}), finish: make(chan struct{})}
 			maintenance := make(chan error, 1)
-			go func() { maintenance <- action.run(f.s.Service, ctx, control) }()
-			awaitCheck(t, control.inside)
+			go func() { maintenance <- action.run(f.S.Service, ctx, control) }()
+			intakefixture.AwaitCheck(t, control.inside)
 			finished := intakefixture.ApplyCheck(ctx, c, op)
-			st := awaitCheckSlots(t, f.s, 0, 1)
+			st := awaitCheckSlots(t, f.S, 0, 1)
 			if len(st.Active) != 0 || st.Waiting[0].Unit != "resume" {
 				t.Fatalf("maintenance admitted checks: %+v", st)
 			}
@@ -99,20 +100,20 @@ func TestEngineMaintenanceWaitCreatesNoCheckEvidence(t *testing.T) {
 				t.Fatalf("maintenance wait changed checks state: %+v", state)
 			}
 			close(control.finish)
-			fixturekit.Must(t, awaitCheck(t, maintenance))
-			awaitCheck(t, checker.entered)
+			fixturekit.Must(t, intakefixture.AwaitCheck(t, maintenance))
+			intakefixture.AwaitCheck(t, checker.entered)
 			checker.release <- fixturekit.CheckOutcome{Result: api.CheckResult{Output: fixturekit.PassedReport}}
-			fixturekit.Must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, intakefixture.AwaitCheck(t, finished))
 			run := onlyRun(t, repo, stream)
 			if run.Status != checks.ChecksPassed {
 				t.Fatalf("wait produced %+v", run)
 			}
-			n, err := c.incompleteSinceEntry(stream, "resume", run, []execution.UnitCheckRun{run})
+			n, err := c.Driver().IncompleteSinceEntry(stream, "resume", run, []execution.UnitCheckRun{run})
 			fixturekit.Must(t, err)
 			if n != 0 {
 				t.Fatalf("maintenance wait counted as %d incomplete runs", n)
 			}
-			awaitCheckSlots(t, f.s, 0, 0)
+			awaitCheckSlots(t, f.S, 0, 0)
 		})
 	}
 }

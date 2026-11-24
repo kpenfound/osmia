@@ -3,15 +3,16 @@ package intakejourney
 import (
 	context "context"
 	fmt "fmt"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	testing "testing"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	plan "github.com/kpenfound/osmia/internal/plan"

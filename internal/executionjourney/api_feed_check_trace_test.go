@@ -2,14 +2,16 @@ package executionjourney
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strings"
-	"testing"
-	"time"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -22,7 +24,7 @@ const (
 
 func feedFixtureRepo(t *testing.T, prefix string) *trace.Repository {
 	t.Helper()
-	_, cfg := conversationFixture(t, prefix)
+	_, cfg := journey.ConversationFixture(t, prefix)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })

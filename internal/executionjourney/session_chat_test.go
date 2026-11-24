@@ -2,9 +2,6 @@ package executionjourney
 
 import (
 	context "context"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
 	os "os"
 	filepath "path/filepath"
 	regexp "regexp"
@@ -13,6 +10,11 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	enforcertest "github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
@@ -28,9 +30,9 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newSessionChatFixture(t *testing.T) (*Service, *Client, config.ProjectID, config.WorkstreamID, *fixturekit.SessionEngine, string) {
+func newSessionChatFixture(t *testing.T) (*journey.Service, *journey.Client, config.ProjectID, config.WorkstreamID, *fixturekit.SessionEngine, string) {
 	t.Helper()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	home := filepath.Dir(clone)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", clone, "add", "README.md")
@@ -41,19 +43,19 @@ func newSessionChatFixture(t *testing.T) (*Service, *Client, config.ProjectID, c
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 	engine := &fixturekit.SessionEngine{Sessions: &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}}
-	enforced := Enforce(opts, service.Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
-	opts.Threads, opts.controls = enforced.Threads, enforced.controls
-	s, c := start(t, opts)
+	enforced := journey.Enforce(opts, service.Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
+	opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	s.cfg = s.current()
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	s.Cfg = s.Current()
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), api.SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	fixturekit.Must(t, err)
 	return s, c, added.Project.ID, resp.Session.Workstream, engine, clone
 }
 
-func awaitConversationOn(t *testing.T, c *Client, id config.WorkstreamID, done func(api.ConversationResponse) bool) api.ConversationResponse {
+func awaitConversationOn(t *testing.T, c *journey.Client, id config.WorkstreamID, done func(api.ConversationResponse) bool) api.ConversationResponse {
 	t.Helper()
 	return intakefixture.AwaitView(t, func() (api.ConversationResponse, error) {
 		return c.Conversation(context.Background(), id)
@@ -79,7 +81,7 @@ func TestSessionMessageStartsOneTurnAndRecordsTheReply(t *testing.T) {
 	if n := len(engine.Calls()); n != 1 {
 		t.Fatalf("turns run: %d", n)
 	}
-	th, err := s.sole().repository.Thread(stream, service.SessionAgentID)
+	th, err := s.Sole().Repository.Thread(stream, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 {
 		t.Fatalf("thread turns: %+v", th.Turns)
@@ -94,7 +96,7 @@ func TestSessionMessageStartsOneTurnAndRecordsTheReply(t *testing.T) {
 func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
-	worktree := filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project), string(stream))
+	worktree := filepath.Join(s.Cfg.Root.String(), service.SessionsDirectory, string(project), string(stream))
 	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if _, err := os.Lstat(filepath.Join(req.Workspace.Directory(), ".git")); err == nil {
 			t.Error("the turn's view exposes VCS metadata")
@@ -172,9 +174,9 @@ func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.
 	fixturekit.Must(t, err)
 	fixturekit.AwaitSession(t, c, stream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
 
-	repository := s.sole().repository
-	fixturekit.Must(t, service.RecordSessionEntry(context.Background(), repository, project, stream, "commit-1", s.now(), "Committed as abc123."))
-	fixturekit.Must(t, service.RecordSessionEntry(context.Background(), repository, project, stream, "check-1", s.now(), "Checks passed."))
+	repository := s.Sole().Repository
+	fixturekit.Must(t, service.RecordSessionEntry(context.Background(), repository, project, stream, "commit-1", s.Now(), "Committed as abc123."))
+	fixturekit.Must(t, service.RecordSessionEntry(context.Background(), repository, project, stream, "check-1", s.Now(), "Checks passed."))
 
 	var secondPrompt, secondResume string
 	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
@@ -214,7 +216,7 @@ func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.
 func TestSessionModelSessionDirectoryIsPerSessionUnderRootAndSurvivesRestart(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, clone := newSessionChatFixture(t)
-	root := s.cfg.Root.String()
+	root := s.Cfg.Root.String()
 	worktree := filepath.Join(root, service.SessionsDirectory, string(project), string(stream))
 	dir := runtime.ModelSessionDirectory(root, project, stream)
 	if !strings.HasPrefix(dir, root) {
@@ -240,10 +242,10 @@ func TestSessionModelSessionDirectoryIsPerSessionUnderRootAndSurvivesRestart(t *
 		t.Fatalf("session directory missing: %v", err)
 	}
 	fixturekit.Must(t, s.Close())
-	s2, c2 := start(t, Options{Options: service.Options{
+	s2, c2 := journey.StartT(t, journey.Options{Options: service.Options{
 		Config: config.Options{Root: root}, Build: api.Identity{Version: "test", Commit: "abc"}, ShutdownTimeout: 100 * time.Millisecond,
-		Threads: s.options.Threads,
-	}, controls: s.options.controls})
+		Threads: s.Options.Threads,
+	}, Controls: s.Options.Controls})
 	_ = s2
 	resp, err := c2.Session(context.Background(), stream)
 	fixturekit.Must(t, err)
@@ -296,7 +298,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	worktree := filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project), string(stream))
+	worktree := filepath.Join(s.Cfg.Root.String(), service.SessionsDirectory, string(project), string(stream))
 	entered := make(chan struct{})
 	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "progress.txt"), []byte("partial work\n"), 0600); err != nil {
@@ -323,7 +325,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 	if string(data) != "partial work\n" {
 		t.Fatalf("worktree changes were not kept: %q", data)
 	}
-	th, err := s.sole().repository.Thread(stream, service.SessionAgentID)
+	th, err := s.Sole().Repository.Thread(stream, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Response == nil || th.Turns[0].Response.Stop == nil {
 		t.Fatalf("turn is not recorded as stopped: %+v", th.Turns)
@@ -345,7 +347,7 @@ func TestSessionStopKeepsWorktreeChangesAndReturnsIdle(t *testing.T) {
 func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
-	root := s.cfg.Root.String()
+	root := s.Cfg.Root.String()
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	engine.Turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "First reply"}, nil
@@ -355,12 +357,12 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 	fixturekit.AwaitSession(t, c, stream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
 	fixturekit.Must(t, s.Close())
 
-	repository, err := trace.Open(s.cfg.Root, s.cfg.Project)
+	repository, err := trace.Open(s.Cfg.Root, s.Cfg.Project)
 	fixturekit.Must(t, err)
-	cfg := s.current().For(project)
+	cfg := s.Current().For(project)
 	profile, _, err := cfg.Execution(intake.MasonRole, "default")
 	fixturekit.Must(t, err)
-	at := s.now()
+	at := s.Now()
 	treq := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_crashed", Revision: 1,
 			Project: project, Workstream: stream, At: at, Actor: intake.OwnerActor, Cause: "owner-message"},
@@ -385,13 +387,13 @@ func TestSessionTurnInterruptedByRestartIsRecoveredLikeAChiefOfStaffTurn(t *test
 		}
 		return &agent.Result{ClaudeID: "model-session-2", ResultText: "Recovered reply"}, nil
 	}
-	enforced := Enforce(Options{Options: service.Options{Config: config.Options{Root: root}}}, service.Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
-	s2, c2 := start(t, Options{Options: service.Options{
+	enforced := journey.Enforce(journey.Options{Options: service.Options{Config: config.Options{Root: root}}}, service.Enforcement{Engine: engine, Hosts: sessionImageHosts(engine.Sessions)})
+	s2, c2 := journey.StartT(t, journey.Options{Options: service.Options{
 		Config: config.Options{Root: root}, Build: api.Identity{Version: "test", Commit: "abc"}, ShutdownTimeout: 100 * time.Millisecond,
 		Threads: enforced.Threads,
-	}, controls: enforced.controls})
+	}, Controls: enforced.Controls})
 	fixturekit.AwaitSession(t, c2, stream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
-	th, err := s2.sole().repository.Thread(stream, service.SessionAgentID)
+	th, err := s2.Sole().Repository.Thread(stream, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 3 || th.Turns[1].Status() != "interrupted" {
 		t.Fatalf("crashed turn was not recovered as interrupted: %+v", th.Turns)
@@ -438,13 +440,13 @@ func TestSessionFallsBackToHistoryWhenModelSessionCannotBeResumed(t *testing.T) 
 		t.Fatalf("fallback turn was not seeded with the thread's history: %q", secondHistory)
 	}
 
-	th, err := s.sole().repository.Thread(stream, service.SessionAgentID)
+	th, err := s.Sole().Repository.Thread(stream, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 2 || th.Turns[1].Response == nil || th.Turns[1].Response.Result.Session.ID != "model-session-2" {
 		t.Fatalf("the new model session was not recorded: %+v", th.Turns)
 	}
 
-	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.Sole().Repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	var rebuilt bool
 	for _, e := range entries {
@@ -477,10 +479,10 @@ func TestSessionRelayRecordsContextRebuiltEntryBeforeTheIdleTransition(t *testin
 	fixturekit.Must(t, err)
 	stream := resp.Session.Workstream
 
-	fixturekit.Must(t, s.halt(s.sole()))
+	fixturekit.Must(t, s.Halt(s.Sole()))
 
-	repo := s.sole().repository
-	traceDir, err := s.cfg.Root.WorkstreamTrace(project, stream)
+	repo := s.Sole().Repository
+	traceDir, err := s.Cfg.Root.WorkstreamTrace(project, stream)
 	fixturekit.Must(t, err)
 	ctx := context.Background()
 
@@ -581,10 +583,10 @@ func TestSessionMessageAfterFallbackReceivesTheContextRebuiltEntryOnce(t *testin
 func TestSessionMessageRefusedWhenProfileNoLongerRunnable(t *testing.T) {
 	t.Parallel()
 	s, c, _, stream, engine, _ := newSessionChatFixture(t)
-	cfg := *s.current()
+	cfg := *s.Current()
 	cfg.Profiles = map[string]config.Profile{}
-	service.InspectForTest(s.core()).SetConfig(&cfg)
-	s.cfg = &cfg
+	service.InspectForTest(s.Core()).SetConfig(&cfg)
+	s.Cfg = &cfg
 	_, err := c.SessionMessage(context.Background(), stream, "hello")
 	var apiErr *api.APIError
 	if err == nil {
@@ -602,7 +604,7 @@ func TestSessionMessageRefusedWhenProfileNoLongerRunnable(t *testing.T) {
 	if apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, "default") {
 		t.Fatalf("refusal does not name the profile: %+v", apiErr)
 	}
-	th, err := s.sole().repository.Thread(stream, service.SessionAgentID)
+	th, err := s.Sole().Repository.Thread(stream, service.SessionAgentID)
 	if err == nil && len(th.Turns) != 0 {
 		t.Fatalf("a refused message was recorded: %+v", th)
 	}
@@ -630,9 +632,9 @@ func (e *confinementEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enf
 	}}, nil
 }
 
-func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *confinementEngine) {
+func newConfinementFixture(t *testing.T) (*journey.Service, *journey.Client, config.ProjectID, *confinementEngine) {
 	t.Helper()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	home := filepath.Dir(clone)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", clone, "add", "README.md")
@@ -644,23 +646,23 @@ func newConfinementFixture(t *testing.T) (*Service, *Client, config.ProjectID, *
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
 	engine := &confinementEngine{}
-	enforced := Enforce(opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
-	opts.Threads, opts.controls = enforced.Threads, enforced.controls
-	s, c := start(t, opts)
+	enforced := journey.Enforce(opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
+	opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, engine
 }
 
-func confinementChiefTurn(t *testing.T, s *Service, c *Client, engine *confinementEngine) (resume, prompt string) {
+func confinementChiefTurn(t *testing.T, s *journey.Service, c *journey.Client, engine *confinementEngine) (resume, prompt string) {
 	t.Helper()
-	repository := s.sole().repository
+	repository := s.Sole().Repository
 	streams, err := repository.Workstreams()
 	fixturekit.Must(t, err)
 	other, err := config.NewWorkstreamID(streams...)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), other, s.now(), intake.OwnerActor))
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), other, s.Now(), intake.OwnerActor))
 	engine.mu.Lock()
 	engine.turn = func(_ context.Context, req agent.Request) (*agent.Result, error) {
 		if req.ResumeID != "" {
@@ -763,17 +765,17 @@ func TestResumeConfinedAcrossMasonAndReviewerTurns(t *testing.T) {
 
 func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPrompt, reviewResume, reviewPrompt string) {
 	t.Helper()
-	f, masons := newLandingFixture(t, independentPlan)
-	defer f.stop(t)
-	f.engine.Mu.Lock()
-	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-	f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f, masons := newLandingFixture(t, intakefixture.IndependentPlan)
+	defer f.Stop(t)
+	f.Engine.Mu.Lock()
+	f.Engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
+	f.Engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		masonResume, masonPrompt = req.ResumeID, req.Prompt
 		return masons.Turn(ctx, req, verified, tools)
 	}
-	chiefFallback := f.engine.Turns["*"]
+	chiefFallback := f.Engine.Turns["*"]
 	var sessionResumeIDs []string
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, "message_") {
 			sessionResumeIDs = append(sessionResumeIDs, req.ResumeID)
 			return &agent.Result{ClaudeID: "fixture-session", ResultText: "OK", SessionDir: req.SessionDir, NumTurns: 1}, nil
@@ -783,34 +785,34 @@ func runLandingWithSession(t *testing.T, withSession bool) (masonResume, masonPr
 		}
 		return chiefFallback(ctx, req, verified, tools)
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
 	if withSession {
-		resp, err := f.c.OpenSession(context.Background(), api.SessionOpenRequest{Project: f.project, Profile: "default"})
+		resp, err := f.C.OpenSession(context.Background(), api.SessionOpenRequest{Project: f.Project, Profile: "default"})
 		fixturekit.Must(t, err)
 		sstream := resp.Session.Workstream
-		_, err = f.c.SessionMessage(context.Background(), sstream, "first")
+		_, err = f.C.SessionMessage(context.Background(), sstream, "first")
 		fixturekit.Must(t, err)
-		fixturekit.AwaitSession(t, f.c, sstream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
-		_, err = f.c.SessionMessage(context.Background(), sstream, "second")
+		fixturekit.AwaitSession(t, f.C, sstream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
+		_, err = f.C.SessionMessage(context.Background(), sstream, "second")
 		fixturekit.Must(t, err)
-		fixturekit.AwaitSession(t, f.c, sstream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
+		fixturekit.AwaitSession(t, f.C, sstream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
 		if len(sessionResumeIDs) != 2 || sessionResumeIDs[0] != "" || sessionResumeIDs[1] == "" {
 			t.Fatalf("the session's own second turn did not resume the first: %v", sessionResumeIDs)
 		}
 	}
 
-	stream := f.seedBuilding(t, "land", independentPlan)
-	f.awaitMerged(t, stream, "resume")
+	stream := seedBuilding(f, t, "land", intakefixture.IndependentPlan)
+	f.AwaitMerged(t, stream, "resume")
 	return masonResume, masonPrompt, reviewResume, reviewPrompt
 }
 
 func TestResumeRoleGateCoversEveryRole(t *testing.T) {
 	t.Parallel()
 	s, _, project, _, _, _ := newSessionChatFixture(t)
-	repository := s.sole().repository
-	cfg := s.current().For(project)
-	reconciler, err := s.options.Threads(repository, cfg)
+	repository := s.Sole().Repository
+	cfg := s.Current().For(project)
+	reconciler, err := s.Options.Threads(repository, cfg)
 	fixturekit.Must(t, err)
 	d, ok := reconciler.(thread.Dispatcher)
 	if !ok {

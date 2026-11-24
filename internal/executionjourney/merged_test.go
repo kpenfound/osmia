@@ -3,6 +3,11 @@ package executionjourney
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
@@ -10,29 +15,26 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func assembleForTest(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID) {
+func assembleForTest(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID) {
 	t.Helper()
-	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: intake.AssembledState, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: intake.AssembledState, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}
 	_, err := repo.SetFeatureState(context.Background(), h, intake.AssembledState, "every unit merged")
 	fixturekit.Must(t, err)
 }
 
-func requestPublication(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, k int) {
+func requestPublication(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, k int) {
 	t.Helper()
 	subject, err := repo.Workflow(stream, delivery.PublicationSubject)
 	fixturekit.Must(t, err)
 	transition, _ := delivery.PublishIDs(k)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: transition, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: transition, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}
 	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: delivery.PublicationSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", k), Reason: "the owner approved delivery"}})
 	fixturekit.Must(t, err)
@@ -46,38 +48,38 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 				intakefixture.RequireJJ(t)
 			}
 			t.Parallel()
-			f := newDebateFixture(t, 1, 1)
-			f.upstream(t)
-			f.stop(t)
+			f := journey.NewDebateFixture(t, 1, 1)
+			f.Upstream(t)
+			f.Stop(t)
 			ctx := context.Background()
-			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
 			defer repo.Close()
-			stream, tip := sealDependent(t, f, repo, backend, "", map[string]string{"feature.go": "feature\n"})
+			stream, tip := journey.SealDependent(t, f, repo, backend, "", map[string]string{"feature.go": "feature\n"})
 
-			if _, apiErr := f.s.mergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "only an assembled workstream") {
+			if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "only an assembled workstream") {
 				t.Fatalf("a workstream that is not assembled was recorded merged: %v", apiErr)
 			}
 			assembleForTest(t, f, repo, stream)
-			if _, apiErr := f.s.mergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "does not hold the changes") {
+			if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "does not hold the changes") {
 				t.Fatalf("recorded merged while upstream lacks the branch: %v", apiErr)
 			}
-			advanceUpstream(t, f, map[string]string{"feature.go": "upstream's own\n"})
-			if _, apiErr := f.s.mergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict {
+			journey.AdvanceUpstream(t, f, map[string]string{"feature.go": "upstream's own\n"})
+			if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict {
 				t.Fatalf("recorded merged while upstream conflicts with the branch: %v", apiErr)
 			}
-			upstream := advanceUpstream(t, f, map[string]string{"feature.go": "feature\n"})
+			upstream := journey.AdvanceUpstream(t, f, map[string]string{"feature.go": "feature\n"})
 			requestPublication(t, f, repo, stream, 1)
-			f.s.options.PullRequests = &fixturekit.FakePulls{}
-			if _, apiErr := f.s.mergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "may still be applied") {
+			f.S.Options.PullRequests = &fixturekit.FakePulls{}
+			if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "may still be applied") {
 				t.Fatalf("recorded merged while a publication could still open a pull request: %v", apiErr)
 			}
 			if feature, err := repo.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
 				t.Fatalf("a refused merge moved the feature: %+v %v", feature, err)
 			}
 
-			f.s.options.PullRequests = &fixturekit.FakePulls{Uncredentialed: true}
-			out, apiErr := f.s.mergedOutside(ctx, repo, stream)
+			f.S.Options.PullRequests = &fixturekit.FakePulls{Uncredentialed: true}
+			out, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream)
 			if apiErr != nil {
 				t.Fatal(apiErr)
 			}
@@ -106,7 +108,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 				t.Fatalf("no delivery notice for the chief of staff in %+v", outbox)
 			}
 
-			presented, apiErr := f.s.presentDelivery(ctx, repo.Project(), stream, repo)
+			presented, apiErr := f.S.Delivery().PresentDelivery(ctx, repo.Project(), stream, repo)
 			if apiErr != nil {
 				t.Fatal(apiErr)
 			}
@@ -124,7 +126,7 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 					t.Fatalf("the trace of a merged workstream misses its publication: %+v", gap)
 				}
 			}
-			if _, apiErr := f.s.mergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict {
+			if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, stream); apiErr == nil || apiErr.Code != api.Conflict {
 				t.Fatalf("a delivered workstream was recorded merged again: %v", apiErr)
 			}
 		})
@@ -133,32 +135,32 @@ func TestOwnerRecordsAnAssembledWorkstreamMergedOutsideTheFactory(t *testing.T) 
 
 func TestDependentOfAMergedBaseRebasesOntoUpstream(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
-	f.upstream(t)
-	f.stop(t)
+	f := journey.NewDebateFixture(t, 1, 1)
+	f.Upstream(t)
+	f.Stop(t)
 	ctx := context.Background()
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
-	base, held := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
-	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
-	cfg := f.s.about(repo)
+	base, held := journey.SealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
+	stream, _ := journey.SealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
+	cfg := f.S.About(repo)
 	g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
 	fixturekit.Must(t, err)
-	if selected, err := f.s.resolveBase(ctx, cfg, repo, stream, g); err != nil || selected.Workstream != base {
+	if selected, err := f.S.Intake().ResolveBase(ctx, cfg, repo, stream, g); err != nil || selected.Workstream != base {
 		t.Fatalf("before the merge the dependent builds on %+v: %v", selected, err)
 	}
 
 	assembleForTest(t, f, repo, base)
-	home := filepath.Dir(f.clone)
-	fixturekit.DemoGit(t, home, "-C", f.clone, "push", "--quiet", filepath.Join(home, "remotes", "dagger", "dagger.git"), held+":refs/heads/main")
-	if _, apiErr := f.s.mergedOutside(ctx, repo, base); apiErr != nil {
+	home := filepath.Dir(f.Clone)
+	fixturekit.DemoGit(t, home, "-C", f.Clone, "push", "--quiet", filepath.Join(home, "remotes", "dagger", "dagger.git"), held+":refs/heads/main")
+	if _, apiErr := f.S.Delivery().MergedOutside(ctx, repo, base); apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	if changed, err := service.TestDependentBaseChanged(ctx, cfg, repo, stream); err != nil || !changed {
 		t.Fatalf("the merged base did not ask the dependent to rebase: %v %v", changed, err)
 	}
-	selected, err := f.s.resolveBase(ctx, cfg, repo, stream, g)
+	selected, err := f.S.Intake().ResolveBase(ctx, cfg, repo, stream, g)
 	if err != nil || selected != (seal.Base{Remote: "upstream", Branch: "main", Commit: held}) {
 		t.Fatalf("the dependent of a merged base resolves %+v: %v", selected, err)
 	}

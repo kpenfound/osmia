@@ -2,10 +2,11 @@ package intakejourney
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	"testing"
 
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"

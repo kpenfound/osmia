@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -11,8 +13,8 @@ import (
 
 func TestHandInBaseIsPinnedToItsIdempotencyKey(t *testing.T) {
 	t.Parallel()
-	opts, _ := conversationFixture(t, "base-hand-")
-	s, c := start(t, opts)
+	opts, _ := journey.ConversationFixture(t, "base-hand-")
+	s, c := journey.StartT(t, opts)
 	text := "Build on the earlier feature"
 	req := api.HandInRequest{Project: fixturekit.Project, Key: "dependent", Stdin: &text, Base: fixturekit.Stream}
 	first, err := c.HandIn(context.Background(), req)
@@ -25,14 +27,14 @@ func TestHandInBaseIsPinnedToItsIdempotencyKey(t *testing.T) {
 	req.Base = fixturekit.Quiet
 	_, err = c.HandIn(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Conflict)
-	repo, err := s.repository(fixturekit.Project)
+	repo, err := s.Repository(fixturekit.Project)
 	fixturekit.Must(t, err)
 	base, err := repo.WorkstreamBase(first.Workstream)
 	fixturekit.Must(t, err)
 	if base.Base != fixturekit.Stream || base.Revision != 1 {
 		t.Fatalf("base %+v", base)
 	}
-	_, err = repo.SetWorkstreamBase(context.Background(), first.Workstream, fixturekit.Quiet, base.Revision, s.now())
+	_, err = repo.SetWorkstreamBase(context.Background(), first.Workstream, fixturekit.Quiet, base.Revision, s.Now())
 	fixturekit.Must(t, err)
 	req.Base = fixturekit.Stream
 	_, err = c.HandIn(context.Background(), req)

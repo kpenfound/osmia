@@ -5,13 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +13,15 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -47,14 +49,14 @@ var (
 		recoveryFiles["dedupe"]:   "package trace\n\n// upstream dedupe\n",
 		recoveryFiles["audit"]:    "package audit\n\n// upstream audit\n",
 	}
-	recoveryReports = map[string]string{"resume": resumeReport, "dedupe": dedupeReport, "audit": auditReport}
+	recoveryReports = map[string]string{"resume": journey.ResumeReport, "dedupe": dedupeReport, "audit": auditReport}
 )
 
 type recoveryDemo struct {
-	units   *landingDemo
+	units   *journey.LandingDemo
 	project config.ProjectID
 
-	owner func() *Client
+	owner func() *journey.Client
 
 	entered chan struct{}
 
@@ -74,21 +76,6 @@ type recoveryDemo struct {
 
 	marked   map[string]string
 	problems []string
-}
-
-func (d *recoveryDemo) problem(format string, args ...any) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.problems = append(d.problems, fmt.Sprintf(format, args...))
-}
-
-func (d *recoveryDemo) check(t *testing.T) {
-	t.Helper()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.problems) != 0 {
-		t.Fatal(strings.Join(d.problems, "\n"))
-	}
 }
 
 func recoveryResult(req agent.Request, text string) *agent.Result {
@@ -163,7 +150,7 @@ func (d *recoveryDemo) resolve(path, resolved string, unit bool, args map[string
 }
 
 func reviewDrift(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+	body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift verdict %s: %v", body, err)
 	}
@@ -183,7 +170,7 @@ func (d *recoveryDemo) review(ctx context.Context, unit string, req agent.Reques
 		}
 		asked, err := d.owner().RebaseProject(ctx, d.project)
 		if err != nil {
-			d.problem("the owner's drift rebase request: %v", err)
+			intakefixture.ReportProblem(&d.mu, &d.problems, "the owner's drift rebase request: %v", err)
 		} else {
 			d.mu.Lock()
 			d.asked = &asked
@@ -197,7 +184,7 @@ func (d *recoveryDemo) review(ctx context.Context, unit string, req agent.Reques
 			return nil, ctx.Err()
 		}
 	}
-	result, err := d.units.review(ctx, unit, req, tools)
+	result, err := d.units.Review(ctx, unit, req, tools)
 	if unit == "audit" && err == nil {
 		d.auditOnce.Do(func() { close(d.auditReviewed) })
 	}
@@ -208,25 +195,25 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	intakefixture.RequireJJ(t)
 	t.Parallel()
 	ctx := context.Background()
-	f, _ := newParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 2, 3, recoveryPlan)
-	defer func() { f.stop(t) }()
-	f.stop(t)
+	f, _ := journey.NewParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 2, 3, recoveryPlan)
+	defer func() { f.Stop(t) }()
+	f.Stop(t)
 
 	var stream config.WorkstreamID
-	home := filepath.Dir(f.clone)
+	home := filepath.Dir(f.Clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
-	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "add", "origin", fork)
 	forkBranch := func() string {
 		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}
 	prs := &fixturekit.FakePulls{Fork: forkBranch, SyncHead: true}
-	f.opts.PullRequests = prs
+	f.Opts.PullRequests = prs
 	var passed atomic.Int64
-	f.opts.schedulePassed = func() { passed.Add(1) }
+	f.Opts.SchedulePassed = func() { passed.Add(1) }
 
-	demo := &recoveryDemo{units: &landingDemo{reviews: map[string][]service.UnitReviewIdentity{}}, project: f.project, owner: func() *Client { return f.c },
+	demo := &recoveryDemo{units: &journey.LandingDemo{Reviews: map[string][]service.UnitReviewIdentity{}}, project: f.Project, owner: func() *journey.Client { return f.C },
 		entered: make(chan struct{}), ask: make(chan struct{}), auditWrote: make(chan struct{}), carrying: make(chan struct{}), auditReviewed: make(chan struct{}), marked: map[string]string{}}
 
 	const (
@@ -235,17 +222,17 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		resolvedAudit  = "package audit\n\n// audit, beside upstream's\n"
 	)
 	resolutions := map[string]string{"dedupe": resolvedDedupe, "audit": resolvedAudit}
-	f.engine.Mu.Lock()
-	f.engine.Turns[execution.MasonTurnID("resume")] = demo.interrupted
-	f.engine.Turns[intake.MasonAgent("resume")+"-recover-1"] = demo.continued
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[execution.MasonTurnID("resume")] = demo.interrupted
+	f.Engine.Turns[intake.MasonAgent("resume")+"-recover-1"] = demo.continued
 	for unit, resolved := range resolutions {
-		f.engine.Turns[execution.MasonTurnID(unit)] = demo.build(unit)
-		f.engine.Turns[execution.ResolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
+		f.Engine.Turns[execution.MasonTurnID(unit)] = demo.build(unit)
+		f.Engine.Turns[execution.ResolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
 	}
-	f.engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve(intakefixture.TrackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
-	f.engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = reviewDrift
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve(intakefixture.TrackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
+	f.Engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = reviewDrift
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range recoveryReports {
 			if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
@@ -254,75 +241,75 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		if strings.HasPrefix(req.Name, "final-") {
 			body, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
-				demo.problem("final report %s: %s: %v", req.Name, body, err)
+				intakefixture.ReportProblem(&demo.mu, &demo.problems, "final report %s: %s: %v", req.Name, body, err)
 			}
 			return recoveryResult(req, "Reviewed"), nil
 		}
 		return chief(ctx, req, turn, tools)
 	}
-	f.engine.Mu.Unlock()
-	f.start(t)
+	f.Engine.Mu.Unlock()
+	f.Start(t)
 
-	s := f.s
+	s := f.S
 	crashing := make(chan struct{})
 	var crashed atomic.Bool
-	s.boundary = func(step string) error {
+	s.Boundary = func(step string) error {
 		if step == "land-advanced" && crashed.CompareAndSwap(false, true) {
 			close(crashing)
-			<-s.lifetime.Done()
+			<-s.Lifetime.Done()
 			return errors.New("the service died in the middle of the landing")
 		}
 		return nil
 	}
 
-	stream, _ = f.builtAs(t, "jujutsu-recovery")
-	if got := backendOf(t, f, stream); got != config.WorkspacesJujutsu {
+	stream, _ = f.BuiltAs(t, "jujutsu-recovery")
+	if got := journey.BackendOf(t, f, stream); got != config.WorkspacesJujutsu {
 		t.Fatalf("the workstream is on %s", got)
 	}
-	base := featureTip(t, f, stream)
+	base := journey.FeatureTip(t, f, stream)
 	select {
 	case <-demo.entered:
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("resume's mason never started")
 	}
-	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume")), "workstream", "Stop the mason")
+	target := runtime.Target{Scope: "workstream", Project: f.Project, Workstream: stream}
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
+	intakefixture.CheckPauseStop(t, awaitCompleted(f, t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume")), "workstream", "Stop the mason")
 	intakefixture.AwaitFurtherPasses(t, &passed, 2)
-	if !holdsEdits(inDirectory(filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(stream), "resume"))) {
+	if !holdsEdits(inDirectory(filepath.Join(f.Opts.Config.Root, intake.UnitsDirectory, string(f.Project), string(stream), "resume"))) {
 		t.Fatal("the stopped turn's edits are not in resume's workspace")
 	}
-	mutation(t, f.c, "DELETE", "pause", target)
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", target)
 
 	select {
 	case <-crashing:
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("resume never reached its landing")
 	}
-	f.stop(t)
-	moved := f.landedCommits(t, stream, base)
+	f.Stop(t)
+	moved := landedCommits(f, t, stream, base)
 	if len(moved) != 1 || !holdsEdits(inCommit(f, moved[0])) {
 		t.Fatalf("the cut-short landing left the feature branch with %v", moved)
 	}
 
-	if left := checkpoints(t, f, intake.BranchesDirectory); len(left) != 0 {
+	if left := f.Jujutsu().Checkpoints(t, intake.BranchesDirectory); len(left) != 0 {
 		t.Fatalf("cancelled landing left checkpoints %v", left)
 	}
-	entry, changed := interrupted(t, f, intake.BranchesDirectory)
+	entry, changed := f.Jujutsu().Interrupted(t, intake.BranchesDirectory)
 	if !changed {
 		t.Fatal("the cut-short landing changed nothing in the feature workspaces' operation log")
 	}
 
-	f.start(t)
-	f.awaitMerged(t, stream, "resume")
-	if log := operationLog(t, f, intake.BranchesDirectory); !slices.ContainsFunc(log, func(line string) bool { return strings.HasSuffix(line, " restore to operation "+entry) }) {
+	f.Start(t)
+	f.AwaitMerged(t, stream, "resume")
+	if log := f.Jujutsu().OperationLog(t, intake.BranchesDirectory); !slices.ContainsFunc(log, func(line string) bool { return strings.HasSuffix(line, " restore to operation "+entry) }) {
 		t.Fatalf("the feature workspaces were not restored to %s:\n%s", entry, strings.Join(log, "\n"))
 	}
-	if got := f.landedCommits(t, stream, base); !slices.Equal(got, moved) {
+	if got := landedCommits(f, t, stream, base); !slices.Equal(got, moved) {
 		t.Fatalf("after the restart the feature branch holds %v, not the one landing %v", got, moved)
 	}
 	var resume api.UnitLanding
-	fixturekit.Must(t, json.Unmarshal([]byte(landingByUnit(t, f.repository(), stream)["resume"].Content), &resume))
+	fixturekit.Must(t, json.Unmarshal([]byte(journey.LandingByUnit(t, f.Repository(), stream)["resume"].Content), &resume))
 	if resume.Commit != moved[0] || resume.Base != base {
 		t.Fatalf("resume's landing records %+v, want commit %s on %s", resume, moved[0], base)
 	}
@@ -334,27 +321,27 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		t.Fatalf("the continuation saw the edits %t with prompt %q, want %q", sawEdits, continuation, want)
 	}
 
-	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 	select {
 	case <-demo.auditWrote:
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("audit's mason never wrote its file")
 	}
-	from := intakefixture.Seals(t, f.repository(), stream)[0].Base.Commit
-	upstream := advanceUpstream(t, f, recoveryUpstream)
+	from := intakefixture.Seals(t, f.Repository(), stream)[0].Base.Commit
+	upstream := journey.AdvanceUpstream(t, f, recoveryUpstream)
 	close(demo.ask)
 
 	intakefixture.Eventually(t, "the drift rebase never set out to carry the units over", func() bool {
-		return slices.ContainsFunc(driftRecords(t, f.repository(), stream), func(r service.DriftRebase) bool {
+		return slices.ContainsFunc(journey.DriftRecords(t, f.Repository(), stream), func(r service.DriftRebase) bool {
 			return r.Outcome == driftCarrying || r.Outcome == lifecycle.DriftRebased
 		})
 	})
 	close(demo.carrying)
 
-	f.awaitMerged(t, stream, "dedupe")
-	f.awaitMerged(t, stream, "audit")
-	demo.check(t)
-	repository := f.repository()
+	f.AwaitMerged(t, stream, "dedupe")
+	f.AwaitMerged(t, stream, "audit")
+	intakefixture.CheckProblems(t, &demo.mu, &demo.problems)
+	repository := f.Repository()
 	demo.mu.Lock()
 	asked, marked := demo.asked, demo.marked
 	demo.mu.Unlock()
@@ -370,30 +357,30 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		}
 	}
 	var resolved string
-	for _, r := range driftRecords(t, repository, stream) {
+	for _, r := range journey.DriftRecords(t, repository, stream) {
 		if r.Outcome == lifecycle.DriftRebased {
 			resolved = r.Commit
 		}
 	}
-	if resolved == "" || parentOf(t, f, resolved) != upstream || fileAt(t, f, resolved, intakefixture.TrackedFile) != resolvedGit {
+	if resolved == "" || journey.ParentOf(t, f, resolved) != upstream || journey.FileAt(t, f, resolved, intakefixture.TrackedFile) != resolvedGit {
 		t.Fatalf("the drift rebase moved the feature branch to %q, not resume's landing resolved onto %s", resolved, upstream)
 	}
 	if all := intakefixture.Seals(t, repository, stream); len(all) != 2 || all[0].Base.Commit != from || all[1].Base.Commit != upstream {
 		t.Fatalf("seals %+v", all)
 	}
 
-	g := intakefixture.ProviderOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream)
-	landings := landingByUnit(t, repository, stream)
+	g := intakefixture.ProviderOf(t, journey.NewUnitWorkspaces(f.S.Cfg, repository).StreamWorkspaces, stream)
+	landings := journey.LandingByUnit(t, repository, stream)
 	for unit, state := range map[string]string{"dedupe": intake.UnitApproved, "audit": intake.UnitImplementing} {
 
-		rebases := unitRebases(t, repository, stream, unit)
+		rebases := journey.UnitRebases(t, repository, stream, unit)
 		if len(rebases) == 0 || rebases[0].State != state || rebases[0].Base != resume.Commit || rebases[0].Onto != resolved || !slices.Equal(rebases[0].Conflicts, []string{recoveryFiles[unit]}) {
 			t.Fatalf("unit %s's rebases %+v", unit, rebases)
 		}
 		if stored, err := g.StoredConflicts(ctx, rebases[0].Commit); err != nil || !slices.Equal(stored, []string{recoveryFiles[unit]}) {
 			t.Fatalf("unit %s's rebased commit %s stores %v: %v", unit, rebases[0].Commit, stored, err)
 		}
-		th := f.thread(t, stream, intake.MasonAgent(unit))
+		th := f.Thread(t, stream, intake.MasonAgent(unit))
 		i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == execution.ResolveTurnID(unit, 1) })
 		if i < 0 || !strings.Contains(th.Turns[i].Request.Prompt, "- "+recoveryFiles[unit]+"\n") {
 			t.Fatalf("unit %s's mason got no turn resolving %s", unit, recoveryFiles[unit])
@@ -410,10 +397,10 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		if change == "" {
 			t.Fatalf("unit %s records no change", unit)
 		}
-		reviews := demo.units.reviewed(unit)
+		reviews := demo.units.Reviewed(unit)
 		walk := func(commit, role string) {
 			t.Helper()
-			walked, apiErr := f.s.traceView(ctx, string(stream), "commit", commit)
+			walked, apiErr := journey.InspectForTest(f.S).TraceView(ctx, string(stream), "commit", commit)
 			if apiErr != nil {
 				t.Fatalf("the walk of unit %s's commit %s: %+v", unit, commit, apiErr)
 			}
@@ -443,32 +430,32 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 		if landed.Candidate != last.Revision || landed.Base != last.BaseRevision || slices.ContainsFunc(rebases, func(r api.UnitRebase) bool { return r.Snapshot == landed.Candidate }) {
 			t.Fatalf("unit %s landed %+v; its last review read %+v", unit, landed, last)
 		}
-		if fileAt(t, f, landed.Commit, recoveryFiles[unit]) != resolutions[unit] {
+		if journey.FileAt(t, f, landed.Commit, recoveryFiles[unit]) != resolutions[unit] {
 			t.Fatalf("unit %s's landing lost its mason's resolution", unit)
 		}
 	}
-	if first := demo.units.reviewed("dedupe")[0].Candidate; first.BaseRevision != resume.Commit {
+	if first := demo.units.Reviewed("dedupe")[0].Candidate; first.BaseRevision != resume.Commit {
 		t.Fatalf("dedupe was first approved on %s, not resume's landing %s", first.BaseRevision, resume.Commit)
 	}
 
-	f.awaitFeature(t, stream, intake.AssembledState)
+	f.AwaitFeature(t, stream, intake.AssembledState)
 	var presented api.DeliveryPresentation
 	var err error
 	intakefixture.Eventually(t, "final review never presented the delivery", func() bool {
-		presented, err = f.c.Delivery(ctx, stream)
+		presented, err = f.C.Delivery(ctx, stream)
 		return err == nil
 	})
-	_, err = f.c.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	_, err = f.C.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	fixturekit.Must(t, err)
-	f.awaitFeature(t, stream, intake.DeliveredState)
-	demo.check(t)
+	f.AwaitFeature(t, stream, intake.DeliveredState)
+	intakefixture.CheckProblems(t, &demo.mu, &demo.problems)
 	prs.Mu.Lock()
 	defer prs.Mu.Unlock()
 	if len(prs.Prs) != 1 || prs.Creates != 1 || prs.Prs[0].Body != presented.Draft || prs.Prs[0].HeadCommit != forkBranch() {
 		t.Fatalf("pull requests %+v", prs.Prs)
 	}
 	for name, content := range map[string]string{intakefixture.TrackedFile: resolvedGit, recoveryFiles["dedupe"]: resolvedDedupe, recoveryFiles["audit"]: resolvedAudit, "internal/trace/kept.go": interruptedEdits["internal/trace/kept.go"]} {
-		if got := fileAt(t, f, forkBranch(), name); got != content {
+		if got := journey.FileAt(t, f, forkBranch(), name); got != content {
 			t.Fatalf("the delivered branch holds %s as %q, want %q", name, got, content)
 		}
 	}

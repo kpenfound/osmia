@@ -1,13 +1,15 @@
 package executionjourney
 
 import (
+	strconv "strconv"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	strconv "strconv"
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	chromedp "github.com/chromedp/chromedp"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
@@ -15,14 +17,14 @@ import (
 
 func TestBrowserFeedCheckHistoryPreservesResultsAndSelectionsWithoutAListedTotal(t *testing.T) {
 	t.Parallel()
-	f := newPageFixture(t)
+	f := journey.NewPageFixture(t)
 	p := openBrowser(t)
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(fixturekit.Stream)
 	p.OpenActivity()
-	repo := f.s.sole().repository
-	at := f.s.now()
+	repo := f.S.Sole().Repository
+	at := f.S.Now()
 	selection := &api.CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://go/check"}, Candidates: 113}
 	for i, state := range []string{checkrun.ChecksPassed, checkrun.ChecksIncomplete, checkrun.ChecksSuperseded} {
 		run := i + 1

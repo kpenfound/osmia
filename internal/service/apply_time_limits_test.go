@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/config"
@@ -140,7 +142,7 @@ func routeWhileJevAnswers(t *testing.T, limit, way string) *limitRoute {
 	})
 	f.s.router.Judge = jevfixture.TransitionJudge(f.clock.Now, p)
 	x, id := sendBackExit(t, f, repo, stream, "checks-"+name)
-	r := &limitRoute{f: f, stream: stream, repo: repo, x: x, id: id, limit: l, way: way, before: unitStateOf(t, repo, stream), transitions: len(workTransitions(t, repo, stream))}
+	r := &limitRoute{f: f, stream: stream, repo: repo, x: x, id: id, limit: l, way: way, before: unitStateOf(t, repo, stream), transitions: len(intakefixture.WorkTransitions(t, repo, stream))}
 	res, err := f.s.RouteExit(context.Background(), x)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, reachErr)
@@ -176,7 +178,7 @@ func TestALimitReachedWhileJevAnswersLeavesTheUnitWhereItWas(t *testing.T) {
 		if now := unitStateOf(t, r.repo, r.stream); now != r.before {
 			t.Fatalf("the unit moved from %+v to %+v", r.before, now)
 		}
-		if got := len(workTransitions(t, r.repo, r.stream)); got != r.transitions {
+		if got := len(intakefixture.WorkTransitions(t, r.repo, r.stream)); got != r.transitions {
 			t.Fatalf("%d transitions were committed", got-r.transitions)
 		}
 	})
@@ -238,7 +240,7 @@ func approveRecoveryWhileLimited(t *testing.T, limit string) *limitedRecoveryApp
 	if _, e := m.f.s.ownerMove(context.Background(), string(m.stream), "resume", UnitMoveRequest{To: UnitContested, Note: "Hold it while I look."}); e != nil {
 		t.Fatal(e.Message)
 	}
-	if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, "pending as an owner decision on the recovery card") {
+	if out := intakefixture.Handle(t, m.move, `{"unit":"resume","to":"reviewing","note":"Review it again."}`); !strings.Contains(out, "pending as an owner decision on the recovery card") {
 		t.Fatalf("the chief's move: %s", out)
 	}
 	cards := recoveryEntriesOf(t, m.f.s, m.repo, m.stream)
@@ -248,7 +250,7 @@ func approveRecoveryWhileLimited(t *testing.T, limit string) *limitedRecoveryApp
 	req := recoveryRequestOf(t, cards[0])
 	l.arm(t, m.f, m.repo, m.stream)
 	fixturekit.Must(t, l.reach(t, m.f, m.repo, m.stream))
-	a := &limitedRecoveryApproval{m: m, p: p, l: l, req: req, before: m.state(t), transitions: len(workTransitions(t, m.repo, m.stream)), asked: len(p.Requests())}
+	a := &limitedRecoveryApproval{m: m, p: p, l: l, req: req, before: intakefixture.UnitWorkflow(t, m.repo, m.stream, "resume"), transitions: len(intakefixture.WorkTransitions(t, m.repo, m.stream)), asked: len(p.Requests())}
 	_, a.fail = m.f.s.approveRecovery(context.Background(), string(m.stream), req)
 	return a
 }
@@ -276,7 +278,7 @@ func TestARefusedRecoveryApprovalLeavesTheUnitWhereItWasWithoutAskingJev(t *test
 	t.Parallel()
 	eachLimit(t, func(t *testing.T, limit string) {
 		a := approveRecoveryWhileLimited(t, limit)
-		if now := a.m.state(t); now != a.before || len(workTransitions(t, a.m.repo, a.m.stream)) != a.transitions {
+		if now := intakefixture.UnitWorkflow(t, a.m.repo, a.m.stream, "resume"); now != a.before || len(intakefixture.WorkTransitions(t, a.m.repo, a.m.stream)) != a.transitions {
 			t.Fatalf("the unit moved from %+v to %+v", a.before, now)
 		}
 		if len(a.p.Requests()) != a.asked {

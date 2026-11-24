@@ -4,12 +4,6 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
@@ -18,6 +12,13 @@ import (
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
@@ -70,36 +71,36 @@ func TestQuickReplyEligibility(t *testing.T) {
 func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newQuestionFixture(t, "qi-", "", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
-		{fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "mason", "build"}, {fixturekit.Stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"}, {intakefixture.Quiet, "agent_other", "thread_other", "mason", "build_other"},
+	f := journey.NewQuestionFixture(t, "qi-", "", "# Charter\n\n1. Keep state in files under the root.\n", []intakefixture.QuestionAsker{
+		{Stream: fixturekit.Stream, Agent: fixturekit.DemoAgent, Thread: fixturekit.DemoThread, Role: "mason", Turn: "build"}, {Stream: fixturekit.Stream, Agent: "agent_reviewer", Thread: "thread_reviewer", Role: "reviewer", Turn: "review"}, {Stream: intakefixture.Quiet, Agent: "agent_other", Thread: "thread_other", Role: "mason", Turn: "build_other"},
 	})
 	asker := func(question string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			if err := f.use(ctx, tools, req.Name, "ask", map[string]any{"question": question}); err != nil {
+			f.Mu.Lock()
+			defer f.Mu.Unlock()
+			if err := f.Use(ctx, tools, req.Name, "ask", map[string]any{"question": question}); err != nil {
 				return nil, err
 			}
 			return intakefixture.QuestionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
-	f.engine.Turns["build"] = asker("Where does state live?")
-	f.engine.Turns["review"] = asker("Is the log format fixed?")
-	f.engine.Turns["build_other"] = asker("May I add a dependency?")
+	f.Engine.Turns["build"] = asker("Where does state live?")
+	f.Engine.Turns["review"] = asker("Is the log format fixed?")
+	f.Engine.Turns["build_other"] = asker("May I add a dependency?")
 
 	resumed := func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
 		if names, err := intakefixture.ToolNames(ctx, tools); err != nil || !slices.Equal(names, []string{"ask", "file_read"}) {
-			f.problem("%s tools %v: %v", req.Name, names, err)
+			f.Problem("%s tools %v: %v", req.Name, names, err)
 		}
 		if !strings.Contains(req.Prompt, "Work: ") {
-			f.problem("%s does not continue the asking thread:\n%s", req.Name, req.Prompt)
+			f.Problem("%s does not continue the asking thread:\n%s", req.Name, req.Prompt)
 		}
-		f.results["resumed"] = append(f.results["resumed"], req.Prompt[strings.Index(req.Prompt, "The owner ruled"):])
+		f.Results["resumed"] = append(f.Results["resumed"], req.Prompt[strings.Index(req.Prompt, "The owner ruled"):])
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Built"), nil
 	}
-	f.engine.Turns["answer_1"], f.engine.Turns["answer_2"] = resumed, resumed
+	f.Engine.Turns["answer_1"], f.Engine.Turns["answer_2"] = resumed, resumed
 
 	relayed := make(chan struct{})
 	section, sectionErr := envelope.Render(envelope.Section{Name: "owner_response", Text: "Both are part of the contract."}, envelope.Section{Name: "returned_answer", Text: "State and the log format are part of the contract."})
@@ -107,54 +108,54 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		t.Fatal(sectionErr)
 	}
 	notice := "- workstreams/" + string(fixturekit.Stream) + "/questions/1/rulings.jsonl (record 1 revision 2, workstream " + string(fixturekit.Stream) + ")\n" + section
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		f.mu.Lock()
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.Mu.Lock()
 		switch {
 
 		case strings.Contains(req.Prompt, ", escalation_1 (questions 1, 2): Both are part of the contract."):
 			select {
 			case <-relayed:
 
-				f.mu.Unlock()
+				f.Mu.Unlock()
 				return intakefixture.QuestionResult(req, "session-chief", "Already relayed"), nil
 			default:
 			}
 			if strings.Contains(req.SystemPrompt, "<<< osmia:owner_response") {
-				f.problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
+				f.Problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
 			}
 			for _, args := range []map[string]any{
 				{"question": "2", "text": "State and the log format are part of the contract.", "scope": "notify"},
 				{"question": "1", "text": "Again.", "scope": "local"},
 			} {
-				if err := f.use(ctx, tools, "relay", "relay_ruling", args); err != nil {
-					f.problem("relay_ruling: %v", err)
-					f.mu.Unlock()
+				if err := f.Use(ctx, tools, "relay", "relay_ruling", args); err != nil {
+					f.Problem("relay_ruling: %v", err)
+					f.Mu.Unlock()
 					return nil, err
 				}
 			}
-			f.mu.Unlock()
+			f.Mu.Unlock()
 
 			close(relayed)
 			<-ctx.Done()
 			return nil, ctx.Err()
 		case strings.Contains(req.Prompt, ", escalation_1 (questions 1): No new dependencies."):
-			defer f.mu.Unlock()
+			defer f.Mu.Unlock()
 
 			if !strings.Contains(req.SystemPrompt, "## Notices\n"+notice) {
-				f.problem("event turn system prompt lacks the notice:\n%s", req.SystemPrompt)
+				f.Problem("event turn system prompt lacks the notice:\n%s", req.SystemPrompt)
 			}
-			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), f.use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
+			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
 		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):
-			defer f.mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
+			defer f.Mu.Unlock()
+			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1", "2"},
 				"rephrasing": "Are state files and the log format part of the contract?", "blocked": "The upload unit and its review.", "options": []string{"Both fixed", "Both free"}, "recommendation": "Both fixed."})
 		case strings.Contains(req.Prompt, "is open, asked by the mason: May I add a dependency?"):
-			defer f.mu.Unlock()
-			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
+			defer f.Mu.Unlock()
+			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), f.Use(ctx, tools, "escalate", "escalate", map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index unit add a dependency?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 		}
-		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
-		f.mu.Unlock()
+		f.Problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
+		f.Mu.Unlock()
 		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 
@@ -181,10 +182,10 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		return out
 	}
 	runs := func() map[string]int {
-		f.engine.Mu.Lock()
-		defer f.engine.Mu.Unlock()
+		f.Engine.Mu.Lock()
+		defer f.Engine.Mu.Unlock()
 		out := map[string]int{}
-		for _, name := range f.engine.Runs {
+		for _, name := range f.Engine.Runs {
 			if strings.HasPrefix(name, "events_") {
 				name = "events"
 			}
@@ -194,9 +195,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	lifetime := func() (*journey.Service, *journey.Client, *trace.Repository) {
 		t.Helper()
-		s, err := journey.Start(ctx, f.opts)
+		s, err := journey.Start(ctx, f.Opts)
 		fixturekit.Must(t, err)
-		return s, journey.NewClient(s.Socket()), <-f.lives
+		return s, journey.NewClient(s.Socket()), <-f.Lives
 	}
 	stop := func(s *journey.Service, c *journey.Client) {
 		t.Helper()
@@ -205,9 +206,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 
 	s, c, repo := lifetime()
-	f.settle(t, s)
-	f.clock.Advance(time.Minute)
-	f.settle(t, s)
+	f.Settle(t, s)
+	f.Clock.Advance(time.Minute)
+	f.Settle(t, s)
 	inbox, err := c.Inbox(ctx)
 	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 2 || inbox.Entries[0].Number != 1 || inbox.Entries[1].Number != 2 {
@@ -218,7 +219,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		batch, single = single, batch
 	}
 	wantBatch := api.InboxEntry{Kind: api.InboxEscalation, Project: fixturekit.Project, Number: batch.Number, Workstream: fixturekit.Stream, Batch: "escalation_1", Question: "Are state files and the log format part of the contract?", Blocked: "The upload unit and its review.",
-		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.clock.Now(), Answer: api.InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{"project": string(fixturekit.Project)}},
+		Options: []string{"Both fixed", "Both free"}, Recommendation: "Both fixed.", QuickReply: "Both fixed.", OpenedAt: f.Clock.Now(), Answer: api.InboxAnswer{Method: "POST", Path: "/v1/inbox/" + strconv.Itoa(batch.Number), Body: map[string]any{"project": string(fixturekit.Project)}},
 		Asked: []api.InboxQuestion{{ID: "1", AskedBy: fixturekit.DemoAgent, Question: "Where does state live?"}, {ID: "2", AskedBy: "agent_reviewer", Question: "Is the log format fixed?"}}}
 
 	if batch.Asked[0].Question != "Where does state live?" {
@@ -244,7 +245,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		}
 	}
 
-	traceDir, err := f.cfg.Root.ProjectTrace(fixturekit.Project)
+	traceDir, err := f.Cfg.Root.ProjectTrace(fixturekit.Project)
 	fixturekit.Must(t, err)
 	head := fixturekit.TraceCommits(t, traceDir)
 	_, err = c.Answer(ctx, 9, "Both are part of the contract.", "")
@@ -262,7 +263,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	if got, err := c.Status(ctx, fixturekit.Stream); err != nil || len(got.Gates) != 0 {
 		t.Fatalf("ruled status gates: %+v %v", got.Gates, err)
 	}
-	if !reflect.DeepEqual(answered, api.AnswerResponse{Number: batch.Number, Workstream: fixturekit.Stream, Batch: "escalation_1", Questions: []string{"1", "2"}, Ruling: "Both are part of the contract.", At: f.clock.Now()}) {
+	if !reflect.DeepEqual(answered, api.AnswerResponse{Number: batch.Number, Workstream: fixturekit.Stream, Batch: "escalation_1", Questions: []string{"1", "2"}, Ruling: "Both are part of the contract.", At: f.Clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)
 	}
 	_, err = c.Answer(ctx, batch.Number, "Neither is.", "")
@@ -288,7 +289,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 
 	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
-	journey.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	started := map[string]int{"build": 1, "review": 1, "build_other": 1, "events": 2}
 	if got := runs(); !reflect.DeepEqual(got, started) {
 		t.Fatalf("first lifetime runs: %v", got)
@@ -296,20 +297,20 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	stop(s, c)
 
 	s, c, repo = lifetime()
-	f.settle(t, s)
+	f.Settle(t, s)
 	if got := runs(); !reflect.DeepEqual(got, started) {
 		t.Fatalf("restart after the ruling ran: %v", got)
 	}
-	f.clock.Advance(time.Minute)
+	f.Clock.Advance(time.Minute)
 	deadline := time.After(fixturekit.DemoTimeout)
 	for waiting := true; waiting; {
 		select {
-		case f.ticks <- f.clock.Now():
+		case f.Ticks <- f.Clock.Now():
 		case <-relayed:
 			waiting = false
 		case <-deadline:
 			s.Close()
-			t.Fatalf("chief of staff did not relay the ruling; runs %v, fake agents saw %v", runs(), f.problems)
+			t.Fatalf("chief of staff did not relay the ruling; runs %v, fake agents saw %v", runs(), f.Problems)
 		}
 	}
 	if got := states(repo, fixturekit.Stream); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionAnswered}) {
@@ -333,7 +334,7 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	stop(s, c)
 
 	s, c, repo = lifetime()
-	f.settle(t, s)
+	f.Settle(t, s)
 	queued := func(r *trace.Repository) {
 		t.Helper()
 		mason, reviewer := thread(r, fixturekit.Stream, fixturekit.DemoAgent), thread(r, fixturekit.Stream, "agent_reviewer")
@@ -345,13 +346,13 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	stop(s, c)
 
 	s, c, repo = lifetime()
-	f.settle(t, s)
+	f.Settle(t, s)
 	queued(repo)
 	if got := runs(); got["answer_1"] != 0 || got["answer_2"] != 0 {
 		t.Fatalf("held answer turns ran: %v", got)
 	}
-	journey.Mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(target))
-	f.settle(t, s)
+	intakefixture.Mutation(t, c, "DELETE", "pause", api.ClearPauseRequest(target))
+	f.Settle(t, s)
 	for agent, thread := range map[string]string{fixturekit.DemoAgent: fixturekit.DemoThread, "agent_reviewer": "thread_reviewer"} {
 		th, err := repo.Thread(fixturekit.Stream, agent)
 		fixturekit.Must(t, err)
@@ -361,9 +362,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	_, err = c.Answer(ctx, single.Number, "No new dependencies.", "")
 	fixturekit.Must(t, err)
-	f.clock.Advance(time.Minute)
-	f.settle(t, s)
-	f.settle(t, s)
+	f.Clock.Advance(time.Minute)
+	f.Settle(t, s)
+	f.Settle(t, s)
 	if th := thread(repo, intakefixture.Quiet, "agent_other"); len(th.Turns) != 2 || th.Parked() || th.Turns[1].Request.ThreadID != "thread_other" {
 		t.Fatalf("other workstream's asker: parked %v, turns %v", th.Parked(), turnsOf(repo, intakefixture.Quiet, "agent_other"))
 	}
@@ -383,8 +384,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	stop(s, c)
 
 	s, c, repo = lifetime()
-	f.clock.Advance(24 * time.Hour)
-	f.settle(t, s)
+	f.Clock.Advance(24 * time.Hour)
+	f.Settle(t, s)
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "review": 1, "build_other": 1, "events": 5, "answer_1": 2, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
@@ -393,9 +394,9 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	}
 	stop(s, c)
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	slices.Sort(f.results["resumed"])
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	slices.Sort(f.Results["resumed"])
 	ruled := func(id, question, answer string) string {
 		ownerWords := "Both are part of the contract."
 		if answer == "Add no dependency." {
@@ -406,24 +407,24 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 	wantResumed := []string{ruled("1", wantBatch.Asked[0].Question, "State and the log format are part of the contract."), ruled("1", "May I add a dependency?", "Add no dependency."),
 		ruled("2", wantBatch.Asked[1].Question, "State and the log format are part of the contract.")}
 	slices.Sort(wantResumed)
-	if !slices.Equal(f.results["resumed"], wantResumed) {
-		t.Fatalf("resumed prompts:\n%q\nwant\n%q", f.results["resumed"], wantResumed)
+	if !slices.Equal(f.Results["resumed"], wantResumed) {
+		t.Fatalf("resumed prompts:\n%q\nwant\n%q", f.Results["resumed"], wantResumed)
 	}
-	if got, want := f.results["relay"], []string{
+	if got, want := f.Results["relay"], []string{
 		`{"recorded":true,"questions":["1","2"],"scope":"notify","next":"The ruling is delivered to each asker as its next turn."}`,
 		`{"recorded":false,"reason":"question 1 is already answered"}`,
 	}; !slices.Equal(got, want) {
 		t.Fatalf("relay results: %v", got)
 	}
 
-	if got := slices.Sorted(slices.Values(f.results["escalate"])); !slices.Equal(got, []string{`{"recorded":true,"batch":"escalation_1","questions":["1","2"]}`, `{"recorded":true,"batch":"escalation_1","questions":["1"]}`}) {
+	if got := slices.Sorted(slices.Values(f.Results["escalate"])); !slices.Equal(got, []string{`{"recorded":true,"batch":"escalation_1","questions":["1","2"]}`, `{"recorded":true,"batch":"escalation_1","questions":["1"]}`}) {
 		t.Fatalf("escalation results: %v", got)
 	}
-	if got := f.results["relay-local"]; !slices.Equal(got, []string{`{"recorded":true,"questions":["1"],"scope":"local","next":"The ruling is delivered to each asker as its next turn."}`}) {
+	if got := f.Results["relay-local"]; !slices.Equal(got, []string{`{"recorded":true,"questions":["1"],"scope":"local","next":"The ruling is delivered to each asker as its next turn."}`}) {
 		t.Fatalf("local relay result: %v", got)
 	}
-	if len(f.problems) != 0 {
-		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))
+	if len(f.Problems) != 0 {
+		t.Fatalf("fake agents saw:\n%s", strings.Join(f.Problems, "\n"))
 	}
 }
 

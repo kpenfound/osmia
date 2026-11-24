@@ -199,7 +199,7 @@ func TestRemoveProjectRefusesUnresolvedMemberThenRemovesResolvedProject(t *testi
 	if _, api := s.removeProject(ProjectRemoveRequest{Project: fixturekit.Project}); api != nil {
 		t.Fatalf("resolved project removal: %+v", api)
 	}
-	if s.current().Active(fixturekit.Project) || !s.current().Active(otherProject) {
+	if s.current().Active(fixturekit.Project) || !s.current().Active(fixturekit.OtherProject) {
 		t.Fatal("removal affected the wrong project")
 	}
 }

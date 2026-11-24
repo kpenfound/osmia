@@ -3,7 +3,6 @@ package intakefixture
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -137,4 +138,37 @@ func Interrupted(t *testing.T, directory string, paths, log []string) (string, b
 	}
 	t.Fatalf("the cancelled %s local step has no operation log", directory)
 	return "", false
+}
+
+// JujutsuClone locates the Jujutsu-backed workspaces a fixture's service keeps
+// for its project and reads their recovery state.
+type JujutsuClone struct {
+	Root    config.Root
+	Project config.ProjectID
+	Clone   string
+}
+
+// Checkpoints lists the checkpoints left in directory's workspaces.
+func (j JujutsuClone) Checkpoints(t *testing.T, directory string) []string {
+	t.Helper()
+	return Checkpoints(t, JujutsuRepository(j.Root, j.Project, directory))
+}
+
+// OperationLog lists the operations the directory's workspaces recorded.
+func (j JujutsuClone) OperationLog(t *testing.T, directory string) []string {
+	t.Helper()
+	return OperationLog(t, JujutsuRepository(j.Root, j.Project, directory), filepath.Dir(j.Clone))
+}
+
+// Interrupted reports the entry an interrupted step left in directory's
+// workspaces and whether the step changed them.
+func (j JujutsuClone) Interrupted(t *testing.T, directory string) (string, bool) {
+	t.Helper()
+	return Interrupted(t, directory, j.Checkpoints(t, directory), j.OperationLog(t, directory))
+}
+
+// RestoredTo checks that recovery restored directory's workspaces to entry.
+func (j JujutsuClone) RestoredTo(t *testing.T, directory, entry string, changed bool) {
+	t.Helper()
+	RestoredTo(t, directory, entry, changed, j.OperationLog(t, directory), j.Checkpoints(t, directory))
 }

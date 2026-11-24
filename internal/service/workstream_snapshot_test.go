@@ -3,12 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"

@@ -3,14 +3,16 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -35,13 +37,13 @@ func picks(option string, confidence float64) *jevfixture.Provider {
 
 func (d *draftFixture) withRouteJev(p *jevfixture.Provider) *jev.Judge {
 	j := routeJudge(p)
-	d.f.s.jev = j
+	d.f.S.Jev = j
 	return j
 }
 
 func (d *draftFixture) routeGate(t *testing.T) *intake.Gate {
 	t.Helper()
-	g, err := d.f.s.delivery().DeliveryRouteGate(context.Background(), d.repository, d.stream)
+	g, err := d.f.S.Delivery().DeliveryRouteGate(context.Background(), d.repository, d.stream)
 	fixturekit.Must(t, err)
 	return g
 }
@@ -99,7 +101,7 @@ func (d *draftFixture) refusePush(t *testing.T) {
 
 func (d *draftFixture) card(t *testing.T) (api.InboxEntry, bool) {
 	t.Helper()
-	entry, found, err := d.f.s.delivery().DeliveryEntry(context.Background(), d.repository, d.stream)
+	entry, found, err := d.f.S.Delivery().DeliveryEntry(context.Background(), d.repository, d.stream)
 	fixturekit.Must(t, err)
 	return entry, found
 }
@@ -140,7 +142,7 @@ func TestTheDeliveryRouteStateHoldsWhatTheCardShowsAndNoCode(t *testing.T) {
 	}
 	p := picks("land", 0.95)
 	d.withRouteJev(p)
-	d.runGate(t, d.f.s.jev)
+	d.runGate(t, d.f.S.Jev)
 	for _, r := range p.Decisions() {
 		if got := jevfixture.Options(r); strings.Join(got, ",") != "land,pull-request,defer" {
 			t.Fatalf("Jev was offered %v, want land, pull-request and defer", got)
@@ -157,12 +159,12 @@ func TestJevIsNotAskedHowToDeliverUnlessTheDeliveryIsClean(t *testing.T) {
 	}{
 		{"a project that delivers by pull request", func(t *testing.T) *draftFixture {
 			d := newLandJourney(t)
-			d.f.s.cfg.Project.Delivery = config.DeliveryPullRequest
+			d.f.S.Cfg.Project.Delivery = config.DeliveryPullRequest
 			return d
 		}},
 		{"a delivery through a fork", func(t *testing.T) *draftFixture {
 			d := newLandJourney(t)
-			d.f.s.cfg.Project.Fork = "someone/widgets"
+			d.f.S.Cfg.Project.Fork = "someone/widgets"
 			return d
 		}},
 		{"blocking findings left to the owner", func(t *testing.T) *draftFixture { return newLandJourney(t, blocking) }},
@@ -414,8 +416,8 @@ func TestAConfidentLandPickTheRouterHoldsIsAppliedWhenTheHoldClears(t *testing.T
 	fixturekit.Must(t, err)
 	for _, r := range records {
 		if delivery.LandingAction(r.Operation) {
-			lander := &delivery.Lander{S: d.f.s.delivery(), Repository: d.repository}
-			if result := settleOperation(t, d.f.s, d.repository, d.stream, r.Operation, lander); result.Outcome != api.LandOutcomeLanded {
+			lander := &delivery.Lander{S: d.f.S.Delivery(), Repository: d.repository}
+			if result := journey.SettleOperation(t, d.f.S, d.repository, d.stream, r.Operation, lander); result.Outcome != api.LandOutcomeLanded {
 				t.Fatalf("the landing once the hold cleared: %+v", result)
 			}
 		}

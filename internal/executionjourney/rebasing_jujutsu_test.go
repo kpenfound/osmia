@@ -5,12 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -18,6 +12,14 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -28,16 +30,6 @@ import (
 	workspace "github.com/kpenfound/osmia/internal/workspace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func onWorkspaces(t *testing.T, opts Options, backend string) {
-	t.Helper()
-	intakefixture.OnWorkspaces(t, opts.Config.Root, backend)
-}
-
-func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
-	t.Helper()
-	return intakefixture.BackendOf(t, f.opts.Config, f.project, stream)
-}
 
 var (
 	uploadReport = "send chunks"
@@ -52,23 +44,25 @@ var jujutsuConflicts = map[string]map[string]string{
 
 var jujutsuConflicted = map[string][]string{"resume": {fixturekit.MasonWrote}, "audit": {fixturekit.MasonWrote, intakefixture.TrackedFile}, "upload": nil}
 
-func newJujutsuLandedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string, map[string]coreadapter.Operation) {
+func newJujutsuLandedFixture(t *testing.T, key string) (*journey.ShedFixture, config.WorkstreamID, *trace.Repository, *journey.Foreman, string, map[string]coreadapter.Operation) {
 	t.Helper()
-	f, _ := newParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 1, 3, disjointPlan)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repository := seedBuild(t, f, key, disjointPlan, config.WorkspacesJujutsu, base)
-	seedReview(t, f, repository, stream, "resume", resumeReport)
-	lands := &foreman{masons: newMasonController(f.s, repository)}
-	landed, ops := intakefixture.PrepareJujutsuLanding(t, repository, stream, f.unitSeedDriver(repository), newUnitWorkspaces(f.s.cfg, repository).find, jujutsuConflicts, uploadReport, auditReport, func(files map[string]string) string { return moveFeature(t, f, stream, files) }, lands.Pass, func(unit string) []trace.OperationRecord { return rebaseOperations(t, repository, stream, unit) })
+	f, _ := journey.NewParallelMasonFixtureOn(t, config.WorkspacesJujutsu, 1, 3, intakefixture.DisjointPlan)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	stream, repository := journey.SeedBuild(t, f, key, intakefixture.DisjointPlan, config.WorkspacesJujutsu, base)
+	journey.SeedReview(t, f, repository, stream, "resume", journey.ResumeReport)
+	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}
+	landed, ops := intakefixture.PrepareJujutsuLanding(t, repository, stream, f.UnitSeedDriver(repository), journey.NewUnitWorkspaces(f.S.Cfg, repository).Find, jujutsuConflicts, uploadReport, auditReport, func(files map[string]string) string { return journey.MoveFeature(t, f, stream, files) }, lands.Pass, func(unit string) []trace.OperationRecord {
+		return journey.RebaseOperations(t, repository, stream, unit)
+	})
 
 	return f, stream, repository, lands, landed, ops
 }
 
-func newJujutsuRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *foreman, string) {
+func newJujutsuRebaseFixture(t *testing.T, key string) (*journey.ShedFixture, config.WorkstreamID, *trace.Repository, *journey.Foreman, string) {
 	t.Helper()
 	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, key)
 	for _, unit := range []string{"resume", "upload", "audit"} {
-		if result := settleOperation(t, f.s, repository, stream, ops[unit], rebaser{lands}); result.Outcome != "succeeded" {
+		if result := journey.SettleOperation(t, f.S, repository, stream, ops[unit], journey.Rebaser{Foreman: lands}); result.Outcome != "succeeded" {
 			t.Fatalf("rebase of unit %s: %+v", unit, result)
 		}
 	}
@@ -107,15 +101,15 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 	t.Parallel()
 	f, stream, repository, lands, landed := newJujutsuRebaseFixture(t, "jj-conflicts")
 	ctx := context.Background()
-	m := lands.masons
-	units := newUnitWorkspaces(f.s.cfg, repository)
-	g := intakefixture.ProviderOf(t, units.streamWorkspaces, stream)
+	m := lands.Masons
+	units := journey.NewUnitWorkspaces(f.S.Cfg, repository)
+	g := intakefixture.ProviderOf(t, units.StreamWorkspaces, stream)
 	if _, ok := g.(*workspace.Jujutsu); !ok {
 		t.Fatalf("the unit workspaces are %T", g)
 	}
 
 	for _, unit := range []string{"resume", "audit"} {
-		rebases := unitRebases(t, repository, stream, unit)
+		rebases := journey.UnitRebases(t, repository, stream, unit)
 		if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, jujutsuConflicted[unit]) || rebases[0].Onto != landed {
 			t.Fatalf("unit %s's rebases %+v", unit, rebases)
 		}
@@ -125,7 +119,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 		if c, err := g.Commit(ctx, rebases[0].Commit); err != nil || !slices.Equal(c.Parents, []string{landed}) {
 			t.Fatalf("unit %s's rebased commit %+v: %v", unit, c, err)
 		}
-		w, _, _, err := units.find(ctx, stream, unit)
+		w, _, _, err := units.Find(ctx, stream, unit)
 		fixturekit.Must(t, err)
 		data, err := os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote))
 		fixturekit.Must(t, err)
@@ -134,21 +128,21 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 			t.Fatalf("unit %s's conflicted %s reads %q | %q | %q", unit, fixturekit.MasonWrote, onto, base, change)
 		}
 	}
-	audit, _, _, err := units.find(ctx, stream, "audit")
+	audit, _, _, err := units.Find(ctx, stream, "audit")
 	fixturekit.Must(t, err)
 	data, err := os.ReadFile(filepath.Join(audit.Path, intakefixture.TrackedFile))
 	fixturekit.Must(t, err)
 	if onto, base, change := conflictSides(t, data); !slices.Equal(onto, []string{"package trace", "", "// landed git"}) || !slices.Equal(base, []string{"package trace"}) || len(change) != 0 {
 		t.Fatalf("audit's deleted %s reads %q | %q | %q", intakefixture.TrackedFile, onto, base, change)
 	}
-	rebases := unitRebases(t, repository, stream, "upload")
+	rebases := journey.UnitRebases(t, repository, stream, "upload")
 	if len(rebases) != 1 || len(rebases[0].Conflicts) != 0 || rebases[0].Onto != landed {
 		t.Fatalf("upload's rebases %+v", rebases)
 	}
 	if stored, err := g.StoredConflicts(ctx, rebases[0].Commit); err != nil || len(stored) != 0 {
 		t.Fatalf("upload's rebased commit stores %v: %v", stored, err)
 	}
-	w, _, _, err := units.find(ctx, stream, "upload")
+	w, _, _, err := units.Find(ctx, stream, "upload")
 	fixturekit.Must(t, err)
 	for name, want := range map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n", intakefixture.TrackedFile: "package trace\n\n// landed git\n", "internal/upload/upload.go": "package upload\n"} {
 		if data, err := os.ReadFile(filepath.Join(w.Path, name)); err != nil || string(data) != want {
@@ -157,7 +151,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	if ops := landOperations(t, repository, stream); len(ops) != 0 {
+	if ops := journey.LandOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("a landing was asked for with conflicted units: %+v", ops)
 	}
 	for _, unit := range []string{"resume", "audit"} {
@@ -180,11 +174,11 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 		t.Fatalf("the cleanly rebased unit's mason got a resolve turn: %v", err)
 	}
 
-	resume, _, _, err := units.find(ctx, stream, "resume")
+	resume, _, _, err := units.Find(ctx, stream, "resume")
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(resume.Path, fixturekit.MasonWrote), []byte("package trace\n\n// landed and resumed\n"), 0600))
-	completeMasonTurn(t, f, repository, stream, "resume", resumeReport)
-	done := completeMasonTurn(t, f, repository, stream, "audit", auditReport)
+	journey.CompleteMasonTurn(t, f, repository, stream, "resume", journey.ResumeReport)
+	done := journey.CompleteMasonTurn(t, f, repository, stream, "audit", auditReport)
 	fixturekit.Must(t, m.Pass(ctx))
 
 	for unit, want := range map[string]string{"resume": "+// landed and resumed", "upload": "+package upload"} {
@@ -198,7 +192,7 @@ func TestJujutsuRebaseStoresEachUnitsConflictAndRoutesItToItsMason(t *testing.T)
 		if stored, err := g.StoredConflicts(ctx, report.Candidate); err != nil || len(stored) != 0 {
 			t.Fatalf("unit %s's candidate stores %v: %v", unit, stored, err)
 		}
-		req, _, err := m.candidateEvidence(ctx, stream, unit)
+		req, _, err := m.CandidateEvidence(ctx, stream, unit)
 		fixturekit.Must(t, err)
 		if strings.Contains(req.Diff, "<<<<<<<") || strings.Contains(req.Diff, ">>>>>>>") || strings.Contains(req.Diff, "jjconflict") || !strings.Contains(req.Diff, want) {
 			t.Fatalf("unit %s's reviewer diff:\n%s", unit, req.Diff)
@@ -251,12 +245,12 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	t.Parallel()
 	f, stream, repository, lands, landed := newJujutsuRebaseFixture(t, "jj-gates")
 	ctx := context.Background()
-	rebases := unitRebases(t, repository, stream, "audit")
+	rebases := journey.UnitRebases(t, repository, stream, "audit")
 	if len(rebases) != 1 || len(rebases[0].Conflicts) == 0 {
 		t.Fatalf("audit's rebases %+v", rebases)
 	}
 	candidate := rebases[0].Commit
-	if tip, _, err := intakefixture.ProviderOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream).Branch(ctx, execution.UnitBranch(stream, "audit")); err != nil || tip != candidate {
+	if tip, _, err := intakefixture.ProviderOf(t, journey.NewUnitWorkspaces(f.S.Cfg, repository).StreamWorkspaces, stream).Branch(ctx, execution.UnitBranch(stream, "audit")); err != nil || tip != candidate {
 		t.Fatalf("audit's branch is at %s, %v; want %s", tip, err, candidate)
 	}
 	latest, _, _, err := seal.Latest(repository, stream)
@@ -266,14 +260,14 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	plantUnit(t, repository, stream, "audit", intake.UnitReviewing)
 	refused := fmt.Sprintf("candidate %s holds unresolved conflicts in %s, %s", candidate, fixturekit.MasonWrote, intakefixture.TrackedFile)
 
-	r := &reviewers{masons: lands.masons}
+	r := &journey.Reviewers{Masons: lands.Masons}
 	state, err := repository.Workflow(stream, trace.UnitSubject("audit"))
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, r.one(ctx, stream, "audit", state, false))
+	fixturekit.Must(t, r.One(ctx, stream, "audit", state, false))
 	if th, err := repository.Thread(stream, intake.ReviewerAgent("audit")); err == nil && len(th.Turns) != 0 || err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the candidate holding a conflict was offered for review: %+v %v", th.Turns, err)
 	}
-	blocked := slices.IndexFunc(intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
+	blocked := slices.IndexFunc(intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream), func(tr trace.Transition) bool {
 		return tr.Subject == execution.ReviewBlockedSubject("audit") && tr.Reason == "unit audit stays reviewing: its reviewer bundle cannot be assembled: "+refused
 	})
 	if blocked < 0 {
@@ -282,14 +276,14 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 
 	review := plantDocument(t, repository, stream, "audit", execution.ReviewDocument("audit"), "units/audit/review.json", service.UnitReviewResult{
 		Identity: service.UnitReviewIdentity{Subject: string(stream) + "/audit", Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: landed, SpecRevision: fmt.Sprint(latest.Revision.Spec), PlanRevision: fmt.Sprint(latest.Revision.Plan)}, Report: fmt.Sprintf("%s revision %d", report.Path, report.Revision), Seal: latest.Seal},
-		Turn:     "test", Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
+		Turn:     "test", Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}})
 	plantUnit(t, repository, stream, "audit", intake.UnitApproved)
-	_, result, satisfactory, err := lands.approval(stream, "audit", review.Revision)
+	_, result, satisfactory, err := lands.Approval(stream, "audit", review.Revision)
 	if err != nil || !satisfactory {
 		t.Fatalf("the planted approval does not hold: %v", err)
 	}
-	fixturekit.Must(t, lands.request(ctx, stream, "audit", review, result))
-	ops := landOperations(t, repository, stream)
+	fixturekit.Must(t, lands.Driver().Request(ctx, stream, "audit", review, result))
+	ops := journey.LandOperations(t, repository, stream)
 	if len(ops) != 1 {
 		t.Fatalf("landings %+v", ops)
 	}
@@ -297,7 +291,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 	if err != nil || landing.Outcome != "failed" || landing.Evidence != "unit audit did not land: "+refused {
 		t.Fatalf("the landing of a candidate holding a conflict: %+v %v", landing, err)
 	}
-	if tip := featureTip(t, f, stream); tip != landed {
+	if tip := journey.FeatureTip(t, f, stream); tip != landed {
 		t.Fatalf("the feature branch moved to %s", tip)
 	}
 	if state, err := repository.Workflow(stream, trace.UnitSubject("audit")); err != nil || state.Value != intake.UnitApproved {
@@ -307,16 +301,16 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 
 func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
-	base := f.upstream(t)
-	stream, repository := seedBuild(t, f, "jj-drift", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	f := journey.NewDebateFixtureWith(t, 1, 1, "", func(opts *journey.Options) { intakefixture.OnWorkspaces(t, opts.Config.Root, config.WorkspacesJujutsu) })
+	base := f.Upstream(t)
+	stream, repository := journey.SeedBuild(t, f, "jj-drift", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
+	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
 	ctx := context.Background()
-	before, upstream, op := conflictedDrift(t, f, d, stream)
+	before, upstream, op := journey.ConflictedDrift(t, f, d, stream)
 
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
-	w := resolutionWorkspace(t, f, stream)
-	g := intakefixture.ProviderOf(t, lifecycle.DriftWorkspaces(f.s.cfg, repository), stream)
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution of CODEOWNERS")
+	w := journey.ResolutionWorkspace(t, f, stream)
+	g := intakefixture.ProviderOf(t, lifecycle.DriftWorkspaces(f.S.Cfg, repository), stream)
 	if _, ok := g.(*workspace.Jujutsu); !ok {
 		t.Fatalf("the drift workspaces are %T", g)
 	}
@@ -338,8 +332,8 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 		}
 	}
 
-	left := completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Left it"))
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
+	left := journey.CompleteDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, journey.ResolvedDone("Left it"))
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution of CODEOWNERS")
 	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), fmt.Sprintf("%s-markers-%d", intake.DriftMasonAgent, left.Sequence)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
@@ -348,48 +342,48 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
-	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
-	records := driftRecords(t, repository, stream)
+	journey.CompleteDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, journey.ResolvedDone("Kept both owners"))
+	journey.AwaitResolution(t, f.S, d, stream, op, "review 1 of candidate")
+	records := journey.DriftRecords(t, repository, stream)
 	candidate := records[len(records)-1].Candidate
-	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || parentOf(t, f, candidate) != upstream {
+	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || journey.ParentOf(t, f, candidate) != upstream {
 		t.Fatalf("the resolved candidate %s stores %v: %v", candidate, stored, err)
 	}
 	review, err := repository.Thread(stream, intake.DriftReviewerAgent)
 	fixturekit.Must(t, err)
-	prompt := review.Turns[0].Request.Prompt + driftResolutionDiff(t, f, repository, stream)
+	prompt := review.Turns[0].Request.Prompt + journey.DriftResolutionDiff(t, f, repository, stream)
 	if strings.Contains(prompt, "<<<<<<<") || strings.Contains(prompt, ">>>>>>>") || strings.Contains(prompt, "jjconflict") || !strings.Contains(prompt, "+/internal/ @upstream @feature") {
 		t.Fatalf("the drift reviewer reads:\n%s", prompt)
 	}
-	if tip := featureTip(t, f, stream); tip != before {
+	if tip := journey.FeatureTip(t, f, stream); tip != before {
 		t.Fatalf("the feature branch moved to %s before review", tip)
 	}
 
-	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
-	if result, err := attemptOperation(t, f.s, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
+	journey.CompleteDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, journey.DriftVerdict(t, journey.ApprovedResolution))
+	if result, err := journey.AttemptOperation(t, f.S, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
 	}
-	if tip := featureTip(t, f, stream); tip != candidate || fileAt(t, f, tip, "CODEOWNERS") != "/internal/ @upstream @feature\n" {
+	if tip := journey.FeatureTip(t, f, stream); tip != candidate || journey.FileAt(t, f, tip, "CODEOWNERS") != "/internal/ @upstream @feature\n" {
 		t.Fatalf("the feature branch is at %s, not the approved candidate %s", tip, candidate)
 	}
 }
 
-func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r rebaser, stream config.WorkstreamID, unit string, op coreadapter.Operation, onto string, conflicts []string) string {
+func crashedRebase(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, r journey.Rebaser, stream config.WorkstreamID, unit string, op coreadapter.Operation, onto string, conflicts []string) string {
 	t.Helper()
 	ctx := context.Background()
 	crashed := false
-	f.s.boundary = func(name string) error {
+	f.S.Boundary = func(name string) error {
 		if name == "rebase-moved" && !crashed {
 			crashed = true
 			return errors.New("crash")
 		}
 		return nil
 	}
-	defer func() { f.s.boundary = nil }()
+	defer func() { f.S.Boundary = nil }()
 	if result, err := r.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "crash") {
 		t.Fatalf("unit %s's rebase never moved the workspace: %+v %v", unit, result, err)
 	}
-	g := intakefixture.ProviderOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream)
+	g := intakefixture.ProviderOf(t, journey.NewUnitWorkspaces(f.S.Cfg, repository).StreamWorkspaces, stream)
 	moved, _, err := g.Branch(ctx, execution.UnitBranch(stream, unit))
 	fixturekit.Must(t, err)
 	if observed, err := r.Inspect(ctx, op); err != nil || observed.State != coreadapter.EffectAbsent || !strings.Contains(observed.Evidence, "this operation's rebase of snapshot") {
@@ -412,14 +406,14 @@ func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r
 	if got, err := g.ChangeOf(ctx, moved); err != nil || change == "" || got != change {
 		t.Fatalf("unit %s's rebased commit is change %q, %v; want %q", unit, got, err, change)
 	}
-	rebases := unitRebases(t, repository, stream, unit)
+	rebases := journey.UnitRebases(t, repository, stream, unit)
 	last := rebases[len(rebases)-1]
 	if last.Commit != moved || last.Onto != onto || !slices.Equal(last.Conflicts, conflicts) {
 		t.Fatalf("unit %s's rebase records %+v", unit, rebases)
 	}
 	transition, _ := execution.RebaseIDs(unit, last.Rebase)
 	var outcomes []string
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.Subject == execution.RebaseSubject(unit) && strings.HasPrefix(tr.ID, transition+"-") {
 			outcomes = append(outcomes, tr.ID)
 		}
@@ -431,13 +425,13 @@ func crashedRebase(t *testing.T, f *shedFixture, repository *trace.Repository, r
 	if !slices.Equal(outcomes, []string{outcome}) {
 		t.Fatalf("unit %s's rebase outcomes %v", unit, outcomes)
 	}
-	settleOperation(t, f.s, repository, stream, op, r)
+	journey.SettleOperation(t, f.S, repository, stream, op, r)
 	return moved
 }
 
 func rebaseNumber(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, k int) coreadapter.Operation {
 	t.Helper()
-	for _, o := range rebaseOperations(t, repository, stream, unit) {
+	for _, o := range journey.RebaseOperations(t, repository, stream, unit) {
 		if in, err := execution.DecodeRebase(o.Operation); err == nil && in.Rebase == k {
 			return o.Operation
 		}
@@ -450,8 +444,8 @@ func TestInterruptedJujutsuConflictedRebaseCompletesOnRetry(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, lands, landed, ops := newJujutsuLandedFixture(t, "jj-interrupted")
 	ctx := context.Background()
-	r := rebaser{lands}
-	if result := settleOperation(t, f.s, repository, stream, ops["resume"], r); result.Outcome != "succeeded" {
+	r := journey.Rebaser{Foreman: lands}
+	if result := journey.SettleOperation(t, f.S, repository, stream, ops["resume"], r); result.Outcome != "succeeded" {
 		t.Fatalf("rebase of unit resume: %+v", result)
 	}
 	crashedRebase(t, f, repository, r, stream, "upload", ops["upload"], landed, nil)
@@ -463,20 +457,20 @@ func TestInterruptedJujutsuConflictedRebaseCompletesOnRetry(t *testing.T) {
 		{map[string]string{"LANDED.md": "landed again\n"}, jujutsuConflicted["audit"]},
 		{map[string]string{fixturekit.MasonWrote: jujutsuConflicts["audit"][fixturekit.MasonWrote], intakefixture.TrackedFile: ""}, nil},
 	} {
-		onto := moveFeature(t, f, stream, landing.files)
+		onto := journey.MoveFeature(t, f, stream, landing.files)
 		fixturekit.Must(t, lands.Pass(ctx))
 		for _, unit := range []string{"resume", "upload"} {
-			if result := settleOperation(t, f.s, repository, stream, rebaseNumber(t, repository, stream, unit, k+2), r); result.Outcome != "succeeded" {
+			if result := journey.SettleOperation(t, f.S, repository, stream, rebaseNumber(t, repository, stream, unit, k+2), r); result.Outcome != "succeeded" {
 				t.Fatalf("rebase %d of unit %s: %+v", k+2, unit, result)
 			}
 		}
 		commits = append(commits, crashedRebase(t, f, repository, r, stream, "audit", rebaseNumber(t, repository, stream, "audit", k+2), onto, landing.conflicts))
 	}
-	rebases := unitRebases(t, repository, stream, "audit")
+	rebases := journey.UnitRebases(t, repository, stream, "audit")
 	if len(rebases) != 3 || rebases[1].Snapshot != commits[0] || rebases[2].Snapshot != commits[1] {
 		t.Fatalf("audit's rebase records %+v, rebased commits %v", rebases, commits)
 	}
-	w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "audit")
+	w, _, _, err := journey.NewUnitWorkspaces(f.S.Cfg, repository).Find(ctx, stream, "audit")
 	fixturekit.Must(t, err)
 	if data, err := os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote)); err != nil || string(data) != jujutsuConflicts["audit"][fixturekit.MasonWrote] {
 		t.Fatalf("audit's resolved %s holds %q: %v", fixturekit.MasonWrote, data, err)
@@ -498,7 +492,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 		}
 	}
 	fixturekit.Must(t, repository.Close())
-	path := filepath.Join(f.opts.Config.Root, "config.toml")
+	path := filepath.Join(f.Opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
 	fixturekit.Must(t, err)
 
@@ -515,9 +509,9 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 	var mu sync.Mutex
 	var problems []string
 	release := make(chan struct{})
-	f.engine.Mu.Lock()
+	f.Engine.Mu.Lock()
 	for unit, files := range resolutions {
-		f.engine.Turns[execution.ResolveTurnID(unit, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.Engine.Turns[execution.ResolveTurnID(unit, 1)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			view := req.Workspace.Directory()
 			for name := range files {
 				if data, err := os.ReadFile(filepath.Join(view, name)); err != nil || !strings.Contains(string(data), "\n||||||| ") {
@@ -544,12 +538,12 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Resolved", SessionDir: req.SessionDir, NumTurns: 2}, nil
 		}
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
-	f.start(t)
+	f.Start(t)
 	var masons api.RoleCapacity
 	intakefixture.Soon(t, "both resolve turns to be in flight together", func() bool {
-		capacity := f.s.capacityStatus(nil)
+		capacity := f.S.CapacityStatus(nil)
 		masons = capacity.Roles[slices.IndexFunc(capacity.Roles, func(r api.RoleCapacity) bool { return r.Role == intake.MasonRole })]
 		return masons.Used == 2
 	})
@@ -557,16 +551,16 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 		t.Fatalf("mason capacity with both resolve turns in flight %+v", masons)
 	}
 	for _, unit := range []string{"resume", "audit"} {
-		th, err := f.repository().Thread(stream, intake.MasonAgent(unit))
+		th, err := f.Repository().Thread(stream, intake.MasonAgent(unit))
 		fixturekit.Must(t, err)
 		if last := th.Turns[len(th.Turns)-1]; last.Request.TurnID != execution.ResolveTurnID(unit, 1) || !last.CompletedAt.IsZero() {
 			t.Fatalf("unit %s's mason's last turn is %s, completed at %s", unit, last.Request.TurnID, last.CompletedAt)
 		}
 	}
 	close(release)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
-	f.awaitUnit(t, stream, "audit", intake.UnitReviewing)
-	f.stop(t)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "audit", intake.UnitReviewing)
+	f.Stop(t)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(problems) != 0 {
@@ -576,7 +570,7 @@ func TestJujutsuConflictedUnitsAreResolvedInParallel(t *testing.T) {
 
 func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newApprovedFixtureOn(t, "jj-change", config.WorkspacesJujutsu)
+	f, stream, repository := journey.NewApprovedFixtureOn(t, "jj-change", config.WorkspacesJujutsu)
 	ctx := context.Background()
 	if backend, err := repository.Workspaces(stream); err != nil || backend != config.WorkspacesJujutsu {
 		t.Fatalf("workstream %s is on %q: %v", stream, backend, err)
@@ -599,29 +593,29 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 	if recorded != (execution.UnitChange{Unit: "dedupe", Branch: execution.UnitBranch(stream, "dedupe"), Change: change}) {
 		t.Fatalf("dedupe's change record %+v", recorded)
 	}
-	g := intakefixture.ProviderOf(t, newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces, stream)
-	_, approved := approvedReview(t, repository, stream, "dedupe")
+	g := intakefixture.ProviderOf(t, journey.NewUnitWorkspaces(f.S.Cfg, repository).StreamWorkspaces, stream)
+	_, approved := journey.ApprovedReview(t, repository, stream, "dedupe")
 	candidate := approved.Identity.Candidate.Revision
 	if got, err := g.ChangeOf(ctx, candidate); err != nil || got != change {
 		t.Fatalf("dedupe's approved candidate %s is change %q, %v; want %s", candidate, got, err, change)
 	}
 	fixturekit.Must(t, repository.Close())
-	f.start(t)
-	defer f.stop(t)
+	f.Start(t)
+	defer f.Stop(t)
 
-	f.awaitMerged(t, stream, "resume")
-	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
+	f.AwaitMerged(t, stream, "resume")
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 	var rebases []trace.OperationRecord
 	intakefixture.Soon(t, "dedupe's rebase to finish", func() bool {
-		rebases = rebaseOperations(t, f.repository(), stream, "dedupe")
+		rebases = journey.RebaseOperations(t, f.Repository(), stream, "dedupe")
 		return len(rebases) == 1 && rebases[0].Result != nil
 	})
-	_, landing := approvedReview(t, f.repository(), stream, "resume")
-	landed := f.landedCommits(t, stream, landing.Identity.Candidate.BaseRevision)
+	_, landing := journey.ApprovedReview(t, f.Repository(), stream, "resume")
+	landed := landedCommits(f, t, stream, landing.Identity.Candidate.BaseRevision)
 	if len(landed) != 1 {
 		t.Fatalf("the feature branch holds %v", landed)
 	}
-	recordedRebases := unitRebases(t, f.repository(), stream, "dedupe")
+	recordedRebases := journey.UnitRebases(t, f.Repository(), stream, "dedupe")
 	if len(recordedRebases) != 1 {
 		t.Fatalf("rebase records %+v", recordedRebases)
 	}
@@ -640,25 +634,25 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 	if service.OperationTrailer(c.Message) != rebases[0].Operation.ID || !slices.Equal(c.Parents, landed) {
 		t.Fatalf("dedupe's rebased commit %+v", c)
 	}
-	_, report := latestReport(t, f.repository(), stream, "dedupe")
+	_, report := latestReport(t, f.Repository(), stream, "dedupe")
 	if report.Candidate != rebase.Commit || report.Base != landed[0] {
 		t.Fatalf("dedupe's report after its rebase %+v", report)
 	}
-	back := slices.IndexFunc(intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
+	back := slices.IndexFunc(intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream), func(tr trace.Transition) bool {
 		return tr.ID == trace.UnitSubject("dedupe")+"-checking-rebase-1" && tr.From == intake.UnitApproved && tr.To == execution.UnitChecking && strings.HasPrefix(tr.Reason, "the approval no longer holds: ")
 	})
 	if back < 0 {
 		t.Fatal("dedupe's return to review is not recorded")
 	}
-	if kept, err := execution.ReadUnitChange(f.repository(), stream, "dedupe"); err != nil || kept != change {
+	if kept, err := execution.ReadUnitChange(f.Repository(), stream, "dedupe"); err != nil || kept != change {
 		t.Fatalf("dedupe's recorded change is %q after its rebase: %v", kept, err)
 	}
-	if ops := landOperations(t, f.repository(), stream); len(ops) != 1 {
+	if ops := journey.LandOperations(t, f.Repository(), stream); len(ops) != 1 {
 		t.Fatalf("the rebased approval was asked to land: %+v", ops)
 	}
 
 	for _, commit := range []string{candidate, rebase.Commit} {
-		result, apiErr := f.s.traceView(ctx, string(stream), "commit", commit)
+		result, apiErr := journey.InspectForTest(f.S).TraceView(ctx, string(stream), "commit", commit)
 		if apiErr != nil {
 			t.Fatalf("the walk of %s: %+v", commit, apiErr)
 		}

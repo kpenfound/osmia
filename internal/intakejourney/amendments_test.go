@@ -2,12 +2,13 @@ package intakejourney
 
 import (
 	context "context"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	strings "strings"
-	testing "testing"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	questions "github.com/kpenfound/osmia/internal/questions"

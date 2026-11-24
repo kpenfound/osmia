@@ -145,9 +145,9 @@ func TestReloadKeepsTheTelemetrySettingsUntilRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	_, c := start(t, opts)
-	files.write(t, files.topText+"[telemetry]\nendpoint = 'collector.internal:4317'\nprotocol = 'http/protobuf'\n[capacity]\nreviewers = 5\n")
+	files.Write(t, files.TopText+"[telemetry]\nendpoint = 'collector.internal:4317'\nprotocol = 'http/protobuf'\n[capacity]\nreviewers = 5\n")
 	reloaded, err := c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"telemetry"}) {

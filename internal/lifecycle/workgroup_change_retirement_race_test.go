@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -25,32 +27,32 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			gate := &intakefixture.ChangeRaceGate{Step: "change-before-application-lock", Reached: make(chan struct{}), Released: make(chan struct{})}
+			gate := &intakefixture.ChangeRaceGate{Step: "change-before-application-lock", Reached: make(chan struct{})}
 			t.Cleanup(gate.Release)
-			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: gate.Checkpoint}, trace.EdgeContract, nil)
-			defer f.stop(t)
+			f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait, Checkpoint: gate.Checkpoint}, trace.EdgeContract, nil)
+			defer f.Stop(t)
 			deliverResolutionMembers(t, f)
 			for _, m := range resolutionMembers(f) {
-				repo, err := f.s.repository(m.project)
+				repo, err := f.S.Repository(m.project)
 				fixturekit.Must(t, err)
-				recordResolutionMerge(t, repo, m.stream)
+				journey.RecordResolutionMerge(t, repo, m.stream)
 			}
 			awaitMemberMergeResolution(t, f)
 
-			change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retirement-observer", Kind: "cancel", Scope: "workgroup", Change: "Keep the approved decision held when every member retires."})
+			change, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "retirement-observer", Kind: "cancel", Scope: "workgroup", Change: "Keep the approved decision held when every member retires."})
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
-			lifecycleAwait(t, f, "presented decision", func() bool {
-				change = currentChange(t, f.s, f.origin, change.ID)
+			journey.LifecycleAwait(t, f, "presented decision", func() bool {
+				change = journey.CurrentChange(t, f.S, f.Origin, change.ID)
 				return change.State == "presented"
 			})
-			lock := f.s.lifecycle().ChangeApplicationLock(change.Workgroup)
+			lock := f.S.Lifecycle().ChangeApplicationLock(change.Workgroup)
 			lock.RLock()
 			unlock := sync.OnceFunc(lock.RUnlock)
 			defer unlock()
 			gate.Armed.Store(true)
-			decided, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
+			decided, apiFault := f.S.Lifecycle().DecideChange(ctx, string(f.Origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
@@ -58,12 +60,12 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 				t.Fatal("owner approval was not recorded")
 			}
 			gate.Await(t)
-			coordination := f.s.groupApprovalLock(change.Workgroup)
+			coordination := journey.InspectForTest(f.S).GroupApprovalLock(change.Workgroup)
 			if coordination.TryLock() {
 				coordination.Unlock()
 				t.Fatal("observer did not retain its locked journal read")
 			}
-			wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, change.Workgroup)
+			wt, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, change.Workgroup)
 			fixturekit.Must(t, err)
 			defer wt.Close()
 			journal := func() []byte {
@@ -79,7 +81,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			before := journal()
 			if retire {
 				for _, m := range resolutionMembers(f) {
-					_, err := f.c.Archive(ctx, m.stream)
+					_, err := f.C.Archive(ctx, m.stream)
 					fixturekit.Must(t, err)
 				}
 			}
@@ -106,8 +108,8 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 					t.Fatal("retired observer changed the approved decision or its exact pins")
 				}
 			} else {
-				lifecycleAwait(t, f, "live group applies through the same gate", func() bool {
-					return currentChange(t, f.s, f.origin, change.ID).State == "applied"
+				journey.LifecycleAwait(t, f, "live group applies through the same gate", func() bool {
+					return journey.CurrentChange(t, f.S, f.Origin, change.ID).State == "applied"
 				})
 				if bytes.Equal(before, journal()) {
 					t.Fatal("live observer did not record application")

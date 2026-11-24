@@ -3,9 +3,12 @@ package lifecycle_test
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -25,7 +28,7 @@ const (
 
 func (f *edgeGraphFixture) edgeWaitCleared(t *testing.T, p *jevfixture.Transitions) string {
 	t.Helper()
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	f.resolvePasses(t)
 	f.recordOwnerMerge(t, f.upstream, "b1c2d3e4f5a6b1c2d3e4f5a6b1c2d3e4f5a6b1c2")
 	f.resolvePasses(t)
@@ -33,7 +36,7 @@ func (f *edgeGraphFixture) edgeWaitCleared(t *testing.T, p *jevfixture.Transitio
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
 	}
-	if n := len(requestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
+	if n := len(intakefixture.RequestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
 		t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
 	}
 	return requestText(t, requests[0])
@@ -43,7 +46,7 @@ func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
-	at := f.s.now()
+	at := f.s.Now()
 	recordSealed(t, f.repository, f.downstream, at,
 		"# Dependent\n\n## Intent\n\nDEPENDENT-INTENT keeps uploads resumable.\n\n```go\nfunc codeInIntent() {}\n```\n\n## Intended behaviour\n\nNOT-THE-INTENT\n\n## Acceptance criteria\n\n1. OUTCOME-ONE resumes uploads.\n2. OUTCOME-TWO speaks the widget protocol.\n",
 		[]plan.Unit{
@@ -100,7 +103,7 @@ func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 	long := func(word string, n int) string { return strings.Repeat(word+" ", n) }
 	ctx := context.Background()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
-	at := f.s.now()
+	at := f.s.Now()
 	var criteria []string
 	var units, upstreamUnits []plan.Unit
 	for i := 1; i <= 300; i++ {
@@ -136,9 +139,9 @@ func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 
 func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := journey.NewDebateFixture(t, 1, 1)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, p))
 	repo, stream := parkAndRelease(t, f)
 	base, err := repo.WorkstreamBase(stream)
 	fixturekit.Must(t, err)
@@ -146,14 +149,14 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		findings = append(findings, api.FinalFinding{Severity: delivery.FindingAdvisory, Finding: strings.Repeat("finding ", 400)})
 	}
-	recordFinalReport(t, repo, base.Base, f.s.now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
+	recordFinalReport(t, repo, base.Base, f.S.Now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
 
-	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(context.Background(), repo))
 	requests := p.TransitionRequests()
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
 	}
-	if n := len(requestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
+	if n := len(intakefixture.RequestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
 		t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
 	}
 	text := requestText(t, requests[0])

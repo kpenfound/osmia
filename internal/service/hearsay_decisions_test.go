@@ -51,30 +51,20 @@ func (f *publisherFixture) ruling(stream config.WorkstreamID, id string, revisio
 	fixturekit.Must(f.t, f.repo.Append(context.Background(), r))
 }
 
-func decisions(posts []hooksPost) []hooksPost {
-	var out []hooksPost
-	for _, p := range posts {
-		if p.str("kind") == "decision" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func decisionOf(t *testing.T, posts []hooksPost, id string) hooksPost {
+func decisionOf(t *testing.T, posts []fixturekit.HooksPost, id string) fixturekit.HooksPost {
 	t.Helper()
 	p := find(posts, "decision", "decision", id)
 	if p == nil {
 		var ids []string
-		for _, d := range decisions(posts) {
-			ids = append(ids, d.str("decision"))
+		for _, d := range fixturekit.Decisions(posts) {
+			ids = append(ids, d.Str("decision"))
 		}
 		t.Fatalf("no decision %s among %v", id, ids)
 	}
 	return *p
 }
 
-func rejectedOf(p hooksPost) []string {
+func rejectedOf(p fixturekit.HooksPost) []string {
 	var out []string
 	list, _ := p.Body["rejected_options"].([]any)
 	for _, v := range list {
@@ -99,7 +89,7 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 		t.Fatalf("the relay of the ruling posted %v", kinds(posts))
 	}
 
-	f.hooks.take()
+	f.hooks.Take()
 	f.reopen()
 	posted, err := f.repo.HearsayPosted()
 	fixturekit.Must(t, err)
@@ -110,26 +100,26 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 	}
 	fixturekit.Must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, hr(5)))
 	posts, _ = f.pass()
-	rulings := decisions(posts)
+	rulings := fixturekit.Decisions(posts)
 	if len(rulings) != 1 {
 		t.Fatalf("%d decisions, want the owner's ruling alone: %v", len(rulings), kinds(posts))
 	}
 	d := rulings[0]
-	if d.Source != "osmia-owner" || d.str("author") != "owner" || d.str("decider") != "owner" || d.str("workstream") != string(stream) {
+	if d.Source != "osmia-owner" || d.Str("author") != "owner" || d.Str("decider") != "owner" || d.Str("workstream") != string(stream) {
 		t.Fatalf("ruling: %s on %s", d.Raw, d.Source)
 	}
-	if d.str("decision") != string(stream)+"-ruling-1" || d.str("question") != string(stream)+":1" {
+	if d.Str("decision") != string(stream)+"-ruling-1" || d.Str("question") != string(stream)+":1" {
 		t.Fatalf("ruling ids: %s", d.Raw)
 	}
-	if d.str("outcome") != "Cap uploads at 10 MiB." {
+	if d.Str("outcome") != "Cap uploads at 10 MiB." {
 		t.Fatalf("outcome: %s", d.Raw)
 	}
 	for _, want := range []string{"Should uploads be capped?", "spec.md: Upload limits", "The spec caps uploads at 10 MiB but the plan streams without a cap.", "- Cap at 10 MiB", "- Stream without a cap", "The unit waits on the ruling."} {
-		if !strings.Contains(d.str("context"), want) {
-			t.Fatalf("context lacks %q: %s", want, d.str("context"))
+		if !strings.Contains(d.Str("context"), want) {
+			t.Fatalf("context lacks %q: %s", want, d.Str("context"))
 		}
 	}
-	if d.str("rationale") == "" || d.str("created_at") == "" {
+	if d.Str("rationale") == "" || d.Str("created_at") == "" {
 		t.Fatalf("ruling: %s", d.Raw)
 	}
 	for _, p := range posts {
@@ -151,15 +141,15 @@ func TestPublishChiefAnswersAreDecisionsUnlessTheyCiteCode(t *testing.T) {
 	f.ruling(stream, "3", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "MIXED-ANSWER the cap applies.", Citations: []string{"spec#1", "inspection#inspection-def"}}, hr(7), chiefActor)
 
 	posts, _ := f.pass()
-	got := decisions(posts)
+	got := fixturekit.Decisions(posts)
 	if len(got) != 1 {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	d := got[0]
-	if d.Source != "osmia-work" || d.str("author") != "" || d.str("decider") != "chief_of_staff" || d.str("outcome") != "Resume is in scope." || d.str("decision") != string(stream)+"-answer-1" {
+	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("outcome") != "Resume is in scope." || d.Str("decision") != string(stream)+"-answer-1" {
 		t.Fatalf("answer: %s on %s", d.Raw, d.Source)
 	}
-	if !strings.Contains(d.str("rationale"), "charter#1") || !strings.Contains(d.str("context"), "Is resume in scope?") || d.str("question") != string(stream)+":1" {
+	if !strings.Contains(d.Str("rationale"), "charter#1") || !strings.Contains(d.Str("context"), "Is resume in scope?") || d.Str("question") != string(stream)+":1" {
 		t.Fatalf("answer: %s", d.Raw)
 	}
 	for _, p := range posts {
@@ -177,15 +167,15 @@ func TestPublishLoggedAssumptionIsAnInferredChiefDecision(t *testing.T) {
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(2), chiefActor)
 
 	posts, _ := f.pass()
-	got := decisions(posts)
+	got := fixturekit.Decisions(posts)
 	if len(got) != 1 {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	d := got[0]
-	if d.Source != "osmia-work" || d.str("author") != "" || d.str("decider") != "chief_of_staff" || d.str("outcome") != "Treat the 10 MiB cap as inclusive." || d.str("workstream") != string(stream) {
+	if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("outcome") != "Treat the 10 MiB cap as inclusive." || d.Str("workstream") != string(stream) {
 		t.Fatalf("assumption: %s on %s", d.Raw, d.Source)
 	}
-	if d.str("spec_document") != string(stream)+"-spec" || d.str("context") == "" || d.str("rationale") == "" {
+	if d.Str("spec_document") != string(stream)+"-spec" || d.Str("context") == "" || d.Str("rationale") == "" {
 		t.Fatalf("assumption carries its context, rationale and spec link: %s", d.Raw)
 	}
 	if again, _ := f.pass(); len(again) != 0 {
@@ -210,23 +200,23 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 	f.document(stream, trace.CharterProposalID("2"), 2, trace.CharterProposalPath("2"), proposal("2", "Never cap uploads.", trace.CharterDecline, "Too broad.", 0), hr(2), owner)
 
 	posts, _ := f.pass()
-	got := decisions(posts)
+	got := fixturekit.Decisions(posts)
 	if len(got) != 2 {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	ratified, declined := decisionOf(t, posts, string(stream)+"-charter-1"), decisionOf(t, posts, string(stream)+"-charter-2")
-	for _, d := range []hooksPost{ratified, declined} {
-		if d.Source != "osmia-owner" || d.str("author") != "owner" || d.str("decider") != "owner" || d.str("workstream") != "" {
+	for _, d := range []fixturekit.HooksPost{ratified, declined} {
+		if d.Source != "osmia-owner" || d.Str("author") != "owner" || d.Str("decider") != "owner" || d.Str("workstream") != "" {
 			t.Fatalf("charter decision: %s on %s", d.Raw, d.Source)
 		}
-		if !strings.Contains(d.str("context"), "Every upload must resume.") {
+		if !strings.Contains(d.Str("context"), "Every upload must resume.") {
 			t.Fatalf("the context lacks the owner's ruling: %s", d.Raw)
 		}
 	}
-	if !strings.HasPrefix(ratified.str("outcome"), "Ratified") || !strings.Contains(ratified.str("outcome"), "Uploads resume after a restart.") || !strings.Contains(ratified.str("rationale"), "Yes, state it as a rule.") {
+	if !strings.HasPrefix(ratified.Str("outcome"), "Ratified") || !strings.Contains(ratified.Str("outcome"), "Uploads resume after a restart.") || !strings.Contains(ratified.Str("rationale"), "Yes, state it as a rule.") {
 		t.Fatalf("ratified: %s", ratified.Raw)
 	}
-	if !strings.HasPrefix(declined.str("outcome"), "Declined") || !strings.Contains(declined.str("outcome"), "Never cap uploads.") || !strings.Contains(declined.str("rationale"), "Too broad.") {
+	if !strings.HasPrefix(declined.Str("outcome"), "Declined") || !strings.Contains(declined.Str("outcome"), "Never cap uploads.") || !strings.Contains(declined.Str("rationale"), "Too broad.") {
 		t.Fatalf("declined: %s", declined.Raw)
 	}
 	f.document(stream, trace.CharterProposalID("1"), 3, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", trace.CharterRatify, "Yes, state it as a rule.", 4), hr(3), chiefActor)
@@ -266,26 +256,26 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 	f.amendmentDecision(stream, "5", 1, "reject", "SERVICE-RETIREMENT", hr(10), trace.Actor{Kind: "service", ID: "amendments"})
 
 	posts, _ := f.pass()
-	got := decisions(posts)
+	got := fixturekit.Decisions(posts)
 	if len(got) != 3 {
 		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
 	}
 	ownerDecided, planOnly, revisited := decisionOf(t, posts, string(stream)+"-amendment-1"), decisionOf(t, posts, string(stream)+"-amendment-2"), decisionOf(t, posts, string(stream)+"-amendment-3")
-	if ownerDecided.Source != "osmia-owner" || ownerDecided.str("author") != "owner" || ownerDecided.str("decider") != "owner" {
+	if ownerDecided.Source != "osmia-owner" || ownerDecided.Str("author") != "owner" || ownerDecided.Str("decider") != "owner" {
 		t.Fatalf("owner-decided amendment: %s on %s", ownerDecided.Raw, ownerDecided.Source)
 	}
 	for _, want := range []string{"Allow 20 MiB uploads.", "The partner needs it.", "spec#1"} {
-		if !strings.Contains(ownerDecided.str("context"), want) {
+		if !strings.Contains(ownerDecided.Str("context"), want) {
 			t.Fatalf("context lacks %q: %s", want, ownerDecided.Raw)
 		}
 	}
-	if !strings.HasPrefix(ownerDecided.str("outcome"), "Approved amendment 1") || ownerDecided.str("rationale") != "Go ahead." || len(rejectedOf(ownerDecided)) == 0 || ownerDecided.str("spec_document") != string(stream)+"-spec" {
+	if !strings.HasPrefix(ownerDecided.Str("outcome"), "Approved amendment 1") || ownerDecided.Str("rationale") != "Go ahead." || len(rejectedOf(ownerDecided)) == 0 || ownerDecided.Str("spec_document") != string(stream)+"-spec" {
 		t.Fatalf("owner-decided amendment: %s", ownerDecided.Raw)
 	}
-	if planOnly.Source != "osmia-work" || planOnly.str("author") != "" || planOnly.str("decider") != "chief_of_staff" || planOnly.str("supersedes") != "" {
+	if planOnly.Source != "osmia-work" || planOnly.Str("author") != "" || planOnly.Str("decider") != "chief_of_staff" || planOnly.Str("supersedes") != "" {
 		t.Fatalf("plan-only amendment: %s on %s", planOnly.Raw, planOnly.Source)
 	}
-	if revisited.str("supersedes") != ownerDecided.str("decision") || ownerDecided.str("supersedes") != "" {
+	if revisited.Str("supersedes") != ownerDecided.Str("decision") || ownerDecided.Str("supersedes") != "" {
 		t.Fatalf("supersedes: %s / %s", revisited.Raw, ownerDecided.Raw)
 	}
 	ordered := kinds(posts)
@@ -296,8 +286,8 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 			}
 		}
 	}
-	first := slices.IndexFunc(posts, func(p hooksPost) bool { return p.str("decision") == ownerDecided.str("decision") })
-	second := slices.IndexFunc(posts, func(p hooksPost) bool { return p.str("decision") == revisited.str("decision") })
+	first := slices.IndexFunc(posts, func(p fixturekit.HooksPost) bool { return p.Str("decision") == ownerDecided.Str("decision") })
+	second := slices.IndexFunc(posts, func(p fixturekit.HooksPost) bool { return p.Str("decision") == revisited.Str("decision") })
 	if first < 0 || second < 0 || first > second {
 		t.Fatalf("order %d %d: %v", first, second, ordered)
 	}
@@ -308,7 +298,7 @@ func scopeDiscovery(n int) string { return fmt.Sprintf("discovery-%064x", n) }
 type scopePublication struct {
 	f      *publisherFixture
 	stream config.WorkstreamID
-	posts  []hooksPost
+	posts  []fixturekit.HooksPost
 }
 
 func publishScopeCalls(t *testing.T) *scopePublication {
@@ -342,28 +332,28 @@ func TestPublishPostsADeclinedAndADeferredDiscoveryAsChiefOfStaffScopeCalls(t *t
 	p := publishScopeCalls(t)
 	declined := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-2")
 	deferred := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-3")
-	for _, d := range []hooksPost{declined, deferred} {
-		if d.Source != "osmia-work" || d.str("author") != "" || d.str("decider") != "chief_of_staff" || d.str("workstream") != string(p.stream) {
+	for _, d := range []fixturekit.HooksPost{declined, deferred} {
+		if d.Source != "osmia-work" || d.Str("author") != "" || d.Str("decider") != "chief_of_staff" || d.Str("workstream") != string(p.stream) {
 			t.Fatalf("scope call: %s on %s", d.Raw, d.Source)
 		}
 	}
-	if declined.str("rationale") != "Outside the approved intent." || !strings.HasPrefix(declined.str("outcome"), "Declined") || !strings.Contains(declined.str("context"), "Handle empty uploads") {
+	if declined.Str("rationale") != "Outside the approved intent." || !strings.HasPrefix(declined.Str("outcome"), "Declined") || !strings.Contains(declined.Str("context"), "Handle empty uploads") {
 		t.Fatalf("declined: %s", declined.Raw)
 	}
-	if deferred.str("rationale") != "Worth doing after delivery." || !strings.Contains(deferred.str("outcome"), "Deferred") || deferred.str("supersedes") != declined.str("decision") {
+	if deferred.Str("rationale") != "Worth doing after delivery." || !strings.Contains(deferred.Str("outcome"), "Deferred") || deferred.Str("supersedes") != declined.Str("decision") {
 		t.Fatalf("deferred: %s", deferred.Raw)
 	}
 }
 
 func TestPublishPostsAnAcceptedBlockingFindingAsTheOwnersDecision(t *testing.T) {
 	p := publishScopeCalls(t)
-	var accepted *hooksPost
-	for _, d := range decisions(p.posts) {
+	var accepted *fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(p.posts) {
 		if d.Source == "osmia-owner" {
 			accepted = &d
 		}
 	}
-	if accepted == nil || accepted.str("author") != "owner" || accepted.str("decider") != "owner" || !strings.Contains(accepted.str("outcome"), "the retry cap is not enforced") || len(rejectedOf(*accepted)) == 0 {
+	if accepted == nil || accepted.Str("author") != "owner" || accepted.Str("decider") != "owner" || !strings.Contains(accepted.Str("outcome"), "the retry cap is not enforced") || len(rejectedOf(*accepted)) == 0 {
 		t.Fatalf("accepted finding: %+v", accepted)
 	}
 }
@@ -371,7 +361,7 @@ func TestPublishPostsAnAcceptedBlockingFindingAsTheOwnersDecision(t *testing.T) 
 func TestPublishPostsAFinalReviewFollowUpAsAChiefOfStaffDecision(t *testing.T) {
 	p := publishScopeCalls(t)
 	later := decisionOf(t, p.posts, string(p.stream)+"-followup-final-1")
-	if later.Source != "osmia-work" || later.str("author") != "" || later.str("decider") != "chief_of_staff" || !strings.Contains(later.str("context"), "Resume is not tested after a restart") || later.str("rationale") == "" {
+	if later.Source != "osmia-work" || later.Str("author") != "" || later.Str("decider") != "chief_of_staff" || !strings.Contains(later.Str("context"), "Resume is not tested after a restart") || later.Str("rationale") == "" {
 		t.Fatalf("follow-up: %s on %s", later.Raw, later.Source)
 	}
 }
@@ -387,7 +377,7 @@ func TestPublishLeavesOutFollowUpsThatAreNotOfTheFinalReview(t *testing.T) {
 
 func TestPublishPostsEachScopeCallAndFindingOnce(t *testing.T) {
 	p := publishScopeCalls(t)
-	if got := decisions(p.posts); len(got) != 4 {
+	if got := fixturekit.Decisions(p.posts); len(got) != 4 {
 		t.Fatalf("%d decisions: %v", len(got), kinds(p.posts))
 	}
 	if again, _ := p.f.pass(); len(again) != 0 {
@@ -403,15 +393,15 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":"Count bytes, not characters.","actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), hr(3).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(3), chiefActor)
 
-	f.hooks.setStatus(http.StatusServiceUnavailable)
+	f.hooks.SetStatus(http.StatusServiceUnavailable)
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
 	fixturekit.Must(t, err)
 	if res.Posts != 0 {
 		t.Fatalf("pass during the outage: %+v", res)
 	}
-	f.hooks.setStatus(http.StatusAccepted)
+	f.hooks.SetStatus(http.StatusAccepted)
 	posts, _ := f.pass()
-	if len(decisions(posts)) != 2 {
+	if len(fixturekit.Decisions(posts)) != 2 {
 		t.Fatalf("recovery posted %v", kinds(posts))
 	}
 	if again, _ := f.pass(); len(again) != 0 {
@@ -506,10 +496,10 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 		t.Fatalf("an added subsystem posted %v", kinds(posts))
 	}
 	u := posts[0]
-	if u.str("kind") != "update" || u.Source != "osmia-work" || u.str("author") != "" || u.str("workstream") != "" || u.str("project") != string(f.repo.Project()) {
+	if u.Str("kind") != "update" || u.Source != "osmia-work" || u.Str("author") != "" || u.Str("workstream") != "" || u.Str("project") != string(f.repo.Project()) {
 		t.Fatalf("update: %s on %s", u.Raw, u.Source)
 	}
-	if !strings.Contains(u.str("text"), "Store") || u.str("created_at") != hearsayTime(hr(3)) || u.str("update") == "" {
+	if !strings.Contains(u.Str("text"), "Store") || u.Str("created_at") != hearsayTime(hr(3)) || u.Str("update") == "" {
 		t.Fatalf("update: %s", u.Raw)
 	}
 	for _, field := range []string{"state", "status"} {

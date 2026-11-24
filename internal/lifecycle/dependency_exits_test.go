@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -44,7 +46,7 @@ func endStream(t *testing.T, repo *trace.Repository, at time.Time, stream config
 func (f *edgeGraphFixture) reopened(t *testing.T) {
 	t.Helper()
 	f.repository.Close()
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repo, err := trace.Open(f.s.Cfg.Root, f.s.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	f.repository = repo
@@ -61,9 +63,9 @@ func TestADependentOnAnAbandonedUpstreamRaisesAnExitThatKeepsTheWaitByDefault(t 
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	f.resolvePasses(t)
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 
 	records := routeFor(t, f.repository, f.downstream, lifecycle.TriggerUpstreamTerminal)
@@ -97,7 +99,7 @@ func TestJevDropsADependencyOnAnAbandonedUpstream(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := dropsAt(0.95)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	specBefore, _, found, err := f.repository.ProjectSpecOf(f.downstream)
 	fixturekit.Must(t, err)
 	if !found || len(specBefore.Graph) != 1 {
@@ -107,7 +109,7 @@ func TestJevDropsADependencyOnAnAbandonedUpstream(t *testing.T) {
 	if !f.holdsMason(t, f.downstream) {
 		t.Fatal("the dependent was not held before the upstream ended")
 	}
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 
 	subject := lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock)
@@ -176,7 +178,7 @@ func TestJevDropsADependencyOnAnAbandonedUpstream(t *testing.T) {
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times after the restart", n)
 	}
-	if n := departuresInFeed(t, f.s, f.repository, f.downstream); n != 1 {
+	if n := jevDepartures(t, f.s, f.repository, f.downstream); n != 1 {
 		t.Fatalf("%d departures in the feed, want one", n)
 	}
 }
@@ -185,9 +187,9 @@ func TestADropBelowTheBarHoldsTheDependentAndWakesTheChief(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := dropsAt(0.8)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	f.resolvePasses(t)
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 	f.resolvePasses(t)
 
@@ -216,17 +218,17 @@ func TestAClosedUpstreamPullRequestRaisesAnExitFromWaiting(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := dropsAt(0.95)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	ctx := context.Background()
 	f.resolvePasses(t)
 
 	feature, err := f.repository.Workflow(f.upstream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = f.repository.MoveFeatureState(ctx, h, feature.Value, intake.DeliveredState, "fixture delivery")
 	fixturekit.Must(t, err)
-	cfg := f.s.about(f.repository)
-	fixturekit.Must(t, (&publisher{s: f.s, repository: f.repository}).recordPublication(ctx, f.upstream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: "https://example.invalid/pull/7", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(f.upstream), Commit: "head"}))
+	cfg := f.s.About(f.repository)
+	fixturekit.Must(t, (&journey.Publisher{S: f.s, Repository: f.repository}).RecordPublication(ctx, f.upstream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: "https://example.invalid/pull/7", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(f.upstream), Commit: "head"}))
 	f.resolvePasses(t)
 	if records := routeFor(t, f.repository, f.downstream, lifecycle.TriggerUpstreamTerminal); len(records) != 0 {
 		t.Fatalf("an open pull request raised an exit: %+v", records)
@@ -235,7 +237,7 @@ func TestAClosedUpstreamPullRequestRaisesAnExitFromWaiting(t *testing.T) {
 		t.Fatal("the dependent was released while the pull request was open")
 	}
 
-	doc, ok, err := delivery.OwnPullRequestOutcomeDocumentFor(f.repository, f.upstream, f.s.now(), "fixture", 7, delivery.OwnPullRequestOutcomeClosed)
+	doc, ok, err := delivery.OwnPullRequestOutcomeDocumentFor(f.repository, f.upstream, f.s.Now(), "fixture", 7, delivery.OwnPullRequestOutcomeClosed)
 	fixturekit.Must(t, err)
 	if !ok {
 		t.Fatal("no outcome document")
@@ -259,16 +261,16 @@ func TestAClosedUpstreamPullRequestRaisesAnExitFromWaiting(t *testing.T) {
 
 func newTwoUpstreamFixture(t *testing.T) (*edgeGraphFixture, config.WorkstreamID) {
 	t.Helper()
-	f := newDebateFixture(t, 1, 1)
-	f.stop(t)
+	f := journey.NewDebateFixture(t, 1, 1)
+	f.Stop(t)
 	ctx := context.Background()
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repository, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repository.Close() })
 	first := config.WorkstreamID("w_00000000000000000000000000000c01")
 	second := config.WorkstreamID("w_00000000000000000000000000000c02")
 	dependent := config.WorkstreamID("w_00000000000000000000000000000c03")
-	at := f.s.now()
+	at := f.S.Now()
 	for _, id := range []config.WorkstreamID{first, second, dependent} {
 		fixturekit.Must(t, repository.CreateWorkstream(ctx, id, at, intake.RegistrationActor))
 	}
@@ -279,16 +281,16 @@ func newTwoUpstreamFixture(t *testing.T) (*edgeGraphFixture, config.WorkstreamID
 		{From: second, To: dependent, Type: trace.EdgeHardBlock},
 	}}
 	fixturekit.Must(t, trace.RecordProjectSpec(ctx, repository, g, spec, at, intake.OwnerActor, "fixture"))
-	return &edgeGraphFixture{s: f.s, clock: f.clock, project: f.project, repository: repository, upstream: first, downstream: dependent}, second
+	return &edgeGraphFixture{s: f.S, clock: f.Clock, project: f.Project, repository: repository, upstream: first, downstream: dependent}, second
 }
 
 func TestASecondUnresolvedEdgeStillBlocksAfterAWaiver(t *testing.T) {
 	t.Parallel()
 	f, second := newTwoUpstreamFixture(t)
 	p := dropsAt(0.95)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	f.resolvePasses(t)
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 
 	if waived, err := lifecycle.EdgeWaived(f.repository, f.downstream, f.upstream, trace.EdgeHardBlock); err != nil || !waived {
@@ -345,17 +347,17 @@ func TestAWaivedMergeOrderEdgeFreesAnAlreadyPublishedDraft(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeMergeOrder)
 	p := dropsAt(0.95)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	ctx := context.Background()
 	f.resolvePasses(t)
 
 	feature, err := f.repository.Workflow(f.downstream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.downstream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.downstream, At: f.s.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = f.repository.MoveFeatureState(ctx, h, feature.Value, intake.DeliveredState, "fixture delivery")
 	fixturekit.Must(t, err)
-	cfg := f.s.about(f.repository)
-	fixturekit.Must(t, (&publisher{s: f.s, repository: f.repository}).recordPublication(ctx, f.downstream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 9, URL: "https://example.invalid/pull/9", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(f.downstream), Commit: "head", Draft: true}))
+	cfg := f.s.About(f.repository)
+	fixturekit.Must(t, (&journey.Publisher{S: f.s, Repository: f.repository}).RecordPublication(ctx, f.downstream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 9, URL: "https://example.invalid/pull/9", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(f.downstream), Commit: "head", Draft: true}))
 	if pending, err := lifecycle.WorkgroupEdgePending(f.repository, f.downstream); err != nil || pending {
 		t.Fatalf("the draft is pending before anything changed: %v %v", pending, err)
 	}
@@ -363,7 +365,7 @@ func TestAWaivedMergeOrderEdgeFreesAnAlreadyPublishedDraft(t *testing.T) {
 		t.Fatalf("references before the waiver %v %v", refs, err)
 	}
 
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 	if waived, err := lifecycle.EdgeWaived(f.repository, f.downstream, f.upstream, trace.EdgeMergeOrder); err != nil || !waived {
 		t.Fatalf("the edge is not waived: %v %v", waived, err)
@@ -400,9 +402,9 @@ func TestTheOwnerDropsADependencyAsAPinnedMove(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	ctx := context.Background()
-	c := f.s.lifecycle()
+	c := f.s.Lifecycle()
 	f.resolvePasses(t)
 
 	if _, apiFault := c.DropDependencyOf(ctx, f.project, f.downstream, f.repository, lifecycle.DropDependencyRequest{Upstream: f.downstream}); apiFault == nil || apiFault.Code != api.Conflict {
@@ -439,36 +441,36 @@ func TestTheOwnerDropsADependencyAsAPinnedMove(t *testing.T) {
 	}
 }
 
-func sealedEdgeFixture(t *testing.T, f *shedFixture) (*edgeGraphFixture, string) {
+func sealedEdgeFixture(t *testing.T, f *journey.ShedFixture) (*edgeGraphFixture, string) {
 	t.Helper()
 	ctx := context.Background()
-	f.upstream(t)
-	f.stop(t)
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	f.Upstream(t)
+	f.Stop(t)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	up, tip := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"upstream.go": "upstream\n"})
-	dep, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"dependent.go": "dependent\n"})
-	at := f.s.now()
+	up, tip := journey.SealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"upstream.go": "upstream\n"})
+	dep, _ := journey.SealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"dependent.go": "dependent\n"})
+	at := f.S.Now()
 	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{up, dep}, at, intake.OwnerActor, "fixture")
 	fixturekit.Must(t, err)
 	spec := trace.ProjectSpec{Behavior: "The dependent needs the upstream.", Graph: []trace.Edge{{From: up, To: dep, Type: trace.EdgeHardBlock}}}
 	fixturekit.Must(t, trace.RecordProjectSpec(ctx, repo, g, spec, at, intake.OwnerActor, "fixture"))
-	return &edgeGraphFixture{s: f.s, clock: f.clock, project: f.project, repository: repo, upstream: up, downstream: dep}, tip
+	return &edgeGraphFixture{s: f.S, clock: f.Clock, project: f.Project, repository: repo, upstream: up, downstream: dep}, tip
 }
 
 func TestAnUpstreamMergedOutsideTheFactoryRaisesAnExitAndTheDependentGoesOn(t *testing.T) {
 	t.Parallel()
-	sf := newDebateFixture(t, 1, 1)
+	sf := journey.NewDebateFixture(t, 1, 1)
 	p := &jevfixture.Transitions{}
-	routeJev(sf.s, p)
+	journey.InspectForTest(sf.S).SetRouterJudge(jevfixture.TransitionJudge(sf.S.Now, p))
 	f, _ := sealedEdgeFixture(t, sf)
 	f.resolvePasses(t)
 	if !f.holdsMason(t, f.downstream) {
 		t.Fatal("the dependent was not held before the upstream merged")
 	}
 
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 	if records := routeFor(t, f.repository, f.downstream, lifecycle.TriggerUpstreamIntegrated); len(records) != 0 {
 		t.Fatalf("an upstream whose changes are not in the base branch raised the integrated exit: %+v", records)
@@ -477,7 +479,7 @@ func TestAnUpstreamMergedOutsideTheFactoryRaisesAnExitAndTheDependentGoesOn(t *t
 		t.Fatalf("route %+v", records)
 	}
 
-	merged := advanceUpstream(t, sf, map[string]string{"upstream.go": "upstream\n", "UPSTREAM.md": "merged by hand\n"})
+	merged := journey.AdvanceUpstream(t, sf, map[string]string{"upstream.go": "upstream\n", "UPSTREAM.md": "merged by hand\n"})
 	f.resolvePasses(t)
 	records := routeFor(t, f.repository, f.downstream, lifecycle.TriggerUpstreamIntegrated)
 	if len(records) != 1 || records[0].State != router.StateCommitted || records[0].Default != lifecycle.DependencyAdopted || records[0].Outcome != router.OutcomeFollowed || records[0].Target != lifecycle.DependencyAdopted {
@@ -508,18 +510,18 @@ func TestAnUpstreamMergedOutsideTheFactoryRaisesAnExitAndTheDependentGoesOn(t *t
 	}
 }
 
-func parkOnAbandonedBase(t *testing.T, f *shedFixture) (*trace.Repository, config.WorkstreamID, config.WorkstreamID) {
+func parkOnAbandonedBase(t *testing.T, f *journey.ShedFixture) (*trace.Repository, config.WorkstreamID, config.WorkstreamID) {
 	t.Helper()
 	ctx := context.Background()
-	f.upstream(t)
-	f.stop(t)
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	f.Upstream(t)
+	f.Stop(t)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	base, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
-	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
-	endStream(t, repo, f.s.now(), base)
-	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+	base, _ := journey.SealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
+	stream, _ := journey.SealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
+	endStream(t, repo, f.S.Now(), base)
+	fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
 		t.Fatalf("the dependent is not parked: %v %v", waiting, err)
 	}
@@ -528,14 +530,14 @@ func parkOnAbandonedBase(t *testing.T, f *shedFixture) (*trace.Repository, confi
 
 func TestAnAbandonedBaseMergedByHandRaisesAnExitAndTheDependentGoesOn(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := journey.NewDebateFixture(t, 1, 1)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, p))
 	repo, base, stream := parkOnAbandonedBase(t, f)
 	ctx := context.Background()
-	upstream := advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
 
-	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
+	fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repo))
 	records := routeFor(t, repo, stream, lifecycle.TriggerBaseIntegrated)
 	if len(records) != 1 || records[0].State != router.StateCommitted || records[0].Default != lifecycle.DependencyAdopted || records[0].Outcome != router.OutcomeFollowed {
 		t.Fatalf("route %+v", records)
@@ -553,7 +555,7 @@ func TestAnAbandonedBaseMergedByHandRaisesAnExitAndTheDependentGoesOn(t *testing
 	if waivers, _, err := lifecycle.EdgeWaiversAt(repo, stream); err != nil || len(waivers.Waivers) != 0 {
 		t.Fatalf("going on because the base is integrated wrote a waiver: %+v %v", waivers, err)
 	}
-	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
 	if state, err := repo.Workflow(stream, lifecycle.BaseWaitSubject); err != nil || state.Value != "available" {
 		t.Fatalf("the base wait after its next pass %+v: %v", state, err)
 	}
@@ -561,14 +563,14 @@ func TestAnAbandonedBaseMergedByHandRaisesAnExitAndTheDependentGoesOn(t *testing
 
 func TestJevDropsAnAbandonedBaseWhoseChangesAreNotInUpstream(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := journey.NewDebateFixture(t, 1, 1)
 	p := dropsAt(0.95)
-	routeJev(f.s, p)
+	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, p))
 	repo, base, stream := parkOnAbandonedBase(t, f)
 	ctx := context.Background()
-	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 
-	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
+	fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repo))
 	records := routeFor(t, repo, stream, lifecycle.TriggerBaseUnavailable)
 	if len(records) != 1 || records[0].Outcome != router.OutcomeDeparted || records[0].Target != lifecycle.DependencyWaived {
 		t.Fatalf("route %+v", records)
@@ -589,8 +591,8 @@ func TestJevDropsAnAbandonedBaseWhoseChangesAreNotInUpstream(t *testing.T) {
 		t.Fatalf("the base observation %+v: %v", observed, err)
 	}
 	for i := 0; i < 3; i++ {
-		fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
-		fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
+		fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
+		fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repo))
 	}
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || waiting {
 		t.Fatalf("the dependent was parked again: %v %v", waiting, err)
@@ -604,31 +606,31 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repository, report, repo2, upstream := newCrossRepoEdgeDependent(t)
-	routeJev(f.s, dropsAt(0.95))
-	home := filepath.Dir(f.clone)
+	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, dropsAt(0.95)))
+	home := filepath.Dir(f.Clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	fixturekit.ConfigureDeliverySigner(t, f.clone)
+	fixturekit.ConfigureDeliverySigner(t, f.Clone)
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
-	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "add", "origin", fork)
 	pull := &fixturekit.FakePulls{SyncHead: true, Fork: func() string {
 		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}}
-	f.s.mu.Lock()
-	f.s.options.PullRequests = pull
-	f.s.mu.Unlock()
+	f.S.Mu.Lock()
+	f.S.Options.PullRequests = pull
+	f.S.Mu.Unlock()
 
 	upstreamPullRequest := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/other", Fork: "owner/other-fork", Branch: intake.FeatureBranch(upstream), Commit: "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2", PullRequest: 77, URL: "https://example.invalid/owner/other/pull/77"}
-	recordUpstreamOwnPullRequest(t, f.s, repo2, upstream, upstreamPullRequest)
+	journey.RecordUpstreamOwnPullRequest(t, f.S, repo2, upstream, upstreamPullRequest)
 	pull.Mu.Lock()
 	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: upstreamPullRequest.PullRequest, URL: upstreamPullRequest.URL, State: "open", HeadRepository: upstreamPullRequest.Fork, Head: upstreamPullRequest.Branch, HeadCommit: upstreamPullRequest.Commit, Base: "main"})
 	pull.Mu.Unlock()
-	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repository))
 
-	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
-	pub.publishDraft(t)
-	pub.approve(t, nil)
-	result, err := pub.publisher().Apply(ctx, pub.request(t))
+	pub := &journey.PublicationFixture{ShedFixture: f, Stream: stream, Repository: repository, Report: report, Fork: fork, Pulls: pull}
+	pub.PublishDraft(t)
+	pub.Approve(t, nil)
+	result, err := pub.Publisher().Apply(ctx, pub.Request(t))
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
@@ -637,33 +639,33 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 		t.Fatalf("the dependent's pull request is not a draft: %+v, ready calls %d", pull.Prs, pull.Readies)
 	}
 	pull.Mu.Unlock()
-	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || pending {
+	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.S.About(repository), stream); err != nil || pending {
 		t.Fatalf("maintenance is pending before anything changed: %v %v", pending, err)
 	}
 
-	endStream(t, repo2, f.s.now(), upstream)
-	f.clock.Mu.Lock()
-	f.clock.At = f.clock.At.Add(11 * time.Minute)
-	f.clock.Mu.Unlock()
-	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
+	endStream(t, repo2, f.S.Now(), upstream)
+	f.Clock.Mu.Lock()
+	f.Clock.At = f.Clock.At.Add(11 * time.Minute)
+	f.Clock.Mu.Unlock()
+	fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repository))
 	if waived, err := lifecycle.EdgeWaived(repository, stream, upstream, trace.EdgeMergeOrder); err != nil || !waived {
 		t.Fatalf("the edge is not waived: %v %v", waived, err)
 	}
 	for i := 0; i < 2; i++ {
-		fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
-		fixturekit.Must(t, f.s.lifecycle().EdgeWaitPass(ctx, repository))
+		fixturekit.Must(t, f.S.Lifecycle().EdgeResolverPass(ctx, repository))
+		fixturekit.Must(t, f.S.Lifecycle().EdgeWaitPass(ctx, repository))
 	}
-	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || !pending {
+	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.S.About(repository), stream); err != nil || !pending {
 		t.Fatalf("the waived draft is not pending a fresh review and approval: %v %v", pending, err)
 	}
 	if resolved, err := lifecycle.WorkgroupMergeOrderResolved(repository, stream); err != nil || resolved != "" {
 		t.Fatalf("a waiver is reported as a merge: %q %v", resolved, err)
 	}
 
-	a := &finalReviewer{s: f.s, repository: repository}
-	f.clock.Mu.Lock()
-	f.clock.At = f.clock.At.Add(time.Second)
-	f.clock.Mu.Unlock()
+	a := &journey.FinalReviewer{S: f.S, Repository: repository}
+	f.Clock.Mu.Lock()
+	f.Clock.At = f.Clock.At.Add(time.Second)
+	f.Clock.Mu.Unlock()
 	fixturekit.Must(t, a.Pass(ctx))
 	op := fixturekit.ActionOperation(t, repository, stream, lifecycle.DeliveryReviewAction)
 	in, err := delivery.DecodeFinalReview(op)
@@ -671,11 +673,11 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	if in.EdgeWaived != string(upstream) || in.EdgeResolved != "" || !in.Maintenance {
 		t.Fatalf("the fresh review does not pin the waiver: %+v", in)
 	}
-	f.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dependency dropped", "findings": []any{}})
 		return err
 	})
-	if res := settleOperation(t, f.s, repository, stream, op, a); res.Outcome != "succeeded" {
+	if res := journey.SettleOperation(t, f.S, repository, stream, op, a); res.Outcome != "succeeded" {
 		t.Fatal(res)
 	}
 	fresh, found, err := delivery.LatestFinalReport(repository, stream)
@@ -689,13 +691,13 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	if readies != 0 {
 		t.Fatal("the pull request was marked ready before any fresh approval")
 	}
-	freshApproval := pub.approve(t, nil)
+	freshApproval := pub.Approve(t, nil)
 	if freshApproval.Review != fresh.Review {
 		t.Fatalf("the fresh approval read review %d, want %d", freshApproval.Review, fresh.Review)
 	}
-	fixturekit.Must(t, pub.publisher().Pass(ctx))
+	fixturekit.Must(t, pub.Publisher().Pass(ctx))
 	op2 := fixturekit.ActionOperation(t, repository, stream, lifecycle.PublishUpstreamAction)
-	result2, err := pub.publisher().Apply(ctx, op2)
+	result2, err := pub.Publisher().Apply(ctx, op2)
 	if err != nil || result2.Outcome != "succeeded" {
 		t.Fatalf("the fresh publication %+v: %v", result2, err)
 	}
@@ -711,17 +713,17 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	host, err := f.repository.ChiefOfStaffHost(f.downstream)
 	fixturekit.Must(t, err)
 	scope := intakefixture.ClaimChiefTurn(t, f.repository, f.project, host, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
 		Turn: "events_drop", Prompt: "The upstream will not merge.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events_drop", Directory: "events_drop",
 	})
 	f.resolvePasses(t)
-	controls := &runtimeControls{}
-	controls.service.Store(f.s)
-	tool := controls.lifecycle().DropDependency(f.repository, scope)
-	out := callMove(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
+	controls := &journey.RuntimeControls{}
+	controls.Service.Store(f.s)
+	tool := controls.Lifecycle().DropDependency(f.repository, scope)
+	out := intakefixture.Handle(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
 	if !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("the chief's drop: %s", out)
 	}

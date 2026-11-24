@@ -3,15 +3,16 @@ package intakejourney
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	http "net/http"
 	httptest "net/http/httptest"
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	charter "github.com/kpenfound/osmia/internal/charter"
@@ -37,14 +38,9 @@ func handInStatus(t *testing.T, s *journey.Service, body string) int {
 	return w.Code
 }
 
-func documentRevisions(t *testing.T, s *journey.Service, id string) []trace.Document {
-	t.Helper()
-	return intakefixture.DocumentRevisions(t, s.Sole().Repository, id)
-}
-
 func charterRevisionCount(t *testing.T, s *journey.Service) int {
 	t.Helper()
-	return len(documentRevisions(t, s, "charter"))
+	return len(journey.DocumentRevisions(t, s, "charter"))
 }
 
 var unknownProject = config.ProjectID("p_0123456789abcdef0123456789abcdef")
@@ -102,7 +98,7 @@ func TestOwnerCharterEditIsRecordedWithItsDiagnostics(t *testing.T) {
 	t.Parallel()
 	s, c, added := newChartedProject(t)
 	id := added.Project.ID
-	journey.WriteCharter(t, c, id, trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n")
+	intakefixture.WriteCharter(t, c, id, trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n")
 	cfg, err := c.Configuration(context.Background())
 	fixturekit.Must(t, err)
 	state := cfg.Project.CharterState
@@ -112,7 +108,7 @@ func TestOwnerCharterEditIsRecordedWithItsDiagnostics(t *testing.T) {
 	if n := charterRevisionCount(t, s); n != 2 {
 		t.Fatalf("one edit recorded %d revisions in total", n)
 	}
-	docs := documentRevisions(t, s, "charter")
+	docs := journey.DocumentRevisions(t, s, "charter")
 	if docs[1].Actor != (trace.Actor{Kind: "owner", ID: "local"}) || docs[1].Cause != "owner-edit" {
 		t.Fatalf("edit provenance: %+v", docs[1].Header)
 	}
@@ -122,7 +118,7 @@ func TestHandInStillNeedsAKeyAfterTheCharterIsEmptied(t *testing.T) {
 	t.Parallel()
 	s, c, added := newChartedProject(t)
 	id := added.Project.ID
-	journey.WriteCharter(t, c, id, "# Charter\n")
+	intakefixture.WriteCharter(t, c, id, "# Charter\n")
 	if apiErr := handInError(t, c, api.HandInRequest{Project: id}); apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, "key") {
 		t.Fatalf("emptied charter: %+v", apiErr)
 	}
@@ -163,7 +159,7 @@ func TestContextProviderAssemblesTheActiveProjectsBundle(t *testing.T) {
 	added, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	id := added.Project.ID
-	journey.WriteCharter(t, c, id, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, id, "1. Keep changes small.\n")
 	repo, err := s.Repository(id)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))

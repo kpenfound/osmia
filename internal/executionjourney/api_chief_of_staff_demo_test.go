@@ -5,10 +5,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	maps "maps"
 	os "os"
 	filepath "path/filepath"
@@ -19,6 +15,12 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -82,7 +84,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts.Reconciliation.Now = clock.Now
 	lives := make(chan *trace.Repository, 1)
-	opts = Enforce(opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
+	opts = journey.Enforce(opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
 	production := opts.Threads
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		bound, err := production(r, cfg)
@@ -122,17 +124,17 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		return bound, nil
 	}
 
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(ctx, fixturekit.Request(lf.clone))
 	fixturekit.Must(t, err)
 	id := added.Project.ID
-	writeCharter(t, c, added.Project.ID, chiefDemoCharter)
+	intakefixture.WriteCharter(t, c, added.Project.ID, chiefDemoCharter)
 	onboarded, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
 	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 1 {
 		t.Fatalf("charter: %+v", cs)
 	}
-	cfg := s.current()
+	cfg := s.Current()
 	c.Close()
 	fixturekit.Must(t, s.Close())
 
@@ -160,12 +162,12 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Ticks = ticks
 	var passes atomic.Uint64
-	opts.schedulePassed = func() { passes.Add(1) }
-	lifetime := func() (*Service, *Client, *trace.Repository) {
+	opts.SchedulePassed = func() { passes.Add(1) }
+	lifetime := func() (*journey.Service, *journey.Client, *trace.Repository) {
 		t.Helper()
-		s, err := Start(ctx, opts)
+		s, err := journey.Start(ctx, opts)
 		fixturekit.Must(t, err)
-		c := NewClient(s.Socket())
+		c := journey.NewClient(s.Socket())
 		t.Cleanup(func() {
 			c.Close()
 			if err := s.Close(); err != nil {
@@ -175,14 +177,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		select {
 		case r := <-lives:
 			return s, c, r
-		case <-s.done:
+		case <-s.Done:
 			t.Fatalf("service stopped before opening the trace: %v", s.Wait())
 		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("service did not open the trace")
 		}
 		return nil, nil, nil
 	}
-	stop := func(s *Service, c *Client) {
+	stop := func(s *journey.Service, c *journey.Client) {
 		t.Helper()
 		c.Close()
 		fixturekit.Must(t, s.Close())
@@ -368,13 +370,13 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		}
 		return true
 	}
-	await := func(s *Service, r *trace.Repository, phase string, ready func() bool) {
+	await := func(s *journey.Service, r *trace.Repository, phase string, ready func() bool) {
 		t.Helper()
-		sub, ok := service.InspectForTest(s.core()).Hub().Subscribe()
+		sub, ok := service.InspectForTest(s.Core()).Hub().Subscribe()
 		if !ok {
 			t.Fatalf("%s: cannot subscribe to stopped service: %v", phase, s.Wait())
 		}
-		defer service.InspectForTest(s.core()).Hub().Unsubscribe(sub)
+		defer service.InspectForTest(s.Core()).Hub().Unsubscribe(sub)
 		deadline := time.NewTimer(fixturekit.DemoTimeout)
 		defer deadline.Stop()
 		poll := time.NewTicker(time.Second)
@@ -416,16 +418,16 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 				t.Logf("operation=%s worker=%s turn=%s acknowledged=%v outcome=%s observation=%s evidence=%q retry=%s failure=%q decode_error=%v inspect_error=%v", op.Operation.ID, in.Agent, in.Turn, op.Acknowledged, outcome, observed.State, observed.Evidence, op.RetryAt, failure, decodeErr, inspectErr)
 			}
 			select {
-			case <-s.done:
+			case <-s.Done:
 				t.Logf("service stopped: %v", s.Wait())
 			default:
-				t.Logf("service active lifetime_error=%v", s.lifetime.Err())
+				t.Logf("service active lifetime_error=%v", s.Lifetime.Err())
 			}
 			t.Fatalf("chief demonstration did not complete %s: %s", phase, reason)
 		}
 		for {
 			select {
-			case <-s.done:
+			case <-s.Done:
 				diagnose("service stopped")
 			default:
 			}
@@ -437,7 +439,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			case <-sub.Wake():
 				sub.Take()
 			case <-poll.C:
-			case <-s.done:
+			case <-s.Done:
 				diagnose("service stopped")
 			case <-deadline.C:
 				diagnose("deadline reached")

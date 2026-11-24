@@ -3,15 +3,17 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strings"
-	"testing"
-	"time"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -20,7 +22,7 @@ import (
 
 func TestFinalReviewNamesAnApprovedDriftRebasesConflictedPathsAndApproval(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "final-drift-notes")
+	f, stream, repository, a := journey.NewFinalFixture(t, "final-drift-notes")
 	ctx := context.Background()
 	rebase := service.DriftRebase{Drift: 1, Operation: "test-drift-1", Outcome: service.TestDriftReplayed, Branch: intake.FeatureBranch(stream),
 		Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: strings.Repeat("a", 40)},
@@ -31,12 +33,12 @@ func TestFinalReviewNamesAnApprovedDriftRebasesConflictedPathsAndApproval(t *tes
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.DriftDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "test"}, Path: lifecycle.DriftPath, Content: string(content) + "\n"}
 	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{doc}))
 
-	_, op := assembleBoth(t, f, repository, a, stream,
+	_, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	in, err := delivery.DecodeFinalReview(op)
 	fixturekit.Must(t, err)
-	f.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Both criteria are shown.", "findings": []any{}})
 		return err
 	})

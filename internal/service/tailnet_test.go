@@ -29,11 +29,6 @@ func withTailnet(t *testing.T, opts *Options, names ...string) **fixturekit.Tail
 	return joined
 }
 
-func withListen(t *testing.T, opts Options, body string) {
-	t.Helper()
-	fixturekit.WithListen(t, opts.Config.Root, body)
-}
-
 // Without listen.tailnet the service never joins a tailnet and no response
 // mentions the tailnet.
 func TestTailnetDisabledByDefault(t *testing.T) {
@@ -70,7 +65,7 @@ func TestTailnetDisabledByDefault(t *testing.T) {
 func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, c := start(t, opts)
 	node := *joined
@@ -99,7 +94,7 @@ func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 func TestTailnetListenerRefusesCrossSiteRequests(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	withTailnet(t, &opts, "osmia-1.tail0.ts.net.", "osmia-1")
 	s, c := start(t, opts)
 	remote, base := intakefixture.WebHTTP(), "http://"+s.TailnetAddr()
@@ -133,13 +128,13 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	node, addr := *joined, s.TailnetAddr()
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia-2\"", 1))
+	files.Write(t, strings.Replace(files.TopText, "\"osmia\"", "\"osmia-2\"", 1))
 	reloaded, err := c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) {
@@ -154,15 +149,15 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 		t.Fatalf("tailnet after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1))
+	files.Write(t, strings.Replace(files.TopText, "[listen]\ntailnet = \"osmia\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("removed listen.tailnet: %+v, bound %s", reloaded, s.TailnetAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia.example\"", 1))
-	reloadFails(t, c, files.top, "listen.tailnet")
+	files.Write(t, strings.Replace(files.TopText, "\"osmia\"", "\"osmia.example\"", 1))
+	intakefixture.ReloadFails(t, c.Reload, files.Top, "listen.tailnet")
 }
 
 // A tailnet that cannot be joined at startup leaves the service running with
@@ -173,7 +168,7 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 	ctx := context.Background()
 	opts := fixture(t)
 	opts.TailnetRetry = 10 * time.Millisecond
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	var unreachable atomic.Bool
 	unreachable.Store(true)
 	var joined atomic.Pointer[fixturekit.TailnetNode]
@@ -230,7 +225,7 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 	ctx := context.Background()
 	opts := fixture(t)
 	opts.TailnetRetry = 10 * time.Millisecond
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	var mu sync.Mutex
 	var nodes []*fixturekit.TailnetNode
 	var unreachable atomic.Bool
@@ -308,7 +303,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\ntailnet_https = false\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\ntailnet_https = false\n")
 	joined := withTailnet(t, &opts)
 	_, c := start(t, opts)
 	node := *joined
@@ -339,7 +334,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, err := Start(context.Background(), opts)
 	fixturekit.Must(t, err)

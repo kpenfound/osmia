@@ -3,7 +3,6 @@ package lifecycle_test
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/intake"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -11,6 +10,9 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -24,17 +26,17 @@ import (
 func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newTwoProjectFixture(t)
-	store, _, err := runtime.Open(runtime.Inputs{Config: f.cfg})
+	f := journey.NewTwoProjectFixture(t)
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.Cfg})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Owner pause"}))
 	fixturekit.Must(t, store.Close())
-	otherEntered, otherRelease := f.block(otherProject, "first")
-	entered, _ := f.block(fixturekit.Project, "first")
+	otherEntered, otherRelease := f.Turns.Block(intakefixture.Turn(fixturekit.OtherProject, "first"))
+	entered, _ := f.Turns.Block(intakefixture.Turn(fixturekit.Project, "first"))
 
 	var passed atomic.Int64
-	f.opts.schedulePassed = func() { passed.Add(1) }
-	s, err := Start(ctx, f.opts)
+	f.Opts.SchedulePassed = func() { passed.Add(1) }
+	s, err := journey.Start(ctx, f.Opts)
 	fixturekit.Must(t, err)
 	stopped := false
 	defer func() {
@@ -42,25 +44,25 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 			s.Close()
 		}
 	}()
-	if got := s.current().ProjectIDs(); !slices.Equal(got, []config.ProjectID{fixturekit.Project, otherProject}) {
+	if got := s.Current().ProjectIDs(); !slices.Equal(got, []config.ProjectID{fixturekit.Project, fixturekit.OtherProject}) {
 		t.Fatalf("active projects %v", got)
 	}
 	intakefixture.Await(t, "the other project's turn", otherEntered)
-	paused, other := f.repository(fixturekit.Project), f.repository(otherProject)
+	paused, other := f.Repository(fixturekit.Project), f.Repository(fixturekit.OtherProject)
 	if paused == nil || other == nil || paused == other {
 		t.Fatalf("each project needs its own trace: %v %v", paused, other)
 	}
 	intakefixture.Soon(t, "the other project's turn holds the only mason slot", func() bool {
-		st := s.capacityStatus(nil)
+		st := s.CapacityStatus(nil)
 		return st.Roles[0].Used == 1 && len(st.Roles[0].Waiting) == 0
 	})
-	if got := f.dispatchedTurns(t, paused, fixturekit.Project); len(got) != 0 {
+	if got := dispatchedTurns(f, t, paused, fixturekit.Project); len(got) != 0 {
 		t.Fatalf("paused project dispatched %v", got)
 	}
 
-	fixturekit.Must(t, s.store.ClearPause(runtime.Target{Scope: "project", Project: fixturekit.Project}, runtime.PauseOwner))
+	fixturekit.Must(t, s.Store.ClearPause(runtime.Target{Scope: "project", Project: fixturekit.Project}, runtime.PauseOwner))
 	intakefixture.Soon(t, "the first project's turn waits for the shared mason slot", func() bool {
-		st := s.capacityStatus(nil)
+		st := s.CapacityStatus(nil)
 		if st.Roles[0].Used != 1 || len(st.Roles[0].Waiting) != 1 {
 			return false
 		}
@@ -68,25 +70,25 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 		return w.Workstream == fixturekit.Stream && w.Turn == intakefixture.Turn(fixturekit.Project, "first") && w.Reason == "capacity"
 	})
 	intakefixture.AwaitPasses(t, &passed, 3)
-	if got := f.dispatchedTurns(t, paused, fixturekit.Project); len(got) != 0 {
+	if got := dispatchedTurns(f, t, paused, fixturekit.Project); len(got) != 0 {
 		t.Fatalf("first project dispatched %v past the shared capacity", got)
 	}
 
 	close(otherRelease)
 	intakefixture.Await(t, "the first project's turn", entered)
-	f.queue(t, other, otherProject, "second")
+	queue(f, t, other, fixturekit.OtherProject, "second")
 	fixturekit.Must(t, s.Close())
 	stopped = true
 
-	s, err = Start(ctx, f.opts)
+	s, err = journey.Start(ctx, f.Opts)
 	fixturekit.Must(t, err)
 	stopped = false
-	for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+	for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 		fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
-			ops, err := f.repository(id).Operations(f.streams[id])
+			ops, err := f.Repository(id).Operations(f.Streams[id])
 			fixturekit.Must(t, err)
 			want := 1
-			if id == otherProject {
+			if id == fixturekit.OtherProject {
 				want = 2
 			}
 			if len(ops) != want {
@@ -97,16 +99,16 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 	}
 	fixturekit.Must(t, s.Close())
 	stopped = true
-	for _, p := range f.cfg.Projects {
-		repo, err := trace.Open(f.cfg.Root, p)
+	for _, p := range f.Cfg.Projects {
+		repo, err := trace.Open(f.Cfg.Root, p)
 		fixturekit.Must(t, err)
-		th, err := repo.Thread(f.streams[p.ID], fixturekit.DemoAgent)
+		th, err := repo.Thread(f.Streams[p.ID], fixturekit.DemoAgent)
 		fixturekit.Must(t, err)
 		want := []string{intakefixture.Turn(p.ID, "first")}
-		if p.ID == otherProject {
+		if p.ID == fixturekit.OtherProject {
 			want = append(want, intakefixture.Turn(p.ID, "second"))
 		}
-		if got := f.dispatchedTurns(t, repo, p.ID); !slices.Equal(got, want) {
+		if got := dispatchedTurns(f, t, repo, p.ID); !slices.Equal(got, want) {
 			t.Fatalf("project %s dispatched %v, want %v", p.ID, got, want)
 		}
 		for _, q := range th.Turns {
@@ -121,10 +123,10 @@ func TestSeveralProjectsShareCapacityPauseApartAndResumeFromTheirOwnTraces(t *te
 func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newTwoProjectFixture(t)
-	s, c := start(t, f.opts)
+	f := journey.NewTwoProjectFixture(t)
+	s, c := journey.StartT(t, f.Opts)
 	text := "Build it"
-	both := string(fixturekit.Project) + ", " + string(otherProject)
+	both := string(fixturekit.Project) + ", " + string(fixturekit.OtherProject)
 	_, err := c.HandIn(ctx, api.HandInRequest{Key: "k", Stdin: &text})
 	var apiFault *api.APIError
 	if !errors.As(err, &apiFault) || apiFault.Code != api.Validation || !strings.Contains(apiFault.Message, "several projects are active; name one of "+both) {
@@ -142,17 +144,17 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 	if _, err := c.RebaseProject(ctx, unknown); !errors.As(err, &apiFault) || apiFault.Code != api.NotFound || !strings.Contains(apiFault.Message, "the active projects are "+both) {
 		t.Fatalf("rebase of an inactive project: %v", err)
 	}
-	out, err := c.RebaseProject(ctx, otherProject)
+	out, err := c.RebaseProject(ctx, fixturekit.OtherProject)
 	fixturekit.Must(t, err)
-	if out.Project != otherProject || len(out.Covered)+len(out.Skipped) != 1 || len(out.Covered) == 1 && out.Covered[0].Workstream != otherStream || len(out.Skipped) == 1 && out.Skipped[0].Workstream != otherStream {
+	if out.Project != fixturekit.OtherProject || len(out.Covered)+len(out.Skipped) != 1 || len(out.Covered) == 1 && out.Covered[0].Workstream != fixturekit.OtherStream || len(out.Skipped) == 1 && out.Skipped[0].Workstream != fixturekit.OtherStream {
 		t.Fatalf("rebase of the other project: %+v", out)
 	}
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project != nil || len(cfg.Projects) != 2 || !(cfg.Projects[0].ID == fixturekit.Project && cfg.Projects[1].ID == otherProject || cfg.Projects[0].ID == otherProject && cfg.Projects[1].ID == fixturekit.Project) {
+	if cfg.Project != nil || len(cfg.Projects) != 2 || !(cfg.Projects[0].ID == fixturekit.Project && cfg.Projects[1].ID == fixturekit.OtherProject || cfg.Projects[0].ID == fixturekit.OtherProject && cfg.Projects[1].ID == fixturekit.Project) {
 		t.Fatalf("configuration projects: %+v %+v", cfg.Project, cfg.Projects)
 	}
-	if got := cfg.Effective.ActiveProjects; len(got) != 2 || got[0] != string(fixturekit.Project) || got[1] != string(otherProject) {
+	if got := cfg.Effective.ActiveProjects; len(got) != 2 || got[0] != string(fixturekit.Project) || got[1] != string(fixturekit.OtherProject) {
 		t.Fatalf("effective active projects: %v", got)
 	}
 	status, err := c.Statuses(ctx)
@@ -162,13 +164,13 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 		listed = append(listed, w.Project)
 	}
 	slices.Sort(listed)
-	if !slices.Equal(listed, []config.ProjectID{fixturekit.Project, otherProject}) {
+	if !slices.Equal(listed, []config.ProjectID{fixturekit.Project, fixturekit.OtherProject}) {
 		t.Fatalf("status lists workstreams of %v", listed)
 	}
-	if _, apiFault := s.workstreamStatus(string(otherStream)); apiFault != nil {
+	if _, apiFault := s.WorkstreamStatus(string(fixturekit.OtherStream)); apiFault != nil {
 		t.Fatalf("status of the other project's workstream: %v", apiFault)
 	}
-	if p, ws, repo, apiFault := s.conversationTrace(string(otherStream)); apiFault != nil || p != otherProject || ws != otherStream || repo.Project() != otherProject {
+	if p, ws, repo, apiFault := journey.InspectForTest(s).ConversationTrace(string(fixturekit.OtherStream)); apiFault != nil || p != fixturekit.OtherProject || ws != fixturekit.OtherStream || repo.Project() != fixturekit.OtherProject {
 		t.Fatalf("conversation of the other project's workstream: %v %v %v", p, ws, apiFault)
 	}
 }
@@ -176,16 +178,16 @@ func TestProjectScopedRequestsNameOneOfSeveralProjects(t *testing.T) {
 func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newTwoProjectFixture(t)
-	s, c := start(t, f.opts)
-	for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+	f := journey.NewTwoProjectFixture(t)
+	s, c := journey.StartT(t, f.Opts)
+	for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 		fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
-			ops, err := f.repository(id).Operations(f.streams[id])
+			ops, err := f.Repository(id).Operations(f.Streams[id])
 			fixturekit.Must(t, err)
 			return ops
 		})
 	}
-	_, err := c.Abandon(ctx, f.streams[fixturekit.Project], "Owner finished this project's work.")
+	_, err := c.Abandon(ctx, f.Streams[fixturekit.Project], "Owner finished this project's work.")
 	fixturekit.Must(t, err)
 	removed, err := c.RemoveProject(ctx, fixturekit.Project)
 	fixturekit.Must(t, err)
@@ -194,26 +196,26 @@ func TestRemovingOneOfSeveralProjectsLeavesTheOtherRunning(t *testing.T) {
 	}
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != otherProject || len(cfg.Projects) != 1 || cfg.Projects[0].ID != otherProject {
+	if cfg.Project == nil || cfg.Project.ID != fixturekit.OtherProject || len(cfg.Projects) != 1 || cfg.Projects[0].ID != fixturekit.OtherProject {
 		t.Fatalf("configuration after removal: %+v %+v", cfg.Project, cfg.Projects)
 	}
-	if traces := s.traces(); len(traces) != 1 || traces[0].Project() != otherProject {
+	if traces := traces(s); len(traces) != 1 || traces[0].Project() != fixturekit.OtherProject {
 		t.Fatalf("traces in the capacity pool: %d", len(traces))
 	}
-	if got := activeProjects(t, f.opts.Config.Root); !slices.Equal(got, []string{string(otherProject)}) {
+	if got := activeProjects(t, f.Opts.Config.Root); !slices.Equal(got, []string{string(fixturekit.OtherProject)}) {
 		t.Fatalf("registry %v", got)
 	}
-	other := f.repository(otherProject)
-	f.queue(t, other, otherProject, "second")
+	other := f.Repository(fixturekit.OtherProject)
+	queue(f, t, other, fixturekit.OtherProject, "second")
 	fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
-		ops, err := other.Operations(otherStream)
+		ops, err := other.Operations(fixturekit.OtherStream)
 		fixturekit.Must(t, err)
 		if len(ops) != 2 {
 			return nil
 		}
 		return ops
 	})
-	repo, err := trace.Open(f.cfg.Root, f.cfg.For(fixturekit.Project).Project)
+	repo, err := trace.Open(f.Cfg.Root, f.Cfg.For(fixturekit.Project).Project)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 }
@@ -227,24 +229,24 @@ func appendCost(t *testing.T, repository *trace.Repository, stream config.Workst
 
 func TestDailyBudgetCountsTheSpendOfEveryProject(t *testing.T) {
 	t.Parallel()
-	f := newTwoProjectFixture(t)
-	top := filepath.Join(f.opts.Config.Root, "config.toml")
+	f := journey.NewTwoProjectFixture(t)
+	top := filepath.Join(f.Opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(top)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(top, append(data, []byte("[budget]\nper_day = \"1.00\"\n")...), 0600))
-	for _, p := range f.cfg.Projects {
-		repo, err := trace.Open(f.cfg.Root, p)
+	for _, p := range f.Cfg.Projects {
+		repo, err := trace.Open(f.Cfg.Root, p)
 		fixturekit.Must(t, err)
-		appendCost(t, repo, f.streams[p.ID], "cost", fixturekit.DemoStart, 0.6)
+		appendCost(t, repo, f.Streams[p.ID], "cost", fixturekit.DemoStart, 0.6)
 		fixturekit.Must(t, repo.Close())
 	}
-	f.opts.Location = time.UTC
-	s, _ := start(t, f.opts)
+	f.Opts.Location = time.UTC
+	s, _ := journey.StartT(t, f.Opts)
 	intakefixture.Soon(t, "the daily budget pauses the factory", func() bool {
-		p, ok := factoryPause(t, s)
+		p, ok := fixturekit.FactoryPause(s.Store)
 		return ok && p.Source == runtime.PauseDailyBudget
 	})
-	if got := budgetStatus(t, s); got.SpendUSD != "1.2" || got.LimitUSD != "1.00" {
+	if got := fixturekit.RequireDailyBudget(t, journey.InspectForTest(s).DailyBudget()); got.SpendUSD != "1.2" || got.LimitUSD != "1.00" {
 		t.Fatalf("daily budget status %+v", got)
 	}
 }

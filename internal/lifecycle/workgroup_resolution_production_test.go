@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -55,49 +57,49 @@ func (p *resolutionPulls) Find(ctx context.Context, repository, head, branch str
 	}
 	return found, err
 }
-func resolutionApprovedFixture(t *testing.T, configuration productionDesignConfiguration, edge string, host pulls.Client, prepare ...func(*productionDesignFixture)) *productionDesignFixture {
+func resolutionApprovedFixture(t *testing.T, configuration journey.ProductionDesignConfiguration, edge string, host pulls.Client, prepare ...func(*journey.ProductionDesignFixture)) *journey.ProductionDesignFixture {
 	t.Helper()
 	if host == nil {
 		host = &fixturekit.FakePulls{}
 	}
-	options := configuration.options
-	configuration.options = func(opts *Options) {
+	options := configuration.Options
+	configuration.Options = func(opts *journey.Options) {
 		if options != nil {
 			options(opts)
 		}
 		opts.PullRequests = host
 	}
-	f := newConfiguredProductionDesignFixture(t, configuration)
+	f := journey.NewConfiguredProductionDesignFixture(t, configuration)
 	for _, setup := range prepare {
 		setup(f)
 	}
-	f.sharedDesign().ScriptResolution(t, edge, lifecycle.ProjectSpecDraftTool)
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	f.SharedDesign().ScriptResolution(t, edge, lifecycle.ProjectSpecDraftTool)
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(context.Background(), f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	fixturekit.Must(t, err)
-	f.awaitApproved(t)
+	f.AwaitApproved(t)
 	return f
 }
-func resolutionMembers(f *productionDesignFixture) []struct {
+func resolutionMembers(f *journey.ProductionDesignFixture) []struct {
 	project config.ProjectID
 	stream  config.WorkstreamID
 } {
 	return []struct {
 		project config.ProjectID
 		stream  config.WorkstreamID
-	}{{f.project, f.stream1}, {f.project2, f.stream2}}
+	}{{f.Project, f.Stream1}, {f.Project2, f.Stream2}}
 }
-func deliverResolutionMembers(t *testing.T, f *productionDesignFixture) []api.DeliveryPublication {
+func deliverResolutionMembers(t *testing.T, f *journey.ProductionDesignFixture) []api.DeliveryPublication {
 	t.Helper()
-	return f.sharedDesign().DeliverResolutionMembers(t, delivery.PublicationDocument, delivery.PublicationPath)
+	return f.SharedDesign().DeliverResolutionMembers(t, delivery.PublicationDocument, delivery.PublicationPath)
 }
 
-func resolutionGroupID(t *testing.T, f *productionDesignFixture) config.WorkgroupID {
+func resolutionGroupID(t *testing.T, f *journey.ProductionDesignFixture) config.WorkgroupID {
 	t.Helper()
-	repo, err := f.s.repository(f.project)
+	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	id, err := repo.CrossRepoWorkgroupOf(f.origin)
+	id, err := repo.CrossRepoWorkgroupOf(f.Origin)
 	fixturekit.Must(t, err)
 	if id == "" {
 		t.Fatal("the origin workstream has no workgroup")
@@ -105,11 +107,11 @@ func resolutionGroupID(t *testing.T, f *productionDesignFixture) config.Workgrou
 	return id
 }
 
-func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved bool) {
+func resolutionGroupState(t *testing.T, f *journey.ProductionDesignFixture, wantResolved bool) {
 	t.Helper()
 	ctx := context.Background()
 	id := resolutionGroupID(t, f)
-	authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
+	authority, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, id)
 	fixturekit.Must(t, err)
 	defer authority.Close()
 	ids, revision, err := trace.ResolvedWorkgroups(authority)
@@ -124,17 +126,17 @@ func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved
 		t.Fatalf("premature resolution=%v revision=%d active=%v", ids, revision, active)
 	}
 	for _, m := range resolutionMembers(f) {
-		if _, archived := f.s.lifecycle().ArchivedWorkstream(string(m.stream)); archived {
+		if _, archived := f.S.Lifecycle().ArchivedWorkstream(string(m.stream)); archived {
 			continue
 		}
 		for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
-			b, err := f.s.Context().Assemble(ctx, m.project, bundle.Scope{Role: role, Workstream: m.stream})
+			b, err := f.S.Context().Assemble(ctx, m.project, bundle.Scope{Role: role, Workstream: m.stream})
 			fixturekit.Must(t, err)
 			if (b.ProjectSpec != nil) == wantResolved {
 				t.Fatalf("member %s role %s project spec presence=%v", m.stream, role, b.ProjectSpec != nil)
 			}
 		}
-		r, err := f.s.repository(m.project)
+		r, err := f.S.Repository(m.project)
 		fixturekit.Must(t, err)
 		docs, err := trace.Read[trace.Document](r, m.stream)
 		fixturekit.Must(t, err)
@@ -144,10 +146,10 @@ func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved
 	}
 }
 
-func awaitGroupResolutionRevision(t *testing.T, f *productionDesignFixture) {
+func awaitGroupResolutionRevision(t *testing.T, f *journey.ProductionDesignFixture) {
 	t.Helper()
-	lifecycleAwait(t, f, "group merge resolution", func() bool {
-		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, resolutionGroupID(t, f))
+	journey.LifecycleAwait(t, f, "group merge resolution", func() bool {
+		authority, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, resolutionGroupID(t, f))
 		fixturekit.Must(t, err)
 		defer authority.Close()
 		_, revision, err := trace.ResolvedWorkgroups(authority)
@@ -155,30 +157,30 @@ func awaitGroupResolutionRevision(t *testing.T, f *productionDesignFixture) {
 		return revision == 1
 	})
 }
-func awaitMemberMergeResolution(t *testing.T, f *productionDesignFixture) {
+func awaitMemberMergeResolution(t *testing.T, f *journey.ProductionDesignFixture) {
 	t.Helper()
 	awaitGroupResolutionRevision(t, f)
 	resolutionGroupState(t, f, true)
 }
 func TestDesignProductionProjectSpecWaitsForEveryMemberMerge(t *testing.T) {
 	t.Parallel()
-	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait}, "contract", nil)
-	defer f.stop(t)
+	f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait}, "contract", nil)
+	defer f.Stop(t)
 	deliverResolutionMembers(t, f)
 	resolutionGroupState(t, f, false)
-	repo, err := f.s.repository(f.project)
+	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	recordResolutionMerge(t, repo, f.stream1)
+	journey.RecordResolutionMerge(t, repo, f.Stream1)
 	resolutionGroupState(t, f, false)
-	f.stop(t)
-	f.start(t)
+	f.Stop(t)
+	f.Start(t)
 	resolutionGroupState(t, f, false)
-	repo, err = f.s.repository(f.project2)
+	repo, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	recordResolutionMerge(t, repo, f.stream2)
+	journey.RecordResolutionMerge(t, repo, f.Stream2)
 	awaitMemberMergeResolution(t, f)
-	f.stop(t)
-	f.start(t)
+	f.Stop(t)
+	f.Start(t)
 	resolutionGroupState(t, f, true)
 }
 func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
@@ -188,21 +190,21 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			host := &resolutionPulls{FakePulls: &fixturekit.FakePulls{}}
 			host.fail.Store(true)
 			var hold atomic.Bool
-			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
+			f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait, Checkpoint: func(ctx context.Context, step string) error {
 				if (step == "workgroup-resolution-ready" || step == "auto-archive-selected") && hold.Load() {
 					<-ctx.Done()
 					return ctx.Err()
 				}
 				return nil
 			}}, edge, host)
-			defer func() { hold.Store(false); f.stop(t) }()
-			sink := intake.FeatureBranch(f.stream2)
+			defer func() { hold.Store(false); f.Stop(t) }()
+			sink := intake.FeatureBranch(f.Stream2)
 			host.sink.Store(&sink)
 			publications := deliverResolutionMembers(t, f)
 			awaitChecks := func(phase string, minimum int) {
-				lifecycleAwait(t, f, phase, func() bool {
+				journey.LifecycleAwait(t, f, phase, func() bool {
 					for _, m := range resolutionMembers(f) {
-						repo, err := f.s.repository(m.project)
+						repo, err := f.S.Repository(m.project)
 						fixturekit.Must(t, err)
 						transitions, err := trace.Read[trace.Transition](repo, m.stream)
 						fixturekit.Must(t, err)
@@ -221,7 +223,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			}
 			assertNoOutcomes := func() {
 				for _, m := range resolutionMembers(f) {
-					repo, err := f.s.repository(m.project)
+					repo, err := f.S.Repository(m.project)
 					fixturekit.Must(t, err)
 					_, rev, err := delivery.OwnPullRequestOutcomeAt(repo, m.stream)
 					fixturekit.Must(t, err)
@@ -239,12 +241,12 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				host.Prs = append(host.Prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
 			}
 			host.Mu.Unlock()
-			f.clock.Advance(10 * time.Minute)
+			f.Clock.Advance(10 * time.Minute)
 			awaitChecks("ready open provider lookups", 2)
 			assertNoOutcomes()
 			pending := &resolutionLookup{reached: make(chan struct{}), release: make(chan struct{})}
 			host.pending.Store(pending)
-			lifecycleAwait(t, f, "open provider response in flight", func() bool {
+			journey.LifecycleAwait(t, f, "open provider response in flight", func() bool {
 				select {
 				case <-pending.reached:
 					return true
@@ -260,11 +262,11 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				host.Prs[i].MergeCommit = fmt.Sprintf("merged-%d", i)
 			}
 			host.Mu.Unlock()
-			f.clock.Advance(10 * time.Minute)
+			f.Clock.Advance(10 * time.Minute)
 			close(pending.release)
-			lifecycleAwait(t, f, "durable outcomes before resolution", func() bool {
+			journey.LifecycleAwait(t, f, "durable outcomes before resolution", func() bool {
 				for _, m := range resolutionMembers(f) {
-					repo, err := f.s.repository(m.project)
+					repo, err := f.S.Repository(m.project)
 					fixturekit.Must(t, err)
 					if _, rev, err := delivery.OwnPullRequestOutcomeAt(repo, m.stream); err != nil || rev == 0 {
 						return false
@@ -273,7 +275,7 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 				return true
 			})
 			for i, m := range resolutionMembers(f) {
-				repo, err := f.s.repository(m.project)
+				repo, err := f.S.Repository(m.project)
 				fixturekit.Must(t, err)
 				outcome, rev, err := delivery.OwnPullRequestOutcomeAt(repo, m.stream)
 				fixturekit.Must(t, err)
@@ -283,16 +285,16 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			}
 			resolutionGroupState(t, f, false)
 			for _, m := range resolutionMembers(f) {
-				if _, archived := intakefixture.ArchiveRecord(t, f.s.store, m.stream); archived {
+				if _, archived := intakefixture.ArchiveRecord(t, f.S.Store, m.stream); archived {
 					t.Fatalf("member %s archived before the restart", m.stream)
 				}
 			}
-			f.stop(t)
+			f.Stop(t)
 			hold.Store(false)
 			host.Mu.Lock()
 			calls := host.Finds
 			host.Mu.Unlock()
-			f.start(t)
+			f.Start(t)
 			awaitGroupResolutionRevision(t, f)
 			host.Mu.Lock()
 			after := host.Finds
@@ -300,9 +302,9 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			if after != calls {
 				t.Fatalf("finished own PRs polled after restart: %d -> %d", calls, after)
 			}
-			lifecycleAwait(t, f, "chief of staff archives of the merged members", func() bool {
+			journey.LifecycleAwait(t, f, "chief of staff archives of the merged members", func() bool {
 				for _, m := range resolutionMembers(f) {
-					if a, ok := intakefixture.ArchiveRecord(t, f.s.store, m.stream); !ok || a.CleanedAt.IsZero() {
+					if a, ok := intakefixture.ArchiveRecord(t, f.S.Store, m.stream); !ok || a.CleanedAt.IsZero() {
 						return false
 					}
 				}
@@ -310,13 +312,13 @@ func TestDesignProductionObservesAllOwnPullRequestsAcrossRestart(t *testing.T) {
 			})
 			resolutionGroupState(t, f, true)
 			for i, m := range resolutionMembers(f) {
-				a, _ := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
+				a, _ := intakefixture.ArchiveRecord(t, f.S.Store, m.stream)
 				if a.Actor != runtime.ArchiveActorChief || !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.Publication.PullRequest != publications[i].PullRequest || a.MergeCommit != fmt.Sprintf("merged-%d", i) {
 					t.Fatalf("archive of %s=%+v", m.stream, a)
 				}
 			}
-			f.stop(t)
-			f.start(t)
+			f.Stop(t)
+			f.Start(t)
 			resolutionGroupState(t, f, true)
 		})
 	}

@@ -2,18 +2,16 @@ package intakejourney
 
 import (
 	context "context"
-	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
-	sync "sync"
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -21,68 +19,17 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-type questionAsker struct {
-	stream                    config.WorkstreamID
-	agent, thread, role, turn string
-}
-
-type questionFixture struct {
-	opts     journey.Options
-	cfg      *config.Config
-	clock    *fixturekit.FixedClock
-	engine   *fixturekit.DemoEngine
-	lives    chan *trace.Repository
-	ticks    chan time.Time
-	mu       sync.Mutex
-	results  map[string][]string
-	problems []string
-}
-
-func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []questionAsker) *questionFixture {
-	t.Helper()
-	f := &questionFixture{results: map[string][]string{}}
-	var inputs []intakefixture.QuestionAsker
-	for _, a := range askers {
-		inputs = append(inputs, intakefixture.QuestionAsker{Stream: a.stream, Agent: a.agent, Thread: a.thread, Role: a.role, Turn: a.turn})
-	}
-	data := intakefixture.NewQuestionSetup(t, prefix, global, charter, inputs, func(t *testing.T, home string) config.Options {
-		f.opts = journey.FixtureAt(t, home)
-		return f.opts.Config
-	})
-	f.cfg, f.clock, f.engine, f.lives, f.ticks = data.Config, data.Clock, data.Engine, data.Lives, data.Ticks
-	f.opts.Threads, f.opts.Reconciliation.Now, f.opts.Reconciliation.Ticks = data.Threads, data.Clock.Now, data.Ticks
-	return f
-}
-
-func (f *questionFixture) settle(t *testing.T, s *journey.Service) {
-	t.Helper()
-	intakefixture.SettleTicks(t, f.ticks, f.clock.Now, s.Close)
-}
-
-func (f *questionFixture) problem(format string, args ...any) {
-	f.problems = append(f.problems, fmt.Sprintf(format, args...))
-}
-
-func (f *questionFixture) use(ctx context.Context, tools *mcp.ClientSession, step, name string, args map[string]any) error {
-	out, err := fixturekit.CallTool(ctx, tools, name, args)
-	if err != nil {
-		return err
-	}
-	f.results[step] = append(f.results[step], out)
-	return nil
-}
-
 func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
-		{fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "mason", "build"}, {fixturekit.Stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {fixturekit.Stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
+	f := journey.NewQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []intakefixture.QuestionAsker{
+		{Stream: fixturekit.Stream, Agent: fixturekit.DemoAgent, Thread: fixturekit.DemoThread, Role: "mason", Turn: "build"}, {Stream: fixturekit.Stream, Agent: "agent_mason2", Thread: "thread_mason2", Role: "mason", Turn: "build2"}, {Stream: fixturekit.Stream, Agent: "agent_reviewer", Thread: "thread_reviewer", Role: "reviewer", Turn: "review"},
 	})
-	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
+	opts, clock, engine, lives, ticks := f.Opts, f.Clock, f.Engine, f.Lives, f.Ticks
 
 	opts.Reconciliation.Concurrent = func(coreadapter.Operation) bool { return false }
-	settle := func(s *journey.Service) { t.Helper(); f.settle(t, s) }
-	mu, results, problem, use, result := &f.mu, f.results, f.problem, f.use, intakefixture.QuestionResult
+	settle := func(s *journey.Service) { t.Helper(); f.Settle(t, s) }
+	mu, results, problem, use, result := &f.Mu, f.Results, f.Problem, f.Use, intakefixture.QuestionResult
 	var repo *trace.Repository
 	asker := func(session, question string, want ...string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -389,7 +336,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if !reflect.DeepEqual(results, want) {
 		t.Fatalf("tool results:\n%v\nwant:\n%v", results, want)
 	}
-	if len(f.problems) != 0 {
-		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))
+	if len(f.Problems) != 0 {
+		t.Fatalf("fake agents saw:\n%s", strings.Join(f.Problems, "\n"))
 	}
 }

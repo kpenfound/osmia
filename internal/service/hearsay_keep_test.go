@@ -80,17 +80,7 @@ func (f *publisherFixture) down() (recover func()) {
 	f.t.Helper()
 	addr := f.hooks.Listener.Addr().String()
 	f.hooks.Close()
-	return func() { f.hooks = newHooksFakeOn(f.t, addr) }
-}
-
-func postsAbout(posts []hooksPost, kind, field, value string) []hooksPost {
-	var out []hooksPost
-	for _, p := range posts {
-		if p.str("kind") == kind && p.str(field) == value {
-			out = append(out, p)
-		}
-	}
-	return out
+	return func() { f.hooks = fixturekit.NewHooksOn(f.t, addr) }
 }
 
 func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) {
@@ -133,26 +123,26 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 	if len(res.Failures) != 0 || res.Unreachable {
 		t.Fatalf("recovery pass: %+v", res)
 	}
-	ws := postsAbout(posts, "workstream", "workstream", string(stream))
-	if len(ws) != 1 || ws[0].Source != "osmia-work" || ws[0].str("author") != "" || ws[0].str("state") != "completed" || ws[0].str("status") != "delivered" ||
-		ws[0].str("url") != "https://github.com/o/r/pull/7" || !strings.Contains(ws[0].str("description"), "(merged)") {
+	ws := postsOf(posts, "workstream", "workstream", string(stream))
+	if len(ws) != 1 || ws[0].Source != "osmia-work" || ws[0].Str("author") != "" || ws[0].Str("state") != "completed" || ws[0].Str("status") != "delivered" ||
+		ws[0].Str("url") != "https://github.com/o/r/pull/7" || !strings.Contains(ws[0].Str("description"), "(merged)") {
 		t.Fatalf("final state: %v", ws)
 	}
-	spec := postsAbout(posts, "document", "document", string(stream)+"-spec")
-	if len(spec) != 1 || spec[0].Source != "osmia-owner" || spec[0].str("author") != "owner" || !strings.Contains(spec[0].str("body"), "Cap uploads at 10 MiB.") {
+	spec := postsOf(posts, "document", "document", string(stream)+"-spec")
+	if len(spec) != 1 || spec[0].Source != "osmia-owner" || spec[0].Str("author") != "owner" || !strings.Contains(spec[0].Str("body"), "Cap uploads at 10 MiB.") {
 		t.Fatalf("seal document: %v", spec)
 	}
-	ruling := postsAbout(posts, "decision", "decision", string(stream)+"-ruling-1")
-	if len(ruling) != 1 || ruling[0].Source != "osmia-owner" || ruling[0].str("author") != "owner" || ruling[0].str("decider") != "owner" || ruling[0].str("outcome") != "Cap uploads at 10 MiB." {
+	ruling := postsOf(posts, "decision", "decision", string(stream)+"-ruling-1")
+	if len(ruling) != 1 || ruling[0].Source != "osmia-owner" || ruling[0].Str("author") != "owner" || ruling[0].Str("decider") != "owner" || ruling[0].Str("outcome") != "Cap uploads at 10 MiB." {
 		t.Fatalf("ruling: %v", ruling)
 	}
-	var assumptions []hooksPost
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "assumption") {
+	var assumptions []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "assumption") {
 			assumptions = append(assumptions, d)
 		}
 	}
-	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].str("author") != "" || assumptions[0].str("decider") != "chief_of_staff" || assumptions[0].str("workstream") != string(stream) {
+	if len(assumptions) != 1 || assumptions[0].Source != "osmia-work" || assumptions[0].Str("author") != "" || assumptions[0].Str("decider") != "chief_of_staff" || assumptions[0].Str("workstream") != string(stream) {
 		t.Fatalf("assumption: %v", assumptions)
 	}
 	for _, p := range posts {
@@ -174,7 +164,7 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 // The same records reach Hearsay under the same ids and sources whether the
 // workstream's trace was cleaned in between or not.
 func TestKeptRecordsPostWhatTheLiveTraceWould(t *testing.T) {
-	post := func(clean bool) []hooksPost {
+	post := func(clean bool) []fixturekit.HooksPost {
 		f := newPublisherFixture(t)
 		stream := fixturekit.Stream
 		fixturekit.RecordHanded(t, f.repo, stream, "stdin", fixturekit.DemoStart)
@@ -186,10 +176,10 @@ func TestKeptRecordsPostWhatTheLiveTraceWould(t *testing.T) {
 		posts, _ := f.pass()
 		return posts
 	}
-	shape := func(posts []hooksPost) []string {
+	shape := func(posts []fixturekit.HooksPost) []string {
 		var out []string
 		for _, p := range posts {
-			if p.str("workstream") != string(fixturekit.Stream) {
+			if p.Str("workstream") != string(fixturekit.Stream) {
 				continue
 			}
 			p.Body["project"] = ""
@@ -219,11 +209,11 @@ func TestCleanupKeepsAnAbandonedWorkstreamWithItsReason(t *testing.T) {
 	f.restart()
 	recoverHooks()
 	posts, _ := f.pass()
-	ws := postsAbout(posts, "workstream", "workstream", string(stream))
-	if len(ws) != 1 || ws[0].str("state") != "abandoned" || ws[0].str("status") != "abandoned" || !strings.Contains(ws[0].str("description"), "Cancelled: No longer needed.") {
+	ws := postsOf(posts, "workstream", "workstream", string(stream))
+	if len(ws) != 1 || ws[0].Str("state") != "abandoned" || ws[0].Str("status") != "abandoned" || !strings.Contains(ws[0].Str("description"), "Cancelled: No longer needed.") {
 		t.Fatalf("abandoned state: %v", ws)
 	}
-	if len(postsAbout(posts, "document", "document", string(stream)+"-spec")) != 1 || len(decisions(posts)) != 2 {
+	if len(postsOf(posts, "document", "document", string(stream)+"-spec")) != 1 || len(fixturekit.Decisions(posts)) != 2 {
 		t.Fatalf("pending records: %v", kinds(posts))
 	}
 	for range 2 {
@@ -271,7 +261,7 @@ func TestCleanupKeepsOnlyWhatIsNotPostedAtItsCurrentDigest(t *testing.T) {
 	g.restart()
 	recoverHooks()
 	posts, _ := g.pass()
-	if spec := postsAbout(posts, "document", "document", string(stream)+"-spec"); len(spec) != 1 || !strings.Contains(spec[0].str("body"), "20 MiB") {
+	if spec := postsOf(posts, "document", "document", string(stream)+"-spec"); len(spec) != 1 || !strings.Contains(spec[0].Str("body"), "20 MiB") {
 		t.Fatalf("recovery posted %v", kinds(posts))
 	}
 }
@@ -333,12 +323,12 @@ func TestCleanupBeforePublishingWasConfiguredLeavesNothingToBackfill(t *testing.
 	f.cfg.Hearsay.Publish = &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: f.hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
 	fixturekit.Must(t, err)
-	posts := f.hooks.take()
+	posts := f.hooks.Take()
 	if len(res.Failures) != 0 || len(posts) == 0 {
 		t.Fatalf("backfill: %+v %v", res, kinds(posts))
 	}
 	for _, p := range posts {
-		if p.str("workstream") == string(stream) || p.str("kind") == "decision" || strings.Contains(p.Raw, string(stream)) {
+		if p.Str("workstream") == string(stream) || p.Str("kind") == "decision" || strings.Contains(p.Raw, string(stream)) {
 			t.Fatalf("the cleaned workstream was posted: %s", p.Raw)
 		}
 	}
@@ -377,25 +367,25 @@ func TestRemovalIsKeptAndPostedOnceAfterARestartWithTheProjectInactive(t *testin
 	if f.s.publishRemovedPass(context.Background()) {
 		t.Fatal("recovery pass asked to back off")
 	}
-	posts := f.hooks.take()
-	removals := postsAbout(posts, "project", "project", string(project))
-	if len(removals) != 1 || removals[0].Source != "osmia-work" || removals[0].str("status") != "removed" || removals[0].str("state") != "abandoned" || removals[0].str("author") != "owner" || removals[0].Body["repos"] != nil {
+	posts := f.hooks.Take()
+	removals := postsOf(posts, "project", "project", string(project))
+	if len(removals) != 1 || removals[0].Source != "osmia-work" || removals[0].Str("status") != "removed" || removals[0].Str("state") != "abandoned" || removals[0].Str("author") != "owner" || removals[0].Body["repos"] != nil {
 		t.Fatalf("removal: %v", removals)
 	}
-	if posts[0].str("kind") != "project" {
+	if posts[0].Str("kind") != "project" {
 		t.Fatalf("order: %v", kinds(posts))
 	}
 	for _, want := range []string{"workstream", "document", "decision"} {
-		if len(postsAbout(posts, want, "project", string(project))) == 0 {
+		if len(postsOf(posts, want, "project", string(project))) == 0 {
 			t.Fatalf("no %s was posted with the removal: %v", want, kinds(posts))
 		}
 	}
-	if len(postsAbout(posts, "decision", "project", string(project))) != 2 {
+	if len(postsOf(posts, "decision", "project", string(project))) != 2 {
 		t.Fatalf("decisions: %v", kinds(posts))
 	}
 	for range 2 {
 		f.s.publishRemovedPass(context.Background())
-		if again := f.hooks.take(); len(again) != 0 {
+		if again := f.hooks.Take(); len(again) != 0 {
 			t.Fatalf("reposted: %v", kinds(again))
 		}
 		f.s = &Service{cfg: f.s.current(), memory: hearsay.Health{}}
@@ -415,12 +405,12 @@ func TestRemovalOfAPostedProjectPostsOnlyTheRemoval(t *testing.T) {
 	f.restart()
 	recoverHooks()
 	f.s.publishRemovedPass(context.Background())
-	posts := f.hooks.take()
-	if len(posts) != 1 || posts[0].str("kind") != "project" || posts[0].str("status") != "removed" {
+	posts := f.hooks.Take()
+	if len(posts) != 1 || posts[0].Str("kind") != "project" || posts[0].Str("status") != "removed" {
 		t.Fatalf("removal posted %v", kinds(posts))
 	}
 	f.s.publishRemovedPass(context.Background())
-	if again := f.hooks.take(); len(again) != 0 {
+	if again := f.hooks.Take(); len(again) != 0 {
 		t.Fatalf("reposted: %v", kinds(again))
 	}
 }
@@ -436,7 +426,7 @@ func TestRemovalWritesNothingWithoutPublishing(t *testing.T) {
 	}
 	f.s.cfg = f.cfg.WithoutProjectID(f.repo.Project())
 	fixturekit.Must(t, f.repo.Close())
-	if f.s.publishRemovedPass(context.Background()) || len(f.hooks.take()) != 0 {
+	if f.s.publishRemovedPass(context.Background()) || len(f.hooks.Take()) != 0 {
 		t.Fatal("a removed project was published without publishing configured")
 	}
 }
@@ -444,7 +434,7 @@ func TestRemovalWritesNothingWithoutPublishing(t *testing.T) {
 func TestRemovedProjectIsPostedByTheServiceAfterARestart(t *testing.T) {
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
 	opts, clone := projectFixture(t)
-	hooks := newHooksFake(t)
+	hooks := fixturekit.NewHooks(t)
 	addr := hooks.Listener.Addr().String()
 	hooks.Close()
 	path := filepath.Join(opts.Config.Root, "config.toml")
@@ -495,22 +485,22 @@ token_env = "PUBLISH_TEST_TOKEN"
 	c.Close()
 	fixturekit.Must(t, s.Close())
 
-	hooks = newHooksFakeOn(t, addr)
+	hooks = fixturekit.NewHooksOn(t, addr)
 	passes.Store(0)
 	s, err = Start(ctx, opts)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { s.Close() })
-	var posts []hooksPost
+	var posts []fixturekit.HooksPost
 	intakefixture.Soon(t, "the removal to be posted", func() bool {
-		posts = append(posts, hooks.take()...)
-		return len(postsAbout(posts, "project", "status", "removed")) > 0
+		posts = append(posts, hooks.Take()...)
+		return len(postsOf(posts, "project", "status", "removed")) > 0
 	})
 	intakefixture.Soon(t, "the removal pass to finish", func() bool { return passes.Load() > 0 })
-	posts = append(posts, hooks.take()...)
-	if removals := postsAbout(posts, "project", "project", string(id)); len(removals) != 1 || removals[0].str("state") != "abandoned" {
+	posts = append(posts, hooks.Take()...)
+	if removals := postsOf(posts, "project", "project", string(id)); len(removals) != 1 || removals[0].Str("state") != "abandoned" {
 		t.Fatalf("removals: %v", kinds(posts))
 	}
-	if charter := postsAbout(posts, "document", "document", "charter"); len(charter) == 0 {
+	if charter := postsOf(posts, "document", "document", "charter"); len(charter) == 0 {
 		t.Fatalf("the project's pending charter was not posted with it: %v", kinds(posts))
 	}
 	fixturekit.Must(t, s.Close())
@@ -519,7 +509,7 @@ token_env = "PUBLISH_TEST_TOKEN"
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { s.Close() })
 	intakefixture.Soon(t, "the removal pass to finish", func() bool { return passes.Load() > 0 })
-	if again := hooks.take(); len(again) != 0 {
+	if again := hooks.Take(); len(again) != 0 {
 		t.Fatalf("reposted after another restart: %v", kinds(again))
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -29,29 +31,14 @@ const (
 	flowPoll     = 10 * time.Minute
 )
 
-type flowClock struct {
-	mu sync.Mutex
-	at time.Time
-}
+type flowClock struct{ *fixturekit.IssueClock }
 
 func (c *flowClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(10 * time.Microsecond)
-	return c.at
+	c.Advance(10 * time.Microsecond)
+	return c.IssueClock.Now()
 }
 
-func (c *flowClock) Peek() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *flowClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
-}
+func (c *flowClock) Peek() time.Time { return c.IssueClock.Now() }
 
 type cloudHost struct {
 	mu       sync.Mutex
@@ -172,36 +159,36 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(flowTokenEnv, flowToken)
 
-	clock := &flowClock{at: fixturekit.DemoStart}
+	clock := &flowClock{fixturekit.NewIssueClock(fixturekit.DemoStart)}
 	b := newBriefFixtureAt(t, "[dagger]\ncloud_api_token_env = \""+flowTokenEnv+"\"\n[events]\nwindow = \"1ms\"\nprogress_window = \"1ms\"\n", clock.Now)
 	j := &flowJourney{briefJourney: b, clock: clock, checks: &countingChecks{}, rerunLog: rerunLog, traceLog: traceLog}
 	j.host = newCloudHost(j.clock)
-	j.fork, j.pulls = fixturekit.PublicationFork(t, b.clone, func() string { commit, _ := j.forkBranch(t); return commit })
-	j.pulls.SyncHead = true
-	j.pulls.Statuses = j.host.CommitStatuses
-	j.received = filepath.Join(filepath.Dir(j.fork), "received")
+	j.Fork, j.Pulls = fixturekit.PublicationFork(t, b.Clone, func() string { commit, _ := j.ForkBranch(t); return commit })
+	j.Pulls.SyncHead = true
+	j.Pulls.Statuses = j.host.CommitStatuses
+	j.received = filepath.Join(filepath.Dir(j.Fork), "received")
 	hook := fmt.Sprintf("#!/bin/sh\necho push >> '%s'\n", j.received)
-	fixturekit.Must(t, os.WriteFile(filepath.Join(j.fork, "hooks", "pre-receive"), []byte(hook), 0o700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(j.Fork, "hooks", "pre-receive"), []byte(hook), 0o700))
 
-	b.opts.PullRequests = j.pulls
-	b.opts.FinalChecksWait = nil
-	b.opts.reviewChecks = j.checks
+	b.Opts.PullRequests = j.Pulls
+	b.Opts.FinalChecksWait = nil
+	b.Opts.ReviewChecks = j.checks
 
-	stream, repository := b.buildFixture().SeedGit(t, "flow")
-	b.stream, b.repository = stream, repository
-	b.s.setSole(&activeProject{repository: repository})
-	fixturekit.EditProjectSettings(t, b.opts.Config.Root, b.project, func(text string) string { return "checks_timeout = \"2h\"\n" + text })
-	mergeDirectly(t, b.shedFixture, repository, stream, "resume", map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"})
-	mergeDirectly(t, b.shedFixture, repository, stream, "dedupe", map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
+	stream, repository := b.BuildFixture().SeedGit(t, "flow")
+	b.Stream, b.Repository = stream, repository
+	b.S.SetSole(&journey.ActiveProject{Repository: repository})
+	fixturekit.EditProjectSettings(t, b.Opts.Config.Root, b.Project, func(text string) string { return "checks_timeout = \"2h\"\n" + text })
+	journey.MergeDirectly(t, b.ShedFixture, repository, stream, "resume", map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"})
+	journey.MergeDirectly(t, b.ShedFixture, repository, stream, "dedupe", map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	return j
 }
 
 func (j *flowJourney) start(t *testing.T) {
 	t.Helper()
 	j.run(t)
-	status := j.s.CheckSlots()
+	status := j.S.CheckSlots()
 	for i := range status.Limit {
-		release, err := InspectForTest(j.s).AcquireCheckSlot(context.Background(), service.CheckSlotRun{Project: j.project, Workstream: j.stream, Unit: fmt.Sprintf("held-%d", i)})
+		release, err := journey.InspectForTest(j.S).AcquireCheckSlot(context.Background(), service.CheckSlotRun{Project: j.Project, Workstream: j.Stream, Unit: fmt.Sprintf("held-%d", i)})
 		fixturekit.Must(t, err)
 		j.held = append(j.held, release)
 	}
@@ -216,17 +203,17 @@ func (j *flowJourney) restart(t *testing.T) {
 
 func (j *flowJourney) requireNoCheckSlotWait(t *testing.T) {
 	t.Helper()
-	status := j.s.CheckSlots()
+	status := j.S.CheckSlots()
 	if len(status.Waiting) != 0 || status.Used != status.Limit {
 		t.Fatalf("check slots: %d of %d used, waiting %+v", status.Used, status.Limit, status.Waiting)
 	}
 }
 
-func (j *flowJourney) live() *trace.Repository { return j.s.sole().repository }
+func (j *flowJourney) live() *trace.Repository { return j.S.Sole().Repository }
 
 func (j *flowJourney) pushes(t *testing.T) []delivery.Push {
 	t.Helper()
-	pushes, err := delivery.Pushes(j.live(), j.stream)
+	pushes, err := delivery.Pushes(j.live(), j.Stream)
 	fixturekit.Must(t, err)
 	return pushes
 }
@@ -273,7 +260,7 @@ func (j *flowJourney) traceCalls(t *testing.T) []string {
 
 func (j *flowJourney) finalOperation(t *testing.T, review int) (trace.OperationRecord, bool) {
 	t.Helper()
-	ops, err := j.live().Operations(j.stream)
+	ops, err := j.live().Operations(j.Stream)
 	fixturekit.Must(t, err)
 	for _, o := range ops {
 		if o.Operation.Action != delivery.FinalReviewAction {
@@ -328,7 +315,7 @@ func (j *flowJourney) stepTo(t *testing.T, review int, at time.Time, want string
 func (j *flowJourney) checkRuns(t *testing.T, review int) []delivery.FinalCheckRun {
 	t.Helper()
 	var runs []delivery.FinalCheckRun
-	for _, d := range intakefixture.StreamDocuments(t, j.live(), j.stream, delivery.FinalChecksDocument(review)) {
+	for _, d := range intakefixture.StreamDocuments(t, j.live(), j.Stream, delivery.FinalChecksDocument(review)) {
 		var run delivery.FinalCheckRun
 		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &run))
 		runs = append(runs, run)
@@ -354,7 +341,7 @@ func (j *flowJourney) awaitReport(t *testing.T, review int) api.FinalReport {
 	t.Helper()
 	var report api.FinalReport
 	intakefixture.Eventually(t, fmt.Sprintf("final review %d recorded no report", review), func() bool {
-		r, found, err := delivery.LatestFinalReport(j.live(), j.stream)
+		r, found, err := delivery.LatestFinalReport(j.live(), j.Stream)
 		fixturekit.Must(t, err)
 		report = r
 		return found && r.Review == review && r.Outcome == delivery.FinalReviewed
@@ -364,7 +351,7 @@ func (j *flowJourney) awaitReport(t *testing.T, review int) api.FinalReport {
 
 func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 	t.Helper()
-	entries, err := j.live().Outbox(j.stream)
+	entries, err := j.live().Outbox(j.Stream)
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
@@ -377,7 +364,7 @@ func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 
 func (j *flowJourney) feature(t *testing.T) string {
 	t.Helper()
-	state, err := j.live().Workflow(j.stream, trace.FeatureSubject)
+	state, err := j.live().Workflow(j.Stream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
 	return state.Value
 }

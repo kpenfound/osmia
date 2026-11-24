@@ -3,13 +3,15 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
+	slices "slices"
+	testing "testing"
+	time "time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	slices "slices"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -19,10 +21,10 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (f *shedFixture) deferred(t *testing.T, stream config.WorkstreamID, unit string, d api.UnitDispatch) api.UnitStatus {
+func deferred(f *journey.ShedFixture, t *testing.T, stream config.WorkstreamID, unit string, d api.UnitDispatch) api.UnitStatus {
 	t.Helper()
-	state, _ := f.s.store.Effective()
-	return intakefixture.DeferredUnit(t, f.repository(), state.Pauses, stream, unit, d)
+	state, _ := f.S.Store.Effective()
+	return intakefixture.DeferredUnit(t, f.Repository(), state.Pauses, stream, unit, d)
 }
 
 func overlapping(unit string) api.UnitDispatch {
@@ -39,23 +41,23 @@ func blockedOnItself(unit string) api.UnitDispatch {
 	return api.UnitDispatch{Reason: execution.DeferBlocked, Blocked: unit, Message: "Cannot start: the mason controller is blocked on this unit and tries again on every pass."}
 }
 
-func (f *shedFixture) dispatches(t *testing.T, stream config.WorkstreamID, unit string) []string {
+func dispatches(f *journey.ShedFixture, t *testing.T, stream config.WorkstreamID, unit string) []string {
 	t.Helper()
-	return intakefixture.DispatchDecisions(t, f.repository(), stream, unit)
+	return intakefixture.DispatchDecisions(t, f.Repository(), stream, unit)
 }
 
-func (f *shedFixture) awaitDispatches(t *testing.T, stream config.WorkstreamID, unit string, n int) {
+func awaitDispatches(f *journey.ShedFixture, t *testing.T, stream config.WorkstreamID, unit string, n int) {
 	t.Helper()
-	intakefixture.AwaitDispatchDecisions(t, f.repository(), stream, unit, n)
+	intakefixture.AwaitDispatchDecisions(t, f.Repository(), stream, unit, n)
 }
 
 func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	t.Parallel()
 
-	f, masons := newParallelMasonFixturePrepared(t, config.WorkspacesGit, 1, 3, disjointPlan, func(opts *Options) {
-		appendConfig(t, opts, "\n[mason]\nmax_clean_turns = 20\n")
+	f, masons := journey.NewParallelMasonFixturePrepared(t, config.WorkspacesGit, 1, 3, intakefixture.DisjointPlan, func(opts *journey.Options) {
+		journey.AppendConfig(t, opts, "\n[mason]\nmax_clean_turns = 20\n")
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 
 	hiPaused := make(chan struct{})
 	running := make(chan struct{}, 16)
@@ -77,46 +79,46 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 			return nil, ctx.Err()
 		}
 	}
-	f.engine.Mu.Lock()
+	f.Engine.Mu.Lock()
 	for _, unit := range []string{"resume", "upload", "audit"} {
 		for i := 1; i <= 6; i++ {
-			f.engine.Turns[fmt.Sprintf("%s-continue-%d", intake.MasonAgent(unit), i)] = continued
-			f.engine.Turns[fmt.Sprintf("%s-recover-%d", intake.MasonAgent(unit), i)] = continued
+			f.Engine.Turns[fmt.Sprintf("%s-continue-%d", intake.MasonAgent(unit), i)] = continued
+			f.Engine.Turns[fmt.Sprintf("%s-recover-%d", intake.MasonAgent(unit), i)] = continued
 		}
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 	factory := runtime.Target{Scope: "factory"}
-	built := f.builtPaused(t, factory, "first", "second")
+	built := builtPaused(f, t, factory, "first", "second")
 	a, b := built[0], built[1]
 
 	lo, hi := intakefixture.LowHigh(a, b)
 	units := []string{"resume", "upload", "audit"}
 	for _, stream := range []config.WorkstreamID{lo, hi} {
-		f.awaitDispatches(t, stream, "audit", 1)
+		awaitDispatches(f, t, stream, "audit", 1)
 	}
 	for _, stream := range []config.WorkstreamID{lo, hi} {
 		var want []api.UnitStatus
 		for _, unit := range units {
-			want = append(want, f.deferred(t, stream, unit, factoryPaused))
+			want = append(want, deferred(f, t, stream, unit, factoryPaused))
 		}
-		f.checkUnits(t, stream, want)
+		f.CheckUnits(t, stream, want)
 	}
 
-	mutation(t, f.c, "PUT", "priority", api.PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMasonRan(t, hi, "resume")
+	intakefixture.Mutation(t, f.C, "PUT", "priority", api.PriorityRequest{Project: f.Project, Workstreams: []config.WorkstreamID{hi, lo}})
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
+	f.AwaitMasonRan(t, hi, "resume")
 	for _, unit := range units {
-		f.awaitDispatches(t, lo, unit, 2)
+		awaitDispatches(f, t, lo, unit, 2)
 	}
 	behind := api.UnitDispatch{Reason: execution.DeferPriority, Limit: 1, Workstreams: []config.WorkstreamID{hi}, Message: "Waits for a mason slot: all 1 are in use, and higher-priority workstreams start first: " + string(hi) + "."}
-	f.checkUnits(t, hi, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, f.deferred(t, hi, "upload", slotless(1)), f.deferred(t, hi, "audit", slotless(1))})
-	f.checkUnits(t, lo, []api.UnitStatus{f.deferred(t, lo, "resume", behind), f.deferred(t, lo, "upload", behind), f.deferred(t, lo, "audit", behind)})
+	f.CheckUnits(t, hi, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, deferred(f, t, hi, "upload", slotless(1)), deferred(f, t, hi, "audit", slotless(1))})
+	f.CheckUnits(t, lo, []api.UnitStatus{deferred(f, t, lo, "resume", behind), deferred(f, t, lo, "upload", behind), deferred(f, t, lo, "audit", behind)})
 	for _, unit := range units {
-		if got, want := f.dispatches(t, lo, unit), []string{"deferred paused", "deferred priority"}; !slices.Equal(got, want) {
+		if got, want := dispatches(f, t, lo, unit), []string{"deferred paused", "deferred priority"}; !slices.Equal(got, want) {
 			t.Fatalf("decisions on %s of %s: %q, want %q", unit, lo, got, want)
 		}
 	}
-	if got, want := f.dispatches(t, hi, "resume"), []string{"deferred paused", "started"}; !slices.Equal(got, want) {
+	if got, want := dispatches(f, t, hi, "resume"), []string{"deferred paused", "started"}; !slices.Equal(got, want) {
 		t.Fatalf("decisions on resume of %s: %q, want %q", hi, got, want)
 	}
 
@@ -125,26 +127,26 @@ func TestReadyUnitDecisionsFollowPauseAndPriority(t *testing.T) {
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatalf("no continuation of a mason of %s started before the pause", hi)
 	}
-	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner"}
-	mutation(t, f.c, "PUT", "pause", api.PauseRequest(pause))
+	pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.Project, Workstream: hi}, Mode: "soft", Source: "owner"}
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest(pause))
 	close(hiPaused)
-	f.awaitMasonRan(t, lo, "resume")
+	f.AwaitMasonRan(t, lo, "resume")
 	decisions := map[config.WorkstreamID]map[string][]string{
 		lo: {"resume": {"deferred paused", "deferred priority", "started"}, "upload": {"deferred paused", "deferred priority", "deferred capacity"}},
 		hi: {"resume": {"deferred paused", "started"}, "upload": {"deferred paused", "deferred capacity", "deferred paused"}},
 	}
 	for stream, want := range decisions {
 		for unit, want := range want {
-			f.awaitDispatches(t, stream, unit, len(want))
+			awaitDispatches(f, t, stream, unit, len(want))
 		}
 	}
 	masons.Check(t)
 	paused := api.UnitDispatch{Reason: execution.DeferPaused, Pause: &pause, Message: "Waits while a workstream pause is in force, set by owner."}
-	f.checkUnits(t, hi, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, f.deferred(t, hi, "upload", paused), f.deferred(t, hi, "audit", paused)})
-	f.checkUnits(t, lo, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, f.deferred(t, lo, "upload", slotless(1)), f.deferred(t, lo, "audit", slotless(1))})
+	f.CheckUnits(t, hi, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, deferred(f, t, hi, "upload", paused), deferred(f, t, hi, "audit", paused)})
+	f.CheckUnits(t, lo, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, deferred(f, t, lo, "upload", slotless(1)), deferred(f, t, lo, "audit", slotless(1))})
 	for stream, want := range decisions {
 		for unit, want := range want {
-			if got := f.dispatches(t, stream, unit); !slices.Equal(got, want) {
+			if got := dispatches(f, t, stream, unit); !slices.Equal(got, want) {
 				t.Fatalf("decisions on %s of %s: %q, want %q", unit, stream, got, want)
 			}
 		}

@@ -4,20 +4,22 @@ import (
 	slices "slices"
 	testing "testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func (f *twoProjectFixture) queue(t *testing.T, repo *trace.Repository, id config.ProjectID, turn string) {
+func queue(f *journey.TwoProjectFixture, t *testing.T, repo *trace.Repository, id config.ProjectID, turn string) {
 	t.Helper()
-	fixturekit.QueueProjectTurn(t, repo, id, f.streams[id], f.clock.Now(), turn)
+	fixturekit.QueueProjectTurn(t, repo, id, f.Streams[id], f.Clock.Now(), turn)
 }
 
-func (f *twoProjectFixture) dispatchedTurns(t *testing.T, repo *trace.Repository, id config.ProjectID) []string {
+func dispatchedTurns(f *journey.TwoProjectFixture, t *testing.T, repo *trace.Repository, id config.ProjectID) []string {
 	t.Helper()
-	ops, err := repo.Operations(f.streams[id])
+	ops, err := repo.Operations(f.Streams[id])
 	fixturekit.Must(t, err)
 	var out []string
 	for _, op := range ops {

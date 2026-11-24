@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -18,11 +19,11 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 	t.Parallel()
 	for _, change := range []string{"pause", "unpause"} {
 		t.Run(change, func(t *testing.T) {
-			f, _ := newParallelMasonFixture(t, 1, 3, disjointPlan)
+			f, _ := newParallelMasonFixture(t, 1, 3, intakefixture.DisjointPlan)
 			defer f.stop(t)
 			built := f.builtPaused(t, factoryTarget, "first", "second")
 			lo, hi := intakefixture.LowHigh(built[0], built[1])
-			mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
+			intakefixture.Mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
 			f.awaitDispatches(t, lo, "resume", 1)
 
 			_, projects := f.s.runtimes()

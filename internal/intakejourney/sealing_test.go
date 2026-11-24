@@ -4,9 +4,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -14,6 +11,10 @@ import (
 	"sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	intake "github.com/kpenfound/osmia/internal/intake"

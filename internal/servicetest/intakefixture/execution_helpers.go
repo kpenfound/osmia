@@ -76,7 +76,7 @@ func HeldCheck(ctx context.Context, links []string, entered chan []string, relea
 	}
 }
 
-func CleanupCheckpoint(ctx context.Context, step string, reached, released chan struct{}, once *sync.Once) error {
+func CleanupCheckpoint(ctx context.Context, step string, reached chan struct{}, released <-chan struct{}, once *sync.Once) error {
 	if step != "archive-cleanup-ready" {
 		return nil
 	}

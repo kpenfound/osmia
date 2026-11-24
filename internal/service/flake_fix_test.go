@@ -344,7 +344,7 @@ func TestAFlakeFixWorkstreamWaitsForTheOwnerAtTheRatificationGate(t *testing.T) 
 func TestTheFeedNamesTheWorkstreamAFlakeDecisionOpened(t *testing.T) {
 	t.Parallel()
 	o := openFlakeFix(t)
-	feed := readFeed(t, o.c, o.stream)
+	feed := intakefixture.ReadFeed(t, o.c, o.stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 		return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(o.want)) && e.Transition.Actor == chiefActor.Kind+":"+chiefActor.ID
 	}) {
@@ -556,7 +556,7 @@ func TestFlakeFixInterruptedOpenCompletesAfterRestart(t *testing.T) {
 		t.Fatalf("the retried open answered %+v", retry)
 	}
 	intakefixture.Soon(t, "the decision to show in the originating feed", func() bool {
-		feed := readFeed(t, l.c, l.stream)
+		feed := intakefixture.ReadFeed(t, l.c, l.stream)
 		return slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 			return e.Transition != nil && strings.HasPrefix(e.Transition.Subject, "flake-decision-") && strings.Contains(e.Transition.Reason, string(want))
 		})
@@ -597,7 +597,7 @@ func TestFlakeFixDeclineNeedsAReasonAndNotifiesAgainOnTheNextFlake(t *testing.T)
 	}) {
 		t.Fatalf("the trace does not record the decline: %+v", transitions)
 	}
-	feed := readFeed(t, l.c, l.stream)
+	feed := intakefixture.ReadFeed(t, l.c, l.stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 		return e.Transition != nil && e.Transition.To == "declined" && strings.Contains(e.Transition.Reason, reason)
 	}) {

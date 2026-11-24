@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -24,58 +26,58 @@ import (
 func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{
-		wait: lifecycleAwait,
-		options: func(opts *Options) {
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{
+		Wait: journey.LifecycleAwait,
+		Options: func(opts *journey.Options) {
 			opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 				return op.Boundary == coreadapter.ContainerBoundary
 			}
 		},
 	})
-	defer f.stop(t)
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	defer f.Stop(t)
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(ctx, f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	fixturekit.Must(t, err)
-	f.awaitApproved(t)
-	f.checkContinuation(t)
-	repo, err := f.s.repository(f.project)
+	f.AwaitApproved(t)
+	f.CheckContinuation(t)
+	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	sharedID, err := repo.CrossRepoWorkgroupOf(f.stream1)
+	sharedID, err := repo.CrossRepoWorkgroupOf(f.Stream1)
 	fixturekit.Must(t, err)
-	target, host, _, closeTarget, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
+	target, host, _, closeTarget, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)
 	fixturekit.Must(t, err)
 	chief, err := target.ChiefOfStaffThread(host)
 	closeTarget()
 	fixturekit.Must(t, err)
 
-	f.stop(t)
+	f.Stop(t)
 	live := config.WorkstreamID("w_00000000000000000000000000000101")
 	retained := config.WorkstreamID("w_00000000000000000000000000000102")
 	cleaned := config.WorkstreamID("w_00000000000000000000000000000103")
 	session := config.WorkstreamID("w_00000000000000000000000000000104")
-	cfg := loadRegistered(t, f.opts.Config)
-	repo, err = trace.Open(cfg.Root, cfg.For(f.project).Project)
+	cfg := loadRegistered(t, f.Opts.Config)
+	repo, err = trace.Open(cfg.Root, cfg.For(f.Project).Project)
 	fixturekit.Must(t, err)
 	for _, stream := range []config.WorkstreamID{live, retained} {
 		fixturekit.Must(t, repo.CreateWorkstream(ctx, stream, fixturekit.DemoStart, intake.RegistrationActor))
 	}
 	_, err = repo.SetFeatureState(ctx, trace.Header{
 		Schema: "osmia.trace.transition", Version: trace.Version, ID: "retained-cancelled", Revision: 1,
-		Project: f.project, Workstream: retained, At: fixturekit.DemoStart, Actor: intake.RegistrationActor, Cause: "fixture",
+		Project: f.Project, Workstream: retained, At: fixturekit.DemoStart, Actor: intake.RegistrationActor, Cause: "fixture",
 	}, intake.AbandonedState, "cancelled")
 	fixturekit.Must(t, err)
-	blockArchiveCleanup(t, repo, f.project, retained, fixturekit.DemoStart, intake.RegistrationActor)
-	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.repos[0].Main, "osmia/session/"+string(session), "Explore uploads", fixturekit.DemoStart, intake.RegistrationActor))
+	blockArchiveCleanup(t, repo, f.Project, retained, fixturekit.DemoStart, intake.RegistrationActor)
+	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.Repos[0].Main, "osmia/session/"+string(session), "Explore uploads", fixturekit.DemoStart, intake.RegistrationActor))
 	legacyChiefs := map[config.WorkstreamID]trace.Thread{}
 	for _, stream := range []config.WorkstreamID{live, retained} {
 		legacyChiefs[stream], err = repo.ChiefOfStaffThread(stream)
 		fixturekit.Must(t, err)
 	}
-	sessionPath := filepath.Join(f.opts.Config.Root, "workstreams", string(f.project), string(session))
+	sessionPath := filepath.Join(f.Opts.Config.Root, "workstreams", string(f.Project), string(session))
 	sessionBefore := fixturekit.TraceCommits(t, sessionPath)
 	repo.Close()
-	path := filepath.Join(f.opts.Config.Root, "runtime.json")
+	path := filepath.Join(f.Opts.Config.Root, "runtime.json")
 	data, err := os.ReadFile(path)
 	state := runtime.State{Version: runtime.Version}
 	if err == nil {
@@ -84,8 +86,8 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		fixturekit.Must(t, err)
 	}
 	archives := []runtime.Archive{
-		{Project: f.project, Workstream: retained, ArchivedAt: fixturekit.DemoStart, Title: "Retained request", State: intake.AbandonedState, ResolutionEvidence: "cancelled", Resolved: true},
-		{Project: f.project, Workstream: cleaned, ArchivedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart.Add(time.Minute), Title: "Cleaned request", State: intake.DeliveredState},
+		{Project: f.Project, Workstream: retained, ArchivedAt: fixturekit.DemoStart, Title: "Retained request", State: intake.AbandonedState, ResolutionEvidence: "cancelled", Resolved: true},
+		{Project: f.Project, Workstream: cleaned, ArchivedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart.Add(time.Minute), Title: "Cleaned request", State: intake.DeliveredState},
 	}
 	state.Archived = append(state.Archived, archives...)
 	data, err = json.Marshal(state)
@@ -98,13 +100,13 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	}
 	var before map[membership][]config.WorkgroupID
 	for restart := range 2 {
-		f.start(t)
+		f.Start(t)
 		memberships := map[membership][]config.WorkgroupID{}
-		for _, project := range []config.ProjectID{f.project, f.project2} {
-			if f.s.current().For(project).Project.ID != project {
+		for _, project := range []config.ProjectID{f.Project, f.Project2} {
+			if f.S.Current().For(project).Project.ID != project {
 				t.Fatalf("repo %s is not active", project)
 			}
-			r, err := f.s.repository(project)
+			r, err := f.S.Repository(project)
 			fixturekit.Must(t, err)
 			groups, _, err := trace.Workgroups(r)
 			fixturekit.Must(t, err)
@@ -118,21 +120,21 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 				}
 			}
 		}
-		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, sharedID)
+		authority, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, sharedID)
 		fixturekit.Must(t, err)
 		groups, _, err := trace.Workgroups(authority)
 		fixturekit.Must(t, err)
-		if len(groups) != 1 || groups[0].ID != sharedID || !slices.Equal(groups[0].Members, []config.WorkstreamID{f.origin, f.stream1, f.stream2}) {
+		if len(groups) != 1 || groups[0].ID != sharedID || !slices.Equal(groups[0].Members, []config.WorkstreamID{f.Origin, f.Stream1, f.Stream2}) {
 			t.Fatalf("shared authority lost exact membership: %+v", groups)
 		}
-		sharedChief, err := authority.ChiefOfStaffThread(f.origin)
+		sharedChief, err := authority.ChiefOfStaffThread(f.Origin)
 		authority.Close()
 		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(sharedChief.Identity, chief.Identity) {
 			t.Fatal("startup replaced the shared chief thread")
 		}
-		for _, member := range []membership{{f.project, f.stream1}, {f.project2, f.stream2}} {
-			r, err := f.s.repository(member.repo)
+		for _, member := range []membership{{f.Project, f.Stream1}, {f.Project2, f.Stream2}} {
+			r, err := f.S.Repository(member.repo)
 			fixturekit.Must(t, err)
 			id, err := r.CrossRepoWorkgroupOf(member.stream)
 			fixturekit.Must(t, err)
@@ -144,7 +146,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 				t.Fatalf("member %v has an independent chief: %v", member, err)
 			}
 		}
-		want := []membership{{f.project, live}, {f.project, retained}, {f.project, cleaned}, {f.project, f.stream1}, {f.project2, f.stream2}}
+		want := []membership{{f.Project, live}, {f.Project, retained}, {f.Project, cleaned}, {f.Project, f.Stream1}, {f.Project2, f.Stream2}}
 		if len(memberships) != len(want) {
 			t.Fatalf("unexpected memberships: %+v", memberships)
 		}
@@ -158,8 +160,8 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		}
 		before = memberships
 		var sharedEntries []api.ConversationEntry
-		for i, stream := range []config.WorkstreamID{f.stream1, f.stream2} {
-			conversation, err := f.c.Conversation(ctx, stream)
+		for i, stream := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+			conversation, err := f.C.Conversation(ctx, stream)
 			fixturekit.Must(t, err)
 			if i == 0 {
 				sharedEntries = conversation.Entries
@@ -167,7 +169,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 				t.Fatal("member conversations no longer resolve to the shared chief")
 			}
 		}
-		r, err := f.s.repository(f.project)
+		r, err := f.S.Repository(f.Project)
 		fixturekit.Must(t, err)
 		for stream, original := range legacyChiefs {
 			current, err := r.ChiefOfStaffThread(stream)
@@ -182,20 +184,20 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		if _, err := r.ChiefOfStaffThread(cleaned); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("cleaned archive gained a chief thread: %v", err)
 		}
-		if _, err := f.c.Conversation(ctx, cleaned); !intakefixture.Failed(err, api.Conflict) {
+		if _, err := f.C.Conversation(ctx, cleaned); !intakefixture.Failed(err, api.Conflict) {
 			t.Fatalf("cleaned archive gained a conversation: %v", err)
 		}
-		if _, err := os.Lstat(filepath.Join(f.opts.Config.Root, "workstreams", string(f.project), string(cleaned))); !os.IsNotExist(err) {
+		if _, err := os.Lstat(filepath.Join(f.Opts.Config.Root, "workstreams", string(f.Project), string(cleaned))); !os.IsNotExist(err) {
 			t.Fatalf("cleaned archive history was recreated: %v", err)
 		}
 		for _, original := range archives {
-			current, found := intakefixture.ArchiveRecord(t, f.s.store, original.Workstream)
+			current, found := intakefixture.ArchiveRecord(t, f.S.Store, original.Workstream)
 			if !found || !reflect.DeepEqual(original, current) {
 				t.Fatalf("archive changed: before=%+v after=%+v", original, current)
 			}
 		}
 		if restart == 0 {
-			f.stop(t)
+			f.Stop(t)
 		}
 	}
 }

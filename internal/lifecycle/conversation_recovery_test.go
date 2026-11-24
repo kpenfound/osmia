@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -18,21 +20,21 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 		t.Run(map[bool]string{false: "captured", true: "completed"}[completed], func(t *testing.T) {
 			ctx := context.Background()
 			f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
-			s, err := Start(ctx, f.opts)
+			s, err := journey.Start(ctx, f.opts)
 			fixturekit.Must(t, err)
 			t.Cleanup(func() { fixturekit.Must(t, s.Close()) })
-			_, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+			_, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
-			InspectForTest(s).DrainConversations()
-			client := NewClient(s.Socket())
+			journey.InspectForTest(s).DrainConversations()
+			client := journey.NewClient(s.Socket())
 			t.Cleanup(func() { client.Close() })
 			sent, err := client.Send(ctx, f.stream1, "Shared captured message")
 			fixturekit.Must(t, err)
-			repo, err := s.repository(f.project1)
+			repo, err := s.Repository(f.project1)
 			fixturekit.Must(t, err)
-			wt, host, _, closeTarget, err := s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
+			wt, host, _, closeTarget, err := s.Lifecycle().ChiefRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
 			th, err := wt.Thread(host, trace.ChiefOfStaff)
 			fixturekit.Must(t, err)
@@ -67,11 +69,11 @@ func TestConversationPathSharedChiefRestartReconcilesHostOperation(t *testing.T)
 			attempt.Close()
 			closeTarget()
 			fixturekit.Must(t, s.Close())
-			s, err = Start(ctx, f.opts)
+			s, err = journey.Start(ctx, f.opts)
 			fixturekit.Must(t, err)
-			repo, err = s.repository(f.project1)
+			repo, err = s.Repository(f.project1)
 			fixturekit.Must(t, err)
-			wt, host, _, closeTarget, err = s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
+			wt, host, _, closeTarget, err = s.Lifecycle().ChiefRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
 			t.Cleanup(closeTarget)
 			fixturekit.ConversationAwait(t, func() bool { records, _ := wt.Operations(host); return len(records) == 1 && records[0].Acknowledged })

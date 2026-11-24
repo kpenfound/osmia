@@ -5,12 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	maps "maps"
 	os "os"
 	filepath "path/filepath"
@@ -19,6 +13,13 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -307,7 +308,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	if second == "" {
 		t.Fatal("project creation did not register the second project")
 	}
-	journey.WriteCharter(t, c, second, "1. Keep the client API stable.\n")
+	intakefixture.WriteCharter(t, c, second, "1. Keep the client API stable.\n")
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("uncommitted source\n"), 0600))
 	for _, repoID := range []config.ProjectID{project, second} {
 		repository, err := s.Repository(repoID)
@@ -534,7 +535,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(d.Clone))
 	fixturekit.Must(t, err)
-	journey.WriteCharter(t, c, added.Project.ID, "1. Keep state in files under the root.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep state in files under the root.\n")
 	return s, c, added.Project.ID, engine, clock, ticks
 }
 

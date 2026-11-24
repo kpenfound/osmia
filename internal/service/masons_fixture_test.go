@@ -1,22 +1,20 @@
 package service
 
 import (
-	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-const masonRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
-
 func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	return newMasonFixtureOn(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted)
+	return newMasonFixtureOn(t, config.WorkspacesGit, intakefixture.MasonCapacity(masons), drafted)
 }
 
 func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFixture, *intakefixture.FakeMasons) {
@@ -26,7 +24,7 @@ func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFi
 
 func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare func(*Options)) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	return newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted, prepare)
+	return newMasonFixtureWith(t, config.WorkspacesGit, intakefixture.MasonCapacity(masons), drafted, prepare)
 }
 
 func countingSchedule() (*atomic.Int64, func(*Options)) {
@@ -36,7 +34,7 @@ func countingSchedule() (*atomic.Int64, func(*Options)) {
 
 func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
+	f := newDebateFixtureWith(t, 1, 1, intakefixture.MasonRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
 		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls

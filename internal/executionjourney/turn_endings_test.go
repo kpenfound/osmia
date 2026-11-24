@@ -5,13 +5,15 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	strings "strings"
-	atomic "sync/atomic"
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	utf8 "unicode/utf8"
 
@@ -27,17 +29,17 @@ func continueTurn(unit string, sequence int) string {
 	return fmt.Sprintf("%s-continue-%d", intake.MasonAgent(unit), sequence)
 }
 
-func playContinuation(f *shedFixture, fake *intakefixture.FakeMasons, name string, play func(context.Context, agent.Request, *mcp.ClientSession) error) {
+func playContinuation(f *journey.ShedFixture, fake *intakefixture.FakeMasons, name string, play func(context.Context, agent.Request, *mcp.ClientSession) error) {
 	fake.Play[name] = play
-	f.engine.Mu.Lock()
-	f.engine.Turns[name] = fake.Turn
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[name] = fake.Turn
+	f.Engine.Mu.Unlock()
 }
 
-func checkingMoves(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit string) int {
+func checkingMoves(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, unit string) int {
 	t.Helper()
 	n := 0
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.Subject == trace.UnitSubject(unit) && tr.To == execution.UnitChecking {
 			n++
 		}
@@ -45,9 +47,9 @@ func checkingMoves(t *testing.T, f *shedFixture, stream config.WorkstreamID, uni
 	return n
 }
 
-func onlyReport(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit string) execution.UnitReport {
+func onlyReport(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, unit string) execution.UnitReport {
 	t.Helper()
-	docs := f.reports(t, stream, unit)
+	docs := reports(f, t, stream, unit)
 	if len(docs) != 1 {
 		t.Fatalf("reports of unit %s: %+v", unit, docs)
 	}
@@ -58,8 +60,8 @@ func onlyReport(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit s
 
 func TestMasonDoneWithALongCardIsRecorded(t *testing.T) {
 	t.Parallel()
-	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
-	defer f.stop(t)
+	f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer f.Stop(t)
 	long := strings.Repeat("The storage client resumes uploads from the last chunk. ", 6)
 	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Built", "happened": long})
@@ -68,8 +70,8 @@ func TestMasonDoneWithALongCardIsRecorded(t *testing.T) {
 		}
 		return nil
 	}
-	stream := f.seedBuilding(t, "long-card", fixturekit.ValidPlan)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+	stream := seedBuilding(f, t, "long-card", fixturekit.ValidPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 	report := onlyReport(t, f, stream, "resume")
 	if report.Outcome != "Built" || report.Card == nil {
 		t.Fatalf("report %+v", report)
@@ -89,16 +91,16 @@ func TestMasonDoneWithALongCardIsRecorded(t *testing.T) {
 func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 	t.Parallel()
 	var crash atomic.Int64
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", fixturekit.ValidPlan, func(opts *Options) {
+	f, fake := journey.NewMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", fixturekit.ValidPlan, func(opts *journey.Options) {
 
-		opts.boundary = func(_ context.Context, step string) error {
+		opts.Boundary = func(_ context.Context, step string) error {
 			if strings.HasPrefix(step, "mason-turn-queued:") && strings.HasSuffix(step, ":resume") && crash.Add(1) == 2 {
 				return errors.New("the service stopped")
 			}
 			return nil
 		}
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 	var refused atomic.Pointer[string]
 	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": " "})
@@ -109,15 +111,15 @@ func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 		return nil
 	}
 	playContinuation(f, fake, continueTurn("resume", 1), intakefixture.ReportDone("Built"))
-	stream := f.seedBuilding(t, "refused-done", fixturekit.ValidPlan)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+	stream := seedBuilding(f, t, "refused-done", fixturekit.ValidPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 
-	first := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
+	first := awaitCompleted(f, t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	refusal := *refused.Load()
 	if first.Response.Result.Refusal == "" || first.Response.Result.Refusal != refusal || first.Response.Classification != nil {
 		t.Fatalf("the refused turn recorded refusal %q and classification %+v, want refusal %q", first.Response.Result.Refusal, first.Response.Classification, refusal)
 	}
-	th := f.thread(t, stream, intake.MasonAgent("resume"))
+	th := f.Thread(t, stream, intake.MasonAgent("resume"))
 	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != continueTurn("resume", 1) || th.Turns[1].Request.ThreadID != th.Identity.ThreadID {
 		t.Fatalf("mason turns %+v", th.Turns)
 	}
@@ -129,10 +131,10 @@ func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 		t.Fatalf("moves to checking: %d", n)
 	}
 
-	f.stop(t)
-	f.start(t)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
-	if th := f.thread(t, stream, intake.MasonAgent("resume")); len(th.Turns) != 2 {
+	f.Stop(t)
+	f.Start(t)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
+	if th := f.Thread(t, stream, intake.MasonAgent("resume")); len(th.Turns) != 2 {
 		t.Fatalf("mason turns after a restart %+v", th.Turns)
 	}
 	if n := checkingMoves(t, f, stream, "resume"); n != 1 {
@@ -143,14 +145,14 @@ func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 
 func TestMasonFailureWithoutDoneGetsAContinuation(t *testing.T) {
 	t.Parallel()
-	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
-	defer f.stop(t)
+	f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer f.Stop(t)
 	fake.Play[execution.MasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn }
 	playContinuation(f, fake, continueTurn("resume", 1), intakefixture.ReportDone("Built"))
-	stream := f.seedBuilding(t, "failed-turn", fixturekit.ValidPlan)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+	stream := seedBuilding(f, t, "failed-turn", fixturekit.ValidPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 
-	th := f.thread(t, stream, intake.MasonAgent("resume"))
+	th := f.Thread(t, stream, intake.MasonAgent("resume"))
 	if len(th.Turns) != 2 {
 		t.Fatalf("mason turns %+v", th.Turns)
 	}
@@ -179,8 +181,8 @@ func TestMasonAcceptedDoneBeatsTheFailureThatEndedTheTurn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
-			defer f.stop(t)
+			f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+			defer f.Stop(t)
 			name := execution.MasonTurnID("resume")
 			fake.Play[name] = intakefixture.ReportDone("Built")
 			if tc.end == nil {
@@ -191,19 +193,19 @@ func TestMasonAcceptedDoneBeatsTheFailureThatEndedTheTurn(t *testing.T) {
 					return intakefixture.ErrFailTurn
 				}
 			}
-			f.engine.Mu.Lock()
-			f.engine.Turns[name] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.Engine.Mu.Lock()
+			f.Engine.Turns[name] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				result, err := fake.Turn(ctx, req, verified, tools)
 				if result != nil && tc.end != nil {
 					tc.end(result)
 				}
 				return result, err
 			}
-			f.engine.Mu.Unlock()
-			stream := f.seedBuilding(t, "done-then-failure", fixturekit.ValidPlan)
-			f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+			f.Engine.Mu.Unlock()
+			stream := seedBuilding(f, t, "done-then-failure", fixturekit.ValidPlan)
+			f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 
-			th := f.thread(t, stream, intake.MasonAgent("resume"))
+			th := f.Thread(t, stream, intake.MasonAgent("resume"))
 			if len(th.Turns) != 1 || th.Turns[0].Status() != "failed" {
 				t.Fatalf("the mason's turns %+v", th.Turns)
 			}
@@ -216,16 +218,16 @@ func TestMasonAcceptedDoneBeatsTheFailureThatEndedTheTurn(t *testing.T) {
 			if n := checkingMoves(t, f, stream, "resume"); n != 1 {
 				t.Fatalf("moves to checking: %d", n)
 			}
-			for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+			for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 				if tr.To == intake.UnitContested {
 					t.Fatalf("the unit was contested: %+v", tr)
 				}
 			}
 
-			f.stop(t)
-			f.start(t)
-			f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
-			if th := f.thread(t, stream, intake.MasonAgent("resume")); len(th.Turns) != 1 {
+			f.Stop(t)
+			f.Start(t)
+			f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
+			if th := f.Thread(t, stream, intake.MasonAgent("resume")); len(th.Turns) != 1 {
 				t.Fatalf("mason turns after a restart %+v", th.Turns)
 			}
 			if n := checkingMoves(t, f, stream, "resume"); n != 1 {
@@ -238,10 +240,10 @@ func TestMasonAcceptedDoneBeatsTheFailureThatEndedTheTurn(t *testing.T) {
 
 func TestMasonEndingsWithoutAReportContestTheUnitOnceTheBoundIsUsedUp(t *testing.T) {
 	t.Parallel()
-	passed, prepare := countingSchedule()
-	f, fake := newMasonFixturePrepared(t, 1, fixturekit.ValidPlan, prepare)
-	defer f.stop(t)
-	bound := f.s.cfg.Mason.MaxCleanTurns
+	passed, prepare := journey.CountingSchedule()
+	f, fake := journey.NewMasonFixturePrepared(t, 1, fixturekit.ValidPlan, prepare)
+	defer f.Stop(t)
+	bound := f.S.Cfg.Mason.MaxCleanTurns
 
 	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, _, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": " "}); err != nil || recorded {
@@ -252,18 +254,18 @@ func TestMasonEndingsWithoutAReportContestTheUnitOnceTheBoundIsUsedUp(t *testing
 	for i := 1; i < bound; i++ {
 		playContinuation(f, fake, continueTurn("resume", i), func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn })
 	}
-	stream := f.seedBuilding(t, "bounded", fixturekit.ValidPlan)
-	f.awaitUnit(t, stream, "resume", intake.UnitContested)
+	stream := seedBuilding(f, t, "bounded", fixturekit.ValidPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitContested)
 
-	th := f.thread(t, stream, intake.MasonAgent("resume"))
+	th := f.Thread(t, stream, intake.MasonAgent("resume"))
 	if len(th.Turns) != bound {
 		t.Fatalf("the mason had %d turns, want %d", len(th.Turns), bound)
 	}
-	last := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), th.Turns[bound-1].Request.TurnID)
+	last := awaitCompleted(f, t, stream, intake.MasonAgent("resume"), th.Turns[bound-1].Request.TurnID)
 	id := execution.FailureContestID(last.Response.ID)
 	var contest trace.Transition
 	contests := 0
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.To == intake.UnitContested {
 			contest = tr
 			contests++
@@ -273,23 +275,23 @@ func TestMasonEndingsWithoutAReportContestTheUnitOnceTheBoundIsUsedUp(t *testing
 	if contests != 1 || contest.ID != id || contest.From != intake.UnitImplementing || contest.Cause != last.Response.ID || !strings.Contains(contest.Reason, reason) || !strings.Contains(contest.Reason, "it failed") {
 		t.Fatalf("contests %d: %+v", contests, contest)
 	}
-	if body := f.notice(t, stream, id); !strings.Contains(body, "is contested") || !strings.Contains(body, reason) {
+	if body := f.Notice(t, stream, id); !strings.Contains(body, "is contested") || !strings.Contains(body, reason) {
 		t.Fatalf("contest notice %q", body)
 	}
 	if checkingMoves(t, f, stream, "resume") != 0 {
 		t.Fatal("the unit moved to checking")
 	}
 
-	f.stop(t)
-	f.start(t)
+	f.Stop(t)
+	f.Start(t)
 	intakefixture.AwaitFurtherPasses(t, passed, 3)
 	contests = 0
-	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if tr.To == intake.UnitContested {
 			contests++
 		}
 	}
-	if th := f.thread(t, stream, intake.MasonAgent("resume")); contests != 1 || len(th.Turns) != bound {
+	if th := f.Thread(t, stream, intake.MasonAgent("resume")); contests != 1 || len(th.Turns) != bound {
 		t.Fatalf("after a restart: %d contests, %d turns", contests, len(th.Turns))
 	}
 	fake.Check(t)

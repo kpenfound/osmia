@@ -3,13 +3,14 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,10 +39,10 @@ func TestFinalReaderFetchesATraceOutput(t *testing.T) {
 	t.Parallel()
 	d := newDraftFixture(t, "squash")
 	reads := &traceReads{}
-	d.f.s.options.CloudTrace = reads
+	d.f.S.Options.CloudTrace = reads
 	var listedTools []string
 	var results []string
-	d.f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	d.f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		listed, err := tools.ListTools(ctx, nil)
 		if err != nil {
 			return err

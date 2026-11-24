@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
@@ -30,7 +32,7 @@ import (
 )
 
 type crossRepoWiringFixture struct {
-	opts               Options
+	opts               journey.Options
 	cfg                *config.Config
 	clock              *fixturekit.FixedClock
 	engine             *fixturekit.DemoEngine
@@ -47,9 +49,9 @@ func newCrossRepoWiringFixture(t *testing.T, agents map[string]string) *crossRep
 	home, err := os.MkdirTemp("", "wgw-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	opts.Workstreams = nil
-	f := &crossRepoWiringFixture{opts: opts, project1: fixturekit.Project, project2: otherProject, stream1: fixturekit.Stream, stream2: otherStream, live: map[config.ProjectID]*trace.Repository{}}
+	f := &crossRepoWiringFixture{opts: opts, project1: fixturekit.Project, project2: fixturekit.OtherProject, stream1: fixturekit.Stream, stream2: fixturekit.OtherStream, live: map[config.ProjectID]*trace.Repository{}}
 	setup := intakefixture.NewWiringSetup(t, home, opts.Config, agents, func(r *trace.Repository) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
@@ -61,7 +63,7 @@ func newCrossRepoWiringFixture(t *testing.T, agents map[string]string) *crossRep
 	return f
 }
 
-func (f *crossRepoWiringFixture) settle(t *testing.T, s *Service) {
+func (f *crossRepoWiringFixture) settle(t *testing.T, s *journey.Service) {
 	t.Helper()
 	for range 8 {
 		select {
@@ -85,10 +87,10 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		return intakefixture.QuestionResult(req, "session-chief", "The agreed work continues."), nil
 	}
-	s, err := Start(ctx, f.opts)
+	s, err := journey.Start(ctx, f.opts)
 	fixturekit.Must(t, err)
 	defer func() { fixturekit.Must(t, s.Close()) }()
-	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -97,7 +99,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	if leader == f.stream2 {
 		project = f.project2
 	}
-	repo, err := s.repository(project)
+	repo, err := s.Repository(project)
 	fixturekit.Must(t, err)
 	const source config.WorkstreamID = "w_00000000000000000000000000000000"
 	if source >= leader {
@@ -109,13 +111,13 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	for lifetime := 0; lifetime < 2; lifetime++ {
 		if lifetime > 0 {
 			fixturekit.Must(t, s.Close())
-			s, err = Start(ctx, f.opts)
+			s, err = journey.Start(ctx, f.opts)
 			fixturekit.Must(t, err)
 		}
-		c := NewClient(s.Socket())
+		c := journey.NewClient(s.Socket())
 		sent, err := c.Send(ctx, leader, "Report the workgroup's status.")
 		fixturekit.Must(t, err)
-		wait, closeWait := serviceChanges(t, s)
+		wait, closeWait := journey.ServiceChanges(t, s)
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for {
 			f.settle(t, s)
@@ -136,7 +138,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	}
 }
 
-func (f *crossRepoWiringFixture) repositories(t *testing.T, s *Service) (repo1, repo2 *trace.Repository) {
+func (f *crossRepoWiringFixture) repositories(t *testing.T, s *journey.Service) (repo1, repo2 *trace.Repository) {
 	t.Helper()
 	defer func() {
 		if t.Failed() {
@@ -215,7 +217,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 
-	s, err := Start(ctx, opts)
+	s, err := journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	closed := false
 	defer func() {
@@ -225,7 +227,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	}()
 	repo1, repo2 := f.repositories(t, s)
 
-	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -303,7 +305,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 
 	fixturekit.Must(t, s.Close())
 	closed = true
-	s2, err := Start(ctx, opts)
+	s2, err := journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	closed2 := false
 	defer func() {
@@ -386,14 +388,14 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 		return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
 	}
 
-	s, err := Start(ctx, opts)
+	s, err := journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { s.Close() })
-	c := NewClient(s.Socket())
+	c := journey.NewClient(s.Socket())
 	t.Cleanup(func() { c.Close() })
 	f.repositories(t, s)
 
-	if _, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
+	if _, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 
@@ -434,11 +436,11 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
-	defer f.stop(t)
+	defer f.Stop(t)
 	ctx := context.Background()
 
-	main1 := f.upstream(t)
-	home := filepath.Dir(f.clone)
+	main1 := f.Upstream(t)
+	home := filepath.Dir(f.Clone)
 	clone2 := filepath.Join(home, "clone2")
 	bare2 := filepath.Join(home, "remotes", "owner", "other.git")
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare2), 0700))
@@ -447,26 +449,26 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	fixturekit.DemoGit(t, home, "-C", clone2, "remote", "add", "upstream", bare2)
 	main2 := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare2, "rev-parse", "refs/heads/main"))
 
-	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.S.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.Stream1, f.Stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
-	packets := f.awaitDecisionPackets(t)
-	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, packets[0].ProjectSpecRevision); err != nil {
+	packets := awaitDecisionPackets(f, t)
+	if _, err := f.C.Ratify(ctx, f.Stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, packets[0].ProjectSpecRevision); err != nil {
 		t.Fatalf("ratify: %v", err)
 	}
 
 	checkCompletedSeals := func(t *testing.T) trace.GroupApproval {
 		t.Helper()
-		wait, closeWait := serviceChanges(t, f.s)
+		wait, closeWait := journey.ServiceChanges(t, f.S)
 		defer closeWait()
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		var decision trace.GroupApproval
 		for {
-			repo, err := f.s.repository(f.project)
+			repo, err := f.S.Repository(f.Project)
 			fixturekit.Must(t, err)
 			var found bool
-			decision, found, err = repo.GroupApprovalOf(f.stream1)
+			decision, found, err = repo.GroupApprovalOf(f.Stream1)
 			fixturekit.Must(t, err)
 			if found && decision.Complete {
 				break
@@ -474,7 +476,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 			if time.Now().After(deadline) {
 				var diagnostic strings.Builder
 				for _, packet := range packets {
-					r, err := f.s.repository(packet.Project)
+					r, err := f.S.Repository(packet.Project)
 					fixturekit.Must(t, err)
 					state, err := r.Workflow(packet.Workstream, trace.FeatureSubject)
 					fixturekit.Must(t, err)
@@ -490,7 +492,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 			t.Fatalf("completed approval has wrong membership: %+v", decision)
 		}
 		for i, packet := range packets {
-			repo, err := f.s.repository(packet.Project)
+			repo, err := f.S.Repository(packet.Project)
 			fixturekit.Must(t, err)
 			approval, found, err := repo.GroupApprovalOf(packet.Workstream)
 			fixturekit.Must(t, err)
@@ -511,44 +513,44 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 
 	checkWorkgroupRecord := func(t *testing.T) {
 		t.Helper()
-		repo1, err := f.s.repository(f.project)
+		repo1, err := f.S.Repository(f.Project)
 		fixturekit.Must(t, err)
-		repo2, err := f.s.repository(f.project2)
+		repo2, err := f.S.Repository(f.Project2)
 		fixturekit.Must(t, err)
-		gid1, err := repo1.CrossRepoWorkgroupOf(f.stream1)
+		gid1, err := repo1.CrossRepoWorkgroupOf(f.Stream1)
 		fixturekit.Must(t, err)
-		gid2, err := repo2.CrossRepoWorkgroupOf(f.stream2)
+		gid2, err := repo2.CrossRepoWorkgroupOf(f.Stream2)
 		fixturekit.Must(t, err)
 		if gid1 != id || gid2 != id {
 			t.Fatalf("members do not both point to the sealed workgroup: member1=%s member2=%s want=%s", gid1, gid2, id)
 		}
 		_, g, found, err := repo1.CrossRepoProjectSpec(id)
 		fixturekit.Must(t, err)
-		if !found || len(g.Members) != 3 || g.Members[1] != f.stream1 || g.Members[2] != f.stream2 {
+		if !found || len(g.Members) != 3 || g.Members[1] != f.Stream1 || g.Members[2] != f.Stream2 {
 			t.Fatalf("workgroup record is not exactly the host and the two real members: %+v found=%v", g, found)
 		}
 	}
 	checkWorkgroupRecord(t)
 
-	repo1, err := f.s.repository(f.project)
+	repo1, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	repo2, err := f.s.repository(f.project2)
+	repo2, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	sent1, err := f.c.Send(ctx, f.stream1, "Where does the acknowledgment live?")
+	sent1, err := f.C.Send(ctx, f.Stream1, "Where does the acknowledgment live?")
 	fixturekit.Must(t, err)
-	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
 	}
-	sent2, err := f.c.Send(ctx, f.stream2, "Does the client ever see the offset?")
+	sent2, err := f.C.Send(ctx, f.Stream2, "Does the client ever see the offset?")
 	fixturekit.Must(t, err)
-	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
 	for i, member := range []struct {
 		repo   *trace.Repository
 		stream config.WorkstreamID
-	}{{repo1, f.stream1}, {repo2, f.stream2}} {
+	}{{repo1, f.Stream1}, {repo2, f.Stream2}} {
 		unit := fmt.Sprintf("feed-member-%d", i)
 		fixturekit.FeedDocument(t, member.repo, member.stream, execution.CheckSelectionDocument(unit, 1), execution.CheckSelectionPath(unit, 1), 1, fixturekit.DemoStart, execution.UnitCheckSelection{Unit: unit, Run: 1, StartedAt: fixturekit.DemoStart, Selection: checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set")})
 		fixturekit.FeedDocument(t, member.repo, member.stream, delivery.FinalReportDocument, delivery.FinalReportPath, 1, fixturekit.DemoStart, api.FinalReport{Review: i + 1, Outcome: delivery.FinalFailed, Failure: unit})
@@ -556,17 +558,17 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 
 	checkShared := func(t *testing.T) {
 		t.Helper()
-		for _, m := range []config.WorkstreamID{f.stream1, f.stream2} {
-			conv, err := f.c.Conversation(ctx, m)
+		for _, m := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+			conv, err := f.C.Conversation(ctx, m)
 			fixturekit.Must(t, err)
 			if len(conv.Entries) != 2 || conv.Entries[0].Turn != sent1.Turn || conv.Entries[1].Turn != sent2.Turn {
 				t.Fatalf("workstream %s's shared conversation: %+v", m, conv.Entries)
 			}
 			var feed api.FeedResponse
-			fixturekit.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/feed/"+string(m), nil, &feed))
+			fixturekit.Must(t, f.C.Do(ctx, "GET", api.Prefix+"/feed/"+string(m), nil, &feed))
 			unit := "feed-member-0"
 			review := 1
-			if m == f.stream2 {
+			if m == f.Stream2 {
 				unit = "feed-member-1"
 				review = 2
 			}
@@ -596,7 +598,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 			}
 		}
 		var shared api.WorkgroupFeedResponse
-		fixturekit.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(id)+"/feed", nil, &shared))
+		fixturekit.Must(t, f.C.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(id)+"/feed", nil, &shared))
 		var sawFirst, sawSecond bool
 		for _, e := range shared.Entries {
 			sawFirst = sawFirst || e.Turn == sent1.Turn
@@ -611,15 +613,15 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	}
 	checkShared(t)
 
-	f.stop(t)
-	f.start(t)
+	f.Stop(t)
+	f.Start(t)
 	if after := checkCompletedSeals(t); !intakefixture.EqualJSONTest(after, completed) {
 		t.Fatalf("restart changed the completed approval: before=%+v after=%+v", completed, after)
 	}
 
-	repo1, err = f.s.repository(f.project)
+	repo1, err = f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	repo2, err = f.s.repository(f.project2)
+	repo2, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
 
 	groups1, _, err := trace.Workgroups(repo1)
@@ -633,10 +635,10 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Fatalf("member2's own repository was wrapped in its own one-workstream workgroup: %+v", groups2)
 	}
 
-	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo1.ChiefOfStaffThread(f.Stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
 	}
-	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repo2.ChiefOfStaffThread(f.Stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 

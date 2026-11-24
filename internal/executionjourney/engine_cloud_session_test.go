@@ -2,11 +2,13 @@ package executionjourney
 
 import (
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/checks"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
@@ -20,7 +22,7 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 	const traceURL = "https://dagger.cloud/example/traces/service123"
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", token)
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
-	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
+	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *journey.Options) {
 		path := filepath.Join(o.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		fixturekit.Must(t, err)
@@ -28,13 +30,13 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 		fixturekit.Must(t, os.WriteFile(path, data, 0600))
 	})
 
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 	run, err := c.SessionCheck(t.Context(), w)
 	fixturekit.Must(t, err)
 	if run.Status != checks.ChecksPassed || run.TraceURL != traceURL || run.CIIdentityFallback != "" {
 		t.Fatalf("session run: %+v", run)
 	}
-	repo, err := s.repository(project)
+	repo, err := s.Repository(project)
 	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
 	fixturekit.Must(t, err)
@@ -73,20 +75,20 @@ func TestServiceDockerSessionChecks(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("DOCKER_HOST", "tcp://engine.example.ts.net:2375")
 	t.Setenv("DOCKER_CONTEXT", "default")
-	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
+	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *journey.Options) {
 		path := filepath.Join(o.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		fixturekit.Must(t, err)
 		data = append(data, []byte("\n[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\n")...)
 		fixturekit.Must(t, os.WriteFile(path, data, 0600))
 	})
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 	run, err := c.SessionCheck(t.Context(), w)
 	fixturekit.Must(t, err)
 	if run.Status != checks.ChecksPassed {
 		t.Fatalf("%+v", run)
 	}
-	repo, err := s.repository(project)
+	repo, err := s.Repository(project)
 	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
 	fixturekit.Must(t, err)

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -27,13 +29,13 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	const question1, question2 = "Where does state live?", "Should the index rebuild on start?"
 	const ownersRuling, relayedAnswer = "Keep the index fixed at start.", "The index does not rebuild on start."
 
-	f := newQuestionFixture(t, "wg-", "[capacity]\nmasons = 2\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
-		{fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "mason", "build"},
-		{second, "agent_second", "thread_second", "mason", "build2"},
+	f := journey.NewQuestionFixture(t, "wg-", "[capacity]\nmasons = 2\n", "# Charter\n\n1. Keep state in files under the root.\n", []intakefixture.QuestionAsker{
+		{Stream: fixturekit.Stream, Agent: fixturekit.DemoAgent, Thread: fixturekit.DemoThread, Role: "mason", Turn: "build"},
+		{Stream: second, Agent: "agent_second", Thread: "thread_second", Role: "mason", Turn: "build2"},
 	})
-	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
+	opts, clock, engine, lives, ticks := f.Opts, f.Clock, f.Engine, f.Lives, f.Ticks
 
-	grouping, err := trace.Open(f.cfg.Root, f.cfg.Project)
+	grouping, err := trace.Open(f.Cfg.Root, f.Cfg.Project)
 	fixturekit.Must(t, err)
 	_, err = trace.CreateWorkgroup(ctx, grouping, []config.WorkstreamID{fixturekit.Stream, second}, clock.Now(), intake.OwnerActor, "test-workgroup")
 	fixturekit.Must(t, err)
@@ -147,7 +149,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		return b.String()
 	}
 
-	pump := func(s *Service, check func() bool) {
+	pump := func(s *journey.Service, check func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for !check() {
@@ -163,7 +165,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		}
 	}
 
-	s, err := Start(ctx, opts)
+	s, err := journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	closed := false
 	defer func() {
@@ -179,7 +181,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			return q.CompletedAt.IsZero()
 		})
 	}
-	f.settle(t, s)
+	f.Settle(t, s)
 	clock.Advance(time.Minute)
 	escalatedAndAnswered := func() bool {
 		q1, err := repo.Questions(fixturekit.Stream)
@@ -221,7 +223,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 
 	fixturekit.Must(t, s.Close())
 	closed = true
-	s2, c := start(t, opts)
+	s2, c := journey.StartT(t, opts)
 	repo2 := <-lives
 	current = repo2
 

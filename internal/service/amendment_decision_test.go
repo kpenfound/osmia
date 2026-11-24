@@ -1,19 +1,12 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
-)
-
-var (
-	amendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
-	amendedPlan = strings.Replace(fixturekit.ValidPlan, "TestResume", "TestResumeAfterRestart", 1)
 )
 
 func builtForAmendment(t *testing.T, rounds int) (*shedFixture, config.WorkstreamID) {

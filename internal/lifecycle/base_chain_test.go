@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -27,11 +29,11 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
 				intakefixture.RequireJJ(t)
 			}
-			f := newDebateFixture(t, 1, 1)
-			base := f.upstream(t)
-			f.stop(t)
+			f := journey.NewDebateFixture(t, 1, 1)
+			base := f.Upstream(t)
+			f.Stop(t)
 			ctx := context.Background()
-			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
 			defer func() { repo.Close() }()
 			var streams []config.WorkstreamID
@@ -39,12 +41,12 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			for i := 0; i < 3; i++ {
 				stream, err := config.NewWorkstreamID()
 				fixturekit.Must(t, err)
-				fixturekit.Must(t, repo.CreateWorkstreamOn(ctx, stream, backend, f.s.now(), intake.OwnerActor))
+				fixturekit.Must(t, repo.CreateWorkstreamOn(ctx, stream, backend, f.S.Now(), intake.OwnerActor))
 				if i > 0 {
-					_, err = repo.SetWorkstreamBase(ctx, stream, streams[i-1], 0, f.s.now())
+					_, err = repo.SetWorkstreamBase(ctx, stream, streams[i-1], 0, f.S.Now())
 					fixturekit.Must(t, err)
 				}
-				header := trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner-ratification"}
+				header := trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "owner-ratification"}
 				ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
 				fixturekit.Must(t, err)
 				docs := []trace.Document{}
@@ -57,10 +59,10 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				header.Schema, header.ID = "osmia.trace.transition", "in-shed"
 				_, err = repo.SetFeatureState(ctx, header, intake.InShedState, "Owner approved the draft")
 				fixturekit.Must(t, err)
-				z := &intake.Sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
+				z := &intake.Sealer{S: f.S.Intake().SealerDependencies(), Repository: repo}
 				fixturekit.Must(t, z.Pass(ctx))
 				op := fixturekit.ActionOperation(t, repo, stream, intake.SealAction)
-				f.s.boundary = func(name string) error {
+				f.S.Boundary = func(name string) error {
 					if name == "seal-branch-created" {
 						return errors.New("interrupted")
 					}
@@ -69,12 +71,12 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				if _, err = z.Apply(ctx, op); err == nil {
 					t.Fatal("expected branch-creation interruption")
 				}
-				f.s.clearBoundary()
+				f.S.ClearBoundary()
 				if i == 0 {
-					advanceUpstream(t, f, map[string]string{"new-upstream": "moved during restart\n"})
+					journey.AdvanceUpstream(t, f, map[string]string{"new-upstream": "moved during restart\n"})
 				}
 				fixturekit.Must(t, repo.Close())
-				repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+				repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 				fixturekit.Must(t, err)
 				z.Repository = repo
 				result, err := z.Apply(ctx, op)
@@ -92,7 +94,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				if observed.State != coreadapter.EffectCompleted {
 					t.Fatal(observed)
 				}
-				g, err := intake.FeatureWorkspaces(f.s.about(repo), repo).Of(stream)
+				g, err := intake.FeatureWorkspaces(f.S.About(repo), repo).Of(stream)
 				fixturekit.Must(t, err)
 				w, found, err := g.Workspace(ctx, string(stream))
 				fixturekit.Must(t, err)
@@ -109,13 +111,13 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				}
 				streams = append(streams, stream)
 			}
-			g, err := intake.FeatureWorkspaces(f.s.about(repo), repo).Of(streams[0])
+			g, err := intake.FeatureWorkspaces(f.S.About(repo), repo).Of(streams[0])
 			fixturekit.Must(t, err)
 			w, _, err := g.Workspace(ctx, string(streams[0]))
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, g.Release(ctx, workspace.Worktree(w)))
-			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", "-D", intake.FeatureBranch(streams[0]))
-			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+			fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "branch", "-D", intake.FeatureBranch(streams[0]))
+			fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)
@@ -125,8 +127,8 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			}
 			firstSeal, _, _, err := seal.Latest(repo, streams[0])
 			fixturekit.Must(t, err)
-			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", firstSeal.Branch, firstSeal.Base.Commit)
-			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+			fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "branch", firstSeal.Branch, firstSeal.Base.Commit)
+			fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)
@@ -134,10 +136,10 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 					t.Fatal("restored dependency remained parked")
 				}
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: streams[0], At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: streams[0], At: f.S.Now(), Actor: intake.OwnerActor, Cause: "owner"}
 			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Owner abandoned the base")
 			fixturekit.Must(t, err)
-			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)

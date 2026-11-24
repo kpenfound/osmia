@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -58,12 +61,12 @@ func awaitGitOperation(t *testing.T, ch <-chan string) string {
 	}
 }
 
-func approvedStream(t *testing.T, f *shedFixture, repo *trace.Repository, key, backend string) config.WorkstreamID {
+func approvedStream(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, key, backend string) config.WorkstreamID {
 	t.Helper()
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream := recordBuild(t, f, repo, key, independentPlan, backend, base)
-	seedReview(t, f, repo, stream, "resume", resumeReport)
-	approveDirectly(t, f.s, repo, stream, "resume", "spec#1")
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	stream := journey.RecordBuild(t, f, repo, key, intakefixture.IndependentPlan, backend, base)
+	journey.SeedReview(t, f, repo, stream, "resume", journey.ResumeReport)
+	journey.ApproveDirectly(t, f.S, repo, stream, "resume", "spec#1")
 	return stream
 }
 
@@ -72,16 +75,16 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, a, repo := newApprovedFixtureOn(t, "concurrent-a", backend)
+			f, a, repo := journey.NewApprovedFixtureOn(t, "concurrent-a", backend)
 			b := approvedStream(t, f, repo, "concurrent-b", backend)
-			lands := &foreman{masons: newMasonController(f.s, repo)}
+			lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repo)}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			fixturekit.Must(t, lands.Pass(ctx))
 			gate := &gatedLanding{Reconciler: lands, entered: make(chan string, 3), finished: make(chan string, 3)}
 			add := func(stream config.WorkstreamID) string {
 				t.Helper()
-				ops := landOperations(t, repo, stream)
+				ops := journey.LandOperations(t, repo, stream)
 				if len(ops) != 1 {
 					t.Fatalf("stream %s has %d pending landings", stream, len(ops))
 				}
@@ -99,7 +102,7 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 			}
 			first, second := add(a), add(b)
 			controller, err := reconcile.New(repo, reconcile.Options{Worker: "landing-fixture", Schedule: lands.Pass,
-				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: journey.InspectForTest(f.S).GitOperationLimit(repo, nil),
 				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: gate},
 				Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != service.LandAction },
 			})
@@ -138,12 +141,12 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 			close(ch.(chan struct{}))
 			fixturekit.Must(t, controller.Wait())
 			for _, stream := range []config.WorkstreamID{a, b, c} {
-				ops := landOperations(t, repo, stream)
+				ops := journey.LandOperations(t, repo, stream)
 				if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 					t.Fatalf("landing %s: %+v", stream, ops)
 				}
-				_, review := approvedReview(t, repo, stream, "resume")
-				if commits := f.landedCommits(t, stream, review.Identity.Candidate.BaseRevision); len(commits) != 1 {
+				_, review := journey.ApprovedReview(t, repo, stream, "resume")
+				if commits := landedCommits(f, t, stream, review.Identity.Candidate.BaseRevision); len(commits) != 1 {
 					t.Fatalf("feature branch %s has %v", intake.FeatureBranch(stream), commits)
 				}
 			}
@@ -153,18 +156,18 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 
 func TestLandingWaitsOnlyForItsWorkstreamsRebases(t *testing.T) {
 	t.Parallel()
-	f, a, repo := newApprovedFixture(t, "waiting-a")
+	f, a, repo := journey.NewApprovedFixture(t, "waiting-a")
 	b := approvedStream(t, f, repo, "waiting-b", config.WorkspacesGit)
-	lands := &foreman{masons: newMasonController(f.s, repo)}
-	moveFeature(t, f, a, map[string]string{"OTHER.md": "new feature tip\n"})
+	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repo)}
+	journey.MoveFeature(t, f, a, map[string]string{"OTHER.md": "new feature tip\n"})
 	fixturekit.Must(t, lands.Pass(context.Background()))
-	if ops := landOperations(t, repo, a); len(ops) != 0 {
+	if ops := journey.LandOperations(t, repo, a); len(ops) != 0 {
 		t.Fatalf("workstream %s has %d landings, want 0: %+v", a, len(ops), ops)
 	}
-	if ops := landOperations(t, repo, b); len(ops) != 1 {
+	if ops := journey.LandOperations(t, repo, b); len(ops) != 1 {
 		t.Fatalf("independent workstream has %d landings", len(ops))
 	}
-	if len(rebaseOperations(t, repo, a, "resume")) != 1 {
+	if len(journey.RebaseOperations(t, repo, a, "resume")) != 1 {
 		t.Fatal("the workstream behind its feature branch was not rebased")
 	}
 }
@@ -215,10 +218,10 @@ func TestGitOperationLimitLeavesExcessPendingAndAdmitsModelWork(t *testing.T) {
 	for _, limit := range []int{0, 1, 2} {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			t.Parallel()
-			f, _, repo := newApprovedFixture(t, "capacity")
-			f.s.cfg.Project.Capacity.GitOperations = limit
+			f, _, repo := journey.NewApprovedFixture(t, "capacity")
+			f.S.Cfg.Project.Capacity.GitOperations = limit
 			var streams []config.WorkstreamID
-			actions := []string{service.SealAction, service.BuildAction, service.LandAction, service.RebaseAction, service.DriftAction, delivery.PublishAction, publishUpstreamAction}
+			actions := []string{service.SealAction, service.BuildAction, service.LandAction, service.RebaseAction, service.DriftAction, delivery.PublishAction, lifecycle.PublishUpstreamAction}
 			for _, action := range append(slices.Clone(actions), "model-fixture") {
 				stream, err := config.NewWorkstreamID()
 				fixturekit.Must(t, err)
@@ -235,7 +238,7 @@ func TestGitOperationLimitLeavesExcessPendingAndAdmitsModelWork(t *testing.T) {
 			defer releaseOnce.Do(func() { close(release) })
 			effects := &capacityGitEffects{entered: make(chan string, 8), release: release}
 			controller, err := reconcile.New(repo, reconcile.Options{Worker: "capacity-fixture", Workstreams: func() ([]config.WorkstreamID, error) { return streams, nil },
-				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: journey.InspectForTest(f.S).GitOperationLimit(repo, nil),
 				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: effects, coreadapter.RunnerBoundary: fixturekit.CompletedEffect{}}})
 			fixturekit.Must(t, err)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -286,15 +289,15 @@ func TestGitOperationLimitLeavesExcessPendingAndAdmitsModelWork(t *testing.T) {
 
 func TestDriftRequestsWaitOnlyForTheirOwnLanding(t *testing.T) {
 	t.Parallel()
-	f, a, repo := newApprovedFixture(t, "landing-before-drift")
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	b := recordBuild(t, f, repo, "independent-drift", independentPlan, config.WorkspacesGit, base)
-	lands := &foreman{masons: newMasonController(f.s, repo)}
+	f, a, repo := journey.NewApprovedFixture(t, "landing-before-drift")
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	b := journey.RecordBuild(t, f, repo, "independent-drift", intakefixture.IndependentPlan, config.WorkspacesGit, base)
+	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repo)}
 	fixturekit.Must(t, lands.Pass(context.Background()))
-	if len(landOperations(t, repo, a)) != 1 {
+	if len(journey.LandOperations(t, repo, a)) != 1 {
 		t.Fatal("fixture has no pending landing")
 	}
-	requested, err := (drifter{foreman: lands}).requestDrifts(context.Background(), testDrift)
+	requested, err := (journey.Drifter{Foreman: lands}).RequestDrifts(context.Background(), intakefixture.TestDrift)
 	fixturekit.Must(t, err)
 	if !slices.Equal(requested, []config.WorkstreamID{b}) {
 		t.Fatalf("drift requests %v, want only independent workstream %s", requested, b)
@@ -303,15 +306,15 @@ func TestDriftRequestsWaitOnlyForTheirOwnLanding(t *testing.T) {
 
 func TestGitCapacitySharesPollPermitsAndAdoptsLimits(t *testing.T) {
 	t.Parallel()
-	f, _, repo := newApprovedFixture(t, "shared-git-capacity")
+	f, _, repo := journey.NewApprovedFixture(t, "shared-git-capacity")
 	setLimit := func(limit int) {
-		cfg := *f.s.cfg
+		cfg := *f.S.Cfg
 		cfg.Project.Capacity.GitOperations = limit
-		f.s.cfg = &cfg
-		InspectForTest(f.s).SetConfig(&cfg)
+		f.S.Cfg = &cfg
+		journey.InspectForTest(f.S).SetConfig(&cfg)
 	}
 	setLimit(2)
-	poll, ok := InspectForTest(f.s).TryGitOperation(repo)
+	poll, ok := journey.InspectForTest(f.S).TryGitOperation(repo)
 	if !ok {
 		t.Fatal("poll was not admitted")
 	}
@@ -321,7 +324,7 @@ func TestGitCapacitySharesPollPermitsAndAdoptsLimits(t *testing.T) {
 		otherUsed++
 		return func() { otherUsed-- }, true
 	}
-	limit := InspectForTest(f.s).GitOperationLimit(repo, other)
+	limit := journey.InspectForTest(f.S).GitOperationLimit(repo, other)
 	op := coreadapter.Operation{Boundary: coreadapter.RepositoryBoundary, Action: service.SealAction}
 	workflow, ok := limit(op)
 	if !ok {
@@ -359,15 +362,15 @@ func TestGitCapacitySharesPollPermitsAndAdoptsLimits(t *testing.T) {
 
 func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 	t.Parallel()
-	f, _, repo := newApprovedFixture(t, "busy-git-admission")
+	f, _, repo := journey.NewApprovedFixture(t, "busy-git-admission")
 	stream, err := config.NewWorkstreamID()
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repo.CreateWorkstreamOn(context.Background(), stream, config.WorkspacesGit, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, repo.CreateWorkstreamOn(context.Background(), stream, config.WorkspacesGit, f.S.Now(), intake.OwnerActor))
 	queueGitFixtureOperation(t, repo, stream, service.SealAction, coreadapter.RepositoryBoundary, map[string]string{})
 	queueGitFixtureOperation(t, repo, stream, service.BuildAction, coreadapter.RepositoryBoundary, map[string]string{})
 	ops, err := repo.Operations(stream)
 	fixturekit.Must(t, err)
-	attempt, _, err := repo.BeginOperation(context.Background(), stream, ops[0].EventID, trace.WorkflowOperation, execution.ForemanActor, f.s.now)
+	attempt, _, err := repo.BeginOperation(context.Background(), stream, ops[0].EventID, trace.WorkflowOperation, execution.ForemanActor, f.S.Now)
 	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("fixture did not reserve its workstream")
@@ -375,7 +378,7 @@ func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 	defer attempt.Close()
 	controller, err := reconcile.New(repo, reconcile.Options{Worker: "busy-git-fixture",
 		Workstreams: func() ([]config.WorkstreamID, error) { return []config.WorkstreamID{stream}, nil },
-		Concurrent:  service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+		Concurrent:  service.ConcurrentOperation, Class: service.TestOperationClass, Limit: journey.InspectForTest(f.S).GitOperationLimit(repo, nil),
 		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: fixturekit.CompletedEffect{}},
 	})
 	fixturekit.Must(t, err)
@@ -390,7 +393,7 @@ func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 		t.Fatalf("busy admission woke another pass: %v", err)
 	}
 
-	release, admitted := InspectForTest(f.s).TryGitOperation(repo)
+	release, admitted := journey.InspectForTest(f.S).TryGitOperation(repo)
 	if !admitted {
 		t.Fatal("busy workflow admission leaked a Git permit")
 	}
@@ -402,32 +405,32 @@ func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 
 func TestGitWorkflowAdmissionHonorsPauseAndBaseWait(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "git-holds")
-	f.s.options.PullRequests = &fixturekit.FakePulls{}
-	InspectForTest(f.s).SetStoppedPullRequests(f.s.options.PullRequests)
-	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{repo.Project(): {stream}}})
+	f, stream, repo := journey.NewApprovedFixture(t, "git-holds")
+	f.S.Options.PullRequests = &fixturekit.FakePulls{}
+	journey.InspectForTest(f.S).SetStoppedPullRequests(f.S.Options.PullRequests)
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.S.Cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{repo.Project(): {stream}}})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { fixturekit.Must(t, store.Close()) })
-	f.s.store = store
-	InspectForTest(f.s).SetRuntimeStore(store)
+	f.S.Store = store
+	journey.InspectForTest(f.S).SetRuntimeStore(store)
 	target := runtime.Target{Scope: "workstream", Project: repo.Project(), Workstream: stream}
-	fixturekit.Must(t, f.s.store.SetPause(runtime.Pause{Target: target, Mode: "soft", Source: runtime.PauseOwner, Reason: "owner pause", SetAt: f.s.now()}))
-	hold := InspectForTest(f.s).Holding(repo)
-	actions := []string{service.SealAction, service.BuildAction, service.LandAction, service.RebaseAction, service.DriftAction, delivery.PublishAction, publishUpstreamAction}
+	fixturekit.Must(t, f.S.Store.SetPause(runtime.Pause{Target: target, Mode: "soft", Source: runtime.PauseOwner, Reason: "owner pause", SetAt: f.S.Now()}))
+	hold := journey.InspectForTest(f.S).Holding(repo)
+	actions := []string{service.SealAction, service.BuildAction, service.LandAction, service.RebaseAction, service.DriftAction, delivery.PublishAction, lifecycle.PublishUpstreamAction}
 	for _, action := range actions {
-		want := slices.Contains([]string{service.LandAction, service.RebaseAction, delivery.PublishAction, publishUpstreamAction}, action)
+		want := slices.Contains([]string{service.LandAction, service.RebaseAction, delivery.PublishAction, lifecycle.PublishUpstreamAction}, action)
 		if got := hold(stream, coreadapter.Operation{Boundary: coreadapter.RepositoryBoundary, Action: action}); got != want {
 			t.Fatalf("paused %s: held %t, want %t", action, got, want)
 		}
 	}
-	fixturekit.Must(t, f.s.store.ClearPause(target, "owner"))
+	fixturekit.Must(t, f.S.Store.ClearPause(target, "owner"))
 	for _, action := range actions {
 		if hold(stream, coreadapter.Operation{Boundary: coreadapter.RepositoryBoundary, Action: action}) {
 			t.Fatalf("resumed %s remains held", action)
 		}
 	}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-base-wait", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-base-wait", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "fixture"},
 		Subject: lifecycle.BaseWaitSubject, To: "waiting", Reason: "the base is unavailable",
 	}})
 	fixturekit.Must(t, err)

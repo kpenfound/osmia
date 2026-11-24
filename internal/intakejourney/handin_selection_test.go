@@ -4,10 +4,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -15,6 +11,11 @@ import (
 	"sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -568,7 +569,7 @@ func TestHandInOwnerProjectsValidationRecordsNothing(t *testing.T) {
 func TestHandInOwnerProjectsKeepPausedMemberWaiting(t *testing.T) {
 	t.Parallel()
 	f := newHandInProductionFixture(t)
-	journey.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: f.Project2}, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: f.Project2}, Mode: "soft", Source: "owner"})
 	handInProduction(t, f, api.HandInRequest{SkipDebate: true})
 	f.Wait(t, "active member drafts while paused member waits", func() bool {
 		a, err := f.S.Repository(f.Project)

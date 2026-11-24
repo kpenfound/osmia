@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"image"
 	"image/png"
 	"net/http"
@@ -13,6 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -23,7 +25,7 @@ import (
 )
 
 type shownImage struct {
-	c          *Client
+	c          *journey.Client
 	repo       *trace.Repository
 	stream     config.WorkstreamID
 	attachment api.FeedImage
@@ -37,11 +39,11 @@ func showSessionImage(t *testing.T) shownImage {
 	var b bytes.Buffer
 	fixturekit.Must(t, png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 2, 3))))
 	data := b.Bytes()
-	sub, ok := service.InspectForTest(s.core()).Hub().Subscribe()
+	sub, ok := service.InspectForTest(s.Core()).Hub().Subscribe()
 	if !ok {
 		t.Fatal("subscribe")
 	}
-	t.Cleanup(func() { service.InspectForTest(s.core()).Hub().Unsubscribe(sub) })
+	t.Cleanup(func() { service.InspectForTest(s.Core()).Hub().Unsubscribe(sub) })
 	sub.Take()
 	outside := filepath.Join(t.TempDir(), "outside.png")
 	fixturekit.Must(t, os.WriteFile(outside, data, 0600))
@@ -49,7 +51,7 @@ func showSessionImage(t *testing.T) shownImage {
 	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		active := req.Workspace.Directory()
 		fixturekit.Must(t, os.WriteFile(filepath.Join(active, "fresh.png"), data, 0600))
-		persistent := filepath.Join(s.current().Root.String(), service.SessionsDirectory, string(project), string(stream), "fresh.png")
+		persistent := filepath.Join(s.Current().Root.String(), service.SessionsDirectory, string(project), string(stream), "fresh.png")
 		if _, err := os.Stat(persistent); !os.IsNotExist(err) {
 			t.Error("workspace captured before tool call")
 		}
@@ -94,7 +96,7 @@ func showSessionImage(t *testing.T) shownImage {
 	if attachment.ID == "" {
 		t.Fatal("image tool was not called")
 	}
-	return shownImage{c: c, repo: s.sole().repository, stream: stream, attachment: attachment, data: data, announced: func() bool {
+	return shownImage{c: c, repo: s.Sole().Repository, stream: stream, attachment: attachment, data: data, announced: func() bool {
 		for _, e := range sub.Take() {
 			if e.Kind == api.EventImage && e.Workstream == stream {
 				return true

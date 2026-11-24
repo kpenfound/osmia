@@ -32,30 +32,6 @@ func stopAt(t *testing.T, s *Service, step string) context.Context {
 	return intakefixture.StopAt(t, step, func(h func(string) error) { s.setBoundary(h) })
 }
 
-func jujutsuRepository(f *shedFixture, directory string) string {
-	return intakefixture.JujutsuRepository(f.s.cfg.Root, f.s.cfg.Project.ID, directory)
-}
-
-func checkpoints(t *testing.T, f *shedFixture, directory string) []string {
-	t.Helper()
-	return intakefixture.Checkpoints(t, jujutsuRepository(f, directory))
-}
-
-func operationLog(t *testing.T, f *shedFixture, directory string) []string {
-	t.Helper()
-	return intakefixture.OperationLog(t, jujutsuRepository(f, directory), filepath.Dir(f.clone))
-}
-
-func interrupted(t *testing.T, f *shedFixture, directory string) (string, bool) {
-	t.Helper()
-	return intakefixture.Interrupted(t, directory, checkpoints(t, f, directory), operationLog(t, f, directory))
-}
-
-func restoredTo(t *testing.T, f *shedFixture, directory, entry string, changed bool) {
-	t.Helper()
-	intakefixture.RestoredTo(t, directory, entry, changed, operationLog(t, f, directory), checkpoints(t, f, directory))
-}
-
 func onCommit(t *testing.T, g workspace.Provider, w workspace.Worktree, commit string) {
 	t.Helper()
 	intakefixture.OnCommit(t, g, w, commit)
@@ -65,7 +41,7 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 	intakefixture.RequireJJ(t)
 	t.Parallel()
 	ctx := context.Background()
-	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { intakefixture.OnWorkspaces(t, opts.Config.Root, config.WorkspacesJujutsu) })
 	base := f.upstream(t)
 	stream, repository := seedBuild(t, f, "restored-drift", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
@@ -81,9 +57,9 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 		if _, err := d.Apply(stopAt(t, f.s, step), op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
 			t.Fatalf("the drift rebase was not cut short at %s: %v", step, err)
 		}
-		entry, changed := interrupted(t, f, branchesDirectory)
+		entry, changed := f.jujutsu().Interrupted(t, branchesDirectory)
 		fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
-		restoredTo(t, f, branchesDirectory, entry, changed)
+		f.jujutsu().RestoredTo(t, branchesDirectory, entry, changed)
 		if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
 			t.Fatalf("the retried drift rebase %+v", result)
 		}
@@ -120,7 +96,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	intakefixture.RequireJJ(t)
 	t.Parallel()
 	ctx := context.Background()
-	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { intakefixture.OnWorkspaces(t, opts.Config.Root, config.WorkspacesJujutsu) })
 	base := f.upstream(t)
 	stream, repository := seedBuild(t, f, "restored-resolution", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
@@ -135,11 +111,11 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 		if _, err := d.Apply(stopAt(t, f.s, step), op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
 			t.Fatalf("the drift rebase was not cut short at %s: %v", step, err)
 		}
-		features, feature := interrupted(t, f, branchesDirectory)
-		resolutions, resolution := interrupted(t, f, driftsDirectory)
+		features, feature := f.jujutsu().Interrupted(t, branchesDirectory)
+		resolutions, resolution := f.jujutsu().Interrupted(t, driftsDirectory)
 		fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
-		restoredTo(t, f, branchesDirectory, features, feature)
-		restoredTo(t, f, driftsDirectory, resolutions, resolution)
+		f.jujutsu().RestoredTo(t, branchesDirectory, features, feature)
+		f.jujutsu().RestoredTo(t, driftsDirectory, resolutions, resolution)
 		return feature, resolution
 	}
 
@@ -159,17 +135,17 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || parentOf(t, f, candidate) != upstream || fileAt(t, f, candidate, "CODEOWNERS") != resolved {
 		t.Fatalf("the resolved candidate %s stores %v: %v", candidate, stored, err)
 	}
-	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
-	if ids := turnIDs(t, repository, stream, driftReviewerAgent); len(ids) != 1 {
+	if ids := intakefixture.TurnIDs(t, repository, stream, driftReviewerAgent); len(ids) != 1 {
 		t.Fatalf("drift reviewer turns %v", ids)
 	}
 	if tip := featureTip(t, f, stream); tip != before {
 		t.Fatalf("the feature branch moved to %s before review", tip)
 	}
 
-	completeDriftTurn(t, f, repository, stream, driftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, driftReviewerAgent, intakefixture.VerdictOutcome(t, approvedResolution, execution.VerdictOutcome))
 	if feature, resolution := cutShort("drift-moved"); !feature || !resolution {
 		t.Fatalf("the attempt cut short after the branch moved changed the feature workspaces: %t, the resolution workspaces: %t", feature, resolution)
 	}
@@ -213,7 +189,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			ctx := context.Background()
 			f, a, repository := newApprovedFixtureOn(t, "interleaved-a", config.WorkspacesJujutsu)
 			base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-			b := recordBuild(t, f, repository, "interleaved-b", independentPlan, config.WorkspacesJujutsu, base)
+			b := recordBuild(t, f, repository, "interleaved-b", intakefixture.IndependentPlan, config.WorkspacesJujutsu, base)
 			seedReview(t, f, repository, b, "resume", resumeReport)
 			approveDirectly(t, f.s, repository, b, "resume", "spec#1")
 			lands := &foreman{masons: newMasonController(f.s, repository)}
@@ -238,7 +214,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "interrupted local step") {
 				t.Fatalf("A: %v", err)
 			}
-			if left := checkpoints(t, f, branchesDirectory); len(left) != 0 {
+			if left := f.jujutsu().Checkpoints(t, branchesDirectory); len(left) != 0 {
 				t.Fatalf("A unlocked with checkpoints %v", left)
 			}
 			f.s.setBoundary(nil)
@@ -396,7 +372,7 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			if !errors.As(err, &exit) || exit.ExitCode() != -1 || childCtx.Err() != nil {
 				t.Fatalf("copy crash: %v\n%s", err, out)
 			}
-			if left := checkpoints(t, f, directory); len(left) != 1 {
+			if left := f.jujutsu().Checkpoints(t, directory); len(left) != 1 {
 				t.Fatalf("crash left checkpoints %v", left)
 			}
 			fixturekit.Must(t, repository.Close())
@@ -422,9 +398,13 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			if th.Active != "" || last.Request.TurnID != req.TurnID || last.Status() != "interrupted" {
 				t.Fatalf("copy recovery did not settle its original claim: %+v", th)
 			}
-			if left := checkpoints(t, f, directory); len(left) != 0 {
+			if left := f.jujutsu().Checkpoints(t, directory); len(left) != 0 {
 				t.Fatalf("recovery unlocked with checkpoints %v", left)
 			}
 		})
 	}
+}
+
+func (f *shedFixture) jujutsu() intakefixture.JujutsuClone {
+	return intakefixture.JujutsuClone{Root: f.s.cfg.Root, Project: f.s.cfg.Project.ID, Clone: f.clone}
 }

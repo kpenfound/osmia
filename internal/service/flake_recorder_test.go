@@ -40,10 +40,10 @@ func flakyOutcome(links ...string) fixturekit.CheckOutcome {
 func newFlakeFixture(t *testing.T, key string, outcomes ...fixturekit.CheckOutcome) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	checks := &fixturekit.FakeChecks{Outcomes: outcomes}
-	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
+	f, _ := newMasonFixturePrepared(t, 1, intakefixture.IndependentPlan, func(opts *Options) { opts.reviewChecks = checks })
 	f.s.cfg.Project.FlakeFixes = true
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
+	stream, repository := seedBuild(t, f, key, intakefixture.IndependentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repository, stream, "resume", resumeReport)
 	return f, stream, repository
 }
@@ -216,7 +216,7 @@ func TestFlakeRecorderListsTwoGroupsInOneNotice(t *testing.T) {
 	}
 	for _, o := range occurrences {
 		if len(o.Links) == 2 && !slices.Equal(o.Links, []string{flakyTraceTest, flakyTraceOther}) {
-			t.Fatalf("sibling tests of one package fall in one group: %+v", o)
+			t.Fatalf("fixturekit.Sibling tests of one package fall in one group: %+v", o)
 		}
 	}
 }

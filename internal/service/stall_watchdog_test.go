@@ -108,12 +108,6 @@ func (f *stallFixture) watch(after string) stallWatch {
 	return stallWatch{s: f.s, cfg: &cfg, repository: f.repo, submit: f.log.submit}
 }
 
-func (f *stallFixture) quietFor(d time.Duration) {
-	f.clock.Mu.Lock()
-	defer f.clock.Mu.Unlock()
-	f.clock.At = fixturekit.DemoStart.Add(d)
-}
-
 func (f *stallFixture) firstPassed(w stallWatch) {
 	f.s.stalls.due(w.repository.Project(), time.Now().Add(-time.Hour), stallCheckEvery)
 }
@@ -172,12 +166,12 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 	f := newStallFixture(t, "", nil)
 	w := f.watch("45m")
 
-	f.quietFor(44 * time.Minute)
+	f.clock.QuietFor(44 * time.Minute)
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a unit quiet for less than the window raised %d exits", len(got))
 	}
 
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, w)
 	unit, ws := got[execution.TriggerStalled], got["ws.stalled"]
 	if len(got) != 2 || unit.Subject != trace.UnitSubject(stallUnit) || unit.Unit != stallUnit || unit.Default != execution.TargetWait || ws.Subject != trace.FeatureSubject {
@@ -223,7 +217,7 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 func TestStallWatchdogIsOffWithAWindowOfZero(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "[loop]\nstall_after = \"0\"\n", nil)
-	f.quietFor(1000 * time.Hour)
+	f.clock.QuietFor(1000 * time.Hour)
 	w := stallWatch{s: f.s, cfg: f.s.current(), repository: f.repo, submit: f.log.submit}
 	f.firstPassed(w)
 	fixturekit.Must(t, w.Run(context.Background()))
@@ -246,16 +240,16 @@ func TestStallWatchdogIsExplainedByAPauseAndStartsOverWhenItLifts(t *testing.T) 
 	fixturekit.Must(t, store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
 	w := f.watch("45m")
 
-	f.quietFor(2 * time.Hour)
+	f.clock.QuietFor(2 * time.Hour)
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a paused workstream raised %d exits", len(got))
 	}
 	fixturekit.Must(t, store.ClearPause(target, runtime.PauseOwner))
-	f.quietFor(2*time.Hour + 30*time.Minute)
+	f.clock.QuietFor(2*time.Hour + 30*time.Minute)
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a workstream resumed 30 minutes ago raised %d exits", len(got))
 	}
-	f.quietFor(3 * time.Hour)
+	f.clock.QuietFor(3 * time.Hour)
 	if got := f.pass(t, w); len(got) != 2 {
 		t.Fatalf("a workstream quiet for the window after it resumed raised %d exits, want 2", len(got))
 	}
@@ -266,9 +260,9 @@ func TestStallWatchdogIsExplainedByAPauseAndStartsOverWhenItLifts(t *testing.T) 
 func TestStallWatchdogCountsNoProgressOfTheChiefOfStaff(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
-	f.quietFor(40 * time.Minute)
+	f.clock.QuietFor(40 * time.Minute)
 	f.transition(t, "stall-chief-move", trace.UnitSubject(stallUnit), UnitImplementing, UnitChecking, stallUnit, chiefActor, f.clock.Now())
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, f.watch("45m"))
 	unit := got[execution.TriggerStalled]
 	if len(got) != 2 || unit.From != UnitChecking || unit.Evidence.Facts["last_progress"] != fixturekit.DemoStart.UTC().Format(time.RFC3339) {
@@ -319,13 +313,13 @@ func TestStallWatchdogCitesTheLastFailureOfAnOperationThatCannotEnd(t *testing.T
 	f := newStallFixture(t, "", nil)
 	w := f.watch("45m")
 
-	f.quietFor(2 * time.Hour)
+	f.clock.QuietFor(2 * time.Hour)
 	f.queueOperation(t, LandAction, f.clock.Now())
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("an operation in flight did not explain the quiet: %d exits", len(got))
 	}
 
-	f.quietFor(2*time.Hour + 50*time.Minute)
+	f.clock.QuietFor(2*time.Hour + 50*time.Minute)
 	got := f.pass(t, w)
 	if len(got) != 2 || len(got[execution.TriggerStalled].Evidence.Records) != 1 {
 		t.Fatalf("an operation with no attempt in the window explained the quiet: %+v", got)
@@ -334,7 +328,7 @@ func TestStallWatchdogCitesTheLastFailureOfAnOperationThatCannotEnd(t *testing.T
 	reason := "Clone recovery failure: restoring the checkout timed out after 5m"
 	limit := f.s.GiveUpLimit().Failures
 	young := newStallFixture(t, "", nil)
-	young.quietFor(2 * time.Hour)
+	young.clock.QuietFor(2 * time.Hour)
 	failing := young.queueOperation(t, "rebase-unit", young.clock.Now())
 	for range limit - 1 {
 		young.fail(t, failing, reason)
@@ -428,7 +422,7 @@ func TestAnUnresolvedHoldBecomesAStallAfterTheWindow(t *testing.T) {
 	}}
 	f := newStallFixture(t, "", p)
 	w := f.watch("45m")
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	first := f.pass(t, w)[execution.TriggerStalled]
 	res, err := f.s.RouteExit(ctx, first)
 	fixturekit.Must(t, err)
@@ -439,11 +433,11 @@ func TestAnUnresolvedHoldBecomesAStallAfterTheWindow(t *testing.T) {
 		t.Fatalf("a hold of the unit raised %d exits at once, want only the workstream's: %+v", len(got), got)
 	}
 
-	f.quietFor(46*time.Minute + 30*time.Minute)
+	f.clock.QuietFor(46*time.Minute + 30*time.Minute)
 	if got := f.pass(t, w); got[execution.TriggerStalled].Subject != "" {
 		t.Fatalf("a held unit stalled inside the window of its hold: %+v", got)
 	}
-	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.clock.QuietFor(46*time.Minute + 50*time.Minute)
 	second := f.pass(t, w)[execution.TriggerStalled]
 	if second.Subject == "" || router.OccurrenceKey(second) == router.OccurrenceKey(first) {
 		t.Fatalf("a hold that stood for the window did not stall the unit again: %+v", second)
@@ -455,7 +449,7 @@ func TestAnUnresolvedHoldBecomesAStallAfterTheWindow(t *testing.T) {
 func TestStallWatchdogNeverAsksJevOnTheSchedulingPath(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
-	f.quietFor(3 * time.Hour)
+	f.clock.QuietFor(3 * time.Hour)
 	w := f.watch("45m")
 	f.firstPassed(w)
 	ctx := router.OnSchedulingPath(context.Background())
@@ -520,7 +514,7 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 	w := f.watch("45m")
 	round := func(at time.Duration) map[string]router.Exit {
 		t.Helper()
-		f.quietFor(at)
+		f.clock.QuietFor(at)
 		got := f.pass(t, w)
 		for _, x := range got {
 			if _, err := f.s.RouteExit(ctx, x); err != nil {
@@ -617,7 +611,7 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 	}
 
 	w := f.watch("45m")
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, w)
 	ws := got[intake.TriggerStalled]
 	if len(got) != 1 || ws.Subject != trace.FeatureSubject || ws.From != BuildingState {
@@ -627,7 +621,7 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 		t.Fatalf("the stalled exit = %+v, %v", res, err)
 	}
 
-	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.clock.QuietFor(46*time.Minute + 50*time.Minute)
 	f.pass(t, w)
 	cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream)
 	if len(cards) != 1 {
@@ -659,12 +653,12 @@ func TestAQueuedTurnOlderThanTheWindowDoesNotExplainTheQuiet(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
 	w := f.watch("45m")
-	f.quietFor(2 * time.Hour)
+	f.clock.QuietFor(2 * time.Hour)
 	f.queueTurn(t, stallUnit, f.clock.Now())
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a turn queued a moment ago did not explain the quiet: %+v", got)
 	}
-	f.quietFor(2*time.Hour + 50*time.Minute)
+	f.clock.QuietFor(2*time.Hour + 50*time.Minute)
 	got := f.pass(t, w)
 	if len(got) != 2 || got[execution.TriggerStalled].Subject != trace.UnitSubject(stallUnit) {
 		t.Fatalf("a turn queued 50 minutes ago explained the quiet: %+v", got)
@@ -685,7 +679,7 @@ func TestAWorkstreamCardDoesNotExplainTheQuietOfItsUnits(t *testing.T) {
 	if cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(cards) != 1 {
 		t.Fatalf("the workstream has %d open cards, want 1", len(cards))
 	}
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, f.watch("45m"))
 	if len(got) != 1 || got[execution.TriggerStalled].Subject != trace.UnitSubject(stallUnit) {
 		t.Fatalf("with a card of the workstream open, the pass raised %+v, want the unit's stall alone", got)
@@ -697,9 +691,9 @@ func TestAWorkstreamCardDoesNotExplainTheQuietOfItsUnits(t *testing.T) {
 func TestADriftRebaseIsNoProgressForTheStallWatchdog(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
-	f.quietFor(30 * time.Minute)
+	f.clock.QuietFor(30 * time.Minute)
 	f.transition(t, "stall-drift-rebased", driftSubject, "", driftRebased+"-1", "", stallSeeder, f.clock.Now())
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := f.pass(t, f.watch("45m"))
 	ws := got[intake.TriggerStalled]
 	if len(got) != 2 || ws.Evidence.Facts["last_progress"] != fixturekit.DemoStart.UTC().Format(time.RFC3339) {
@@ -729,11 +723,11 @@ func TestAnUpstreamExplainsItsDependentsOnlyWhileItIsNotStalled(t *testing.T) {
 		return explains
 	}
 
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	if !judge() {
 		t.Fatal("an upstream that progressed 6 minutes ago did not explain its dependents")
 	}
-	f.quietFor(90 * time.Minute)
+	f.clock.QuietFor(90 * time.Minute)
 	if judge() {
 		t.Fatal("an upstream quiet for 50 minutes with nothing to explain it explained its dependents")
 	}
@@ -765,12 +759,12 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 	subject := lifecycle.WorkgroupChangeDocument("c1")
 	w := f.watch("45m")
 
-	f.quietFor(44 * time.Minute)
+	f.clock.QuietFor(44 * time.Minute)
 	f.pass(t, w)
 	if got := f.exitsOf(fixturekit.Stream, subject); len(got) != 0 {
 		t.Fatalf("a change drafted for 44 minutes raised %+v", got)
 	}
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	f.pass(t, w)
 	got := f.exitsOf(fixturekit.Stream, subject)
 	if len(got) != 1 || got[0].Trigger != intake.TriggerStalled || got[0].Default != intake.TargetWait || len(got[0].Targets) != 1 {
@@ -795,7 +789,7 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 		t.Fatalf("the chief of staff was told of the change %d times, want 1", told)
 	}
 
-	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.clock.QuietFor(46*time.Minute + 50*time.Minute)
 	f.pass(t, w)
 	if again := f.exitsOf(fixturekit.Stream, subject); len(again) != 0 {
 		t.Fatalf("a decided stall of the change was raised again: %+v", again)
@@ -820,7 +814,7 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 
 	presented := newStallFixture(t, "", nil)
 	presented.seedChange(t, lifecycle.WorkgroupChange{ID: "c2", Workgroup: "wg", Host: fixturekit.Stream, State: "presented"}, 1, fixturekit.DemoStart)
-	presented.quietFor(3 * time.Hour)
+	presented.clock.QuietFor(3 * time.Hour)
 	presented.pass(t, presented.watch("45m"))
 	if got := presented.exitsOf(fixturekit.Stream, lifecycle.WorkgroupChangeDocument("c2")); len(got) != 0 {
 		t.Fatalf("a presented change raised %+v", got)

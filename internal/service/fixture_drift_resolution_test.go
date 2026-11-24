@@ -1,13 +1,10 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strings"
-	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -24,9 +21,9 @@ func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, st
 
 func awaitResolution(t *testing.T, s *Service, d drifter, stream config.WorkstreamID, op coreadapter.Operation, want string) {
 	t.Helper()
-	if result, err := attemptOperation(t, s, d.repository, stream, op, d); !errors.Is(err, lifecycle.ErrDriftAwaits) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("the drift rebase did not await %q: %+v %v", want, result, err)
-	}
+	intakefixture.AwaitResolution(t, func() (coreadapter.OperationResult, error) {
+		return attemptOperation(t, s, d.repository, stream, op, d)
+	}, lifecycle.ErrDriftAwaits, want)
 }
 
 func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
@@ -35,23 +32,12 @@ func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 }
 
 func resolvedDone(outcome string) *coreadapter.Outcome {
-	data, _ := json.Marshal(MasonReport{Outcome: outcome})
-	return &coreadapter.Outcome{Status: execution.MasonDone, Report: string(data)}
-}
-
-func driftVerdict(t *testing.T, verdict UnitVerdict) *coreadapter.Outcome {
-	t.Helper()
-	return intakefixture.VerdictOutcome(t, verdict, execution.VerdictOutcome)
+	return intakefixture.ResolvedDone(execution.MasonDone, MasonReport{Outcome: outcome})
 }
 
 var (
-	approvedResolution = UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	approvedResolution = UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 )
-
-func turnIDs(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, agent string) []string {
-	t.Helper()
-	return intakefixture.TurnIDs(t, repository, stream, agent)
-}
 
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
@@ -60,14 +46,13 @@ func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamI
 
 func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	tip, _, err := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream)).Branch(context.Background(), featureBranch(stream))
-	fixturekit.Must(t, err)
-	return tip
+	return intakefixture.BranchTip(t, workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream)), featureBranch(stream))
 }
 
 func conflictedDrift(t *testing.T, f *shedFixture, d drifter, stream config.WorkstreamID) (string, string, coreadapter.Operation) {
 	t.Helper()
-	before := moveFeature(t, f, stream, map[string]string{"CODEOWNERS": "/internal/ @feature\n"})
-	upstream := advanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
-	return before, upstream, requestDrift(t, d, stream)
+	return intakefixture.ConflictedDrift(t,
+		func(files map[string]string) string { return moveFeature(t, f, stream, files) },
+		func(files map[string]string) string { return advanceUpstream(t, f, files) },
+		func() coreadapter.Operation { return requestDrift(t, d, stream) })
 }

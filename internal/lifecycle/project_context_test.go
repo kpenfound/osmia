@@ -4,9 +4,11 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -16,14 +18,14 @@ import (
 
 func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testing.T) {
 	t.Parallel()
-	f, stream, repo, _ := newFinalFixture(t, "project-context")
+	f, stream, repo, _ := journey.NewFinalFixtureWith(t, "project-context", "")
 	ctx := context.Background()
-	_, err := repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.OwnerActor)
+	_, err := repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.OwnerActor)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, ID: "request_context", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
+	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, ID: "request_context", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "context", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read context"})
 	fixturekit.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "context-claim", "/owned/context", f.s.now())
+	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "context-claim", "/owned/context", f.S.Now())
 	fixturekit.Must(t, err)
 	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "context", Role: trace.ChiefOfStaff}
 	notice := func(text string) string {
@@ -33,7 +35,7 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	}
 	var docs []trace.Document
 	for i := range 25 {
-		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("topic-%02d", i), Revision: 1, Project: repo.Project(), At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+		dh := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: fmt.Sprintf("topic-%02d", i), Revision: 1, Project: repo.Project(), At: f.S.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 		docs = append(docs, trace.Document{Header: dh, Path: fmt.Sprintf("notices/topic-%02d.json", i), Content: notice(strings.Repeat("évidence ", 4000))})
 	}
 	dh := docs[0].Header

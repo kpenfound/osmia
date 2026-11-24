@@ -3,11 +3,13 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -32,12 +34,12 @@ func logAssumption(t *testing.T, repository *trace.Repository, stream config.Wor
 
 func TestDraftDeliveryIncludesLoggedAssumptions(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, repository, report := journey.DeliveryFixture(t)
 	defer repository.Close()
 	at := time.Now().UTC()
 	logAssumption(t, repository, stream, "Used the existing retry backoff rather than adding a new one.", at)
 
-	_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
+	_, body, err := journey.DraftDelivery(f.S.About(repository), repository, stream, report)
 	fixturekit.Must(t, err)
 	if !strings.Contains(body, "Assumptions:") || !strings.Contains(body, "- Used the existing retry backoff rather than adding a new one.") {
 		t.Fatalf("drafted body does not carry the logged assumption:\n%s", body)
@@ -46,9 +48,9 @@ func TestDraftDeliveryIncludesLoggedAssumptions(t *testing.T) {
 
 func TestDraftDeliveryHasNoAssumptionsSectionWithoutAny(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, repository, report := journey.DeliveryFixture(t)
 	defer repository.Close()
-	_, body, err := draftDelivery(f.s.about(repository), repository, stream, report)
+	_, body, err := journey.DraftDelivery(f.S.About(repository), repository, stream, report)
 	fixturekit.Must(t, err)
 	if strings.Contains(body, "Assumptions:") {
 		t.Fatalf("drafted body has an assumptions section with none logged:\n%s", body)

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
@@ -19,22 +21,22 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func archivedMemberFixture(t *testing.T) (*productionDesignFixture, config.WorkstreamID, config.WorkstreamID) {
+func archivedMemberFixture(t *testing.T) (*journey.ProductionDesignFixture, config.WorkstreamID, config.WorkstreamID) {
 	t.Helper()
 	ctx := context.Background()
-	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait}, "", nil)
+	f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait}, "", nil)
 	deliverResolutionMembers(t, f)
-	archived, survivor := f.stream1, f.stream2
-	repo, err := f.s.repository(f.project)
+	archived, survivor := f.Stream1, f.Stream2
+	repo, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	recordResolutionMerge(t, repo, archived)
-	if _, err := f.c.Archive(ctx, archived); err != nil {
-		if _, found := intakefixture.ArchiveRecord(t, f.s.store, archived); !found {
+	journey.RecordResolutionMerge(t, repo, archived)
+	if _, err := f.C.Archive(ctx, archived); err != nil {
+		if _, found := intakefixture.ArchiveRecord(t, f.S.Store, archived); !found {
 			t.Fatal(err)
 		}
 	}
-	lifecycleAwait(t, f, "merged member archived", func() bool {
-		a, found := intakefixture.ArchiveRecord(t, f.s.store, archived)
+	journey.LifecycleAwait(t, f, "merged member archived", func() bool {
+		a, found := intakefixture.ArchiveRecord(t, f.S.Store, archived)
 		return found && a.Resolved && a.ResolutionEvidence == "merged"
 	})
 	return f, archived, survivor
@@ -68,7 +70,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, archived, survivor := archivedMemberFixture(t)
-	defer f.stop(t)
+	defer f.Stop(t)
 	var changeArchived atomic.Bool
 	var drafts atomic.Int32
 	installRetirementDelta(t, f, &drafts, func(after *trace.ProjectSpec) {
@@ -93,7 +95,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	})
 
 	changeArchived.Store(true)
-	refused, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "frozen-slice", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests in every member."})
+	refused, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "frozen-slice", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests in every member."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -101,19 +103,19 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	if refused.State != "drafting" || refused.Held() {
 		t.Fatalf("request with an archived member was held: %+v", refused)
 	}
-	lifecycleAwait(t, f, "frozen-slice draft refused", func() bool {
-		return currentChange(t, f.s, f.origin, refused.ID).State == "failed"
+	journey.LifecycleAwait(t, f, "frozen-slice draft refused", func() bool {
+		return journey.CurrentChange(t, f.S, f.Origin, refused.ID).State == "failed"
 	})
 	assertFrozenSliceRefusal(t, f, survivor, refused.ID, archived)
 
 	changeArchived.Store(false)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "survivor-repair", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "survivor-repair", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	assertArchivedMemberSnapshot(t, c, archived, survivor)
-	lifecycleAwait(t, f, "survivor amendment presented", func() bool {
-		c = currentChange(t, f.s, f.origin, c.ID)
+	journey.LifecycleAwait(t, f, "survivor amendment presented", func() bool {
+		c = journey.CurrentChange(t, f.S, f.Origin, c.ID)
 		if c.State == "failed" {
 			t.Fatalf("survivor amendment failed: %s", c.Failure)
 		}
@@ -129,11 +131,11 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	if after, _ := trace.SliceFor(c.After, archived); !intakefixture.EqualJSONTest(before, after) {
 		t.Fatal("presented proposal changed the archived member's slice")
 	}
-	if _, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault != nil {
+	if _, apiFault := f.S.Lifecycle().DecideChange(ctx, string(f.Origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	lifecycleAwait(t, f, "survivor amendment applied", func() bool {
-		c = currentChange(t, f.s, f.origin, c.ID)
+	journey.LifecycleAwait(t, f, "survivor amendment applied", func() bool {
+		c = journey.CurrentChange(t, f.S, f.Origin, c.ID)
 		return c.State == "applied"
 	})
 	if !slices.Equal(c.Applied, []config.WorkstreamID{survivor}) || len(c.Retired) != 0 || c.Failure != "" {
@@ -142,7 +144,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	if kept, _ := trace.SliceFor(*c.Result, archived); !intakefixture.EqualJSONTest(before, kept) {
 		t.Fatal("published project spec changed the archived member's slice")
 	}
-	repo, err := f.s.repository(f.project2)
+	repo, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, survivor)
 	fixturekit.Must(t, err)
@@ -169,11 +171,11 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, archived, survivor := archivedMemberFixture(t)
-	defer f.stop(t)
-	if _, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-archived", Kind: "cancel", Scope: "workstream", Workstream: archived, Change: "Cancel the archived member."}); apiFault == nil || !strings.Contains(apiFault.Message, "archived and already terminal") {
+	defer f.Stop(t)
+	if _, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "cancel-archived", Kind: "cancel", Scope: "workstream", Workstream: archived, Change: "Cancel the archived member."}); apiFault == nil || !strings.Contains(apiFault.Message, "archived and already terminal") {
 		t.Fatalf("cancelling an archived member: %v", apiFault)
 	}
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-survivor", Kind: "cancel", Scope: "workstream", Workstream: survivor, Change: "Cancel the open member."})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "cancel-survivor", Kind: "cancel", Scope: "workstream", Workstream: survivor, Change: "Cancel the open member."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -184,21 +186,21 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 	if row := impactRow(c, survivor); row.Action != amendment.Cancel {
 		t.Fatalf("survivor impact: %+v", row)
 	}
-	lifecycleAwait(t, f, "cancellation presented", func() bool {
-		c = currentChange(t, f.s, f.origin, c.ID)
+	journey.LifecycleAwait(t, f, "cancellation presented", func() bool {
+		c = journey.CurrentChange(t, f.S, f.Origin, c.ID)
 		return c.State == "presented"
 	})
-	if _, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "draft"}); apiFault != nil {
+	if _, apiFault := f.S.Lifecycle().DecideChange(ctx, string(f.Origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "draft"}); apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	lifecycleAwait(t, f, "survivor cancellation applied", func() bool {
-		c = currentChange(t, f.s, f.origin, c.ID)
+	journey.LifecycleAwait(t, f, "survivor cancellation applied", func() bool {
+		c = journey.CurrentChange(t, f.S, f.Origin, c.ID)
 		return c.State == "applied"
 	})
 	if !slices.Equal(c.Applied, []config.WorkstreamID{survivor}) || len(c.Retired) != 0 {
 		t.Fatalf("applied cancellation: applied=%v retired=%v", c.Applied, c.Retired)
 	}
-	repo, err := f.s.repository(f.project2)
+	repo, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
 	feature, err := repo.Workflow(survivor, trace.FeatureSubject)
 	fixturekit.Must(t, err)
@@ -230,7 +232,7 @@ func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, archived, _ := archivedMemberFixture(t)
-	defer f.stop(t)
+	defer f.Stop(t)
 	var changeArchived atomic.Bool
 	var drafts atomic.Int32
 	installRetirementDelta(t, f, &drafts, func(after *trace.ProjectSpec) {
@@ -254,31 +256,31 @@ func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
 		}
 	})
 	changeArchived.Store(true)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retried", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "retried", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	lifecycleAwait(t, f, "first draft failed", func() bool {
-		return currentChange(t, f.s, f.origin, c.ID).State == "failed"
+	journey.LifecycleAwait(t, f, "first draft failed", func() bool {
+		return journey.CurrentChange(t, f.S, f.Origin, c.ID).State == "failed"
 	})
 	first := drafts.Load()
 
 	changeArchived.Store(false)
-	retried, apiFault := f.s.lifecycle().RetryChange(ctx, f.origin, c.ID)
+	retried, apiFault := f.S.Lifecycle().RetryChange(ctx, f.Origin, c.ID)
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	if retried.State != "drafting" || retried.Attempt != 1 || retried.Failure != "" {
 		t.Fatalf("retried change: %+v", retried)
 	}
-	lifecycleAwait(t, f, "retried change presented", func() bool {
-		c = currentChange(t, f.s, f.origin, c.ID)
+	journey.LifecycleAwait(t, f, "retried change presented", func() bool {
+		c = journey.CurrentChange(t, f.S, f.Origin, c.ID)
 		return c.State == "presented"
 	})
 	if drafts.Load() <= first {
 		t.Fatalf("the retry drafted nothing: %d drafts before, %d after", first, drafts.Load())
 	}
-	if _, apiFault := f.s.lifecycle().RetryChange(ctx, f.origin, c.ID); apiFault == nil || !strings.Contains(apiFault.Message, "only a change still drafting or debating") {
+	if _, apiFault := f.S.Lifecycle().RetryChange(ctx, f.Origin, c.ID); apiFault == nil || !strings.Contains(apiFault.Message, "only a change still drafting or debating") {
 		t.Fatalf("a presented change was retried: %v", apiFault)
 	}
 }

@@ -2,10 +2,11 @@ package service
 
 import (
 	"bytes"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func imageWorktree(t *testing.T) (directory string, data []byte) {

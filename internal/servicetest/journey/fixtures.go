@@ -3,7 +3,11 @@ package journey
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
@@ -21,10 +25,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 // ApproveDirectly records a satisfactory review of the unit's current
@@ -33,7 +33,7 @@ func ApproveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	t.Helper()
 	r := &Reviewers{Masons: NewMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.PrepareUnitReview, func(identity service.UnitReviewIdentity, turn string) ([]byte, error) {
-		return json.Marshal(service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: ReviewSummary}})
+		return json.Marshal(service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}})
 	}, execution.ReviewTurnID, execution.ReviewDocument, r.One, intake.UnitApproved)
 }
 
@@ -129,7 +129,7 @@ func DeliveryFixtureWith(t *testing.T, extra string) (*ShedFixture, config.Works
 // FinalOperations returns the workstream's final review operations.
 func FinalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.FinalOperations(t, repository, stream, service.FinalReviewAction)
+	return intakefixture.OperationsOf(t, repository, stream, service.FinalReviewAction)
 }
 
 // FinalTurn installs the fake committee member's turn of final review k.
@@ -140,7 +140,7 @@ func (f *ShedFixture) FinalTurn(k, attempt int, run func(context.Context, *mcp.C
 // LandOperations returns the workstream's landing operations.
 func LandOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.LandOperations(t, repository, stream, service.LandAction)
+	return intakefixture.OperationsOf(t, repository, stream, service.LandAction)
 }
 
 // LifecycleAwait observes the live controller's durable writes. It never runs a
@@ -149,10 +149,6 @@ func LifecycleAwait(t *testing.T, f *ProductionDesignFixture, phase string, read
 	t.Helper()
 	f.SharedDesign().LifecycleAwait(t, phase, ready)
 }
-
-// MasonRoles runs the chief of staff, mason and reviewer in containers, the
-// sandbox the fake engine's boundary check accepts.
-const MasonRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
 // MergeDirectly commits files onto the feature branch as the unit's landing
 // and records the unit merged, as a landing does, and returns the new tip.
@@ -179,9 +175,9 @@ func NewApprovedFixture(t *testing.T, key string) (*ShedFixture, config.Workstre
 // NewApprovedFixtureOn creates approved units on the given workspace backend.
 func NewApprovedFixtureOn(t *testing.T, key, backend string) (*ShedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, _ := NewMasonFixtureOn(t, backend, "masons = 1\n", IndependentPlan)
+	f, _ := NewMasonFixtureOn(t, backend, "masons = 1\n", intakefixture.IndependentPlan)
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
-	stream, repository := SeedBuild(t, f, key, IndependentPlan, backend, base)
+	stream, repository := SeedBuild(t, f, key, intakefixture.IndependentPlan, backend, base)
 	intakefixture.SeedApprovedUnits(t, func(u, o string) { SeedReview(t, f, repository, stream, u, o) }, func(u, c string) { ApproveDirectly(t, f.S, repository, stream, u, c) })
 	return f, stream, repository
 }
@@ -213,15 +209,7 @@ func NewFinalFixtureWith(t *testing.T, key, extra string) (*ShedFixture, config.
 // restarted service holds the same host.
 func HostFinalReviews(t *testing.T, f *ShedFixture, stream config.WorkstreamID) *fixturekit.FakePulls {
 	t.Helper()
-	var fork string
-	var pulls *fixturekit.FakePulls
-	fork, pulls = fixturekit.PublicationFork(t, f.Clone, func() string {
-		tip, _ := fixturekit.PublicationForkBranch(t, fork, intake.FeatureBranch(stream))
-		return tip
-	})
-	pulls.SyncHead = true
-	f.Opts.PullRequests = pulls
-	f.S.Options.PullRequests = pulls
+	_, pulls := HostService(t, f, func() config.WorkstreamID { return stream })
 	service.InspectForTest(f.S.Core()).SetStoppedPullRequests(pulls)
 	return pulls
 }
@@ -229,7 +217,7 @@ func HostFinalReviews(t *testing.T, f *ShedFixture, stream config.WorkstreamID) 
 // NewMasonController returns the mason controller of the service's
 // configuration over repository.
 func NewMasonController(s *Service, repository *trace.Repository) *Masons {
-	return &Masons{S: s, Cfg: s.Current(), Repository: repository}
+	return &Masons{S: s, Cfg: s.Cfg, Repository: repository}
 }
 
 // NewMasonFixtureOn is NewMasonFixtureWith whose workstreams are
@@ -243,7 +231,7 @@ func NewMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*ShedFi
 // the options and the configuration file before the service starts.
 func NewMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*ShedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	f := NewDebateFixtureWith(t, 1, 1, MasonRoles, func(opts *Options) {
+	f := NewDebateFixtureWith(t, 1, 1, intakefixture.MasonRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
 		enforced := Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
@@ -270,7 +258,14 @@ func NewParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 // handed in on the workspace backend given.
 func NewParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*ShedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	f, fake := NewMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
+	return NewParallelMasonFixturePrepared(t, backend, masons, perWorkstream, drafted, nil)
+}
+
+// NewParallelMasonFixturePrepared is NewParallelMasonFixtureOn with prepare,
+// when set, changing the options before the service starts.
+func NewParallelMasonFixturePrepared(t *testing.T, backend string, masons, perWorkstream int, drafted string, prepare func(*Options)) (*ShedFixture, *intakefixture.FakeMasons) {
+	t.Helper()
+	f, fake := NewMasonFixtureWith(t, backend, intakefixture.ParallelCapacity(masons, perWorkstream), drafted, prepare)
 	intakefixture.ExtendParallelMasons(t, f.Clone, f.Repository(), f.Clock.Now(), f.Engine, fake, execution.MasonTurnID, intake.OwnerActor)
 	return f, fake
 }
@@ -303,9 +298,6 @@ func RecordBuild(t *testing.T, f *ShedFixture, repository *trace.Repository, key
 	fixturekit.Must(t, err)
 	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: fixturekit.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
-
-// ReviewSummary is how a fixture reviewer says it verified the acceptance.
-const ReviewSummary = "The candidate does the task and its acceptance holds"
 
 // RunChecks runs the checks controller's passes and reconciles each check
 // run they request as the reconciliation controller does, one at a time as
@@ -361,8 +353,6 @@ func (f *ShedFixture) UnitState(stream config.WorkstreamID, unit string) (string
 	states, err := f.Repository().WorkflowStates(stream)
 	return states[trace.UnitSubject(unit)].Value, err
 }
-
-const OtherStream config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
 
 func (f *ProductionDesignFixture) AssertBarrier(t *testing.T) {
 	t.Helper()
@@ -434,6 +424,8 @@ type ProductionDesignConfiguration struct {
 	Wait       func(*testing.T, *ProductionDesignFixture, string, func() bool)
 	Checkpoint func(context.Context, string) error
 	HandIn     bool
+
+	OpenPullRequestsStay bool
 }
 
 type ProductionDesignFixture struct {
@@ -487,7 +479,7 @@ func (f *ProductionDesignFixture) SharedDesign() *intakefixture.ProductionDesign
 				t.Logf("injection step=%s hits=%d target=%d", hook.Step, hook.Count.Load(), hook.Nth)
 			}
 		},
-		WriteCharter: func(t *testing.T, p config.ProjectID, text string) { WriteCharter(t, f.C, p, text) },
+		WriteCharter: func(t *testing.T, p config.ProjectID, text string) { intakefixture.WriteCharter(t, f.C, p, text) },
 		Upstream:     f.Upstream, Script: f.Script, ScriptDrafts: f.ScriptDrafts, Workspaces: intake.Workspaces,
 		ReadBuilding: func(r *trace.Repository, w config.WorkstreamID) (bool, error) {
 			_, ok, err := (&Masons{S: f.S, Repository: r}).Read(w)
@@ -506,6 +498,9 @@ func (f *ProductionDesignFixture) SharedDesign() *intakefixture.ProductionDesign
 		},
 		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
+	if f.Configuration.OpenPullRequestsStay {
+		shared.IdleRefresh = func(t trace.Transition) bool { return t.Reason == lifecycle.OwnPullRequestOpenReason }
+	}
 	if f.Configuration.Wait != nil {
 		shared.WaitMode = func(t *testing.T, phase string, done func() bool) { f.Configuration.Wait(t, f, phase, done) }
 	}
@@ -521,9 +516,9 @@ func (f *ArchitectFixture) SharedTurns() *intakefixture.TurnScenario {
 	}
 }
 
-func (f *ShedFixture) UnitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[service.TestBuilding] {
+func (f *ShedFixture) UnitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[execution.Building] {
 	m := NewMasonController(f.S, repository)
-	return intakefixture.UnitSeedDriver[service.TestBuilding]{Read: m.Read, Start: m.Start, Finish: m.Finish,
+	return intakefixture.UnitSeedDriver[execution.Building]{Read: m.Read, Start: m.Start, Finish: m.Finish,
 		Open: NewUnitWorkspaces(f.S.Current(), repository).Open,
 		Complete: func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) trace.QueuedTurn {
 			return CompleteMasonTurn(t, f, r, w, u, o)

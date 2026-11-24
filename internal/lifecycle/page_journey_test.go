@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/config"
@@ -36,23 +38,23 @@ func (v journeyViewport) emulate(height int64) chromedp.Action {
 	return chromedp.EmulateViewport(v.width, height)
 }
 
-type journey struct {
+type pageJourney struct {
 	*briefJourney
 	other      config.WorkstreamID
 	screenshot string
 }
 
-func newJourney(t *testing.T) *journey {
+func newJourney(t *testing.T) *pageJourney {
 	t.Helper()
-	j := newBriefFixture(t, listenWeb)
-	first, repository := j.buildFixture().SeedGit(t, "journey")
-	j.stream, j.repository = first, repository
+	j := newBriefFixture(t, journey.ListenWeb)
+	first, repository := j.BuildFixture().SeedGit(t, "journey")
+	j.Stream, j.Repository = first, repository
 	j.host(t)
-	j.s.setSole(&activeProject{repository: repository})
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 	other := j.secondMember(t, "journey-other")
 	j.assemble(t, first, "internal/trace", "resume", "dedupe")
 	j.assemble(t, other, "internal/trace", "other-resume", "other-dedupe")
-	screenshot := j.captureImage(t, "uploads", j.report.Commit, previewPicture(t))
+	screenshot := j.captureImage(t, "uploads", j.Report.Commit, previewPicture(t))
 	for n := 1; n <= 3; n++ {
 		status := "passed"
 		if n == 1 {
@@ -66,7 +68,7 @@ func newJourney(t *testing.T) *journey {
 	fixturekit.FeedDocument(t, repository, first, "unit-dedupe-checks-1", "units/dedupe/checks-1.json", 1, at,
 		service.UnitCheckRun{Unit: "dedupe", Run: 1, Status: "passed", StartedAt: at, FinishedAt: at})
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
-	return &journey{briefJourney: j, other: other, screenshot: screenshot}
+	return &pageJourney{briefJourney: j, other: other, screenshot: screenshot}
 }
 
 func TestBrowserJourneyWalksTheRedesignedPage(t *testing.T) {
@@ -84,7 +86,7 @@ func TestBrowserJourneyWalksTheRedesignedPage(t *testing.T) {
 
 func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	j := newJourney(t)
-	stream, other := j.stream, j.other
+	stream, other := j.Stream, j.other
 	j.run(t)
 	first, second := j.awaitEntry(t, stream), j.awaitEntry(t, other)
 	card := intakefixture.DecisionCard(first)
@@ -94,7 +96,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p := browsertest.OpenBrowser(t)
 	audit := func(step string) { p.T.Helper(); p.Audit(v.name+": "+step, v.phone) }
 	shot := func(view string, position ...string) { p.T.Helper(); p.Screenshot(v.name+"-"+view, position...) }
-	p.Run(v.emulate(v.height), chromedp.Navigate("http://"+j.s.WebAddr()+"/"))
+	p.Run(v.emulate(v.height), chromedp.Navigate("http://"+j.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
 	p.Await("the home view listing both deliveries", `(() => {
@@ -353,7 +355,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 
 	p.Click("#confirm-cancel")
 	p.Await("the dialog closed and focus back on the menu button", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
-	statuses, err := j.c.Statuses(t.Context())
+	statuses, err := j.C.Statuses(t.Context())
 	fixturekit.Must(t, err)
 	for _, w := range statuses.Workstreams {
 		if w.Workstream == other && (w.State == nil || *w.State == intake.AbandonedState) {
@@ -367,7 +369,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p.Click("#confirm-accept")
 	p.Await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
 	intakefixture.Eventually(t, "the service never abandoned the workstream the dialog confirmed", func() bool {
-		statuses, err := j.c.Statuses(t.Context())
+		statuses, err := j.C.Statuses(t.Context())
 		fixturekit.Must(t, err)
 		for _, w := range statuses.Workstreams {
 			if w.Workstream == other {

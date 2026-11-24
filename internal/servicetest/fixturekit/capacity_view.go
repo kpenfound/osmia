@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/runtime"
 )
 
 func RoleCapacityEntry(t *testing.T, c *api.CapacityStatus, role string) api.RoleCapacity {
@@ -98,4 +99,20 @@ func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 		t.Fatalf("capacity pool order %s, want %s", got, want)
 	}
 	return doc.Capacity.Roles
+}
+
+// FactoryPause returns the pause in effect on the whole factory.
+func FactoryPause(store *runtime.Store) (runtime.Pause, bool) {
+	st, _ := store.Effective()
+	return PauseOf(api.RuntimeResponse{Effective: st}, runtime.Target{Scope: "factory"})
+}
+
+// RequireDailyBudget returns the daily budget status and fails the test when
+// there is none.
+func RequireDailyBudget(t *testing.T, status *api.DailyBudgetStatus) api.DailyBudgetStatus {
+	t.Helper()
+	if status == nil {
+		t.Fatal("no daily budget status")
+	}
+	return *status
 }

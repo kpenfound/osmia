@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -20,17 +20,17 @@ func TestNotifyLandingOnceNamingTheLandedCommitAndBaseBranch(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := deliveryFixture(t)
 	ctx := context.Background()
-	hook := newFakeWebhook(t)
-	hook.records(Options{Config: config.Options{Root: f.s.cfg.Root.String()}})
+	hook := fixturekit.NewWebhook(t)
+	hook.Records(f.s.cfg.Root.String())
 	f.s.mu.Lock()
 	cfg := *f.s.cfg
-	cfg.Notify.Webhook = hook.hook()
+	cfg.Notify.Webhook = hook.Hook()
 	f.s.cfg = &cfg
 	f.s.mu.Unlock()
 	n := f.s.notifier
 	n.inbox = f.s.inbox
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 0 {
+	if got := hook.Received(); len(got) != 0 {
 		t.Fatalf("posts before a landing: %q", got)
 	}
 
@@ -40,7 +40,7 @@ func TestNotifyLandingOnceNamingTheLandedCommitAndBaseBranch(t *testing.T) {
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.LandingDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: landing.At, Actor: ownerActor, Cause: "test"}, Path: delivery.LandingPath, Content: string(content)}}))
 	n.pass(ctx)
-	got := hook.received()
+	got := hook.Received()
 	if len(got) != 1 {
 		t.Fatalf("posts for the landing: %q", got)
 	}
@@ -52,7 +52,7 @@ func TestNotifyLandingOnceNamingTheLandedCommitAndBaseBranch(t *testing.T) {
 	n.pass(ctx)
 	restarted := newNotifier(f.s, 10*time.Millisecond, f.s.inbox)
 	restarted.pass(ctx)
-	if got := hook.received(); len(got) != 1 {
+	if got := hook.Received(); len(got) != 1 {
 		t.Fatalf("posts after more passes and a restart: %q", got)
 	}
 }

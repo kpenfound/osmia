@@ -47,7 +47,7 @@ func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepa
 	}
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
-	f.project, f.trace = intakefixture.AddArchitectProject(t, f.c, clone, intakefixture.ShedCharter, func(t *testing.T, p config.ProjectID, text string) { writeCharter(t, f.c, p, text) })
+	f.project, f.trace = intakefixture.AddArchitectProject(t, f.c, clone, intakefixture.ShedCharter, func(t *testing.T, p config.ProjectID, text string) { intakefixture.WriteCharter(t, f.c, p, text) })
 	f.scenario().ScriptDebate(rounds)
 	return &shedFixture{architectFixture: f, members: members}
 }

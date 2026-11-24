@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -57,7 +58,7 @@ func AddDesignProject(t *testing.T, c *service.Client, clone string) config.Proj
 	t.Helper()
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return added.Project.ID
 }
 

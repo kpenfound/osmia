@@ -24,14 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const sibling config.WorkstreamID = "w_0123456789abcdef0123456789abcdee"
-
-type turnFunc func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
-
-func (f turnFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-	return f(ctx, p)
-}
-
 func checkPauseStop(t *testing.T, q trace.QueuedTurn, scope, reason string) {
 	t.Helper()
 	intakefixture.CheckPauseStop(t, q, scope, reason)
@@ -55,7 +47,7 @@ func TestRunningTurnsStopWhatAHardPauseCovers(t *testing.T) {
 	turns := []*running{
 		{project: fixturekit.Project, stream: fixturekit.Stream, stoppable: true},
 		{project: fixturekit.Project, stream: fixturekit.Stream},
-		{project: fixturekit.Project, stream: sibling, stoppable: true},
+		{project: fixturekit.Project, stream: fixturekit.Sibling, stoppable: true},
 		{project: other, stream: fixturekit.Stream, stoppable: true},
 	}
 	var r runningTurns
@@ -178,7 +170,7 @@ func TestHardPauseRacingTurnStartsStopsEveryTurn(t *testing.T) {
 	const n = 8
 	cfg, repo, clock := hardPauseRepository(t, n)
 	started := make(chan string, n)
-	backend := turnFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	backend := fixturekit.TurnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		started <- p.Scope.Thread
 		result := coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session-" + p.Scope.Thread}, FinalResponse: "Partial"}
 		select {
@@ -230,7 +222,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, sibling, clock.Now(), owner))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Sibling, clock.Now(), owner))
 	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
 	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	queueTurn(t, repo, "first", clock.Now())
@@ -302,13 +294,13 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	await(entered, "queued turn did not start")
 
 	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: sibling}, Mode: "hard", Reason: "Another feature", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Sibling}, Mode: "hard", Reason: "Another feature", Source: "owner"})
 	running("a hard pause of another workstream stopped the turn")
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Finish up", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Finish up", Source: "owner"})
 	running("a soft pause stopped the turn")
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop now", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop now", Source: "owner"})
 	await(stopped, "the hard pause did not stop the running turn")
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
 	close(settling)
 	first := completed(fixturekit.DemoAgent, "first")
 	checkPauseStop(t, first, "workstream", "Stop now")
@@ -320,7 +312,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	checkNoRetry(t, turnOperations(t, repo)["first"], "interrupted")
 
 	factory := runtime.Target{Scope: "factory"}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: factory, Mode: "hard", Reason: "Travelling", Source: "owner"})
 	chiefEntered, chiefRelease := make(chan struct{}), make(chan struct{})
 	var chiefErr error
 	turns.Hooks["chief"] = func(ctx context.Context) {
@@ -334,7 +326,7 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
 	await(chiefEntered, "the chief of staff did not answer during a factory hard pause")
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "hard", Reason: "Really stop", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "hard", Reason: "Really stop", Source: "owner"})
 	close(chiefRelease)
 	chief := completed(trace.ChiefOfStaff, "chief")
 	if chiefErr != nil || chief.Status() != "idle" || chief.Response.Stop != nil {
@@ -346,8 +338,8 @@ func TestHardPauseStopsCoveredRunningTurnsOnly(t *testing.T) {
 		t.Fatal("a worker turn was dispatched under a hard pause")
 	}
 
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(factory))
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(runtime.Target{Scope: "project", Project: fixturekit.Project}))
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(factory))
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(runtime.Target{Scope: "project", Project: fixturekit.Project}))
 	tick()
 	tick()
 	if second := completed(fixturekit.DemoAgent, "second"); second.Status() != "idle" {

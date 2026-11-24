@@ -7,6 +7,9 @@ import (
 	slices "slices"
 	testing "testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
@@ -16,15 +19,15 @@ import (
 func TestProjectRegistrationRecoversAlongsideAnActiveProject(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, clone := projectFixture(t)
-	s, c := start(t, opts)
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
 	first, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: first.Project.ID}, Mode: "soft", Reason: "Owner review"})
+	intakefixture.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: first.Project.ID}, Mode: "soft", Reason: "Owner review"})
 	secondClone := filepath.Join(filepath.Dir(clone), "other")
 	fixturekit.DemoGit(t, filepath.Dir(clone), "init", "--quiet", secondClone)
 	req := api.ProjectAddRequest{Name: "other", Upstream: "upstream/other", Fork: "owner/other", Clone: secondClone}
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "trace-created" {
 			return errors.New("interrupted registration")
 		}
@@ -33,15 +36,15 @@ func TestProjectRegistrationRecoversAlongsideAnActiveProject(t *testing.T) {
 	_, err = c.AddProject(ctx, req)
 	fixturekit.AssertCode(t, err, api.Internal)
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	second, err := c.AddProject(ctx, req)
 	fixturekit.Must(t, err)
 	if first.Project.ID == second.Project.ID || len(projectDirectories(t, opts.Config.Root)) != 2 {
 		t.Fatal("recovery duplicated or replaced a project")
 	}
 	want := []config.ProjectID{first.Project.ID, second.Project.ID}
-	if !slices.Equal(s.current().ProjectIDs(), want) || len(s.traces()) != 2 {
-		t.Fatalf("active projects: %v", s.current().ProjectIDs())
+	if !slices.Equal(s.Current().ProjectIDs(), want) || len(traces(s)) != 2 {
+		t.Fatalf("active projects: %v", s.Current().ProjectIDs())
 	}
 	rt, err := c.Runtime(ctx)
 	fixturekit.Must(t, err)
@@ -50,7 +53,7 @@ func TestProjectRegistrationRecoversAlongsideAnActiveProject(t *testing.T) {
 	}
 	_, err = c.RemoveProject(ctx, second.Project.ID)
 	fixturekit.Must(t, err)
-	if !slices.Equal(s.current().ProjectIDs(), want[:1]) {
+	if !slices.Equal(s.Current().ProjectIDs(), want[:1]) {
 		t.Fatal("removing the new project removed the existing project")
 	}
 }

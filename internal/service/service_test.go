@@ -23,13 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/trace"
 )
-
-func writeCharter(t *testing.T, c *Client, project config.ProjectID, content string) trace.Document {
-	t.Helper()
-	return intakefixture.WriteCharter(t, c, project, content)
-}
 
 func fixture(t *testing.T) Options {
 	t.Helper()
@@ -56,11 +50,6 @@ func start(t *testing.T, opts Options) (*Service, *Client) {
 		}
 	})
 	return s, c
-}
-
-func mutation(t *testing.T, c *Client, method, kind string, input any) {
-	t.Helper()
-	intakefixture.Mutation(t, c, method, kind, input)
 }
 
 func TestHealthReportsReadyWithTheBuild(t *testing.T) {
@@ -114,9 +103,9 @@ func TestClosingTheServiceRemovesItsSocket(t *testing.T) {
 
 func setOwnerOverrides(t *testing.T, c *Client) {
 	t.Helper()
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 }
 
 func TestOwnerOverridesAreReportedByRuntime(t *testing.T) {
@@ -166,9 +155,9 @@ func TestClearingOwnerOverridesRestoresTheConfiguredDefaults(t *testing.T) {
 	t.Parallel()
 	_, c := start(t, fixture(t))
 	setOwnerOverrides(t, c)
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
-	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: fixturekit.Project})
-	mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	intakefixture.Mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: fixturekit.Project})
+	intakefixture.Mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
 	after, err := c.Runtime(context.Background())
 	fixturekit.Must(t, err)
 	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
@@ -184,9 +173,9 @@ func TestClearedOwnerOverridesStayClearedAfterARestart(t *testing.T) {
 	opts := fixture(t)
 	s, c := start(t, opts)
 	setOwnerOverrides(t, c)
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
-	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: fixturekit.Project})
-	mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	intakefixture.Mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: fixturekit.Project})
+	intakefixture.Mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
 	after, err := c.Runtime(context.Background())
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, s.Close())
@@ -220,7 +209,7 @@ func TestRootContention(t *testing.T) {
 	}
 	_, err = c.Health(context.Background())
 	fixturekit.Must(t, err)
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 }
 
 func TestStaleSocket(t *testing.T) {
@@ -294,7 +283,7 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 	opts := fixture(t)
 	s, c := start(t, opts)
 	ctx := context.Background()
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
 	fixturekit.Must(t, err)
 	cfg, err := c.Configuration(ctx)
@@ -335,7 +324,7 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 		t.Fatal("disk overwritten")
 	}
 	fixturekit.Must(t, os.WriteFile(path, original, 0600))
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "default"})
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "default"})
 	fixturekit.Must(t, s.Close())
 }
 

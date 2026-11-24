@@ -14,7 +14,7 @@ func TestStartOpensAndSchedulesEveryProjectOfTheRoot(t *testing.T) {
 	t.Parallel()
 	f := newTwoProjectFixture(t)
 	entered := map[config.ProjectID]chan struct{}{}
-	for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+	for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 		var release chan struct{}
 		entered[id], release = f.block(id, "first")
 		close(release)
@@ -23,13 +23,13 @@ func TestStartOpensAndSchedulesEveryProjectOfTheRoot(t *testing.T) {
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { s.Close() })
 
-	for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+	for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 		if _, active := s.runtimeOf(id); active == nil {
 			t.Fatalf("project %s was not opened", id)
 		}
 		intakefixture.Await(t, "project "+string(id)+" turn", entered[id])
 	}
-	for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+	for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 		fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
 			repo := f.repository(id)
 			if repo == nil {

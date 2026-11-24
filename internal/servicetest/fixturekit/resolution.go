@@ -25,3 +25,10 @@ func ResolutionDocument(t *testing.T, repo *trace.Repository, stream config.Work
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repo.Project(), Workstream: stream, At: at, Actor: actor, Cause: "fixture"}
 	Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: string(data)}}))
 }
+
+// OwnerResolutionDocument records value as the owner's document at its demo
+// start, the way ResolutionDocument does for any author.
+func OwnerResolutionDocument(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id, path string, value any) {
+	t.Helper()
+	ResolutionDocument(t, repo, stream, id, path, value, DemoStart, OwnerActor)
+}

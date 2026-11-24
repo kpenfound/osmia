@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/api"
@@ -30,81 +32,67 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func currentChange(t *testing.T, s *Service, address config.WorkstreamID, id string) lifecycle.WorkgroupChange {
-	t.Helper()
-	wt, g, _, close, err := s.lifecycle().ChangeContext(context.Background(), string(address))
-	fixturekit.Must(t, err)
-	defer close()
-	changes, err := lifecycle.ReadChanges(wt, g.Members[0])
-	fixturekit.Must(t, err)
-	for _, c := range changes {
-		if c.ID == id {
-			return c
-		}
-	}
-	return lifecycle.WorkgroupChange{}
-}
 func TestAStalledChangeEndsOnlyAtThePinnedRevision(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "stalled-change")
+	f, stream, repo := journey.NewApprovedFixture(t, "stalled-change")
 	defer repo.Close()
-	f.s.setSole(runtimeFor(repo))
+	f.S.SetSole(journey.RuntimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.ServiceActor)
+	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "stalled-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "stalled-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	c = currentChange(t, f.s, stream, c.ID)
+	c = journey.CurrentChange(t, f.S, stream, c.ID)
 	if c.State != "drafting" {
 		t.Fatalf("the requested change is %s", c.State)
 	}
-	if apiFault := f.s.lifecycle().EndStalledChange(ctx, stream, c.ID, "debating", uint64(c.Revision), "stalled"); apiFault == nil || apiFault.Code != api.Conflict {
+	if apiFault := f.S.Lifecycle().EndStalledChange(ctx, stream, c.ID, "debating", uint64(c.Revision), "stalled"); apiFault == nil || apiFault.Code != api.Conflict {
 		t.Fatalf("ending the change at another state = %+v", apiFault)
 	}
-	if apiFault := f.s.lifecycle().EndStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision)+1, "stalled"); apiFault == nil || apiFault.Code != api.Conflict {
+	if apiFault := f.S.Lifecycle().EndStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision)+1, "stalled"); apiFault == nil || apiFault.Code != api.Conflict {
 		t.Fatalf("ending the change at another revision = %+v", apiFault)
 	}
-	if got := currentChange(t, f.s, stream, c.ID); got.State != "drafting" || got.Revision != c.Revision {
+	if got := journey.CurrentChange(t, f.S, stream, c.ID); got.State != "drafting" || got.Revision != c.Revision {
 		t.Fatalf("a refused end changed the change: %+v", got)
 	}
-	if apiFault := f.s.lifecycle().EndStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision), "ended on its recovery card"); apiFault != nil {
+	if apiFault := f.S.Lifecycle().EndStalledChange(ctx, stream, c.ID, "drafting", uint64(c.Revision), "ended on its recovery card"); apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	if got := currentChange(t, f.s, stream, c.ID); got.State != "failed" || got.Failure != "ended on its recovery card" {
+	if got := journey.CurrentChange(t, f.S, stream, c.ID); got.State != "failed" || got.Failure != "ended on its recovery card" {
 		t.Fatalf("the ended change is %+v", got)
 	}
-	if _, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "after-stall", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"}); apiFault != nil {
+	if _, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "after-stall", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"}); apiFault != nil {
 		t.Fatalf("a new change after the ended one: %+v", apiFault)
 	}
 }
 
 func TestAMoveRefusedByAChangeHoldNamesTheChange(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "change-hold-move")
+	f, stream, repo := journey.NewApprovedFixture(t, "change-hold-move")
 	defer repo.Close()
-	f.s.setSole(runtimeFor(repo))
+	f.S.SetSole(journey.RuntimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "held-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "held-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	c = currentChange(t, f.s, stream, c.ID)
+	c = journey.CurrentChange(t, f.S, stream, c.ID)
 	c.State, c.Failure = "approved", fmt.Sprintf("%s: workstream %s", trace.ErrMemberRetired, stream)
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &c))
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, repo, &c))
 	st, err := repo.Workflow(stream, lifecycle.ChangeBoundarySubject)
 	fixturekit.Must(t, err)
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "change-" + c.ID + "-boundary-false", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: intake.ServiceActor, Cause: "fixture"},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "change-" + c.ID + "-boundary-false", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.S.Now(), Actor: intake.ServiceActor, Cause: "fixture"},
 		Subject: lifecycle.ChangeBoundarySubject, From: st.Value, To: c.ID, Reason: "owner-approved change stops at a unit boundary",
 	}})
 	fixturekit.Must(t, err)
-	_, apiFault = f.s.lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Debate it again."})
+	_, apiFault = f.S.Lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.InShedState, Note: "Debate it again."})
 	for _, text := range []string{"workgroup change " + c.ID, "is approved", trace.ErrMemberRetired.Error(), "does not resume by itself", "the owner"} {
 		if apiFault == nil || apiFault.Code != api.Conflict || !strings.Contains(apiFault.Message, text) {
 			t.Fatalf("change-hold refusal lacks %q: %v", text, apiFault)
@@ -124,21 +112,21 @@ func TestAMoveRefusedByAChangeHoldNamesTheChange(t *testing.T) {
 
 func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "delta-runner")
+	f, stream, repo := journey.NewApprovedFixture(t, "delta-runner")
 	defer repo.Close()
-	f.s.setSole(runtimeFor(repo))
+	f.S.SetSole(journey.RuntimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.ServiceActor)
+	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "queued-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "queued-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	var calls atomic.Int32
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		calls.Add(1)
 		intakefixture.AssertAcceptanceDraftInstructions(t, req.Prompt)
 		text, err := intakefixture.ReadTool(ctx, tools, "before.json")
@@ -149,16 +137,16 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 		if err := json.Unmarshal([]byte(text), &after); err != nil {
 			return nil, err
 		}
-		after.Slices[0].Spec = amendedSpec
+		after.Slices[0].Spec = intakefixture.AmendedSpec
 		_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaDraftTool, toolMap(after))
 		return intakefixture.QuestionResult(req, "session-delta-runner", "Checkpoint delta delivered"), err
 	}
-	f.engine.Mu.Unlock()
-	wt, g, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(stream))
+	f.Engine.Mu.Unlock()
+	wt, g, _, close, err := f.S.Lifecycle().ChangeContext(ctx, string(stream))
 	fixturekit.Must(t, err)
 	defer close()
-	fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
-	fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
+	fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
+	fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
 	if calls.Load() != 0 {
 		t.Fatal("scheduling ran a model")
 	}
@@ -168,7 +156,7 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	if len(op) != 1 || op[0].Result != nil || !service.ConcurrentOperation(op[0].Operation) {
 		t.Fatal("delta scheduling did not publish exactly one concurrent runner intent")
 	}
-	runner := deltaRunner{f.s}
+	runner := journey.DeltaRunner{S: f.S}
 	observed, err := runner.Inspect(ctx, op[0].Operation)
 	fixturekit.Must(t, err)
 	if observed.State != "absent" {
@@ -178,41 +166,41 @@ func TestDeltaSchedulingRecordsRunnerIntentBeforeExecution(t *testing.T) {
 	fixturekit.Must(t, err)
 	_, err = runner.Apply(ctx, op[0].Operation)
 	fixturekit.Must(t, err)
-	if calls.Load() != 1 || currentChange(t, f.s, stream, c.ID).State != "debating" {
+	if calls.Load() != 1 || journey.CurrentChange(t, f.S, stream, c.ID).State != "debating" {
 		t.Fatal("runner replay repeated a model or lost its recorded proposal")
 	}
 }
 func TestDeltaContributionsReconcileAfterJournalAdvances(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "delta-contributions")
+	f, stream, repo := journey.NewApprovedFixture(t, "delta-contributions")
 	defer repo.Close()
-	f.s.setSole(runtimeFor(repo))
+	f.S.SetSole(journey.RuntimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "replayed-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "replayed-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	c.State = "debating"
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &c))
-	review := f.s.lifecycle().DeltaTool(repo, c, intake.CommitteeAgent(1), lifecycle.DeltaReviewTool)
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, repo, &c))
+	review := f.S.Lifecycle().DeltaTool(repo, c, intake.CommitteeAgent(1), lifecycle.DeltaReviewTool)
 	_, err = review.Handle(ctx, json.RawMessage(`{"objections":[],"note":"The delta is consistent"}`))
 	fixturekit.Must(t, err)
-	c = currentChange(t, f.s, stream, c.ID)
+	c = journey.CurrentChange(t, f.S, stream, c.ID)
 	c.State = "answering"
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &c))
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, repo, &c))
 	_, err = review.Handle(ctx, json.RawMessage(`{"objections":[],"note":"The delta is consistent"}`))
 	fixturekit.Must(t, err)
-	answer := f.s.lifecycle().DeltaTool(repo, c, intake.ArchitectAgent, lifecycle.DeltaReplyTool)
+	answer := f.S.Lifecycle().DeltaTool(repo, c, intake.ArchitectAgent, lifecycle.DeltaReplyTool)
 	_, err = answer.Handle(ctx, json.RawMessage(`{"reply":"Unchanged sections remain fixed"}`))
 	fixturekit.Must(t, err)
-	c = currentChange(t, f.s, stream, c.ID)
+	c = journey.CurrentChange(t, f.S, stream, c.ID)
 	c.State = "presented"
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &c))
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, repo, &c))
 	_, err = answer.Handle(ctx, json.RawMessage(`{"reply":"Unchanged sections remain fixed"}`))
 	fixturekit.Must(t, err)
-	latest := currentChange(t, f.s, stream, c.ID)
+	latest := journey.CurrentChange(t, f.S, stream, c.ID)
 	if latest.Revision != c.Revision || len(latest.Debate) != 1 || latest.Reply != c.Reply || latest.State != "presented" {
 		t.Fatal("turn reconciliation duplicated contributions or changed the presented decision")
 	}
@@ -221,14 +209,14 @@ func TestDeltaContributionsReconcileAfterJournalAdvances(t *testing.T) {
 func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newProductionDesignFixture(t)
-	defer f.stop(t)
-	f.engine.Mu.Lock()
-	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		spec, graph := crossSpec1, crossPlan1
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{})
+	defer f.Stop(t)
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		spec, graph := intakefixture.CrossSpec1, intakefixture.CrossPlan1
 		number := 3
-		if strings.Contains(req.Workspace.Directory(), string(f.stream2)) {
-			spec, graph, number = crossSpec2, crossPlan2, 2
+		if strings.Contains(req.Workspace.Directory(), string(f.Stream2)) {
+			spec, graph, number = intakefixture.CrossSpec2, intakefixture.CrossPlan2, 2
 		}
 		spec += fmt.Sprintf("%d. Local diagnostics remain available.\n", number)
 		p, err := plan.Parse([]byte(graph))
@@ -248,15 +236,15 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		}
 		return intakefixture.QuestionResult(req, "session-draft", "Draft delivered"), nil
 	}
-	f.engine.Mu.Unlock()
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	f.Engine.Mu.Unlock()
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(ctx, f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	fixturekit.Must(t, err)
-	f.awaitApproved(t)
-	f.wait(t, "members initialized", func() bool {
-		for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-			r, err := f.s.repository(f.repos[i].ID)
+	f.AwaitApproved(t)
+	f.Wait(t, "members initialized", func() bool {
+		for i, id := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+			r, err := f.S.Repository(f.Repos[i].ID)
 			fixturekit.Must(t, err)
 			st, err := r.Workflow(id, trace.UnitSubject("local"))
 			fixturekit.Must(t, err)
@@ -268,8 +256,8 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	})
 	keptStates := map[config.WorkstreamID]trace.WorkflowState{}
 	keptTips := map[config.WorkstreamID]string{}
-	for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-		r, err := f.s.repository(f.repos[i].ID)
+	for i, id := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+		r, err := f.S.Repository(f.Repos[i].ID)
 		fixturekit.Must(t, err)
 		sealed, _, _, err := seal.Latest(r, id)
 		fixturekit.Must(t, err)
@@ -286,13 +274,13 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		recordUnitMerged(t, r, id, contract)
 		keptStates[id], err = r.Workflow(id, trace.UnitSubject("local"))
 		fixturekit.Must(t, err)
-		keptTips[id] = strings.TrimSpace(fixturekit.DemoGit(t, f.repos[i].Clone, "-C", f.repos[i].Clone, "rev-parse", intake.FeatureBranch(id)))
+		keptTips[id] = strings.TrimSpace(fixturekit.DemoGit(t, f.Repos[i].Clone, "-C", f.Repos[i].Clone, "rev-parse", intake.FeatureBranch(id)))
 	}
 	const key = "offset-delta"
 	var approvedRevision atomic.Int64
 	var approvals atomic.Int32
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
 		if err != nil {
 			return nil, err
@@ -354,16 +342,16 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		}
 		return intakefixture.QuestionResult(req, "session-chief", "Following the approved workgroup."), nil
 	}
-	f.engine.Mu.Unlock()
-	_, err = f.c.Send(ctx, f.origin, "Amend the offset contract to string.")
+	f.Engine.Mu.Unlock()
+	_, err = f.C.Send(ctx, f.Origin, "Amend the offset contract to string.")
 	fixturekit.Must(t, err)
-	f.wait(t, "one impact summary in continued thread", func() bool { return currentChange(t, f.s, f.origin, key).State == "presented" })
-	c := currentChange(t, f.s, f.origin, key)
+	f.Wait(t, "one impact summary in continued thread", func() bool { return journey.CurrentChange(t, f.S, f.Origin, key).State == "presented" })
+	c := journey.CurrentChange(t, f.S, f.Origin, key)
 	if len(c.Debate) != 2 || c.Reply == "" || !c.Impact.Streams[1].Cascade {
 		t.Fatalf("delta debate or cascade missing: %+v", c)
 	}
-	for _, member := range []config.WorkstreamID{f.origin, f.stream1, f.stream2} {
-		conversation, err := f.c.Conversation(ctx, member)
+	for _, member := range []config.WorkstreamID{f.Origin, f.Stream1, f.Stream2} {
+		conversation, err := f.C.Conversation(ctx, member)
 		fixturekit.Must(t, err)
 		count := 0
 		for _, entry := range conversation.Entries {
@@ -378,20 +366,20 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 			t.Fatalf("member %s received %d prompts", member, count)
 		}
 	}
-	f.checkContinuation(t)
-	f.stop(t)
-	f.start(t)
-	c = currentChange(t, f.s, f.origin, key)
+	f.CheckContinuation(t)
+	f.Stop(t)
+	f.Start(t)
+	c = journey.CurrentChange(t, f.S, f.Origin, key)
 	if c.State != "presented" {
 		t.Fatal("restart lost presented impact")
 	}
 	approvedRevision.Store(int64(c.Revision))
-	_, err = f.c.Send(ctx, f.origin, "Approve the offset impact summary.")
+	_, err = f.C.Send(ctx, f.Origin, "Approve the offset impact summary.")
 	fixturekit.Must(t, err)
-	f.wait(t, "approved delta applied", func() bool { return currentChange(t, f.s, f.origin, key).State == "applied" })
-	c = currentChange(t, f.s, f.origin, key)
-	for i, member := range []config.WorkstreamID{f.stream1, f.stream2} {
-		repo, err := f.s.repository(f.repos[i].ID)
+	f.Wait(t, "approved delta applied", func() bool { return journey.CurrentChange(t, f.S, f.Origin, key).State == "applied" })
+	c = journey.CurrentChange(t, f.S, f.Origin, key)
+	for i, member := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+		repo, err := f.S.Repository(f.Repos[i].ID)
 		fixturekit.Must(t, err)
 		spec, _, found, err := repo.ProjectSpecOf(member)
 		fixturekit.Must(t, err)
@@ -403,7 +391,7 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 		if st != keptStates[member] {
 			t.Fatal("unaffected unit lost its state/version")
 		}
-		tip := strings.TrimSpace(fixturekit.DemoGit(t, f.repos[i].Clone, "-C", f.repos[i].Clone, "rev-parse", intake.FeatureBranch(member)))
+		tip := strings.TrimSpace(fixturekit.DemoGit(t, f.Repos[i].Clone, "-C", f.Repos[i].Clone, "rev-parse", intake.FeatureBranch(member)))
 		if tip != keptTips[member] {
 			t.Fatal("amendment changed landed commits")
 		}
@@ -436,32 +424,32 @@ func TestAmendOnProductionContinuedDesignThread(t *testing.T) {
 	if approvals.Load() != 1 {
 		t.Fatal("amendment required repeated owner approval")
 	}
-	f.checkRepos(t)
+	f.CheckRepos(t)
 }
-func approvedCancellation(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, scope, choice string) lifecycle.WorkgroupChange {
+func approvedCancellation(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, scope, choice string) lifecycle.WorkgroupChange {
 	t.Helper()
 	ctx := context.Background()
-	f.s.setSole(&activeProject{id: repo.Project(), repository: repo})
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	f.S.SetSole(&journey.ActiveProject{Id: repo.Project(), Repository: repo})
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.ServiceActor)
+	_, err = repo.EnsureChiefOfStaff(ctx, stream, f.S.Now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "cancel", Kind: "cancel", Scope: scope, Change: "Superseded by owner"})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "cancel", Kind: "cancel", Scope: scope, Change: "Superseded by owner"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	wt, g, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(stream))
+	wt, g, _, close, err := f.S.Lifecycle().ChangeContext(ctx, string(stream))
 	fixturekit.Must(t, err)
 	defer close()
-	fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
-	c = currentChange(t, f.s, stream, c.ID)
+	fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
+	c = journey.CurrentChange(t, f.S, stream, c.ID)
 	if c.State != "presented" {
 		t.Fatalf("cancel not presented: %+v", c)
 	}
-	if _, apiFault := f.s.lifecycle().DecideChange(ctx, string(stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault == nil {
+	if _, apiFault := f.S.Lifecycle().DecideChange(ctx, string(stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault == nil {
 		t.Fatal("cancel accepted without PR disposition")
 	}
-	c, apiFault = f.s.lifecycle().DecideChange(ctx, string(stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: choice})
+	c, apiFault = f.S.Lifecycle().DecideChange(ctx, string(stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: choice})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -477,34 +465,34 @@ func TestCancelPreservesUnlandedUnitBranches(t *testing.T) {
 					defer repo.Close()
 					ctx := context.Background()
 					for _, id := range []string{"upload", "audit"} {
-						completeMasonTurn(t, f, repo, stream, id, "built "+id)
+						journey.CompleteMasonTurn(t, f, repo, stream, id, "built "+id)
 						if state == intake.UnitApproved {
 							st, err := repo.Workflow(stream, trace.UnitSubject(id))
 							fixturekit.Must(t, err)
-							_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id + "-approve", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: id, At: f.s.now(), Actor: execution.ReviewerActor, Cause: "fixture"}, Subject: trace.UnitSubject(id), From: st.Value, To: intake.UnitApproved, Reason: "approved but unlanded"}})
+							_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id + "-approve", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: id, At: f.S.Now(), Actor: execution.ReviewerActor, Cause: "fixture"}, Subject: trace.UnitSubject(id), From: st.Value, To: intake.UnitApproved, Reason: "approved but unlanded"}})
 							fixturekit.Must(t, err)
 						}
 					}
-					tip := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", intake.FeatureBranch(stream)))
+					tip := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", intake.FeatureBranch(stream)))
 					approvedCancellation(t, f, repo, stream, scope, "draft")
-					wt, g, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(stream))
+					wt, g, _, close, err := f.S.Lifecycle().ChangeContext(ctx, string(stream))
 					fixturekit.Must(t, err)
-					fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
+					fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
 					close()
-					if c := currentChange(t, f.s, stream, "cancel"); c.State != "applied" {
+					if c := journey.CurrentChange(t, f.S, stream, "cancel"); c.State != "applied" {
 						t.Fatalf("cancel %+v", c)
 					}
 					cleanup := newCleanup(f, repo)
 					fixturekit.Must(t, cleanup.Pass(ctx))
-					if len(cleanup.failures) > 0 {
-						t.Fatalf("cleanup failures %v", cleanup.failures)
+					if len(cleanup.Failures) > 0 {
+						t.Fatalf("cleanup failures %v", cleanup.Failures)
 					}
 					for _, id := range []string{"upload", "audit"} {
 						if got := branchFile(t, f, repo, stream, execution.UnitBranch(stream, id), id+".txt"); got != id+"\n" {
 							t.Fatalf("lost unit work: %q", got)
 						}
 					}
-					after := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", intake.FeatureBranch(stream)))
+					after := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", intake.FeatureBranch(stream)))
 					if after != tip {
 						t.Fatal("cancel landed unapproved or partial unit code")
 					}
@@ -560,17 +548,17 @@ func TestCancelKeepsPullRequestThatMergesDuringDisposition(t *testing.T) {
 	t.Parallel()
 	for _, choice := range []string{"close", "draft"} {
 		t.Run(choice, func(t *testing.T) {
-			f, stream, repo := newApprovedFixture(t, "cancel-merge-race")
+			f, stream, repo := journey.NewApprovedFixture(t, "cancel-merge-race")
 			defer repo.Close()
 			ctx := context.Background()
-			cfg := f.s.about(repo)
+			cfg := f.S.About(repo)
 			client := &cancelPulls{FakePulls: &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: 7, State: "open", Head: intake.FeatureBranch(stream), HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}, mergeOnDisposition: true}
-			f.s.options.PullRequests = client
-			fixturekit.Must(t, (&publisher{s: f.s, repository: repo}).recordPublication(ctx, stream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(stream)}))
+			f.S.Options.PullRequests = client
+			fixturekit.Must(t, (&journey.Publisher{S: f.S, Repository: repo}).RecordPublication(ctx, stream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(stream)}))
 			before, err := repo.Workflow(stream, trace.FeatureSubject)
 			fixturekit.Must(t, err)
 			c := lifecycle.WorkgroupChange{ID: "cancel-merge-race", Request: lifecycle.ChangeRequest{Kind: "cancel", Change: "Cancel"}, Decision: &lifecycle.ChangeDecision{Decision: "approve", PullRequests: choice}}
-			fixturekit.Must(t, f.s.lifecycle().CancelChangeMember(ctx, repo, stream, c))
+			fixturekit.Must(t, f.S.Lifecycle().CancelChangeMember(ctx, repo, stream, c))
 			after, err := repo.Workflow(stream, trace.FeatureSubject)
 			fixturekit.Must(t, err)
 			if before != after || client.Prs[0].State != "open" || client.Prs[0].Draft {
@@ -584,20 +572,20 @@ func TestCancelOpenPullRequestDispositionAndMergedProtection(t *testing.T) {
 	for _, choice := range []string{"close", "draft"} {
 		for _, merged := range []bool{false, true} {
 			t.Run(choice+map[bool]string{true: "merged", false: "open"}[merged], func(t *testing.T) {
-				f, stream, repo := newApprovedFixture(t, "cancel-pr")
+				f, stream, repo := journey.NewApprovedFixture(t, "cancel-pr")
 				defer repo.Close()
 				ctx := context.Background()
-				cfg := f.s.about(repo)
+				cfg := f.S.About(repo)
 				branch := intake.FeatureBranch(stream)
 				client := &cancelPulls{FakePulls: &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: 7, State: "open", Merged: merged, Head: branch, HeadRepository: cfg.Project.PushRepository(), URL: "https://example.invalid/pull/7"}}}}
-				f.s.options.PullRequests = client
-				p := &publisher{s: f.s, repository: repo}
-				fixturekit.Must(t, p.recordPublication(ctx, stream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: branch}))
+				f.S.Options.PullRequests = client
+				p := &journey.Publisher{S: f.S, Repository: repo}
+				fixturekit.Must(t, p.RecordPublication(ctx, stream, api.DeliveryPublication{Operation: "fixture-publication", Status: delivery.PublicationOpened, PullRequest: 7, URL: client.Prs[0].URL, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: branch}))
 				c := lifecycle.WorkgroupChange{ID: "cancel-pr", Request: lifecycle.ChangeRequest{Kind: "cancel", Change: "Owner cancels"}, Decision: &lifecycle.ChangeDecision{Decision: "approve", PullRequests: choice}}
 				before, err := repo.Workflow(stream, trace.FeatureSubject)
 				fixturekit.Must(t, err)
-				fixturekit.Must(t, f.s.lifecycle().CancelChangeMember(ctx, repo, stream, c))
-				fixturekit.Must(t, f.s.lifecycle().CancelChangeMember(ctx, repo, stream, c))
+				fixturekit.Must(t, f.S.Lifecycle().CancelChangeMember(ctx, repo, stream, c))
+				fixturekit.Must(t, f.S.Lifecycle().CancelChangeMember(ctx, repo, stream, c))
 				after, err := repo.Workflow(stream, trace.FeatureSubject)
 				fixturekit.Must(t, err)
 				if merged {
@@ -618,7 +606,7 @@ func TestCancelOpenPullRequestDispositionAndMergedProtection(t *testing.T) {
 }
 func TestDeltaRevisionsPreserveUnchangedStateAndBranch(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "delta-state")
+	f, stream, repo := journey.NewApprovedFixture(t, "delta-state")
 	defer repo.Close()
 	ctx := context.Background()
 	old, graph, err := lifecycle.MemberSpecAndPlan(repo, stream)
@@ -626,26 +614,26 @@ func TestDeltaRevisionsPreserveUnchangedStateAndBranch(t *testing.T) {
 	before := trace.ProjectSpec{Behavior: "Resume", Slices: []trace.Slice{{Workstream: stream, Spec: old, Plan: graph}}}
 	after := before
 	after.Slices = slices.Clone(before.Slices)
-	after.Slices[0].Spec = amendedSpec
+	after.Slices[0].Spec = intakefixture.AmendedSpec
 	st, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
-	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resume-completed", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}, Subject: trace.UnitSubject("resume"), From: st.Value, To: intake.UnitMerged, Reason: "whole unit landed"}})
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resume-completed", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.S.Now(), Actor: execution.ForemanActor, Cause: "fixture"}, Subject: trace.UnitSubject("resume"), From: st.Value, To: intake.UnitMerged, Reason: "whole unit landed"}})
 	fixturekit.Must(t, err)
 	unaffected, err := repo.Workflow(stream, trace.UnitSubject("dedupe"))
 	fixturekit.Must(t, err)
-	tip := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", intake.FeatureBranch(stream)))
+	tip := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", intake.FeatureBranch(stream)))
 	members := []amendment.Member{{Workstream: stream, State: intake.BuildingState, Units: map[string]string{"resume": intake.UnitMerged, "dedupe": intake.UnitApproved}}}
 	impact, err := amendment.ClassifyImpact("delta", before, after, members)
 	fixturekit.Must(t, err)
 	c := lifecycle.WorkgroupChange{ID: "delta", Before: before, After: after, Result: &after, Impact: impact, Request: lifecycle.ChangeRequest{Change: "Use checkpoints"}}
-	fixturekit.Must(t, f.s.lifecycle().ReworkChangeMember(ctx, repo, impact.Streams[0], &c))
-	fixturekit.Must(t, f.s.lifecycle().ReworkChangeMember(ctx, repo, impact.Streams[0], &c))
+	fixturekit.Must(t, f.S.Lifecycle().ReworkChangeMember(ctx, repo, impact.Streams[0], &c))
+	fixturekit.Must(t, f.S.Lifecycle().ReworkChangeMember(ctx, repo, impact.Streams[0], &c))
 	kept, err := repo.Workflow(stream, trace.UnitSubject("dedupe"))
 	fixturekit.Must(t, err)
 	if kept != unaffected {
 		t.Fatal("unaffected state changed")
 	}
-	if got := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", intake.FeatureBranch(stream))); got != tip {
+	if got := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", intake.FeatureBranch(stream))); got != tip {
 		t.Fatal("amendment rewrote landed commits")
 	}
 	sealed, _, _, err := seal.Latest(repo, stream)
@@ -665,14 +653,14 @@ func TestCancelWaitsForRunningUnitBoundary(t *testing.T) {
 	defer repo.Close()
 	ctx := context.Background()
 	c := approvedCancellation(t, f, repo, stream, "workstream", "draft")
-	wt, g, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(stream))
+	wt, g, _, close, err := f.S.Lifecycle().ChangeContext(ctx, string(stream))
 	fixturekit.Must(t, err)
 	defer close()
 	th, err := repo.Thread(stream, intake.MasonAgent("upload"))
 	fixturekit.Must(t, err)
-	claimed, err := repo.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "done-"+th.Turns[0].Request.TurnID, filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("upload"), "done-"+th.Turns[0].Request.TurnID), f.clock.Now())
+	claimed, err := repo.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "done-"+th.Turns[0].Request.TurnID, filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.MasonAgent("upload"), "done-"+th.Turns[0].Request.TurnID), f.Clock.Now())
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
+	fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
 	st, err := repo.Workflow(stream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
 	if st.Value == intake.AbandonedState {
@@ -686,16 +674,16 @@ func TestCancelWaitsForRunningUnitBoundary(t *testing.T) {
 	content, err := json.Marshal(service.MasonReport{Outcome: "built upload"})
 	fixturekit.Must(t, err)
 	h := claimed.Request.Header
-	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(claimed.Request.ID, "response"), f.clock.Now()
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(claimed.Request.ID, "response"), f.Clock.Now()
 	response := trace.TurnResponse{Header: h, AgentID: intake.MasonAgent("upload"), ThreadID: intake.MasonAgent("upload"), TurnID: claimed.Request.TurnID, RequestID: claimed.Request.ID, RequestRevision: claimed.Request.Revision,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: claimed.Request.Profile.Backend, ID: claimed.Claim.Token}, SessionDirectory: claimed.Claim.SessionDirectory, StartedAt: claimed.Claim.At, FinalResponse: "Built", Outcome: &coreadapter.Outcome{Status: execution.MasonDone, Report: string(content), Card: &intakefixture.ExampleCard}}}
 	fixturekit.Must(t, repo.CaptureTurn(ctx, claimed.Claim.Token, response))
-	fixturekit.Must(t, repo.CompleteTurn(ctx, stream, intake.MasonAgent("upload"), claimed.Request.TurnID, claimed.Claim.Token, f.clock.Now()))
-	fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
-	if currentChange(t, f.s, stream, c.ID).State != "applied" {
+	fixturekit.Must(t, repo.CompleteTurn(ctx, stream, intake.MasonAgent("upload"), claimed.Request.TurnID, claimed.Claim.Token, f.Clock.Now()))
+	fixturekit.Must(t, f.S.Lifecycle().AdvanceChanges(ctx, wt, g))
+	if journey.CurrentChange(t, f.S, stream, c.ID).State != "applied" {
 		t.Fatal("boundary completion did not resume cancellation")
 	}
-	if _, err := os.Stat(filepath.Join(f.clone, "upload.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(f.Clone, "upload.txt")); !os.IsNotExist(err) {
 		t.Fatal("partial code reached clone checkout")
 	}
 }

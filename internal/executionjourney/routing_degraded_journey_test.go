@@ -2,19 +2,20 @@ package executionjourney
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/jev/systemone"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -22,10 +23,10 @@ import (
 func degradedJourney(t *testing.T, p *jevfixture.Transitions) (*bounceFixture, *tracetest.InMemoryExporter) {
 	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
-	b := prepareBounceFixture(t, "reviews", false, func(o *Options) { o.telemetryExporter = exporter })
+	b := prepareBounceFixture(t, "reviews", false, func(o *journey.Options) { o.TelemetryExporter = exporter })
 	t.Cleanup(func() { b.stop(t) })
-	service.InspectForTest(b.f.s.core()).SetJudge(jevfixture.TransitionJudge(b.f.s.now, p))
-	b.stream = b.f.seedBuilding(t, "journey-degraded", b.graph)
+	service.InspectForTest(b.f.S.Core()).SetJudge(jevfixture.TransitionJudge(b.f.S.Now, p))
+	b.stream = seedBuilding(b.f, t, "journey-degraded", b.graph)
 	b.awaitUnit(t, intake.UnitContested)
 	return b, exporter
 }
@@ -33,7 +34,7 @@ func degradedJourney(t *testing.T, p *jevfixture.Transitions) (*bounceFixture, *
 func routedUnitTransitions(t *testing.T, b *bounceFixture) []trace.Transition {
 	t.Helper()
 	var out []trace.Transition
-	for _, tr := range workTransitions(t, b.f.repository(), b.stream) {
+	for _, tr := range intakefixture.WorkTransitions(t, b.f.Repository(), b.stream) {
 		if tr.Subject == trace.UnitSubject(bounceUnit) && tr.DecidedBy != "" {
 			out = append(out, tr)
 		}
@@ -47,7 +48,7 @@ func TestJourneyAScriptedJevOutageCommitsDefaultsInDegradedMode(t *testing.T) {
 	p := &jevfixture.Transitions{Fail: func(int) error { return &systemone.Error{Kind: systemone.KindUnavailable, Message: "down"} }}
 	b, exporter := degradedJourney(t, p)
 
-	if state := workflowOf(t, b.f.repository(), b.stream, bounceUnit); state.Value != intake.UnitContested {
+	if state := intakefixture.UnitWorkflow(t, b.f.Repository(), b.stream, bounceUnit); state.Value != intake.UnitContested {
 		t.Fatalf("the unit is %s", state.Value)
 	}
 	asked := p.TransitionRequests()
@@ -55,7 +56,7 @@ func TestJourneyAScriptedJevOutageCommitsDefaultsInDegradedMode(t *testing.T) {
 		t.Fatal("no exit asked Jev")
 	}
 	fallbacks := 0
-	for _, rec := range routeRecords(t, b.f.repository(), b.stream) {
+	for _, rec := range journey.RouteRecords(t, b.f.Repository(), b.stream) {
 		if !rec.JevRequested {
 			continue
 		}
@@ -86,14 +87,14 @@ func TestJourneyAScriptedJevOutageCommitsDefaultsInDegradedMode(t *testing.T) {
 	}
 
 	intakefixture.Soon(t, "the fallback route spans", func() bool {
-		return len(servicetest.SpansOf(exporter).Named("osmia.transition.route").With("osmia.outcome", router.OutcomeFallback)) >= fallbacks
+		return len(fixturekit.SpansOf(exporter).Named("osmia.transition.route").With("osmia.outcome", router.OutcomeFallback)) >= fallbacks
 	})
-	for _, sp := range servicetest.SpansOf(exporter).Named("osmia.transition.route") {
-		if outcome, _ := servicetest.Attr(sp, "osmia.outcome"); outcome == router.OutcomeDeparted {
-			t.Fatalf("a departure span while Jev was down: %v", servicetest.Strings(sp))
+	for _, sp := range fixturekit.SpansOf(exporter).Named("osmia.transition.route") {
+		if outcome, _ := fixturekit.Attr(sp, "osmia.outcome"); outcome == router.OutcomeDeparted {
+			t.Fatalf("a departure span while Jev was down: %v", fixturekit.Strings(sp))
 		}
 	}
-	runtime, err := b.f.c.Runtime(ctx)
+	runtime, err := b.f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
 	if runtime.Jev.Mode != jev.ModeDegraded {
 		t.Fatalf("Jev's status: %+v", runtime.Jev)
@@ -120,7 +121,7 @@ func TestJourneyAJevThatNeverAnswersIsWaitedOnOnlyUntilItsTimeout(t *testing.T) 
 	}}
 	b, _ := degradedJourney(t, p)
 
-	if state := workflowOf(t, b.f.repository(), b.stream, bounceUnit); state.Value != intake.UnitContested {
+	if state := intakefixture.UnitWorkflow(t, b.f.Repository(), b.stream, bounceUnit); state.Value != intake.UnitContested {
 		t.Fatalf("the unit is %s", state.Value)
 	}
 	mu.Lock()
@@ -134,7 +135,7 @@ func TestJourneyAJevThatNeverAnswersIsWaitedOnOnlyUntilItsTimeout(t *testing.T) 
 		}
 	}
 	committed := 0
-	for _, rec := range routeRecords(t, b.f.repository(), b.stream) {
+	for _, rec := range journey.RouteRecords(t, b.f.Repository(), b.stream) {
 		if rec.JevRequested {
 			committed++
 			if rec.State != router.StateCommitted || rec.Outcome != router.OutcomeFallback {

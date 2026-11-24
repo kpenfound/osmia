@@ -203,7 +203,7 @@ func TestAContestRulingBindsAndAnUnexecutablePickGoesToTheOwner(t *testing.T) {
 	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, "owner's inbox") {
 		t.Fatalf("resolve with the pick: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitContested {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitContested {
 		t.Fatalf("the unit is %q", got)
 	}
 	gate, carried, err := c.f.s.contestedGate(c.repo, c.stream, "resume")
@@ -255,7 +255,7 @@ func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("review: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitReviewing {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 		t.Fatalf("the unit is %q", got)
 	}
 	judgment, _, _ := decisionJudgment(t, c.repo, c.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
@@ -293,7 +293,7 @@ func TestAContestRulingThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 			if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {
 				t.Fatalf("review: %s", out)
 			}
-			if got := c.state(t).Value; got != UnitReviewing {
+			if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 				t.Fatalf("the unit is %q", got)
 			}
 		})
@@ -316,7 +316,7 @@ func TestAnotherContestsDecideResultDoesNotPermitARuling(t *testing.T) {
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 		t.Fatalf("resolve on another contest's result: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitContested {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitContested {
 		t.Fatalf("the unit is %q", got)
 	}
 }

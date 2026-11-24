@@ -5,10 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	http "net/http"
 	os "os"
 	filepath "path/filepath"
@@ -18,6 +14,11 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -110,7 +111,7 @@ func TestArchitectDraftsAndSketchesAHandedWorkstream(t *testing.T) {
 	f := journey.NewArchitectFixture(t)
 	defer f.Stop(t)
 	ctx := context.Background()
-	charter := "1. Keep changes small.\n2. Every change has a test.\n"
+	charter := intakefixture.ShedCharter
 	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan},
 		func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 			err := checkArchitectBoundary(ctx, req, verified, tools, f.Clone, fixturekit.HandedDesign, charter)
@@ -459,7 +460,7 @@ func TestArchitectStopsAfterExhaustedDrafts(t *testing.T) {
 	added, err := f2.C.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f2.Project, f2.Trace = added.Project.ID, added.Project.Trace
-	journey.WriteCharter(t, f2.C, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, f2.C, added.Project.ID, "1. Keep changes small.\n")
 	stream = f2.HandIn(t, "design", fixturekit.HandedDesign)
 	fixturekit.Must(t, (&intake.Drafter{S: f2.S.Intake().DrafterDependencies(), Repository: f2.Repository()}).Pass(ctx))
 	if state, err := f2.Repository().Workflow(stream, intake.DraftSubject); err != nil || state.Value != "" {
@@ -687,7 +688,7 @@ func TestArchitectDraftsBeforeTheScheduleHook(t *testing.T) {
 	added, err := f.C.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f.Project, f.Trace = added.Project.ID, added.Project.Trace
-	journey.WriteCharter(t, f.C, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, f.C, added.Project.ID, "1. Keep changes small.\n")
 	repository.Store(f.Repository())
 	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
 	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
@@ -1005,7 +1006,7 @@ func TestSchedulerLeavesArchitectTurnsToTheDrafter(t *testing.T) {
 	added, err := f2.C.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f2.Project, f2.Trace = added.Project.ID, added.Project.Trace
-	journey.WriteCharter(t, f2.C, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, f2.C, added.Project.ID, "1. Keep changes small.\n")
 	f2.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
 	stream := f2.HandIn(t, "design", fixturekit.HandedDesign)
 	f2.Await(t, stream, intakefixture.Sketched)

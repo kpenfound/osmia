@@ -3,13 +3,14 @@ package intakejourney
 import (
 	context "context"
 	fmt "fmt"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
 
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
@@ -24,7 +25,7 @@ func TestCrossRepoBuildPreservesConcurrentFeatureTransition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			gate := &intakefixture.ChangeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
+			gate := &intakefixture.ChangeRaceGate{Reached: make(chan struct{})}
 			t.Cleanup(gate.Release)
 			f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait, Checkpoint: gate.Checkpoint})
 			defer f.Stop(t)

@@ -2,25 +2,27 @@ package executionjourney
 
 import (
 	context "context"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	http "net/http"
 	httptest "net/http/httptest"
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
 
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-func traceService(t *testing.T, f *walkFixture) *Service {
+func traceService(t *testing.T, f *walkFixture) *journey.Service {
 	t.Helper()
-	opts := fixture(t)
+	opts := journey.Fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
-	return &Service{cfg: cfg, projects: []*activeProject{runtimeFor(f.repo)}}
+	return &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(f.repo)}}
 }
 
 func TestTraceAPIAndClient(t *testing.T) {
@@ -32,7 +34,7 @@ func TestTraceAPIAndClient(t *testing.T) {
 	f.deliver()
 	s := traceService(t, f)
 	before := f.snapshot()
-	c := &Client{Client: service.ClientForTest(&http.Client{Transport: traceTransport{s}})}
+	c := &journey.Client{Client: service.ClientForTest(&http.Client{Transport: traceTransport{s}})}
 	ctx := context.Background()
 
 	summary, err := c.Trace(ctx, fixturekit.Stream)
@@ -67,11 +69,11 @@ func TestTraceAPIAndClient(t *testing.T) {
 	}
 }
 
-type traceTransport struct{ service *Service }
+type traceTransport struct{ service *journey.Service }
 
 func (tr traceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	w := httptest.NewRecorder()
-	tr.service.handle(w, r)
+	tr.service.Handle(w, r)
 	return w.Result(), nil
 }
 
@@ -84,12 +86,12 @@ func TestTraceAPIErrors(t *testing.T) {
 		kind, selector string
 		code           api.Code
 	}{{"criterion", "bad", api.Validation}, {"commit", "bad", api.Validation}, {"commit", strings.Repeat("a", 40) + ") | all()", api.Validation}, {"unit", "missing", api.NotFound}, {"other", "a", api.Validation}} {
-		_, apiErr := s.traceView(context.Background(), string(fixturekit.Stream), test.kind, test.selector)
+		_, apiErr := journey.InspectForTest(s).TraceView(context.Background(), string(fixturekit.Stream), test.kind, test.selector)
 		if apiErr == nil || apiErr.Code != test.code {
 			t.Fatalf("%s %s: %+v", test.kind, test.selector, apiErr)
 		}
 	}
-	_, apiErr := s.traceView(context.Background(), "bad", "", "")
+	_, apiErr := journey.InspectForTest(s).TraceView(context.Background(), "bad", "", "")
 	if apiErr == nil || apiErr.Code != api.Validation {
 		t.Fatalf("workstream error %+v", apiErr)
 	}
@@ -97,7 +99,7 @@ func TestTraceAPIErrors(t *testing.T) {
 	streamDir, err := f.root.WorkstreamTrace(fixturekit.Project, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	fixturekit.TraceExec(t, streamDir, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'damaged', 1, 'secret damaged content')", "workstreams/"+string(fixturekit.Stream)+"/documents.jsonl")
-	_, apiErr = s.traceView(context.Background(), string(fixturekit.Stream), "", "")
+	_, apiErr = journey.InspectForTest(s).TraceView(context.Background(), string(fixturekit.Stream), "", "")
 	if apiErr == nil || apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "trace repository") {
 		t.Fatalf("unavailable trace %+v", apiErr)
 	}

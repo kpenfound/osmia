@@ -3,9 +3,6 @@ package executionjourney
 import (
 	context "context"
 	json "encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	net "net"
 	http "net/http"
 	exec "os/exec"
@@ -13,6 +10,11 @@ import (
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	plan "github.com/kpenfound/osmia/internal/plan"
 )
@@ -28,10 +30,10 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "trace.sock")
 	listener, err := net.Listen("unix", socket)
 	fixturekit.Must(t, err)
-	server := &http.Server{Handler: http.HandlerFunc(s.handle)}
+	server := &http.Server{Handler: http.HandlerFunc(s.Handle)}
 	go server.Serve(listener)
 	t.Cleanup(func() { fixturekit.Must(t, server.Close()) })
-	client := NewClient(socket)
+	client := journey.NewClient(socket)
 	t.Cleanup(func() { client.Close() })
 	ctx := context.Background()
 

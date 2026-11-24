@@ -31,13 +31,6 @@ func setUpBusyReadsService(t *testing.T, blocking coreadapter.Reconciler) (*Serv
 	return s, c, active.repository
 }
 
-func readFeed(t *testing.T, c *Client, id config.WorkstreamID) FeedResponse {
-	t.Helper()
-	var v FeedResponse
-	fixturekit.Must(t, c.Do(context.Background(), "GET", Prefix+"/feed/"+string(id), nil, &v))
-	return v
-}
-
 func coreReadEndpointChecks(c *Client, workstream config.WorkstreamID) map[string]func() error {
 	ctx := context.Background()
 	return map[string]func() error{
@@ -156,9 +149,9 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
 	t.Parallel()
 	checks := &fixturekit.FakeChecks{Links: []string{"dag://x"}, Outcomes: []fixturekit.CheckOutcome{{Block: true}}}
-	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
+	f, _ := newMasonFixturePrepared(t, 1, intakefixture.IndependentPlan, func(opts *Options) { opts.reviewChecks = checks })
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	workstream, repository := seedBuild(t, f, "stall-check", independentPlan, config.WorkspacesGit, base)
+	workstream, repository := seedBuild(t, f, "stall-check", intakefixture.IndependentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repository, workstream, "resume", resumeReport)
 	fixturekit.Must(t, repository.Close())
 	f.start(t)
@@ -207,7 +200,7 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 	if after.Workstreams[0].State == nil || *after.Workstreams[0].State != "pending" {
 		t.Fatalf("workstream list did not show the new state: %+v", after.Workstreams[0])
 	}
-	feed := readFeed(t, c, fixturekit.Stream)
+	feed := intakefixture.ReadFeed(t, c, fixturekit.Stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 		return e.Kind == "transition" && e.Transition != nil && e.Transition.To == "pending"
 	}) {

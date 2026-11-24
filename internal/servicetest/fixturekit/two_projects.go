@@ -67,3 +67,6 @@ func QueueProjectTurn(t *testing.T, repo *trace.Repository, id config.ProjectID,
 	_, err := repo.EnqueueTurn(context.Background(), req)
 	Must(t, err)
 }
+
+// Sibling is a workstream id distinct from Stream.
+const Sibling config.WorkstreamID = "w_0123456789abcdef0123456789abcdee"

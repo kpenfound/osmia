@@ -3,11 +3,13 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -22,15 +24,15 @@ import (
 func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
-	defer f.stop(t)
+	defer f.Stop(t)
 	checked := make(chan struct{}, 1)
-	f.engine.Mu.Lock()
-	original := f.engine.Turns["project-spec-draft-1"]
-	f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	original := f.Engine.Turns["project-spec-draft-1"]
+	f.Engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, m := range []struct {
 			project config.ProjectID
 			stream  config.WorkstreamID
-		}{{f.project, f.stream1}, {f.project2, f.stream2}} {
+		}{{f.Project, f.Stream1}, {f.Project2, f.Stream2}} {
 			data, err := os.ReadFile(filepath.Join(req.Grants.Mounts[0].Path, "members", string(m.stream), "charter.md"))
 			if err != nil {
 				t.Errorf("shared charter view: %v", err)
@@ -42,12 +44,12 @@ func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 		checked <- struct{}{}
 		return original(ctx, req, turn, tools)
 	}
-	f.engine.Mu.Unlock()
-	_, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	f.Engine.Mu.Unlock()
+	_, apiFault := f.S.Lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.Stream1, f.Stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	f.awaitProjectSpec(t)
+	awaitProjectSpec(f, t)
 	select {
 	case <-checked:
 	default:
@@ -57,19 +59,19 @@ func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 
 func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
 	t.Parallel()
-	f := newProductionDesignFixture(t)
-	defer f.stop(t)
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{})
+	defer f.Stop(t)
 	checked := make(chan struct{}, 4)
 	for i := 1; i <= 2; i++ {
 		turnID := intake.RoundTurnID(1, intake.CommitteeAgent(i), 1)
-		f.engine.Mu.Lock()
-		original := f.engine.Turns[turnID]
-		f.engine.Turns[turnID] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.Engine.Mu.Lock()
+		original := f.Engine.Turns[turnID]
+		f.Engine.Turns[turnID] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			text, err := intakefixture.ReadTool(ctx, tools, "context.md")
 			if err != nil {
 				return nil, err
 			}
-			for _, project := range []config.ProjectID{f.project, f.project2} {
+			for _, project := range []config.ProjectID{f.Project, f.Project2} {
 				if !strings.Contains(text, string(project)+"/charter#1") {
 					t.Errorf("committee context missing charter of %s: %s", project, text)
 				}
@@ -80,10 +82,10 @@ func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
 			checked <- struct{}{}
 			return original(ctx, req, turn, tools)
 		}
-		f.engine.Mu.Unlock()
+		f.Engine.Mu.Unlock()
 	}
-	f.startOwner(t)
-	f.awaitPacket(t)
+	f.StartOwner(t)
+	f.AwaitPacket(t)
 	if len(checked) != 4 {
 		t.Fatalf("reviewed member turns = %d, want 4", len(checked))
 	}
@@ -91,19 +93,19 @@ func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
 
 func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newApprovedFixture(t, "delta-charters")
+	f, stream, repo := journey.NewApprovedFixture(t, "delta-charters")
 	defer repo.Close()
-	f.s.setSole(runtimeFor(repo))
+	f.S.SetSole(journey.RuntimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.S.Now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	change, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
+	change, apiFault := f.S.Lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	change.State = "drafting"
-	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &change))
-	tool := f.s.lifecycle().DeltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
+	fixturekit.Must(t, f.S.Lifecycle().SaveChange(ctx, repo, &change))
+	tool := f.S.Lifecycle().DeltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, field := range []string{"behavior", "contract"} {
 		for _, citation := range []string{"charter#999", "p_missing/charter#1"} {
 			after := change.Before
@@ -119,7 +121,7 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 			if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 				t.Fatalf("invalid %s citation %s accepted: %s", field, citation, out)
 			}
-			latest := currentChange(t, f.s, stream, change.ID)
+			latest := journey.CurrentChange(t, f.S, stream, change.ID)
 			if latest.State != "drafting" || latest.Revision != change.Revision {
 				t.Fatalf("refused citation advanced the amendment: %+v", latest)
 			}
@@ -131,36 +133,36 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	fixturekit.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, stream, change.ID).State != "debating" {
+	if !strings.Contains(string(out), `"recorded":true`) || journey.CurrentChange(t, f.S, stream, change.ID).State != "debating" {
 		t.Fatalf("valid charter citation refused: %s", out)
 	}
 }
 
 func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	t.Parallel()
-	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{options: func(opts *Options) {
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Options: func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action == lifecycle.DeltaTurnAction
 		}
 	}})
-	defer f.stop(t)
+	defer f.Stop(t)
 	ctx := context.Background()
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(ctx, f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	fixturekit.Must(t, err)
-	f.awaitApproved(t)
-	writeCharter(t, f.c, f.project, "1. Keep changes small.\n\n2. A alone has this rule.\n")
-	writeCharter(t, f.c, f.project2, "1. Keep changes small.\n\n3. B alone has this rule.\n")
-	change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.stream2), lifecycle.ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
+	f.AwaitApproved(t)
+	intakefixture.WriteCharter(t, f.C, f.Project, "1. Keep changes small.\n\n2. A alone has this rule.\n")
+	intakefixture.WriteCharter(t, f.C, f.Project2, "1. Keep changes small.\n\n3. B alone has this rule.\n")
+	change, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Stream2), lifecycle.ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	wt, _, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(f.stream2))
+	wt, _, _, close, err := f.S.Lifecycle().ChangeContext(ctx, string(f.Stream2))
 	fixturekit.Must(t, err)
 	defer close()
-	tool := f.s.lifecycle().DeltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
-	for _, citation := range []string{"charter#2", string(f.project) + "/charter#3", "p_missing/charter#1"} {
+	tool := f.S.Lifecycle().DeltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
+	for _, citation := range []string{"charter#2", string(f.Project) + "/charter#3", "p_missing/charter#1"} {
 		after := change.Before
 		after.Behavior = "Follow " + citation
 		raw, err := json.Marshal(after)
@@ -170,20 +172,20 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 		if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 			t.Fatalf("invalid citation %s accepted: %s", citation, out)
 		}
-		latest := currentChange(t, f.s, f.stream2, change.ID)
+		latest := journey.CurrentChange(t, f.S, f.Stream2, change.ID)
 		if latest.State != change.State || latest.Revision != change.Revision {
 			t.Fatalf("refusal changed journal: %+v", latest)
 		}
 	}
 	after := change.Before
-	after.Behavior = "Follow charter#3 and " + string(f.project) + "/charter#2."
+	after.Behavior = "Follow charter#3 and " + string(f.Project) + "/charter#2."
 	after.Contracts = append([]trace.Contract(nil), after.Contracts...)
-	after.Contracts[0].Text += " Follow " + string(f.project) + "/charter#2."
+	after.Contracts[0].Text += " Follow " + string(f.Project) + "/charter#2."
 	raw, err := json.Marshal(after)
 	fixturekit.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
 	fixturekit.Must(t, err)
-	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, f.stream2, change.ID).State != "debating" {
+	if !strings.Contains(string(out), `"recorded":true`) || journey.CurrentChange(t, f.S, f.Stream2, change.ID).State != "debating" {
 		t.Fatalf("valid local and qualified citations refused: %s", out)
 	}
 }

@@ -64,7 +64,7 @@ func eachTailnetHTTPSSetting(t *testing.T, check func(t *testing.T, h *tailnetHT
 		t.Run(setting, func(t *testing.T) {
 			t.Parallel()
 			opts := fixture(t)
-			withListen(t, opts, "tailnet = \"osmia\"\n"+setting)
+			fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n"+setting)
 			joined := withTailnet(t, &opts, httpsNodeName, "osmia-1")
 			s, c := start(t, opts)
 			status := awaitHTTPS(t, c, api.TailnetHTTPSUp)
@@ -159,16 +159,16 @@ func TestTailnetShutdownClosesTLSAndLeavesTheNode(t *testing.T) {
 func TestTailnetHTTPSOptOutAndRestartRequired(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\ntailnet_https = false\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\ntailnet_https = false\n")
 	joined := withTailnet(t, &opts, httpsNodeName)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	node := *joined
 	status := awaitHTTPS(t, c, api.TailnetHTTPSOff)
 	if status.HTTPSReason == "" || status.HTTPSAddress != "" || node.HTTPSCalls.Load() != 0 {
 		t.Fatalf("opt-out: %+v", status)
 	}
-	files.write(t, strings.Replace(files.topText, "tailnet_https = false", "tailnet_https = true", 1))
+	files.Write(t, strings.Replace(files.TopText, "tailnet_https = false", "tailnet_https = true", 1))
 	reloaded, err := c.Reload(context.Background())
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet_https"}) {
@@ -195,7 +195,7 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			t.Parallel()
 			opts := fixture(t)
-			withListen(t, opts, "tailnet = \"osmia\"\n")
+			fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 			opts.TailnetHTTPSRetry = time.Hour
 			joined := withTailnet(t, &opts, httpsNodeName)
 			join := opts.JoinTailnet
@@ -230,7 +230,7 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 func TestTailnetHTTPSRetriesUntilTheCertificateIsIssued(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	opts.TailnetHTTPSRetry = 10 * time.Millisecond
 	joined := withTailnet(t, &opts, httpsNodeName)
 	join := opts.JoinTailnet
@@ -265,7 +265,7 @@ func TestTailnetHTTPSRetriesUntilTheCertificateIsIssued(t *testing.T) {
 func TestTailnetHTTPSWaitsForASlowIssuance(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts, httpsNodeName)
 	join := opts.JoinTailnet
 	var release func()
@@ -296,19 +296,19 @@ func TestTailnetHTTPSWaitsForASlowIssuance(t *testing.T) {
 
 func TestTailnetHTTPSFailureFallsBackInWebhook(t *testing.T) {
 	t.Parallel()
-	hook := newFakeWebhook(t)
-	opts, inbox := notifyFixture(t, hook.hook())
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	hook := fixturekit.NewWebhook(t)
+	opts, inbox := notifyFixture(t, hook.Hook())
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts, httpsNodeName)
 	s, c := startNotifying(t, opts, inbox)
 	awaitHTTPS(t, c, api.TailnetHTTPSUp)
-	intakefixture.Soon(t, "webhook was not enabled", func() bool { return readLedger(t, opts).Enabled })
+	intakefixture.Soon(t, "webhook was not enabled", func() bool { return fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root).Enabled })
 	secure := nodeHTTPSClient(t, *joined)
 	if code, body := intakefixture.Exchange(t, secure, "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("TLS: %d %s", code, body)
 	}
-	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
-	if got := hook.await(t, 1)[0]; !strings.HasSuffix(got, "Open: "+httpsNodeAddress+"\n") {
+	inbox.Set(fixturekit.NotificationEntry(InboxEscalation, 1))
+	if got := intakefixture.AwaitWebhook(t, hook, 1)[0]; !strings.HasSuffix(got, "Open: "+httpsNodeAddress+"\n") {
 		t.Fatal(got)
 	}
 	node, httpAddr := *joined, s.TailnetAddr()
@@ -320,8 +320,8 @@ func TestTailnetHTTPSFailureFallsBackInWebhook(t *testing.T) {
 	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+httpAddr+Prefix+"/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("HTTP after TLS failure: %d %s", code, body)
 	}
-	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1), fixturekit.NotificationEntry(InboxEscalation, 2))
-	if got := hook.await(t, 2)[1]; !strings.HasSuffix(got, "Open: http://"+httpsNodeName+"/\n") {
+	inbox.Set(fixturekit.NotificationEntry(InboxEscalation, 1), fixturekit.NotificationEntry(InboxEscalation, 2))
+	if got := intakefixture.AwaitWebhook(t, hook, 2)[1]; !strings.HasSuffix(got, "Open: http://"+httpsNodeName+"/\n") {
 		t.Fatal(got)
 	}
 }
@@ -329,7 +329,7 @@ func TestTailnetHTTPSFailureFallsBackInWebhook(t *testing.T) {
 func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	opts.TailnetRetry = time.Millisecond
 	var joined atomic.Pointer[fixturekit.TailnetNode]
 	join, _ := fixturekit.TailnetJoiner(httpsNodeName)

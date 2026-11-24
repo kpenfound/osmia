@@ -209,17 +209,17 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 	first, _, c, opts, _ := transcribeFixture(t, nil, nil)
 	second := newFakeWhisper(t)
 	second.handler = func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"text":"from the second server"}`) }
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 
-	files.write(t, strings.Replace(files.topText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1))
-	reloadFails(t, c, files.top, "transcribe.url")
+	files.Write(t, strings.Replace(files.TopText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1))
+	intakefixture.ReloadFails(t, c.Reload, files.Top, "transcribe.url")
 	out, err := c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
 	fixturekit.Must(t, err)
 	if out.Text != whisperText || len(first.received()) != 1 {
 		t.Fatalf("after a failed reload: %q %d", out.Text, len(first.received()))
 	}
 
-	files.write(t, strings.Replace(files.topText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n")
+	files.Write(t, strings.Replace(files.TopText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n")
 	_, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	out, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
@@ -234,7 +234,7 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 		t.Fatalf("effective %+v", cfg.Effective.Transcribe)
 	}
 
-	files.write(t, strings.Replace(files.topText, first.url(), "", 1))
+	files.Write(t, strings.Replace(files.TopText, first.url(), "", 1))
 	_, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	_, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
@@ -385,7 +385,7 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 	whisper := newFakeWhisper(t)
 	opts := fixture(t)
 	withTranscribe(t, opts, "url = \""+whisper.url()+"\"\n")
-	withWeb(t, opts, "127.0.0.1:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 	s, _ := start(t, opts)
 	web, base := intakefixture.WebHTTP(), "http://"+s.WebAddr()+Prefix+"/transcribe"
 	valid, err := json.Marshal(clipRequest("audio/webm", []byte(clipBytes)))

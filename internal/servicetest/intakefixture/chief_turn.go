@@ -8,6 +8,9 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -31,4 +34,43 @@ func ClaimChiefTurn(t *testing.T, repository *trace.Repository, project config.P
 	_, err = repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, in.Token, filepath.Join(t.TempDir(), in.Directory), now())
 	fixturekit.Must(t, err)
 	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: in.Turn}
+}
+
+// ClaimContestChiefTurn claims the chief-of-staff event turn that rules on a
+// contested unit.
+func ClaimContestChiefTurn(t *testing.T, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID) coreadapter.Scope {
+	t.Helper()
+	return ClaimChiefTurn(t, repository, project, stream, func() time.Time { return fixturekit.DemoStart }, ChiefTurnInput{
+		Turn: "events_1", Prompt: "Unit resume is contested.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
+	})
+}
+
+// ChiefEventScope is the scope of the chief-of-staff event turn that
+// ClaimContestChiefTurn claims.
+func ChiefEventScope(project config.ProjectID, stream config.WorkstreamID) coreadapter.Scope {
+	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
+}
+
+// DecideContest records the owner's fallback ruling on the unit's contest
+// when the unit is contested and no ruling is recorded yet.
+func DecideContest(repository *trace.Repository, stream config.WorkstreamID, unit string, unitContest func(*trace.Repository, config.WorkstreamID, string) (trace.Transition, bool, error)) error {
+	contest, contested, err := unitContest(repository, stream, unit)
+	if err != nil || !contested {
+		return err
+	}
+	key := jev.ContestKey(contest.ID)
+	res, err := jev.Recorded(repository, stream, jev.KindContestedRuling, key)
+	if err != nil || res.Status != jev.None {
+		return err
+	}
+	jevfixture.Fallback(repository, repository.Project(), stream, jev.KindContestedRuling, key)
+	return nil
+}
+
+// ClaimHeldDriftTurn claims the chief's turn that hands back a drift rebase held for the owner.
+func ClaimHeldDriftTurn(t *testing.T, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, now func() time.Time, id string) coreadapter.Scope {
+	t.Helper()
+	return ClaimChiefTurn(t, repository, project, stream, now, ChiefTurnInput{
+		Turn: id, Prompt: "The drift rebase is held.", Actor: fixturekit.ServiceActor, Cause: "fixture", Token: "token-" + id, Directory: id,
+	})
 }

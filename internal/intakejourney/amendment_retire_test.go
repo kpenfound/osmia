@@ -3,9 +3,6 @@ package intakejourney
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -13,6 +10,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -142,14 +143,14 @@ func TestAmendmentApprovalRetiresOtherPresentedAmendments(t *testing.T) {
 			t.Run(approved+" retires "+retired, func(t *testing.T) {
 				f, stream := journey.BuiltForAmendment(t, 2)
 				defer f.Stop(t)
-				spec, graph := journey.AmendedSpec, fixturekit.ValidPlan
+				spec, graph := intakefixture.AmendedSpec, fixturekit.ValidPlan
 				if approved == "plan" {
-					spec, graph = fixturekit.ValidSpec, amendedPlan
+					spec, graph = fixturekit.ValidSpec, intakefixture.RestartPlan
 				}
 				journey.PresentAmendment(t, f, stream, intake.MasonRole, spec, graph)
-				spec, graph = journey.AmendedSpec, fixturekit.ValidPlan
+				spec, graph = intakefixture.AmendedSpec, fixturekit.ValidPlan
 				if retired == "plan" {
-					spec, graph = fixturekit.ValidSpec, amendedPlan
+					spec, graph = fixturekit.ValidSpec, intakefixture.RestartPlan
 				}
 				requester := intakefixture.PresentAmendmentForUnit(t, f.Repository(), f.Project, f.Clock.Now(), stream, "2", "dedupe", intake.MasonRole, spec, graph)
 				_, err := f.C.DecideAmendment(context.Background(), stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Packet: 1})
@@ -184,11 +185,11 @@ func TestStaleAmendmentHiddenBeforeRetirementAndRetiredOnStartup(t *testing.T) {
 			repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
 			fixturekit.Must(t, err)
 			f.S.SetSole(&journey.ActiveProject{Repository: repo})
-			requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+			requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 			recordAmendmentSealRevision(t, f, repo, stream, func(s *seal.Seal) {
 				if change == "spec" {
 					s.Revision.Spec++
-					s.SpecHash = seal.SpecHash(journey.AmendedSpec)
+					s.SpecHash = seal.SpecHash(intakefixture.AmendedSpec)
 				} else {
 					s.Revision.Plan++
 				}
@@ -245,7 +246,7 @@ func TestAmendmentRetirementRulingRecoversAtEveryBoundary(t *testing.T) {
 			}
 			reopen()
 			defer func() { repo.Close() }()
-			requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+			requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 			recordAmendmentSealRevision(t, f, repo, stream, func(s *seal.Seal) { s.Revision.Plan++ })
 			c := f.S.Intake()
 			handled, err := c.RetireStaleAmendment(ctx, repo, stream, "1")
@@ -285,7 +286,7 @@ func TestOwnerDecisionRacesAmendmentRetirement(t *testing.T) {
 			fixturekit.Must(t, err)
 			defer repo.Close()
 			f.S.SetSole(&journey.ActiveProject{Repository: repo})
-			intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+			intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 			recordAmendmentSealRevision(t, f, repo, stream, func(s *seal.Seal) { s.Revision.Plan++ })
 			c := f.S.Intake()
 			start := make(chan struct{})
@@ -353,7 +354,7 @@ func TestAmendmentCardsRecommendTheirOwnDecisions(t *testing.T) {
 			if kind != "" {
 				records = append(records, intakefixture.AmendmentObjection(kind))
 			}
-			intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan, records...)
+			intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan, records...)
 			docs, err := trace.Read[trace.Document](repo, stream)
 			fixturekit.Must(t, err)
 			for _, doc := range docs {
@@ -431,8 +432,8 @@ func TestRetiredAmendmentOperationsSettleAndLaterAmendmentProgresses(t *testing.
 			if stage == "draft running" {
 				draftCheck = hold
 			}
-			f.Script("amend-1-1", map[string]string{plan.SpecPath: journey.AmendedSpec}, draftCheck)
-			f.Script("amend-1-2", map[string]string{plan.SpecPath: journey.AmendedSpec}, nil)
+			f.Script("amend-1-1", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, draftCheck)
+			f.Script("amend-1-2", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, nil)
 			member := intake.CommitteeAgent(1)
 			debateCheck := (func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error)(nil)
 			if stage == "debate running" {
@@ -444,7 +445,7 @@ func TestRetiredAmendmentOperationsSettleAndLaterAmendmentProgresses(t *testing.
 				replyCheck = hold
 			}
 			f.Script("amend-1-reply-1", nil, replyCheck)
-			f.Script("amend-2-1", map[string]string{plan.SpecPath: journey.AmendedSpec}, nil)
+			f.Script("amend-2-1", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, nil)
 			f.Script("amend-2-round-1-"+member+"-1", nil, nil)
 			f.Script("amend-2-reply-1", nil, nil)
 			c := f.S.Intake()
@@ -652,7 +653,7 @@ func TestRetirementLeavesDraftQuestionsOnTheirNormalPath(t *testing.T) {
 				p.Report("retired draft's answer ran")
 				return nil
 			})
-			f.Script("amend-2-1", map[string]string{plan.SpecPath: journey.AmendedSpec}, nil)
+			f.Script("amend-2-1", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, nil)
 			c := f.S.Intake()
 			draft := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: c.DrafterDependencies(), Repository: repo}}
 			debate := intake.AmendmentDebate{Debate: &intake.Debate{S: c.DebateDependencies(), Repository: repo}}
@@ -800,7 +801,7 @@ func TestAmendmentRetirementResumesAReviewer(t *testing.T) {
 	fixturekit.Must(t, err)
 	defer repo.Close()
 	f.S.SetSole(&journey.ActiveProject{Repository: repo})
-	requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.ReviewerRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	requester := intakefixture.PresentAmendment(t, repo, f.Project, f.Clock.Now(), stream, intake.ReviewerRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	recordAmendmentSealRevision(t, f, repo, stream, func(s *seal.Seal) { s.Revision.Plan++ })
 	debate := intake.AmendmentDebate{Debate: &intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: repo}}
 	fixturekit.Must(t, debate.Pass(ctx))

@@ -2,8 +2,9 @@ package intakefixture
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	reviewtools "github.com/kpenfound/osmia/internal/review"

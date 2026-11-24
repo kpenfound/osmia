@@ -508,7 +508,7 @@ func presentedAmendment(t *testing.T, p *gateJev) (*shedFixture, config.Workstre
 	stream := f.buildFixture().Amendment(t)
 	before, _, _, err := seal.Latest(f.repository(), stream)
 	fixturekit.Must(t, err)
-	requester := presentAmendment(t, f, stream, masonRole, amendedSpec, fixturekit.ValidPlan)
+	requester := presentAmendment(t, f, stream, masonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	return f, stream, requester, before, key
 }
 
@@ -571,7 +571,7 @@ func TestJevIsNeverAskedAboutAPlanOnlyAmendment(t *testing.T) {
 	f := newDebateFixtureWith(t, 1, 1, gateJevConfig(gateKey(t, true)), func(o *Options) { o.JevProvider = p.Factory(); counted(o) })
 	stream := f.buildFixture().Amendment(t)
 	defer f.stop(t)
-	presentAmendment(t, f, stream, masonRole, fixturekit.ValidSpec, amendedPlan)
+	presentAmendment(t, f, stream, masonRole, fixturekit.ValidSpec, intakefixture.RestartPlan)
 	awaitGateScans(t, scans)
 	if state, err := f.repository().Workflow(stream, amendmentSubject("1")); err != nil || state.Value != intake.AmendmentPresented {
 		t.Fatalf("amendment 1 is %q: %v", state.Value, err)
@@ -799,7 +799,7 @@ func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	w := newGateWorker(c.f.s, &activeProject{id: c.repo.Project(), repository: c.repo})
 	w.handle(ctx, *gate)
 
-	if got := c.state(t).Value; got != UnitReviewing {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 		t.Fatalf("the unit is %q", got)
 	}
 	transitions, err := trace.Read[trace.Transition](c.repo, c.stream)

@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -27,10 +29,10 @@ import (
 
 const contestEvidence = "The reviewer sent the candidate back three times with the same finding and the mason has not changed it."
 
-func withJev(t *testing.T, p *jevfixture.Provider) func(*Options) {
+func withJev(t *testing.T, p *jevfixture.Provider) func(*journey.Options) {
 	t.Helper()
 	key := jevfixture.Key(t, true)
-	return func(o *Options) {
+	return func(o *journey.Options) {
 		o.JevProvider = p.Factory()
 		file, err := os.OpenFile(filepath.Join(o.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 		fixturekit.Must(t, err)
@@ -41,11 +43,11 @@ func withJev(t *testing.T, p *jevfixture.Provider) func(*Options) {
 }
 
 func (b *bounceFixture) chiefTurn(match string, script func(ctx context.Context, tools *mcp.ClientSession) error) {
-	b.f.engine.Mu.Lock()
-	defer b.f.engine.Mu.Unlock()
-	next := b.f.engine.Turns["*"]
+	b.f.Engine.Mu.Lock()
+	defer b.f.Engine.Mu.Unlock()
+	next := b.f.Engine.Turns["*"]
 	var once atomic.Bool
-	b.f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	b.f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.Contains(req.Prompt, match) || !once.CompareAndSwap(false, true) {
 			return next(ctx, req, turn, tools)
 		}
@@ -87,7 +89,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	defer b.stop(t)
 	ctx := context.Background()
 
-	contest, contested, err := execution.UnitContest(b.f.repository(), b.stream, bounceUnit)
+	contest, contested, err := execution.UnitContest(b.f.Repository(), b.stream, bounceUnit)
 	fixturekit.Must(t, err)
 	if !contested {
 		t.Fatal("the unit is not contested")
@@ -110,9 +112,9 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 		done <- o
 		return err
 	})
-	_, err = b.f.c.Send(ctx, b.stream, "jev rules bounce now")
+	_, err = b.f.C.Send(ctx, b.stream, "jev rules bounce now")
 	fixturekit.Must(t, err)
-	got := awaitCheck(t, done)
+	got := intakefixture.AwaitCheck(t, done)
 	if !strings.Contains(got.before, `"recorded":false`) || !strings.Contains(got.before, "decide") {
 		t.Fatalf("the ruling before decide: %s", got.before)
 	}
@@ -126,7 +128,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 		t.Fatalf("the picked ruling: %s", got.picked)
 	}
 
-	if req := awaitCheck(t, b.delivered); !strings.HasPrefix(req.Name, intake.ReviewerAgent(bounceUnit)+"-review-") {
+	if req := intakefixture.AwaitCheck(t, b.delivered); !strings.HasPrefix(req.Name, intake.ReviewerAgent(bounceUnit)+"-review-") {
 		t.Fatalf("the turn after the ruling: %s", req.Name)
 	}
 
@@ -139,7 +141,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 			t.Fatalf("Jev was not offered %q: %v", option, jevfixture.Options(requests[0]))
 		}
 	}
-	unit, err := b.f.c.TraceUnit(ctx, b.stream, bounceUnit)
+	unit, err := b.f.C.TraceUnit(ctx, b.stream, bounceUnit)
 	fixturekit.Must(t, err)
 	var ruling *api.TraceRuling
 	for i := range unit.Rulings {
@@ -150,13 +152,13 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	if ruling == nil || ruling.Decision != "review" || ruling.DecidedBy != trace.DecidedByJev || ruling.Judgment == "" {
 		t.Fatalf("trace rulings: %+v", unit.Rulings)
 	}
-	res, err := jev.Recorded(b.f.repository(), b.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
+	res, err := jev.Recorded(b.f.Repository(), b.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
 	fixturekit.Must(t, err)
 	if res.Status != jev.Binding || res.Pick != "review" || res.Judgment != ruling.Judgment {
 		t.Fatalf("recorded result %+v", res)
 	}
 	byJev := 0
-	for _, tr := range intakefixture.AllTransitions(t, b.f.s.cfg.Root, b.f.project, b.stream) {
+	for _, tr := range intakefixture.AllTransitions(t, b.f.S.Cfg.Root, b.f.Project, b.stream) {
 		if tr.Actor == trace.JevActor && tr.Subject == trace.UnitSubject(bounceUnit) {
 			byJev++
 		}
@@ -164,7 +166,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	if byJev != 1 {
 		t.Fatalf("%d transitions of the unit by Jev", byJev)
 	}
-	root, err := config.ResolveRoot(b.f.opts.Config.Root, "")
+	root, err := config.ResolveRoot(b.f.Opts.Config.Root, "")
 	fixturekit.Must(t, err)
 	var out, diag bytes.Buffer
 	code := cli.Run(ctx, []string{"--root", root.String(), "trace", string(b.stream), "unit", bounceUnit}, strings.NewReader(""), &out, &diag)
@@ -190,20 +192,20 @@ func TestWithJevUnconfiguredTheChiefDecidesAndTheContestReachesTheOwner(t *testi
 		done <- [2]string{decided, escalated}
 		return err
 	})
-	_, err := b.f.c.Send(ctx, b.stream, "escalate after decide")
+	_, err := b.f.C.Send(ctx, b.stream, "escalate after decide")
 	fixturekit.Must(t, err)
-	got := awaitCheck(t, done)
+	got := intakefixture.AwaitCheck(t, done)
 	if !strings.Contains(got[0], `"decision":"chief"`) || strings.Contains(got[0], `"decision":"binding"`) {
 		t.Fatalf("decide: %s", got[0])
 	}
 	if !strings.Contains(got[1], `"recorded":true`) {
 		t.Fatalf("escalate: %s", got[1])
 	}
-	entries := b.f.raisedContests(t, b.stream)
+	entries := raisedContests(b.f, t, b.stream)
 	if len(entries) != 1 || entries[0].Unit != bounceUnit || !strings.Contains(entries[0].Recommendation, note) {
 		t.Fatalf("the contested card: %+v", entries)
 	}
-	if runtime, err := b.f.c.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeUnconfigured {
+	if runtime, err := b.f.C.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeUnconfigured {
 		t.Fatalf("Jev in the status: %+v %v", runtime.Jev, err)
 	}
 }

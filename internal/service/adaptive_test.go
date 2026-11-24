@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/ghlog"
@@ -21,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -29,11 +31,11 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 	for _, tc := range []struct {
 		name, spec string
 		allowed    bool
-	}{{"engineering", fixturekit.ValidSpec, true}, {"intent", amendedSpec, false}} {
+	}{{"engineering", fixturekit.ValidSpec, true}, {"intent", intakefixture.AmendedSpec, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)
 			defer f.stop(t)
-			requester := presentAmendment(t, f, stream, masonRole, tc.spec, amendedPlan)
+			requester := presentAmendment(t, f, stream, masonRole, tc.spec, intakefixture.RestartPlan)
 			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, chiefActor, "engineering-decision")
 			if tc.allowed {
 				if api != nil {
@@ -238,7 +240,7 @@ func TestFactoryContextReadsAPriorRevisionOfADocument(t *testing.T) {
 	c := newContestFixture(t, "factory-history")
 	spec := currentSpecDocument(t, c)
 	spec.Revision++
-	spec.Content = amendedSpec
+	spec.Content = intakefixture.AmendedSpec
 	spec.Cause = "fixture"
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{spec}))
 	raw, err := factoryContext(c.repo, factoryContextScope(c)).Handle(context.Background(), json.RawMessage(`{"path":"spec.md","revision":1}`))
@@ -426,11 +428,11 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 func TestChiefRecoveryCannotApproveItsOwnCandidate(t *testing.T) {
 	t.Parallel()
 	m := newMoveFixture(t, "independent-review")
-	out := m.moveUnit(t, `{"unit":"resume","to":"approved","note":"The change appears correct"}`)
+	out := intakefixture.Handle(t, m.move, `{"unit":"resume","to":"approved","note":"The change appears correct"}`)
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "independent review") {
 		t.Fatal(out)
 	}
-	if m.state(t).Value != UnitReviewing {
+	if intakefixture.UnitWorkflow(t, m.repo, m.stream, "resume").Value != UnitReviewing {
 		t.Fatal("chief bypassed independent review")
 	}
 }
@@ -500,7 +502,7 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 		t.Fatal("captured unit workspace disappeared")
 	}
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "investigation.txt"), []byte("work captured before done\n"), 0600))
-	scope := chiefTurn(t, f, repo, stream, "inspect_unfinished")
+	scope := intakefixture.ClaimHeldDriftTurn(t, repo, f.project, stream, f.clock.Now, "inspect_unfinished")
 	raw, err := inspectCode(f.s.cfg, repo, scope, f.clock.Now).Handle(ctx, json.RawMessage(`{"unit":"dedupe","path":"investigation.txt"}`))
 	fixturekit.Must(t, err)
 	var evidence trace.CodeInspection

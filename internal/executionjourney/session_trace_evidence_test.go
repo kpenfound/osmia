@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/checks"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -59,30 +61,30 @@ esac
 	return func(mode string) { fixturekit.Must(t, os.WriteFile(modeFile, []byte(mode), 0600)) }
 }
 
-func sessionTraceFixture(t *testing.T, token, dagger string) (*Service, *Client, Options, config.ProjectID, config.WorkstreamID) {
+func sessionTraceFixture(t *testing.T, token, dagger string) (*journey.Service, *journey.Client, journey.Options, config.ProjectID, config.WorkstreamID) {
 	t.Helper()
 	extra := ""
 	if token != "" {
 		t.Setenv(sessionTraceToken, token)
 		extra = "\n[dagger]\ncloud_compute_token_env = '" + sessionTraceToken + "'\n" + dagger
 	}
-	s, c, opts, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
+	s, c, opts, project, w, _, _ := newSessionControlsFixture(t, func(o *journey.Options) {
 		if extra != "" {
-			appendConfig(t, o, extra)
+			journey.AppendConfig(t, o, extra)
 		}
 	})
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 	return s, c, opts, project, w
 }
 
-func sessionFeedRaw(t *testing.T, c *Client, w config.WorkstreamID) []byte {
+func sessionFeedRaw(t *testing.T, c *journey.Client, w config.WorkstreamID) []byte {
 	t.Helper()
 	var raw json.RawMessage
 	fixturekit.Must(t, c.Do(t.Context(), "GET", api.Prefix+"/feed/"+string(w), nil, &raw))
 	return raw
 }
 
-func sessionCheckEntries(t *testing.T, c *Client, w config.WorkstreamID) map[int]api.FeedSessionChecks {
+func sessionCheckEntries(t *testing.T, c *journey.Client, w config.WorkstreamID) map[int]api.FeedSessionChecks {
 	t.Helper()
 	var feed api.FeedResponse
 	fixturekit.Must(t, json.Unmarshal(sessionFeedRaw(t, c, w), &feed))
@@ -98,7 +100,7 @@ func sessionCheckEntries(t *testing.T, c *Client, w config.WorkstreamID) map[int
 	return out
 }
 
-func awaitSessionCheckEntry(t *testing.T, c *Client, w config.WorkstreamID, run int, ok func(api.FeedSessionChecks) bool) api.FeedSessionChecks {
+func awaitSessionCheckEntry(t *testing.T, c *journey.Client, w config.WorkstreamID, run int, ok func(api.FeedSessionChecks) bool) api.FeedSessionChecks {
 	t.Helper()
 	var entry api.FeedSessionChecks
 	intakefixture.Soon(t, fmt.Sprintf("a matching session_checks entry for run %d", run), func() bool {
@@ -109,9 +111,9 @@ func awaitSessionCheckEntry(t *testing.T, c *Client, w config.WorkstreamID, run 
 	return entry
 }
 
-func sessionTraceDocuments(t *testing.T, s *Service, project config.ProjectID, w config.WorkstreamID) map[string]trace.Document {
+func sessionTraceDocuments(t *testing.T, s *journey.Service, project config.ProjectID, w config.WorkstreamID) map[string]trace.Document {
 	t.Helper()
-	repo, err := s.repository(project)
+	repo, err := s.Repository(project)
 	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
 	fixturekit.Must(t, err)
@@ -138,8 +140,8 @@ func TestSessionCheckLinkOfAnInterruptedRunStaysInTheFeedAcrossRestart(t *testin
 		t.Fatal("a cancelled request returned a result")
 	}
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, opts)
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+	s, c = journey.StartT(t, opts)
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 
 	interrupted := sessionCheckEntries(t, c, w)
 	first, found := interrupted[1]
@@ -221,7 +223,7 @@ func TestSessionCheckResultIsRecordedWhenTheRequestIsCancelledAfterTheRunEnds(t 
 	s, c, _, _, w, _, _ := newSessionControlsFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	service.InspectForTest(s.core()).SetReviewChecks(fixturekit.CheckFunc(func(checkCtx context.Context, dir string) (api.CheckResult, error) {
+	service.InspectForTest(s.Core()).SetReviewChecks(fixturekit.CheckFunc(func(checkCtx context.Context, dir string) (api.CheckResult, error) {
 
 		cancel()
 		<-checkCtx.Done()

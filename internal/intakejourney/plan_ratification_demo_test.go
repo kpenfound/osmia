@@ -4,11 +4,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -16,6 +11,12 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -64,7 +65,7 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	cappedVeto := veto
 	chargeVeto := intakefixture.Objection{Kind: shed.Charter, Part: "spec#2", Argument: "Criterion 2 is shown by judgement, not by a test.", Citation: "charter#2"}
 	quiet := d.Debates(nil)
-	d.Plays[intakefixture.ExitTitle(intakefixture.ExitDebated)] = map[string]fixturekit.DemoTurn{
+	d.Plays[intakefixture.ExitTitle(fixturekit.HandedDesign)] = map[string]fixturekit.DemoTurn{
 		"draft-1-1": d.Drafts(map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil),
 		intake.RoundTurnID(1, intake.CommitteeAgent(1), 1): d.Debates([]intakefixture.Objection{chargeVeto, {Kind: shed.Size, Part: "plan#resume", Argument: "Resuming is two changes, not one.", Citation: "kb/entities.json#internal.trace"}}),
 		intake.RoundTurnID(1, intake.CommitteeAgent(2), 1): quiet,
@@ -133,7 +134,7 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 	added, err := f.C.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f.Project, f.Trace, d.Trace, d.Root, d.Project = added.Project.ID, added.Project.Trace, added.Project.Trace, f.S.Current().Root, added.Project.ID
-	journey.WriteCharter(t, f.C, added.Project.ID, intakefixture.ExitCharter)
+	intakefixture.WriteCharter(t, f.C, added.Project.ID, intakefixture.ShedCharter)
 	onboarded, err := f.C.Configuration(ctx)
 	fixturekit.Must(t, err)
 	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 2 {
@@ -156,10 +157,10 @@ func TestHandInToRatifiedPlan(t *testing.T) {
 		}
 		return out.Workstream
 	}
-	debated, capped := handIn("debated", intakefixture.ExitDebated, false), handIn("capped", intakefixture.ExitCapped, false)
+	debated, capped := handIn("debated", fixturekit.HandedDesign, false), handIn("capped", intakefixture.ExitCapped, false)
 	small, gone := handIn("small", intakefixture.ExitSmall, true), handIn("abandoned", intakefixture.ExitAbandoned, true)
 	d.Mu.Lock()
-	d.Streams = map[string]config.WorkstreamID{intakefixture.ExitTitle(intakefixture.ExitDebated): debated, intakefixture.ExitTitle(intakefixture.ExitCapped): capped, intakefixture.ExitTitle(intakefixture.ExitSmall): small, intakefixture.ExitTitle(intakefixture.ExitAbandoned): gone}
+	d.Streams = map[string]config.WorkstreamID{intakefixture.ExitTitle(fixturekit.HandedDesign): debated, intakefixture.ExitTitle(intakefixture.ExitCapped): capped, intakefixture.ExitTitle(intakefixture.ExitSmall): small, intakefixture.ExitTitle(intakefixture.ExitAbandoned): gone}
 	d.Mu.Unlock()
 
 	for _, stream := range []config.WorkstreamID{debated, capped, small, gone} {

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -16,13 +15,6 @@ const unreachableGitHub = "http://127.0.0.1:1"
 func testOptions(cfg config.Options) Options {
 	return Options{Config: cfg, Build: Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{fixturekit.Stream}, ShutdownTimeout: 100 * time.Millisecond,
 		ErrorReporter: ErrorReporterOptions{BaseURL: unreachableGitHub}}
-}
-
-func awaitConversation(t *testing.T, c *Client, done func(ConversationResponse) bool) ConversationResponse {
-	t.Helper()
-	return intakefixture.AwaitView(t, func() (ConversationResponse, error) {
-		return c.Conversation(context.Background(), fixturekit.Stream)
-	}, done, "conversation did not settle: %+v")
 }
 
 func (f *twoProjectFixture) block(id config.ProjectID, name string) (entered, release chan struct{}) {
@@ -45,11 +37,6 @@ func newTwoProjectFixture(t *testing.T) *twoProjectFixture {
 	return &twoProjectFixture{opts: opts, cfg: data.Loaded, clock: data.Clock, streams: data.Streams, turns: data.Turns, scenario: data}
 }
 
-const (
-	otherProject config.ProjectID    = "p_fedcba9876543210fedcba9876543210"
-	otherStream  config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
-)
-
 func projectFixture(t *testing.T) (Options, string) {
 	t.Helper()
 	cfg, clone := fixturekit.ProjectConfig(t)
@@ -71,5 +58,3 @@ type twoProjectFixture struct {
 	streams  map[config.ProjectID]config.WorkstreamID
 	scenario *fixturekit.TwoProjectScenario
 }
-
-const reviewSummary = "The candidate does the task and its acceptance holds"

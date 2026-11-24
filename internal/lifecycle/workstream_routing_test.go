@@ -1,10 +1,11 @@
 package lifecycle_test
 
 import (
-	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -12,50 +13,25 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func routeThrough(s *Service, p *jevfixture.Transitions) {
-	service.InspectForTest(s.core()).SetJudge(jevfixture.TransitionJudge(s.now, p))
-}
-
-func routeOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, trigger string) (router.Record, bool) {
-	t.Helper()
-	docs, err := trace.Read[trace.Document](repo, stream)
-	fixturekit.Must(t, err)
-	var found router.Record
-	var ok bool
-	revision := 0
-	for _, d := range docs {
-		if !strings.HasPrefix(d.Path, "routes/") {
-			continue
-		}
-		var rec router.Record
-		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &rec))
-		if rec.Trigger == trigger && d.Revision >= revision {
-			found, ok, revision = rec, true, d.Revision
-		}
-	}
-	return found, ok
-}
-
 func TestTheOwnersAbandonmentIsAPinnedMove(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, _ := newFinalFixture(t, "route-abandon")
-	f.s.setSole(&activeProject{repository: repository})
+	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "route-abandon", "")
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
+	journey.InspectForTest(f.S).SetJudge(jevfixture.TransitionJudge(f.S.Now, p))
 	tool := chiefMoveTool(t, f, repository, stream, "message_1", true)
-	if out := callMove(t, tool, `{"to":"abandoned","note":"Stop this one.","owner_decided":true}`); !strings.Contains(out, `"recorded":true`) {
+	if out := intakefixture.Handle(t, tool, `{"to":"abandoned","note":"Stop this one.","owner_decided":true}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("the relayed abandonment: %s", out)
 	}
 	abandon := intakefixture.TransitionByID(t, repository, stream, intake.AbandonTransition)
 	if abandon.To != intake.AbandonedState || abandon.DecidedBy != trace.DecidedByOwner || abandon.DefaultTo != intake.AbandonedState || abandon.Judgment != "" || abandon.Departed() || abandon.Actor != intake.OwnerActor {
 		t.Fatalf("the abandonment %+v", abandon)
 	}
-	rec, ok := routeOf(t, repository, stream, "ws.abandon")
+	rec, ok := journey.LookupRoute(t, repository, stream, "ws.abandon")
 	if !ok || rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested || rec.State != router.StateCommitted {
 		t.Fatalf("route %+v (found %v)", rec, ok)
 	}
@@ -66,15 +42,15 @@ func TestTheOwnersAbandonmentIsAPinnedMove(t *testing.T) {
 
 func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "route-owner-move")
-	hostFinalReviews(t, f, stream)
-	f.s.setSole(&activeProject{repository: repository})
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-owner-move", "")
+	journey.HostFinalReviews(t, f, stream)
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
-	assembleBoth(t, f, repository, a, stream,
+	journey.InspectForTest(f.S).SetJudge(jevfixture.TransitionJudge(f.S.Now, p))
+	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	out, apiFault := f.s.lifecycle().OwnerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it."})
+	out, apiFault := f.S.Lifecycle().OwnerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it."})
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
@@ -90,7 +66,7 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 	if feature.DecidedBy != trace.DecidedByOwner || feature.DefaultTo != intake.BuildingState || feature.Actor != intake.OwnerActor {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
-	rec, ok := routeOf(t, repository, stream, "ws.move_owner")
+	rec, ok := journey.LookupRoute(t, repository, stream, "ws.move_owner")
 	if !ok || rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested {
 		t.Fatalf("route %+v (found %v)", rec, ok)
 	}
@@ -101,20 +77,20 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 
 func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "route-chief-gate")
-	hostFinalReviews(t, f, stream)
-	f.s.setSole(&activeProject{repository: repository})
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-gate", "")
+	journey.HostFinalReviews(t, f, stream)
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{Script: func(ask jevfixture.Ask) jevfixture.Reply {
 		return jevfixture.Departs(ask, "abandoned", 0.99, 0.99)
 	}}
-	routeThrough(f.s, p)
-	assembleBoth(t, f, repository, a, stream,
+	journey.InspectForTest(f.S).SetJudge(jevfixture.TransitionJudge(f.S.Now, p))
+	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	tool := chiefMoveTool(t, f, repository, stream, "events_1", false)
 
 	for _, to := range []string{intake.AbandonedState, intake.RatifiedState} {
-		out := callMove(t, tool, `{"to":"`+to+`","note":"Nothing else is moving it."}`)
+		out := intakefixture.Handle(t, tool, `{"to":"`+to+`","note":"Nothing else is moving it."}`)
 		if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "the owner's decision") || strings.Contains(out, "say") {
 			t.Fatalf("the chief proposal to %s: %s", to, out)
 		}
@@ -159,16 +135,16 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 
 func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "route-chief-building")
-	hostFinalReviews(t, f, stream)
-	f.s.setSole(&activeProject{repository: repository})
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "route-chief-building", "")
+	journey.HostFinalReviews(t, f, stream)
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
-	assembleBoth(t, f, repository, a, stream,
+	journey.InspectForTest(f.S).SetJudge(jevfixture.TransitionJudge(f.S.Now, p))
+	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	tool := chiefMoveTool(t, f, repository, stream, "events_2", false)
-	if out := callMove(t, tool, `{"to":"building","note":"Reopen it so a revision can repair the gap."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
+	if out := intakefixture.Handle(t, tool, `{"to":"building","note":"Reopen it so a revision can repair the gap."}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"state":"building"`) {
 		t.Fatalf("move_workstream to building: %s", out)
 	}
 	var feature trace.Transition
@@ -180,7 +156,7 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != intake.BuildingState || feature.Departed() {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
-	rec, ok := routeOf(t, repository, stream, "ws.move_proposal")
+	rec, ok := journey.LookupRoute(t, repository, stream, "ws.move_proposal")
 	if !ok || rec.Outcome != router.OutcomeFollowed || rec.State != router.StateCommitted || rec.Default != intake.BuildingState {
 		t.Fatalf("route %+v (found %v)", rec, ok)
 	}

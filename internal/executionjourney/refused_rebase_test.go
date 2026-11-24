@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -19,7 +21,7 @@ import (
 
 func orderedRebases(t *testing.T, b *boundedRebase, unit string) []trace.OperationRecord {
 	t.Helper()
-	ops := rebaseOperations(t, b.repository, b.stream, unit)
+	ops := journey.RebaseOperations(t, b.repository, b.stream, unit)
 	number := func(op trace.OperationRecord) int {
 		in, err := execution.DecodeRebase(op.Operation)
 		fixturekit.Must(t, err)
@@ -33,9 +35,9 @@ func TestRefusedRebaseIsAskedForAgainAndContestsTheUnitOnceTheBoundIsUsedUp(t *t
 	t.Parallel()
 	b := newBoundedRebase(t, "refused-rebase-again")
 	ctx := context.Background()
-	lands := &foreman{masons: newMasonController(b.f.s, b.repository)}
+	lands := &journey.Foreman{Masons: journey.NewMasonController(b.f.S, b.repository)}
 	failing := true
-	b.f.s.boundary = func(name string) error {
+	b.f.S.Boundary = func(name string) error {
 		if failing && name == "rebase-snapshotting" {
 			return errors.New("the clone is unreachable")
 		}
@@ -43,7 +45,7 @@ func TestRefusedRebaseIsAskedForAgainAndContestsTheUnitOnceTheBoundIsUsedUp(t *t
 	}
 	for i := 1; i <= execution.MaxRefusedRebases; i++ {
 		b.pass(t, reconcile.GiveUpFailures+1)
-		b.clock.advance(10 * time.Minute)
+		b.clock.Advance(10 * time.Minute)
 		b.pass(t, 1)
 		ops := orderedRebases(t, b, "resume")
 		if len(ops) != i || ops[i-1].Result == nil || ops[i-1].Result.Outcome != "failed" {
@@ -96,13 +98,13 @@ func TestRefusedRebaseIsAskedForAgainAndContestsTheUnitOnceTheBoundIsUsedUp(t *t
 	}
 
 	failing = false
-	if _, apiErr := b.f.s.recordContestedRuling(ctx, b.repository, b.stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "The clone is reachable again."}, intake.ChiefActor); apiErr != nil {
+	if _, apiErr := recordContestedRuling(b.f.S, ctx, b.repository, b.stream, "resume", api.ContestedRulingRequest{Decision: "revise", Note: "The clone is reachable again."}, intake.ChiefActor); apiErr != nil {
 		t.Fatalf("the chief's ruling: %+v", apiErr)
 	}
 	if state, err := b.repository.Workflow(b.stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitContested {
 		t.Fatalf("dedupe is %+v: %v", state, err)
 	}
-	if _, apiErr := b.f.s.moveUnit(ctx, b.repository, b.stream, "dedupe", api.UnitMoveRequest{To: intake.UnitImplementing, Note: "The clone is reachable again."}, intake.ChiefActor, ""); apiErr != nil {
+	if _, apiErr := b.f.S.Execution().MoveUnit(ctx, b.repository, b.stream, "dedupe", (api.UnitMoveRequest{To: intake.UnitImplementing, Note: "The clone is reachable again."}), intake.ChiefActor, ""); apiErr != nil {
 		t.Fatalf("the chief's move: %+v", apiErr)
 	}
 	fixturekit.Must(t, lands.Pass(ctx))
@@ -119,9 +121,9 @@ func TestRefusedRebaseIsAskedForAgainAndContestsTheUnitOnceTheBoundIsUsedUp(t *t
 		}
 	}
 	b.pass(t, 1)
-	units := newUnitWorkspaces(b.f.s.cfg, b.repository)
+	units := journey.NewUnitWorkspaces(b.f.S.Cfg, b.repository)
 	for _, unit := range []string{"resume", "dedupe"} {
-		if behind, err := units.behind(ctx, b.stream, unit); err != nil || behind {
+		if behind, err := units.Driver().Behind(ctx, b.stream, unit); err != nil || behind {
 			t.Fatalf("%s is behind after its fresh rebase: %v %v", unit, behind, err)
 		}
 	}

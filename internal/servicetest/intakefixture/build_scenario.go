@@ -231,22 +231,6 @@ func (f *TurnScenario) CompleteMasonTurn(t *testing.T, repository *trace.Reposit
 	return f.CaptureTurn(t, repository, stream, intake.MasonAgent(unit), &coreadapter.Outcome{Status: "done", Report: string(content), Card: &ExampleCard})
 }
 
-func FinalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
-	t.Helper()
-	ops, err := repository.Operations(stream)
-	fixturekit.Must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
-	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
-	return ops
-}
-
-func LandOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
-	t.Helper()
-	ops, err := repository.Operations(stream)
-	fixturekit.Must(t, err)
-	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
-}
-
 func FinalTurn(engine *fixturekit.DemoEngine, turn string, run func(context.Context, *mcp.ClientSession) error) string {
 
 	engine.Mu.Lock()
@@ -349,12 +333,12 @@ func AssembleBoth(t *testing.T, repository *trace.Repository, a PassReconciler, 
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != assembled {
 		t.Fatalf("the workstream is %+v with every unit merged: %v", feature, err)
 	}
-	if ops := FinalOperations(t, repository, stream, action); len(ops) != 0 {
+	if ops := OperationsOf(t, repository, stream, action); len(ops) != 0 {
 		t.Fatalf("final reviews asked for in the pass that assembled: %+v", ops)
 	}
 	fixturekit.Must(t, a.Pass(ctx))
 	fixturekit.Must(t, a.Pass(ctx))
-	ops := FinalOperations(t, repository, stream, action)
+	ops := OperationsOf(t, repository, stream, action)
 	if len(ops) != 1 {
 		t.Fatalf("final review operations %+v", ops)
 	}
@@ -611,4 +595,14 @@ func DrivePass(t *testing.T, repo *trace.Repository, halt func() error, pass fun
 	if err := pass(); err != nil {
 		t.Fatalf("drive the pass: %v", err)
 	}
+}
+
+// OperationsOf returns the workstream's operations of one action, oldest first.
+func OperationsOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
+	t.Helper()
+	ops, err := repository.Operations(stream)
+	fixturekit.Must(t, err)
+	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
+	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
+	return ops
 }

@@ -2,10 +2,12 @@ package lifecycle_test
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -15,10 +17,10 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-func readWorkgroupFeed(t *testing.T, f *productionDesignFixture, group config.WorkgroupID) api.WorkgroupFeedResponse {
+func readWorkgroupFeed(t *testing.T, f *journey.ProductionDesignFixture, group config.WorkgroupID) api.WorkgroupFeedResponse {
 	t.Helper()
 	var feed api.WorkgroupFeedResponse
-	fixturekit.Must(t, f.c.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(group)+"/feed", nil, &feed))
+	fixturekit.Must(t, f.C.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(group)+"/feed", nil, &feed))
 	return feed
 }
 
@@ -32,11 +34,11 @@ func feedArchiveEntries(feed api.WorkgroupFeedResponse, member config.Workstream
 	return out
 }
 
-func awaitEveryMemberCleaned(t *testing.T, f *productionDesignFixture) {
+func awaitEveryMemberCleaned(t *testing.T, f *journey.ProductionDesignFixture) {
 	t.Helper()
-	lifecycleAwait(t, f, "every member's cleanup", func() bool {
+	journey.LifecycleAwait(t, f, "every member's cleanup", func() bool {
 		for _, m := range resolutionMembers(f) {
-			a, ok := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
+			a, ok := intakefixture.ArchiveRecord(t, f.S.Store, m.stream)
 			if !ok || a.CleanedAt.IsZero() {
 				return false
 			}
@@ -66,23 +68,23 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
-	group := resolutionGroupID(t, g.productionDesignFixture)
-	before := retainedEntries(readWorkgroupFeed(t, g.productionDesignFixture, group))
+	group := resolutionGroupID(t, g.ProductionDesignFixture)
+	before := retainedEntries(readWorkgroupFeed(t, g.ProductionDesignFixture, group))
 	if len(before) == 0 {
 		t.Fatal("the shared feed is empty before the members are archived")
 	}
 	g.host.Mu.Lock()
 	g.host.Prs = []pulls.PullRequest{mergedPullRequest(g.pubs[0], "first-merge"), mergedPullRequest(g.pubs[1], "second-merge")}
 	g.host.Mu.Unlock()
-	lifecycleAwait(t, g.f(), "the chief of staff archives every member", func() bool {
+	journey.LifecycleAwait(t, g.f(), "the chief of staff archives every member", func() bool {
 		for _, m := range resolutionMembers(g.f()) {
-			if a, ok := intakefixture.ArchiveRecord(t, g.s.store, m.stream); !ok || a.Actor != runtime.ArchiveActorChief {
+			if a, ok := intakefixture.ArchiveRecord(t, g.S.Store, m.stream); !ok || a.Actor != runtime.ArchiveActorChief {
 				return false
 			}
 		}
 		return true
 	})
-	g.gate.release()
+	g.gate.Release()
 	awaitEveryMemberCleaned(t, g.f())
 
 	check := func(phase string) {
@@ -103,7 +105,7 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 				t.Fatalf("%s: member summary=%+v", phase, m)
 			}
 		}
-		conversation, err := g.c.Conversation(ctx, g.origin)
+		conversation, err := g.C.Conversation(ctx, g.Origin)
 		fixturekit.Must(t, err)
 		for _, m := range resolutionMembers(g.f()) {
 			if entries := archiveEntries(conversation.Entries, m.stream); len(entries) != 1 {
@@ -115,46 +117,46 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 
 	count := len(readWorkgroupFeed(t, g.f(), group).Entries)
 	var sent api.ConversationEntry
-	if err := g.c.Do(ctx, "POST", api.Prefix+"/workgroups/"+string(group)+"/conversation", api.SendRequest{Text: "Anyone still here?"}, &sent); err == nil {
+	if err := g.C.Do(ctx, "POST", api.Prefix+"/workgroups/"+string(group)+"/conversation", api.SendRequest{Text: "Anyone still here?"}, &sent); err == nil {
 		t.Fatalf("sending to a fully archived workgroup was accepted: %+v", sent)
 	}
 	if after := readWorkgroupFeed(t, g.f(), group); len(after.Entries) != count || slices.ContainsFunc(after.Entries, func(e api.FeedEntry) bool { return e.Text == "Anyone still here?" }) {
 		t.Fatalf("a refused send changed the shared thread: %d -> %d entries", count, len(after.Entries))
 	}
 
-	g.f().stop(t)
-	g.f().start(t)
+	g.f().Stop(t)
+	g.f().Start(t)
 	check("after restart")
 }
 
 func TestSharedFeedStaysReadableAfterTheOwnerArchivesEveryMember(t *testing.T) {
 	t.Parallel()
 	g := newAutoArchiveGroup(t)
-	group := resolutionGroupID(t, g.productionDesignFixture)
-	before := retainedEntries(readWorkgroupFeed(t, g.productionDesignFixture, group))
+	group := resolutionGroupID(t, g.ProductionDesignFixture)
+	before := retainedEntries(readWorkgroupFeed(t, g.ProductionDesignFixture, group))
 	if len(before) == 0 {
 		t.Fatal("the shared feed is empty before the members are archived")
 	}
 	for _, m := range resolutionMembers(g.f()) {
-		repo, err := g.s.repository(m.project)
+		repo, err := g.S.Repository(m.project)
 		fixturekit.Must(t, err)
-		recordResolutionMerge(t, repo, m.stream)
+		journey.RecordResolutionMerge(t, repo, m.stream)
 	}
-	down, err := g.s.repository(g.project2)
+	down, err := g.S.Repository(g.Project2)
 	fixturekit.Must(t, err)
-	lifecycleAwait(t, g.f(), "the downstream edge is released", func() bool {
-		wait, err := lifecycle.EdgeWaitDisplay(down, g.stream2)
+	journey.LifecycleAwait(t, g.f(), "the downstream edge is released", func() bool {
+		wait, err := lifecycle.EdgeWaitDisplay(down, g.Stream2)
 		fixturekit.Must(t, err)
 		return wait == ""
 	})
 	for _, m := range resolutionMembers(g.f()) {
-		resp, err := g.c.Archive(context.Background(), m.stream)
+		resp, err := g.C.Archive(context.Background(), m.stream)
 		fixturekit.Must(t, err)
 		if resp.ArchivedBy != api.ArchivedByOwner {
 			t.Fatalf("owner archive reports %+v", resp)
 		}
 	}
-	g.gate.release()
+	g.gate.Release()
 	awaitEveryMemberCleaned(t, g.f())
 	feed := readWorkgroupFeed(t, g.f(), group)
 	requireRetained(t, feed, before)

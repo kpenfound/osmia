@@ -2,14 +2,15 @@ package intakejourney
 
 import (
 	context "context"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	strings "strings"
-	testing "testing"
 
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -144,7 +146,7 @@ func TestAbandonCompetingUnclaimedInvocationsPreserveRunningClaim(t *testing.T) 
 		t.Fatal("archive cleanup did not remove the cancelled turn's trace")
 	}
 	fixturekit.Must(t, cleanup.Pass(ctx))
-	archived, ok := archiveRecord(t, s.store, fixturekit.Stream)
+	archived, ok := intakefixture.ArchiveRecord(t, s.store, fixturekit.Stream)
 	if !ok || archived.CleanedAt.IsZero() {
 		t.Fatalf("archive cleanup did not complete in the same session: %+v", archived)
 	}
@@ -250,7 +252,7 @@ func TestAbandonBeforeFirstAttemptReleasesReturnedClaim(t *testing.T) {
 		t.Fatal("archive cleanup did not remove the cancelled turn's trace")
 	}
 	fixturekit.Must(t, cleanup.Pass(ctx))
-	archived, ok := archiveRecord(t, s.store, fixturekit.Stream)
+	archived, ok := intakefixture.ArchiveRecord(t, s.store, fixturekit.Stream)
 	if !ok || archived.CleanedAt.IsZero() {
 		t.Fatalf("archive cleanup did not complete in the same session: %+v", archived)
 	}

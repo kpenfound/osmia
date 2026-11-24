@@ -4,6 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/service"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -14,13 +25,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"sync"
-	"testing"
-	"time"
 )
 
 // ArchitectFixture is an active project with a ruled charter, a clone whose
@@ -42,6 +46,11 @@ type ArchitectFixture struct {
 	ScenarioState *intakefixture.ArchitectScenario
 }
 
+// FreeRouting installs a free fixture Jev on the transition router of every
+// architect fixture service started afterwards. A test package sets it before
+// Main runs its tests.
+var FreeRouting bool
+
 func NewArchitectOptions(t *testing.T) (Options, string, *fixturekit.DemoEngine, *fixturekit.DemoSessions, *fixturekit.DemoClock) {
 	t.Helper()
 	opts, clone := ProjectFixture(t)
@@ -58,7 +67,7 @@ func NewArchitectFixture(t *testing.T, configure ...func(*Options)) *ArchitectFi
 	}
 	f := &ArchitectFixture{Opts: opts, Clone: clone, Engine: engine, Sessions: sessions, Clock: clock}
 	f.Start(t)
-	f.Project, f.Trace = intakefixture.AddArchitectProject(t, f.C, clone, "1. Keep changes small.\n2. Every change has a test.\n", func(t *testing.T, p config.ProjectID, text string) { WriteCharter(t, f.C, p, text) })
+	f.Project, f.Trace = intakefixture.AddArchitectProject(t, f.C, clone, "1. Keep changes small.\n2. Every change has a test.\n", func(t *testing.T, p config.ProjectID, text string) { intakefixture.WriteCharter(t, f.C, p, text) })
 	f.S.Cfg = f.S.Current()
 	return f
 }
@@ -71,6 +80,9 @@ func (f *ArchitectFixture) Start(t *testing.T) {
 			c.Client.SetTimeoutForTest(c.DefaultTimeout)
 		}
 	})
+	if FreeRouting {
+		service.InspectForTest(f.S.Core()).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, &jevfixture.Transitions{Free: true}))
+	}
 }
 
 func (f *ArchitectFixture) Stop(t *testing.T) {
@@ -158,13 +170,6 @@ func (f *ShedFixture) DraftMoves(t *testing.T, stream config.WorkstreamID) []str
 	}
 	return moves
 }
-
-// IndependentPlan is intakefixture.ValidPlan with no dependency between its units.
-const IndependentPlan = `{"version": 2, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]}
-]}
-`
 
 // BuildOperations returns the workstream's build operations.
 func (f *ArchitectFixture) BuildOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
@@ -431,7 +436,9 @@ func NewHandInFixture(t *testing.T) *HandInFixture {
 		opts.Issues = fake
 		f.S, f.C = StartT(t, opts)
 		return f.C
-	}, func(t *testing.T, project config.ProjectID, text string) { WriteCharter(t, f.C, project, text) })
+	}, func(t *testing.T, project config.ProjectID, text string) {
+		intakefixture.WriteCharter(t, f.C, project, text)
+	})
 	f.Issues, f.Project, f.Trace, f.Home = data.Issues, data.Project, data.Trace, data.Home
 	return f
 }

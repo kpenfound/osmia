@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -158,8 +159,8 @@ func TestDesignTurnContextFollowsTheBriefsProjects(t *testing.T) {
 	t.Parallel()
 	d := newDesignProjects(t)
 	ctx := context.Background()
-	journey.WriteCharter(t, d.c, d.other, "1. Client charter rule.\n")
-	journey.Mutation(t, d.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: d.other}, Mode: "soft", Source: "owner"})
+	intakefixture.WriteCharter(t, d.c, d.other, "1. Client charter rule.\n")
+	intakefixture.Mutation(t, d.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: d.other}, Mode: "soft", Source: "owner"})
 	for _, p := range []config.ProjectID{d.home, d.other} {
 		r, err := d.s.Repository(p)
 		fixturekit.Must(t, err)
@@ -341,7 +342,7 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	s, c, home, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
 	other := addDesignProject(t, c, "only-member")
-	journey.WriteCharter(t, c, other, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, other, "1. Keep changes small.\n")
 	opened, err := c.OpenDesign(ctx, home)
 	fixturekit.Must(t, err)
 	origin := opened.Design.Workstream

@@ -3,13 +3,14 @@ package intakejourney
 import (
 	context "context"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	atomic "sync/atomic"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -47,11 +48,11 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	}
 
 	tool := f.ChiefObjectionTool(t, stream)
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 		t.Fatalf("dismissing before decide: %s", out)
 	}
 	f.ObjectionDecided(t, stream, advice)
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "call decide") {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "call decide") {
 		t.Fatalf("dismissing on another objection's result: %s", out)
 	}
 	f.ObjectionDecided(t, stream, veto)
@@ -59,15 +60,15 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 		`{"objection":"` + veto + `","decision":"dismiss","note":" "}`:     "a note is required",
 		`{"objection":"nobody-r1-1","decision":"escalate","note":"Look."}`: "no objection nobody-r1-1 stands",
 	} {
-		if out := intakefixture.DecideWith(t, tool, input); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, want) {
+		if out := intakefixture.Handle(t, tool, input); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, want) {
 			t.Fatalf("%s: %s, want a refusal saying %q", input, out, want)
 		}
 	}
 	dismissal := "The charter asks for small tested changes, and the architect's reply shows each unit is one with its own test."
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"blocking":false`) {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"blocking":false`) {
 		t.Fatalf("dismissing the veto: %s", out)
 	}
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"escalate","note":"Twice."}`); !strings.Contains(out, "already decided") {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"escalate","note":"Twice."}`); !strings.Contains(out, "already decided") {
 		t.Fatalf("a second decision on one objection was recorded: %s", out)
 	}
 
@@ -75,7 +76,7 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 		t.Fatalf("the packet reached the owner with an objection undecided: %+v", entries)
 	}
 	escalation := "The plan builds uploads before the index the design starts from; I recommend ratifying, since the order does not change what is delivered."
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"`+escalation+`"}`); !strings.Contains(out, `"recorded":true`) {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"`+escalation+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalating the advice: %s", out)
 	}
 
@@ -132,7 +133,7 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	if res, err := jev.Recorded(f.Repository(), stream, jev.KindObjection, jev.ObjectionKey(objected.Objection)); err != nil || res.Status != jev.None {
 		t.Fatalf("a judgment was recorded for the owner's objection: %+v %v", res, err)
 	}
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+objected.Objection+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "the owner's own") {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+objected.Objection+`","decision":"dismiss","note":"Answered."}`); !strings.Contains(out, "the owner's own") {
 		t.Fatalf("the chief of staff decided the owner's objection: %s", out)
 	}
 	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 1 || len(entries[0].Options) != 0 {
@@ -161,7 +162,7 @@ func TestAConfidentObjectionPickBindsTheChiefsDecision(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 	tool := f.ChiefObjectionTool(t, stream)
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "Jev decided dismiss") || !strings.Contains(out, res.Judgment) {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "Jev decided dismiss") || !strings.Contains(out, res.Judgment) {
 		t.Fatalf("escalating against the pick: %s", out)
 	}
 	for _, e := range f.Dissent(t, stream) {
@@ -170,11 +171,11 @@ func TestAConfidentObjectionPickBindsTheChiefsDecision(t *testing.T) {
 		}
 	}
 	again := tool
-	if out := intakefixture.DecideWith(t, again, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, "Jev decided dismiss") {
+	if out := intakefixture.Handle(t, again, `{"objection":"`+veto+`","decision":"escalate","note":"Owner."}`); !strings.Contains(out, "Jev decided dismiss") {
 		t.Fatalf("a later turn: %s", out)
 	}
 	dismissal := "The architect's reply shows each unit is one small change with its own test."
-	if out := intakefixture.DecideWith(t, again, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) {
+	if out := intakefixture.Handle(t, again, `{"objection":"`+veto+`","decision":"dismiss","note":"`+dismissal+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("dismissing as picked: %s", out)
 	}
 	rounds, err := shed.AllChiefDecisions(f.Repository(), stream)
@@ -197,7 +198,7 @@ func TestAConfidentObjectionPickBindsTheChiefsDecision(t *testing.T) {
 
 func decideObjection(t *testing.T, tool coreadapter.Tool, objection string) string {
 	t.Helper()
-	return intakefixture.DecideWith(t, tool, `{"kind":"objection","subject":"`+objection+`","evidence":"The architect's reply answers it."}`)
+	return intakefixture.Handle(t, tool, `{"kind":"objection","subject":"`+objection+`","evidence":"The architect's reply answers it."}`)
 }
 
 func TestDecideRefusesObjectionsThatAreTheOwners(t *testing.T) {
@@ -284,14 +285,14 @@ func TestAnObjectionDecisionIsEnteredAsTheChiefMadeIt(t *testing.T) {
 	f.ObjectionDecided(t, stream, advice)
 	tool := f.ChiefObjectionTool(t, stream)
 
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"The architect's reply answers it."}`); !strings.Contains(out, `"recorded":true`) || strings.Contains(out, "departed") {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+veto+`","decision":"dismiss","note":"The architect's reply answers it."}`); !strings.Contains(out, `"recorded":true`) || strings.Contains(out, "departed") {
 		t.Fatalf("dismissing: %s", out)
 	}
 	moved := f.ObjectionTransition(t, stream, veto)
 	if moved.To != "dismissed" || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
 		t.Fatalf("the dismissal %+v", moved)
 	}
-	if out := intakefixture.DecideWith(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"The plan builds uploads before the index."}`); !strings.Contains(out, `"recorded":true`) {
+	if out := intakefixture.Handle(t, tool, `{"objection":"`+advice+`","decision":"escalate","note":"The plan builds uploads before the index."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalating: %s", out)
 	}
 	if moved := f.ObjectionTransition(t, stream, advice); moved.To != "escalated" || moved.DecidedBy != trace.DecidedByChief {

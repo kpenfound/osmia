@@ -3,11 +3,6 @@ package executionjourney
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +10,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
@@ -102,7 +104,7 @@ func cloudChecks(token string) checkrun.DaggerChecks {
 }
 
 type linkedChecksService struct {
-	f       *shedFixture
+	f       *journey.ShedFixture
 	stream  config.WorkstreamID
 	timeout string
 	open    atomic.Bool
@@ -110,15 +112,15 @@ type linkedChecksService struct {
 	running bool
 }
 
-func startLinkedChecksService(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, checker checkrun.ReviewChecks, timeout string) *linkedChecksService {
+func startLinkedChecksService(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, checker checkrun.ReviewChecks, timeout string) *linkedChecksService {
 	t.Helper()
 	fixturekit.Must(t, repo.Close())
 	r := &linkedChecksService{f: f, stream: stream, timeout: timeout, ticks: make(chan time.Time, 1)}
-	f.opts.Reconciliation.Ticks = r.ticks
-	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+	f.Opts.Reconciliation.Ticks = r.ticks
+	f.Opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 		return !r.open.Load() || op.Action != service.CheckAction
 	}
-	f.opts.reviewChecks = checker
+	f.Opts.ReviewChecks = checker
 	r.start(t)
 	t.Cleanup(func() {
 		if r.running {
@@ -130,10 +132,10 @@ func startLinkedChecksService(t *testing.T, f *shedFixture, repo *trace.Reposito
 
 func (r *linkedChecksService) start(t *testing.T) {
 	t.Helper()
-	r.f.start(t)
+	r.f.Start(t)
 	r.running = true
 	if r.timeout != "" {
-		cfg := r.f.s.current()
+		cfg := r.f.S.Current()
 		cfg.Project.ChecksTimeout = r.timeout
 		for i := range cfg.Projects {
 			cfg.Projects[i].ChecksTimeout = r.timeout
@@ -144,18 +146,18 @@ func (r *linkedChecksService) start(t *testing.T) {
 func (r *linkedChecksService) stop(t *testing.T) {
 	t.Helper()
 	r.running = false
-	r.f.stop(t)
+	r.f.Stop(t)
 }
 
 func (r *linkedChecksService) allow() {
 	r.open.Store(true)
 	select {
-	case r.ticks <- r.f.clock.Now():
+	case r.ticks <- r.f.Clock.Now():
 	default:
 	}
 }
 
-func (r *linkedChecksService) repo() *trace.Repository { return r.f.repository() }
+func (r *linkedChecksService) repo() *trace.Repository { return r.f.Repository() }
 
 func (r *linkedChecksService) awaitRun(t *testing.T) execution.UnitCheckRun {
 	t.Helper()
@@ -199,7 +201,7 @@ func (r *linkedChecksService) awaitLinks(t *testing.T, links ...string) {
 
 func (r *linkedChecksService) entry(t *testing.T) *api.FeedUnitChecks {
 	t.Helper()
-	feed, apiErr := r.f.s.feedList(string(r.stream))
+	feed, apiErr := r.f.S.FeedList(string(r.stream))
 	if apiErr != nil {
 		t.Fatalf("feed: %+v", apiErr)
 	}
@@ -220,7 +222,7 @@ func (r *linkedChecksService) entry(t *testing.T) *api.FeedUnitChecks {
 
 func (r *linkedChecksService) feedJSON(t *testing.T) string {
 	t.Helper()
-	feed, apiErr := r.f.s.feedList(string(r.stream))
+	feed, apiErr := r.f.S.FeedList(string(r.stream))
 	if apiErr != nil {
 		t.Fatalf("feed: %+v", apiErr)
 	}

@@ -42,24 +42,24 @@ func TestChiefControlsAnotherProjectAndRecordsTheTarget(t *testing.T) {
 			t.Fatalf("tool refused: %s", out)
 		}
 	}
-	invoke(controls.prioritise(repo, scope, s.now), map[string]any{"project": otherProject, "workstreams": []string{string(otherStream)}})
+	invoke(controls.prioritise(repo, scope, s.now), map[string]any{"project": fixturekit.OtherProject, "workstreams": []string{string(fixturekit.OtherStream)}})
 	changes, err := trace.Read[trace.PriorityChange](repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
-	if len(changes) != 1 || changes[0].TargetProject != otherProject || changes[0].Actor.Kind != "owner" {
+	if len(changes) != 1 || changes[0].TargetProject != fixturekit.OtherProject || changes[0].Actor.Kind != "owner" {
 		t.Fatalf("priority provenance: %+v", changes)
 	}
-	if got := effectivePriority(s.store, otherProject); len(got) != 1 || got[0] != otherStream {
+	if got := effectivePriority(s.store, fixturekit.OtherProject); len(got) != 1 || got[0] != fixturekit.OtherStream {
 		t.Fatalf("other project order: %v", got)
 	}
-	invoke(controls.pauseControl(repo, scope, s.now, false), map[string]any{"scope": "project", "project": otherProject, "reason": "Owner review"})
-	if _, paused := s.pausing(otherProject, otherStream); !paused {
+	invoke(controls.pauseControl(repo, scope, s.now, false), map[string]any{"scope": "project", "project": fixturekit.OtherProject, "reason": "Owner review"})
+	if _, paused := s.pausing(fixturekit.OtherProject, fixturekit.OtherStream); !paused {
 		t.Fatal("target project did not pause")
 	}
 	if _, paused := s.pausing(fixturekit.Project, fixturekit.Stream); paused {
 		t.Fatal("origin project paused")
 	}
-	invoke(controls.pauseControl(repo, scope, s.now, true), map[string]any{"scope": "project", "project": otherProject})
-	if _, paused := s.pausing(otherProject, otherStream); paused {
+	invoke(controls.pauseControl(repo, scope, s.now, true), map[string]any{"scope": "project", "project": fixturekit.OtherProject})
+	if _, paused := s.pausing(fixturekit.OtherProject, fixturekit.OtherStream); paused {
 		t.Fatal("target project did not resume")
 	}
 	out, err := controls.capacity(repo, scope).Handle(ctx, json.RawMessage(`{}`))

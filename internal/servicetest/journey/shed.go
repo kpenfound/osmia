@@ -4,6 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/cli"
@@ -19,12 +26,6 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
 )
 
 // ShedFixture is an architect fixture whose service also runs the committee,
@@ -60,7 +61,8 @@ func NewDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepa
 	}
 	f := &ArchitectFixture{Opts: opts, Clone: clone, Engine: engine, Sessions: sessions, Clock: clock}
 	f.Start(t)
-	f.Project, f.Trace = intakefixture.AddArchitectProject(t, f.C, clone, intakefixture.ShedCharter, func(t *testing.T, p config.ProjectID, text string) { WriteCharter(t, f.C, p, text) })
+	f.Project, f.Trace = intakefixture.AddArchitectProject(t, f.C, clone, intakefixture.ShedCharter, func(t *testing.T, p config.ProjectID, text string) { intakefixture.WriteCharter(t, f.C, p, text) })
+	f.S.Cfg = f.S.Current()
 	f.Scenario().ScriptDebate(rounds)
 	return &ShedFixture{ArchitectFixture: f, Members: members}
 }
@@ -601,8 +603,6 @@ func LandingReason(t *testing.T, lands *Foreman, repository *trace.Repository, s
 		})
 }
 
-var AmendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
-
 // BuiltForAmendment returns a fixture with a building workstream on seal 1,
 // a committee of one and the given shed.max_rounds.
 func BuiltForAmendment(t *testing.T, rounds int) (*ShedFixture, config.WorkstreamID) {
@@ -651,4 +651,25 @@ func (f *ShedFixture) Resumed(t *testing.T, stream config.WorkstreamID, stage st
 	if state, err := f.UnitState(stream, "resume"); err != nil || state != stage {
 		t.Fatalf("unit resume is %q: %v", state, err)
 	}
+}
+
+// NewShedFixture starts a one-round debate fixture with the given members.
+func NewShedFixture(t *testing.T, members int) *ShedFixture {
+	t.Helper()
+	return NewDebateFixture(t, members, 1)
+}
+
+// HostBranches hosts the fixture's upstream pull requests on a fork whose
+// branch tips the pull requests read, and returns the fork and the host.
+func (f *ShedFixture) HostBranches(t *testing.T) (string, *fixturekit.FakePulls) {
+	t.Helper()
+	fork, pulls := fixturekit.PublicationFork(t, f.Clone, func() string { return "" })
+	pulls.Branches = func(branch string) string {
+		tip, _ := fixturekit.PublicationForkBranch(t, fork, branch)
+		return tip
+	}
+	pulls.SyncHead = true
+	f.S.Options.PullRequests = pulls
+	f.Opts.PullRequests = pulls
+	return fork, pulls
 }

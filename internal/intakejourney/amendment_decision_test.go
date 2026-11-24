@@ -4,15 +4,16 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	filepath "path/filepath"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	amendment "github.com/kpenfound/osmia/internal/amendment"
@@ -25,10 +26,6 @@ import (
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-)
-
-var (
-	amendedPlan = strings.Replace(fixturekit.ValidPlan, "TestResume", "TestResumeAfterRestart", 1)
 )
 
 func recordAmendmentSealRevision(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID, change func(*seal.Seal)) seal.Seal {
@@ -44,7 +41,7 @@ func recordAmendmentSealRevision(t *testing.T, f *journey.ShedFixture, repositor
 	fixturekit.Must(t, err)
 	docs := []trace.Document{}
 	if current.Revision.Spec != before.Revision.Spec {
-		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: current.Revision.Spec, Project: repository.Project(), Workstream: stream, At: f.Clock.Now(), Actor: intake.ArchitectActor, Cause: "fixture-drift"}, Path: plan.SpecPath, Content: journey.AmendedSpec})
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: current.Revision.Spec, Project: repository.Project(), Workstream: stream, At: f.Clock.Now(), Actor: intake.ArchitectActor, Cause: "fixture-drift"}, Path: plan.SpecPath, Content: intakefixture.AmendedSpec})
 	}
 	if current.Revision.Plan != before.Revision.Plan {
 		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: current.Revision.Plan, Project: repository.Project(), Workstream: stream, At: f.Clock.Now(), Actor: intake.ArchitectActor, Cause: "fixture-drift"}, Path: plan.PlanPath, Content: fixturekit.ValidPlan})
@@ -64,7 +61,7 @@ func TestRefusedAmendmentDecisionsRecordNothing(t *testing.T) {
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)
 	defer f.Stop(t)
-	journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	for name, tc := range map[string]struct {
 		amendment string
 		req       api.AmendmentDecisionRequest
@@ -99,7 +96,7 @@ func ownerApprovesAmendment(t *testing.T) *approvedAmendment {
 	t.Cleanup(func() { f.Stop(t) })
 	before, _, _, err := seal.Latest(f.Repository(), stream)
 	fixturekit.Must(t, err)
-	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	out, err := f.C.DecideAmendment(context.Background(), stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Note: "Checkpoints are what we meant.", Packet: 1})
 	fixturekit.Must(t, err)
 	if out.Decision == nil || out.Decision.Decision != intake.AmendmentApprove || out.Decision.Packet != 1 || out.Decision.Spec != 1 || out.Decision.Plan != 1 || out.Decision.SealRevision != 1 || out.Decision.Round != 1 {
@@ -116,7 +113,7 @@ func TestApprovedAmendmentVersionsTheSpecAndResealsOnTheSameBase(t *testing.T) {
 	if got := f.Revisions(t, stream, plan.SpecDocument); !slices.Equal(got, []int{1, 2}) {
 		t.Fatalf("spec.md revisions %v", got)
 	}
-	if spec := f.Documents(t, stream, plan.SpecDocument)[1]; spec.Content != journey.AmendedSpec || spec.Actor != intake.AmendmentActor || spec.Cause != intake.AmendmentDecided("1", 1) {
+	if spec := f.Documents(t, stream, plan.SpecDocument)[1]; spec.Content != intakefixture.AmendedSpec || spec.Actor != intake.AmendmentActor || spec.Cause != intake.AmendmentDecided("1", 1) {
 		t.Fatalf("spec.md revision 2 %+v", spec)
 	}
 	if got := f.Revisions(t, stream, plan.PlanDocument); !slices.Equal(got, []int{1}) {
@@ -124,7 +121,7 @@ func TestApprovedAmendmentVersionsTheSpecAndResealsOnTheSameBase(t *testing.T) {
 	}
 	after, doc, _, err := seal.Latest(f.Repository(), stream)
 	fixturekit.Must(t, err)
-	if doc.Revision != 2 || after.Seal != 2 || after.Revision != (shed.Pin{Spec: 2, Plan: 1}) || after.SpecHash != seal.SpecHash(journey.AmendedSpec) || after.Base != before.Base || after.Branch != before.Branch || after.Workspace != before.Workspace || !reflect.DeepEqual(after.Footprints, before.Footprints) {
+	if doc.Revision != 2 || after.Seal != 2 || after.Revision != (shed.Pin{Spec: 2, Plan: 1}) || after.SpecHash != seal.SpecHash(intakefixture.AmendedSpec) || after.Base != before.Base || after.Branch != before.Branch || after.Workspace != before.Workspace || !reflect.DeepEqual(after.Footprints, before.Footprints) {
 		t.Fatalf("seal after approval %+v, before %+v", after, before)
 	}
 	if feature, err := f.Repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.BuildingState {
@@ -185,7 +182,7 @@ func TestOwnerApprovesAPlanOnlyAmendment(t *testing.T) {
 	defer f.Stop(t)
 	before, _, _, err := seal.Latest(f.Repository(), stream)
 	fixturekit.Must(t, err)
-	requester := journey.PresentAmendment(t, f, stream, intake.ReviewerRole, fixturekit.ValidSpec, amendedPlan)
+	requester := journey.PresentAmendment(t, f, stream, intake.ReviewerRole, fixturekit.ValidSpec, intakefixture.RestartPlan)
 	if requester != intake.ReviewerAgent("resume") {
 		t.Fatalf("requester %s", requester)
 	}
@@ -217,7 +214,7 @@ func TestOwnerRejectsAnAmendment(t *testing.T) {
 	t.Parallel()
 	f, stream := journey.BuiltForAmendment(t, 1)
 	defer f.Stop(t)
-	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	out, err := f.C.DecideAmendment(context.Background(), stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentReject, Note: "Keep the chunk semantics.", Packet: 1})
 	fixturekit.Must(t, err)
 	if out.State != intake.AmendmentRejected {
@@ -247,7 +244,7 @@ func TestOwnerOverrulesAVetoToApproveAnAmendment(t *testing.T) {
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)
 	defer f.Stop(t)
-	journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan, intakefixture.AmendmentObjection(shed.Charter))
+	journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan, intakefixture.AmendmentObjection(shed.Charter))
 	if _, err := f.C.DecideAmendment(ctx, stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Packet: 1}); !intakefixture.Failed(err, api.Conflict) || !strings.Contains(err.Error(), "block amendment 1") {
 		t.Fatalf("approving over a veto: %v", err)
 	}
@@ -268,7 +265,7 @@ func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
 	t.Run("approve base move", func(t *testing.T) {
 		f, stream := journey.BuiltForAmendment(t, 1)
 		defer f.Stop(t)
-		journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+		journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 		beforeCard := f.InboxEntries(t, stream, api.InboxAmendment)
 		recordAmendmentSealRevision(t, f, f.Repository(), stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
 		afterCard := f.InboxEntries(t, stream, api.InboxAmendment)
@@ -283,13 +280,13 @@ func TestAmendmentDecisionAcrossSealRevisions(t *testing.T) {
 		}
 	})
 	for name, change := range map[string]func(*seal.Seal){
-		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(journey.AmendedSpec) },
+		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(intakefixture.AmendedSpec) },
 		"plan": func(s *seal.Seal) { s.Revision.Plan++ },
 	} {
 		t.Run(name+" changed", func(t *testing.T) {
 			f, stream := journey.BuiltForAmendment(t, 1)
 			defer f.Stop(t)
-			journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+			journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 			recordAmendmentSealRevision(t, f, f.Repository(), stream, change)
 			if _, err := f.C.DecideAmendment(context.Background(), stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Packet: 1}); !intakefixture.Failed(err, api.Conflict) {
 				t.Fatalf("decision with changed %s: %v", name, err)
@@ -315,7 +312,7 @@ func TestOwnerAsksForAnotherAmendmentRound(t *testing.T) {
 		_, err := fixturekit.CallTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": shed.ObjectionID(1, member, 1), "answer": "Checkpoints keep the fit."})
 		return err
 	})
-	journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan, intakefixture.AmendmentObjection(shed.Fit))
+	journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan, intakefixture.AmendmentObjection(shed.Fit))
 	if entries := f.InboxEntries(t, stream, api.InboxAmendment); len(entries) != 1 || entries[0].Amendment != "1" || entries[0].Revision != 1 || entries[0].Unit != "resume" ||
 		!slices.Equal(entries[0].Options, []string{intake.AmendmentApprove, intake.AmendmentOverrule, intake.AmendmentReject, intake.AmendmentRound}) ||
 		!reflect.DeepEqual(entries[0].Answer, api.InboxAnswer{Method: "POST", Path: "/v1/amendment/" + string(stream) + "/1", Body: map[string]any{"packet": 1.0}}) {
@@ -386,7 +383,7 @@ func TestAmendmentDecisionIsCompletedOnceAfterARestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)
-	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	requester := journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	f.Stop(t)
 	repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
 	fixturekit.Must(t, err)
@@ -434,7 +431,7 @@ func TestChiefOfStaffRecordsTheOwnersAmendmentDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream := journey.BuiltForAmendment(t, 1)
-	journey.PresentAmendment(t, f, stream, intake.MasonRole, journey.AmendedSpec, fixturekit.ValidPlan)
+	journey.PresentAmendment(t, f, stream, intake.MasonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	f.Stop(t)
 	repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
 	fixturekit.Must(t, err)

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
@@ -108,22 +110,22 @@ elif [ -n "${DAGGER_CLOUD_TOKEN-}" ]; then
  echo 'View trace at https://dagger.cloud/example/traces/caller123' >&2
 fi`, 1)), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	enableListing := func(s *Service) {
+	enableListing := func(s *journey.Service) {
 		useJevProvider(s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.1)}}}}})
 	}
 
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		for _, mode := range []string{"identity", "anonymous", "fallback"} {
 			t.Run(backend+"/"+mode+"/unit", func(t *testing.T) {
-				f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", independentPlan, nil)
-				base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-				stream, repo := seedBuild(t, f, "identity-unit", independentPlan, backend, base)
-				seedChecking(t, f, repo, stream, "resume", resumeReport)
+				f, _ := journey.NewMasonFixtureWith(t, backend, "masons = 1\n", intakefixture.IndependentPlan, nil)
+				base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+				stream, repo := journey.SeedBuild(t, f, "identity-unit", intakefixture.IndependentPlan, backend, base)
+				journey.SeedChecking(t, f, repo, stream, "resume", journey.ResumeReport)
 				report := currentReport(t, repo, stream, "resume")
 
-				g, err := newUnitWorkspaces(f.s.current(), repo).Of(stream)
+				g, err := journey.NewUnitWorkspaces(f.S.Current(), repo).Of(stream)
 				fixturekit.Must(t, err)
-				w, _, err := newUnitWorkspaces(f.s.current(), repo).open(context.Background(), stream, "resume")
+				w, _, err := journey.NewUnitWorkspaces(f.S.Current(), repo).Open(context.Background(), stream, "resume")
 				fixturekit.Must(t, err)
 				fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("pinned candidate tree\n"), 0600))
 				candidate, err := g.Snapshot(context.Background(), w, report.Base)
@@ -138,11 +140,11 @@ fi`, 1)), 0700))
 				doc.Revision++
 				fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 				fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("unchecked working files\n"), 0600))
-				cfg := f.s.current()
-				checker := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: candidate, Branch: execution.UnitBranch(stream, "resume"), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: f.clone}}
-				f.s.options.reviewChecks = checker
-				enableListing(f.s)
-				runChecks(t, f.s, repo, stream)
+				cfg := f.S.Current()
+				checker := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: candidate, Branch: execution.UnitBranch(stream, "resume"), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: f.Clone}}
+				f.S.Options.ReviewChecks = checker
+				enableListing(f.S)
+				journey.RunChecks(t, f.S, repo, stream)
 				run := onlyRun(t, repo, stream)
 				if checker.calls != 1 || checker.listed != 1 || run.Candidate != candidate || run.Status != checkrun.ChecksPassed || run.CIIdentityFallback != checker.fallback || run.TraceURL != checker.traceURL {
 					t.Fatalf("persisted unit run %+v, runner %+v", run, checker)
@@ -154,18 +156,18 @@ fi`, 1)), 0700))
 	for _, mode := range []string{"identity", "anonymous", "fallback"} {
 		t.Run(mode+"/session", func(t *testing.T) {
 			s, client, _, project, stream, _, clone := newSessionControlsFixture(t)
-			worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+			worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 			fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "candidate.txt"), []byte("pinned candidate tree\n"), 0600))
 			committed, err := client.SessionCommit(context.Background(), stream, "candidate title", "identity-commit")
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "candidate.txt"), []byte("unchecked working files\n"), 0600))
-			cfg := s.current().For(project)
+			cfg := s.Current().For(project)
 			checker := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: committed.Commit, Branch: service.SessionBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: clone}}
-			service.InspectForTest(s.core()).SetReviewChecks(checker)
+			service.InspectForTest(s.Core()).SetReviewChecks(checker)
 			enableListing(s)
 			run, err := client.SessionCheck(context.Background(), stream)
 			fixturekit.Must(t, err)
-			repo, err := s.repository(project)
+			repo, err := s.Repository(project)
 			fixturekit.Must(t, err)
 			docs := intakefixture.StreamDocuments(t, repo, stream, fmt.Sprintf("session-check-%d", run.Run))
 			var saved api.SessionCheckRun

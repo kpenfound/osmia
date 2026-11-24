@@ -3,14 +3,15 @@ package intakejourney
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
@@ -80,7 +81,7 @@ func TestRatifiedWorkstreamWithIndependentUnitsHasEveryUnitReady(t *testing.T) {
 	t.Parallel()
 	f := journey.NewDebateFixture(t, 1, 1)
 	defer f.Stop(t)
-	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: journey.IndependentPlan}, nil)
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: intakefixture.IndependentPlan}, nil)
 	f.Upstream(t)
 	stream, op := f.Built(t)
 	id := op.Operation.ID

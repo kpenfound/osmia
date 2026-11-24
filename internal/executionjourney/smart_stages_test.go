@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/kpenfound/osmia/internal/checks"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
@@ -38,12 +40,12 @@ func TestServiceSmartCheckStagesSurviveRestart(t *testing.T) {
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"depth-0": jevtest.Choice("go-package", .8, .8, "go-test")}}},
 		{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.9), "check-2": jevtest.Noul(.1), "check-3": jevtest.Noul(.1)}}},
 	}}
-	useJevProvider(f.s, provider)
-	c, op := requestUnitCheck(t, f.s, repo, stream)
+	useJevProvider(f.S, provider)
+	c, op := requestUnitCheck(t, f.S, repo, stream)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	finished := intakefixture.ApplyCheck(ctx, c, op)
-	links := awaitCheck(t, checker.held.entered)
+	links := intakefixture.AwaitCheck(t, checker.held.entered)
 	if !slices.Equal(links, []string{fixturekit.SmartPackageA}) {
 		t.Fatalf("runner got %q", links)
 	}
@@ -70,27 +72,27 @@ func TestServiceSmartCheckStagesSurviveRestart(t *testing.T) {
 		t.Fatalf("selection evidence %+v", s)
 	}
 	cancel()
-	if err := awaitCheck(t, finished); !errors.Is(err, context.Canceled) {
+	if err := intakefixture.AwaitCheck(t, finished); !errors.Is(err, context.Canceled) {
 		t.Fatalf("interrupted check: %v", err)
 	}
 	fixturekit.Must(t, repo.Close())
-	reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	reopened, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { reopened.Close() })
 
 	checker.ListErr = errors.New("listings unavailable after restart")
 	replacement := &jevtest.Provider{}
-	useJevProvider(f.s, replacement)
-	c = &checkers{masons: newMasonController(f.s, reopened)}
+	useJevProvider(f.S, replacement)
+	c = &journey.Checkers{Masons: journey.NewMasonController(f.S, reopened)}
 	if observed, err := c.Inspect(t.Context(), op); err != nil || observed.State != coreadapter.EffectAbsent {
 		t.Fatalf("interrupted observation %+v %v", observed, err)
 	}
 	finished = intakefixture.ApplyCheck(t.Context(), c, op)
-	if again := awaitCheck(t, checker.held.entered); !slices.Equal(again, links) {
+	if again := intakefixture.AwaitCheck(t, checker.held.entered); !slices.Equal(again, links) {
 		t.Fatalf("resumed links %q", again)
 	}
 	checker.held.release <- fixturekit.CheckOutcome{Result: api.CheckResult{Output: fixturekit.PassedReport}}
-	fixturekit.Must(t, awaitCheck(t, finished))
+	fixturekit.Must(t, intakefixture.AwaitCheck(t, finished))
 	run := onlyRun(t, reopened, stream)
 	if run.Status != checks.ChecksPassed || !reflect.DeepEqual(*run.Selection, s) || len(replacement.Requests()) != 0 || len(provider.Requests()) != 3 {
 		t.Fatalf("resumed run %+v selection %+v", run, run.Selection)

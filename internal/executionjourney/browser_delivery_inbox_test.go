@@ -5,15 +5,17 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	reflect "reflect"
+	sync "sync"
+	testing "testing"
+	time "time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	reflect "reflect"
-	sync "sync"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	network "github.com/chromedp/cdproto/network"
 	chromedp "github.com/chromedp/chromedp"
@@ -22,14 +24,12 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
-
 func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	t.Parallel()
-	f, ws, repository, report := deliveryFixtureWith(t, listenWeb)
+	f, ws, repository, report := journey.DeliveryFixtureWith(t, journey.ListenWeb)
 	fixturekit.Must(t, repository.Close())
-	f.start(t)
-	t.Cleanup(func() { f.stop(t) })
+	f.Start(t)
+	t.Cleanup(func() { f.Stop(t) })
 	p := openBrowser(t)
 	ctx := context.Background()
 
@@ -51,9 +51,9 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		}
 		read, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		presented, err := f.c.Delivery(read, ws)
+		presented, err := f.C.Delivery(read, ws)
 		t.Logf("delivery at failure: review=%d revision=%d draft=%s approval=%+v error=%v", presented.Report.Review, presented.ReviewRevision, presented.DraftHash, presented.Approval, err)
-		inbox, err := f.c.Inbox(read)
+		inbox, err := f.C.Inbox(read)
 		t.Logf("inbox read at failure: %v", err)
 		for _, entry := range inbox.Entries {
 			if entry.Workstream == ws {
@@ -69,24 +69,24 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Logf("page inbox reads: %+v", inboxReads)
 	}()
 
-	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.Project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
 
 	recordReport := func(revision int) api.DeliveryPresentation {
 		t.Helper()
 		content, err := json.Marshal(report)
 		fixturekit.Must(t, err)
-		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: revision, Project: f.project, Workstream: ws, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}
-		fixturekit.Must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(content)}}))
-		out, err := f.c.Delivery(ctx, ws)
+		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: revision, Project: f.Project, Workstream: ws, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}
+		fixturekit.Must(t, f.Repository().RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(content)}}))
+		out, err := f.C.Delivery(ctx, ws)
 		fixturekit.Must(t, err)
 		if out.ReviewRevision != revision {
 			t.Fatalf("presentation of report revision %d: %+v", revision, out)
 		}
 		return out
 	}
-	first, err := f.c.Delivery(ctx, ws)
+	first, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
-	entries := intakefixture.EntriesOf(t, f.c, api.InboxDelivery)
+	entries := intakefixture.EntriesOf(t, f.C, api.InboxDelivery)
 	if len(entries) != 1 {
 		t.Fatalf("delivery entries %+v", entries)
 	}
@@ -110,7 +110,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		}
 	}
 
-	link := browsertest.NewLinkProxy(t, f.s.WebAddr())
+	link := browsertest.NewLinkProxy(t, f.S.WebAddr())
 	resync := func() {
 		t.Helper()
 		link.Cut()
@@ -191,7 +191,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	if body := sent(); !reflect.DeepEqual(body, pinned(2, second)) {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
-	after, err := f.c.Delivery(ctx, ws)
+	after, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != second.Draft || !reflect.DeepEqual(after.Approval.Messages, second.Messages) || after.Approval.ReviewRevision != 2 || after.Approval.DraftHash != second.DraftHash {
 		t.Fatalf("the approval of the draft %+v", after.Approval)
@@ -213,7 +213,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	if body := sent(); !reflect.DeepEqual(body, pinned(3, third)) {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
-	after, err = f.c.Delivery(ctx, ws)
+	after, err = f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != third.Draft || !reflect.DeepEqual(after.Approval.Messages, third.Messages) || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
 		t.Fatalf("the approval %+v", after.Approval)
@@ -223,26 +223,26 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 
 func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	t.Parallel()
-	f := newPublicationFixtureWith(t, "commit-per-unit", listenWeb)
-	ws, repository := f.stream, f.repository
+	f := journey.NewPublicationFixtureWith(t, "commit-per-unit", journey.ListenWeb)
+	ws, repository := f.Stream, f.Repository
 	ctx := context.Background()
-	presented, apiErr := f.s.deliveryPresentation(ctx, string(ws))
+	presented, apiErr := f.S.DeliveryPresentation(ctx, string(ws))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	if _, apiErr := f.s.approveDelivery(ctx, string(ws), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}); apiErr != nil {
+	if _, apiErr := f.S.ApproveDelivery(ctx, string(ws), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}); apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	fixturekit.Must(t, repository.Close())
 	refusal := "GitHub answered 403: Resource not accessible by personal access token"
-	f.pulls.FindErr = errors.New(refusal)
-	f.opts.PullRequests = f.pulls
-	f.start(t)
-	t.Cleanup(func() { f.stop(t) })
+	f.Pulls.FindErr = errors.New(refusal)
+	f.Opts.PullRequests = f.Pulls
+	f.Start(t)
+	t.Cleanup(func() { f.Stop(t) })
 	p := openBrowser(t)
 	var entry api.InboxEntry
 	intakefixture.Soon(t, "the failing publication to reach the inbox", func() bool {
-		entries := intakefixture.EntriesOf(t, f.c, api.InboxPublication)
+		entries := intakefixture.EntriesOf(t, f.C, api.InboxPublication)
 		if len(entries) != 1 {
 			return false
 		}
@@ -250,7 +250,7 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 		return true
 	})
 	card := intakefixture.DecisionCard(entry)
-	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.Run(chromedp.Navigate("http://" + f.S.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Publication failing")

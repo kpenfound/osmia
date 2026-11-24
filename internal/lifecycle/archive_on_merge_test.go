@@ -2,10 +2,12 @@ package lifecycle_test
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/execution"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -26,13 +28,13 @@ type autoArchiveFixture struct {
 	cfg   *config.Config
 	repo  *trace.Repository
 	store *runtime.Store
-	s     *Service
+	s     *journey.Service
 	host  *fixturekit.FakePulls
 }
 
 func newAutoArchiveFixture(t *testing.T, key string) *autoArchiveFixture {
 	t.Helper()
-	opts, cfg := conversationFixture(t, key)
+	opts, cfg := journey.ConversationFixture(t, key)
 	host := &fixturekit.FakePulls{}
 	opts.PullRequests = host
 	repo, err := trace.Open(cfg.Root, cfg.Project)
@@ -41,13 +43,13 @@ func newAutoArchiveFixture(t *testing.T, key string) *autoArchiveFixture {
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
-	s.setSole(runtimeFor(repo))
+	s := &journey.Service{Cfg: cfg, Store: store, Options: opts}
+	s.SetSole(journey.RuntimeFor(repo))
 	return &autoArchiveFixture{t: t, cfg: cfg, repo: repo, store: store, s: s, host: host}
 }
 
 func (f *autoArchiveFixture) pass() error {
-	return (&lifecycle.MergeArchiver{S: f.s.lifecycle(), Repository: f.repo}).Pass(context.Background())
+	return (&lifecycle.MergeArchiver{S: f.s.Lifecycle(), Repository: f.repo}).Pass(context.Background())
 }
 
 func (f *autoArchiveFixture) mustPass() {
@@ -62,14 +64,14 @@ func (f *autoArchiveFixture) deliver(pr int) api.DeliveryPublication {
 
 func (f *autoArchiveFixture) outcome(pr int, outcome string) {
 	f.t.Helper()
-	resolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: pr, Outcome: outcome, MergeCommit: "merge-commit"})
+	journey.ResolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: pr, Outcome: outcome, MergeCommit: "merge-commit"})
 }
 
 func (f *autoArchiveFixture) publish(p api.DeliveryPublication, pr int) {
 	f.t.Helper()
 	p.PullRequest = pr
 	p.URL = p.URL[:len(p.URL)-1] + string(rune('0'+pr))
-	resolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.PublicationDocument, delivery.PublicationPath, p)
+	journey.ResolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.PublicationDocument, delivery.PublicationPath, p)
 }
 
 func (f *autoArchiveFixture) setState(id, state string) {
@@ -91,7 +93,7 @@ func (f *autoArchiveFixture) archives() int {
 
 func (f *autoArchiveFixture) during(step string, hook func()) {
 	done := false
-	f.s.boundary = func(name string) error {
+	f.s.Boundary = func(name string) error {
 		if name == step && !done {
 			done = true
 			hook()
@@ -109,7 +111,7 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 		f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 	}
 	auto.mustPass()
-	if resp, apiFault := owner.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
+	if resp, apiFault := owner.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
 		t.Fatalf("owner archive: %+v %v", resp, apiFault)
 	}
 	chief, ok := auto.archive()
@@ -134,7 +136,7 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 	if auto.host.Finds != 0 {
 		t.Fatalf("the automatic archive looked up pull requests %d times", auto.host.Finds)
 	}
-	if resp, apiFault := auto.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
+	if resp, apiFault := auto.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
 		t.Fatalf("repeated owner archive reports %+v %v", resp, apiFault)
 	}
 }
@@ -162,7 +164,7 @@ func TestAutoArchiveSkipsAWorkstreamWithoutAMergedCurrentPullRequest(t *testing.
 			f.publish(p, autoArchivePullRequest+1)
 		}},
 		{"owner-recorded merge without a pull request", func(f *autoArchiveFixture) {
-			recordResolutionMerge(f.t, f.repo, fixturekit.Stream)
+			journey.RecordResolutionMerge(f.t, f.repo, fixturekit.Stream)
 			f.setState("delivered", intake.DeliveredState)
 		}},
 		{"abandoned", func(f *autoArchiveFixture) {
@@ -185,7 +187,7 @@ func TestAutoArchiveSkipsAWorkstreamWithoutAMergedCurrentPullRequest(t *testing.
 				state, _ := f.store.Snapshot()
 				t.Fatalf("archived: %+v", state.Archived)
 			}
-			if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(fixturekit.Stream)); apiFault == nil {
+			if _, apiFault := f.s.Lifecycle().ArchiveOnMerge(string(fixturekit.Stream)); apiFault == nil {
 				t.Fatal("the archive itself accepted a workstream without a merged current pull request")
 			}
 			if f.archives() != 0 || f.host.Finds != 0 {
@@ -201,7 +203,7 @@ func TestAutoArchiveSkipsASession(t *testing.T) {
 	session := config.WorkstreamID("w_00000000000000000000000000000b01")
 	fixturekit.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, execution.ForemanActor))
 	f.mustPass()
-	if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(session)); apiFault == nil || f.archives() != 0 {
+	if _, apiFault := f.s.Lifecycle().ArchiveOnMerge(string(session)); apiFault == nil || f.archives() != 0 {
 		t.Fatalf("session archive: %v archives=%d", apiFault, f.archives())
 	}
 }
@@ -223,7 +225,7 @@ func TestAutoArchiveRepeatedPassesAndOwnerArchiveFirst(t *testing.T) {
 	owner := newAutoArchiveFixture(t, "auto-archive-owner-first-")
 	owner.deliver(autoArchivePullRequest)
 	owner.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
-	if _, apiFault := owner.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
+	if _, apiFault := owner.s.Lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	recorded, _ := owner.archive()
@@ -255,7 +257,7 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 				if f.archives() != 0 {
 					t.Fatal("archived on evidence that no longer held at commit")
 				}
-				f.s.boundary = nil
+				f.s.Boundary = nil
 				f.mustPass()
 				if f.archives() != 0 {
 					t.Fatal("archived without a merged current pull request")

@@ -3,15 +3,16 @@ package intakejourney
 import (
 	context "context"
 	fmt "fmt"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	slices "slices"
-	strings "strings"
-	testing "testing"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	plan "github.com/kpenfound/osmia/internal/plan"
@@ -26,7 +27,7 @@ func TestAmendmentDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := journey.NewParallelMasonFixture(t, 2, 2, journey.ParallelPlan)
 	defer f.Stop(t)
-	f.Script("amend-1-1", map[string]string{plan.SpecPath: journey.AmendedSpec}, nil)
+	f.Script("amend-1-1", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, nil)
 	f.Script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
 	f.Script("amend-1-reply-1", nil, nil)
 	for _, unit := range []string{"upload", "audit"} {

@@ -22,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -242,7 +243,7 @@ func (p *previewSource) restarted(t *testing.T) (view *isolation.FileView, resul
 	for _, tc := range p.cases() {
 		p.preview(t, tc.raw)
 	}
-	p.repo = restartTrace(t, p.f, p.repo)
+	p.repo = fixturekit.ReopenTrace(t, p.f.s.cfg, p.repo)
 	view = previewView(t)
 	tool := p.controls.preview(p.cfg, p.repo, p.scope, view, p.f.s.now)
 	before, err := os.ReadFile(p.fake.Runs)
@@ -521,7 +522,7 @@ func TestChiefPreviewRestartsCaptureWithoutReceipt(t *testing.T) {
 	raw := json.RawMessage(`{"call":["web","--message","it's a string; $(never executed)"],"port":8080,"path":"/phone","viewport":"phone","full_page":true}`)
 	seedPreviewOperation(t, repo, scope, raw, stream, commit, previewServiceFixture())
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "later branch movement\n"})
-	repo = restartTrace(t, f, repo)
+	repo = fixturekit.ReopenTrace(t, f.s.cfg, repo)
 	fixturekit.Must(t, repo.AbandonTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, f.s.now()))
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
@@ -784,7 +785,7 @@ type symlinkPreview struct {
 func newSymlinkPreview(t *testing.T, backend string) *symlinkPreview {
 	t.Helper()
 	fake := fixturekit.InstallPreviewCLIs(t, attachmentPNG(t))
-	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, backend) })
+	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { intakefixture.OnWorkspaces(t, opts.Config.Root, backend) })
 	stream, repo := seedBuild(t, f, "preview-symlinks", fixturekit.ValidPlan, backend, f.upstream(t))
 	cfg := f.s.about(repo)
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "symlinks\n"})
@@ -853,7 +854,7 @@ func TestChiefPreviewResumedCaptureRunsTheCallItPinned(t *testing.T) {
 		settings.Call = []string{"web", "--source", "/etc/passwd", "--other", "outside"}
 		raw := json.RawMessage(`{"path":"/pinned"}`)
 		seedPreviewOperation(t, p.repo, p.scope, raw, p.stream, p.commit, settings)
-		repo := restartTrace(t, p.f, p.repo)
+		repo := fixturekit.ReopenTrace(t, p.f.s.cfg, p.repo)
 		fixturekit.Must(t, repo.AbandonTurn(context.Background(), p.stream, trace.ChiefOfStaff, p.scope.Turn, p.f.s.now()))
 		resumed := p.scope
 		resumed.Turn = "preview-continuation"

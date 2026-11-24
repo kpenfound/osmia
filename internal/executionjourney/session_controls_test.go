@@ -3,13 +3,16 @@ package executionjourney
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
@@ -23,9 +26,9 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func newSessionControlsFixture(t *testing.T, configure ...func(*Options)) (*Service, *Client, Options, config.ProjectID, config.WorkstreamID, *fixturekit.SessionEngine, string) {
+func newSessionControlsFixture(t *testing.T, configure ...func(*journey.Options)) (*journey.Service, *journey.Client, journey.Options, config.ProjectID, config.WorkstreamID, *fixturekit.SessionEngine, string) {
 	t.Helper()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	for _, apply := range configure {
 		apply(&opts)
 	}
@@ -39,13 +42,13 @@ func newSessionControlsFixture(t *testing.T, configure ...func(*Options)) (*Serv
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 	engine := &fixturekit.SessionEngine{}
-	enforced := Enforce(opts, service.Enforcement{Engine: engine, Hosts: sessionImageHosts()})
-	opts.Threads, opts.controls = enforced.Threads, enforced.controls
-	s, c := start(t, opts)
+	enforced := journey.Enforce(opts, service.Enforcement{Engine: engine, Hosts: sessionImageHosts()})
+	opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	s.cfg = s.current()
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	s.Cfg = s.Current()
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), api.SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	fixturekit.Must(t, err)
 	return s, c, opts, added.Project.ID, resp.Session.Workstream, engine, clone
@@ -58,7 +61,7 @@ func sessionWorktreePath(root string, project config.ProjectID, stream config.Wo
 func TestSessionChangesReadsUncommittedAndCommittedChanges(t *testing.T) {
 	t.Parallel()
 	s, c, _, project, stream, _, _ := newSessionControlsFixture(t)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	empty, err := c.SessionChanges(context.Background(), stream)
 	fixturekit.Must(t, err)
 	if empty.Changes != "" || len(empty.Commits) != 0 {
@@ -87,7 +90,7 @@ func TestSessionCommitCommitsAndThreadEntryReachesNextTurn(t *testing.T) {
 	t.Parallel()
 	s, c, _, project, stream, engine, clone := newSessionControlsFixture(t)
 	home := filepath.Dir(clone)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	base := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", worktree, "rev-parse", "HEAD"))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("hi\n"), 0600))
 	resp, err := c.SessionCommit(context.Background(), stream, "add a note", "commit-key-1")
@@ -120,9 +123,9 @@ func headOf(t *testing.T, home, dir string) string {
 	return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", dir, "rev-parse", "HEAD"))
 }
 
-func sessionEntryCount(t *testing.T, s *Service, stream config.WorkstreamID) int {
+func sessionEntryCount(t *testing.T, s *journey.Service, stream config.WorkstreamID) int {
 	t.Helper()
-	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.Sole().Repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	return len(entries)
 }
@@ -134,7 +137,7 @@ func TestSessionCommitRefusalsRecordNothing(t *testing.T) {
 		t.Parallel()
 		s, c, _, project, stream, engine, clone := newSessionControlsFixture(t)
 		home := filepath.Dir(clone)
-		worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+		worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 		hold, entered := make(chan struct{}), make(chan struct{})
 		engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 			close(entered)
@@ -169,7 +172,7 @@ func TestSessionCommitRefusalsRecordNothing(t *testing.T) {
 		t.Parallel()
 		s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 		home := filepath.Dir(clone)
-		worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+		worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 		before := headOf(t, home, worktree)
 		fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("hi\n"), 0600))
 		_, err := c.SessionCommit(context.Background(), stream, "   ", "key-empty")
@@ -186,7 +189,7 @@ func TestSessionCommitRefusalsRecordNothing(t *testing.T) {
 		t.Parallel()
 		s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 		home := filepath.Dir(clone)
-		worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+		worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 		before := headOf(t, home, worktree)
 		_, err := c.SessionCommit(context.Background(), stream, "message", "key-no-changes")
 		fixturekit.AssertCode(t, err, api.Validation)
@@ -202,7 +205,7 @@ func TestSessionCommitRefusalsRecordNothing(t *testing.T) {
 		t.Parallel()
 		s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 		home := filepath.Dir(clone)
-		worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+		worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 		before := headOf(t, home, worktree)
 		_, err := c.SessionEnd(context.Background(), stream)
 		fixturekit.Must(t, err)
@@ -219,7 +222,7 @@ func TestSessionCommitRetryWithSameRequestKeyIsIdempotentAcrossRestart(t *testin
 	t.Parallel()
 	s, c, opts, project, stream, _, clone := newSessionControlsFixture(t)
 	home := filepath.Dir(clone)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	base := headOf(t, home, worktree)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("hi\n"), 0600))
 
@@ -233,13 +236,13 @@ func TestSessionCommitRetryWithSameRequestKeyIsIdempotentAcrossRestart(t *testin
 	}
 
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	afterRestart, err := c.SessionCommit(context.Background(), stream, "add a note", "same-key")
 	fixturekit.Must(t, err)
 	if afterRestart.Commit != first.Commit {
 		t.Fatalf("a retry across a restart made a second commit: %s, want %s", afterRestart.Commit, first.Commit)
 	}
-	g := service.SessionGit(s.cfg)
+	g := service.SessionGit(s.Cfg)
 	messages, err := g.Log(context.Background(), base, first.Commit)
 	fixturekit.Must(t, err)
 	if len(messages) != 1 {
@@ -254,15 +257,15 @@ func TestSessionCommitRetryAfterACrashBetweenTheCommitAndItsRecordStillRecords(t
 	t.Parallel()
 	s, c, project, stream, _, clone := newSessionChatFixture(t)
 	home := filepath.Dir(clone)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
-	g := service.SessionGit(s.cfg)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
+	g := service.SessionGit(s.Cfg)
 	wt, found, err := g.Workspace(context.Background(), string(stream))
 	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the session has no worktree")
 	}
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("hi\n"), 0600))
-	made, _, err := g.CommitChanges(context.Background(), wt, service.SessionCommitMessage("add a note", "crash-key"), s.now())
+	made, _, err := g.CommitChanges(context.Background(), wt, service.SessionCommitMessage("add a note", "crash-key"), s.Now())
 	fixturekit.Must(t, err)
 	if n := sessionEntryCount(t, s, stream); n != 0 {
 		t.Fatalf("a direct commit recorded %d entries, want none", n)
@@ -279,7 +282,7 @@ func TestSessionCommitRetryAfterACrashBetweenTheCommitAndItsRecordStillRecords(t
 	if n := sessionEntryCount(t, s, stream); n != 1 {
 		t.Fatalf("session entries after the recovering retry: %d, want exactly one", n)
 	}
-	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.Sole().Repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	if !strings.Contains(entries[0].Text, made) {
 		t.Fatalf("the recovered entry does not name the commit: %q", entries[0].Text)
@@ -319,16 +322,16 @@ func (c *checkCapture) Check(_ context.Context, dir string, _ api.CheckIdentity,
 
 func TestSessionCheckRunsFullUnderJEVDisabled(t *testing.T) {
 	t.Parallel()
-	s, c, _, project, stream, _, clone := newSessionControlsFixture(t, func(opts *Options) {
+	s, c, _, project, stream, _, clone := newSessionControlsFixture(t, func(opts *journey.Options) {
 		path := filepath.Join(opts.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
 		fixturekit.Must(t, err)
 		fixturekit.Must(t, os.WriteFile(path, append(data, []byte("\n[jev]\ncheck_fallback_picks = 2\n")...), 0600))
 	})
 	checker := &fixturekit.FakeChecks{Links: []string{"dag+check://a"}, Outcomes: fixturekit.Passing()}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 	home := filepath.Dir(clone)
-	head := headOf(t, home, sessionWorktreePath(s.cfg.Root.String(), project, stream))
+	head := headOf(t, home, sessionWorktreePath(s.Cfg.Root.String(), project, stream))
 	run, err := c.SessionCheck(context.Background(), stream)
 	fixturekit.Must(t, err)
 	if ran := checker.Runs(); len(ran) != 1 || len(ran[0]) != 0 {
@@ -340,12 +343,12 @@ func TestSessionCheckRunsFullUnderJEVDisabled(t *testing.T) {
 	if n := sessionEntryCount(t, s, stream); n != 1 {
 		t.Fatalf("session entries after a check: %d, want exactly one", n)
 	}
-	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.Sole().Repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	if !strings.Contains(entries[0].Text, head) {
 		t.Fatalf("the check's thread entry does not name the commit: %q", entries[0].Text)
 	}
-	runs, err := service.SessionCheckRuns(s.sole().repository, stream)
+	runs, err := service.SessionCheckRuns(s.Sole().Repository, stream)
 	fixturekit.Must(t, err)
 	if len(runs) != 1 || runs[0].Commit != head || runs[0].Status != checkrun.ChecksPassed {
 		t.Fatalf("recorded check runs: %+v", runs)
@@ -360,7 +363,7 @@ func TestSessionCheckRunsSmartSelectionUnderJEV(t *testing.T) {
 		"dag+check://go/packages/tests/test?go-package=internal/web&go-test=TestPage",
 	}
 	checker := &checkCapture{links: links}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.02), "check-1": jevtest.Noul(0.92)}}}}}
@@ -378,7 +381,7 @@ func TestSessionCheckRunsFullWhenDaggerRefusesTheSelection(t *testing.T) {
 	links := []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web&go-test=TestPage"}
 	const message = "no checks matched pattern"
 	refused := &refusingChecks{links: links, message: message}
-	service.InspectForTest(s.core()).SetReviewChecks(refused)
+	service.InspectForTest(s.Core()).SetReviewChecks(refused)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-1.0", Answers: map[string]systemone.Answer{
 		"check-0": jevtest.Noul(0.02), "check-1": jevtest.Noul(0.92)}}}}}
 	useJevProvider(s, p)
@@ -400,18 +403,18 @@ func TestSessionCheckNotesFlakyChecks(t *testing.T) {
 	s, c, _, _, stream, _, _ := newSessionControlsFixture(t)
 	const link = "dag://go/packages/tests/test?go-test=TestFlaky"
 	checker := &fixturekit.FakeChecks{Outcomes: []fixturekit.CheckOutcome{{Result: api.CheckResult{Output: fixturekit.FailedReport(link) + "CHECKS  ✔ 1 passed\n✔ " + link + " 1s OK\n", Flaky: []string{link}}}}}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 	run, err := c.SessionCheck(context.Background(), stream)
 	fixturekit.Must(t, err)
 	if run.Status != checkrun.ChecksPassed || run.ExitCode != 0 || len(run.Failed) != 0 || !slices.Equal(run.Flaky, []string{link}) {
 		t.Fatalf("check run: %+v", run)
 	}
-	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.Sole().Repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	if !strings.Contains(entries[0].Text, checkrun.DescribeFlaky([]string{link})) {
 		t.Fatalf("the check's thread entry does not note the flake: %q", entries[0].Text)
 	}
-	feed, err := service.FeedEntries(s.sole().repository, s.sole().repository, stream)
+	feed, err := service.FeedEntries(s.Sole().Repository, s.Sole().Repository, stream)
 	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(feed, func(e api.FeedEntry) bool {
 		return e.SessionChecks != nil && slices.Equal(e.SessionChecks.Flaky, []string{link})
@@ -441,10 +444,10 @@ func (r *refusingChecks) Check(_ context.Context, _ string, _ checkrun.Identity,
 func TestSessionCheckExcludesUncommittedChanges(t *testing.T) {
 	t.Parallel()
 	s, c, _, project, stream, _, _ := newSessionControlsFixture(t)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "uncommitted.txt"), []byte("never committed\n"), 0600))
 	checker := &checkCapture{file: "uncommitted.txt"}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 	_, err := c.SessionCheck(context.Background(), stream)
 	fixturekit.Must(t, err)
 	if checker.found {
@@ -456,7 +459,7 @@ func TestSessionCheckWhileOneIsRunningIsRefused(t *testing.T) {
 	t.Parallel()
 	s, c, _, _, stream, _, _ := newSessionControlsFixture(t)
 	hold, entered := make(chan struct{}), make(chan struct{})
-	service.InspectForTest(s.core()).SetReviewChecks(fixturekit.CheckFunc(func(ctx context.Context, dir string) (api.CheckResult, error) {
+	service.InspectForTest(s.Core()).SetReviewChecks(fixturekit.CheckFunc(func(ctx context.Context, dir string) (api.CheckResult, error) {
 		close(entered)
 		select {
 		case <-hold:
@@ -486,7 +489,7 @@ func TestSessionPushAgainstLocalBareRemote(t *testing.T) {
 	t.Parallel()
 	s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 	home := filepath.Dir(clone)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	bare := filepath.Join(home, "remotes", "dagger", "dagger.git")
 	mainBefore := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare, "rev-parse", "main"))
 
@@ -557,8 +560,8 @@ func TestSessionEndIsRefusedWhileATurnRuns(t *testing.T) {
 }
 
 type endedSession struct {
-	s         *Service
-	c         *Client
+	s         *journey.Service
+	c         *journey.Client
 	stream    config.WorkstreamID
 	worktree  string
 	modelDir  string
@@ -568,8 +571,8 @@ type endedSession struct {
 func endSessionAfterACommit(t *testing.T) endedSession {
 	t.Helper()
 	s, c, project, stream, engine, _ := newSessionChatFixture(t)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
-	modelDir := runtime.ModelSessionDirectory(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
+	modelDir := runtime.ModelSessionDirectory(s.Cfg.Root.String(), project, stream)
 	engine.Turn = func(context.Context, agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "model-session-1", ResultText: "working"}, nil
 	}
@@ -606,7 +609,7 @@ func TestSessionEndReleasesItsStateAndKeepsItsRecord(t *testing.T) {
 	if len(changes.Commits) != 1 || changes.Commits[0].Commit != e.committed {
 		t.Fatalf("commits after end: %+v", changes.Commits)
 	}
-	th, err := e.s.sole().repository.Thread(e.stream, service.SessionAgentID)
+	th, err := e.s.Sole().Repository.Thread(e.stream, service.SessionAgentID)
 	if err != nil || len(th.Turns) != 1 {
 		t.Fatalf("thread after end: %+v, %v", th, err)
 	}
@@ -651,7 +654,7 @@ func TestEndingAnEndedSessionChangesNothing(t *testing.T) {
 func TestSessionCommitAndEndRefuseWhileAMessageIsBeingStarted(t *testing.T) {
 	t.Parallel()
 	s, c, _, _, stream, _, _ := newSessionControlsFixture(t)
-	lock := service.SessionLock(s.sole().repository, stream)
+	lock := service.SessionLock(s.Sole().Repository, stream)
 	hold, held := make(chan struct{}), make(chan struct{})
 	go func() {
 		lock.Lock()
@@ -671,10 +674,10 @@ func TestSessionCommitAndEndRefuseWhileAMessageIsBeingStarted(t *testing.T) {
 func TestSessionCommitAndCheckRefuseOnceEndHasBegun(t *testing.T) {
 	t.Parallel()
 	s, c, project, stream, _, _ := newSessionChatFixture(t)
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("hi\n"), 0600))
 
-	lock := service.SessionLock(s.sole().repository, stream)
+	lock := service.SessionLock(s.Sole().Repository, stream)
 	hold, held := make(chan struct{}), make(chan struct{})
 	go func() {
 		lock.Lock()
@@ -693,7 +696,7 @@ func TestSessionCommitAndCheckRefuseOnceEndHasBegun(t *testing.T) {
 
 	_, err = c.SessionCheck(context.Background(), stream)
 	fixturekit.AssertCode(t, err, api.Conflict)
-	runs, err := service.SessionCheckRuns(s.sole().repository, stream)
+	runs, err := service.SessionCheckRuns(s.Sole().Repository, stream)
 	fixturekit.Must(t, err)
 	if len(runs) != 0 {
 		t.Fatalf("a check refused while end is in progress recorded %d runs", len(runs))
@@ -702,7 +705,7 @@ func TestSessionCommitAndCheckRefuseOnceEndHasBegun(t *testing.T) {
 
 func TestSessionCheckOutlivesDefaultWriteTimeout(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	home := filepath.Dir(clone)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", clone, "add", "README.md")
@@ -712,20 +715,20 @@ func TestSessionCheckOutlivesDefaultWriteTimeout(t *testing.T) {
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	resp, err := c.OpenSession(context.Background(), api.SessionOpenRequest{Project: added.Project.ID, Profile: "default"})
 	fixturekit.Must(t, err)
 	stream := resp.Session.Workstream
 
 	fixturekit.Must(t, s.Close())
 	opts.WriteTimeout = 20 * time.Millisecond
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 
 	c.SetSessionCheckTimeoutForTest(fixturekit.DemoTimeout)
-	service.InspectForTest(s.core()).SetReviewChecks(fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
+	service.InspectForTest(s.Core()).SetReviewChecks(fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
 		time.Sleep(100 * time.Millisecond)
 		return api.CheckResult{Output: fixturekit.PassedReport}, nil
 	}))
@@ -743,15 +746,15 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 	home := filepath.Dir(clone)
 	baseTree := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", clone, "rev-parse", "HEAD^{tree}"))
-	worktree := sessionWorktreePath(s.cfg.Root.String(), project, stream)
+	worktree := sessionWorktreePath(s.Cfg.Root.String(), project, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("new tree\n"), 0600))
 	commit, err := c.SessionCommit(context.Background(), stream, "add a note", "diff-check")
 	fixturekit.Must(t, err)
 
 	fixturekit.Must(t, os.Remove(filepath.Join(clone, ".git", "objects", baseTree[:2], baseTree[2:])))
-	fixturekit.Must(t, service.SessionGit(s.current().For(project)).Export(context.Background(), commit.Commit, t.TempDir()))
+	fixturekit.Must(t, service.SessionGit(s.Current().For(project)).Export(context.Background(), commit.Commit, t.TempDir()))
 	checker := &fixturekit.FakeChecks{Links: []string{"dag+check://go/test"}, Outcomes: fixturekit.Passing()}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 	provider := &jevtest.Provider{}
 	useJevProvider(s, provider)
 	_, err = c.SessionCheck(context.Background(), stream)
@@ -762,7 +765,7 @@ func TestSessionCheckRequiresReadableDiff(t *testing.T) {
 	if len(checker.Runs()) != 0 || len(provider.Requests()) != 0 {
 		t.Fatal("unreadable change reached selection or the check runner")
 	}
-	runs, err := service.SessionCheckRuns(s.sole().repository, stream)
+	runs, err := service.SessionCheckRuns(s.Sole().Repository, stream)
 	fixturekit.Must(t, err)
 	if len(runs) != 0 {
 		t.Fatalf("unreadable change recorded a check run: %+v", runs)
@@ -784,10 +787,10 @@ func TestSessionCheckRunsFallbackPicksAndReportsReloadedConfiguration(t *testing
 		t.Fatalf("reported config %+v", reported)
 	}
 	checker := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b", "dag+check://c"}, Outcomes: fixturekit.Passing()}
-	service.InspectForTest(s.core()).SetReviewChecks(checker)
+	service.InspectForTest(s.Core()).SetReviewChecks(checker)
 	p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}}}}
-	j := &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: s.now}
-	service.InspectForTest(s.core()).SetJudge(j)
+	j := &jev.Judge{Config: func() config.Jev { return s.Current().Jev }, Provider: p.Factory(), Getenv: func(string) string { return "key" }, Now: s.Now}
+	service.InspectForTest(s.Core()).SetJudge(j)
 	run, err := c.SessionCheck(t.Context(), stream)
 	fixturekit.Must(t, err)
 	want := []string{"dag+check://b", "dag+check://c"}

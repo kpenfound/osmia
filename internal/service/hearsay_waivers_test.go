@@ -35,12 +35,12 @@ func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 		trace.Routing{DecidedBy: trace.DecidedByJev, Judgment: jevJudgment, DefaultTo: lifecycle.DependencyKept})
 
 	posts, _ := f.pass()
-	var waivers []hooksPost
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-jev-route-") {
+	var waivers []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-jev-route-") {
 			t.Fatalf("the drop was posted as a departure too: %s", d.Raw)
 		}
-		if strings.Contains(d.str("decision"), "-jev-waiver-") {
+		if strings.Contains(d.Str("decision"), "-jev-waiver-") {
 			waivers = append(waivers, d)
 		}
 	}
@@ -49,12 +49,12 @@ func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 	}
 	d := waivers[0]
 	requireWorkDecision(t, d, jevJudgment)
-	if !strings.Contains(d.str("outcome"), "goes on without it") || strings.Contains(strings.ToLower(d.str("outcome")), "merged:") || !strings.Contains(d.str("outcome"), "not recorded as merged") {
+	if !strings.Contains(d.Str("outcome"), "goes on without it") || strings.Contains(strings.ToLower(d.Str("outcome")), "merged:") || !strings.Contains(d.Str("outcome"), "not recorded as merged") {
 		t.Fatalf("the waiver's outcome: %s", d.Raw)
 	}
 	posts, _ = f.pass()
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-jev-waiver-") {
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-jev-waiver-") {
 			t.Fatalf("the waiver was posted again: %s", d.Raw)
 		}
 	}
@@ -71,13 +71,13 @@ func TestAnOwnersWaiverIsPostedAsTheOwnersDecision(t *testing.T) {
 		trace.Routing{DecidedBy: trace.DecidedByOwner, DefaultTo: lifecycle.DependencyKept})
 
 	posts, _ := f.pass()
-	var waivers []hooksPost
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-waiver-") {
+	var waivers []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-waiver-") {
 			waivers = append(waivers, d)
 		}
 	}
-	if len(waivers) != 1 || waivers[0].Source != "osmia-owner" || waivers[0].str("decider") != "owner" || strings.Contains(waivers[0].Raw, "Decided by Jev") {
+	if len(waivers) != 1 || waivers[0].Source != "osmia-owner" || waivers[0].Str("decider") != "owner" || strings.Contains(waivers[0].Raw, "Decided by Jev") {
 		t.Fatalf("the owner's waiver: %v %v", waivers, kinds(posts))
 	}
 }

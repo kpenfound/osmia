@@ -3,14 +3,14 @@ package executionjourney
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/intake"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -63,28 +63,10 @@ func (p *lossyPulls) Ready(ctx context.Context, repository string, number int) (
 	return pr, err
 }
 
-type publicationClock struct {
-	mu sync.Mutex
-	at time.Time
-}
-
-func (c *publicationClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *publicationClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
-}
-
 type boundedPublication struct {
-	d          *draftFixture
-	pulls      *lossyPulls
-	clock      *publicationClock
-	controller *reconcile.Controller
+	d     *draftFixture
+	pulls *lossyPulls
+	retryPasses
 }
 
 func newBoundedPublication(t *testing.T) *boundedPublication {
@@ -96,27 +78,13 @@ func newBoundedPublication(t *testing.T) *boundedPublication {
 	}
 	d.recordBrief(t, "Restart the service")
 	lossy := &lossyPulls{FakePulls: d.pulls}
-	d.f.s.options.PullRequests = lossy
+	d.f.S.Options.PullRequests = lossy
 	if _, apiErr := d.decide(d.present(t)); apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	fixturekit.Must(t, (&publisher{s: d.f.s, repository: d.repository}).Pass(context.Background()))
-	clock := &publicationClock{at: time.Now().UTC()}
-	controller, err := reconcile.New(d.repository, reconcile.Options{
-		Worker: "publication-test", Now: clock.Now, RetryDelay: time.Minute, MaxRetryDelay: time.Minute, GiveUpWindow: 10 * time.Minute,
-		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: &delivery.Publisher{S: d.f.s.delivery(), Repository: d.repository}},
-		Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != delivery.PublishAction },
-	})
-	fixturekit.Must(t, err)
-	return &boundedPublication{d, lossy, clock, controller}
-}
-
-func (b *boundedPublication) pass(t *testing.T, passes int) {
-	t.Helper()
-	for range passes {
-		fixturekit.Must(t, b.controller.Pass(context.Background()))
-		b.clock.advance(time.Minute)
-	}
+	fixturekit.Must(t, (&journey.Publisher{S: d.f.S, Repository: d.repository}).Pass(context.Background()))
+	passes := newRetryPasses(t, d.repository, "publication-test", delivery.PublishAction, &delivery.Publisher{S: d.f.S.Delivery(), Repository: d.repository})
+	return &boundedPublication{d, lossy, passes}
 }
 
 func (b *boundedPublication) operation(t *testing.T) trace.OperationRecord {
@@ -159,7 +127,7 @@ func TestPublicationWhoseReadyResponseWasLostIsRecordedWhenGivenUp(t *testing.T)
 		t.Fatalf("given up inside the window: %+v", op.Result)
 	}
 
-	b.clock.advance(10 * time.Minute)
+	b.clock.Advance(10 * time.Minute)
 	b.pulls.set(func(p *lossyPulls) { p.unreadable = false })
 	b.pass(t, 1)
 
@@ -195,7 +163,7 @@ func TestPublicationGivenUpOnAnUnreadableRemoteSaysItsOutcomeCouldNotBeDetermine
 	if op := b.operation(t); op.Result != nil {
 		t.Fatalf("given up inside the window: %+v", op.Result)
 	}
-	b.clock.advance(10 * time.Minute)
+	b.clock.Advance(10 * time.Minute)
 	b.pass(t, 1)
 
 	op := b.operation(t)
@@ -232,7 +200,7 @@ func TestPublicationWhoseEffectIsConfirmedAbsentIsRefusedWhenGivenUp(t *testing.
 	if op := b.operation(t); op.Result != nil || reconcile.ConsecutiveFailures(op) != reconcile.GiveUpFailures+1 {
 		t.Fatalf("inside the window: %+v", op)
 	}
-	b.clock.advance(10 * time.Minute)
+	b.clock.Advance(10 * time.Minute)
 	b.pass(t, 1)
 
 	op := b.operation(t)

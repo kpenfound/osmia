@@ -26,7 +26,9 @@ func newHandInFixture(t *testing.T) *handInFixture {
 		opts.Issues = fake
 		f.s, f.c = start(t, opts)
 		return f.c
-	}, func(t *testing.T, project config.ProjectID, text string) { writeCharter(t, f.c, project, text) })
+	}, func(t *testing.T, project config.ProjectID, text string) {
+		intakefixture.WriteCharter(t, f.c, project, text)
+	})
 	f.issues, f.project, f.trace, f.home = data.Issues, data.Project, data.Trace, data.Home
 	return f
 }

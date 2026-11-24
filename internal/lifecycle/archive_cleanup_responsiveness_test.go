@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -16,14 +18,17 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func assertCoreReadsStayResponsive(t *testing.T, s *Service, bound time.Duration) {
+func assertCoreReadsStayResponsive(t *testing.T, s *journey.Service, bound time.Duration) {
 	t.Helper()
 	checks := map[string]func() error{
-		"project list (/config)":                    func() error { s.configuration(); return nil },
-		"workstream list (/status)":                 func() error { s.statusList(); return nil },
-		"inbox (/inbox)":                            func() error { _, apiFault := s.inbox(context.Background()); return apiErr(apiFault) },
-		"conversation (/conversation/{workstream})": func() error { _, apiFault := s.conversationList(string(fixturekit.Quiet)); return apiErr(apiFault) },
-		"workstream feed (/feed/{workstream})":      func() error { _, apiFault := s.feedList(string(fixturekit.Quiet)); return apiErr(apiFault) },
+		"project list (/config)":    func() error { journey.InspectForTest(s).Configuration(); return nil },
+		"workstream list (/status)": func() error { s.StatusList(); return nil },
+		"inbox (/inbox)":            func() error { _, apiFault := s.Inbox(context.Background()); return apiErr(apiFault) },
+		"conversation (/conversation/{workstream})": func() error {
+			_, apiFault := journey.InspectForTest(s).ConversationList(string(fixturekit.Quiet))
+			return apiErr(apiFault)
+		},
+		"workstream feed (/feed/{workstream})": func() error { _, apiFault := s.FeedList(string(fixturekit.Quiet)); return apiErr(apiFault) },
 	}
 	for name, check := range checks {
 		started := time.Now()
@@ -45,7 +50,7 @@ func apiErr(apiFault *api.APIError) error {
 func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "archive-stall-")
+	opts, cfg := journey.ConversationFixture(t, "archive-stall-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
@@ -57,9 +62,9 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream, fixturekit.Quiet}}})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, store: store, options: opts}
-	s.activity = activity.New(s.now)
-	s.setSole(runtimeFor(repo))
+	s := &journey.Service{Cfg: cfg, Store: store, Options: opts}
+	s.Activity = activity.New(s.Now)
+	s.SetSole(journey.RuntimeFor(repo))
 	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, Title: "fixture workstream", State: intake.AbandonedState, ArchivedAt: fixturekit.DemoStart}))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -71,7 +76,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 		}
 	}
 	t.Cleanup(releaseOnce)
-	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}, finish: func(root config.Root, p config.ProjectID, w config.WorkstreamID) error {
+	cleanup := &journey.ArchiveCleanup{S: s, Workspaces: &journey.WorkspaceCleanup{Cfg: cfg, Repository: repo, Now: s.Now}, Finish: func(root config.Root, p config.ProjectID, w config.WorkstreamID) error {
 		select {
 		case started <- struct{}{}:
 		default:
@@ -89,7 +94,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 
 	assertCoreReadsStayResponsive(t, s, time.Second)
 
-	activity := s.activityView()
+	activity := journey.InspectForTest(s).ActivityView()
 	idx := slices.IndexFunc(activity.Activity, func(e api.ActivityEntry) bool {
 		return e.Kind == api.ActivityArchiveCleanup && e.Workstream == fixturekit.Stream
 	})

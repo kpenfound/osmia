@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"

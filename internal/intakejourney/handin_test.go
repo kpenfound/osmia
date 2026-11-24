@@ -2,10 +2,6 @@ package intakejourney
 
 import (
 	context "context"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	fs "io/fs"
 	http "net/http"
 	os "os"
@@ -15,6 +11,11 @@ import (
 	syscall "syscall"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -117,8 +118,8 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 	text := "design"
 	out := f.HandIn(t, api.HandInRequest{Key: "known", Stdin: &text})
 	target := runtime.Target{Scope: "workstream", Project: f.Project, Workstream: out.Workstream}
-	journey.Mutation(t, f.C, "PUT", "priority", api.PriorityRequest{Project: f.Project, Workstreams: []config.WorkstreamID{out.Workstream}})
-	journey.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, f.C, "PUT", "priority", api.PriorityRequest{Project: f.Project, Workstreams: []config.WorkstreamID{out.Workstream}})
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	rt, err := f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
 	if len(rt.Diagnostics) != 0 {

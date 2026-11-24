@@ -37,7 +37,7 @@ func idleSpec(g trace.Workgroup, size int) trace.ProjectSpec {
 func (f *changePassFixture) idleGroup(t *testing.T, locals []config.WorkstreamID, specBytes int) trace.Workgroup {
 	t.Helper()
 	ctx := context.Background()
-	members := []trace.CrossRepoMember{{Workstream: otherStream, Project: f.remote}}
+	members := []trace.CrossRepoMember{{Workstream: fixturekit.OtherStream, Project: f.remote}}
 	for _, stream := range locals {
 		members = append(members, trace.CrossRepoMember{Workstream: stream, Project: f.local})
 	}
@@ -56,7 +56,7 @@ func (f *changePassFixture) idleGroup(t *testing.T, locals []config.WorkstreamID
 }
 
 func (f *changePassFixture) repositoryOf(stream config.WorkstreamID) *trace.Repository {
-	if stream == otherStream {
+	if stream == fixturekit.OtherStream {
 		return f.remote
 	}
 	return f.local
@@ -151,7 +151,7 @@ func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t 
 			t.Fatalf("building member %s edges = %v, want %v", stream, got, want)
 		}
 	}
-	if edges, _ := lifecycle.IncomingMergeEdges(f.local, passFirst); len(edges) != 1 || edges[0].Type != trace.EdgeMergeOrder || edges[0].From != otherStream {
+	if edges, _ := lifecycle.IncomingMergeEdges(f.local, passFirst); len(edges) != 1 || edges[0].Type != trace.EdgeMergeOrder || edges[0].From != fixturekit.OtherStream {
 		t.Fatalf("first member edges = %v", edges)
 	}
 	if edges, _ := lifecycle.IncomingMergeEdges(f.local, passSecond); len(edges) != 0 {
@@ -166,10 +166,10 @@ func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t 
 	if waiting, err := lifecycle.EdgeWaiting(f.local, passFirst); err != nil || waiting {
 		t.Fatalf("first member waiting = %v, %v (a merge_order edge never blocks building)", waiting, err)
 	}
-	if display, err := lifecycle.EdgeWaitDisplay(f.local, passFirst); err != nil || display != lifecycle.EdgeWaitMessage(string(otherStream)) {
+	if display, err := lifecycle.EdgeWaitDisplay(f.local, passFirst); err != nil || display != lifecycle.EdgeWaitMessage(string(fixturekit.OtherStream)) {
 		t.Fatalf("first member display = %q, %v", display, err)
 	}
-	if references, err := lifecycle.PendingMergeOrderReferences(f.local, passFirst); err != nil || !slices.Equal(references, []string{string(otherStream)}) {
+	if references, err := lifecycle.PendingMergeOrderReferences(f.local, passFirst); err != nil || !slices.Equal(references, []string{string(fixturekit.OtherStream)}) {
 		t.Fatalf("first member references = %v, %v", references, err)
 	}
 
@@ -202,13 +202,13 @@ func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t 
 	}
 
 	f.setFeature(t, passThird, intake.AbandonedState)
-	f.setFeature(t, otherStream, intake.AbandonedState)
+	f.setFeature(t, fixturekit.OtherStream, intake.AbandonedState)
 	before = readsOf(g.ID)
 	for range 40 {
 		for _, stream := range locals {
 			edgeCallers(t, f.local, stream)
 		}
-		edgeCallers(t, f.remote, otherStream)
+		edgeCallers(t, f.remote, fixturekit.OtherStream)
 		fixturekit.Must(t, f.controller.EdgeWaitPass(ctx, f.local))
 		fixturekit.Must(t, f.controller.EdgeWaitPass(ctx, f.remote))
 	}

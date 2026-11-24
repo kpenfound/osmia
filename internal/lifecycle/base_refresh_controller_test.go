@@ -26,15 +26,6 @@ func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Co
 	t.Helper()
 	return fixturekit.RecordDeliveredPublication(t, repo, cfg, stream, featureBranch(stream), pr, foremanActor)
 }
-func baseRefreshOperationCount(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
-	t.Helper()
-	return fixturekit.OperationCount(t, repo, stream, BaseRefreshAction)
-}
-
-func recordIntegration(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, commit string) {
-	t.Helper()
-	fixturekit.RecordBaseIntegration(t, repo, stream, at, commit, foremanActor)
-}
 
 var actionOperation = fixturekit.ActionOperation
 var jump = fixturekit.Jump
@@ -67,7 +58,7 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 	_, repo, host, refresh, clock := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DeliveredState, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DeliveredState, Revision: 1, Project: project, Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}
 	_, err := repo.SetFeatureState(ctx, h, DeliveredState, "delivered by merging outside the factory")
 	must(t, err)
 	must(t, refresh.Pass(ctx))
@@ -139,11 +130,11 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	sealStream(t, repo)
 	before, err := repo.WorkstreamBase(stream)
 	must(t, err)
-	recordIntegration(t, repo, stream, demoStart, "recorded-upstream-sha")
+	fixturekit.RecordBaseIntegration(t, repo, stream, fixturekit.DemoStart, "recorded-upstream-sha", foremanActor)
 
 	for i := 0; i < 3; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, repo, stream); n != 0 {
+		if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 0 {
 			t.Fatalf("pass %d scheduled a base-refresh after integration was recorded: %d operations", i, n)
 		}
 	}
@@ -158,7 +149,7 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	refresh.Repository = reopened
 	for i := 0; i < 2; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, reopened, stream); n != 0 {
+		if n := fixturekit.OperationCount(t, reopened, stream, BaseRefreshAction); n != 0 {
 			t.Fatalf("pass %d after a restart scheduled a base-refresh: %d operations", i, n)
 		}
 	}
@@ -213,7 +204,7 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 
 	for i := 0; i < 3; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, repo, stream); n != 1 {
+		if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 1 {
 			t.Fatalf("pass %d scheduled a base-refresh for a finished workstream: %d operations", i, n)
 		}
 	}
@@ -228,7 +219,7 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 	refresh.Repository = reopened
 	for i := 0; i < 2; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, reopened, stream); n != 1 {
+		if n := fixturekit.OperationCount(t, reopened, stream, BaseRefreshAction); n != 1 {
 			t.Fatalf("pass %d after a restart scheduled a base-refresh: %d operations", i, n)
 		}
 	}
@@ -266,14 +257,14 @@ func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration
 			ctx := context.Background()
 			sealStream(t, repo)
 			if integrated {
-				recordIntegration(t, repo, stream, demoStart, "recorded-upstream-sha")
+				fixturekit.RecordBaseIntegration(t, repo, stream, fixturekit.DemoStart, "recorded-upstream-sha", foremanActor)
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "owner-abandoned", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "fixture"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "owner-abandoned", Revision: 1, Project: project, Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}
 			_, err := repo.SetFeatureState(ctx, h, AbandonedState, "no longer needed")
 			must(t, err)
 			for i := 0; i < 3; i++ {
 				must(t, refresh.Pass(ctx))
-				if n := baseRefreshOperationCount(t, repo, stream); n != 0 {
+				if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 0 {
 					t.Fatalf("pass %d scheduled a base-refresh for an abandoned workstream: %d operations", i, n)
 				}
 			}

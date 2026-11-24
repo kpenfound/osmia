@@ -4,22 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-func resolutionDocument(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id, path string, value any) {
-	t.Helper()
-	fixturekit.ResolutionDocument(t, repo, stream, id, path, value, demoStart, ownerActor)
-}
-
-func recordResolutionMerge(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) {
-	t.Helper()
-	resolutionDocument(t, repo, stream, mergeDocument, mergePath, DeliveryMerge{Branch: featureBranch(stream), Commit: "merged-feature", Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: "merged-upstream"}})
-}
 
 func TestMemberResolutionRequiresMergeOrCancellation(t *testing.T) {
 	t.Parallel()
@@ -42,17 +32,17 @@ func TestMemberResolutionRequiresMergeOrCancellation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := memberEvidenceFixture(t)
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "terminal", Revision: 1, Project: repo.Project(), Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "fixture"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "terminal", Revision: 1, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}
 			_, err := repo.SetFeatureState(context.Background(), h, tc.state, "terminal fixture")
 			must(t, err)
 			if tc.pr > 0 {
-				resolutionDocument(t, repo, stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, PullRequest: tc.pr, Draft: tc.draft})
+				fixturekit.OwnerResolutionDocument(t, repo, stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, PullRequest: tc.pr, Draft: tc.draft})
 			}
 			if tc.owner {
-				recordResolutionMerge(t, repo, stream)
+				fixturekit.OwnerResolutionDocument(t, repo, stream, delivery.MergeDocument, delivery.MergePath, DeliveryMerge{Branch: intake.FeatureBranch(stream), Commit: "merged-feature", Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: "merged-upstream"}})
 			}
 			if tc.outcome.Outcome != "" {
-				resolutionDocument(t, repo, stream, ownPullRequestOutcomeDocument, ownPullRequestOutcomePath, tc.outcome)
+				fixturekit.OwnerResolutionDocument(t, repo, stream, ownPullRequestOutcomeDocument, ownPullRequestOutcomePath, tc.outcome)
 			}
 			got, err := Resolved(repo, stream)
 			must(t, err)
@@ -91,10 +81,8 @@ func TestMemberEvidenceUsesCurrentDocumentRevisions(t *testing.T) {
 
 const stream = fixturekit.Stream
 
-var demoStart = fixturekit.DemoStart
 var must = fixturekit.Must
 
-const mergePath = delivery.MergePath
 const publicationPath = delivery.PublicationPath
 const ownPullRequestOutcomePath = delivery.OwnPullRequestOutcomePath
 

@@ -43,7 +43,7 @@ func NewProject(t *testing.T, configure ...func(*service.Options, *service.TestH
 	s, c := Start(t, opts, hooks)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return &Project{Options: opts, Hooks: hooks, S: s, C: c, ID: added.Project.ID, Clone: clone}
 }
 
@@ -87,7 +87,7 @@ func (f *Project) SeedBuilding(t *testing.T, key, graph string) config.Workstrea
 // SeedBuildingPaused creates ready builds under an owner pause.
 func (f *Project) SeedBuildingPaused(t *testing.T, target runtime.Target, graph string, keys ...string) []config.WorkstreamID {
 	t.Helper()
-	Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	var streams []config.WorkstreamID
 	for _, key := range keys {
 		streams = append(streams, f.SeedBuilding(t, key, graph))

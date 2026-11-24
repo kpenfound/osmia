@@ -4,6 +4,10 @@ import (
 	context "context"
 	json "encoding/json"
 	errors "errors"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
@@ -11,9 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
-	slices "slices"
-	strings "strings"
-	testing "testing"
 
 	amendment "github.com/kpenfound/osmia/internal/amendment"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -87,12 +88,12 @@ func TestApprovedAmendmentUsesCurrentDriftBase(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := journey.NewApprovedFixture(t, "drifted-amendment")
 	defer repository.Close()
-	a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, journey.IndependentPlan)
+	a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, intakefixture.IndependentPlan)
 	moved := recordAmendmentSealRevision(t, f, repository, stream, func(s *seal.Seal) { s.Base.Commit = "later-upstream-commit" })
 	intakefixture.Step(t, a, stream, req, intake.AmendmentResealed)
 	current, doc, found, err := seal.Latest(repository, stream)
 	fixturekit.Must(t, err)
-	if !found || doc.Revision != 3 || current.Base != moved.Base || current.Seal != moved.Seal+1 || current.SpecHash != seal.SpecHash(journey.AmendedSpec) {
+	if !found || doc.Revision != 3 || current.Base != moved.Base || current.Seal != moved.Seal+1 || current.SpecHash != seal.SpecHash(intakefixture.AmendedSpec) {
 		t.Fatalf("resealed %+v at revision %d, want current base %+v", current, doc.Revision, moved.Base)
 	}
 	applications, err := amendment.Read(repository, stream)
@@ -105,13 +106,13 @@ func TestApprovedAmendmentUsesCurrentDriftBase(t *testing.T) {
 func TestApprovedAmendmentWithChangedSealedDocumentsIsUnapplied(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*seal.Seal){
-		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(journey.AmendedSpec) },
+		"spec": func(s *seal.Seal) { s.Revision.Spec++; s.SpecHash = seal.SpecHash(intakefixture.AmendedSpec) },
 		"plan": func(s *seal.Seal) { s.Revision.Plan++ },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, stream, repository := journey.NewApprovedFixture(t, "stale-"+name)
 			defer repository.Close()
-			a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, journey.IndependentPlan)
+			a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, intakefixture.IndependentPlan)
 			recordAmendmentSealRevision(t, f, repository, stream, change)
 			intakefixture.Step(t, a, stream, req, intake.AmendmentUnapplied)
 			if got := intakefixture.TransitionByID(t, repository, stream, "amendment-1-unapplied").Reason; !strings.Contains(got, "sealed spec or plan changed") {
@@ -130,7 +131,7 @@ func TestApprovedAmendmentReworksItsUnitAndLandsUnaffectedApprovals(t *testing.T
 	f, stream, repository := journey.NewApprovedFixture(t, "amended")
 	defer repository.Close()
 	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}
-	a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, journey.IndependentPlan)
+	a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, intakefixture.IndependentPlan)
 
 	intakefixture.Step(t, a, stream, req, intake.AmendmentResealed)
 	if got := journey.LandingReason(t, lands, repository, stream, "resume"); !strings.HasPrefix(got, "stale approval: stale review inputs: ") || !strings.Contains(got, "report seal 1 is not the current seal") {
@@ -300,7 +301,7 @@ func approveAmendmentOverAFinalReport(t *testing.T) finalReportAmendment {
 	if _, reason, err := finals.FinalGate(ctx, stream); err != nil || reason != "" {
 		t.Fatalf("final review 1 does not authorise delivery: %q %v", reason, err)
 	}
-	a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, fixturekit.ValidPlan)
+	a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	intakefixture.Step(t, a, stream, req, intake.AmendmentResealed)
 	intakefixture.Step(t, a, stream, req, intake.AmendmentApplied)
 	return finalReportAmendment{f: f, stream: stream, repository: repository, finals: finals}
@@ -392,14 +393,14 @@ func TestFollowupsJoinTheBuildingPlan(t *testing.T) {
 	ctx := context.Background()
 	f, stream, repository, finals := journey.NewFinalFixture(t, "followed")
 	journey.MergeDirectly(t, f, repository, stream, "resume", map[string]string{"internal/trace/resume.go": "package trace\n"})
-	a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, fixturekit.ValidPlan)
+	a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	intakefixture.Step(t, a, stream, req, intake.AmendmentResealed)
 	intakefixture.Step(t, a, stream, req, intake.AmendmentApplied)
 	id := "amendment-1-spec-1"
 	b, found, err := journey.NewMasonController(f.S, repository).Read(stream)
 	fixturekit.Must(t, err)
-	if !found || !slices.ContainsFunc(b.Plan.Units, func(u plan.Unit) bool { return u.ID == id }) || b.States[trace.UnitSubject(id)].Value != intake.UnitReady {
-		t.Fatalf("the building plan %+v, states %+v", b.Plan.Units, b.States)
+	if !found || !slices.ContainsFunc(b.Plan().Units, func(u plan.Unit) bool { return u.ID == id }) || b.States()[trace.UnitSubject(id)].Value != intake.UnitReady {
+		t.Fatalf("the building plan %+v, states %+v", b.Plan().Units, b.States())
 	}
 	journey.MergeDirectly(t, f, repository, stream, "dedupe", map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	fixturekit.Must(t, finals.Pass(ctx))

@@ -3,10 +3,11 @@ package fixturekit
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/trace"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func FeedDocument(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, id, path string, revision int, at time.Time, value any) {

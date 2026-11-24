@@ -5,7 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
@@ -14,6 +13,9 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
@@ -58,7 +60,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	home, err := os.MkdirTemp("", "cs-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.MkdirAll(cfg.Project.Clone, 0700))
@@ -141,10 +143,10 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		return &agent.Result{ClaudeID: "session-chief", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	list, err := c.Statuses(ctx)
 	fixturekit.Must(t, err)
-	groups, _, err := trace.Workgroups(s.sole().repository)
+	groups, _, err := trace.Workgroups(s.Sole().Repository)
 	fixturekit.Must(t, err)
 	empty := func(w config.WorkstreamID) api.WorkstreamStatus {
 		group, ok := trace.WorkgroupOf(groups, w)
@@ -189,7 +191,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	check(stored)
 
-	_, c = start(t, opts)
+	_, c = journey.StartT(t, opts)
 	after, err := c.Status(ctx, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	check(after)
@@ -233,8 +235,8 @@ func sameStatuses(got, want []api.WorkstreamStatus) bool {
 func TestStatusErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts := fixture(t)
-	_, c := start(t, opts)
+	opts := journey.Fixture(t)
+	_, c := journey.StartT(t, opts)
 
 	list, err := c.Statuses(ctx)
 	fixturekit.Must(t, err)
@@ -253,7 +255,7 @@ func TestStatusErrors(t *testing.T) {
 	idle := filepath.Join(filepath.Dir(root), "idle")
 	fixturekit.Must(t, os.MkdirAll(idle, 0700))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(idle, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
-	_, c = start(t, Options{Options: service.Options{Config: config.Options{Root: idle}, ShutdownTimeout: 100 * time.Millisecond}})
+	_, c = journey.StartT(t, journey.Options{Options: service.Options{Config: config.Options{Root: idle}, ShutdownTimeout: 100 * time.Millisecond}})
 	list, err = c.Statuses(ctx)
 	fixturekit.Must(t, err)
 	if len(list.Workstreams) != 0 {
@@ -271,7 +273,7 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	home, err := os.MkdirTemp("", "cu-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.MkdirAll(cfg.Project.Clone, 0700))
@@ -285,16 +287,16 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream}}})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Store: store}
 	fixturekit.TraceExec(t, fixturekit.WorkstreamTraceDirectory(t, cfg.Root, fixturekit.Project, fixturekit.Stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.status', 'status', 1, '{not json}')", "workstreams/"+string(fixturekit.Stream)+"/status.jsonl")
 	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", fixturekit.Project)
-	list := s.statusList()
+	list := s.StatusList()
 	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", fixturekit.Project)
 
 	if want := []api.Diagnostic{{Field: "provider_usage", Code: api.Internal, Message: usage}, {Field: "workstreams", Code: api.Internal, Message: message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
-	if _, apiErr := s.workstreamStatus(string(fixturekit.Stream)); apiErr == nil || *apiErr != (api.APIError{Code: api.Internal, Message: message}) {
+	if _, apiErr := s.WorkstreamStatus(string(fixturekit.Stream)); apiErr == nil || *apiErr != (api.APIError{Code: api.Internal, Message: message}) {
 		t.Fatalf("damaged trace: %v", apiErr)
 	}
 }

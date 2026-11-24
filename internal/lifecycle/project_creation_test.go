@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest"
@@ -21,7 +23,7 @@ import (
 const creationCharter = "# Charter\n\n## Rules\n\n1. Keep the repository small.\n"
 
 type creationFixture struct {
-	opts     Options
+	opts     journey.Options
 	root     string
 	dir      string
 	cloneDir string
@@ -33,7 +35,7 @@ type creationFixture struct {
 func newCreationFixture(t *testing.T, defaultBranch string, projects string) *creationFixture {
 	t.Helper()
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
-	opts, _ := projectFixture(t)
+	opts, _ := journey.ProjectFixture(t)
 	dir, err := os.MkdirTemp("", "os-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(dir) })
@@ -59,14 +61,9 @@ func (f *creationFixture) request() api.ProjectCreateRequest {
 
 func (f *creationFixture) clone() string { return filepath.Join(f.cloneDir, "newrepo") }
 
-func (f *creationFixture) git(t *testing.T, args ...string) string {
-	t.Helper()
-	return strings.TrimSpace(fixturekit.DemoGit(t, f.dir, args...))
-}
-
 func (f *creationFixture) journal() string { return filepath.Join(f.root, "project-add.json") }
 
-func (f *creationFixture) reserve(t *testing.T, c *Client) api.ProjectCreateRequest {
+func (f *creationFixture) reserve(t *testing.T, c *journey.Client) api.ProjectCreateRequest {
 	t.Helper()
 	id, err := c.ReserveProjectCreation(context.Background())
 	fixturekit.Must(t, err)
@@ -105,7 +102,7 @@ func (f *creationFixture) assertNothingWritten(t *testing.T, existing ...string)
 	}
 }
 
-func (f *creationFixture) assertCompleted(t *testing.T, s *Service, c *Client, id config.ProjectID, req api.ProjectCreateRequest) {
+func (f *creationFixture) assertCompleted(t *testing.T, s *journey.Service, c *journey.Client, id config.ProjectID, req api.ProjectCreateRequest) {
 	t.Helper()
 	cfg := loadRegistered(t, f.opts.Config)
 	if !cfg.Active(id) {
@@ -115,16 +112,16 @@ func (f *creationFixture) assertCompleted(t *testing.T, s *Service, c *Client, i
 	if p.Name != req.Name || p.Upstream != "owner/"+req.Repo || p.Fork != "" || p.BaseBranch != "main" || p.Clone != filepath.Join(f.cloneDir, req.Repo) || p.Landing != "commit-per-unit" {
 		t.Fatalf("registered project: %+v", p)
 	}
-	if got := f.git(t, "-C", p.Clone, "symbolic-ref", "--short", "HEAD"); got != "main" {
+	if got := fixturekit.Git(t, f.dir, "-C", p.Clone, "symbolic-ref", "--short", "HEAD"); got != "main" {
 		t.Fatalf("clone has %q checked out", got)
 	}
-	if got := f.git(t, "-C", p.Clone, "rev-parse", "HEAD"); got != f.readme {
+	if got := fixturekit.Git(t, f.dir, "-C", p.Clone, "rev-parse", "HEAD"); got != f.readme {
 		t.Fatalf("clone is at %s, not the README commit %s", got, f.readme)
 	}
-	if got := f.git(t, "-C", p.Clone, "rev-parse", "--abbrev-ref", "main@{upstream}"); got != "origin/main" {
+	if got := fixturekit.Git(t, f.dir, "-C", p.Clone, "rev-parse", "--abbrev-ref", "main@{upstream}"); got != "origin/main" {
 		t.Fatalf("main tracks %q", got)
 	}
-	if got := f.git(t, "-C", f.remote, "rev-parse", "refs/heads/main"); got != f.readme {
+	if got := fixturekit.Git(t, f.dir, "-C", f.remote, "rev-parse", "refs/heads/main"); got != f.readme {
 		t.Fatalf("remote main is %s, not the README commit %s", got, f.readme)
 	}
 	if repo, ok := f.github.Repo("owner/" + req.Repo); !ok || repo.DefaultBranch != "main" {
@@ -133,10 +130,10 @@ func (f *creationFixture) assertCompleted(t *testing.T, s *Service, c *Client, i
 	if _, err := os.Lstat(f.journal()); !os.IsNotExist(err) {
 		t.Fatalf("journal retained: %v", err)
 	}
-	if s.sole() == nil || s.sole().repository.Project() != id {
+	if s.Sole() == nil || s.Sole().Repository.Project() != id {
 		t.Fatal("the created project is not the running one")
 	}
-	revisions := intakefixture.DocumentRevisions(t, s.sole().repository, "charter")
+	revisions := intakefixture.DocumentRevisions(t, s.Sole().Repository, "charter")
 	if len(revisions) != 1 || revisions[0].Revision != 1 || revisions[0].Content != req.Charter {
 		t.Fatalf("charter revisions: %+v", revisions)
 	}
@@ -156,7 +153,7 @@ func (f *creationFixture) assertNoDelete(t *testing.T) {
 
 func TestProjectCreateCreatesCloneAndRegisters(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
 	state, err := c.ProjectCreation(ctx, req.ID)
@@ -189,7 +186,7 @@ func TestProjectCreateIsPublicOnlyWhenRequested(t *testing.T) {
 	for _, public := range []bool{false, true} {
 		t.Run(fmt.Sprint("public=", public), func(t *testing.T) {
 			f := newCreationFixture(t, "main", "")
-			_, c := start(t, f.opts)
+			_, c := journey.StartT(t, f.opts)
 			req := f.reserve(t, c)
 			if public {
 				req.Visibility = api.VisibilityPublic
@@ -215,12 +212,12 @@ func TestProjectCreateIsPublicOnlyWhenRequested(t *testing.T) {
 
 func TestProjectCreateMovesTheREADMECommitToMain(t *testing.T) {
 	f := newCreationFixture(t, "trunk", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.Must(t, err)
 	f.assertCompleted(t, s, c, req.ID, req)
-	if got := f.git(t, "-C", f.remote, "rev-parse", "refs/heads/trunk"); got != f.readme {
+	if got := fixturekit.Git(t, f.dir, "-C", f.remote, "rev-parse", "refs/heads/trunk"); got != f.readme {
 		t.Fatalf("the original branch moved to %s", got)
 	}
 	writes := f.github.Writes()
@@ -254,7 +251,7 @@ func TestProjectCreateRefusesBeforeWritingAnything(t *testing.T) {
 			if tc.prepare != nil {
 				tc.prepare(t, f)
 			}
-			_, c := start(t, f.opts)
+			_, c := journey.StartT(t, f.opts)
 			req := f.request()
 			if tc.name == "bad repo name" {
 				req.Repo = "not a name"
@@ -274,7 +271,7 @@ func TestProjectCreateStopsWhenGitHubCreatesAnotherRepository(t *testing.T) {
 	f.github.OnCreate = func(g *servicetest.FakeGitHub, body map[string]any) (bool, int, any) {
 		return true, 201, map[string]any{"id": 4242, "full_name": "owner/other", "ssh_url": f.remote, "default_branch": "main"}
 	}
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Conflict)
@@ -301,7 +298,7 @@ func TestProjectCreateStopsWhenGitHubCreatesAnotherRepository(t *testing.T) {
 	if _, err := os.Lstat(f.cloneDir); !os.IsNotExist(err) {
 		t.Fatalf("something was cloned: %v", err)
 	}
-	if s.sole() != nil || len(activeProjects(t, f.root)) != 0 {
+	if s.Sole() != nil || len(activeProjects(t, f.root)) != 0 {
 		t.Fatal("a project was registered")
 	}
 	_, err = c.CreateProject(context.Background(), api.ProjectCreateRequest{ID: req.ID})
@@ -328,11 +325,11 @@ func TestProjectCreateRecoversAtEachStep(t *testing.T) {
 		for _, mode := range []string{"restart", "retry"} {
 			t.Run(step.seam+"/"+mode, func(t *testing.T) {
 				f := newCreationFixture(t, "trunk", "")
-				s, c := start(t, f.opts)
+				s, c := journey.StartT(t, f.opts)
 				ctx := context.Background()
 				req := f.reserve(t, c)
 				crash := errors.New("crash")
-				s.boundary = func(name string) error {
+				s.Boundary = func(name string) error {
 					if name == step.seam {
 						return crash
 					}
@@ -352,10 +349,10 @@ func TestProjectCreateRecoversAtEachStep(t *testing.T) {
 				} else if state.State != api.CreationPending || state.Step != step.reached || state.Stuck != nil || state.Repository != "owner/newrepo" {
 					t.Fatalf("pending state: %+v", state)
 				}
-				s.boundary = nil
+				s.Boundary = nil
 				if mode == "restart" {
 					fixturekit.Must(t, s.Close())
-					s, c = start(t, f.opts)
+					s, c = journey.StartT(t, f.opts)
 					cfg, err := c.Configuration(ctx)
 					fixturekit.Must(t, err)
 					if cfg.Project == nil || cfg.Project.ID != req.ID || len(cfg.Diagnostics) != 0 {
@@ -383,10 +380,10 @@ func TestProjectCreateRecoversAtEachStep(t *testing.T) {
 
 func TestProjectCreateStopsWhenARepositoryAppearsBeforeTheCreate(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "journal-written" {
 			return errors.New("crash")
 		}
@@ -394,11 +391,11 @@ func TestProjectCreateStopsWhenARepositoryAppearsBeforeTheCreate(t *testing.T) {
 	}
 	_, err := c.CreateProject(ctx, req)
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 	unrelated, _ := servicetest.SeedRemote(t, f.dir, "unrelated", "main")
 	f.github.AddRepo("owner/newrepo", unrelated, "main")
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, f.opts)
+	s, c = journey.StartT(t, f.opts)
 	f.assertOwnershipStuck(t, s, c, req)
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
@@ -413,7 +410,7 @@ func TestProjectCreateStopsWhenARepositoryAppearsBeforeTheCreate(t *testing.T) {
 	}
 }
 
-func (f *creationFixture) assertOwnershipStuck(t *testing.T, s *Service, c *Client, req api.ProjectCreateRequest) {
+func (f *creationFixture) assertOwnershipStuck(t *testing.T, s *journey.Service, c *journey.Client, req api.ProjectCreateRequest) {
 	t.Helper()
 	ctx := context.Background()
 	state, err := c.ProjectCreation(ctx, req.ID)
@@ -424,7 +421,7 @@ func (f *creationFixture) assertOwnershipStuck(t *testing.T, s *Service, c *Clie
 	if _, err := os.Lstat(f.clone()); !os.IsNotExist(err) {
 		t.Fatalf("the unrelated repository was cloned: %v", err)
 	}
-	if s.sole() != nil || len(activeProjects(t, f.root)) != 0 {
+	if s.Sole() != nil || len(activeProjects(t, f.root)) != 0 {
 		t.Fatal("the unrelated repository was registered")
 	}
 	_, err = c.CreateProject(ctx, api.ProjectCreateRequest{ID: req.ID})
@@ -442,7 +439,7 @@ func TestProjectCreateStopsOnANameConflict(t *testing.T) {
 		g.AddRepo("owner/newrepo", unrelated, "main")
 		return true, 422, servicetest.GitHubNameTaken
 	}
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Conflict)
@@ -451,7 +448,7 @@ func TestProjectCreateStopsOnANameConflict(t *testing.T) {
 		t.Fatalf("%d create calls", f.github.CreateCalls())
 	}
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, f.opts)
+	s, c = journey.StartT(t, f.opts)
 	f.assertOwnershipStuck(t, s, c, req)
 	if f.github.CreateCalls() != 1 {
 		t.Fatalf("%d create calls after the restart", f.github.CreateCalls())
@@ -465,7 +462,7 @@ func TestProjectCreateStopsWhenAnUnknownOutcomeLeavesARepository(t *testing.T) {
 		g.AddRepo("owner/newrepo", unrelated, "main")
 		return true, 502, map[string]string{"message": "Bad Gateway"}
 	}
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Internal)
@@ -473,7 +470,7 @@ func TestProjectCreateStopsWhenAnUnknownOutcomeLeavesARepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, f.opts)
+	s, c = journey.StartT(t, f.opts)
 	f.assertOwnershipStuck(t, s, c, req)
 	if f.github.CreateCalls() != 1 {
 		t.Fatalf("%d create calls", f.github.CreateCalls())
@@ -490,7 +487,7 @@ func TestProjectCreateMayResendAnUnknownOutcomeWhenNothingExists(t *testing.T) {
 		}
 		return false, 0, nil
 	}
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Internal)
@@ -517,7 +514,7 @@ func TestProjectCreateResumesAfterTheOwnerResolvesAConflict(t *testing.T) {
 		}
 		return false, 0, nil
 	}
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(context.Background(), req)
 	fixturekit.AssertCode(t, err, api.Conflict)
@@ -530,10 +527,10 @@ func TestProjectCreateResumesAfterTheOwnerResolvesAConflict(t *testing.T) {
 
 func TestProjectCreateNeverReusesARepositoryWithAnotherIdentity(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "repository-created" {
 			return errors.New("crash")
 		}
@@ -541,7 +538,7 @@ func TestProjectCreateNeverReusesARepositoryWithAnotherIdentity(t *testing.T) {
 	}
 	_, err := c.CreateProject(ctx, req)
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 	f.github.Forget("owner/newrepo")
 	unrelated, _ := servicetest.SeedRemote(t, f.dir, "unrelated", "main")
 	f.github.AddRepo("owner/newrepo", unrelated, "main")
@@ -557,7 +554,7 @@ func TestProjectCreateCloneFailureIsRetriedOnTheSameRepository(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
 	later := filepath.Join(f.dir, "later.git")
 	f.github.Remote = func(string) string { return later }
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
 	_, err := c.CreateProject(ctx, req)
@@ -597,7 +594,7 @@ func TestProjectCreateKeepsTheTokenOutOfGit(t *testing.T) {
 	t.Setenv("OSMIA_CREATION_MARKER", "inherited")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GITHUB_TOKEN", sentinel)
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	req := f.reserve(t, c)
 	_, err = c.CreateProject(context.Background(), req)
 	fixturekit.Must(t, err)
@@ -635,10 +632,10 @@ func TestProjectCreateKeepsTheTokenOutOfGit(t *testing.T) {
 
 func TestProjectAddReportsAPendingCreation(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "repository-created" {
 			return errors.New("crash")
 		}
@@ -646,7 +643,7 @@ func TestProjectAddReportsAPendingCreation(t *testing.T) {
 	}
 	_, err := c.CreateProject(ctx, req)
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 	before, err := os.ReadFile(f.journal())
 	fixturekit.Must(t, err)
 	_, err = c.AddProject(ctx, fixturekit.Request(f.remote))
@@ -677,7 +674,7 @@ func TestProjectAddReportsAPendingCreation(t *testing.T) {
 
 func TestProjectCreationStates(t *testing.T) {
 	f := newCreationFixture(t, "main", "")
-	s, c := start(t, f.opts)
+	s, c := journey.StartT(t, f.opts)
 	ctx := context.Background()
 	req := f.reserve(t, c)
 	state, err := c.ProjectCreation(ctx, req.ID)
@@ -687,7 +684,7 @@ func TestProjectCreationStates(t *testing.T) {
 	}
 	_, err = c.ProjectCreation(ctx, "not-an-id")
 	fixturekit.AssertCode(t, err, api.Validation)
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "journal-removed" {
 			return errors.New("crash")
 		}

@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -79,15 +80,15 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	files := configFiles(t, opts)
-	files.write(t, files.topText+"[skills]\nrefresh = \"always\"\n")
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
+	files.Write(t, files.TopText+"[skills]\nrefresh = \"always\"\n")
 	cache := skills.NewManager(filepath.Join(opts.Config.Root, "skills"))
 	opts.skills = cache
 	_, c := start(t, opts)
 	if cache.Refresh == nil || cache.Refresh() != "always" {
 		t.Fatal("skill cache does not follow the loaded refresh policy")
 	}
-	files.write(t, files.topText+"[skills]\nrefresh = \"never\"\n")
+	files.Write(t, files.TopText+"[skills]\nrefresh = \"never\"\n")
 	_, err := c.Reload(context.Background())
 	fixturekit.Must(t, err)
 	if got := cache.Refresh(); got != "never" {

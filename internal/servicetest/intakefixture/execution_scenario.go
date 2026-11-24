@@ -308,24 +308,15 @@ func DriftRecords[R any](t *testing.T, repository *trace.Repository, stream conf
 	return out
 }
 
-func DriftOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
-	t.Helper()
-	ops, err := repository.Operations(stream)
-	fixturekit.Must(t, err)
-	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
-	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
-	return ops
-}
-
 func RequestDrift(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string, request func(context.Context, func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error), due func(config.WorkstreamID) (string, error)) coreadapter.Operation {
 	t.Helper()
-	asked := len(DriftOperations(t, repository, stream, action))
+	asked := len(OperationsOf(t, repository, stream, action))
 	requested, err := request(context.Background(), due)
 	fixturekit.Must(t, err)
 	if !slices.Equal(requested, []config.WorkstreamID{stream}) {
 		t.Fatalf("drift rebases asked for %v, want %s", requested, stream)
 	}
-	ops := DriftOperations(t, repository, stream, action)
+	ops := OperationsOf(t, repository, stream, action)
 	if len(ops) != asked+1 {
 		t.Fatalf("drift operations %+v", ops)
 	}

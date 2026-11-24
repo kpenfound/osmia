@@ -64,13 +64,13 @@ func runEngineUnitCheck(t *testing.T, tc engineUnitCase) engineUnitRun {
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
 	t.Setenv("DOCKER_HOST", "tcp://host-docker:2375")
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
-	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(o *Options) {
+	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", intakefixture.IndependentPlan, func(o *Options) {
 		appendEngineConfig(t, o, engineConfig(tc.mode, tc.token))
 		o.reviewChecks = nil
 		o.Logger = slog.New(slog.NewJSONHandler(logs, nil))
 	})
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	w, repo := seedBuild(t, f, "engine-check", independentPlan, config.WorkspacesGit, base)
+	w, repo := seedBuild(t, f, "engine-check", intakefixture.IndependentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repo, w, "resume", resumeReport)
 	report := intakefixture.CurrentReport[UnitReport](t, repo, w, "resume", reportDocument)
 	fixturekit.Must(t, repo.Close())
@@ -125,7 +125,7 @@ func TestUnitCheckRunLinksItsCloudTraceOnlyWhenACloudTokenIsConfigured(t *testin
 			t.Fatalf("trace URL %q, want %q", r.run.TraceURL, want)
 		}
 		found, linked := false, false
-		for _, e := range readFeed(t, r.f.c, r.stream).Entries {
+		for _, e := range intakefixture.ReadFeed(t, r.f.c, r.stream).Entries {
 			if e.UnitChecks == nil {
 				continue
 			}
@@ -141,7 +141,7 @@ func TestUnitCheckRunLinksItsCloudTraceOnlyWhenACloudTokenIsConfigured(t *testin
 // Serial: fake commands and planted host engine selectors are process-wide.
 func TestUnitChecksKeepTheCloudTokenOutOfTheFeedAndTheLogs(t *testing.T) {
 	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous, hostEngine, explicitContainer, explicitAddress}, func(t *testing.T, _ engineUnitCase, r engineUnitRun) {
-		raw, _ := json.Marshal(readFeed(t, r.f.c, r.stream))
+		raw, _ := json.Marshal(intakefixture.ReadFeed(t, r.f.c, r.stream))
 		if strings.Contains(string(raw), engineTestToken) {
 			t.Fatalf("feed: %s", raw)
 		}
@@ -211,7 +211,7 @@ func appendEngineConfig(t *testing.T, o *Options, text string) {
 
 type engineReload struct {
 	fake        fixturekit.EngineCLIs
-	files       reloadFiles
+	files       fixturekit.ReloadFiles
 	top         string
 	next        string
 	s           *Service
@@ -225,9 +225,9 @@ func startManagedEngine(t *testing.T) *engineReload {
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
 	o := fixture(t)
-	files := configFiles(t, o)
-	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
-	files.write(t, top)
+	files := fixturekit.ConfigFiles(t, o.Config.Root)
+	top := files.TopText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
+	files.Write(t, top)
 	fixturekit.Must(t, os.Remove(fake.Version))
 	s, c := start(t, o)
 	return &engineReload{fake: fake, files: files, top: top, s: s, c: c}
@@ -243,7 +243,7 @@ func (e *engineReload) reloadedWhileBusy(t *testing.T) {
 	e.releaseWork = func() { held(); turn() }
 	t.Cleanup(e.releaseWork)
 	e.next = strings.Replace(e.top, "version = 'v0.20.5'", "version = 'v0.21.0'", 1)
-	e.files.write(t, e.next)
+	e.files.Write(t, e.next)
 	_, err = e.c.Reload(t.Context())
 	fixturekit.Must(t, err)
 }
@@ -303,7 +303,7 @@ func TestReloadLeavesARunningEngineAloneAndReportsTheVersionMismatch(t *testing.
 func TestRejectedReloadLeavesChecksOnTheCurrentEngine(t *testing.T) {
 	e := startManagedEngine(t)
 	e.reloadedWhileBusy(t)
-	e.files.write(t, strings.Replace(e.next, "engine = \"managed\"", "engine = 'bad-mode'", 1))
+	e.files.Write(t, strings.Replace(e.next, "engine = \"managed\"", "engine = 'bad-mode'", 1))
 	if _, err := e.c.Reload(t.Context()); err == nil {
 		t.Fatal("invalid reload accepted")
 	}
@@ -346,7 +346,7 @@ func TestEngineRestartAndPruneDoNotApplyToAnExternalEngine(t *testing.T) {
 	for _, mode := range []string{"auto", "tcp://external:1234", "cloud"} {
 		t.Run(mode, func(t *testing.T) {
 			e := startManagedEngine(t)
-			e.files.write(t, e.files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
+			e.files.Write(t, e.files.TopText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
 			_, err := e.c.Reload(t.Context())
 			fixturekit.Must(t, err)
 			before := e.fake.Commands(t)
@@ -377,8 +377,8 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			t.Setenv("DOCKER_HOST", "ssh://user:secret@engine.example.ts.net")
 			t.Setenv("DOCKER_CONTEXT", "named")
 			o := fixture(t)
-			files := configFiles(t, o)
-			files.write(t, files.topText+engineConfig(mode, ""))
+			files := fixturekit.ConfigFiles(t, o.Config.Root)
+			files.Write(t, files.TopText+engineConfig(mode, ""))
 			s, err := Start(t.Context(), o)
 			assertConflict := func(err error) {
 				t.Helper()
@@ -394,10 +394,10 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			if _, err := os.Stat(fake.Environments); !os.IsNotExist(err) {
 				t.Fatalf("startup invoked engine: %v", err)
 			}
-			files.write(t, files.topText)
+			files.Write(t, files.TopText)
 			s, c := start(t, o)
 			before := s.current()
-			files.write(t, files.topText+engineConfig(mode, ""))
+			files.Write(t, files.TopText+engineConfig(mode, ""))
 			_, err = c.Reload(t.Context())
 			assertConflict(err)
 			if s.current() != before {
@@ -486,8 +486,8 @@ func TestCreatingEngineAPIRespondsAtDeadline(t *testing.T) {
 	t.Setenv("DOCKER_HOST", "tcp://engine.example.ts.net:2375")
 	t.Setenv("DOCKER_CONTEXT", "default")
 	o := fixture(t)
-	files := configFiles(t, o)
-	files.write(t, files.topText+engineConfig("managed", ""))
+	files := fixturekit.ConfigFiles(t, o.Config.Root)
+	files.Write(t, files.TopText+engineConfig("managed", ""))
 	s, _ := start(t, o)
 	entered := filepath.Join(fake.Directory, "creating")
 	script := fmt.Sprintf(`#!/bin/sh
@@ -534,11 +534,11 @@ esac
 	started := time.Now()
 	close(creating)
 	next := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Unit: "waiting-for-creation"})
-	fixturekit.Must(t, awaitCheck(t, completed))
+	fixturekit.Must(t, intakefixture.AwaitCheck(t, completed))
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("API did not deliver response at the action bound")
 	}
-	release := awaitCheck(t, next)
+	release := intakefixture.AwaitCheck(t, next)
 	if release == nil {
 		t.Fatal("API action retained maintenance gate")
 	}

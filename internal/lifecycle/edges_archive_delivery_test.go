@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
@@ -33,18 +35,18 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	t.Parallel()
 	ctx := context.Background()
 	const merged = "aabbccddeeff0011223344556677889900aabbccdd"
-	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
-	t.Cleanup(cleanup.release)
+	cleanup := &journey.LifecycleCleanupGate{Reached: make(chan struct{})}
+	t.Cleanup(cleanup.Release)
 	var interrupt, observed atomic.Bool
 	interrupt.Store(true)
-	var fixture atomic.Pointer[productionDesignFixture]
+	var fixture atomic.Pointer[journey.ProductionDesignFixture]
 	var passes atomic.Int64
 	host := &fixturekit.FakePulls{SyncHead: true}
-	hook := newFakeWebhook(t)
-	configuration := productionDesignConfiguration{
-		wait:                 lifecycleAwait,
-		openPullRequestsStay: true,
-		checkpoint: func(ctx context.Context, step string) error {
+	hook := fixturekit.NewWebhook(t)
+	configuration := journey.ProductionDesignConfiguration{
+		Wait:                 journey.LifecycleAwait,
+		OpenPullRequestsStay: true,
+		Checkpoint: func(ctx context.Context, step string) error {
 			if step == "edge-merge-observed" && interrupt.Load() {
 				observed.Store(true)
 				<-ctx.Done()
@@ -55,18 +57,18 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 					return err
 				}
 			}
-			return cleanup.checkpoint(ctx, step)
+			return cleanup.Checkpoint(ctx, step)
 		},
-		options: func(opts *Options) {
+		Options: func(opts *journey.Options) {
 			path := filepath.Join(opts.Config.Root, "config.toml")
 			data, err := os.ReadFile(path)
 			fixturekit.Must(t, err)
 			data = []byte(strings.Replace(string(data), "[capacity]\n", "[capacity]\nmasons = 2\n", 1) + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
 			fixturekit.Must(t, os.WriteFile(path, data, 0600))
-			setWebhook(t, *opts, hook.hook())
-			hook.records(*opts)
-			opts.schedulePassed = func() { passes.Add(1) }
-			opts.reviewChecks = fixturekit.CheckFunc(func(_ context.Context, directory string) (api.CheckResult, error) {
+			fixturekit.SetWebhook(t, opts.Config.Root, hook.Hook())
+			hook.Records(opts.Config.Root)
+			opts.SchedulePassed = func() { passes.Add(1) }
+			opts.ReviewChecks = fixturekit.CheckFunc(func(_ context.Context, directory string) (api.CheckResult, error) {
 				dependency, err := os.ReadFile(filepath.Join(directory, "internal/trace/dependency.txt"))
 				if os.IsNotExist(err) {
 					return api.CheckResult{Output: "initial checks pass"}, nil
@@ -78,17 +80,17 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 			})
 		},
 	}
-	f := resolutionApprovedFixture(t, configuration, trace.EdgeMergeOrder, host, func(f *productionDesignFixture) {
+	f := resolutionApprovedFixture(t, configuration, trace.EdgeMergeOrder, host, func(f *journey.ProductionDesignFixture) {
 		fixture.Store(f)
-		clone := f.repos[1].Clone
+		clone := f.Repos[1].Clone
 		home := filepath.Dir(clone)
 		host.Fork = func() string {
-			return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.repos[1].Remote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(f.stream2)))
+			return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Repos[1].Remote, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(f.Stream2)))
 		}
 		fixturekit.ConfigureDeliverySigner(t, clone)
-		f.engine.Mu.Lock()
-		chief := f.engine.Turns["*"]
-		f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		f.Engine.Mu.Lock()
+		chief := f.Engine.Turns["*"]
+		f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			var err error
 			switch {
 			case strings.HasPrefix(req.Name, "mason-") && strings.HasSuffix(req.Name, "-implement"):
@@ -110,10 +112,10 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 					}
 				}
 			case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-				_, err = fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+				_, err = fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			case strings.HasPrefix(req.Name, "final-"):
 				findings := []any{}
-				if !strings.Contains(req.Workspace.Directory(), string(f.stream1)) && !strings.HasPrefix(req.Name, "final-1-") {
+				if !strings.Contains(req.Workspace.Directory(), string(f.Stream1)) && !strings.HasPrefix(req.Name, "final-1-") {
 					dependency, e := intakefixture.ReadTool(ctx, tools, "branch/internal/trace/dependency.txt")
 					if e != nil || strings.TrimSpace(dependency) != merged {
 						return nil, fmt.Errorf("final reader missed dependency update: %q, %v", dependency, e)
@@ -133,15 +135,15 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 			}
 			return intakefixture.QuestionResult(req, "session-"+req.Name, "Implemented and reviewed"), err
 		}
-		f.engine.Mu.Unlock()
+		f.Engine.Mu.Unlock()
 	})
-	defer f.stop(t)
-	up, err := f.s.repository(f.project)
+	defer f.Stop(t)
+	up, err := f.S.Repository(f.Project)
 	fixturekit.Must(t, err)
-	down, err := f.s.repository(f.project2)
+	down, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	upstream := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: intake.FeatureBranch(f.stream1), Commit: "upstream-feature", PullRequest: 71, URL: "https://example.invalid/pull/71"}
-	recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, upstream)
+	upstream := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: f.Repos[0].Upstream, Fork: f.S.Current().For(f.Project).Project.PushRepository(), Branch: intake.FeatureBranch(f.Stream1), Commit: "upstream-feature", PullRequest: 71, URL: "https://example.invalid/pull/71"}
+	journey.RecordUpstreamOwnPullRequest(t, f.S, up, f.Stream1, upstream)
 	host.Mu.Lock()
 	host.Prs = []pulls.PullRequest{{Number: upstream.PullRequest, State: "open", HeadRepository: upstream.Fork, Head: upstream.Branch, URL: upstream.URL}}
 	host.Mu.Unlock()
@@ -150,8 +152,8 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		t.Helper()
 		var out api.DeliveryPresentation
 		ready := func() bool {
-			out, err = f.c.Delivery(ctx, f.stream2)
-			threads, readErr := down.Threads(f.stream2)
+			out, err = f.C.Delivery(ctx, f.Stream2)
+			threads, readErr := down.Threads(f.Stream2)
 			fixturekit.Must(t, readErr)
 			for _, thread := range threads {
 				if thread.Identity.Role != intake.MasonRole && thread.Identity.Role != intake.ReviewerRole {
@@ -165,12 +167,12 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 			}
 			return err == nil && out.Report.Review == review && out.Draft != ""
 		}
-		changes, closeChanges := serviceChanges(t, f.s)
+		changes, closeChanges := journey.ServiceChanges(t, f.S)
 		defer closeChanges()
 		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for !ready() {
 			if time.Now().After(deadline) {
-				docs, readErr := trace.Read[trace.Document](down, f.stream2)
+				docs, readErr := trace.Read[trace.Document](down, f.Stream2)
 				t.Logf("final report documents: %v", readErr)
 				for _, doc := range docs {
 					if doc.ID != delivery.FinalReportDocument {
@@ -182,36 +184,36 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 						t.Logf("final report revision=%d decode-error=%v: %s", doc.Revision, decodeErr, doc.Content)
 					}
 				}
-				units, readErr := followup.Read(down, f.stream2)
+				units, readErr := followup.Read(down, f.Stream2)
 				t.Logf("follow-ups: %+v error=%v", units, readErr)
 				for _, unit := range units {
-					state, stateErr := down.Workflow(f.stream2, trace.UnitSubject(unit.Unit.ID))
+					state, stateErr := down.Workflow(f.Stream2, trace.UnitSubject(unit.Unit.ID))
 					t.Logf("follow-up %s workflow=%+v error=%v", unit.Unit.ID, state, stateErr)
 				}
-				transitions, readErr := trace.Read[trace.Transition](down, f.stream2)
+				transitions, readErr := trace.Read[trace.Transition](down, f.Stream2)
 				t.Logf("dependent transitions: %v", readErr)
 				for _, tr := range transitions {
 					if tr.Subject != "base-refresh" && !strings.HasPrefix(tr.ID, "route-") {
 						t.Logf("transition %s at=%s %s: %s -> %s", tr.ID, tr.At.Format(time.RFC3339), tr.Subject, tr.From, tr.To)
 					}
 				}
-				ops, readErr := down.Operations(f.stream2)
+				ops, readErr := down.Operations(f.Stream2)
 				t.Logf("delivery review operations: %v", readErr)
 				for _, op := range ops {
 					if op.Operation.Action == lifecycle.DeliveryReviewAction || op.Operation.Action == delivery.FinalReviewAction {
 						t.Logf("delivery review operation=%s input=%s result=%+v acknowledged=%v", op.Operation.ID, op.Operation.Input, op.Result, op.Acknowledged)
 					}
 				}
-				f.timeout(t, fmt.Sprintf("dependent final review %d", review))
+				f.Timeout(t, fmt.Sprintf("dependent final review %d", review))
 			}
-			lifecycleAdvanceScheduled(t, f)
+			journey.LifecycleAdvanceScheduled(t, f)
 			changes()
 		}
 		return out
 	}
 	approve := func(p api.DeliveryPresentation) api.DeliveryApproval {
 		t.Helper()
-		a, err := f.c.ApproveDelivery(ctx, f.stream2, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
+		a, err := f.C.ApproveDelivery(ctx, f.Stream2, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
 		fixturekit.Must(t, err)
 		return a
 	}
@@ -221,27 +223,27 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	}
 	initialApproval := approve(first)
 	var draft api.DeliveryPublication
-	lifecycleAwait(t, f, "owner-approved dependent draft", func() bool {
-		state, err := down.Workflow(f.stream2, trace.FeatureSubject)
+	journey.LifecycleAwait(t, f, "owner-approved dependent draft", func() bool {
+		state, err := down.Workflow(f.Stream2, trace.FeatureSubject)
 		fixturekit.Must(t, err)
 		var found bool
-		draft, found, err = delivery.CurrentOwnPublication(down, f.stream2)
+		draft, found, err = delivery.CurrentOwnPublication(down, f.Stream2)
 		fixturekit.Must(t, err)
 		return state.Value == intake.DeliveredState && found && draft.Draft && draft.Reviewed == initialApproval.Commit
 	})
-	if state, err := down.Workflow(f.stream2, "publication"); err != nil || state.Value != "published-1" {
+	if state, err := down.Workflow(f.Stream2, "publication"); err != nil || state.Value != "published-1" {
 		t.Fatalf("the approval's outcome %+v: %v", state, err)
 	}
 	assertPrompts := func() {
 		t.Helper()
-		inbox, err := f.c.Inbox(ctx)
+		inbox, err := f.C.Inbox(ctx)
 		fixturekit.Must(t, err)
 		for _, entry := range inbox.Entries {
 			if entry.Kind != api.InboxDelivery {
 				t.Fatalf("unexpected owner prompt: %+v", entry)
 			}
 		}
-		ledger := readLedger(t, f.opts)
+		ledger := fixturekit.ReadNotificationLedger[service.TestNotifyLedger](t, f.Opts.Config.Root)
 		for _, notification := range ledger.Notifications {
 			if notification.Kind != api.InboxRatification && notification.Kind != api.InboxDelivery {
 				t.Fatalf("unexpected notification for dependency wait: %+v", notification)
@@ -249,58 +251,58 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		}
 	}
 	assertPrompts()
-	if reference, waiting, err := lifecycle.UnresolvedMergeOrderEdge(down, f.stream2); err != nil || !waiting || reference != upstream.Upstream+"#71" {
+	if reference, waiting, err := lifecycle.UnresolvedMergeOrderEdge(down, f.Stream2); err != nil || !waiting || reference != upstream.Upstream+"#71" {
 		t.Fatalf("dependent lacks truthful merge wait: %q %v %v", reference, waiting, err)
 	}
 	host.Mu.Lock()
 	host.Prs[0].Merged, host.Prs[0].State, host.Prs[0].MergeCommit = true, "closed", merged
 	host.Mu.Unlock()
-	f.clock.Advance(10 * time.Minute)
-	lifecycleAwait(t, f, "edge read interrupted before persistence", observed.Load)
-	_, err = f.c.Archive(ctx, f.stream1)
+	f.Clock.Advance(10 * time.Minute)
+	journey.LifecycleAwait(t, f, "edge read interrupted before persistence", observed.Load)
+	_, err = f.C.Archive(ctx, f.Stream1)
 	fixturekit.Must(t, err)
-	cleanup.await(t)
-	archived, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
+	cleanup.Await(t)
+	archived, ok := intakefixture.ArchiveRecord(t, f.S.Store, f.Stream1)
 	if !ok || archived.Publication.PullRequest != upstream.PullRequest || archived.Publication.Branch != upstream.Branch {
 		t.Fatalf("archive lost current upstream publication: %+v", archived)
 	}
-	before, beforeRevision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
+	before, beforeRevision, _, err := lifecycle.EdgeObservationAt(down, f.Stream2)
 	fixturekit.Must(t, err)
 	if len(before.Edges) != 1 || before.Edges[0].Merged {
 		t.Fatalf("dependent persisted merge before cleanup: %+v", before)
 	}
-	cleanup.release()
-	lifecycleAwait(t, f, "authorized upstream cleanup", func() bool {
-		a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
+	cleanup.Release()
+	journey.LifecycleAwait(t, f, "authorized upstream cleanup", func() bool {
+		a, ok := intakefixture.ArchiveRecord(t, f.S.Store, f.Stream1)
 		return ok && !a.CleanedAt.IsZero()
 	})
-	f.stop(t)
+	f.Stop(t)
 	interrupt.Store(false)
-	f.start(t)
-	down, err = f.s.repository(f.project2)
+	f.Start(t)
+	down, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
 	fresh := awaitReview(3)
-	assertBaseRefreshesBounded(t, down, f.stream2)
-	assertMergedEdgeReviewsFollowTheUpdate(t, down, f.stream2)
+	assertBaseRefreshesBounded(t, down, f.Stream2)
+	assertMergedEdgeReviewsFollowTheUpdate(t, down, f.Stream2)
 	if fresh.Report.Commit == first.Report.Commit || fresh.Report.EdgeResolved == "" {
 		t.Fatalf("missing dependency repair or re-review: report=%+v", fresh.Report)
 	}
-	updates, err := followup.Read(down, f.stream2)
+	updates, err := followup.Read(down, f.Stream2)
 	fixturekit.Must(t, err)
 	if len(updates) != 2 || !strings.Contains(updates[0].Unit.ID, "dependency-update-") || !strings.Contains(updates[0].Unit.Task, merged) || updates[1].Criterion != "spec#1" {
 		t.Fatalf("update or in-slice repair missing/duplicated: %+v", updates)
 	}
 	for _, unit := range updates {
-		state, err := down.Workflow(f.stream2, trace.UnitSubject(unit.Unit.ID))
+		state, err := down.Workflow(f.Stream2, trace.UnitSubject(unit.Unit.ID))
 		fixturekit.Must(t, err)
 		if state.Value != intake.UnitMerged {
 			t.Fatalf("unit did not land through the controller: %+v", state)
 		}
 	}
 	assertPrompts()
-	group, err := down.CrossRepoWorkgroupOf(f.stream2)
+	group, err := down.CrossRepoWorkgroupOf(f.Stream2)
 	fixturekit.Must(t, err)
-	authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
+	authority, err := trace.OpenWorkgroupAuthority(f.S.Current().Root, group)
 	fixturekit.Must(t, err)
 	resolved, resolutionRevision, err := trace.ResolvedWorkgroups(authority)
 	fixturekit.Must(t, err)
@@ -311,14 +313,14 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		t.Fatalf("project spec retired before dependent delivery: resolved=%v revision=%d active=%v", resolved, resolutionRevision, active)
 	}
 	for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {
-		view, err := f.s.Context().Assemble(ctx, f.project2, bundle.Scope{Role: role, Workstream: f.stream2})
+		view, err := f.S.Context().Assemble(ctx, f.Project2, bundle.Scope{Role: role, Workstream: f.Stream2})
 		fixturekit.Must(t, err)
 		if view.ProjectSpec == nil || !strings.Contains(view.Render(), "Stored chunks are acknowledged with their offset.") {
 			t.Fatalf("surviving %s lost the ratified project contract", role)
 		}
 	}
 	pass := passes.Load()
-	lifecycleAwait(t, f, "publication stays gated after re-review", func() bool { return passes.Load() > pass+1 })
+	journey.LifecycleAwait(t, f, "publication stays gated after re-review", func() bool { return passes.Load() > pass+1 })
 	host.Mu.Lock()
 	readies, creates := host.Readies, host.Creates
 	host.Mu.Unlock()
@@ -326,7 +328,7 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if readies != 0 || creates != 1 || remoteTip != draft.Commit {
 		t.Fatalf("publication escaped fresh approval: ready=%d create=%d pushed=%s draft=%s", readies, creates, remoteTip, draft.Commit)
 	}
-	if _, err := f.c.ApproveDelivery(ctx, f.stream2, api.DeliveryDecision{Review: first.Report.Review, ReviewRevision: first.ReviewRevision, Commit: first.Report.Commit, DraftHash: first.DraftHash}); err == nil {
+	if _, err := f.C.ApproveDelivery(ctx, f.Stream2, api.DeliveryDecision{Review: first.Report.Review, ReviewRevision: first.ReviewRevision, Commit: first.Report.Commit, DraftHash: first.DraftHash}); err == nil {
 		t.Fatal("stale pinned approval authorized the changed dependency")
 	}
 	freshApproval := approve(fresh)
@@ -334,9 +336,9 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		t.Fatalf("approval lacks fresh review and commit pins: %+v", freshApproval)
 	}
 	var ready api.DeliveryPublication
-	lifecycleAwait(t, f, "fresh approval pushes and marks same PR ready", func() bool {
+	journey.LifecycleAwait(t, f, "fresh approval pushes and marks same PR ready", func() bool {
 		var found bool
-		ready, found, err = delivery.CurrentOwnPublication(down, f.stream2)
+		ready, found, err = delivery.CurrentOwnPublication(down, f.Stream2)
 		fixturekit.Must(t, err)
 		return found && !ready.Draft && ready.Approval == 2
 	})
@@ -350,30 +352,30 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 		}
 	}
 	host.Mu.Unlock()
-	clone := f.repos[1].Clone
+	clone := f.Repos[1].Clone
 	if got := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(clone), "-C", clone, "show", ready.Commit+":internal/trace/dependency.txt")); got != merged {
 		t.Fatalf("published dependency=%q", got)
 	}
 	if !strings.Contains(fixturekit.DemoGit(t, filepath.Dir(clone), "-C", clone, "cat-file", "-p", ready.Commit), "gpgsig") {
 		t.Fatal("ready publication lacks owner signing")
 	}
-	observation, revision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
+	observation, revision, _, err := lifecycle.EdgeObservationAt(down, f.Stream2)
 	fixturekit.Must(t, err)
 	if revision != beforeRevision+1 || len(observation.Edges) != 1 || !observation.Edges[0].Merged || observation.Edges[0].Commit != merged {
 		t.Fatalf("merge release receipt: before=%d after=%d %+v", beforeRevision, revision, observation)
 	}
-	f.stop(t)
-	f.start(t)
-	down, err = f.s.repository(f.project2)
+	f.Stop(t)
+	f.Start(t)
+	down, err = f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
 	pass = passes.Load()
-	lifecycleAwait(t, f, "stable publication after second restart", func() bool { return passes.Load() > pass+1 })
-	after, afterRevision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
+	journey.LifecycleAwait(t, f, "stable publication after second restart", func() bool { return passes.Load() > pass+1 })
+	after, afterRevision, _, err := lifecycle.EdgeObservationAt(down, f.Stream2)
 	fixturekit.Must(t, err)
 	if afterRevision != revision || !slices.Equal(after.Edges, observation.Edges) {
 		t.Fatalf("restart duplicated merge release: %+v revision=%d", after, afterRevision)
 	}
-	units, err := followup.Read(down, f.stream2)
+	units, err := followup.Read(down, f.Stream2)
 	fixturekit.Must(t, err)
 	if len(units) != len(updates) {
 		t.Fatalf("restart duplicated dependency work: %+v", units)
@@ -384,14 +386,14 @@ func TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart(t *testin
 	if readies != 1 || creates != 1 {
 		t.Fatalf("publication duplicated: readies=%d creates=%d", readies, creates)
 	}
-	gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
+	gone, err := trace.WorkstreamTraceGone(f.S.Current().Root, f.Project, f.Stream1)
 	fixturekit.Must(t, err)
 	if !gone {
 		t.Fatal("upstream history was recreated")
 	}
 	streams, err := down.Workstreams()
 	fixturekit.Must(t, err)
-	if !slices.Equal(streams, []config.WorkstreamID{f.stream2}) {
+	if !slices.Equal(streams, []config.WorkstreamID{f.Stream2}) {
 		t.Fatalf("repair created another workstream: %v", streams)
 	}
 	assertPrompts()
@@ -413,15 +415,15 @@ func assertBaseRefreshesBounded(t *testing.T, r *trace.Repository, w config.Work
 	}
 }
 
-func awaitDependentEdgeMerged(ctx context.Context, f *productionDesignFixture) error {
+func awaitDependentEdgeMerged(ctx context.Context, f *journey.ProductionDesignFixture) error {
 	if f == nil {
 		return nil
 	}
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if down, err := f.s.repository(f.project2); err == nil {
-			if observed, _, _, err := lifecycle.EdgeObservationAt(down, f.stream2); err == nil && len(observed.Edges) == 1 && observed.Edges[0].Merged {
+		if down, err := f.S.Repository(f.Project2); err == nil {
+			if observed, _, _, err := lifecycle.EdgeObservationAt(down, f.Stream2); err == nil && len(observed.Edges) == 1 && observed.Edges[0].Merged {
 				return nil
 			}
 		}

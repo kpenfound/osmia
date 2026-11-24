@@ -10,6 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -17,7 +18,7 @@ func TestServiceFixtureOpensTheWebListenerAndRunsSchedulerPasses(t *testing.T) {
 	t.Parallel()
 	f := NewProject(t)
 	f.Stop(t)
-	WithWeb(t, f.Options, "127.0.0.1:0")
+	intakefixture.WithWeb(t, f.Options.Config.Root, "127.0.0.1:0")
 	passed := make(chan struct{}, 1)
 	f.Hooks.SchedulePassed = func() {
 		select {

@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -26,23 +29,23 @@ import (
 func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "conversation-path-")
+	opts, cfg := journey.ConversationFixture(t, "conversation-path-")
 	turns := &fixturekit.ChiefTurns{}
-	runChief(&opts, cfg, turns)
+	journey.RunChief(&opts, cfg, turns)
 	opts.Reconciliation.Ticks = make(chan time.Time)
-	opts.conversationTicks = make(chan time.Time)
-	s, client := start(t, opts)
-	repo := s.sole().repository
+	opts.ConversationTicks = make(chan time.Time)
+	s, client := journey.StartT(t, opts)
+	repo := s.Sole().Repository
 	design, err := client.OpenDesign(ctx, cfg.Project.ID)
 	fixturekit.Must(t, err)
 	session := config.WorkstreamID("w_00000000000000000000000000000111")
-	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-test", "Session", s.now(), intake.OwnerActor))
-	_, err = service.TestEnsureSessionThread(ctx, repo, cfg.Project.ID, session, s.now())
+	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-test", "Session", s.Now(), intake.OwnerActor))
+	_, err = service.TestEnsureSessionThread(ctx, repo, cfg.Project.ID, session, s.Now())
 	fixturekit.Must(t, err)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
-	pipeline := InspectForTest(s).Pipeline(s.sole().id)
+	pipeline := journey.InspectForTest(s).Pipeline(s.Sole().Id)
 	stage := *pipeline.Current.Load()
 	stage.Hooks = []service.TestScheduleHook{{Name: "held", Pass: func(ctx context.Context) error {
 		select {
@@ -67,9 +70,9 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 
 	event := "held-conversation-workflow"
 	op := coreadapter.Operation{ID: trace.OperationID(cfg.Project.ID, fixturekit.Stream, event), Boundary: coreadapter.RepositoryBoundary, Action: "held-conversation-workflow", Input: json.RawMessage(`{}`)}
-	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: event, Revision: 1, Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.now(), Actor: intake.ServiceActor, Cause: "test"}, Subject: "fixture", To: "held", Reason: "Hold the workflow"}, Events: []trace.Event{{ID: event, Kind: "fixture", Body: "Hold the workflow", Operation: &op}}})
+	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: event, Revision: 1, Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.Now(), Actor: intake.ServiceActor, Cause: "test"}, Subject: "fixture", To: "held", Reason: "Hold the workflow"}, Events: []trace.Event{{ID: event, Kind: "fixture", Body: "Hold the workflow", Operation: &op}}})
 	fixturekit.Must(t, err)
-	attempt, _, err := repo.BeginOperation(ctx, fixturekit.Stream, event, trace.WorkflowOperation, intake.ServiceActor, s.now)
+	attempt, _, err := repo.BeginOperation(ctx, fixturekit.Stream, event, trace.WorkflowOperation, intake.ServiceActor, s.Now)
 	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("fixture did not reserve workflow")
@@ -111,7 +114,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 			t.Fatalf("turn has %d operations", found)
 		}
 	}
-	for role, used := range InspectForTest(s).Pool().Slots([]config.ProjectID{cfg.Project.ID}).Used {
+	for role, used := range journey.InspectForTest(s).Pool().Slots([]config.ProjectID{cfg.Project.ID}).Used {
 		if used != 0 {
 			t.Fatalf("conversation used %s capacity: %d", role, used)
 		}
@@ -130,18 +133,18 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "conversation-order-")
+	opts, cfg := journey.ConversationFixture(t, "conversation-order-")
 	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	runChief(&opts, cfg, turns)
+	journey.RunChief(&opts, cfg, turns)
 	opts.Reconciliation.Ticks = make(chan time.Time)
-	opts.conversationTicks = make(chan time.Time)
-	s, client := start(t, opts)
+	opts.ConversationTicks = make(chan time.Time)
+	s, client := journey.StartT(t, opts)
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(turns.Hold) }) })
-	repo := s.sole().repository
+	repo := s.Sole().Repository
 	profile, err := cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_background", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.now(), Actor: intake.ServiceActor, Cause: "event"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_background", Profile: profile, Prompt: "Background"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_background", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: s.Now(), Actor: intake.ServiceActor, Cause: "event"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_background", Profile: profile, Prompt: "Background"})
 	fixturekit.Must(t, err)
 	select {
 	case <-turns.Entered:
@@ -162,7 +165,7 @@ func TestConversationPathOwnerWaitsForBackgroundTurnAndShowsReason(t *testing.T)
 		t.Fatalf("owner jumped queue: %+v", calls)
 	}
 	release.Do(func() { close(turns.Hold) })
-	awaitConversation(t, client, func(r api.ConversationResponse) bool {
+	intakefixture.AwaitConversation(t, client, func(r api.ConversationResponse) bool {
 		return len(r.Entries) == 2 && r.Entries[0].State == api.TurnDone
 	})
 	if calls := turns.Calls(); len(calls) != 2 || calls[1].Prompt != "Owner" {
@@ -175,7 +178,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 	for _, restart := range []bool{false, true} {
 		t.Run(map[bool]string{false: "retry", true: "restart"}[restart], func(t *testing.T) {
 			ctx := context.Background()
-			opts, cfg := conversationFixture(t, "conversation-hook-")
+			opts, cfg := journey.ConversationFixture(t, "conversation-hook-")
 			clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 			opts.Reconciliation.Now = clock.Now
 			opts.Reconciliation.RetryDelay = time.Hour
@@ -200,8 +203,8 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 					return service.SessionRelay(ctx, repo, clock.Now, th, q)
 				}}, nil
 			}
-			s, client := start(t, opts)
-			repo := s.sole().repository
+			s, client := journey.StartT(t, opts)
+			repo := s.Sole().Repository
 			session := config.WorkstreamID("w_00000000000000000000000000000112")
 			fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-hook", "Session", clock.Now(), intake.OwnerActor))
 			sent, err := client.SessionMessage(ctx, session, "Hello")
@@ -230,11 +233,11 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 			}
 			fixturekit.Jump(clock, clock.Now().Add(2*time.Hour))
 			if restart {
-				s, _ = start(t, opts)
+				s, _ = journey.StartT(t, opts)
 			} else {
-				InspectForTest(s).WakeConversations()
+				journey.InspectForTest(s).WakeConversations()
 			}
-			repo = s.sole().repository
+			repo = s.Sole().Repository
 			fixturekit.ConversationAwait(t, func() bool {
 				records, _ := repo.Operations(session)
 				return len(records) == 1 && records[0].Acknowledged
@@ -261,9 +264,9 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 				t.Fatalf("idle transitions: %d", idle)
 			}
 			fixturekit.Must(t, s.Close())
-			s, _ = start(t, opts)
+			s, _ = journey.StartT(t, opts)
 			fixturekit.ConversationAwait(t, func() bool {
-				records, _ := s.sole().repository.Operations(session)
+				records, _ := s.Sole().Repository.Operations(session)
 				return len(records) == 1 && records[0].Acknowledged
 			})
 			if calls.Load() != 1 || relays.Load() != 2 {
@@ -276,7 +279,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 
 func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 	t.Parallel()
-	opts, cfg := conversationFixture(t, "conversation-drain-")
+	opts, cfg := journey.ConversationFixture(t, "conversation-drain-")
 	entered, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	recorded := make(chan error, 1)
 	opts.Threads = func(repo *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -291,7 +294,7 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Turn)}, nil
 		}}, nil
 	}
-	s, client := start(t, opts)
+	s, client := journey.StartT(t, opts)
 	var released sync.Once
 	t.Cleanup(func() { released.Do(func() { close(release) }) })
 	_, err := client.Send(context.Background(), fixturekit.Stream, "Wait for shutdown")
@@ -329,18 +332,18 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 func TestConversationPathChiefPauseAndProviderHolds(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "conversation-gates-")
+	opts, cfg := journey.ConversationFixture(t, "conversation-gates-")
 	turns := &fixturekit.ChiefTurns{}
-	runChief(&opts, cfg, turns)
-	s, client := start(t, opts)
-	fixturekit.Must(t, InspectForTest(s).SetPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Owner pause", Source: runtime.PauseOwner, SetAt: s.now()}))
+	journey.RunChief(&opts, cfg, turns)
+	s, client := journey.StartT(t, opts)
+	fixturekit.Must(t, journey.InspectForTest(s).SetPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Owner pause", Source: runtime.PauseOwner, SetAt: s.Now()}))
 	sent, err := client.Send(ctx, fixturekit.Stream, "Reachable during pause")
 	fixturekit.Must(t, err)
-	awaitConversation(t, client, func(r api.ConversationResponse) bool { return len(r.Entries) == 2 })
+	intakefixture.AwaitConversation(t, client, func(r api.ConversationResponse) bool { return len(r.Entries) == 2 })
 	if len(turns.Calls()) != 1 {
 		t.Fatal("chief did not run while paused")
 	}
-	repo := s.sole().repository
+	repo := s.Sole().Repository
 	records, err := repo.Operations(fixturekit.Stream)
 	fixturekit.Must(t, err)
 	fixturekit.ConversationAwait(t, func() bool {
@@ -353,12 +356,12 @@ func TestConversationPathChiefPauseAndProviderHolds(t *testing.T) {
 		}
 		return false
 	})
-	fixturekit.Must(t, s.store.SetProviderLimit(runtime.ProviderLimit{Backend: "claude", Status: "blocked", SetAt: s.now()}))
-	fixturekit.Must(t, s.store.SetProviderLimit(runtime.ProviderLimit{Backend: "codex", Status: "blocked", SetAt: s.now()}))
+	fixturekit.Must(t, s.Store.SetProviderLimit(runtime.ProviderLimit{Backend: "claude", Status: "blocked", SetAt: s.Now()}))
+	fixturekit.Must(t, s.Store.SetProviderLimit(runtime.ProviderLimit{Backend: "codex", Status: "blocked", SetAt: s.Now()}))
 	next, err := client.Send(ctx, fixturekit.Stream, "Wait for provider")
 	fixturekit.Must(t, err)
 	holds := func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
-		return InspectForTest(s).ConversationHolds(repo.Project(), repo, stream, op)
+		return journey.InspectForTest(s).ConversationHolds(repo.Project(), repo, stream, op)
 	}
 	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
 	fixturekit.Must(t, err)
@@ -368,10 +371,10 @@ func TestConversationPathChiefPauseAndProviderHolds(t *testing.T) {
 	if !holds(repo, fixturekit.Stream, op) || turn.Claim != nil || len(turns.Calls()) != 1 {
 		t.Fatal("provider hold did not keep chief queued")
 	}
-	fixturekit.Must(t, s.store.ClearProviderLimit("claude"))
-	fixturekit.Must(t, s.store.ClearProviderLimit("codex"))
-	InspectForTest(s).WakeConversations()
-	awaitConversation(t, client, func(r api.ConversationResponse) bool { return len(r.Entries) == 4 })
+	fixturekit.Must(t, s.Store.ClearProviderLimit("claude"))
+	fixturekit.Must(t, s.Store.ClearProviderLimit("codex"))
+	journey.InspectForTest(s).WakeConversations()
+	intakefixture.AwaitConversation(t, client, func(r api.ConversationResponse) bool { return len(r.Entries) == 4 })
 	if len(turns.Calls()) != 2 {
 		t.Fatal("held turn did not resume")
 	}
@@ -382,7 +385,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 	for _, completed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "captured", true: "completed-before-acknowledgement"}[completed], func(t *testing.T) {
 			ctx := context.Background()
-			opts, cfg := conversationFixture(t, "conversation-captured-")
+			opts, cfg := journey.ConversationFixture(t, "conversation-captured-")
 			repo, err := trace.Open(cfg.Root, cfg.Project)
 			fixturekit.Must(t, err)
 			profile, err := cfg.NamedProfile("default")
@@ -427,8 +430,8 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 					return coreadapter.SessionResult{}, errors.New("captured reply executed again")
 				})}, Relay: func(ctx context.Context, _ trace.Thread, _ trace.QueuedTurn) error { return relay(ctx, r) }}, nil
 			}
-			s, _ := start(t, opts)
-			repo = s.sole().repository
+			s, _ := journey.StartT(t, opts)
+			repo = s.Sole().Repository
 			fixturekit.ConversationAwait(t, func() bool {
 				records, _ := repo.Operations(fixturekit.Stream)
 				return len(records) == 1 && records[0].Acknowledged
@@ -456,7 +459,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 
 func TestSessionRelayRetryPreservesLaterTurnState(t *testing.T) {
 	t.Parallel()
-	opts, cfg := conversationFixture(t, "session-relay-keys-")
+	opts, cfg := journey.ConversationFixture(t, "session-relay-keys-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })

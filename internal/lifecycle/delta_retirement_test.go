@@ -3,12 +3,15 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/lifecyclefixture"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -36,14 +39,14 @@ func TestDesignProductionQueuedDeltaRetiresBeforeExecution(t *testing.T) {
 
 func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	ctx := context.Background()
-	queued := &intakefixture.ChangeRaceGate{Step: "change-delta-queued", Reached: make(chan struct{}), Released: make(chan struct{})}
-	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
+	queued := &intakefixture.ChangeRaceGate{Step: "change-delta-queued", Reached: make(chan struct{})}
+	cleanup := &journey.LifecycleCleanupGate{Reached: make(chan struct{})}
 	t.Cleanup(queued.Release)
-	t.Cleanup(cleanup.release)
+	t.Cleanup(cleanup.Release)
 	var allowedAddress atomic.Value
 	allowedAddress.Store(config.WorkstreamID(""))
 	var allowSurvivor atomic.Bool
-	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, options: func(opts *Options) {
+	f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait, Options: func(opts *journey.Options) {
 		limit := opts.Reconciliation.Limit
 		opts.Reconciliation.Limit = func(op coreadapter.Operation) (func(), bool) {
 			if op.Action == lifecycle.DeltaTurnAction && !allowSurvivor.Load() {
@@ -57,13 +60,13 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 			}
 			return nil, true
 		}
-	}, checkpoint: func(ctx context.Context, step string) error {
+	}, Checkpoint: func(ctx context.Context, step string) error {
 		if err := queued.Checkpoint(ctx, step); err != nil {
 			return err
 		}
-		return cleanup.checkpoint(ctx, step)
+		return cleanup.Checkpoint(ctx, step)
 	}}, "", nil)
-	defer f.stop(t)
+	defer f.Stop(t)
 	var drafts atomic.Int32
 	var address config.WorkstreamID
 	installRetirementDelta(t, f, &drafts, func(after *trace.ProjectSpec) {
@@ -76,7 +79,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 		}
 	})
 	queued.Armed.Store(true)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retired-dispatch", Kind: "amend", Scope: "workgroup", Change: "Revise the shared acknowledgment contract."})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: "retired-dispatch", Kind: "amend", Scope: "workgroup", Change: "Revise the shared acknowledgment contract."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -84,7 +87,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	var owner *trace.Repository
 	var intent trace.OperationRecord
 	for _, m := range resolutionMembers(f) {
-		repo, err := f.s.repository(m.project)
+		repo, err := f.S.Repository(m.project)
 		fixturekit.Must(t, err)
 		ops, err := repo.Operations(m.stream)
 		fixturekit.Must(t, err)
@@ -100,30 +103,30 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	if address == "" || intent.Claim != nil || intent.Result != nil {
 		t.Fatalf("delta was not queued before execution: %+v", intent)
 	}
-	before := currentChange(t, f.s, f.origin, c.ID)
+	before := journey.CurrentChange(t, f.S, f.Origin, c.ID)
 	awaitMemberBuilt(t, f, owner, address)
-	_, err := f.c.Abandon(ctx, address, "Owner cancelled the member before its queued delta ran.")
+	_, err := f.C.Abandon(ctx, address, "Owner cancelled the member before its queued delta ran.")
 	fixturekit.Must(t, err)
-	_, err = f.c.Archive(ctx, address)
+	_, err = f.C.Archive(ctx, address)
 	fixturekit.Must(t, err)
-	observed, err := (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
+	observed, err := (journey.DeltaRunner{S: f.S}).Inspect(ctx, intent.Operation)
 	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectCompleted || observed.Result == nil || observed.Result.Outcome != "cancelled" {
 		t.Fatalf("retired queued intent: %+v", observed)
 	}
-	survivor := f.stream1
+	survivor := f.Stream1
 	if survivor == address {
-		survivor = f.stream2
+		survivor = f.Stream2
 	}
-	if after := currentChange(t, f.s, survivor, c.ID); !intakefixture.EqualJSONTest(before, after) {
+	if after := journey.CurrentChange(t, f.S, survivor, c.ID); !intakefixture.EqualJSONTest(before, after) {
 		t.Fatal("retirement inspection changed the authoritative journal")
 	}
-	attempt, _, err := owner.BeginOperation(ctx, address, intent.EventID, trace.WorkerOperation, trace.Actor{Kind: "service", ID: "retired-delta-retry"}, f.clock.Now)
+	attempt, _, err := owner.BeginOperation(ctx, address, intent.EventID, trace.WorkerOperation, trace.Actor{Kind: "service", ID: "retired-delta-retry"}, f.Clock.Now)
 	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("could not force the retired dispatch retry")
 	}
-	retry := attempt.Action("retry", f.clock.Now())
+	retry := attempt.Action("retry", f.Clock.Now())
 	retry.Failure = "retired dispatch retry before cancellation inspection"
 	retry.RetryAt = retry.At.Add(time.Second)
 	err = attempt.Record(ctx, retry)
@@ -132,56 +135,56 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	ops, err := owner.Operations(address)
 	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
-		return op.Operation.ID == intent.Operation.ID && op.Result == nil && op.RetryAt.After(f.clock.Now())
+		return op.Operation.ID == intent.Operation.ID && op.Result == nil && op.RetryAt.After(f.Clock.Now())
 	}) {
 		t.Fatal("retired dispatch did not retain a retry ahead of the fixture clock")
 	}
-	cleanup.diagnose = func() {
+	cleanup.Diagnose = func() {
 		t.Logf("retired member %s is awaiting cleanup", address)
-		logUnsettledLifecycleOperations(t, owner, address, f.s)
+		lifecyclefixture.LogUnsettled(t, owner, address, journey.DeltaRunner{S: f.S}.Load)
 	}
 	allowedAddress.Store(address)
 	owner.WakeWorkflow()
 	queued.Release()
-	cleanup.await(t, f)
+	cleanup.Await(t, f)
 	ops, err = owner.Operations(address)
 	fixturekit.Must(t, err)
 	index := slices.IndexFunc(ops, func(op trace.OperationRecord) bool { return op.Operation.ID == intent.Operation.ID })
 	if index < 0 || ops[index].Result == nil || ops[index].Result.Outcome != "cancelled" {
-		logUnsettledLifecycleOperations(t, owner, address)
+		lifecyclefixture.LogUnsettled(t, owner, address, nil)
 		t.Fatalf("retired member dispatch did not settle as cancelled: %+v", ops)
 	}
 	if drafts.Load() != 0 {
 		t.Fatal("retired dispatch ran the shared delta turn")
 	}
-	after := currentChange(t, f.s, survivor, c.ID)
+	after := journey.CurrentChange(t, f.S, survivor, c.ID)
 	if after.State == "applied" || len(after.Applied) != 0 || !intakefixture.EqualJSONTest(before.Before, after.Before) || !intakefixture.EqualJSONTest(before.Members, after.Members) {
 		t.Fatal("retiring dispatch applied or repinned the shared decision")
 	}
-	cleanup.release()
+	cleanup.Release()
 	allowSurvivor.Store(true)
-	lifecycleAwait(t, f, "retired delta controller cleanup", func() bool {
-		a, found := intakefixture.ArchiveRecord(t, f.s.store, address)
+	journey.LifecycleAwait(t, f, "retired delta controller cleanup", func() bool {
+		a, found := intakefixture.ArchiveRecord(t, f.S.Store, address)
 		return found && !a.CleanedAt.IsZero()
 	})
 	if unavailable {
-		lifecycleAwait(t, f, "survivor draft refused and settled", func() bool {
-			c := currentChange(t, f.s, survivor, c.ID)
+		journey.LifecycleAwait(t, f, "survivor draft refused and settled", func() bool {
+			c := journey.CurrentChange(t, f.S, survivor, c.ID)
 			return c.State == "failed" && c.FailureSettled
 		})
 		assertFrozenSliceRefusal(t, f, survivor, c.ID, address)
 	} else {
-		lifecycleAwait(t, f, "survivor delta presentation", func() bool {
-			return currentChange(t, f.s, survivor, c.ID).State == "presented"
+		journey.LifecycleAwait(t, f, "survivor delta presentation", func() bool {
+			return journey.CurrentChange(t, f.S, survivor, c.ID).State == "presented"
 		})
 	}
-	pending := currentChange(t, f.s, survivor, c.ID)
+	pending := journey.CurrentChange(t, f.S, survivor, c.ID)
 	if drafts.Load() != 1 {
 		t.Fatalf("survivor drafted %d times", drafts.Load())
 	}
-	f.stop(t)
-	f.start(t)
-	after = currentChange(t, f.s, survivor, c.ID)
+	f.Stop(t)
+	f.Start(t)
+	after = journey.CurrentChange(t, f.S, survivor, c.ID)
 	if !intakefixture.EqualJSONTest(pending, after) || drafts.Load() != 1 {
 		t.Fatal("restart changed the pending decision or repeated its live contribution")
 	}
@@ -207,14 +210,14 @@ func TestDesignProductionRetiredDeltaPreservesRunningSharedClaim(t *testing.T) {
 
 func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, retireWhileRunning bool) {
 	ctx := context.Background()
-	queued := &intakefixture.ChangeRaceGate{Step: "change-delta-queued", Reached: make(chan struct{}), Released: make(chan struct{})}
-	cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
+	queued := &intakefixture.ChangeRaceGate{Step: "change-delta-queued", Reached: make(chan struct{})}
+	cleanup := &journey.LifecycleCleanupGate{Reached: make(chan struct{})}
 	t.Cleanup(queued.Release)
-	t.Cleanup(cleanup.release)
+	t.Cleanup(cleanup.Release)
 	var allowedAddress atomic.Value
 	allowedAddress.Store(config.WorkstreamID(""))
 	var allowAll atomic.Bool
-	f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, options: func(opts *Options) {
+	f := resolutionApprovedFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait, Options: func(opts *journey.Options) {
 		limit := opts.Reconciliation.Limit
 		opts.Reconciliation.Limit = func(op coreadapter.Operation) (func(), bool) {
 			if op.Action == lifecycle.DeltaTurnAction {
@@ -228,13 +231,13 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 			}
 			return nil, true
 		}
-	}, checkpoint: func(ctx context.Context, step string) error {
+	}, Checkpoint: func(ctx context.Context, step string) error {
 		if err := queued.Checkpoint(ctx, step); err != nil {
 			return err
 		}
-		return cleanup.checkpoint(ctx, step)
+		return cleanup.Checkpoint(ctx, step)
 	}}, "", nil)
-	defer f.stop(t)
+	defer f.Stop(t)
 	running := make(chan struct{})
 	release := make(chan struct{})
 	released := false
@@ -248,8 +251,8 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	installRetirementDelta(t, f, &drafts)
 	const key = "running-retired-dispatch"
 	turn := lifecycle.DeltaTurnID(lifecycle.WorkgroupChange{ID: key}, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
-	f.engine.Mu.Lock()
-	f.engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[turn] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		drafts.Add(1)
 		close(running)
 		select {
@@ -267,9 +270,9 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 			}
 		})
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 	queued.Armed.Store(true)
-	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Revise the acknowledgment contract."})
+	c, apiFault := f.S.Lifecycle().RequestChange(ctx, string(f.Origin), lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Revise the acknowledgment contract."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -277,7 +280,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	var intent trace.OperationRecord
 	var owner *trace.Repository
 	for _, m := range resolutionMembers(f) {
-		repo, err := f.s.repository(m.project)
+		repo, err := f.S.Repository(m.project)
 		fixturekit.Must(t, err)
 		ops, err := repo.Operations(m.stream)
 		fixturekit.Must(t, err)
@@ -292,7 +295,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}
 	var in lifecycle.DeltaTurnInput
 	fixturekit.Must(t, json.Unmarshal(intent.Operation.Input, &in))
-	before := currentChange(t, f.s, f.origin, c.ID)
+	before := journey.CurrentChange(t, f.S, f.Origin, c.ID)
 	awaitRunning := func() {
 		t.Helper()
 		select {
@@ -306,7 +309,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		allowedAddress.Store(address)
 		queued.Release()
 		awaitRunning()
-		wt, c, retired, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
+		wt, c, retired, closeAuthority, err := (journey.DeltaRunner{S: f.S}).Load(ctx, in)
 		fixturekit.Must(t, err)
 		th, err := wt.Thread(c.Host, intake.ArchitectAgent)
 		fixturekit.Must(t, err)
@@ -334,25 +337,25 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		allowedAddress.Store(config.WorkstreamID(""))
 	}
 	awaitMemberBuilt(t, f, owner, address)
-	_, err := f.c.Abandon(ctx, address, "Owner cancelled the shared delta dispatch's member.")
+	_, err := f.C.Abandon(ctx, address, "Owner cancelled the shared delta dispatch's member.")
 	fixturekit.Must(t, err)
-	_, err = f.c.Archive(ctx, address)
+	_, err = f.C.Archive(ctx, address)
 	fixturekit.Must(t, err)
 	if !retireWhileRunning {
-		survivor := f.stream1
+		survivor := f.Stream1
 		if survivor == address {
-			survivor = f.stream2
+			survivor = f.Stream2
 		}
 		allowedAddress.Store(survivor)
 		queued.Release()
 		awaitRunning()
 	}
-	observed, err := (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
+	observed, err := (journey.DeltaRunner{S: f.S}).Inspect(ctx, intent.Operation)
 	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectUnknown || observed.Result != nil {
 		t.Fatalf("running shared claim was settled: %+v", observed)
 	}
-	wt, after, retired, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
+	wt, after, retired, closeAuthority, err := (journey.DeltaRunner{S: f.S}).Load(ctx, in)
 	fixturekit.Must(t, err)
 	th, err := wt.Thread(after.Host, intake.ArchitectAgent)
 	fixturekit.Must(t, err)
@@ -369,8 +372,8 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}
 	close(release)
 	released = true
-	lifecycleAwait(t, f, "shared delta response captured", func() bool {
-		wt, c, _, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
+	journey.LifecycleAwait(t, f, "shared delta response captured", func() bool {
+		wt, c, _, closeAuthority, err := (journey.DeltaRunner{S: f.S}).Load(ctx, in)
 		fixturekit.Must(t, err)
 		defer closeAuthority()
 		th, err := wt.Thread(c.Host, intake.ArchitectAgent)
@@ -379,7 +382,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 			return q.Request.TurnID == turn && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
-	wt, after, retired, closeAuthority, err = (deltaRunner{s: f.s}).load(ctx, in)
+	wt, after, retired, closeAuthority, err = (journey.DeltaRunner{S: f.S}).Load(ctx, in)
 	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err = wt.Thread(after.Host, intake.ArchitectAgent)
@@ -389,12 +392,12 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}) {
 		t.Fatal("running shared turn did not retain its captured response")
 	}
-	observed, err = (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
+	observed, err = (journey.DeltaRunner{S: f.S}).Inspect(ctx, intent.Operation)
 	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectAbsent || observed.Result != nil {
 		t.Fatalf("captured shared response was replaced by retirement: %+v", observed)
 	}
-	result, err := (deltaRunner{s: f.s}).Apply(ctx, intent.Operation)
+	result, err := (journey.DeltaRunner{S: f.S}).Apply(ctx, intent.Operation)
 	fixturekit.Must(t, err)
 	outcome := "completed"
 	if unavailable {
@@ -408,29 +411,29 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	if !intakefixture.EqualJSONTest(th, retained) {
 		t.Fatal("reconciling retired controller changed the captured shared response")
 	}
-	_, latest, _, closeLatest, err := (deltaRunner{s: f.s}).load(ctx, in)
+	_, latest, _, closeLatest, err := (journey.DeltaRunner{S: f.S}).Load(ctx, in)
 	fixturekit.Must(t, err)
 	closeLatest()
 	if unavailable {
 		if latest.State != "failed" || !intakefixture.EqualJSONTest(before.Before, latest.Before) || !intakefixture.EqualJSONTest(before.After, latest.After) {
 			t.Fatalf("refused draft changed the shared decision: %+v", latest)
 		}
-		survivor := f.stream1
+		survivor := f.Stream1
 		if survivor == address {
-			survivor = f.stream2
+			survivor = f.Stream2
 		}
 		assertFrozenSliceRefusal(t, f, survivor, c.ID, address)
 	}
 	if drafts.Load() != 1 {
 		t.Fatalf("shared turn ran %d times", drafts.Load())
 	}
-	cleanup.diagnose = func() {
+	cleanup.Diagnose = func() {
 		t.Logf("retired member %s is awaiting cleanup", address)
-		logUnsettledLifecycleOperations(t, owner, address, f.s)
+		lifecyclefixture.LogUnsettled(t, owner, address, journey.DeltaRunner{S: f.S}.Load)
 	}
 	allowAll.Store(true)
 	owner.WakeWorkflow()
-	cleanup.await(t, f)
+	cleanup.Await(t, f)
 	ops, err := owner.Operations(address)
 	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
@@ -438,9 +441,9 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}) {
 		t.Fatalf("captured retired dispatch did not settle: %+v", ops)
 	}
-	cleanup.release()
-	lifecycleAwait(t, f, "running delta controller cleanup", func() bool {
-		a, found := intakefixture.ArchiveRecord(t, f.s.store, address)
+	cleanup.Release()
+	journey.LifecycleAwait(t, f, "running delta controller cleanup", func() bool {
+		a, found := intakefixture.ArchiveRecord(t, f.S.Store, address)
 		return found && !a.CleanedAt.IsZero()
 	})
 	if drafts.Load() != 1 {
@@ -468,12 +471,12 @@ func deliverRetirementDelta(ctx context.Context, req agent.Request, tools *mcp.C
 	return intakefixture.QuestionResult(req, "session-retirement-delta", "The shared delta proposal is recorded."), err
 }
 
-func installRetirementDelta(t *testing.T, f *productionDesignFixture, drafts *atomic.Int32, mutations ...func(*trace.ProjectSpec)) {
+func installRetirementDelta(t *testing.T, f *journey.ProductionDesignFixture, drafts *atomic.Int32, mutations ...func(*trace.ProjectSpec)) {
 	t.Helper()
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	previous := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	defer f.Engine.Mu.Unlock()
+	previous := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		names, err := intakefixture.ToolNames(ctx, tools)
 		if err != nil {
 			return nil, err
@@ -493,15 +496,15 @@ func installRetirementDelta(t *testing.T, f *productionDesignFixture, drafts *at
 	}
 }
 
-func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor config.WorkstreamID, change string, archived config.WorkstreamID) {
+func assertFrozenSliceRefusal(t *testing.T, f *journey.ProductionDesignFixture, survivor config.WorkstreamID, change string, archived config.WorkstreamID) {
 	t.Helper()
-	project := f.project
-	if survivor == f.stream2 {
-		project = f.project2
+	project := f.Project
+	if survivor == f.Stream2 {
+		project = f.Project2
 	}
-	repo, err := f.s.repository(project)
+	repo, err := f.S.Repository(project)
 	fixturekit.Must(t, err)
-	wt, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(context.Background(), repo, survivor)
+	wt, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(context.Background(), repo, survivor)
 	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err := wt.Thread(host, intake.ArchitectAgent)
@@ -514,9 +517,9 @@ func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor
 	}
 }
 
-func awaitMemberBuilt(t *testing.T, f *productionDesignFixture, owner *trace.Repository, address config.WorkstreamID) {
+func awaitMemberBuilt(t *testing.T, f *journey.ProductionDesignFixture, owner *trace.Repository, address config.WorkstreamID) {
 	t.Helper()
-	lifecycleAwait(t, f, "member build recorded", func() bool {
+	journey.LifecycleAwait(t, f, "member build recorded", func() bool {
 		ops, err := owner.Operations(address)
 		fixturekit.Must(t, err)
 		return slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {

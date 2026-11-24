@@ -3,14 +3,16 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
@@ -20,30 +22,26 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func (s *Service) approveAndLand(ctx context.Context, raw string, req api.DeliveryLandDecision) (api.DeliveryLandResponse, *api.APIError) {
-	return s.delivery().ApproveAndLand(ctx, raw, req)
-}
-
 func newLandJourney(t *testing.T, findings ...any) *draftFixture {
 	t.Helper()
-	f, stream, repository, a := newFinalFixtureWith(t, "land", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "land", "")
 	d := &draftFixture{f: f, stream: stream, repository: repository, a: a}
-	d.fork = strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "remote", "get-url", "upstream"))
+	d.fork = strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "remote", "get-url", "upstream"))
 	d.pulls = &fixturekit.FakePulls{SyncHead: true, Fork: func() string { commit, _ := d.forkBranch(t); return commit }}
-	f.s.setSole(&activeProject{repository: repository})
-	f.s.cfg.Project.Fork = ""
-	f.s.cfg.Project.Delivery = config.DeliveryJev
-	f.s.options.PullRequests = d.pulls
-	f.s.options.reviewChecks = fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	f.S.Cfg.Project.Fork = ""
+	f.S.Cfg.Project.Delivery = config.DeliveryJev
+	f.S.Options.PullRequests = d.pulls
+	f.S.Options.ReviewChecks = fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
 		return api.CheckResult{Output: "all proofs passed"}, nil
 	})
-	_, d.first = assembleBoth(t, f, repository, a, stream,
+	_, d.first = journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	if findings == nil {
 		findings = []any{}
 	}
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": findings})
 		return err
 	})
@@ -55,7 +53,7 @@ func newLandJourney(t *testing.T, findings ...any) *draftFixture {
 
 func (d *draftFixture) upstreamRev(t *testing.T, ref string) string {
 	t.Helper()
-	return strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(d.f.clone), "-C", d.fork, "rev-parse", ref))
+	return strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(d.f.Clone), "-C", d.fork, "rev-parse", ref))
 }
 
 func (d *draftFixture) landDecision(p api.DeliveryPresentation, accept bool) api.DeliveryLandDecision {
@@ -81,16 +79,16 @@ func TestApproveAndLandFastForwardsTheBaseToThePushedCommitWithJevUnconfigured(t
 	if !presented.CanLand || presented.Recommendation != "" {
 		t.Fatalf("the presentation does not offer landing: can land %v, recommendation %q", presented.CanLand, presented.Recommendation)
 	}
-	entry, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream)
+	entry, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream)
 	fixturekit.Must(t, err)
 	if !found || strings.Join(entry.Options, ",") != "approve,land" || entry.Land == nil || entry.Land.Method != "POST" || !strings.HasSuffix(entry.Land.Path, "/delivery/"+string(d.stream)+"/land") || entry.Land.Body["draft_hash"] != presented.DraftHash {
 		t.Fatalf("the inbox entry does not offer landing: %+v", entry)
 	}
 
-	if d.f.s.jev != nil {
+	if d.f.S.Jev != nil {
 		t.Fatal("Jev is configured")
 	}
-	response, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), d.landDecision(presented, false))
+	response, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), (d.landDecision(presented, false)))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
@@ -100,7 +98,7 @@ func TestApproveAndLandFastForwardsTheBaseToThePushedCommitWithJevUnconfigured(t
 	if got := d.upstreamRev(t, "refs/heads/main"); got != pushed {
 		t.Fatalf("the base branch is at %s, want the pushed commit %s", got, pushed)
 	}
-	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(d.f.clone), "-C", d.fork, "rev-list", "--merges", base+".."+pushed)); merges != "" {
+	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(d.f.Clone), "-C", d.fork, "rev-list", "--merges", base+".."+pushed)); merges != "" {
 		t.Fatalf("landing created merge commits: %s", merges)
 	}
 	if tip, ok := d.forkBranch(t); !ok || tip != pushed {
@@ -112,10 +110,10 @@ func TestApproveAndLandFastForwardsTheBaseToThePushedCommitWithJevUnconfigured(t
 	if got := d.feature(t); got != intake.DeliveredState {
 		t.Fatalf("the workstream is %s, want delivered", got)
 	}
-	if _, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
+	if _, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
 		t.Fatalf("a delivered workstream still has a delivery card: %v %v", found, err)
 	}
-	if again, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), d.landDecision(presented, false)); apiErr == nil || apiErr.Code != api.Conflict {
+	if again, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), (d.landDecision(presented, false))); apiErr == nil || apiErr.Code != api.Conflict {
 		t.Fatalf("landing again: %+v %v", again, apiErr)
 	}
 	if got := d.upstreamRev(t, "refs/heads/main"); got != pushed {
@@ -147,7 +145,7 @@ func TestApproveAndLandIsRefusedWithNothingPushed(t *testing.T) {
 			reason: "did not pass"},
 		{name: "a project that delivers by pull request", build: func(t *testing.T) *draftFixture {
 			d := newLandJourney(t)
-			d.f.s.cfg.Project.Delivery = config.DeliveryPullRequest
+			d.f.S.Cfg.Project.Delivery = config.DeliveryPullRequest
 			return d
 		}, reason: `delivery is "pull-request"`},
 	} {
@@ -156,7 +154,7 @@ func TestApproveAndLandIsRefusedWithNothingPushed(t *testing.T) {
 			d := c.build(t)
 			base, branch := d.upstreamRev(t, "refs/heads/main"), d.upstreamRev(t, "refs/heads/"+intake.FeatureBranch(d.stream))
 			var req api.DeliveryLandDecision
-			if d.f.s.cfg.Project.Lands() {
+			if d.f.S.Cfg.Project.Lands() {
 				p := d.present(t)
 				req = d.landDecision(p, c.accept)
 				if !p.CanLand {
@@ -167,7 +165,7 @@ func TestApproveAndLandIsRefusedWithNothingPushed(t *testing.T) {
 				if p.CanLand {
 					t.Fatal("a project that delivers by pull request is offered landing")
 				}
-				if entry, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || !found || entry.Land != nil || strings.Join(entry.Options, ",") != "approve" {
+				if entry, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || !found || entry.Land != nil || strings.Join(entry.Options, ",") != "approve" {
 					t.Fatalf("the inbox entry %+v %v %v", entry, found, err)
 				}
 				req = d.landDecision(p, false)
@@ -176,7 +174,7 @@ func TestApproveAndLandIsRefusedWithNothingPushed(t *testing.T) {
 				c.change(t, d, &req)
 			}
 			approvals := d.approvals(t)
-			response, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), req)
+			response, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), req)
 			if apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, c.reason) {
 				t.Fatalf("approving to land gave %+v %v, want a conflict naming %q", response, apiErr, c.reason)
 			}
@@ -232,7 +230,7 @@ func TestApproveAndLandTakesTheFallbackWhenTheUpstreamRefusesThePush(t *testing.
 	base := d.upstreamRev(t, "refs/heads/main")
 	presented := d.present(t)
 
-	response, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), d.landDecision(presented, false))
+	response, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), (d.landDecision(presented, false)))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
@@ -248,7 +246,7 @@ func TestApproveAndLandTakesTheFallbackWhenTheUpstreamRefusesThePush(t *testing.
 	if got := d.feature(t); got != intake.DeliveredState {
 		t.Fatalf("the workstream is %s, want delivered", got)
 	}
-	if _, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
+	if _, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
 		t.Fatalf("a second delivery card appeared: %v %v", found, err)
 	}
 	notices, err := d.repository.Outbox(d.stream)
@@ -276,7 +274,7 @@ func TestAnApprovalToLandIsNotPublishedAsMarkReady(t *testing.T) {
 	if approval.Route != "" {
 		t.Fatalf("marking ready recorded the route %q", approval.Route)
 	}
-	if _, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), d.landDecision(presented, false)); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "already approved") {
+	if _, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), (d.landDecision(presented, false))); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "already approved") {
 		t.Fatalf("landing over a standing approval to mark ready: %v", apiErr)
 	}
 
@@ -288,22 +286,22 @@ func TestAnApprovalToLandIsNotPublishedAsMarkReady(t *testing.T) {
 	land.Revision++
 	land.Content = string(content)
 	fixturekit.Must(t, d.repository.RecordDocuments(ctx, []trace.Document{land}))
-	if _, reason, err := d.f.s.deliveryGate(ctx, d.repository, d.stream, approval.Description); err != nil || !strings.Contains(reason, "approved landing") {
+	if _, reason, err := d.f.S.DeliveryGate(ctx, d.repository, d.stream, approval.Description); err != nil || !strings.Contains(reason, "approved landing") {
 		t.Fatalf("the delivery gate for an approval to land: %q, %v", reason, err)
 	}
-	p := &publisher{s: d.f.s, repository: d.repository}
+	p := &journey.Publisher{S: d.f.S, Repository: d.repository}
 	fixturekit.Must(t, p.Pass(ctx))
 	if ops := fixturekitPublications(t, d); ops != 0 || d.pulls.Readies != 0 {
 		t.Fatalf("an approval to land was published: %d operations, %d ready", ops, d.pulls.Readies)
 	}
-	if entry, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || !found || entry.Land == nil {
+	if entry, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || !found || entry.Land == nil {
 		t.Fatalf("the card is not offered while no landing is under way: %+v %v %v", entry, found, err)
 	}
 
 	push := d.pushes(t)[0]
-	_, err = (&delivery.Lander{S: d.f.s.delivery(), Repository: d.repository}).Request(ctx, d.stream, delivery.LandInput{Landing: 1, Push: push.Number, Review: push.Review, Reviewed: push.Reviewed, Commit: push.Commit})
+	_, err = (&delivery.Lander{S: d.f.S.Delivery(), Repository: d.repository}).Request(ctx, d.stream, delivery.LandInput{Landing: 1, Push: push.Number, Review: push.Review, Reviewed: push.Reviewed, Commit: push.Commit})
 	fixturekit.Must(t, err)
-	if entry, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
+	if entry, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream); err != nil || found {
 		t.Fatalf("the card came back while a landing is under way: %+v %v %v", entry, found, err)
 	}
 	if _, apiErr := d.decide(presented); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "landing") {
@@ -311,7 +309,7 @@ func TestAnApprovalToLandIsNotPublishedAsMarkReady(t *testing.T) {
 	}
 
 	approvals := d.approvals(t)
-	response, apiErr := d.f.s.approveAndLand(ctx, string(d.stream), d.landDecision(presented, false))
+	response, apiErr := d.f.S.Delivery().ApproveAndLand(ctx, string(d.stream), (d.landDecision(presented, false)))
 	if apiErr != nil || response.Outcome != api.LandOutcomeLanded {
 		t.Fatalf("landing under the standing approval: %+v %v", response, apiErr)
 	}

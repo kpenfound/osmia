@@ -3,8 +3,6 @@ package executionjourney
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +10,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -62,7 +64,7 @@ func (m *baseMover) boundary(ctx context.Context, step string) error {
 
 func (m *baseMover) arm(w *routeWorld, content string) {
 	m.t.Helper()
-	home := filepath.Dir(w.f.clone)
+	home := filepath.Dir(w.f.Clone)
 	m.scratch = filepath.Join(home, "someone-else")
 	fixturekit.DemoGit(m.t, home, "clone", "--quiet", w.upstream, m.scratch)
 	fixturekit.Must(m.t, os.MkdirAll(filepath.Dir(filepath.Join(m.scratch, m.file)), 0755))
@@ -115,7 +117,7 @@ func (w *routeWorld) requireRetriedLanding(first, rebased delivery.Push, moved, 
 	if got := w.rev("refs/heads/main"); got != rebased.Commit {
 		t.Fatalf("the base branch is at %s, want the new signed commit %s", got, rebased.Commit)
 	}
-	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-list", "--merges", moved+".."+rebased.Commit)); merges != "" {
+	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(w.f.Clone), "-C", w.upstream, "rev-list", "--merges", moved+".."+rebased.Commit)); merges != "" {
 		t.Fatalf("landing created merge commits: %s", merges)
 	}
 	if first.Commit != "" {
@@ -161,9 +163,9 @@ func TestTheServiceRetriesTheOwnersLandingOnTheRebasedCommitAfterTheBaseMoved(t 
 	if strings.Join(card.Options, ",") != "approve,land" {
 		t.Fatalf("the delivery card is %+v", card)
 	}
-	presented, err := w.f.c.Delivery(ctx, w.stream)
+	presented, err := w.f.C.Delivery(ctx, w.stream)
 	fixturekit.Must(t, err)
-	response, err := w.f.c.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	response, err := w.f.C.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	fixturekit.Must(t, err)
 	if response.Outcome != api.LandOutcomeBaseMoved {
 		t.Fatalf("the response is %+v, want the base moved", response)
@@ -183,7 +185,7 @@ func TestTheServiceRetriesTheOwnersLandingOnTheRebasedCommitAfterTheBaseMoved(t 
 	if n := w.cards.Load(); n != cards {
 		t.Fatalf("the delivery card came back: %d looks at it after the approval, %d before the retry landed", n, cards)
 	}
-	if n := len(finalOperations(t, w.repository(), w.stream)); n < 2 {
+	if n := len(journey.FinalOperations(t, w.repository(), w.stream)); n < 2 {
 		t.Fatalf("%d final reviews ran: the rebased workstream was not reviewed again", n)
 	}
 }
@@ -235,9 +237,9 @@ func TestARebasedPushWithBlockingFindingsDropsTheRouteAndShowsTheCard(t *testing
 			first := w.awaitDraft()
 			if !decideByJev {
 				w.awaitCard()
-				presented, err := w.f.c.Delivery(ctx, w.stream)
+				presented, err := w.f.C.Delivery(ctx, w.stream)
 				fixturekit.Must(t, err)
-				_, err = w.f.c.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+				_, err = w.f.C.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 				fixturekit.Must(t, err)
 			}
 			rebased := w.awaitRebasedPush(first)
@@ -248,7 +250,7 @@ func TestARebasedPushWithBlockingFindingsDropsTheRouteAndShowsTheCard(t *testing
 				if !found || route.Status != delivery.LandingRouteDropped {
 					return false
 				}
-				inbox, err := w.f.c.Inbox(ctx)
+				inbox, err := w.f.C.Inbox(ctx)
 				if err != nil {
 					return false
 				}
@@ -291,9 +293,9 @@ func TestARebasedPushWithBlockingFindingsDropsTheRouteAndShowsTheCard(t *testing
 func (w *routeWorld) approveAndLand() api.DeliveryLandResponse {
 	w.t.Helper()
 	ctx := context.Background()
-	presented, err := w.f.c.Delivery(ctx, w.stream)
+	presented, err := w.f.C.Delivery(ctx, w.stream)
 	fixturekit.Must(w.t, err)
-	response, err := w.f.c.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	response, err := w.f.C.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	fixturekit.Must(w.t, err)
 	return response
 }
@@ -328,7 +330,7 @@ func TestARebaseConflictAfterTheBaseMovedTakesTheRepairPath(t *testing.T) {
 		t.Fatalf("the response is %+v, want the base moved", response)
 	}
 	w.await("the conflicted rebase to take the repair path", 0, func() bool {
-		for _, tr := range w.f.transitions(t, w.stream) {
+		for _, tr := range w.f.Transitions(t, w.stream) {
 			if tr.Subject == "drift" && strings.HasPrefix(tr.To, "conflicted-") {
 				return true
 			}

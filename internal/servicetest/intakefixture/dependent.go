@@ -2,11 +2,12 @@ package intakefixture
 
 import (
 	context "context"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	seal "github.com/kpenfound/osmia/internal/seal"

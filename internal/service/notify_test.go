@@ -19,64 +19,20 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type fakeWebhook struct{ *fixturekit.Webhook }
-
-func newFakeWebhook(t *testing.T) *fakeWebhook { return &fakeWebhook{fixturekit.NewWebhook(t)} }
-
-func (w *fakeWebhook) records(opts Options) *fakeWebhook {
-	w.Webhook.Records(opts.Config.Root)
-	return w
-}
-
-func (w *fakeWebhook) hook() string { return w.Hook() }
-
-func (w *fakeWebhook) respond(status int) { w.Respond(status) }
-
-func (w *fakeWebhook) received() []string { return w.Received() }
-
-func (w *fakeWebhook) await(t *testing.T, n int) []string {
-	t.Helper()
-	return intakefixture.AwaitWebhook(t, w.Webhook, n)
-}
-
-type fakeInbox struct{ fixturekit.NotificationInbox }
-
-func (f *fakeInbox) read(ctx context.Context) (InboxResponse, *APIError) { return f.Read(ctx) }
-
-func (f *fakeInbox) set(entries ...InboxEntry) { f.Set(entries...) }
-
-func settled(t *testing.T, count func() int) {
-	t.Helper()
-	intakefixture.Settled(t, count)
-}
-
-func notifyFixture(t *testing.T, webhook string) (Options, *fakeInbox) {
+func notifyFixture(t *testing.T, webhook string) (Options, *fixturekit.NotificationInbox) {
 	t.Helper()
 	opts := fixture(t)
-	inbox := &fakeInbox{}
-	opts.notifyInbox = inbox.read
-	opts.NotifyRetry = 10 * time.Millisecond
-	if webhook != "" {
-		setWebhook(t, opts, webhook)
-	}
+	inbox := fixturekit.NewNotifyInbox(t, opts.Config.Root, webhook)
+	opts.notifyInbox = inbox.Read
+	opts.NotifyRetry = fixturekit.NotifyRetry
 	return opts, inbox
 }
 
-func setWebhook(t *testing.T, opts Options, webhook string) {
-	t.Helper()
-	fixturekit.SetWebhook(t, opts.Config.Root, webhook)
-}
-
-func startNotifying(t *testing.T, opts Options, inbox *fakeInbox) (*Service, *Client) {
+func startNotifying(t *testing.T, opts Options, inbox *fixturekit.NotificationInbox) (*Service, *Client) {
 	t.Helper()
 	s, c := start(t, opts)
 	inbox.Observe(func() { s.hub.Publish(Event{Kind: EventInbox}) })
 	return s, c
-}
-
-func readLedger(t *testing.T, opts Options) notifyLedger {
-	t.Helper()
-	return fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root)
 }
 
 // The notifier reads the service's own inbox: an escalation that opens after
@@ -86,17 +42,17 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	t.Parallel()
 	f, _, repository, _ := deliveryFixture(t)
 	ctx := context.Background()
-	hook := newFakeWebhook(t)
-	hook.records(Options{Config: config.Options{Root: f.s.cfg.Root.String()}})
+	hook := fixturekit.NewWebhook(t)
+	hook.Records(f.s.cfg.Root.String())
 	f.s.mu.Lock()
 	cfg := *f.s.cfg
-	cfg.Notify.Webhook = hook.hook()
+	cfg.Notify.Webhook = hook.Hook()
 	f.s.cfg = &cfg
 	f.s.mu.Unlock()
 	n := f.s.notifier
 	n.inbox = f.s.inbox
-	if due := n.pass(ctx); !due.IsZero() || len(hook.received()) != 0 {
-		t.Fatalf("delivery open before the webhook: %v %q", due, hook.received())
+	if due := n.pass(ctx); !due.IsZero() || len(hook.Received()) != 0 {
+		t.Fatalf("delivery open before the webhook: %v %q", due, hook.Received())
 	}
 
 	p := repository.Project()
@@ -123,22 +79,22 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	fixturekit.Must(t, err)
 	n.pass(ctx)
 	want := fmt.Sprintf("Osmia needs your decision.\nProject: %s\nWorkstream: %s\nKind: escalation\nQuestion: Where should state live?\nRecommendation: In files.\n", p, escalating)
-	if got := hook.received(); len(got) != 1 || got[0] != want {
+	if got := hook.Received(); len(got) != 1 || got[0] != want {
 		t.Fatalf("posts %q, want %q", got, want)
 	}
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 1 {
+	if got := hook.Received(); len(got) != 1 {
 		t.Fatalf("posted again: %q", got)
 	}
 }
 
-func budgetNotifier(t *testing.T, s *Service, hook string) (*notifier, *fakeInbox) {
+func budgetNotifier(t *testing.T, s *Service, hook string) (*notifier, *fixturekit.NotificationInbox) {
 	t.Helper()
 	cfg := *s.cfg
 	cfg.Notify.Webhook = hook
 	s.cfg = &cfg
-	inbox := &fakeInbox{}
-	return newNotifier(s, 10*time.Millisecond, inbox.read), inbox
+	inbox := &fixturekit.NotificationInbox{}
+	return newNotifier(s, 10*time.Millisecond, inbox.Read), inbox
 }
 
 // A daily budget pause is posted once with the spend, the limit and when it
@@ -147,12 +103,12 @@ func budgetNotifier(t *testing.T, s *Service, hook string) (*notifier, *fakeInbo
 func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	hook := newFakeWebhook(t)
+	hook := fixturekit.NewWebhook(t)
 	s, _, repo, clock := dailyBudgetService(t, 0, nil)
 	daily := dailyBudget{s: s, repository: repo}
-	n, _ := budgetNotifier(t, s, hook.hook())
+	n, _ := budgetNotifier(t, s, hook.Hook())
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 0 {
+	if got := hook.Received(); len(got) != 0 {
 		t.Fatalf("posts without a pause: %q", got)
 	}
 
@@ -161,32 +117,32 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 	n.pass(ctx)
 	n.pass(ctx)
 	want := fmt.Sprintf("Osmia paused dispatch: the daily budget is reached.\nProject: %s\nSpend: USD 1.25\nLimit: USD 1.00\nClears: 2026-09-17T00:00:00-07:00\n", fixturekit.Project)
-	if got := hook.received(); len(got) != 1 || got[0] != want {
+	if got := hook.Received(); len(got) != 1 || got[0] != want {
 		t.Fatalf("posts for the pause\n%q\nwant\n%q", got, want)
 	}
 
-	restarted, _ := budgetNotifier(t, s, hook.hook())
+	restarted, _ := budgetNotifier(t, s, hook.Hook())
 	restarted.pass(ctx)
-	if got := hook.received(); len(got) != 1 {
+	if got := hook.Received(); len(got) != 1 {
 		t.Fatalf("posts after a restart: %q", got)
 	}
 
 	fixturekit.Jump(clock, time.Date(2026, 9, 17, 7, 0, 0, 0, time.UTC))
 	fixturekit.Must(t, daily.Pass(ctx))
 	n.pass(ctx)
-	appendDayCost(t, repo, sibling, "next-day", clock.Now(), 1, true)
+	appendDayCost(t, repo, fixturekit.Sibling, "next-day", clock.Now(), 1, true)
 	fixturekit.Must(t, daily.Pass(ctx))
-	hook.respond(http.StatusBadGateway)
+	hook.Respond(http.StatusBadGateway)
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 2 || !strings.Contains(got[1], "Spend: USD 1\n") || !strings.Contains(got[1], "Clears: 2026-09-18T00:00:00-07:00") {
+	if got := hook.Received(); len(got) != 2 || !strings.Contains(got[1], "Spend: USD 1\n") || !strings.Contains(got[1], "Clears: 2026-09-18T00:00:00-07:00") {
 		t.Fatalf("posts for the next day's pause: %q", got)
 	}
 
 	fixturekit.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
-	hook.respond(http.StatusOK)
+	hook.Respond(http.StatusOK)
 	time.Sleep(20 * time.Millisecond)
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 2 {
+	if got := hook.Received(); len(got) != 2 {
 		t.Fatalf("posts for a cleared pause: %q", got)
 	}
 	states := map[string]int{}
@@ -204,13 +160,13 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	hook := newFakeWebhook(t)
+	hook := fixturekit.NewWebhook(t)
 	s, _, repo, clock := dailyBudgetService(t, 0, nil)
 	appendDayCost(t, repo, fixturekit.Stream, "spent", clock.Now(), 1.25, true)
 	fixturekit.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
-	n, inbox := budgetNotifier(t, s, hook.hook())
+	n, inbox := budgetNotifier(t, s, hook.Hook())
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 0 {
+	if got := hook.Received(); len(got) != 0 {
 		t.Fatalf("posts for a pause open before the webhook: %q", got)
 	}
 	for _, rec := range n.ledger.Notifications {
@@ -220,10 +176,10 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	}
 
 	e := fixturekit.NotificationEntry(InboxEscalation, 1)
-	inbox.set(e)
-	hook.respond(http.StatusBadGateway)
+	inbox.Set(e)
+	hook.Respond(http.StatusBadGateway)
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 1 {
+	if got := hook.Received(); len(got) != 1 {
 		t.Fatalf("posts for the entry: %q", got)
 	}
 	unbudgeted := *s.cfg
@@ -231,11 +187,11 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	s.mu.Lock()
 	s.cfg = &unbudgeted
 	s.mu.Unlock()
-	inbox.set()
-	hook.respond(http.StatusOK)
+	inbox.Set()
+	hook.Respond(http.StatusOK)
 	time.Sleep(20 * time.Millisecond)
 	n.pass(ctx)
-	if got := hook.received(); len(got) != 1 {
+	if got := hook.Received(); len(got) != 1 {
 		t.Fatalf("posts with no daily budget configured: %q", got)
 	}
 	if rec := n.ledger.Notifications[NotificationKey(fixturekit.Project, e)]; rec == nil || rec.State != notificationPending {
@@ -259,10 +215,10 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 func TestNotifyWakesOnRuntimeChanges(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
-	hook := newFakeWebhook(t)
+	hook := fixturekit.NewWebhook(t)
 	s, _, repo, clock := dailyBudgetService(t, 0, nil)
 	s.hub = eventstream.New()
-	n, _ := budgetNotifier(t, s, hook.hook())
+	n, _ := budgetNotifier(t, s, hook.Hook())
 	s.notifier = n
 	s.store.Observe(func() { s.hub.Publish(Event{Kind: EventRuntime}) })
 	go n.run(ctx)
@@ -276,7 +232,7 @@ func TestNotifyWakesOnRuntimeChanges(t *testing.T) {
 	intakefixture.Soon(t, "the pending resync consumed", s.hub.Idle)
 	appendDayCost(t, repo, fixturekit.Stream, "spent", clock.Now(), 1.25, true)
 	fixturekit.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
-	if got := hook.await(t, 1); !strings.Contains(got[0], "Spend: USD 1.25") {
+	if got := intakefixture.AwaitWebhook(t, hook, 1); !strings.Contains(got[0], "Spend: USD 1.25") {
 		t.Fatalf("post %q", got)
 	}
 }

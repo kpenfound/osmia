@@ -48,12 +48,6 @@ func (f *crossRepoStall) watch() stallWatch {
 	return stallWatch{s: f.s, cfg: &cfg, repository: f.repo, submit: f.log.submit}
 }
 
-func (f *crossRepoStall) quietFor(d time.Duration) {
-	f.clock.Mu.Lock()
-	defer f.clock.Mu.Unlock()
-	f.clock.At = fixturekit.DemoStart.Add(d)
-}
-
 func (f *crossRepoStall) pass(t *testing.T) []router.Exit {
 	t.Helper()
 	f.log.reset()
@@ -105,11 +99,11 @@ func TestAnUnapprovedWorkgroupExplainsAMemberOnlyWhileTheOwnerIsAsked(t *testing
 		t.Fatal("the owner is asked for the approval of a workgroup whose members have no packet")
 	}
 
-	f.quietFor(44 * time.Minute)
+	f.clock.QuietFor(44 * time.Minute)
 	if got := streamStalls(f.pass(t), fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a member sketched for 44 minutes raised %+v", got)
 	}
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	if got := streamStalls(f.pass(t), fixturekit.Stream); len(got) != 1 {
 		t.Fatalf("a member sketched for 46 minutes with no card raised %d stalls, want 1", len(got))
 	}
@@ -126,7 +120,7 @@ func TestAnUnapprovedWorkgroupExplainsAMemberOnlyWhileTheOwnerIsAsked(t *testing
 	if !asked() {
 		t.Fatal("the owner is not asked for the approval with every member's ratification card open")
 	}
-	f.quietFor(3 * time.Hour)
+	f.clock.QuietFor(3 * time.Hour)
 	if got := streamStalls(f.pass(t), fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a member whose workgroup approval the owner is asked for raised %+v", got)
 	}
@@ -157,11 +151,11 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 	f.seedChange(t, change, 1, fixturekit.DemoStart)
 	subject := lifecycle.WorkgroupChangeDocument("c1")
 
-	f.quietFor(44 * time.Minute)
+	f.clock.QuietFor(44 * time.Minute)
 	if got := changeStalls(f.pass(t), subject); len(got) != 0 {
 		t.Fatalf("a change drafted for 44 minutes raised %+v", got)
 	}
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := changeStalls(f.pass(t), subject)
 	if len(got) != 1 || got[0].Workstream != fixturekit.Stream || got[0].Repo != f.repo || got[0].Trigger != intake.TriggerStalled || len(got[0].Targets) != 1 {
 		t.Fatalf("a change drafted for 46 minutes raised %+v", got)
@@ -194,7 +188,7 @@ func TestACrossRepoWorkgroupChangeStallsOnItsLeader(t *testing.T) {
 		}
 	}
 
-	f.quietFor(46*time.Minute + 50*time.Minute)
+	f.clock.QuietFor(46*time.Minute + 50*time.Minute)
 	if again := changeStalls(f.pass(t), subject); len(again) != 0 {
 		t.Fatalf("a decided stall of the change was raised again: %+v", again)
 	}
@@ -225,11 +219,11 @@ func TestACrossRepoAmendmentRequestStallsOnItsLeader(t *testing.T) {
 	_, err := trace.FileProjectAmendment(ctx, f.chief, trace.ProjectAmendment{Workgroup: f.g.ID, Origin: fixturekit.Quiet, Role: "mason", Requester: stallSeeder, Citations: []string{"criterion 1"}, Change: "Widen the contract", Reason: "the slice cannot meet it"}, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	subject := lifecycle.WorkgroupChangeDocument("contract-1")
-	f.quietFor(44 * time.Minute)
+	f.clock.QuietFor(44 * time.Minute)
 	if got := changeStalls(f.pass(t), subject); len(got) != 0 {
 		t.Fatalf("a request filed 44 minutes ago raised %+v", got)
 	}
-	f.quietFor(46 * time.Minute)
+	f.clock.QuietFor(46 * time.Minute)
 	got := changeStalls(f.pass(t), subject)
 	if len(got) != 1 || got[0].Workstream != fixturekit.Stream || got[0].Evidence.Facts["state"] != "requested" {
 		t.Fatalf("a request filed 46 minutes ago raised %+v", got)

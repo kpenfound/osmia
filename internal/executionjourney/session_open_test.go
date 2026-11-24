@@ -5,9 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/intake"
 	maps "maps"
 	os "os"
 	filepath "path/filepath"
@@ -15,6 +12,12 @@ import (
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -29,9 +32,9 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func newSessionFixture(t *testing.T) (*Service, *Client, config.ProjectID, string) {
+func newSessionFixture(t *testing.T) (*journey.Service, *journey.Client, config.ProjectID, string) {
 	t.Helper()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	home := filepath.Dir(clone)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", clone, "add", "README.md")
@@ -41,11 +44,11 @@ func newSessionFixture(t *testing.T) (*Service, *Client, config.ProjectID, strin
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	s.cfg = s.current()
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	s.Cfg = s.Current()
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, clone
 }
 
@@ -70,7 +73,7 @@ func TestSessionOpenRecordsWorkstreamAndWorktree(t *testing.T) {
 	if read.Session != session {
 		t.Fatalf("read %+v, want %+v", read.Session, session)
 	}
-	worktree := filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project), string(session.Workstream))
+	worktree := filepath.Join(s.Cfg.Root.String(), service.SessionsDirectory, string(project), string(session.Workstream))
 	info, err := os.Stat(worktree)
 	fixturekit.Must(t, err)
 	if !info.IsDir() {
@@ -110,7 +113,7 @@ func TestSessionOpenRefusesUnknownOrMissingProfile(t *testing.T) {
 	if len(sessions.Sessions) != 0 {
 		t.Fatalf("an invalid profile left a session: %+v", sessions)
 	}
-	if entries, err := os.ReadDir(filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project))); err == nil && len(entries) != 0 {
+	if entries, err := os.ReadDir(filepath.Join(s.Cfg.Root.String(), service.SessionsDirectory, string(project))); err == nil && len(entries) != 0 {
 		t.Fatalf("an invalid profile left a worktree: %+v", entries)
 	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
@@ -128,7 +131,7 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 		}
 		for _, mode := range modes {
 			t.Run(step+"/"+mode, func(t *testing.T) {
-				opts, clone := projectFixture(t)
+				opts, clone := journey.ProjectFixture(t)
 				home := filepath.Dir(clone)
 				fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))
 				fixturekit.DemoGit(t, home, "-C", clone, "add", "README.md")
@@ -139,14 +142,14 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 				fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 				fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 				root := opts.Config.Root
-				s, c := start(t, opts)
+				s, c := journey.StartT(t, opts)
 				added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 				fixturekit.Must(t, err)
-				writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+				intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 				project := added.Project.ID
 				req := api.SessionOpenRequest{Project: project, Profile: "default"}
 				crash := errors.New("crash")
-				s.boundary = func(name string) error {
+				s.Boundary = func(name string) error {
 					if name != step {
 						return nil
 					}
@@ -175,10 +178,10 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 					fixturekit.Must(t, json.Unmarshal(data, &journal))
 				}
 				id := journal.Workstream
-				s.boundary = nil
+				s.Boundary = nil
 				if mode == "restart" {
 					fixturekit.Must(t, s.Close())
-					_, c = start(t, opts)
+					_, c = journey.StartT(t, opts)
 				} else {
 					result, err := c.OpenSession(context.Background(), req)
 					fixturekit.Must(t, err)
@@ -220,11 +223,11 @@ func TestSessionOpenRetryComparesTheRequestsProject(t *testing.T) {
 	fixturekit.DemoGit(t, home, "-C", cloneB, "remote", "add", "upstream", bareB)
 	addedB, err := c.AddProject(context.Background(), api.ProjectAddRequest{Name: "second", Upstream: "second/second", Fork: "owner/second", Clone: cloneB})
 	fixturekit.Must(t, err)
-	writeCharter(t, c, addedB.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, addedB.Project.ID, "1. Keep changes small.\n")
 	projectB := addedB.Project.ID
 
 	crash := errors.New("crash")
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name != "session-journal-written" {
 			return nil
 		}
@@ -232,7 +235,7 @@ func TestSessionOpenRetryComparesTheRequestsProject(t *testing.T) {
 	}
 	_, err = c.OpenSession(context.Background(), api.SessionOpenRequest{Project: projectA, Profile: "default"})
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 
 	_, err = c.OpenSession(context.Background(), api.SessionOpenRequest{Project: projectB, Profile: "default"})
 	fixturekit.AssertCode(t, err, api.Conflict)
@@ -317,10 +320,10 @@ func assertSessionUnchanged(t *testing.T, repository *trace.Repository, session 
 	}
 }
 
-func drivenPass(t *testing.T, s *Service, repository *trace.Repository, pass func() error) {
+func drivenPass(t *testing.T, s *journey.Service, repository *trace.Repository, pass func() error) {
 	t.Helper()
-	if active := s.sole(); active != nil {
-		fixturekit.Must(t, s.halt(active))
+	if active := s.Sole(); active != nil {
+		fixturekit.Must(t, s.Halt(active))
 	}
 	fixturekit.Must(t, pass())
 }
@@ -340,8 +343,8 @@ func TestArchitectPassSkipsASessionAlongsideAHandedWorkstream(t *testing.T) {
 	_, err = repo.SetFeatureState(ctx, sessionHeader("handed", session, fixturekit.DemoStart), intake.HandedState, "fixture hand-in")
 	fixturekit.Must(t, err)
 	before := captureSessionSnapshot(t, repo, session)
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{Architect: &intake.Architect{}}}}
-	d := &intake.Drafter{S: s.intake().DrafterDependencies(), Repository: repo}
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Options: journey.Options{Options: service.Options{Architect: &intake.Architect{}}}}
+	d := &intake.Drafter{S: s.Intake().DrafterDependencies(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return d.Pass(ctx) })
 	draft, err := repo.Workflow(fixturekit.Stream, intake.DraftSubject)
 	fixturekit.Must(t, err)
@@ -366,8 +369,8 @@ func TestShedPassSkipsASessionAlongsideASketchedWorkstream(t *testing.T) {
 	_, err = repo.SetFeatureState(ctx, sessionHeader("sketched", session, fixturekit.DemoStart), intake.SketchedState, "fixture draft accepted")
 	fixturekit.Must(t, err)
 	before := captureSessionSnapshot(t, repo, session)
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{Committee: &intake.Committee{}}}}
-	d := &intake.Debate{S: s.intake().DebateDependencies(), Repository: repo}
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Options: journey.Options{Options: service.Options{Committee: &intake.Committee{}}}}
+	d := &intake.Debate{S: s.Intake().DebateDependencies(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return d.Pass(ctx) })
 	feature, err := repo.Workflow(fixturekit.Stream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
@@ -379,13 +382,13 @@ func TestShedPassSkipsASessionAlongsideASketchedWorkstream(t *testing.T) {
 
 func TestMasonsPassSkipsASessionAlongsideAReadyUnit(t *testing.T) {
 	t.Parallel()
-	f, _ := newMasonFixture(t, 1, independentPlan)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	ordinary, repository := seedBuild(t, f, "resume", independentPlan, config.WorkspacesGit, base)
+	f, _ := journey.NewMasonFixture(t, 1, intakefixture.IndependentPlan)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	ordinary, repository := journey.SeedBuild(t, f, "resume", intakefixture.IndependentPlan, config.WorkspacesGit, base)
 	session := createTestSession(t, repository)
 	before := captureSessionSnapshot(t, repository, session)
-	m := newMasonController(f.s, repository)
-	drivenPass(t, f.s, repository, func() error { return m.Pass(context.Background()) })
+	m := journey.NewMasonController(f.S, repository)
+	drivenPass(t, f.S, repository, func() error { return m.Pass(context.Background()) })
 	state, err := repository.Workflow(ordinary, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
 	if state.Value != intake.UnitImplementing {
@@ -396,11 +399,11 @@ func TestMasonsPassSkipsASessionAlongsideAReadyUnit(t *testing.T) {
 
 func TestReviewersPassSkipsASessionAlongsideAReviewingUnit(t *testing.T) {
 	t.Parallel()
-	f, ordinary, repository := newReviewFixture(t, "resume")
+	f, ordinary, repository := journey.NewReviewFixture(t, "resume")
 	session := createTestSession(t, repository)
 	before := captureSessionSnapshot(t, repository, session)
-	r := &reviewers{masons: &masons{s: f.s, cfg: f.s.cfg, repository: repository}}
-	drivenPass(t, f.s, repository, func() error { return r.Pass(context.Background()) })
+	r := &journey.Reviewers{Masons: &journey.Masons{S: f.S, Cfg: f.S.Cfg, Repository: repository}}
+	drivenPass(t, f.S, repository, func() error { return r.Pass(context.Background()) })
 	threads, err := repository.Threads(ordinary)
 	fixturekit.Must(t, err)
 	found := false
@@ -417,14 +420,14 @@ func TestReviewersPassSkipsASessionAlongsideAReviewingUnit(t *testing.T) {
 
 func TestUnitChecksPassSkipsASessionAlongsideACheckingUnit(t *testing.T) {
 	t.Parallel()
-	f, _ := newMasonFixture(t, 1, independentPlan)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	ordinary, repository := seedBuild(t, f, "resume", independentPlan, config.WorkspacesGit, base)
-	seedChecking(t, f, repository, ordinary, "resume", resumeReport)
+	f, _ := journey.NewMasonFixture(t, 1, intakefixture.IndependentPlan)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	ordinary, repository := journey.SeedBuild(t, f, "resume", intakefixture.IndependentPlan, config.WorkspacesGit, base)
+	journey.SeedChecking(t, f, repository, ordinary, "resume", journey.ResumeReport)
 	session := createTestSession(t, repository)
 	before := captureSessionSnapshot(t, repository, session)
-	c := &checkers{masons: &masons{s: f.s, cfg: f.s.cfg, repository: repository}}
-	drivenPass(t, f.s, repository, func() error { return c.Pass(context.Background()) })
+	c := &journey.Checkers{Masons: &journey.Masons{S: f.S, Cfg: f.S.Cfg, Repository: repository}}
+	drivenPass(t, f.S, repository, func() error { return c.Pass(context.Background()) })
 	ops, err := repository.Operations(ordinary)
 	fixturekit.Must(t, err)
 	if len(ops) == 0 {
@@ -448,8 +451,8 @@ func TestBaseRefreshPassSkipsASessionAlongsideADependentWorkstream(t *testing.T)
 	sealFixtureStream(t, repo, session)
 	before := captureSessionSnapshot(t, repo, session)
 	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{Reconciliation: reconcile.Options{Now: clock.Now}}}}
-	b := &lifecycle.BaseRefresher{S: s.lifecycle(), Repository: repo}
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Options: journey.Options{Options: service.Options{Reconciliation: reconcile.Options{Now: clock.Now}}}}
+	b := &lifecycle.BaseRefresher{S: s.Lifecycle(), Repository: repo}
 	drivenPass(t, s, repo, func() error { return b.Pass(ctx) })
 	if baseRefreshOperationCount2(t, repo, fixturekit.Stream) == 0 {
 		t.Fatal("the dependent workstream's base refresh was not requested")
@@ -499,12 +502,12 @@ func TestDriftPassSkipsASessionAlongsideABuildingWorkstream(t *testing.T) {
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream, session}}})
 	fixturekit.Must(t, err)
 	defer store.Close()
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{Reconciliation: reconcile.Options{Now: clock.Now}}}, store: store}
-	f := &foreman{masons: &masons{s: s, cfg: cfg, repository: repo}}
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Options: journey.Options{Options: service.Options{Reconciliation: reconcile.Options{Now: clock.Now}}}, Store: store}
+	f := &journey.Foreman{Masons: &journey.Masons{S: s, Cfg: cfg, Repository: repo}}
 	var requested []config.WorkstreamID
 	drivenPass(t, s, repo, func() error {
 		var err error
-		requested, err = f.RequestDrifts(ctx, func(ws config.WorkstreamID) (string, error) { return "owner requested", nil })
+		requested, err = (journey.Drifter{Foreman: f}).RequestDrifts(ctx, func(ws config.WorkstreamID) (string, error) { return "owner requested", nil })
 		return err
 	})
 	found := false
@@ -532,12 +535,12 @@ func askDriftFixture(t *testing.T, repo *trace.Repository, ws config.WorkstreamI
 
 func TestFinalReviewPassSkipsASessionAlongsideAFullyMergedWorkstream(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "assemble")
-	mergeDirectly(t, f, repository, stream, "resume", map[string]string{"resume.go": "package demo\n"})
-	mergeDirectly(t, f, repository, stream, "dedupe", map[string]string{"dedupe.go": "package demo\n"})
+	f, stream, repository, a := journey.NewFinalFixture(t, "assemble")
+	journey.MergeDirectly(t, f, repository, stream, "resume", map[string]string{"resume.go": "package demo\n"})
+	journey.MergeDirectly(t, f, repository, stream, "dedupe", map[string]string{"dedupe.go": "package demo\n"})
 	session := createTestSession(t, repository)
 	before := captureSessionSnapshot(t, repository, session)
-	drivenPass(t, f.s, repository, func() error { return a.Pass(context.Background()) })
+	drivenPass(t, f.S, repository, func() error { return a.Pass(context.Background()) })
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	fixturekit.Must(t, err)
 	if feature.Value != intake.AssembledState {
@@ -546,21 +549,21 @@ func TestFinalReviewPassSkipsASessionAlongsideAFullyMergedWorkstream(t *testing.
 	assertSessionUnchanged(t, repository, session, before)
 }
 
-func approvedDeliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repository, api.DeliveryApproval) {
+func approvedDeliveryFixture(t *testing.T) (*journey.ShedFixture, config.WorkstreamID, *trace.Repository, api.DeliveryApproval) {
 	t.Helper()
-	f, stream, repository, _ := deliveryFixture(t)
-	presented, apiErr := f.s.deliveryPresentation(context.Background(), string(stream))
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	presented, apiErr := f.S.DeliveryPresentation(context.Background(), string(stream))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	approval, apiErr := f.s.approveDelivery(context.Background(), string(stream), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	approval, apiErr := f.S.ApproveDelivery(context.Background(), string(stream), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	return f, stream, repository, approval
 }
 
-func approveSessionDelivery(t *testing.T, f *shedFixture, repository *trace.Repository, session config.WorkstreamID, approval api.DeliveryApproval) {
+func approveSessionDelivery(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, session config.WorkstreamID, approval api.DeliveryApproval) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -582,13 +585,13 @@ func TestPublisherPassSkipsASessionAlongsideAnApprovedWorkstream(t *testing.T) {
 	session := createTestSession(t, repository)
 	approveSessionDelivery(t, f, repository, session, decision)
 	before := captureSessionSnapshot(t, repository, session)
-	p := &publisher{s: f.s, repository: repository}
-	drivenPass(t, f.s, repository, func() error { return p.Pass(context.Background()) })
+	p := &journey.Publisher{S: f.S, Repository: repository}
+	drivenPass(t, f.S, repository, func() error { return p.Pass(context.Background()) })
 	ops, err := repository.Operations(stream)
 	fixturekit.Must(t, err)
 	found := false
 	for _, o := range ops {
-		if o.Operation.Action == delivery.PublishAction || o.Operation.Action == publishUpstreamAction {
+		if o.Operation.Action == delivery.PublishAction || o.Operation.Action == lifecycle.PublishUpstreamAction {
 			found = true
 		}
 	}

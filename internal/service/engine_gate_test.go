@@ -3,13 +3,15 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -44,7 +46,7 @@ func TestEngineGateNamesAdmittedChecksOnly(t *testing.T) {
 				release, err := p.acquire(t.Context(), held)
 				fixturekit.Must(t, err)
 				ctx, cancel := context.WithCancel(t.Context())
-				queued := queuedSlot(ctx, p, CheckSlotRun{Project: fixturekit.Project, Workstream: sibling, Review: 17})
+				queued := queuedSlot(ctx, p, CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Sibling, Review: 17})
 				synctest.Wait()
 				before := s.CheckSlots()
 				if before.Limit != 1 || before.Used != 1 || len(before.Waiting) != 1 || !reflect.DeepEqual(before.Active, []CheckSlotRun{held}) {
@@ -63,7 +65,7 @@ func TestEngineGateNamesAdmittedChecksOnly(t *testing.T) {
 				if !errors.As(err, &busy) || busy.Action != action.name || !reflect.DeepEqual(busy.Checks, []CheckSlotRun{held}) || len(busy.Turns) != 0 {
 					t.Fatalf("busy refusal: %#v (%v)", busy, err)
 				}
-				if !strings.Contains(err.Error(), "admitted") || strings.Contains(err.Error(), string(sibling)) || strings.Contains(err.Error(), "review 17") || commands != 0 {
+				if !strings.Contains(err.Error(), "admitted") || strings.Contains(err.Error(), string(fixturekit.Sibling)) || strings.Contains(err.Error(), "review 17") || commands != 0 {
 					t.Fatalf("refusal %v, commands %d", err, commands)
 				}
 				if after := s.CheckSlots(); !reflect.DeepEqual(after, before) {
@@ -115,8 +117,8 @@ func TestEngineGateRetainsEveryActiveIdentity(t *testing.T) {
 	p := &checkSlotPool{limit: 3}
 	runs := []CheckSlotRun{
 		{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "implement"},
-		{Project: fixturekit.Project, Workstream: sibling, Review: 3},
-		{Project: fixturekit.Project, Workstream: otherStream, Session: true},
+		{Project: fixturekit.Project, Workstream: fixturekit.Sibling, Review: 3},
+		{Project: fixturekit.Project, Workstream: fixturekit.OtherStream, Session: true},
 	}
 	for _, run := range runs {
 		release, err := p.acquire(t.Context(), run)
@@ -173,7 +175,7 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 				cfg.Dagger = tc.dagger
 			}
 			entered, finish := make(chan struct{}), make(chan struct{})
-			backend := turnFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			backend := fixturekit.TurnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 				close(entered)
 				<-finish
 				return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "engine-turn"}, FinalResponse: "Ready"}, nil
@@ -185,7 +187,7 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 			fixturekit.Must(t, err)
 			finished := make(chan error, 1)
 			go func() { _, err := adapter.Apply(t.Context(), op); finished <- err }()
-			awaitCheck(t, entered)
+			intakefixture.AwaitCheck(t, entered)
 			commands := 0
 			control := gateEngine{run: func(context.Context) error { commands++; return nil }}
 			for _, action := range gateActions {
@@ -206,7 +208,7 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 				}
 			}
 			close(finish)
-			fixturekit.Must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, intakefixture.AwaitCheck(t, finished))
 			fixturekit.Must(t, s.RestartEngine(t.Context(), control))
 			if commands != map[bool]int{false: 3, true: 1}[dagger] {
 				t.Fatalf("commands %d", commands)
@@ -225,7 +227,7 @@ func TestEngineGateExcludesStartsDuringMaintenance(t *testing.T) {
 			cfg.Roles[masonRole] = role
 			cfg.Dagger = config.DaggerConfig{Engine: "docker-container://fake", Version: "v0.20.5"}
 			synctest.Test(t, func(t *testing.T) {
-				backend := turnFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+				backend := fixturekit.TurnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "engine-turn"}, FinalResponse: "Ready"}, nil
 				})
 				s, adapter := hardPauseService(t, cfg, repo, clock, backend)
@@ -241,7 +243,7 @@ func TestEngineGateExcludesStartsDuringMaintenance(t *testing.T) {
 					}})
 				}()
 				<-inside
-				check := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Project: fixturekit.Project, Workstream: sibling, Unit: "new-check"})
+				check := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Sibling, Unit: "new-check"})
 				op, err := thread.TurnOperation(fixturekit.Project, "maintenance-turn", thread.TurnInput{Workstream: fixturekit.Stream, Agent: "agent-0", Turn: "t-0"})
 				fixturekit.Must(t, err)
 				turnDone := make(chan error, 1)

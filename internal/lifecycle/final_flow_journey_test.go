@@ -3,10 +3,12 @@ package lifecycle_test
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -21,14 +23,14 @@ import (
 func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	ctx := context.Background()
 	j := newFlowJourney(t)
-	stream := j.stream
+	stream := j.Stream
 
-	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	j.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
-	j.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	j.FinalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
@@ -40,11 +42,11 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 	j.start(t)
 	first := j.awaitPushes(t, 1)[0]
-	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pushCount(t) != 1 {
-		t.Fatalf("%d pull requests, %d created, %d pushes", len(j.pulls.Prs), j.pulls.Creates, j.pushCount(t))
+	if len(j.Pulls.Prs) != 1 || j.Pulls.Creates != 1 || j.pushCount(t) != 1 {
+		t.Fatalf("%d pull requests, %d created, %d pushes", len(j.Pulls.Prs), j.Pulls.Creates, j.pushCount(t))
 	}
-	pr := j.pulls.Prs[0]
-	tip, _ := j.forkBranch(t)
+	pr := j.Pulls.Prs[0]
+	tip, _ := j.ForkBranch(t)
 	if !pr.Draft || pr.State != "open" || pr.Base != "main" || pr.Head != intake.FeatureBranch(stream) || pr.HeadCommit != tip || first.Commit != tip || first.PullRequest != pr.Number || !first.Draft || first.Number != 1 || first.Review != 1 {
 		t.Fatalf("pull request %+v, push %+v, branch at %s", pr, first, tip)
 	}
@@ -80,7 +82,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	failedCheck := j.host.failedCheck(firstCommit, "test:resume", "abc123")
 	j.step(t, 1, flowPoll, "the failed checks were rerun")
 	calls := j.rerunCalls(t)
-	if len(calls) != 1 || !strings.HasPrefix(calls[0], fmt.Sprintf("cloud checks rerun --failed --pr %d\n", pr.Number)) || !strings.Contains(calls[0], "pwd="+j.s.cfg.Root.String()+"/branches/"+string(j.project)+"/"+string(stream)+"\n") || !strings.HasSuffix(calls[0], "token="+flowToken) {
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], fmt.Sprintf("cloud checks rerun --failed --pr %d\n", pr.Number)) || !strings.Contains(calls[0], "pwd="+j.S.Cfg.Root.String()+"/branches/"+string(j.Project)+"/"+string(stream)+"\n") || !strings.HasSuffix(calls[0], "token="+flowToken) {
 		t.Fatalf("rerun calls %q", calls)
 	}
 	if got := j.loadMissingNotices(t, 1, 1); got != 1 {
@@ -102,8 +104,8 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 	j.restart(t)
 	why = j.step(t, 1, flowPoll, "posted before the rerun was requested")
-	if len(j.rerunCalls(t)) != 1 || j.loadMissingNotices(t, 1, 1) != 1 || j.pushCount(t) != 1 || j.pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.checkRuns(t, 1)) != 0 {
-		t.Fatalf("after the restart: %d reruns, %d notices, %d pushes, %d pull requests, runs %+v (waiting for %q)", len(j.rerunCalls(t)), j.loadMissingNotices(t, 1, 1), j.pushCount(t), j.pulls.Creates, j.checkRuns(t, 1), why)
+	if len(j.rerunCalls(t)) != 1 || j.loadMissingNotices(t, 1, 1) != 1 || j.pushCount(t) != 1 || j.Pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.checkRuns(t, 1)) != 0 {
+		t.Fatalf("after the restart: %d reruns, %d notices, %d pushes, %d pull requests, runs %+v (waiting for %q)", len(j.rerunCalls(t)), j.loadMissingNotices(t, 1, 1), j.pushCount(t), j.Pulls.Creates, j.checkRuns(t, 1), why)
 	}
 
 	j.host.pending(firstCommit)
@@ -151,16 +153,16 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	j.requireNoProblems(t)
 
 	j.halt(t)
-	moveFeature(t, j.shedFixture, stream, map[string]string{"internal/trace/upload.go": "package trace\n\n// Upload calls Dedupe before it sends a chunk.\n"})
+	journey.MoveFeature(t, j.ShedFixture, stream, map[string]string{"internal/trace/upload.go": "package trace\n\n// Upload calls Dedupe before it sends a chunk.\n"})
 	j.held = nil
 	j.start(t)
 	pushes := j.awaitPushes(t, 2)
 	second := pushes[1]
 	secondCommit := second.Commit
-	if second.Number != 2 || second.Review != 2 || second.PullRequest != pr.Number || secondCommit == firstCommit || !second.Draft || j.pulls.Creates != 1 || len(j.pulls.Prs) != 1 || j.pushCount(t) != 2 {
-		t.Fatalf("second push %+v, %d pull requests created, %d pushes", second, j.pulls.Creates, j.pushCount(t))
+	if second.Number != 2 || second.Review != 2 || second.PullRequest != pr.Number || secondCommit == firstCommit || !second.Draft || j.Pulls.Creates != 1 || len(j.Pulls.Prs) != 1 || j.pushCount(t) != 2 {
+		t.Fatalf("second push %+v, %d pull requests created, %d pushes", second, j.Pulls.Creates, j.pushCount(t))
 	}
-	if tip, _ := j.forkBranch(t); tip != secondCommit || j.pulls.Prs[0].Number != pr.Number {
+	if tip, _ := j.ForkBranch(t); tip != secondCommit || j.Pulls.Prs[0].Number != pr.Number {
 		t.Fatalf("the branch is at %s, the push signed %s", tip, secondCommit)
 	}
 	if docs := intakefixture.StreamDocuments(t, j.live(), stream, delivery.DeliveryDocument); len(docs) != 0 || j.feature(t) != intake.AssembledState {
@@ -188,7 +190,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 	var presented api.DeliveryPresentation
 	intakefixture.Eventually(t, "the delivery card never showed the second review's brief and its description", func() bool {
-		p, err := j.c.Delivery(ctx, stream)
+		p, err := j.C.Delivery(ctx, stream)
 		fixturekit.Must(t, err)
 		presented = p
 		return p.Report.Review == 2 && p.Brief != nil && p.Brief.State == api.BriefRecorded && strings.Contains(p.Draft, briefBlock)
@@ -200,8 +202,8 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	if !strings.HasPrefix(entry.Question, "Mark ready for review: ") {
 		t.Fatalf("the delivery entry asks %q", entry.Question)
 	}
-	if j.pulls.Readies != 0 || !j.pulls.Prs[0].Draft || strings.Contains(j.pulls.Prs[0].Body, "Before you ship") {
-		t.Fatalf("the draft changed before the owner decided: %+v", j.pulls.Prs[0])
+	if j.Pulls.Readies != 0 || !j.Pulls.Prs[0].Draft || strings.Contains(j.Pulls.Prs[0].Body, "Before you ship") {
+		t.Fatalf("the draft changed before the owner decided: %+v", j.Pulls.Prs[0])
 	}
 	j.requireNoProblems(t)
 
@@ -209,9 +211,9 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	intakefixture.Eventually(t, "the workstream was never delivered", func() bool { return j.feature(t) == intake.DeliveredState })
-	final := j.pulls.Prs[0]
-	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Updates != 1 || final.Draft || final.State != "open" || !strings.Contains(final.Body, briefBlock) || final.HeadCommit != secondCommit || j.pushCount(t) != 2 || len(j.pushes(t)) != 2 {
-		t.Fatalf("pull requests %+v: %d created, %d ready calls, %d updates, %d pushes", j.pulls.Prs, j.pulls.Creates, j.pulls.Readies, j.pulls.Updates, j.pushCount(t))
+	final := j.Pulls.Prs[0]
+	if len(j.Pulls.Prs) != 1 || j.Pulls.Creates != 1 || j.Pulls.Readies != 1 || j.Pulls.Updates != 1 || final.Draft || final.State != "open" || !strings.Contains(final.Body, briefBlock) || final.HeadCommit != secondCommit || j.pushCount(t) != 2 || len(j.pushes(t)) != 2 {
+		t.Fatalf("pull requests %+v: %d created, %d ready calls, %d updates, %d pushes", j.Pulls.Prs, j.Pulls.Creates, j.Pulls.Readies, j.Pulls.Updates, j.pushCount(t))
 	}
 	ready, recorded, err := delivery.ReadyAt(j.live(), stream)
 	fixturekit.Must(t, err)
@@ -243,14 +245,14 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 func (j *flowJourney) reportOf(t *testing.T, review int) (api.FinalReport, bool) {
 	t.Helper()
-	report, found, err := delivery.LatestFinalReport(j.live(), j.stream)
+	report, found, err := delivery.LatestFinalReport(j.live(), j.Stream)
 	fixturekit.Must(t, err)
 	return report, found && report.Review == review
 }
 
 func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 	t.Helper()
-	entries, err := j.live().Outbox(j.stream)
+	entries, err := j.live().Outbox(j.Stream)
 	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
@@ -263,15 +265,15 @@ func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 
 func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T) {
 	j := newFlowJourney(t)
-	stream := j.stream
-	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	stream := j.Stream
+	j.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
-	j.pulls.Mu.Lock()
-	j.pulls.Uncredentialed = true
-	j.pulls.Mu.Unlock()
+	j.Pulls.Mu.Lock()
+	j.Pulls.Uncredentialed = true
+	j.Pulls.Mu.Unlock()
 
 	j.start(t)
 	why := j.awaitWaiting(t, 1, time.Time{}, "GITHUB_TOKEN")
@@ -283,10 +285,10 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 	}
 	assertHeld := func() {
 		t.Helper()
-		j.pulls.Mu.Lock()
-		finds, creates, prs := j.pulls.Finds, j.pulls.Creates, len(j.pulls.Prs)
-		j.pulls.Mu.Unlock()
-		if _, pushed := j.forkBranch(t); pushed || j.pushCount(t) != 0 || finds != 0 || creates != 0 || prs != 0 || len(j.pushes(t)) != 0 {
+		j.Pulls.Mu.Lock()
+		finds, creates, prs := j.Pulls.Finds, j.Pulls.Creates, len(j.Pulls.Prs)
+		j.Pulls.Mu.Unlock()
+		if _, pushed := j.ForkBranch(t); pushed || j.pushCount(t) != 0 || finds != 0 || creates != 0 || prs != 0 || len(j.pushes(t)) != 0 {
 			t.Fatalf("without a credential: the fork holds the branch %v, %d pushes, %d finds, %d creates, %d pull requests", pushed, j.pushCount(t), finds, creates, prs)
 		}
 		if runs := j.checkRuns(t, 1); len(runs) != 0 {
@@ -309,7 +311,7 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 	if got := j.credentialNotices(t, 1); got != 1 {
 		t.Fatalf("%d notices that the review waits for a credential", got)
 	}
-	statuses, _, apiErr := j.s.statuses()
+	statuses, _, apiErr := journey.InspectForTest(j.S).Statuses()
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
@@ -326,14 +328,14 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		t.Fatal("the workstream is missing from the status")
 	}
 
-	j.pulls.Mu.Lock()
-	j.pulls.Uncredentialed = false
-	j.pulls.Mu.Unlock()
+	j.Pulls.Mu.Lock()
+	j.Pulls.Uncredentialed = false
+	j.Pulls.Mu.Unlock()
 	j.restart(t)
 	j.clock.Advance(flowPoll)
 	first := j.awaitPushes(t, 1)[0]
-	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pushCount(t) != 1 || !j.pulls.Prs[0].Draft || j.pulls.Prs[0].HeadCommit != first.Commit || first.Review != 1 {
-		t.Fatalf("%d pull requests, %d created, %d pushes, push %+v", len(j.pulls.Prs), j.pulls.Creates, j.pushCount(t), first)
+	if len(j.Pulls.Prs) != 1 || j.Pulls.Creates != 1 || j.pushCount(t) != 1 || !j.Pulls.Prs[0].Draft || j.Pulls.Prs[0].HeadCommit != first.Commit || first.Review != 1 {
+		t.Fatalf("%d pull requests, %d created, %d pushes, push %+v", len(j.Pulls.Prs), j.Pulls.Creates, j.pushCount(t), first)
 	}
 	if j.credentialNotices(t, 1) != 1 {
 		t.Fatalf("%d credential notices after the restart", j.credentialNotices(t, 1))
@@ -356,7 +358,7 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		t.Fatalf("the check result %+v", run)
 	}
 	report := j.awaitReport(t, 1)
-	if report.Commit != first.Reviewed || j.pushCount(t) != 1 || j.pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.rerunCalls(t)) != 0 {
-		t.Fatalf("report %+v, %d pushes, %d pull requests, %d reruns", report, j.pushCount(t), j.pulls.Creates, len(j.rerunCalls(t)))
+	if report.Commit != first.Reviewed || j.pushCount(t) != 1 || j.Pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.rerunCalls(t)) != 0 {
+		t.Fatalf("report %+v, %d pushes, %d pull requests, %d reruns", report, j.pushCount(t), j.Pulls.Creates, len(j.rerunCalls(t)))
 	}
 }

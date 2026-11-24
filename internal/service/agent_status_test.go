@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"

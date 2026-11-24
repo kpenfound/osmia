@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -38,20 +40,20 @@ func stageChiefViewAfter(t *testing.T, mode string) (workspace string, repo *tra
 	_, err = repo.SetFeatureState(ctx, trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "terminal", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}, state, "Member outcome")
 	fixturekit.Must(t, err)
 	if mode == "owner merged" {
-		recordResolutionMerge(t, repo, fixturekit.Stream)
+		fixturekit.ResolutionDocument(t, repo, fixturekit.Stream, delivery.MergeDocument, delivery.MergePath, DeliveryMerge{Branch: intake.FeatureBranch(fixturekit.Stream), Commit: "merged-feature", Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: "merged-upstream"}}, fixturekit.DemoStart, intake.OwnerActor)
 	}
 	if mode != "cancelled" && mode != "owner merged" {
 		pr := 42
 		if mode == "stale merge" {
 			pr = 43
 		}
-		resolutionDocument(t, repo, fixturekit.Stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, PullRequest: pr})
+		fixturekit.OwnerResolutionDocument(t, repo, fixturekit.Stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, PullRequest: pr})
 		if mode != "ready" {
 			outcome := delivery.OwnPullRequestOutcomeMerged
 			if mode == "closed" {
 				outcome = delivery.OwnPullRequestOutcomeClosed
 			}
-			resolutionDocument(t, repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 42, Outcome: outcome})
+			fixturekit.OwnerResolutionDocument(t, repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 42, Outcome: outcome})
 		}
 	}
 	_, err = StageChiefDocuments(repo, fixturekit.Stream, workspace)

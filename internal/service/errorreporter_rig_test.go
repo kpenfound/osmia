@@ -25,7 +25,7 @@ const (
 type reporterRig struct {
 	t       *testing.T
 	opts    Options
-	files   reloadFiles
+	files   fixturekit.ReloadFiles
 	gh      *fixturekit.FakeIssueServer
 	clock   *fixturekit.IssueClock
 	log     *fixturekit.SyncBuffer
@@ -63,9 +63,9 @@ func newReporterRig(t *testing.T, text string, tune func(*ErrorReporterOptions))
 		}
 		return os.Getenv(name)
 	}
-	r.files = configFiles(t, r.opts)
+	r.files = fixturekit.ConfigFiles(t, r.opts.Config.Root)
 	if text != "" {
-		r.files.write(t, r.files.topText+text)
+		r.files.Write(t, r.files.TopText+text)
 	}
 	t.Cleanup(r.stop)
 	r.launch()
@@ -98,7 +98,7 @@ func (r *reporterRig) restart() {
 
 func (r *reporterRig) reload(text string) {
 	r.t.Helper()
-	r.files.write(r.t, r.files.topText+text)
+	r.files.Write(r.t, r.files.TopText+text)
 	_, err := r.c.Reload(context.Background())
 	fixturekit.Must(r.t, err)
 }

@@ -17,7 +17,7 @@ import (
 func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	var buf fixturekit.SyncBuffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
 	opts.TailnetRetry = time.Hour

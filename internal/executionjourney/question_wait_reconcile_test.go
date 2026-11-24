@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"reflect"
-	"strings"
-	"testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -21,21 +23,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type questionReviewTurn func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error)
-
-func (run questionReviewTurn) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
-	return run(ctx, p)
-}
-
-func prepareQuestionReview(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, ask bool, verdict *service.UnitVerdict) func() {
+func prepareQuestionReview(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, ask bool, verdict *service.UnitVerdict) func() {
 	t.Helper()
 	agent := intake.ReviewerAgent("resume")
-	q := claimOldestTurn(t, f, repo, stream, agent)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: q.Request.TurnID, Role: intake.ReviewerRole}
+	q := journey.ClaimOldestTurn(t, f, repo, stream, agent)
+	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: q.Request.TurnID, Role: intake.ReviewerRole}
 	reports := &execution.ReviewerReports{}
-	fake := questionReviewTurn(func(ctx context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	fake := fixturekit.TurnsFunc(func(ctx context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		if ask {
-			list, err := questions.Tools(repo, agent, scope, f.clock.Now)
+			list, err := questions.Tools(repo, agent, scope, f.Clock.Now)
 			fixturekit.Must(t, err)
 			out, err := intakefixture.AskTool(t, list, questions.AskTool).Handle(ctx, json.RawMessage(`{"question":"Which test evidence applies?"}`))
 			fixturekit.Must(t, err)
@@ -57,19 +53,19 @@ func prepareQuestionReview(t *testing.T, f *shedFixture, repo *trace.Repository,
 	wrapped := &questions.Turns{Turns: execution.NewVerdictTurns(fake, reports), Repository: repo}
 	result, err := wrapped.Run(context.Background(), coreadapter.PreparedTurn{Scope: scope})
 	fixturekit.Must(t, err)
-	return func() { completeClaimedTurn(t, f, repo, stream, agent, q, result.Outcome) }
+	return func() { journey.CompleteClaimedTurn(t, f, repo, stream, agent, q, result.Outcome) }
 }
 
 func TestReviewerQuestionAnswerBeforeWaiting(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "answer-before-wait")
-	r := &reviewers{masons: newMasonController(f.s, repo)}
+	f, stream, repo := journey.NewReviewFixture(t, "answer-before-wait")
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 	complete := prepareQuestionReview(t, f, repo, stream, true, nil)
-	chiefAnswers(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
+	journey.ChiefAnswers(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
 	complete()
-	verdict := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	verdict := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 	prepareQuestionReview(t, f, repo, stream, false, &verdict)()
 	for range 4 {
 		fixturekit.Must(t, r.Pass(ctx))
@@ -109,19 +105,19 @@ func TestReviewerQuestionInterleavings(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				f, stream, repo := newReviewFixture(t, "question-order")
+				f, stream, repo := journey.NewReviewFixture(t, "question-order")
 				defer func() { fixturekit.Must(t, repo.Close()) }()
-				r := &reviewers{masons: newMasonController(f.s, repo)}
+				r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 				ctx := context.Background()
 				fixturekit.Must(t, r.Pass(ctx))
 				complete := prepareQuestionReview(t, f, repo, stream, true, nil)
-				verdict := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+				verdict := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 				for _, event := range order {
 					switch event {
 					case 'C':
 						complete()
 					case 'D':
-						chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+						journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 					case 'W':
 						fixturekit.Must(t, r.Pass(ctx))
 					case 'V':
@@ -131,9 +127,9 @@ func TestReviewerQuestionInterleavings(t *testing.T) {
 					if restart && strings.Contains(order[:strings.IndexRune(order, event)+1], "C") {
 						fixturekit.Must(t, repo.Close())
 						var err error
-						repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+						repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 						fixturekit.Must(t, err)
-						r = &reviewers{masons: newMasonController(f.s, repo)}
+						r = &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 					}
 				}
 				for range 4 {
@@ -152,7 +148,7 @@ func TestReviewerQuestionInterleavings(t *testing.T) {
 				fixturekit.Must(t, err)
 				for range 3 {
 					fixturekit.Must(t, r.Pass(ctx))
-					fixturekit.Must(t, f.s.answers(f.s.cfg, repo).Pass(ctx))
+					fixturekit.Must(t, f.S.Answers(f.S.Cfg, repo).Pass(ctx))
 				}
 				after, err := trace.Read[trace.Transition](repo, stream)
 				fixturekit.Must(t, err)
@@ -175,26 +171,26 @@ func TestReviewerQuestionLaterVerdictReconcilesAfterRestart(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"satisfactory", "material_findings", "contested"} {
 		t.Run(decision, func(t *testing.T) {
-			f, stream, repo := newReviewFixture(t, "later-verdict")
+			f, stream, repo := journey.NewReviewFixture(t, "later-verdict")
 			defer func() { fixturekit.Must(t, repo.Close()) }()
 			if decision == "contested" {
-				f.s.cfg.Shed.MaxBounces = 1
+				f.S.Cfg.Shed.MaxBounces = 1
 			}
-			r := &reviewers{masons: newMasonController(f.s, repo)}
+			r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 			ctx := context.Background()
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 
 			prepareQuestionReview(t, f, repo, stream, false, nil)()
 			th, err := repo.Thread(stream, intake.ReviewerAgent("resume"))
 			fixturekit.Must(t, err)
 			req := th.Turns[0].Request
-			req.ID, req.TurnID, req.At = "request_review-following", "review-following", f.clock.Now()
+			req.ID, req.TurnID, req.At = "request_review-following", "review-following", f.Clock.Now()
 			_, err = repo.EnqueueTurn(ctx, req)
 			fixturekit.Must(t, err)
-			v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 			if decision != "satisfactory" {
 				v.Decision = "material_findings"
 				v.Findings = []api.ReviewFinding{{Severity: "material", Evidence: "Retry fails", Action: "Handle retry"}}
@@ -203,9 +199,9 @@ func TestReviewerQuestionLaterVerdictReconcilesAfterRestart(t *testing.T) {
 			history, err := trace.Read[trace.Transition](repo, stream)
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, repo.Close())
-			repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
-			r = &reviewers{masons: newMasonController(f.s, repo)}
+			r = &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 			fixturekit.Must(t, r.Pass(ctx))
 			state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 			fixturekit.Must(t, err)
@@ -263,16 +259,16 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ late, early bool }{{}, {late: true}, {early: true}, {late: true, early: true}} {
 		t.Run(fmt.Sprintf("later-turn-%v-early-answer-%v", tc.late, tc.early), func(t *testing.T) {
-			f, _ := newMasonFixture(t, 1, independentPlan)
-			base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-			stream, repo := seedBuild(t, f, "mason-question-done", independentPlan, config.WorkspacesGit, base)
-			m := newMasonController(f.s, repo)
+			f, _ := journey.NewMasonFixture(t, 1, intakefixture.IndependentPlan)
+			base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+			stream, repo := journey.SeedBuild(t, f, "mason-question-done", intakefixture.IndependentPlan, config.WorkspacesGit, base)
+			m := journey.NewMasonController(f.S, repo)
 			ctx := context.Background()
 			fixturekit.Must(t, m.Pass(ctx))
 			agent := intake.MasonAgent("resume")
-			q := claimOldestTurn(t, f, repo, stream, agent)
-			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: q.Request.TurnID, Role: intake.MasonRole}
-			list, err := questions.Tools(repo, agent, scope, f.clock.Now)
+			q := journey.ClaimOldestTurn(t, f, repo, stream, agent)
+			scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: q.Request.TurnID, Role: intake.MasonRole}
+			list, err := questions.Tools(repo, agent, scope, f.Clock.Now)
 			fixturekit.Must(t, err)
 			out, err := intakefixture.AskTool(t, list, questions.AskTool).Handle(ctx, json.RawMessage(`{"question":"Which checks apply?"}`))
 			fixturekit.Must(t, err)
@@ -280,7 +276,7 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 				t.Fatal(string(out))
 			}
 			if !tc.early {
-				completeClaimedTurn(t, f, repo, stream, agent, q, &coreadapter.Outcome{Status: questions.Waiting})
+				journey.CompleteClaimedTurn(t, f, repo, stream, agent, q, &coreadapter.Outcome{Status: questions.Waiting})
 				fixturekit.Must(t, m.Pass(ctx))
 				state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 				fixturekit.Must(t, err)
@@ -296,7 +292,7 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 					t.Fatal("done accepted unanswered wait")
 				}
 			}
-			chiefRecordsAnswer(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
+			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use the recorded checks.", "spec#1")
 			if !tc.early {
 				out, err = reports.Tool(repo, scope).Handle(ctx, json.RawMessage(`{"outcome":"Built and verified.","headline":"Work is complete","happened":"Built and verified the requested behavior."}`))
 				fixturekit.Must(t, err)
@@ -304,7 +300,7 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 					t.Fatal("done accepted undelivered answer")
 				}
 			}
-			fixturekit.Must(t, f.s.answers(f.s.cfg, repo).Pass(ctx))
+			fixturekit.Must(t, f.S.Answers(f.S.Cfg, repo).Pass(ctx))
 			if !tc.early {
 				out, err = reports.Tool(repo, scope).Handle(ctx, json.RawMessage(`{"outcome":"Built and verified.","headline":"Work is complete","happened":"Built and verified the requested behavior."}`))
 				fixturekit.Must(t, err)
@@ -313,18 +309,18 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 				}
 			}
 			if tc.early {
-				completeClaimedTurn(t, f, repo, stream, agent, q, &coreadapter.Outcome{Status: questions.Waiting})
+				journey.CompleteClaimedTurn(t, f, repo, stream, agent, q, &coreadapter.Outcome{Status: questions.Waiting})
 			}
 			if tc.late {
-				captureTurn(t, f, repo, stream, agent, nil)
+				journey.CaptureTurn(t, f, repo, stream, agent, nil)
 				queueFollowingTurn(t, f, repo, stream, agent, "resume", "mason-following")
 			}
-			q = claimOldestTurn(t, f, repo, stream, agent)
+			q = journey.ClaimOldestTurn(t, f, repo, stream, agent)
 			scope.Turn = q.Request.TurnID
 			if tc.late {
 				fixturekit.Must(t, m.Pass(ctx))
 			}
-			fake := questionReviewTurn(func(ctx context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+			fake := fixturekit.TurnsFunc(func(ctx context.Context, _ coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 				out, err := reports.Tool(repo, scope).Handle(ctx, json.RawMessage(`{"outcome":"Built and verified.","headline":"Work is complete","happened":"Built and verified the requested behavior."}`))
 				fixturekit.Must(t, err)
 				if !strings.Contains(string(out), `"recorded":true`) {
@@ -335,13 +331,13 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 			wrapper := &questions.Turns{Turns: execution.NewReportingTurns(fake, reports), Repository: repo}
 			result, err := wrapper.Run(ctx, coreadapter.PreparedTurn{Scope: scope})
 			fixturekit.Must(t, err)
-			completeClaimedTurn(t, f, repo, stream, agent, q, result.Outcome)
+			journey.CompleteClaimedTurn(t, f, repo, stream, agent, q, result.Outcome)
 
 			fixturekit.Must(t, repo.Close())
-			repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
 			defer repo.Close()
-			m = newMasonController(f.s, repo)
+			m = journey.NewMasonController(f.S, repo)
 			for range 3 {
 				fixturekit.Must(t, m.Pass(ctx))
 			}
@@ -350,7 +346,7 @@ func TestMasonQuestionDoneWhileWaiting(t *testing.T) {
 			if state.Value != execution.UnitChecking {
 				t.Fatalf("done stranded in %+v", state)
 			}
-			runChecks(t, f.s, repo, stream)
+			journey.RunChecks(t, f.S, repo, stream)
 			state, err = repo.Workflow(stream, trace.UnitSubject("resume"))
 			fixturekit.Must(t, err)
 			if state.Value != intake.UnitReviewing {
@@ -365,14 +361,14 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 	for _, tc := range []struct{ ambiguous, foreign bool }{{}, {ambiguous: true}, {ambiguous: true, foreign: true}} {
 		ambiguous := tc.ambiguous
 		t.Run(fmt.Sprintf("ambiguous-%v-foreign-actor-%v", ambiguous, tc.foreign), func(t *testing.T) {
-			f, stream, repo := newReviewFixture(t, "wait-provenance")
-			r := &reviewers{masons: newMasonController(f.s, repo)}
+			f, stream, repo := journey.NewReviewFixture(t, "wait-provenance")
+			r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 			ctx := context.Background()
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
-			v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 			prepareQuestionReview(t, f, repo, stream, false, &v)()
 			state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 			fixturekit.Must(t, err)
@@ -383,7 +379,7 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 			if tc.foreign {
 				actor = intake.OwnerActor
 			}
-			_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-wait-provenance", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: actor, Cause: cause}, Subject: trace.UnitSubject("resume"), From: intake.UnitWaiting, To: intake.UnitWaiting, Reason: "Wait on the question"}})
+			_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-wait-provenance", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.Clock.Now(), Actor: actor, Cause: cause}, Subject: trace.UnitSubject("resume"), From: intake.UnitWaiting, To: intake.UnitWaiting, Reason: "Wait on the question"}})
 			fixturekit.Must(t, err)
 			for range 3 {
 				fixturekit.Must(t, r.Pass(ctx))
@@ -414,8 +410,8 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 				if !found {
 					t.Fatal("contest has no notice for the chief and owner feed")
 				}
-				f.s.setSole(&activeProject{repository: repo})
-				_, apiErr := f.s.recordContestedRuling(ctx, repo, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review the same candidate again."}, intake.ChiefActor)
+				f.S.SetSole(&journey.ActiveProject{Repository: repo})
+				_, apiErr := recordContestedRuling(f.S, ctx, repo, stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Review the same candidate again."}, intake.ChiefActor)
 				if apiErr != nil {
 					t.Fatalf("chief cannot resolve question contest: %+v", apiErr)
 				}
@@ -426,17 +422,17 @@ func TestReviewerQuestionWaitOwnershipAndUncertainty(t *testing.T) {
 
 func TestReviewerQuestionRequiresAnswerDelivery(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "pending-answer")
-	r := &reviewers{masons: newMasonController(f.s, repo)}
+	f, stream, repo := journey.NewReviewFixture(t, "pending-answer")
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 
-	v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 	prepareQuestionReview(t, f, repo, stream, true, &v)()
 	fixturekit.Must(t, r.Pass(ctx))
 	for _, answered := range []bool{false, true} {
 		if answered {
-			chiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 		}
 		for range 3 {
 			fixturekit.Must(t, r.Pass(ctx))
@@ -447,7 +443,7 @@ func TestReviewerQuestionRequiresAnswerDelivery(t *testing.T) {
 			t.Fatalf("answered=%v without delivery advanced to %+v", answered, state)
 		}
 	}
-	fixturekit.Must(t, f.s.answers(f.s.cfg, repo).Pass(ctx))
+	fixturekit.Must(t, f.S.Answers(f.S.Cfg, repo).Pass(ctx))
 	prepareQuestionReview(t, f, repo, stream, false, &v)()
 	for range 3 {
 		fixturekit.Must(t, r.Pass(ctx))
@@ -463,14 +459,14 @@ func TestReviewerQuestionStaleVerdictNeverApproves(t *testing.T) {
 	t.Parallel()
 	for _, field := range []string{"candidate", "base", "spec", "plan"} {
 		t.Run(field, func(t *testing.T) {
-			f, stream, repo := newReviewFixture(t, "stale-question")
-			r := &reviewers{masons: newMasonController(f.s, repo)}
+			f, stream, repo := journey.NewReviewFixture(t, "stale-question")
+			r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 			ctx := context.Background()
 			fixturekit.Must(t, r.Pass(ctx))
 			prepareQuestionReview(t, f, repo, stream, true, nil)()
 			fixturekit.Must(t, r.Pass(ctx))
-			chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
-			v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+			journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 			prepareQuestionReview(t, f, repo, stream, false, &v)()
 
 			docs, err := trace.Read[trace.Document](repo, stream)
@@ -504,7 +500,7 @@ func TestReviewerQuestionStaleVerdictNeverApproves(t *testing.T) {
 				latest.Content = string(raw)
 			}
 			latest.Revision++
-			latest.At = f.clock.Now()
+			latest.At = f.Clock.Now()
 			latest.Cause = "fixture-input-change"
 			fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{latest}))
 			fixturekit.Must(t, r.Pass(ctx))
@@ -524,12 +520,12 @@ func TestReviewerQuestionStaleVerdictNeverApproves(t *testing.T) {
 
 func TestReviewerEarlyAnswerWithoutVerdictQueuesFreshReview(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "early-answer-no-verdict")
-	r := &reviewers{masons: newMasonController(f.s, repo)}
+	f, stream, repo := journey.NewReviewFixture(t, "early-answer-no-verdict")
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 	finish := prepareQuestionReview(t, f, repo, stream, true, nil)
-	chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+	journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 	finish()
 	prepareQuestionReview(t, f, repo, stream, false, nil)()
 	for range 4 {
@@ -550,7 +546,7 @@ func TestReviewerEarlyAnswerWithoutVerdictQueuesFreshReview(t *testing.T) {
 	if execution.StaleReview(origin, fresh) != "" {
 		t.Fatal("fresh review changed the candidate")
 	}
-	v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 	prepareQuestionReview(t, f, repo, stream, false, &v)()
 	fixturekit.Must(t, r.Pass(ctx))
 	state, err = repo.Workflow(stream, trace.UnitSubject("resume"))
@@ -562,8 +558,8 @@ func TestReviewerEarlyAnswerWithoutVerdictQueuesFreshReview(t *testing.T) {
 
 func TestReviewerQuestionPendingAnswerHoldsLaterVerdict(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "pending-later-verdict")
-	r := &reviewers{masons: newMasonController(f.s, repo)}
+	f, stream, repo := journey.NewReviewFixture(t, "pending-later-verdict")
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 	ctx := context.Background()
 	fixturekit.Must(t, r.Pass(ctx))
 	prepareQuestionReview(t, f, repo, stream, true, nil)()
@@ -571,14 +567,14 @@ func TestReviewerQuestionPendingAnswerHoldsLaterVerdict(t *testing.T) {
 	th, err := repo.Thread(stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
 	req := th.Turns[0].Request
-	req.ID, req.TurnID, req.At = "request_later-verdict", "later-verdict", f.clock.Now()
+	req.ID, req.TurnID, req.At = "request_later-verdict", "later-verdict", f.Clock.Now()
 	_, err = repo.EnqueueTurn(ctx, req)
 	fixturekit.Must(t, err)
-	v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}
+	v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary}
 	prepareQuestionReview(t, f, repo, stream, false, &v)()
 	for _, answered := range []bool{false, true} {
 		if answered {
-			chiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+			journey.ChiefRecordsAnswer(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 		}
 		for range 2 {
 			fixturekit.Must(t, r.Pass(ctx))
@@ -589,7 +585,7 @@ func TestReviewerQuestionPendingAnswerHoldsLaterVerdict(t *testing.T) {
 			t.Fatalf("answered=%v advanced undelivered question: %+v", answered, state)
 		}
 	}
-	fixturekit.Must(t, f.s.answers(f.s.cfg, repo).Pass(ctx))
+	fixturekit.Must(t, f.S.Answers(f.S.Cfg, repo).Pass(ctx))
 	prepareQuestionReview(t, f, repo, stream, false, &v)()
 	for range 3 {
 		fixturekit.Must(t, r.Pass(ctx))
@@ -603,22 +599,22 @@ func TestReviewerQuestionPendingAnswerHoldsLaterVerdict(t *testing.T) {
 
 func TestMasonDoneRefusesReviewerAndAmendmentWaits(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newReviewFixture(t, "done-other-waits")
+	f, stream, repo := journey.NewReviewFixture(t, "done-other-waits")
 	ctx := context.Background()
-	r := &reviewers{masons: newMasonController(f.s, repo)}
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repo)}
 	fixturekit.Must(t, r.Pass(ctx))
 	prepareQuestionReview(t, f, repo, stream, true, nil)()
 	fixturekit.Must(t, r.Pass(ctx))
-	chiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
+	journey.ChiefAnswers(t, f, repo, stream, "1", "Use recorded checks.", "spec#1")
 	for _, amendment := range []bool{false, true} {
 		if amendment {
 			state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 			fixturekit.Must(t, err)
-			_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-amendment-wait", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: intake.MasonActor, Cause: "amendment_1"}, Subject: trace.UnitSubject("resume"), From: intake.UnitWaiting, To: intake.UnitWaiting, Reason: "Wait for the amendment"}})
+			_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-amendment-wait", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.Clock.Now(), Actor: intake.MasonActor, Cause: "amendment_1"}, Subject: trace.UnitSubject("resume"), From: intake.UnitWaiting, To: intake.UnitWaiting, Reason: "Wait for the amendment"}})
 			fixturekit.Must(t, err)
 		}
 		for _, agent := range []string{intake.MasonAgent("resume"), intake.ReviewerAgent("resume")} {
-			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: questions.TurnID("1"), Role: intake.MasonRole}
+			scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Unit: "resume", Thread: agent, Turn: questions.TurnID("1"), Role: intake.MasonRole}
 			out, err := (&execution.MasonReports{}).Tool(repo, scope).Handle(ctx, json.RawMessage(`{"outcome":"Built and verified.","headline":"Work is complete","happened":"Built and verified the requested behavior."}`))
 			fixturekit.Must(t, err)
 			if strings.Contains(string(out), `"recorded":true`) {

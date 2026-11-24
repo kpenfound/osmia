@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
@@ -44,7 +46,7 @@ func osmia(t *testing.T, root string, args ...string) (int, string, string) {
 func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
 	ctx := context.Background()
-	opts := fixture(t)
+	opts := journey.Fixture(t)
 	root := opts.Config.Root
 	home := filepath.Dir(root)
 	top := filepath.Join(root, "config.toml")
@@ -66,7 +68,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		}
 	}
 
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	untouched("startup")
 	store := projectstore.Open(mustRoot(t, root))
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project)}) {
@@ -80,7 +82,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	}
 	saved, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{ChecksTimeout: textOf("45m")}})
 	fixturekit.Must(t, err)
-	if saved.Outcome != api.ProjectConfigApplied || saved.Pin == first.Pin || saved.Revision != 2 || s.current().For(fixturekit.Project).Project.ChecksTimeout != "45m" {
+	if saved.Outcome != api.ProjectConfigApplied || saved.Pin == first.Pin || saved.Revision != 2 || s.Current().For(fixturekit.Project).Project.ChecksTimeout != "45m" {
 		t.Fatalf("applied save: %+v", saved)
 	}
 	_, err = c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{Landing: textOf("squash")}})
@@ -93,7 +95,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	if !strings.Contains(err.Error(), config.ProjectSettingsLabel(fixturekit.Project)+": checks_timeout: ") || strings.Contains(err.Error(), "config.toml") {
 		t.Fatalf("invalid edit: %v", err)
 	}
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "project-config-written" {
 			return errors.New("the scheduler is unreachable")
 		}
@@ -101,8 +103,8 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	}
 	pending, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: saved.Pin, Set: api.ProjectConfigValues{Landing: textOf("squash")}})
 	fixturekit.Must(t, err)
-	s.boundary = nil
-	if pending.Outcome != api.ProjectConfigSavedNotApplied || !strings.Contains(pending.Reason, "the scheduler is unreachable") || s.current().For(fixturekit.Project).Project.Landing != "commit-per-unit" {
+	s.Boundary = nil
+	if pending.Outcome != api.ProjectConfigSavedNotApplied || !strings.Contains(pending.Reason, "the scheduler is unreachable") || s.Current().For(fixturekit.Project).Project.Landing != "commit-per-unit" {
 		t.Fatalf("not applied save: %+v", pending)
 	}
 	untouched("settings saves")
@@ -157,7 +159,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 
 	cloneC := filepath.Join(home, "clone-c")
 	fixturekit.DemoGit(t, home, "init", "--quiet", cloneC)
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "trace-created" {
 			return errors.New("crash")
 		}
@@ -165,11 +167,11 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	}
 	_, err = c.AddProject(ctx, fixturekit.Request(cloneC))
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 	interrupted := interruptedProject(t, root, fixturekit.Project, addedA.Project.ID, createdB.Project.ID)
 
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	want := []string{string(fixturekit.Project), string(createdB.Project.ID), string(interrupted)}
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry after the restart: %v, want %v", got, want)
@@ -179,7 +181,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	if !reflect.DeepEqual(now.Effective.ActiveProjects, want) {
 		t.Fatalf("effective.active_projects %v, want %v", now.Effective.ActiveProjects, want)
 	}
-	if p := s.current().For(fixturekit.Project).Project; p.ChecksTimeout != "45m" || p.Landing != "squash" {
+	if p := s.Current().For(fixturekit.Project).Project; p.ChecksTimeout != "45m" || p.Landing != "squash" {
 		t.Fatalf("the last saved settings after the restart: %+v", p)
 	}
 	if entries, err := os.ReadDir(filepath.Join(root, "projects")); err != nil || len(entries) != 3 {
@@ -202,12 +204,12 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		t.Fatalf("osmia config shows %v, want %v\n%s", shown, want, text)
 	}
 	untouched("restart")
-	cloneOfProject := s.current().For(fixturekit.Project).Project.Clone
+	cloneOfProject := s.Current().For(fixturekit.Project).Project.Clone
 
 	fixturekit.Must(t, s.Close())
 	fixturekit.Must(t, os.RemoveAll(cloneOfProject))
 	fixturekit.Must(t, os.WriteFile(cloneOfProject, []byte("not a directory"), 0600))
-	_, err = Start(ctx, opts)
+	_, err = journey.Start(ctx, opts)
 	if err == nil {
 		t.Fatal("startup did not refuse stored settings that do not load")
 	}
@@ -226,11 +228,11 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		t.Fatalf("repair: %d %s %s", code, text, diag)
 	}
 	untouched("the refused start and the repair")
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry after the repair: %v, want %v", got, want)
 	}
-	if p := s.current().For(fixturekit.Project).Project; p.Clone != repaired || p.ChecksTimeout != "45m" || p.Landing != "squash" {
+	if p := s.Current().For(fixturekit.Project).Project; p.Clone != repaired || p.ChecksTimeout != "45m" || p.Landing != "squash" {
 		t.Fatalf("settings after the repair: %+v", p)
 	}
 	untouched("the start after the repair")

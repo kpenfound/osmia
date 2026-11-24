@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +13,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -91,7 +92,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	added, err := f.c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f.home = added.Project.ID
-	journey.WriteCharter(t, f.c, f.home, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, f.c, f.home, "1. Keep changes small.\n")
 	return f
 }
 
@@ -182,11 +183,6 @@ func (f *newProjectStart) journal() string {
 }
 func (f *newProjectStart) clone() string { return filepath.Join(f.cloneDir, "gadget") }
 
-func (f *newProjectStart) git(t *testing.T, args ...string) string {
-	t.Helper()
-	return strings.TrimSpace(fixturekit.DemoGit(t, f.dir, args...))
-}
-
 func (f *newProjectStart) assertNothingRecorded(t *testing.T, stream config.WorkstreamID, existing ...string) {
 	t.Helper()
 	r := f.homeRepository(t)
@@ -243,10 +239,10 @@ func (f *newProjectStart) assertGadgetCreated(t *testing.T, stream config.Workst
 			t.Fatalf("create call: %+v", call.Body)
 		}
 	}
-	if got := f.git(t, "-C", f.clone(), "symbolic-ref", "--short", "HEAD"); got != "main" {
+	if got := fixturekit.Git(t, f.dir, "-C", f.clone(), "symbolic-ref", "--short", "HEAD"); got != "main" {
 		t.Fatalf("the clone has %q checked out", got)
 	}
-	if got := f.git(t, "-C", f.clone(), "rev-parse", "HEAD"); got != f.readme {
+	if got := fixturekit.Git(t, f.dir, "-C", f.clone(), "rev-parse", "HEAD"); got != f.readme {
 		t.Fatalf("the clone is at %s, not the README commit %s", got, f.readme)
 	}
 	cfg := f.s.Current()

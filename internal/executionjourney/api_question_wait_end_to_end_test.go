@@ -5,11 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
@@ -18,6 +13,13 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -29,16 +31,16 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func holdQuestionReview(f *shedFixture, stream config.WorkstreamID, reviews, dispatch *atomic.Bool) {
-	p := f.s.sole()
-	st := *service.InspectForTest(f.s.core()).Pipeline(p.id).Current.Load()
+func holdQuestionReview(f *journey.ShedFixture, stream config.WorkstreamID, reviews, dispatch *atomic.Bool) {
+	p := f.S.Sole()
+	st := *service.InspectForTest(f.S.Core()).Pipeline(p.Id).Current.Load()
 	st.Hooks = slices.Clone(st.Hooks)
 	for i, hook := range st.Hooks {
 		if hook.Name != "reviews" && hook.Name != "dispatch" {
 			continue
 		}
 		st.Hooks[i].Pass = func(ctx context.Context) error {
-			state, err := p.repository.Workflow(stream, trace.UnitSubject("resume"))
+			state, err := p.Repository.Workflow(stream, trace.UnitSubject("resume"))
 			if err != nil {
 				return err
 			}
@@ -47,11 +49,11 @@ func holdQuestionReview(f *shedFixture, stream config.WorkstreamID, reviews, dis
 					return nil
 				}
 				if hook.Name == "dispatch" && dispatch.Load() {
-					asked, err := p.repository.Questions(stream)
+					asked, err := p.Repository.Questions(stream)
 					if err != nil {
 						return err
 					}
-					th, err := p.repository.Thread(stream, intake.ReviewerAgent("resume"))
+					th, err := p.Repository.Thread(stream, intake.ReviewerAgent("resume"))
 					if err != nil {
 						return err
 					}
@@ -63,12 +65,12 @@ func holdQuestionReview(f *shedFixture, stream config.WorkstreamID, reviews, dis
 			return hook.Pass(ctx)
 		}
 	}
-	service.InspectForTest(f.s.core()).Pipeline(p.id).Next.Store(&st)
+	service.InspectForTest(f.S.Core()).Pipeline(p.Id).Next.Store(&st)
 }
 
-func awaitQuestionJourney(t *testing.T, f *shedFixture, phase string, ready func() bool) {
+func awaitQuestionJourney(t *testing.T, f *journey.ShedFixture, phase string, ready func() bool) {
 	t.Helper()
-	wait, closeWait := serviceChanges(t, f.s)
+	wait, closeWait := journey.ServiceChanges(t, f.S)
 	defer closeWait()
 	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for !ready() {
@@ -79,10 +81,10 @@ func awaitQuestionJourney(t *testing.T, f *shedFixture, phase string, ready func
 	}
 }
 
-func stopQuestionJourney(t *testing.T, f *shedFixture) {
+func stopQuestionJourney(t *testing.T, f *journey.ShedFixture) {
 	t.Helper()
-	f.c.Close()
-	s, stopped := f.s, f.serviceDone
+	f.C.Close()
+	s, stopped := f.S, f.ServiceDone
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
 	select {
@@ -98,11 +100,11 @@ func stopQuestionJourney(t *testing.T, f *shedFixture) {
 	}
 }
 
-func questionJourneyTurn(t *testing.T, f *shedFixture, stream config.WorkstreamID, agent string, index int) trace.QueuedTurn {
+func questionJourneyTurn(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, agent string, index int) trace.QueuedTurn {
 	t.Helper()
 	var turn trace.QueuedTurn
 	awaitQuestionJourney(t, f, fmt.Sprintf("%s turn %d completion", agent, index), func() bool {
-		th, err := f.repository().Thread(stream, agent)
+		th, err := f.Repository().Thread(stream, agent)
 		if errors.Is(err, os.ErrNotExist) {
 			return false
 		}
@@ -116,17 +118,17 @@ func questionJourneyTurn(t *testing.T, f *shedFixture, stream config.WorkstreamI
 	return turn
 }
 
-func awaitQuestionJourneyQuiet(t *testing.T, f *shedFixture, stream config.WorkstreamID) {
+func awaitQuestionJourneyQuiet(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID) {
 	t.Helper()
 	awaitQuestionJourney(t, f, "chief notices and turn completion", func() bool {
-		outbox, err := f.repository().Outbox(stream)
+		outbox, err := f.Repository().Outbox(stream)
 		fixturekit.Must(t, err)
 		for _, entry := range outbox {
 			if intakefixture.ChiefEvent(entry.Event) && !entry.Acknowledged {
 				return false
 			}
 		}
-		chief, err := f.repository().ChiefOfStaffThread(stream)
+		chief, err := f.Repository().ChiefOfStaffThread(stream)
 		fixturekit.Must(t, err)
 		return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 	})
@@ -146,8 +148,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Parallel()
 			problems := &intakefixture.Faults{}
-			passed, prepare := countingSchedule()
-			f, masons, chief := newAskingMasonFixturePrepared(t, 1, fixturekit.ValidPlan, problems, func(opts *Options) {
+			passed, prepare := journey.CountingSchedule()
+			f, masons, chief := newAskingMasonFixturePrepared(t, 1, fixturekit.ValidPlan, problems, func(opts *journey.Options) {
 				prepare(opts)
 				opts.ShutdownTimeout = 10 * time.Second
 			})
@@ -160,7 +162,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 				return intakefixture.ReportDone("Skip acknowledged chunks")(ctx, req, tools)
 			}
 			verdict := func(ctx context.Context, tools *mcp.ClientSession) error {
-				body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+				body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 				if err != nil || !strings.Contains(body, `"recorded":true`) {
 					return fmt.Errorf("verdict: %s: %v", body, err)
 				}
@@ -171,8 +173,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			var reviewCalls, answerCalls, finalCalls atomic.Int32
 			var stream config.WorkstreamID
 			hostRunningService(t, f, func() config.WorkstreamID { return stream })
-			f.engine.Mu.Lock()
-			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.Engine.Mu.Lock()
+			f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				switch {
 				case strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-"):
 					if reviewCalls.Add(1) != 1 {
@@ -195,24 +197,24 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 				}
 				return intakefixture.QuestionResult(req, "session-"+req.Name, "Reviewed"), nil
 			}
-			f.engine.Mu.Unlock()
-			f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+			f.Engine.Mu.Unlock()
+			f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 				<-buildReady
 				answerCalls.Add(1)
 				if !strings.Contains(req.Prompt, intakefixture.OwnerRuling) || !strings.Contains(req.Prompt, intakefixture.RelayedRuling) {
 					return fmt.Errorf("reviewer did not receive the owner's ruling: %s", req.Prompt)
 				}
-				state, err := f.unitState(stream, "resume")
+				state, err := f.UnitState(stream, "resume")
 				if err != nil || (scenario.waiting && !scenario.queuedOnly && state != intake.UnitWaiting) {
 					return fmt.Errorf("answer turn state %s: %v", state, err)
 				}
 				return verdict(ctx, tools)
 			})
-			finalTurn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+			finalTurn := f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 				<-buildReady
 				finalCalls.Add(1)
 				for _, unit := range []string{"resume", "dedupe"} {
-					state, err := f.unitState(stream, unit)
+					state, err := f.UnitState(stream, unit)
 					if err != nil || state != intake.UnitMerged {
 						return fmt.Errorf("final review started before %s merged: %s: %v", unit, state, err)
 					}
@@ -225,17 +227,17 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			})
 
 			factory := runtime.Target{Scope: "factory"}
-			stream = f.builtPaused(t, factory, scenario.name)[0]
+			stream = builtPaused(f, t, factory, scenario.name)[0]
 			close(buildReady)
 			var holdReviews, holdDispatch atomic.Bool
 			holdReviews.Store(scenario.waiting)
 			holdDispatch.Store(scenario.queuedOnly)
 			holdQuestionReview(f, stream, &holdReviews, &holdDispatch)
-			mutation(t, f.c, "DELETE", "pause", factory)
+			intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
 			awaitQuestionJourney(t, f, "reviewer wait and escalation", func() bool {
-				state, err := f.unitState(stream, "resume")
+				state, err := f.UnitState(stream, "resume")
 				fixturekit.Must(t, err)
-				asked, err := f.repository().Questions(stream)
+				asked, err := f.Repository().Questions(stream)
 				fixturekit.Must(t, err)
 				return state == intake.UnitWaiting && len(asked) == 1 && asked[0].State == trace.QuestionEscalated
 			})
@@ -244,24 +246,24 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			intakefixture.AwaitPasses(t, passed, 3)
 			assertWaiting := func() {
 				t.Helper()
-				state, err := f.unitState(stream, "resume")
+				state, err := f.UnitState(stream, "resume")
 				fixturekit.Must(t, err)
-				if state != intake.UnitWaiting || len(finalOperations(t, f.repository(), stream)) != 0 || finalCalls.Load() != 0 || len(landOperations(t, f.repository(), stream)) != 0 {
+				if state != intake.UnitWaiting || len(journey.FinalOperations(t, f.Repository(), stream)) != 0 || finalCalls.Load() != 0 || len(journey.LandOperations(t, f.Repository(), stream)) != 0 {
 					t.Fatalf("waiting unit advanced: state %s, final calls %d", state, finalCalls.Load())
 				}
 			}
 			assertWaiting()
-			unanswered := f.question(t, stream, "1")
-			if unanswered.Ruling != nil || len(f.thread(t, stream, intake.ReviewerAgent("resume")).Turns) != 1 {
+			unanswered := f.Question(t, stream, "1")
+			if unanswered.Ruling != nil || len(f.Thread(t, stream, intake.ReviewerAgent("resume")).Turns) != 1 {
 				t.Fatalf("unanswered question resumed: %+v", unanswered)
 			}
-			before, err := trace.Read[trace.Transition](f.repository(), stream)
+			before, err := trace.Read[trace.Transition](f.Repository(), stream)
 			fixturekit.Must(t, err)
-			f.rule(t, "1")
+			f.Rule(t, "1")
 			if scenario.waiting {
 				awaitQuestionJourney(t, f, "delivered owner ruling", func() bool {
-					th := f.thread(t, stream, intake.ReviewerAgent("resume"))
-					q := f.question(t, stream, "1")
+					th := f.Thread(t, stream, intake.ReviewerAgent("resume"))
+					q := f.Question(t, stream, "1")
 					return q.State == trace.QuestionAnswered && execution.QuestionDelivered(q, th)
 				})
 				if !scenario.queuedOnly {
@@ -269,40 +271,40 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 					if answer.Response == nil || answer.Response.Result.Outcome == nil || answer.Response.Result.Outcome.Status != execution.VerdictOutcome {
 						t.Fatalf("answer turn lost its verdict: %+v", answer)
 					}
-				} else if th := f.thread(t, stream, intake.ReviewerAgent("resume")); len(th.Turns) != 2 || th.Turns[1].Claim != nil || !th.Turns[1].CompletedAt.IsZero() {
+				} else if th := f.Thread(t, stream, intake.ReviewerAgent("resume")); len(th.Turns) != 2 || th.Turns[1].Claim != nil || !th.Turns[1].CompletedAt.IsZero() {
 					t.Fatalf("delivered answer ran before restart: %+v", th.Turns)
 				}
 				intakefixture.AwaitPasses(t, passed, 3)
 				assertWaiting()
-				before, err = trace.Read[trace.Transition](f.repository(), stream)
+				before, err = trace.Read[trace.Transition](f.Repository(), stream)
 				fixturekit.Must(t, err)
 				if scenario.restart {
 					awaitQuestionJourneyQuiet(t, f, stream)
 					stopQuestionJourney(t, f)
-					f.start(t)
+					f.Start(t)
 				}
 				holdReviews.Store(false)
 				holdDispatch.Store(false)
 			}
 
 			for _, unit := range []string{"resume", "dedupe"} {
-				f.awaitMerged(t, stream, unit)
+				f.AwaitMerged(t, stream, unit)
 			}
 			questionJourneyTurn(t, f, stream, intake.ReviewerAgent("resume"), 1)
 			questionJourneyTurn(t, f, stream, intake.CommitteeAgent(1), 0)
 			awaitQuestionJourney(t, f, "final review completion", func() bool {
-				ops := finalOperations(t, f.repository(), stream)
+				ops := journey.FinalOperations(t, f.Repository(), stream)
 				return len(ops) == 1 && ops[0].Acknowledged && ops[0].Result != nil && ops[0].Result.Outcome == "succeeded"
 			})
-			if th := f.thread(t, stream, intake.CommitteeAgent(1)); len(th.Turns) != 1 || th.Turns[0].Request.TurnID != finalTurn {
+			if th := f.Thread(t, stream, intake.CommitteeAgent(1)); len(th.Turns) != 1 || th.Turns[0].Request.TurnID != finalTurn {
 				t.Fatalf("final reviewer turns: %+v", th.Turns)
 			}
-			_, approved := approvedReview(t, f.repository(), stream, "resume")
+			_, approved := journey.ApprovedReview(t, f.Repository(), stream, "resume")
 			if approved.Identity != identity || approved.Turn != questions.TurnID("1") || approved.Verdict.Decision != "satisfactory" {
 				t.Fatalf("approval lost the unchanged candidate or answer verdict: %+v, asked %+v", approved, identity)
 			}
-			q := f.question(t, stream, "1")
-			if !reflect.DeepEqual(q.Asked, unanswered.Asked) || !reflect.DeepEqual(f.thread(t, stream, intake.ReviewerAgent("resume")).Turns[0], asking) {
+			q := f.Question(t, stream, "1")
+			if !reflect.DeepEqual(q.Asked, unanswered.Asked) || !reflect.DeepEqual(f.Thread(t, stream, intake.ReviewerAgent("resume")).Turns[0], asking) {
 				t.Fatal("question recovery changed the original question or asking turn")
 			}
 			if q.Ruling == nil || q.Ruling.Decision != trace.DecisionRuling || q.Ruling.OwnerResponse != intakefixture.OwnerRuling || q.Ruling.ReturnedAnswer != intakefixture.RelayedRuling {
@@ -314,7 +316,7 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 			awaitQuestionJourneyQuiet(t, f, stream)
 			snapshot := questionJourneySnapshot(t, f, stream)
 			stopQuestionJourney(t, f)
-			f.start(t)
+			f.Start(t)
 			intakefixture.AwaitPasses(t, passed, 3)
 			awaitQuestionJourneyQuiet(t, f, stream)
 			if after := questionJourneySnapshot(t, f, stream); !reflect.DeepEqual(snapshot, after) {
@@ -329,11 +331,11 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 	}
 }
 
-func assertQuestionJourneyHistory(t *testing.T, f *shedFixture, stream config.WorkstreamID, before []trace.Transition) {
+func assertQuestionJourneyHistory(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, before []trace.Transition) {
 	t.Helper()
-	transitions, err := trace.Read[trace.Transition](f.repository(), stream)
+	transitions, err := trace.Read[trace.Transition](f.Repository(), stream)
 	fixturekit.Must(t, err)
-	outbox, err := f.repository().Outbox(stream)
+	outbox, err := f.Repository().Outbox(stream)
 	fixturekit.Must(t, err)
 	if len(transitions) < len(before) || !reflect.DeepEqual(transitions[:len(before)], before) {
 		t.Fatal("question recovery rewrote recorded history")
@@ -352,7 +354,7 @@ func assertQuestionJourneyHistory(t *testing.T, f *shedFixture, stream config.Wo
 		if !slices.Equal(path, want) {
 			t.Fatalf("%s transitions %v, want %v", unit, path, want)
 		}
-		th := f.thread(t, stream, intake.ReviewerAgent(unit))
+		th := f.Thread(t, stream, intake.ReviewerAgent(unit))
 		wantTurns := 1
 		if unit == "resume" {
 			wantTurns = 2
@@ -360,11 +362,11 @@ func assertQuestionJourneyHistory(t *testing.T, f *shedFixture, stream config.Wo
 		if len(th.Turns) != wantTurns {
 			t.Fatalf("%s reviewer turns: %+v", unit, th.Turns)
 		}
-		mason := f.thread(t, stream, intake.MasonAgent(unit))
+		mason := f.Thread(t, stream, intake.MasonAgent(unit))
 		if len(mason.Turns) != 1 || mason.Turns[0].CompletedAt.IsZero() {
 			t.Fatalf("%s mason turns: %+v", unit, mason.Turns)
 		}
-		if docs := intakefixture.StreamDocuments(t, f.repository(), stream, execution.LandingDocument(unit)); len(docs) != 1 {
+		if docs := intakefixture.StreamDocuments(t, f.Repository(), stream, execution.LandingDocument(unit)); len(docs) != 1 {
 			t.Fatalf("%s landings: %+v", unit, docs)
 		}
 		for _, prefix := range []string{"Unit " + unit + " review satisfactory:", "Unit " + unit + " merged:"} {
@@ -379,18 +381,18 @@ func assertQuestionJourneyHistory(t *testing.T, f *shedFixture, stream config.Wo
 			}
 		}
 	}
-	if ops := landOperations(t, f.repository(), stream); len(ops) != 2 {
+	if ops := journey.LandOperations(t, f.Repository(), stream); len(ops) != 2 {
 		t.Fatalf("landing operations: %+v", ops)
 	}
 }
 
-func questionJourneySnapshot(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
+func questionJourneySnapshot(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID) string {
 	t.Helper()
-	transitions, err := trace.Read[trace.Transition](f.repository(), stream)
+	transitions, err := trace.Read[trace.Transition](f.Repository(), stream)
 	fixturekit.Must(t, err)
-	docs, err := trace.Read[trace.Document](f.repository(), stream)
+	docs, err := trace.Read[trace.Document](f.Repository(), stream)
 	fixturekit.Must(t, err)
-	outbox, err := f.repository().Outbox(stream)
+	outbox, err := f.Repository().Outbox(stream)
 	fixturekit.Must(t, err)
 	var notices []trace.Event
 	for _, e := range outbox {
@@ -400,9 +402,9 @@ func questionJourneySnapshot(t *testing.T, f *shedFixture, stream config.Workstr
 	}
 	var threads []trace.Thread
 	for _, agent := range []string{intake.MasonAgent("resume"), intake.MasonAgent("dedupe"), intake.ReviewerAgent("resume"), intake.ReviewerAgent("dedupe"), intake.CommitteeAgent(1)} {
-		threads = append(threads, f.thread(t, stream, agent))
+		threads = append(threads, f.Thread(t, stream, agent))
 	}
-	chief, err := f.repository().ChiefOfStaffThread(stream)
+	chief, err := f.Repository().ChiefOfStaffThread(stream)
 	fixturekit.Must(t, err)
 	threads = append(threads, chief)
 	data, err := json.Marshal([]any{transitions, docs, notices, threads})

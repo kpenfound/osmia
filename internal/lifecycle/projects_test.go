@@ -11,6 +11,8 @@ import (
 	strings "strings"
 	testing "testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	osmiacharter "github.com/kpenfound/osmia/internal/charter"
@@ -72,8 +74,8 @@ func storedSettings(t *testing.T, root string, id config.ProjectID) string {
 
 func TestZeroProjectStart(t *testing.T) {
 	t.Parallel()
-	opts, _ := projectFixture(t)
-	s, c := start(t, opts)
+	opts, _ := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
@@ -85,17 +87,17 @@ func TestZeroProjectStart(t *testing.T) {
 	if !intakefixture.HasDiagnostic(rt.Diagnostics, api.NoProject) || len(rt.Effective.Profiles) != 6 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
-	if s.sole() != nil {
+	if s.Sole() != nil {
 		t.Fatal("idle service opened a trace")
 	}
 	_, err = c.RemoveProject(ctx, fixturekit.Project)
 	fixturekit.AssertCode(t, err, api.NoProject)
 	fixturekit.AssertCode(t, c.Do(ctx, "PUT", api.Prefix+"/runtime/priority", api.PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{}}, nil), api.Validation)
 	fixturekit.AssertCode(t, c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "soft", Source: "owner"}, nil), api.Validation)
-	mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
-	mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: "mason", Profile: "other"})
+	intakefixture.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: "mason", Profile: "other"})
 	fixturekit.Must(t, s.Close())
-	_, c = start(t, opts)
+	_, c = journey.StartT(t, opts)
 	after, err := c.Runtime(ctx)
 	fixturekit.Must(t, err)
 	if len(after.Effective.Pauses) != 1 || after.Effective.Profiles["mason"] != "other" {
@@ -104,9 +106,9 @@ func TestZeroProjectStart(t *testing.T) {
 }
 
 type addedProject struct {
-	s        *Service
-	c        *Client
-	opts     Options
+	s        *journey.Service
+	c        *journey.Client
+	opts     journey.Options
 	clone    string
 	root     string
 	traceDir string
@@ -119,13 +121,13 @@ type addedProject struct {
 
 func addProjectToFreshRoot(t *testing.T) *addedProject {
 	t.Helper()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	bound := &[]config.ProjectID{}
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		*bound = append(*bound, r.Project())
 		return &fixturekit.CompletedRunner{}, nil
 	}
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	fixturekit.Must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
@@ -170,7 +172,7 @@ func TestProjectAddSeedsTheCharterAndEntitiesWithoutTouchingTheClone(t *testing.
 	t.Parallel()
 	p := addProjectToFreshRoot(t)
 	s, id := p.s, p.id
-	charter, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, "charter.md")
+	charter, err := fixturekit.ProjectDocument(t, s.Cfg.Root, id, "charter.md")
 	fixturekit.Must(t, err)
 	if string(charter) != trace.CharterTemplate || osmiacharter.Guidance(trace.CharterTemplate) != "" {
 		t.Fatalf("charter: %q", charter)
@@ -178,14 +180,14 @@ func TestProjectAddSeedsTheCharterAndEntitiesWithoutTouchingTheClone(t *testing.
 	if !reflect.DeepEqual(p.cloneBefore, intakefixture.Snapshot(t, p.clone)) {
 		t.Fatal("clone changed")
 	}
-	entities, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, trace.EntitiesPath)
+	entities, err := fixturekit.ProjectDocument(t, s.Cfg.Root, id, trace.EntitiesPath)
 	fixturekit.Must(t, err)
 	seeded, err := kb.Parse(entities)
 	fixturekit.Must(t, err)
 	if e, ok := seeded.Lookup("internal.trace"); !ok || !reflect.DeepEqual(e.Owners, []string{"@core"}) || !reflect.DeepEqual(e.PartOf, []string{"internal"}) {
 		t.Fatalf("seeded entities:\n%s", entities)
 	}
-	documents := documentRevisions(t, s, trace.EntitiesDocument)
+	documents := journey.DocumentRevisions(t, s, trace.EntitiesDocument)
 	if len(documents) != 1 || documents[0].Revision != 1 || documents[0].Content != string(entities) {
 		t.Fatalf("documents: %+v", documents)
 	}
@@ -199,10 +201,10 @@ func TestProjectAddActivatesTheProjectWithoutRestart(t *testing.T) {
 	if cfg.Project == nil || cfg.Project.ID != p.id || cfg.Effective.Project.ID != p.id || len(cfg.Diagnostics) != 0 {
 		t.Fatalf("%+v", cfg)
 	}
-	if len(*p.bound) != 1 || (*p.bound)[0] != p.id || p.s.sole() == nil || p.s.sole().repository.Project() != p.id {
-		t.Fatalf("activation: bound=%v active=%v", *p.bound, p.s.sole())
+	if len(*p.bound) != 1 || (*p.bound)[0] != p.id || p.s.Sole() == nil || p.s.Sole().Repository.Project() != p.id {
+		t.Fatalf("activation: bound=%v active=%v", *p.bound, p.s.Sole())
 	}
-	if streams, err := p.s.sole().repository.Workstreams(); err != nil || len(streams) != 0 {
+	if streams, err := p.s.Sole().Repository.Workstreams(); err != nil || len(streams) != 0 {
 		t.Fatalf("workstreams after registration: %v %v", streams, err)
 	}
 }
@@ -210,8 +212,8 @@ func TestProjectAddActivatesTheProjectWithoutRestart(t *testing.T) {
 func TestProjectAddedAtRuntimeAcceptsPausesAndPriorities(t *testing.T) {
 	t.Parallel()
 	p := addProjectToFreshRoot(t)
-	mutation(t, p.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: p.id}, Mode: "soft", Source: "owner"})
-	mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
+	intakefixture.Mutation(t, p.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: p.id}, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
 	rt, err := p.c.Runtime(context.Background())
 	fixturekit.Must(t, err)
 	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []api.ProjectRuntime{{Project: p.id, ContextMode: bundle.ModeFile}}) {
@@ -254,8 +256,8 @@ func TestProjectRemoveRetainsTheTraceAndTheCloneAndClearsRuntimeState(t *testing
 	t.Parallel()
 	p := addProjectToFreshRoot(t)
 	ctx := context.Background()
-	mutation(t, p.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: p.id}, Mode: "soft", Source: "owner"})
-	mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
+	intakefixture.Mutation(t, p.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: p.id}, Mode: "soft", Source: "owner"})
+	intakefixture.Mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
 	traceBefore := traceState(t, p.traceDir)
 	removed, err := p.c.RemoveProject(ctx, p.id)
 	fixturekit.Must(t, err)
@@ -272,7 +274,7 @@ func TestProjectRemoveRetainsTheTraceAndTheCloneAndClearsRuntimeState(t *testing
 	}
 	cfg, err := p.c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project != nil || cfg.Effective.HasProject() || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || intakefixture.HasDiagnostic(cfg.Diagnostics, api.RestartRequired) || p.s.sole() != nil {
+	if cfg.Project != nil || cfg.Effective.HasProject() || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || intakefixture.HasDiagnostic(cfg.Diagnostics, api.RestartRequired) || p.s.Sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
 	rt, err := p.c.Runtime(ctx)
@@ -309,18 +311,18 @@ func TestProjectAddedAgainAfterRemoveGetsANewIdentityAndSurvivesARestart(t *test
 		t.Fatal(got)
 	}
 	fixturekit.Must(t, p.s.Close())
-	s, c := start(t, p.opts)
+	s, c := journey.StartT(t, p.opts)
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.sole() == nil {
+	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.Sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
 }
 
 func TestProjectAddValidation(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	_, c := start(t, opts)
+	opts, clone := journey.ProjectFixture(t)
+	_, c := journey.StartT(t, opts)
 	ctx := context.Background()
 	root := opts.Config.Root
 	home := filepath.Dir(root)
@@ -379,12 +381,12 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 	for _, step := range steps {
 		for _, mode := range []string{"restart", "retry"} {
 			t.Run(step+"/"+mode, func(t *testing.T) {
-				opts, clone := projectFixture(t)
+				opts, clone := journey.ProjectFixture(t)
 				root := opts.Config.Root
-				s, c := start(t, opts)
+				s, c := journey.StartT(t, opts)
 				ctx := context.Background()
 				crash := errors.New("crash")
-				s.boundary = func(name string) error {
+				s.Boundary = func(name string) error {
 					if name != step {
 						return nil
 					}
@@ -419,10 +421,10 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if len(names) == 1 && names[0] != string(id) {
 					t.Fatalf("directory %v does not match journal %s", names, id)
 				}
-				s.boundary = nil
+				s.Boundary = nil
 				if mode == "restart" {
 					fixturekit.Must(t, s.Close())
-					s, c = start(t, opts)
+					s, c = journey.StartT(t, opts)
 				} else {
 					result, err := c.AddProject(ctx, fixturekit.Request(clone))
 					fixturekit.Must(t, err)
@@ -432,7 +434,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				}
 				cfg, err := c.Configuration(ctx)
 				fixturekit.Must(t, err)
-				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil || s.sole().repository.Project() != id {
+				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.Sole() == nil || s.Sole().Repository.Project() != id {
 					t.Fatalf("not completed: %+v", cfg)
 				}
 				if names := projectDirectories(t, root); !reflect.DeepEqual(names, []string{string(id)}) {
@@ -444,7 +446,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
 					t.Fatal("journal retained")
 				}
-				charter, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, "charter.md")
+				charter, err := fixturekit.ProjectDocument(t, s.Cfg.Root, id, "charter.md")
 				fixturekit.Must(t, err)
 				if string(charter) != trace.CharterTemplate {
 					t.Fatalf("charter: %q", charter)
@@ -452,18 +454,18 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if n := fixturekit.TraceCommits(t, filepath.Join(root, "projects", string(id))); n != 1 {
 					t.Fatalf("project trace history: %d commits", n)
 				}
-				if streams, err := s.sole().repository.Workstreams(); err != nil || len(streams) != 0 {
+				if streams, err := s.Sole().Repository.Workstreams(); err != nil || len(streams) != 0 {
 					t.Fatalf("workstreams after recovery: %v %v", streams, err)
 				}
-				documents := documentRevisions(t, s, trace.EntitiesDocument)
+				documents := journey.DocumentRevisions(t, s, trace.EntitiesDocument)
 				if len(documents) != 1 || documents[0].Revision != 1 {
 					t.Fatalf("entity map revisions: %+v", documents)
 				}
 				fixturekit.Must(t, s.Close())
-				s, c = start(t, opts)
+				s, c = journey.StartT(t, opts)
 				cfg, err = c.Configuration(ctx)
 				fixturekit.Must(t, err)
-				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil {
+				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.Sole() == nil {
 					t.Fatalf("after restart: %+v", cfg)
 				}
 			})
@@ -473,10 +475,10 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 
 func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	s, c := start(t, opts)
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "trace-created" {
 			return errors.New("crash")
 		}
@@ -484,7 +486,7 @@ func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 	}
 	_, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.AssertCode(t, err, api.Internal)
-	s.boundary = nil
+	s.Boundary = nil
 	other := fixturekit.Request(clone)
 	other.Name = "renamed"
 	_, refused := c.AddProject(ctx, other)
@@ -501,11 +503,11 @@ func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 
 func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	root := opts.Config.Root
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "journal-written" {
 			return errors.New("crash")
 		}
@@ -519,7 +521,7 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	var journal service.PendingProject
 	fixturekit.Must(t, json.Unmarshal(data, &journal))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "projects"), []byte("blocked"), 0600))
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
 	if cfg.Project != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) {
@@ -533,7 +535,7 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	fixturekit.Must(t, os.Remove(filepath.Join(root, "projects")))
 	result, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	if result.Project.ID != journal.Project.ID || s.sole() == nil {
+	if result.Project.ID != journal.Project.ID || s.Sole() == nil {
 		t.Fatalf("%+v", result)
 	}
 	cfg, err = c.Configuration(ctx)
@@ -545,9 +547,9 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 
 func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	root := opts.Config.Root
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
 	added, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.Must(t, err)
@@ -572,10 +574,10 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 		t.Fatal(names)
 	}
 	fixturekit.Must(t, s.Close())
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project == nil || cfg.Project.ID != active || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.sole() == nil {
+	if cfg.Project == nil || cfg.Project.ID != active || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.Sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
 	if !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
@@ -592,11 +594,11 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 
 func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
+	opts, clone := journey.ProjectFixture(t)
 	root := opts.Config.Root
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
-	s.boundary = func(name string) error {
+	s.Boundary = func(name string) error {
 		if name == "trace-created" {
 			return errors.New("crash")
 		}
@@ -607,10 +609,10 @@ func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 	fixturekit.Must(t, s.Close())
 	fixturekit.Must(t, os.RemoveAll(clone))
 	fixturekit.Must(t, os.WriteFile(clone, []byte("not a directory"), 0600))
-	s, c = start(t, opts)
+	s, c = journey.StartT(t, opts)
 	cfg, err := c.Configuration(ctx)
 	fixturekit.Must(t, err)
-	if cfg.Project != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.sole() != nil {
+	if cfg.Project != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.Sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
 	if names := projectDirectories(t, root); len(names) != 1 {

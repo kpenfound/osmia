@@ -4,9 +4,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -14,6 +11,10 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -26,11 +27,6 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func newShedFixture(t *testing.T, members int) *journey.ShedFixture {
-	t.Helper()
-	return journey.NewDebateFixture(t, members, 1)
-}
 
 func newSketchedDebateFixture(t *testing.T, members, rounds int) *journey.ShedFixture {
 	t.Helper()
@@ -47,7 +43,7 @@ type seen struct{ spec, plan, prompt string }
 func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T) {
 	t.Parallel()
 	const members = 3
-	f := newShedFixture(t, members)
+	f := journey.NewShedFixture(t, members)
 	defer f.Stop(t)
 	ctx := context.Background()
 	var architectProblems []error
@@ -278,7 +274,7 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 
 func TestShedWaitsForACommitteeRunnerAndSurvivesRestart(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f := journey.NewShedFixture(t, 2)
 	ctx := context.Background()
 	runner := f.Opts.Committee
 	f.Stop(t)
@@ -367,7 +363,7 @@ func TestShedWaitsForACommitteeRunnerAndSurvivesRestart(t *testing.T) {
 
 func TestCommitteeRoundRecordsAFailedMember(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f := journey.NewShedFixture(t, 2)
 	defer f.Stop(t)
 	f.Member(1, 1, 1, func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "A judgement shows nothing.", "citations": []string{"spec#2"}}); err != nil || !recorded {
@@ -391,7 +387,7 @@ func TestCommitteeRoundRecordsAFailedMember(t *testing.T) {
 
 func TestLaterRoundPinsItsRevisionAndCarriesStandingObjections(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f := journey.NewShedFixture(t, 2)
 	defer f.Stop(t)
 	ctx := context.Background()
 	first := shed.ObjectionID(1, intake.CommitteeAgent(1), 1)
@@ -461,7 +457,7 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 	t.Parallel()
 	for _, crash := range []string{"captured", "recorded-then-abandoned"} {
 		t.Run(crash, func(t *testing.T) {
-			f := newShedFixture(t, 1)
+			f := journey.NewShedFixture(t, 1)
 			ctx := context.Background()
 			member := intake.CommitteeAgent(1)
 			entered := make(chan struct{})
@@ -545,7 +541,7 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 
 func TestMemberInterruptedEveryAttemptIsRecordedAsFailed(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f := journey.NewShedFixture(t, 2)
 	defer f.Stop(t)
 	for attempt := 1; attempt <= intake.MaxRoundAttempts; attempt++ {
 		f.Member(1, 1, attempt, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error {
@@ -569,7 +565,7 @@ func TestMemberInterruptedEveryAttemptIsRecordedAsFailed(t *testing.T) {
 
 func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 2)
+	f := journey.NewShedFixture(t, 2)
 	ctx := context.Background()
 	for round := 1; round <= 2; round++ {
 		for i := 1; i <= 3; i++ {
@@ -615,7 +611,7 @@ func TestCapacityChangeLeavesAnExistingCommitteeAlone(t *testing.T) {
 
 func TestInShedReasonCountsTheCommitteeThatRuns(t *testing.T) {
 	t.Parallel()
-	f := newShedFixture(t, 3)
+	f := journey.NewShedFixture(t, 3)
 	ctx := context.Background()
 	runner := f.Opts.Committee
 	f.Stop(t)

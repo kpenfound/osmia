@@ -58,7 +58,7 @@ type configFixture struct {
 	s     *Service
 	c     *Client
 	opts  Options
-	files reloadFiles
+	files fixturekit.ReloadFiles
 	text  string
 }
 
@@ -69,7 +69,7 @@ func projectConfigFixture(t *testing.T) configFixture {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	clone := filepath.Join(home, "clone")
 	opts := testOptions(fixturekit.ConfigWithSettings(t, home, savedFile(clone)))
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	return configFixture{s: s, c: c, opts: opts, files: files, text: savedFile(clone)}
 }
@@ -164,7 +164,7 @@ func TestProjectConfigSaveBuildsOnAnUnappliedRevision(t *testing.T) {
 	s, c := f.s, f.c
 	edited := strings.Replace(f.text, `checks_timeout = "15m"`, `checks_timeout = "30m"`, 1)
 	revision := f.record(t, edited)
-	fixturekit.Must(t, os.WriteFile(f.files.top, []byte(f.files.topText+"[capacity]\nmasons = 7\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(f.files.Top, []byte(f.files.TopText+"[capacity]\nmasons = 7\n"), 0600))
 
 	got, err := c.ProjectConfig(ctx, fixturekit.Project)
 	fixturekit.Must(t, err)
@@ -604,7 +604,7 @@ func TestProjectConfigSaveReportsAFailureAfterTheWrite(t *testing.T) {
 			}
 
 			s.setBoundary(nil)
-			fixturekit.Must(t, os.WriteFile(f.files.top, []byte(f.files.topText+"[capacity]\nmasons = 7\n"), 0600))
+			fixturekit.Must(t, os.WriteFile(f.files.Top, []byte(f.files.TopText+"[capacity]\nmasons = 7\n"), 0600))
 			_, err = c.Reload(ctx)
 			fixturekit.Must(t, err)
 			if p := s.current().For(fixturekit.Project).Project; p.ChecksTimeout != "15m" || s.current().Capacity.Masons != 7 {
@@ -633,7 +633,7 @@ func TestProjectConfigSaveReportsAFailureAfterTheWrite(t *testing.T) {
 func TestProjectConfigEndpointsFollowTheWebListenerRules(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "web = \"127.0.0.1:0\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\n")
 	s, c := start(t, opts)
 	got, err := c.ProjectConfig(context.Background(), fixturekit.Project)
 	fixturekit.Must(t, err)

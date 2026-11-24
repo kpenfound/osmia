@@ -3,9 +3,6 @@ package executionjourney
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +11,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -29,11 +31,11 @@ import (
 
 type routeWorld struct {
 	t        *testing.T
-	f        *shedFixture
+	f        *journey.ShedFixture
 	stream   config.WorkstreamID
 	down     config.WorkstreamID
 	pulls    *fixturekit.FakePulls
-	hook     *fakeWebhook
+	hook     *fixturekit.Webhook
 	provider *jevfixture.Provider
 	upstream string
 	base     string
@@ -88,36 +90,36 @@ func routeDecisions(p *jevfixture.Provider) int {
 func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	t.Helper()
 	ctx := context.Background()
-	w := &routeWorld{t: t, provider: o.jev, hook: newFakeWebhook(t), pulls: &fixturekit.FakePulls{SyncHead: true}, stopCard: make(chan struct{}), cardDone: make(chan struct{})}
+	w := &routeWorld{t: t, provider: o.jev, hook: fixturekit.NewWebhook(t), pulls: &fixturekit.FakePulls{SyncHead: true}, stopCard: make(chan struct{}), cardDone: make(chan struct{})}
 	passes, onPass := intakefixture.ScheduleCounter()
 	w.passes = passes
-	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
-		opts.schedulePassed = onPass
+	f := journey.NewDebateFixtureWith(t, 1, 1, "", func(opts *journey.Options) {
+		opts.SchedulePassed = onPass
 		opts.PullRequests = w.pulls
 		if o.jev != nil {
 			withJev(t, o.jev)(opts)
 		}
-		w.hook.records(*opts)
-		setWebhook(t, *opts, w.hook.hook())
+		w.hook.Records(opts.Config.Root)
+		fixturekit.SetWebhook(t, opts.Config.Root, w.hook.Hook())
 		opts.NotifyRetry = 10 * time.Millisecond
 	})
 	w.f = f
 
-	saved, err := f.c.ProjectConfig(ctx, f.project)
+	saved, err := f.C.ProjectConfig(ctx, f.Project)
 	fixturekit.Must(t, err)
 	none := ""
 	set := api.ProjectConfigValues{Fork: &none}
 	if o.delivery != "" {
 		set.Delivery = &o.delivery
 	}
-	_, err = f.c.SaveProjectConfig(ctx, f.project, api.ProjectConfigEdit{Pin: saved.Pin, Set: set})
+	_, err = f.C.SaveProjectConfig(ctx, f.Project, api.ProjectConfigEdit{Pin: saved.Pin, Set: set})
 	fixturekit.Must(t, err)
-	f.s.cfg = f.s.current()
+	f.S.Cfg = f.S.Current()
 
 	var repository *trace.Repository
-	w.stream, repository = f.buildFixture().SeedGit(t, "route")
-	home := filepath.Dir(f.clone)
-	w.upstream = strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "get-url", "upstream"))
+	w.stream, repository = f.BuildFixture().SeedGit(t, "route")
+	home := filepath.Dir(f.Clone)
+	w.upstream = strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "get-url", "upstream"))
 	w.pulls.Mu.Lock()
 
 	w.pulls.Branches = func(branch string) string {
@@ -130,9 +132,9 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	hookScript := "#!/bin/sh\nwhile read old new ref; do\n  if [ \"$ref\" = refs/heads/main ]; then\n    echo \"$new\" >> '" + w.pushes + "'\n  fi\ndone\n"
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.upstream, "hooks", "pre-receive"), []byte(hookScript), 0700))
 
-	f.s.setSole(&activeProject{repository: repository})
-	a := &finalReviewer{s: f.s, repository: repository}
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	a := &journey.FinalReviewer{S: f.S, Repository: repository}
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
 	})
@@ -142,16 +144,16 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 		if later == nil {
 			later = []any{}
 		}
-		f.finalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		f.FinalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 			_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume again.", "findings": later})
 			return err
 		})
 	}
-	assembleBoth(t, f, repository, a, w.stream,
+	journey.AssembleBoth(t, f, repository, a, w.stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 
-	at := f.s.now()
+	at := f.S.Now()
 	fixturekit.Must(t, repository.CreateWorkstream(ctx, downstreamStream, at, fixturekit.ServiceActor))
 	g, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{w.stream, downstreamStream}, at, fixturekit.OwnerActor, "fixture")
 	fixturekit.Must(t, err)
@@ -160,9 +162,9 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	fixturekit.Must(t, repository.Close())
 
 	if o.boundary != nil {
-		f.opts.boundary = o.boundary
+		f.Opts.Boundary = o.boundary
 	}
-	f.start(t)
+	f.Start(t)
 	go w.watchCards()
 	t.Cleanup(func() {
 		select {
@@ -172,7 +174,7 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 		}
 		<-w.cardDone
 
-		w.f.stop(t)
+		w.f.Stop(t)
 	})
 	return w
 }
@@ -185,7 +187,7 @@ func (w *routeWorld) watchCards() {
 			return
 		case <-time.After(15 * time.Millisecond):
 		}
-		inbox, err := w.f.c.Inbox(context.Background())
+		inbox, err := w.f.C.Inbox(context.Background())
 		if err != nil {
 			continue
 		}
@@ -197,11 +199,11 @@ func (w *routeWorld) watchCards() {
 	}
 }
 
-func (w *routeWorld) repository() *trace.Repository { return w.f.repository() }
+func (w *routeWorld) repository() *trace.Repository { return w.f.Repository() }
 
 func (w *routeWorld) rev(ref string) string {
 	w.t.Helper()
-	return strings.TrimSpace(fixturekit.DemoGit(w.t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-parse", ref))
+	return strings.TrimSpace(fixturekit.DemoGit(w.t, filepath.Dir(w.f.Clone), "-C", w.upstream, "rev-parse", ref))
 }
 
 func (w *routeWorld) mainUpdates() int {
@@ -228,9 +230,9 @@ func (w *routeWorld) edgeWait() string {
 }
 
 func (w *routeWorld) advance(d time.Duration) {
-	w.f.clock.Mu.Lock()
-	w.f.clock.At = w.f.clock.At.Add(d)
-	w.f.clock.Mu.Unlock()
+	w.f.Clock.Mu.Lock()
+	w.f.Clock.At = w.f.Clock.At.Add(d)
+	w.f.Clock.Mu.Unlock()
 }
 
 func (w *routeWorld) await(what string, step time.Duration, cond func() bool) {
@@ -272,7 +274,7 @@ func (w *routeWorld) awaitCard() api.InboxEntry {
 	w.t.Helper()
 	var card api.InboxEntry
 	w.await("the delivery card", 0, func() bool {
-		inbox, err := w.f.c.Inbox(context.Background())
+		inbox, err := w.f.C.Inbox(context.Background())
 		if err != nil {
 			return false
 		}
@@ -326,7 +328,7 @@ func (w *routeWorld) landed() (delivery.DeliveryLanding, bool) {
 func (w *routeWorld) delivered() trace.Transition {
 	w.t.Helper()
 	var found []trace.Transition
-	for _, tr := range w.f.transitions(w.t, w.stream) {
+	for _, tr := range w.f.Transitions(w.t, w.stream) {
 		if tr.Subject == trace.FeatureSubject && tr.To == intake.DeliveredState {
 			found = append(found, tr)
 		}
@@ -350,7 +352,7 @@ func (w *routeWorld) noPullRequestWasMerged() {
 
 func (w *routeWorld) posts(contains ...string) int {
 	n := 0
-	for _, body := range w.hook.received() {
+	for _, body := range w.hook.Received() {
 		match := true
 		for _, want := range contains {
 			match = match && strings.Contains(body, want)
@@ -369,7 +371,7 @@ func (w *routeWorld) requireLanded(push delivery.Push, decidedBy string) {
 	if got := w.rev("refs/heads/main"); got != push.Commit {
 		t.Fatalf("the base branch is at %s, want the signed pushed commit %s", got, push.Commit)
 	}
-	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-list", "--merges", w.base+".."+push.Commit)); merges != "" {
+	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(w.f.Clone), "-C", w.upstream, "rev-list", "--merges", w.base+".."+push.Commit)); merges != "" {
 		t.Fatalf("landing created merge commits: %s", merges)
 	}
 	if got := w.rev("refs/heads/" + intake.FeatureBranch(w.stream)); got != push.Commit {
@@ -402,19 +404,19 @@ func (w *routeWorld) requireLanded(push delivery.Push, decidedBy string) {
 
 	w.await("the owner's notification", 0, func() bool { return w.posts("Landed commit: "+push.Commit) > 0 })
 	if n := w.posts("Landed commit: "+push.Commit, "main of dagger/dagger"); n != 1 {
-		t.Fatalf("%d notifications name the landed commit and the base branch: %q", n, w.hook.received())
+		t.Fatalf("%d notifications name the landed commit and the base branch: %q", n, w.hook.Received())
 	}
 
 	w.advanceThroughPasses()
 	if _, _, closes := w.hostCounts(); closes != 1 || w.feature() != intake.DeliveredState || w.landings() != 1 || w.mainUpdates() != 1 {
 		t.Fatalf("later polls changed the outcome: %d closes, %s, %d landings, %d base updates", closes, w.feature(), w.landings(), w.mainUpdates())
 	}
-	summary, err := w.f.c.Trace(context.Background(), w.stream)
+	summary, err := w.f.C.Trace(context.Background(), w.stream)
 	fixturekit.Must(t, err)
 	if summary.Delivery == nil || summary.Delivery.Merged != push.Commit {
 		t.Fatalf("the trace shows the delivery as %+v", summary.Delivery)
 	}
-	if inbox, err := w.f.c.Inbox(context.Background()); err != nil {
+	if inbox, err := w.f.C.Inbox(context.Background()); err != nil {
 		t.Fatal(err)
 	} else {
 		for _, e := range inbox.Entries {
@@ -463,7 +465,7 @@ func TestTheOwnerApprovesAndLandsWithJevUnconfigured(t *testing.T) {
 		t.Fatalf("the delivery card is %+v", card)
 	}
 	w.await("the downstream workstream to wait", 0, func() bool { return w.edgeWait() == "waiting" })
-	presented, err := w.f.c.Delivery(ctx, w.stream)
+	presented, err := w.f.C.Delivery(ctx, w.stream)
 	fixturekit.Must(t, err)
 	if !presented.CanLand || presented.Recommendation != "" {
 		t.Fatalf("the presentation %+v", presented)
@@ -472,7 +474,7 @@ func TestTheOwnerApprovesAndLandsWithJevUnconfigured(t *testing.T) {
 		t.Fatal("the workstream landed before the owner approved")
 	}
 
-	response, err := w.f.c.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	response, err := w.f.C.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 	fixturekit.Must(t, err)
 	if response.Outcome != api.LandOutcomeLanded || response.Commit != push.Commit || response.Approval.Route != api.DeliveryRouteLand {
 		t.Fatalf("the response is %+v", response)
@@ -547,7 +549,7 @@ func TestAnUnsureJevLeavesTheMarkReadyCardWithItsRecommendation(t *testing.T) {
 	if !strings.Contains(card.Recommendation, "land") {
 		t.Fatalf("the recommendation is %q", card.Recommendation)
 	}
-	presented, err := w.f.c.Delivery(ctx, w.stream)
+	presented, err := w.f.C.Delivery(ctx, w.stream)
 	fixturekit.Must(t, err)
 	if !presented.CanLand || !strings.Contains(presented.Recommendation, "land") {
 		t.Fatalf("the presentation offers landing %v with the recommendation %q", presented.CanLand, presented.Recommendation)
@@ -576,20 +578,20 @@ func TestAPullRequestProjectDeliversThroughMarkReady(t *testing.T) {
 	if strings.Join(card.Options, ",") != "approve" || card.Land != nil || card.Jev == nil || !card.Jev.Deferred || card.Jev.Binding || strings.Contains(card.Recommendation, "land") {
 		t.Fatalf("the delivery card is %+v", card)
 	}
-	presented, err := w.f.c.Delivery(ctx, w.stream)
+	presented, err := w.f.C.Delivery(ctx, w.stream)
 	fixturekit.Must(t, err)
 	if presented.CanLand || strings.Contains(presented.Recommendation, "land") {
 		t.Fatalf("the presentation %+v", presented)
 	}
 	decision := api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}
-	if _, err := w.f.c.ApproveAndLand(ctx, w.stream, decision); err == nil || !strings.Contains(err.Error(), `delivery is "pull-request"`) {
+	if _, err := w.f.C.ApproveAndLand(ctx, w.stream, decision); err == nil || !strings.Contains(err.Error(), `delivery is "pull-request"`) {
 		t.Fatalf("approving to land on a project that delivers by pull request: %v", err)
 	}
 	if pr := w.pull(); !pr.Draft {
 		t.Fatalf("the draft was marked ready without the owner: %+v", pr)
 	}
 
-	approved, err := w.f.c.ApproveDelivery(ctx, w.stream, api.DeliveryDecision{Review: decision.Review, ReviewRevision: decision.ReviewRevision, Commit: decision.Commit, DraftHash: decision.DraftHash})
+	approved, err := w.f.C.ApproveDelivery(ctx, w.stream, api.DeliveryDecision{Review: decision.Review, ReviewRevision: decision.ReviewRevision, Commit: decision.Commit, DraftHash: decision.DraftHash})
 	fixturekit.Must(t, err)
 	if approved.Route != "" {
 		t.Fatalf("marking ready recorded the route %q", approved.Route)
@@ -655,8 +657,8 @@ func TestARestartAfterTheLandingPushCompletesTheLandingOnce(t *testing.T) {
 	}
 
 	restarted.Store(true)
-	w.f.stop(t)
-	w.f.start(t)
+	w.f.Stop(t)
+	w.f.Start(t)
 
 	w.await("the workstream to be delivered after the restart", 0, func() bool { return w.feature() == intake.DeliveredState })
 	w.requireLanded(push, trace.DecidedByJev)
@@ -669,7 +671,7 @@ func TestARestartAfterTheLandingPushCompletesTheLandingOnce(t *testing.T) {
 	if creates, readies, _ := w.hostCounts(); creates != 1 || readies != 0 {
 		t.Fatalf("%d pull requests opened and %d marked ready", creates, readies)
 	}
-	if reviews := len(finalOperations(t, w.repository(), w.stream)); reviews != 1 {
+	if reviews := len(journey.FinalOperations(t, w.repository(), w.stream)); reviews != 1 {
 		t.Fatalf("%d final reviews ran: the branch was rebased and reviewed again", reviews)
 	}
 	if w.delivered().DecidedBy != trace.DecidedByJevGate {

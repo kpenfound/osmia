@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/lifecycle"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/pulls"
@@ -22,12 +22,12 @@ import (
 
 func TestWorkgroupOwnPullRequestObservationWithRecordedBaseIntegration(t *testing.T) {
 	t.Parallel()
-	cfg, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
+	cfg, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
 	_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{fixturekit.Stream}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
 	fixturekit.Must(t, err)
-	publication := deliverWithPullRequest(t, repo, cfg, 42)
-	resolutionDocument(t, repo, fixturekit.Stream, lifecycle.BaseObservationDocument, "base-observation.json", lifecycle.BaseObservation{Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "integrated"}})
+	publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
+	journey.ResolutionDocument(t, repo, fixturekit.Stream, lifecycle.BaseObservationDocument, "base-observation.json", lifecycle.BaseObservation{Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "integrated"}})
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	fixturekit.Must(t, refresh.Pass(context.Background()))
 	op := fixturekit.ActionOperation(t, repo, fixturekit.Stream, lifecycle.BaseRefreshAction)
@@ -49,15 +49,15 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 	t.Parallel()
 	for _, based := range []bool{false, true} {
 		t.Run(fmt.Sprintf("with-base-%v", based), func(t *testing.T) {
-			cfg, repo, host, refresh := ownPRFixture(t)
+			cfg, repo, host, refresh := journey.OwnPRFixture(t)
 			if based {
-				sealStream(t, repo)
+				journey.SealStream(t, repo)
 			}
 			clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
-			refresh.s.options.Reconciliation.Now = clock.Now
+			refresh.S.Options.Reconciliation.Now = clock.Now
 			_, err := trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{fixturekit.Stream}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
 			fixturekit.Must(t, err)
-			publication := deliverWithPullRequest(t, repo, cfg, 42)
+			publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
 			host.FindErr = errors.New("provider unavailable")
 			ctx := context.Background()
 			fixturekit.Must(t, refresh.Pass(ctx))
@@ -102,32 +102,11 @@ func TestWorkgroupOwnPullRequestObservationRetriesOnCadenceAndStopsWhenClosed(t 
 	}
 }
 
-func ownPRFixture(t *testing.T) (*config.Config, *trace.Repository, *fixturekit.FakePulls, *baseRefresher) {
-	t.Helper()
-	_, cfg := conversationFixture(t, "own-pr-")
-	repo, err := trace.Open(cfg.Root, cfg.Project)
-	fixturekit.Must(t, err)
-	t.Cleanup(func() { repo.Close() })
-	host := &fixturekit.FakePulls{}
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, options: Options{Options: service.Options{PullRequests: host}}}
-	return cfg, repo, host, &baseRefresher{s: s, repository: repo}
-}
-
-func sealStream(t *testing.T, repo *trace.Repository) {
-	t.Helper()
-	fixturekit.SealDependentStream(t, repo, fixturekit.Stream, fixturekit.Quiet, intake.FeatureBranch(fixturekit.Stream), execution.ForemanActor)
-}
-
-func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Config, pr int) api.DeliveryPublication {
-	t.Helper()
-	return fixturekit.RecordDeliveredPublication(t, repo, cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, execution.ForemanActor)
-}
-
 func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
 	t.Parallel()
-	cfg, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
-	publication := deliverWithPullRequest(t, repo, cfg, 42)
+	cfg, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
+	publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	fixturekit.Must(t, refresh.Pass(context.Background()))
 	op := fixturekit.ActionOperation(t, repo, fixturekit.Stream, lifecycle.BaseRefreshAction)
@@ -161,9 +140,9 @@ func TestBaseRefreshRecordsMergedOwnPullRequest(t *testing.T) {
 
 func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
 	t.Parallel()
-	cfg, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
-	publication := deliverWithPullRequest(t, repo, cfg, 42)
+	cfg, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
+	publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	fixturekit.Must(t, refresh.Pass(context.Background()))
 	op := fixturekit.ActionOperation(t, repo, fixturekit.Stream, lifecycle.BaseRefreshAction)
@@ -192,9 +171,9 @@ func TestBaseRefreshRecordsClosedOwnPullRequest(t *testing.T) {
 
 func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.T) {
 	t.Parallel()
-	cfg, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
-	publication := deliverWithPullRequest(t, repo, cfg, 42)
+	cfg, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
+	publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: publication.Branch, HeadRepository: publication.Fork}}
 	fixturekit.Must(t, refresh.Pass(context.Background()))
 	op := fixturekit.ActionOperation(t, repo, fixturekit.Stream, lifecycle.BaseRefreshAction)
@@ -217,8 +196,8 @@ func TestBaseRefreshOpenOwnPullRequestContinuesToExistingParentCheck(t *testing.
 
 func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
 	t.Parallel()
-	_, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
+	_, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
 	ctx := context.Background()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: intake.DeliveredState, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err := repo.SetFeatureState(ctx, h, intake.DeliveredState, "delivered by merging outside the factory")
@@ -240,13 +219,13 @@ func TestBaseRefreshWithNoOwnPullRequestMakesNoLookup(t *testing.T) {
 
 func TestBaseRefreshRestartBetweenOwnPullRequestLookupAndRecordYieldsOneOutcome(t *testing.T) {
 	t.Parallel()
-	cfg, repo, host, refresh := ownPRFixture(t)
-	sealStream(t, repo)
-	publication := deliverWithPullRequest(t, repo, cfg, 42)
+	cfg, repo, host, refresh := journey.OwnPRFixture(t)
+	journey.SealStream(t, repo)
+	publication := journey.DeliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, State: "closed", Head: publication.Branch, HeadRepository: publication.Fork}}
 	fixturekit.Must(t, refresh.Pass(context.Background()))
 	op := fixturekit.ActionOperation(t, repo, fixturekit.Stream, lifecycle.BaseRefreshAction)
-	refresh.s.boundary = func(step string) error {
+	refresh.S.Boundary = func(step string) error {
 		if step == "own-pr-outcome-found" {
 			return errors.New("interrupted")
 		}
@@ -258,13 +237,13 @@ func TestBaseRefreshRestartBetweenOwnPullRequestLookupAndRecordYieldsOneOutcome(
 	if _, revision, err := delivery.OwnPullRequestOutcomeAt(repo, fixturekit.Stream); err != nil || revision != 0 {
 		t.Fatalf("the interrupted attempt recorded an outcome: revision %d err %v", revision, err)
 	}
-	refresh.s.boundary = nil
+	refresh.S.Boundary = nil
 
 	repo.Close()
 	reopened, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { reopened.Close() })
-	refresh.repository = reopened
+	refresh.Repository = reopened
 	result, err := refresh.Apply(context.Background(), op)
 	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" {

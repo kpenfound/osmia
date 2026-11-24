@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -43,13 +45,13 @@ func newChangePassFixture(t *testing.T) *changePassFixture {
 
 func newChangePassFixtureWith(t *testing.T, extra int) *changePassFixture {
 	t.Helper()
-	base := newTwoProjectFixture(t)
+	base := journey.NewTwoProjectFixture(t)
 	f := &changePassFixture{}
 	var err error
-	f.local, err = trace.Open(base.cfg.Root, base.cfg.Projects[0])
+	f.local, err = trace.Open(base.Cfg.Root, base.Cfg.Projects[0])
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { fixturekit.Must(t, f.local.Close()) })
-	f.remote, err = trace.Open(base.cfg.Root, base.cfg.Projects[1])
+	f.remote, err = trace.Open(base.Cfg.Root, base.Cfg.Projects[1])
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { fixturekit.Must(t, f.remote.Close()) })
 	for _, stream := range []config.WorkstreamID{passFirst, passSecond, passThird, passJoining} {
@@ -66,13 +68,13 @@ func newChangePassFixtureWith(t *testing.T, extra int) *changePassFixture {
 		inputs[repo.Project()], err = repo.Workstreams()
 		fixturekit.Must(t, err)
 	}
-	f.store, _, err = runtime.Open(runtime.Inputs{Config: base.cfg, Workstreams: inputs})
+	f.store, _, err = runtime.Open(runtime.Inputs{Config: base.Cfg, Workstreams: inputs})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { fixturekit.Must(t, f.store.Close()) })
 	var lock sync.Mutex
 	f.controller = lifecycle.New(lifecycle.Dependencies{
 		Options:                   lifecycle.Execution{Committee: &intake.Committee{}},
-		Current:                   func() *config.Config { return base.cfg },
+		Current:                   func() *config.Config { return base.Cfg },
 		Store:                     func() *runtime.Store { return f.store },
 		Now:                       func() time.Time { return fixturekit.DemoStart },
 		Step:                      func(string) error { return nil },
@@ -112,7 +114,7 @@ func (f *changePassFixture) localGroup(t *testing.T) trace.Workgroup {
 
 func (f *changePassFixture) crossGroup(t *testing.T, count int) (*trace.Repository, trace.Workgroup) {
 	t.Helper()
-	members := []trace.CrossRepoMember{{Workstream: otherStream, Project: f.remote}}
+	members := []trace.CrossRepoMember{{Workstream: fixturekit.OtherStream, Project: f.remote}}
 	for _, stream := range []config.WorkstreamID{passFirst, passSecond, passThird}[:count] {
 		members = append(members, trace.CrossRepoMember{Workstream: stream, Project: f.local})
 	}
@@ -316,7 +318,7 @@ func (f *changePassFixture) approve(t *testing.T, wt *trace.Repository, g trace.
 	approval := trace.GroupApproval{Workgroup: g.ID, Complete: true}
 	for _, stream := range g.Members[1:] {
 		repo := f.local
-		if stream == otherStream {
+		if stream == fixturekit.OtherStream {
 			repo = f.remote
 		}
 		approval.Members = append(approval.Members, trace.GroupMemberApproval{Project: repo.Project(), Workstream: stream, Record: json.RawMessage(`{}`)})
@@ -328,7 +330,7 @@ func (f *changePassFixture) retire(t *testing.T, g trace.Workgroup) {
 	t.Helper()
 	for _, stream := range g.Members[1:] {
 		repo := f.local
-		if stream == otherStream {
+		if stream == fixturekit.OtherStream {
 			repo = f.remote
 		}
 		fixturekit.Must(t, f.store.SetArchived(runtime.Archive{Project: repo.Project(), Workstream: stream, Workgroup: g.ID, ArchivedAt: fixturekit.DemoStart}))
@@ -381,7 +383,7 @@ func TestChangePassRetirementRequiresApprovedArchiveIdentity(t *testing.T) {
 	approval := trace.GroupApproval{Workgroup: g.ID, Complete: true}
 	for _, stream := range g.Members[1:] {
 		project := f.local.Project()
-		if stream == otherStream || stream == passFirst {
+		if stream == fixturekit.OtherStream || stream == passFirst {
 			project = f.remote.Project()
 		}
 		approval.Members = append(approval.Members, trace.GroupMemberApproval{Project: project, Workstream: stream, Record: json.RawMessage(`{}`)})

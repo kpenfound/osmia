@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -33,8 +35,8 @@ func (j *briefJourney) requireNoProblems(t *testing.T) {
 func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
-	stream := j.stream
-	screenshot := j.capture(t, "uploads", j.report.Commit)
+	stream := j.Stream
+	screenshot := j.capture(t, "uploads", j.Report.Commit)
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
 	j.chief.hold()
 	j.run(t)
@@ -100,7 +102,7 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
-	stream := j.stream
+	stream := j.Stream
 	j.chief.hold()
 	j.run(t)
 	j.awaitStarts(t, 1)
@@ -138,7 +140,7 @@ func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
-	stream := j.stream
+	stream := j.Stream
 	const earlier = "Run the one-way migration first"
 	j.chief.plan(1, briefPlan{Text: "First brief.", Items: []string{earlier}})
 	j.run(t)
@@ -205,7 +207,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	if body != approved.Description || !strings.Contains(body, "- "+current+"\n") || strings.Contains(body, earlier) || strings.Contains(body, "Old item") {
 		t.Fatalf("the published body of the new review:\n%s", body)
 	}
-	if brief, found, err := delivery.ReadBrief(j.repository, stream, 1, first.ReviewRevision); err != nil || !found || brief.Text != "First brief." {
+	if brief, found, err := delivery.ReadBrief(j.Repository, stream, 1, first.ReviewRevision); err != nil || !found || brief.Text != "First brief." {
 		t.Fatalf("review 1's brief after the new one: %+v %v %v", brief, found, err)
 	}
 }
@@ -213,7 +215,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
-	stream := j.stream
+	stream := j.Stream
 	j.run(t)
 	j.awaitEntry(t, stream)
 	read := j.present(t, stream)
@@ -262,10 +264,10 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	j := newBriefFixture(t, "")
-	first, repository := j.buildFixture().SeedGit(t, "group-first")
-	j.stream, j.repository = first, repository
+	first, repository := j.BuildFixture().SeedGit(t, "group-first")
+	j.Stream, j.Repository = first, repository
 	j.host(t)
-	j.s.setSole(&activeProject{repository: repository})
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 	second := j.secondMember(t, "group-second")
 	_, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{first, second}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
 	fixturekit.Must(t, err)
@@ -311,6 +313,6 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 
 func (j *briefJourney) secondMember(t *testing.T, key string) config.WorkstreamID {
 	t.Helper()
-	base := strings.TrimSpace(fixturekit.DemoGit(t, j.clone, "-C", j.clone, "rev-parse", "HEAD"))
-	return recordBuild(t, j.shedFixture, j.repository, key, fixturekit.ValidPlan, config.WorkspacesGit, base)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, j.Clone, "-C", j.Clone, "rev-parse", "HEAD"))
+	return journey.RecordBuild(t, j.ShedFixture, j.Repository, key, fixturekit.ValidPlan, config.WorkspacesGit, base)
 }

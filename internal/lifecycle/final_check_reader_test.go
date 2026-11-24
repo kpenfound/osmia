@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -58,12 +59,12 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			j := newFlowJourney(t)
-			stream := j.stream
+			stream := j.Stream
 			var mu sync.Mutex
 			var viewed, tracePath, traceViewed string
 			var viewErr, traceErr error
 			tracePath = "final/checks-1-traces/" + checkrun.TraceDocumentID("abc123", "test:resume") + ".json"
-			j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+			j.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 				content, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
 				var traced string
 				var terr error

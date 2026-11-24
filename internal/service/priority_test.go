@@ -147,7 +147,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the service's chief-of-staff turn did not run")
 	}
-	mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
+	intakefixture.Mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
 	return r
 }
 
@@ -164,7 +164,7 @@ func (r *priorityRig) send(prompt string) ConversationEntry {
 	sent, err := r.c.Send(r.ctx, fixturekit.Stream, prompt)
 	fixturekit.Must(r.t, err)
 	r.sends++
-	awaitConversation(r.t, r.c, func(l ConversationResponse) bool {
+	intakefixture.AwaitConversation(r.t, r.c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 2*r.sends && l.Entries[len(l.Entries)-1].State == TurnDone
 	})
 	return sent

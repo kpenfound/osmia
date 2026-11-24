@@ -3,11 +3,12 @@ package fixturekit
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
-	"testing"
 )
 
 // HardPauseRepository creates the demo project's trace with the workstream

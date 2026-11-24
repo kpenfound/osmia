@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -35,7 +36,7 @@ func TestFinalReviewWaitsForCloudChecksThatComplete(t *testing.T) {
 		return read, nil
 	}
 	var reads atomic.Int32
-	d.f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	d.f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		reads.Add(1)
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
@@ -55,8 +56,8 @@ func TestFinalReviewWaitsForCloudChecksThatComplete(t *testing.T) {
 	if n := len(d.pushes(t)); n != 1 || reads.Load() != 0 {
 		t.Fatalf("pushes %d, reads %d", n, reads.Load())
 	}
-	timeout := d.f.s.about(d.repository).Project.CheckTimeout()
-	d.f.clock.At = d.f.clock.At.Add(timeout + time.Minute)
+	timeout := d.f.S.About(d.repository).Project.CheckTimeout()
+	d.f.Clock.At = d.f.Clock.At.Add(timeout + time.Minute)
 	for n := 1; n <= 3; n++ {
 		if _, open := entry(); open {
 			t.Fatalf("the inbox reports %d incomplete runs", n-1)
@@ -67,7 +68,7 @@ func TestFinalReviewWaitsForCloudChecksThatComplete(t *testing.T) {
 		if _, err := d.a.Apply(ctx, d.first); err == nil || !strings.Contains(err.Error(), "runs in a row") {
 			t.Fatalf("the checks were read again before the wait passed: %v", err)
 		}
-		d.f.clock.At = d.f.clock.At.Add(delivery.FinalCheckDelay(n) + time.Minute)
+		d.f.Clock.At = d.f.Clock.At.Add(delivery.FinalCheckDelay(n) + time.Minute)
 	}
 	e, open := entry()
 	if !open || e.Kind != api.InboxFinalChecks || e.Revision != 1 || !strings.Contains(e.Question, "did not complete 3 times in a row") || !strings.Contains(e.Question, "no completed") || !strings.Contains(e.Blocked, "waiting longer after each run") {

@@ -3,15 +3,16 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -26,7 +27,7 @@ import (
 
 func proposedAmendment(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID) {
 	t.Helper()
-	seedAmendment(t, f.ArchitectFixture, repo, stream)
+	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, repo, stream)
 	ctx := context.Background()
 	at := f.Clock.Now()
 	docs := []trace.Document{}

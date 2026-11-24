@@ -52,7 +52,7 @@ func advanceUpstream(t *testing.T, f *shedFixture, files map[string]string) stri
 
 func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.FinalOperations(t, repository, stream, FinalReviewAction)
+	return intakefixture.OperationsOf(t, repository, stream, FinalReviewAction)
 }
 
 func assembleBoth(t *testing.T, f *shedFixture, repository *trace.Repository, a *delivery.FinalReviewer, stream config.WorkstreamID, resume, dedupe map[string]string) (string, coreadapter.Operation) {

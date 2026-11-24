@@ -2,13 +2,16 @@ package executionjourney
 
 import (
 	"context"
+	"strconv"
+	"strings"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strconv"
-	"strings"
-	"testing"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -19,7 +22,7 @@ import (
 )
 
 type refusingLanding struct {
-	*foreman
+	*journey.Foreman
 	reason string
 }
 
@@ -28,17 +31,17 @@ func (r refusingLanding) Apply(ctx context.Context, op coreadapter.Operation) (c
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	stream, err := r.foreman.driver().Stream(op, in)
+	stream, err := r.Foreman.Driver().Stream(op, in)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	return r.foreman.driver().Refuse(ctx, stream, in, r.reason)
+	return r.Foreman.Driver().Refuse(ctx, stream, in, r.reason)
 }
 
-func settleLandings(t *testing.T, f *shedFixture, repo *trace.Repository, adapter coreadapter.Reconciler) {
+func settleLandings(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, adapter coreadapter.Reconciler) {
 	t.Helper()
 	controller, err := reconcile.New(repo, reconcile.Options{Worker: "landing-refused-fixture",
-		Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+		Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: journey.InspectForTest(f.S).GitOperationLimit(repo, nil),
 		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: adapter}})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, controller.Pass(context.Background()))
@@ -48,27 +51,27 @@ func settleLandings(t *testing.T, f *shedFixture, repo *trace.Repository, adapte
 func TestARefusedLandingOfAStaleApprovalReturnsTheUnitToChecking(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, stream, repo := newApprovedFixture(t, "refused-stale")
+	f, stream, repo := journey.NewApprovedFixture(t, "refused-stale")
 	defer repo.Close()
 	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
-	lands := &foreman{masons: newMasonController(f.s, repo)}
-	review, result := approvedReview(t, repo, stream, "resume")
+	journey.RouteThrough(f.S, p)
+	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repo)}
+	review, result := journey.ApprovedReview(t, repo, stream, "resume")
 
-	fixturekit.DemoGit(t, f.clone, "-C", f.clone, "update-ref", "refs/heads/"+execution.UnitBranch(stream, "resume"), result.Identity.Candidate.BaseRevision)
+	fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "update-ref", "refs/heads/"+execution.UnitBranch(stream, "resume"), result.Identity.Candidate.BaseRevision)
 	fixturekit.Must(t, lands.Pass(ctx))
 	settleLandings(t, f, repo, lands)
-	ops := landOperations(t, repo, stream)
+	ops := journey.LandOperations(t, repo, stream)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" {
 		t.Fatalf("the refused landing %+v", ops)
 	}
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitApproved {
+	if got := intakefixture.UnitWorkflow(t, repo, stream, "resume"); got.Value != intake.UnitApproved {
 		t.Fatalf("the refusal itself moved the unit to %s", got.Value)
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))
 
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != execution.UnitChecking {
+	if got := intakefixture.UnitWorkflow(t, repo, stream, "resume"); got.Value != execution.UnitChecking {
 		t.Fatalf("a refused landing of a stale approval left the unit %s, want checking", got.Value)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("resume"))
@@ -76,11 +79,11 @@ func TestARefusedLandingOfAStaleApprovalReturnsTheUnitToChecking(t *testing.T) {
 	if moved.ID != wantID || moved.To != execution.UnitChecking || moved.DefaultTo != execution.UnitChecking || moved.DecidedBy != trace.DecidedByCode || moved.Departed() {
 		t.Fatalf("the return to checking %+v, want %s", moved, wantID)
 	}
-	rec := routeOf(t, repo, stream, "unit.landing_refused")
+	rec := journey.RouteOf(t, repo, stream, "unit.landing_refused")
 	if rec.State != router.StateCommitted || rec.Outcome != router.OutcomeFollowed || rec.Default != execution.UnitChecking || rec.Target != execution.UnitChecking || rec.Authority != "" {
 		t.Fatalf("route %+v", rec)
 	}
-	for _, op := range landOperations(t, repo, stream) {
+	for _, op := range journey.LandOperations(t, repo, stream) {
 		in, err := execution.DecodeLand(op.Operation)
 		fixturekit.Must(t, err)
 		if in.Unit == "resume" && op.Result == nil {
@@ -96,20 +99,20 @@ func TestAGivenUpLandingIsLandedAgainAsTheNextAttempt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	f, _ := newMasonFixtureOn(t, config.WorkspacesGit, "masons = 1\n", independentPlan)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repo := seedBuild(t, f, "refused-gave-up", independentPlan, config.WorkspacesGit, base)
-	seedReview(t, f, repo, stream, "resume", resumeReport)
-	approveDirectly(t, f.s, repo, stream, "resume", "spec#1")
+	f, _ := journey.NewMasonFixtureOn(t, config.WorkspacesGit, "masons = 1\n", intakefixture.IndependentPlan)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
+	stream, repo := journey.SeedBuild(t, f, "refused-gave-up", intakefixture.IndependentPlan, config.WorkspacesGit, base)
+	journey.SeedReview(t, f, repo, stream, "resume", journey.ResumeReport)
+	journey.ApproveDirectly(t, f.S, repo, stream, "resume", "spec#1")
 	defer repo.Close()
 	p := &jevfixture.Transitions{}
-	routeThrough(f.s, p)
-	lands := &foreman{masons: newMasonController(f.s, repo)}
-	review, result := approvedReview(t, repo, stream, "resume")
+	journey.RouteThrough(f.S, p)
+	lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repo)}
+	review, result := journey.ApprovedReview(t, repo, stream, "resume")
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	settleLandings(t, f, repo, refusingLanding{foreman: lands, reason: "gave up after repeated failures"})
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitApproved {
+	settleLandings(t, f, repo, refusingLanding{Foreman: lands, reason: "gave up after repeated failures"})
+	if got := intakefixture.UnitWorkflow(t, repo, stream, "resume"); got.Value != intake.UnitApproved {
 		t.Fatalf("the unit is %s", got.Value)
 	}
 
@@ -118,12 +121,12 @@ func TestAGivenUpLandingIsLandedAgainAsTheNextAttempt(t *testing.T) {
 	if again.To != intake.UnitApproved || again.DefaultTo != intake.UnitApproved || again.DecidedBy != trace.DecidedByReviewer || !strings.Contains(again.ID, "-approved-again-") {
 		t.Fatalf("the decision to land again %+v", again)
 	}
-	rec := routeOf(t, repo, stream, "unit.landing_refused")
+	rec := journey.RouteOf(t, repo, stream, "unit.landing_refused")
 	if rec.Authority != router.AuthorityReviewer || rec.Outcome != router.OutcomeFollowed || rec.Target != intake.UnitApproved {
 		t.Fatalf("route %+v", rec)
 	}
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := landOperations(t, repo, stream)
+	ops := journey.LandOperations(t, repo, stream)
 	if len(ops) != 2 {
 		t.Fatalf("%d landings, want the refused one and its second attempt: %+v", len(ops), ops)
 	}
@@ -137,10 +140,10 @@ func TestAGivenUpLandingIsLandedAgainAsTheNextAttempt(t *testing.T) {
 	}
 
 	settleLandings(t, f, repo, lands)
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitMerged {
+	if got := intakefixture.UnitWorkflow(t, repo, stream, "resume"); got.Value != intake.UnitMerged {
 		t.Fatalf("the second attempt left the unit %s", got.Value)
 	}
-	if commits := f.landedCommits(t, stream, result.Identity.Candidate.BaseRevision); len(commits) != 1 {
+	if commits := landedCommits(f, t, stream, result.Identity.Candidate.BaseRevision); len(commits) != 1 {
 		t.Fatalf("the feature branch holds %v", commits)
 	}
 }

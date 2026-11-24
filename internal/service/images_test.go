@@ -42,7 +42,7 @@ type imageRig struct {
 func newImageRig(t *testing.T) *imageRig {
 	t.Helper()
 	opts := eventTraceOptions(t)
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	withTailnet(t, &opts)
 	s, _ := start(t, opts)
 	repo := s.sole().repository
@@ -309,11 +309,11 @@ func TestTheArchiveRecordOfAMemberPinsNoImageBytes(t *testing.T) {
 }
 
 func TestImagesDoNotEnterMemoryKnowledgeOrNotifications(t *testing.T) {
-	hook := newFakeWebhook(t)
+	hook := fixturekit.NewWebhook(t)
 	opts, _ := conversationFixture(t, "image-privacy-")
-	inbox := &fakeInbox{}
-	opts.notifyInbox = inbox.read
-	setWebhook(t, opts, hook.hook())
+	inbox := &fixturekit.NotificationInbox{}
+	opts.notifyInbox = inbox.Read
+	fixturekit.SetWebhook(t, opts.Config.Root, hook.Hook())
 	s, _ := startNotifying(t, opts, inbox)
 	repo := s.sole().repository
 	data := attachmentPNG(t)
@@ -359,9 +359,9 @@ func TestImagesDoNotEnterMemoryKnowledgeOrNotifications(t *testing.T) {
 		noBytes("Hearsay request", string(raw))
 	}
 	s.notifier.pass(context.Background())
-	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
+	inbox.Set(fixturekit.NotificationEntry(InboxEscalation, 1))
 	s.notifier.pass(context.Background())
-	posts := hook.await(t, 1)
+	posts := intakefixture.AwaitWebhook(t, hook, 1)
 	for _, post := range posts {
 		noBytes("webhook", post)
 	}

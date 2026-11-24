@@ -3,117 +3,58 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type contestFixture struct {
-	f      *shedFixture
-	stream config.WorkstreamID
-	repo   *trace.Repository
-	r      *reviewers
-	tool   coreadapter.Tool
-}
-
-func newContestFixture(t *testing.T, key string) *contestFixture {
-	t.Helper()
-	f, stream, repo := newReviewFixture(t, key)
-	f.s.setSole(&activeProject{repository: repo})
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
-		Turn: "events_1", Prompt: "Unit resume is contested.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
-	})
-	controls := &runtimeControls{}
-	controls.service.Store(f.s)
-	return &contestFixture{f: f, stream: stream, repo: repo, r: &reviewers{masons: newMasonController(f.s, repo)}, tool: controls.resolveContested(repo, scope)}
-}
-
-func (c *contestFixture) state(t *testing.T) trace.WorkflowState {
-	t.Helper()
-	state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
-	fixturekit.Must(t, err)
-	return state
-}
-
-func (c *contestFixture) contest(t *testing.T) trace.Transition {
-	t.Helper()
-	return intakefixture.MissingVerdictContest(t, c.state, func(ctx context.Context, state trace.WorkflowState) error {
-		return c.r.one(ctx, c.stream, "resume", state, false)
-	}, func() { captureTurn(t, c.f, c.repo, c.stream, intake.ReviewerAgent("resume"), nil) }, func() (trace.Transition, bool, error) { return execution.UnitContest(c.repo, c.stream, "resume") })
-}
-
-func (c *contestFixture) resolve(t *testing.T, input string) string {
-	t.Helper()
-	decideContest(c.repo, c.stream, "resume")
-	return intakefixture.Handle(t, c.tool, input)
-}
-
-func decideContest(repo *trace.Repository, stream config.WorkstreamID, unit string) {
-	contest, contested, err := execution.UnitContest(repo, stream, unit)
-	if err != nil || !contested {
-		return
-	}
-	key := jev.ContestKey(contest.ID)
-	if res, err := jev.Recorded(repo, stream, jev.KindContestedRuling, key); err == nil && res.Status == jev.None {
-		jevfixture.Fallback(repo, repo.Project(), stream, jev.KindContestedRuling, key)
-	}
-}
-
-func (c *contestFixture) raised(t *testing.T, contest trace.Transition) (bool, string) {
-	t.Helper()
-	raised, note, err := execution.ContestRaised(c.repo, c.stream, "resume", contest)
-	fixturekit.Must(t, err)
-	return raised, note
-}
-
 func TestChiefOfStaffResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	t.Parallel()
-	c := newContestFixture(t, "chief-resolves")
-	contest := c.contest(t)
-	if raised, _ := c.raised(t, contest); raised {
+	c := journey.NewContestFixture(t, "chief-resolves")
+	contest := c.Contest(t)
+	if raised, _ := c.Raised(t, contest); raised {
 		t.Fatal("a contest the chief of staff has not seen was raised to the owner")
 	}
-	if out := c.resolve(t, `{"unit":"resume","decision":"revise","note":"Rebuild it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "use review") {
+	if out := c.Resolve(t, `{"unit":"resume","decision":"revise","note":"Rebuild it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "use review") {
 		t.Fatalf("a ruling the contest does not take was recorded: %s", out)
 	}
-	if out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Cite each criterion by its plan ID.","owner_decided":true}`); !strings.Contains(out, "only for a ruling the owner gave") {
+	if out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"Cite each criterion by its plan ID.","owner_decided":true}`); !strings.Contains(out, "only for a ruling the owner gave") {
 		t.Fatalf("an event turn recorded an owner ruling: %s", out)
 	}
 	note := "Record a verdict citing spec#1 by its plan ID."
-	out := c.resolve(t, `{"unit":"resume","decision":"review","note":"`+note+`"}`)
+	out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"`+note+`"}`)
 	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, `"by":"chief of staff"`) {
 		t.Fatalf("resolve_contested: %s", out)
 	}
-	state := c.state(t)
-	transitions := workTransitions(t, c.repo, c.stream)
+	state := intakefixture.UnitWorkflow(t, c.Repo, c.Stream, "resume")
+	transitions := intakefixture.WorkTransitions(t, c.Repo, c.Stream)
 	last := transitions[len(transitions)-1]
 	if state.Value != intake.UnitReviewing || last.Actor != intake.ChiefActor || !strings.Contains(last.Reason, "chief of staff ruled review") {
 		t.Fatalf("resolved unit %s by %+v", state.Value, last)
 	}
-	if out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Again."}`); !strings.Contains(out, "is not contested") {
+	if out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"Again."}`); !strings.Contains(out, "is not contested") {
 		t.Fatalf("a resolved unit took another ruling: %s", out)
 	}
-	fixturekit.Must(t, c.r.one(context.Background(), c.stream, "resume", state, false))
-	th, err := c.repo.Thread(c.stream, intake.ReviewerAgent("resume"))
+	fixturekit.Must(t, c.R.One(context.Background(), c.Stream, "resume", state, false))
+	th, err := c.Repo.Thread(c.Stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
 	if prompt := th.Turns[len(th.Turns)-1].Request.Prompt; th.Turns[len(th.Turns)-1].Request.TurnID != execution.ReviewTurnID("resume", state.Version) || !strings.Contains(prompt, note) || !strings.Contains(prompt, "chief of staff ruled review") {
 		t.Fatalf("the resumed review lacks the ruling:\n%s", prompt)
 	}
-	actions, err := service.ChiefActions(c.repo, c.stream)
+	actions, err := service.ChiefActions(c.Repo, c.Stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 1 || actions[0].Kind != "action" || actions[0].Turn != "events_1" || actions[0].Text != "Resolved contested unit resume: its reviewer reviews the candidate again. "+note {
 		t.Fatalf("conversation actions %+v", actions)
@@ -122,35 +63,35 @@ func TestChiefOfStaffResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 
 func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 	t.Parallel()
-	c := newContestFixture(t, "chief-raises")
+	c := journey.NewContestFixture(t, "chief-raises")
 	for i := range 3 {
-		c.contest(t)
-		if out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Record a verdict."}`); !strings.Contains(out, `"recorded":true`) {
+		c.Contest(t)
+		if out := c.Resolve(t, `{"unit":"resume","decision":"review","note":"Record a verdict."}`); !strings.Contains(out, `"recorded":true`) {
 			t.Fatalf("ruling %d: %s", i+1, out)
 		}
 	}
-	contest := c.contest(t)
-	if raised, _ := c.raised(t, contest); raised {
+	contest := c.Contest(t)
+	if raised, _ := c.Raised(t, contest); raised {
 		t.Fatal("engineering retries alone raised a contest to the owner")
 	}
 
 	escalation := "The reviewer ends every turn without a verdict; I recommend checking its profile."
-	if out := c.resolve(t, `{"unit":"resume","decision":"escalate","note":"`+escalation+`"}`); !strings.Contains(out, `"recorded":true`) {
+	if out := c.Resolve(t, `{"unit":"resume","decision":"escalate","note":"`+escalation+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("escalate: %s", out)
 	}
-	if raised, note := c.raised(t, contest); !raised || note != escalation {
+	if raised, note := c.Raised(t, contest); !raised || note != escalation {
 		t.Fatalf("escalated contest raised %t with %q", raised, note)
 	}
-	if out := c.resolve(t, `{"unit":"resume","decision":"escalate","note":"Twice."}`); !strings.Contains(out, "already decided") {
+	if out := c.Resolve(t, `{"unit":"resume","decision":"escalate","note":"Twice."}`); !strings.Contains(out, "already decided") {
 		t.Fatalf("a second decision on one contest was recorded: %s", out)
 	}
-	if _, apiErr := c.f.s.recordContestedRuling(context.Background(), c.repo, c.stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Try the other profile."}, intake.OwnerActor); apiErr != nil {
+	if _, apiErr := recordContestedRuling(c.F.S, context.Background(), c.Repo, c.Stream, "resume", api.ContestedRulingRequest{Decision: "review", Note: "Try the other profile."}, intake.OwnerActor); apiErr != nil {
 		t.Fatal(apiErr.Message)
 	}
-	if left, err := execution.ChiefRulingsLeft(c.repo, c.stream, "resume"); err != nil || left != execution.ChiefContestLimit {
+	if left, err := execution.ChiefRulingsLeft(c.Repo, c.Stream, "resume"); err != nil || left != execution.ChiefContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
-	actions, err := service.ChiefActions(c.repo, c.stream)
+	actions, err := service.ChiefActions(c.Repo, c.Stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 4 || actions[3].Text != "Raised contested unit resume to you: "+escalation {
 		t.Fatalf("conversation actions %+v", actions)
@@ -159,20 +100,20 @@ func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 
 func TestChiefViewShowsWhyAUnitIsStuck(t *testing.T) {
 	t.Parallel()
-	c := newContestFixture(t, "chief-view")
-	contest := c.contest(t)
-	th, err := c.repo.Thread(c.stream, intake.ReviewerAgent("resume"))
+	c := journey.NewContestFixture(t, "chief-view")
+	contest := c.Contest(t)
+	th, err := c.Repo.Thread(c.Stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
 	turn := th.Turns[len(th.Turns)-1]
-	call := trace.ToolCall{Scope: coreadapter.Scope{Workstream: string(c.stream), Unit: "resume", Thread: intake.ReviewerAgent("resume"), Turn: turn.Request.TurnID, Role: intake.ReviewerRole}, Name: execution.VerdictTool, Effect: coreadapter.ToolMemory, State: "completed",
+	call := trace.ToolCall{Scope: coreadapter.Scope{Workstream: string(c.Stream), Unit: "resume", Thread: intake.ReviewerAgent("resume"), Turn: turn.Request.TurnID, Role: intake.ReviewerRole}, Name: execution.VerdictTool, Effect: coreadapter.ToolMemory, State: "completed",
 		Output: &trace.ToolPayload{Content: `{"recorded":false,"reason":"unit resume does not address criterion \"spec#1 / plan resume\""}`}}
 	data, err := json.Marshal(call)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "tool-refused-1", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, Unit: "resume", At: time.Now(), Actor: trace.Actor{Kind: "agent", ID: intake.ReviewerAgent("resume")}, Cause: turn.Request.ID}
-	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "tools/tool-refused-1.json", Content: string(data)}}))
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "tool-refused-1", Revision: 1, Project: c.Repo.Project(), Workstream: c.Stream, Unit: "resume", At: time.Now(), Actor: trace.Actor{Kind: "agent", ID: intake.ReviewerAgent("resume")}, Cause: turn.Request.ID}
+	fixturekit.Must(t, c.Repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "tools/tool-refused-1.json", Content: string(data)}}))
 
 	dir := t.TempDir()
-	paths, err := service.StageChiefDocuments(c.repo, c.stream, dir)
+	paths, err := service.StageChiefDocuments(c.Repo, c.Stream, dir)
 	fixturekit.Must(t, err)
 	raw, err := os.ReadFile(filepath.Join(dir, "units", "resume", "activity.json"))
 	fixturekit.Must(t, err)

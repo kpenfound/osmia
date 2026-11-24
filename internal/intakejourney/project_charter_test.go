@@ -3,15 +3,16 @@ package intakejourney
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	filepath "path/filepath"
 	"reflect"
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/charter"
@@ -25,48 +26,48 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			f := newTwoProjectFixture(t)
-			member := f.cfg.For(otherProject).Project
-			repo, err := trace.Open(f.cfg.Root, member)
+			f := journey.NewTwoProjectFixture(t)
+			member := f.Cfg.For(fixturekit.OtherProject).Project
+			repo, err := trace.Open(f.Cfg.Root, member)
 			fixturekit.Must(t, err)
-			_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{journey.OtherStream}, f.clock.Now(), intake.ServiceActor, "fixture")
+			_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{fixturekit.OtherStream}, f.Clock.Now(), intake.ServiceActor, "fixture")
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, repo.Close())
-			fixturekit.SaveProjectSettings(t, f.cfg.Root.String(), member)
+			fixturekit.SaveProjectSettings(t, f.Cfg.Root.String(), member)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }
 			t.Cleanup(unblock)
 			read := make(chan error, 1)
-			f.turns.Mu.Lock()
-			f.turns.Hooks[intakefixture.Turn(otherProject, "first")] = func(ctx context.Context) {
+			f.Turns.Mu.Lock()
+			f.Turns.Hooks[intakefixture.Turn(fixturekit.OtherProject, "first")] = func(ctx context.Context) {
 				close(entered)
 				select {
 				case <-release:
 				case <-ctx.Done():
 				}
-				doc, err := f.repository(otherProject).Charter(context.WithoutCancel(ctx))
-				if err == nil && doc.Project != otherProject {
+				doc, err := f.Repository(fixturekit.OtherProject).Charter(context.WithoutCancel(ctx))
+				if err == nil && doc.Project != fixturekit.OtherProject {
 					err = errors.New("draining turn read another project policy")
 				}
 				read <- err
 			}
-			f.turns.Mu.Unlock()
-			s, c := journey.StartT(t, f.opts)
+			f.Turns.Mu.Unlock()
+			s, c := journey.StartT(t, f.Opts)
 			intakefixture.Await(t, "the member's running turn", entered)
 			finished := make(chan error, 1)
 			if mode == "removal" {
-				for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+				for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 					r, err := s.Repository(id)
 					fixturekit.Must(t, err)
-					state, err := r.Workflow(f.streams[id], trace.FeatureSubject)
+					state, err := r.Workflow(f.Streams[id], trace.FeatureSubject)
 					fixturekit.Must(t, err)
-					_, err = r.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-project-reload", Revision: 1, Project: id, Workstream: f.streams[id], At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "owner"}, Subject: trace.FeatureSubject, From: state.Value, To: intake.AbandonedState, Reason: "owner cancelled member"}})
+					_, err = r.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-project-reload", Revision: 1, Project: id, Workstream: f.Streams[id], At: f.Clock.Now(), Actor: intake.OwnerActor, Cause: "owner"}, Subject: trace.FeatureSubject, From: state.Value, To: intake.AbandonedState, Reason: "owner cancelled member"}})
 					fixturekit.Must(t, err)
 				}
 
 				go func() {
-					for _, id := range []config.ProjectID{fixturekit.Project, otherProject} {
+					for _, id := range []config.ProjectID{fixturekit.Project, fixturekit.OtherProject} {
 						if _, err := c.RemoveProject(ctx, id); err != nil {
 							finished <- err
 							return
@@ -74,7 +75,9 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 					}
 					finished <- nil
 				}()
-				intakefixture.Soon(t, "both projects draining", func() bool { return !s.Current().Active(fixturekit.Project) && !s.Current().Active(otherProject) })
+				intakefixture.Soon(t, "both projects draining", func() bool {
+					return !s.Current().Active(fixturekit.Project) && !s.Current().Active(fixturekit.OtherProject)
+				})
 				unblock()
 			} else {
 				go func() { finished <- s.Close() }()
@@ -108,7 +111,7 @@ func TestProjectChartersAndContextsStayIndependentAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	policies := map[config.ProjectID]string{added.Project.ID: "1. Server policy.\n", other.Project.ID: "1. Client policy.\n7. Preserve identifiers.\n"}
 	for id, text := range policies {
-		journey.WriteCharter(t, c, id, text)
+		intakefixture.WriteCharter(t, c, id, text)
 	}
 	check := func() {
 		for id, text := range policies {

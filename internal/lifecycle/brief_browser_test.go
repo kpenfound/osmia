@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
@@ -12,10 +14,10 @@ import (
 
 func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	t.Parallel()
-	j := newBriefJourney(t, listenWeb)
-	stream := j.stream
-	project := j.repository.Project()
-	screenshot := j.capture(t, "uploads", j.report.Commit)
+	j := newBriefJourney(t, journey.ListenWeb)
+	stream := j.Stream
+	project := j.Repository.Project()
+	screenshot := j.capture(t, "uploads", j.Report.Commit)
 	items := []string{briefShipFirst, briefShipNext}
 	j.chief.plan(1, briefPlan{Text: briefText, Items: items, Screenshots: []string{screenshot}})
 	j.chief.hold()
@@ -23,7 +25,7 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	j.awaitStarts(t, 1)
 
 	p := browsertest.OpenBrowser(t)
-	p.Run(chromedp.EmulateViewport(1280, 900), chromedp.Navigate("http://"+j.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(1280, 900), chromedp.Navigate("http://"+j.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(stream)
 	card := intakefixture.DecisionCard(api.InboxEntry{Kind: api.InboxDelivery, Project: project, Workstream: stream})

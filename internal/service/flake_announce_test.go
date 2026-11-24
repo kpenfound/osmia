@@ -238,7 +238,7 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 				if o := l.current(t, decided); len(o.Moot) != 0 {
 					t.Fatalf("the announcement is not marked: %+v", o)
 				}
-				feed := readFeed(t, l.c, l.stream)
+				feed := intakefixture.ReadFeed(t, l.c, l.stream)
 				var shown int
 				for _, e := range feed.Entries {
 					if e.Transition != nil && e.Transition.Subject == flakeDecisionSubject(decided.ID) {
@@ -380,7 +380,7 @@ func TestFlakeAnnouncementReachesADeliveredOrAbandonedOriginatingWorkstream(t *t
 			if state, err := l.repository().Workflow(other, trace.FeatureSubject); err != nil || state.Value != want {
 				t.Fatalf("recording the decision changed %s to %q (%v)", other, state.Value, err)
 			}
-			if feed := readFeed(t, l.c, other); !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
+			if feed := intakefixture.ReadFeed(t, l.c, other); !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 				return e.Transition != nil && e.Transition.Subject == flakeDecisionSubject(occ.ID) && strings.Contains(e.Transition.Reason, reason)
 			}) {
 				t.Fatalf("the feed of the %s workstream does not show the decision: %+v", terminal, feed.Entries)
@@ -428,7 +428,7 @@ func (a *archivedOrigin) awaitCleaned(t *testing.T) runtime.Archive {
 	var archive runtime.Archive
 	intakefixture.Soon(t, "the archive cleanup of "+string(a.other), func() bool {
 		var ok bool
-		archive, ok = archiveRecord(t, a.l.s.store, a.other)
+		archive, ok = intakefixture.ArchiveRecord(t, a.l.s.store, a.other)
 		if !ok || archive.CleanedAt.IsZero() {
 			return false
 		}

@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -23,10 +25,10 @@ import (
 )
 
 type draftFixture struct {
-	f          *shedFixture
+	f          *journey.ShedFixture
 	stream     config.WorkstreamID
 	repository *trace.Repository
-	a          *finalReviewer
+	a          *journey.FinalReviewer
 	fork       string
 	pulls      *fixturekit.FakePulls
 	received   string
@@ -35,20 +37,20 @@ type draftFixture struct {
 
 func newDraftFixture(t *testing.T, style string) *draftFixture {
 	t.Helper()
-	f, stream, repository, a := newFinalFixtureWith(t, "draft", "")
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "draft", "")
 	d := &draftFixture{f: f, stream: stream, repository: repository, a: a}
-	d.fork, d.pulls = fixturekit.PublicationFork(t, f.clone, func() string { commit, _ := d.forkBranch(t); return commit })
+	d.fork, d.pulls = fixturekit.PublicationFork(t, f.Clone, func() string { commit, _ := d.forkBranch(t); return commit })
 	d.pulls.SyncHead = true
 	d.received = filepath.Join(filepath.Dir(d.fork), "received")
 	hook := fmt.Sprintf("#!/bin/sh\necho push >> '%s'\n", d.received)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(d.fork, "hooks", "pre-receive"), []byte(hook), 0700))
-	f.s.setSole(&activeProject{repository: repository})
-	f.s.cfg.Project.Landing = style
-	f.s.options.PullRequests = d.pulls
-	f.s.options.reviewChecks = fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	f.S.Cfg.Project.Landing = style
+	f.S.Options.PullRequests = d.pulls
+	f.S.Options.ReviewChecks = fixturekit.CheckFunc(func(context.Context, string) (api.CheckResult, error) {
 		return api.CheckResult{Output: "all proofs passed"}, nil
 	})
-	_, d.first = assembleBoth(t, f, repository, a, stream,
+	_, d.first = journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	return d
@@ -70,7 +72,7 @@ func (d *draftFixture) pushCount(t *testing.T) int {
 }
 
 func (d *draftFixture) read(k int) {
-	d.f.finalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	d.f.FinalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
 	})
@@ -78,9 +80,9 @@ func (d *draftFixture) read(k int) {
 
 func (d *draftFixture) review(t *testing.T, files map[string]string) coreadapter.Operation {
 	t.Helper()
-	moveFeature(t, d.f, d.stream, files)
+	journey.MoveFeature(t, d.f, d.stream, files)
 	fixturekit.Must(t, d.a.Pass(context.Background()))
-	ops := finalOperations(t, d.repository, d.stream)
+	ops := journey.FinalOperations(t, d.repository, d.stream)
 	for _, o := range ops {
 		if in, err := delivery.DecodeFinalReview(o.Operation); err == nil && in.Review == len(ops) {
 			return o.Operation
@@ -92,14 +94,14 @@ func (d *draftFixture) review(t *testing.T, files map[string]string) coreadapter
 
 func (d *draftFixture) settle(t *testing.T, op coreadapter.Operation) coreadapter.OperationResult {
 	t.Helper()
-	return settleOperation(t, d.f.s, d.repository, d.stream, op, d.a)
+	return journey.SettleOperation(t, d.f.S, d.repository, d.stream, op, d.a)
 }
 
 func (d *draftFixture) reopen(t *testing.T) {
 	t.Helper()
-	d.repository = fixturekit.ReopenPublication(t, d.repository, d.f.s.cfg.Root, d.f.s.cfg.Project)
-	d.f.s.setSole(&activeProject{repository: d.repository})
-	d.a = &finalReviewer{s: d.f.s, repository: d.repository}
+	d.repository = fixturekit.ReopenPublication(t, d.repository, d.f.S.Cfg.Root, d.f.S.Cfg.Project)
+	d.f.S.SetSole(&journey.ActiveProject{Repository: d.repository})
+	d.a = &journey.FinalReviewer{S: d.f.S, Repository: d.repository}
 }
 
 func (d *draftFixture) pushes(t *testing.T) []delivery.Push {
@@ -141,7 +143,7 @@ func TestFinalReviewPushesTheSignedBranchAndOpensADraftWithoutApproval(t *testin
 			if !exists || tip == report.Commit || d.pushCount(t) != 1 {
 				t.Fatalf("the fork's branch is at %q (reviewed %s) after %d pushes", tip, report.Commit, d.pushCount(t))
 			}
-			g := intake.Workspaces(d.f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit)
+			g := intake.Workspaces(d.f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit)
 			signed, err := g.Commit(ctx, tip)
 			fixturekit.Must(t, err)
 			reviewed, err := g.Commit(ctx, report.Commit)
@@ -153,7 +155,7 @@ func TestFinalReviewPushesTheSignedBranchAndOpensADraftWithoutApproval(t *testin
 				t.Fatalf("pull requests %+v, %d created, %d marked ready", d.pulls.Prs, d.pulls.Creates, d.pulls.Readies)
 			}
 			pr := d.pulls.Prs[0]
-			presented, apiErr := d.f.s.deliveryPresentation(ctx, string(d.stream))
+			presented, apiErr := d.f.S.DeliveryPresentation(ctx, string(d.stream))
 			if apiErr != nil {
 				t.Fatal(apiErr)
 			}
@@ -279,7 +281,7 @@ func TestFinalReviewPushesOnceAcrossARestartAtEveryStep(t *testing.T) {
 			d := newDraftFixture(t, "squash")
 			ctx := context.Background()
 			d.read(1)
-			d.f.s.boundary = func(name string) error {
+			d.f.S.Boundary = func(name string) error {
 				if name == step {
 					return errors.New("stopped at " + name)
 				}
@@ -296,7 +298,7 @@ func TestFinalReviewPushesOnceAcrossARestartAtEveryStep(t *testing.T) {
 				t.Fatalf("%d pushes after the interruption, workstream %s", d.pushCount(t), d.feature(t))
 			}
 			d.reopen(t)
-			d.f.s.boundary = nil
+			d.f.S.Boundary = nil
 			result, err := d.a.Apply(ctx, d.first)
 			if err != nil || result.Outcome != "succeeded" {
 				t.Fatalf("final review after the restart %+v: %v", result, err)
@@ -319,7 +321,7 @@ func TestFinalReviewAdoptsAnOpenPullRequestItMadeBeforeRecordingIt(t *testing.T)
 	d := newDraftFixture(t, "squash")
 	ctx := context.Background()
 	d.read(1)
-	d.f.s.boundary = func(name string) error {
+	d.f.S.Boundary = func(name string) error {
 		if name == "draft-opened" {
 			return errors.New("stopped at " + name)
 		}
@@ -332,7 +334,7 @@ func TestFinalReviewAdoptsAnOpenPullRequestItMadeBeforeRecordingIt(t *testing.T)
 		t.Fatalf("%d pull requests created, pushes %+v", d.pulls.Creates, d.pushes(t))
 	}
 	d.reopen(t)
-	d.f.s.boundary = nil
+	d.f.S.Boundary = nil
 	if result, err := d.a.Apply(ctx, d.first); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("final review after the restart %+v: %v", result, err)
 	}

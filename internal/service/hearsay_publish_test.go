@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -50,7 +51,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	opts := fixture(t)
 	var logs bytes.Buffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	hooks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
 			t.Errorf("a post did not carry the publisher's token")
@@ -59,7 +60,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	}))
 	defer hooks.Close()
 	tables := strings.Replace(hearsayTables, "https://hooks.example", hooks.URL, 1)
-	files.write(t, files.topText+tables)
+	files.Write(t, files.TopText+tables)
 	s, c := start(t, opts)
 	ctx := context.Background()
 
@@ -77,8 +78,8 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 		t.Fatal("a complete publish table did not enable publishing")
 	}
 
-	bad := strings.Replace(files.topText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
-	files.write(t, bad)
+	bad := strings.Replace(files.TopText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
+	files.Write(t, bad)
 	_, err = c.Reload(ctx)
 	if err == nil || !strings.Contains(err.Error(), "hearsay.publish.hooks_url") || strings.Contains(err.Error(), token) {
 		t.Fatalf("reload error: %v", err)
@@ -97,9 +98,9 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 func TestPublishAbsentLeavesConfigurationUnpublished(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	withoutPublish, _, _ := strings.Cut(hearsayTables, "[hearsay.publish]")
-	files.write(t, files.topText+withoutPublish)
+	files.Write(t, files.TopText+withoutPublish)
 	s, c := start(t, opts)
 	view, err := c.Configuration(context.Background())
 	fixturekit.Must(t, err)

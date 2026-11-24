@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -208,7 +210,7 @@ func (c *briefChief) problems() []string {
 }
 
 type briefJourney struct {
-	*publicationFixture
+	*journey.PublicationFixture
 	chief   *briefChief
 	running bool
 }
@@ -216,17 +218,17 @@ type briefJourney struct {
 func newBriefJourney(t *testing.T, extra string) *briefJourney {
 	t.Helper()
 	j := newBriefFixture(t, extra)
-	stream, repository := j.buildFixture().SeedGit(t, "brief")
-	j.stream, j.repository = stream, repository
+	stream, repository := j.BuildFixture().SeedGit(t, "brief")
+	j.Stream, j.Repository = stream, repository
 	j.host(t)
-	j.s.setSole(&activeProject{repository: repository})
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 	j.assemble(t, stream, "internal/trace", "resume", "dedupe")
 	return j
 }
 
 func (j *briefJourney) host(t *testing.T) {
 	t.Helper()
-	j.fork, j.pulls = hostBranches(t, j.shedFixture)
+	j.Fork, j.Pulls = j.ShedFixture.HostBranches(t)
 }
 
 func newBriefFixture(t *testing.T, extra string) *briefJourney {
@@ -236,25 +238,25 @@ func newBriefFixture(t *testing.T, extra string) *briefJourney {
 
 func newBriefFixtureAt(t *testing.T, extra string, now func() time.Time) *briefJourney {
 	t.Helper()
-	f := newDebateFixtureWith(t, 1, 1, intakefixture.ChiefRole+extra, func(opts *Options) {
+	f := journey.NewDebateFixtureWith(t, 1, 1, intakefixture.ChiefRole+extra, func(opts *journey.Options) {
 		opts.WriteTimeout = time.Minute
 		if now != nil {
 			opts.Reconciliation.Now = now
 		}
-		enforced := Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
-		opts.Threads, opts.controls = enforced.Threads, enforced.controls
+		enforced := journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
+		opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
 	})
 	chief := newBriefChief()
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = chief.turn
-	f.engine.Mu.Unlock()
-	return &briefJourney{publicationFixture: &publicationFixture{shedFixture: f}, chief: chief}
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = chief.turn
+	f.Engine.Mu.Unlock()
+	return &briefJourney{PublicationFixture: &journey.PublicationFixture{ShedFixture: f}, chief: chief}
 }
 
 func (j *briefJourney) assemble(t *testing.T, stream config.WorkstreamID, dir, resume, dedupe string) api.FinalReport {
 	t.Helper()
-	a := &finalReviewer{s: j.s, repository: j.repository}
-	_, op := assembleBoth(t, j.shedFixture, j.repository, a, stream,
+	a := &journey.FinalReviewer{S: j.S, Repository: j.Repository}
+	_, op := journey.AssembleBoth(t, j.ShedFixture, j.Repository, a, stream,
 		map[string]string{dir + "/" + resume + ".go": "package trace\n"},
 		map[string]string{dir + "/" + dedupe + ".go": "package trace\n"})
 	return j.review(t, stream, op, "Resumable uploads")
@@ -264,21 +266,21 @@ func (j *briefJourney) review(t *testing.T, stream config.WorkstreamID, op corea
 	t.Helper()
 	in, err := delivery.DecodeFinalReview(op)
 	fixturekit.Must(t, err)
-	j.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	j.FinalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": summary, "findings": []any{}})
 		return err
 	})
-	a := &finalReviewer{s: j.s, repository: j.repository}
-	if result := settleOperation(t, j.s, j.repository, stream, op, a); result.Outcome != "succeeded" {
+	a := &journey.FinalReviewer{S: j.S, Repository: j.Repository}
+	if result := journey.SettleOperation(t, j.S, j.Repository, stream, op, a); result.Outcome != "succeeded" {
 		t.Fatalf("final review %d: %+v", in.Review, result)
 	}
-	report, found, err := delivery.LatestFinalReport(j.repository, stream)
+	report, found, err := delivery.LatestFinalReport(j.Repository, stream)
 	fixturekit.Must(t, err)
 	if !found || report.Review != in.Review || report.Outcome != delivery.FinalReviewed {
 		t.Fatalf("final review %d recorded %+v", in.Review, report)
 	}
-	if stream == j.stream {
-		j.report = report
+	if stream == j.Stream {
+		j.Report = report
 	}
 	return report
 }
@@ -288,16 +290,16 @@ func (j *briefJourney) reassemble(t *testing.T, files map[string]string) api.Fin
 	ctx := context.Background()
 	move := func(to, note string) {
 		t.Helper()
-		if _, apiFault := j.s.lifecycle().OwnerMoveWorkstream(ctx, string(j.stream), api.WorkstreamMoveRequest{To: to, Note: note}); apiFault != nil {
+		if _, apiFault := j.S.Lifecycle().OwnerMoveWorkstream(ctx, string(j.Stream), api.WorkstreamMoveRequest{To: to, Note: note}); apiFault != nil {
 			t.Fatalf("move to %s: %s", to, apiFault.Message)
 		}
 	}
 	move(intake.BuildingState, "The owner asked for a change to the brief's page.")
-	moveFeature(t, j.shedFixture, j.stream, files)
+	journey.MoveFeature(t, j.ShedFixture, j.Stream, files)
 	move(intake.AssembledState, "The change landed; review the branch.")
-	fixturekit.Must(t, (&finalReviewer{s: j.s, repository: j.repository}).Pass(ctx))
-	ops := finalOperations(t, j.repository, j.stream)
-	return j.review(t, j.stream, ops[len(ops)-1].Operation, "Resumable uploads, changed")
+	fixturekit.Must(t, (&journey.FinalReviewer{S: j.S, Repository: j.Repository}).Pass(ctx))
+	ops := journey.FinalOperations(t, j.Repository, j.Stream)
+	return j.review(t, j.Stream, ops[len(ops)-1].Operation, "Resumable uploads, changed")
 }
 
 func (j *briefJourney) capture(t *testing.T, name, commit string) string {
@@ -310,20 +312,20 @@ func (j *briefJourney) capture(t *testing.T, name, commit string) string {
 func (j *briefJourney) captureImage(t *testing.T, name, commit string, data []byte) string {
 	t.Helper()
 	ctx := context.Background()
-	img, err := j.repository.RecordImage(ctx, trace.Header{Project: j.repository.Project(), Workstream: j.stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, name, "image/png", data, "turn")
+	img, err := j.Repository.RecordImage(ctx, trace.Header{Project: j.Repository.Project(), Workstream: j.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, name, "image/png", data, "turn")
 	fixturekit.Must(t, err)
-	content, err := json.Marshal(map[string]any{"workstream": j.stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.stream, "commit": commit}})
+	content, err := json.Marshal(map[string]any{"workstream": j.Stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.Stream, "commit": commit}})
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, j.repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.repository.Project(), Workstream: j.stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
+	fixturekit.Must(t, j.Repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.Repository.Project(), Workstream: j.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
 	return img.ID
 }
 
 func (j *briefJourney) run(t *testing.T) {
 	t.Helper()
-	fixturekit.Must(t, j.repository.Close())
-	j.start(t)
+	fixturekit.Must(t, j.Repository.Close())
+	j.Start(t)
 	if !j.running {
-		t.Cleanup(func() { j.stop(t) })
+		t.Cleanup(func() { j.Stop(t) })
 		t.Cleanup(j.chief.release)
 	}
 	j.running = true
@@ -332,12 +334,12 @@ func (j *briefJourney) run(t *testing.T) {
 func (j *briefJourney) halt(t *testing.T) {
 	t.Helper()
 	j.chief.release()
-	j.stop(t)
-	repository, err := trace.Open(j.s.cfg.Root, j.s.cfg.Project)
+	j.Stop(t)
+	repository, err := trace.Open(j.S.Cfg.Root, j.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repository.Close() })
-	j.repository = repository
-	j.s.setSole(&activeProject{repository: repository})
+	j.Repository = repository
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 }
 
 func (j *briefJourney) awaitStarts(t *testing.T, n int) {
@@ -348,7 +350,7 @@ func (j *briefJourney) awaitStarts(t *testing.T, n int) {
 func (j *briefJourney) entries(t *testing.T, stream config.WorkstreamID) []api.InboxEntry {
 	t.Helper()
 	var out []api.InboxEntry
-	for _, e := range intakefixture.EntriesOf(t, j.c, api.InboxDelivery) {
+	for _, e := range intakefixture.EntriesOf(t, j.C, api.InboxDelivery) {
 		if e.Workstream == stream {
 			out = append(out, e)
 		}
@@ -372,13 +374,13 @@ func (j *briefJourney) awaitEntry(t *testing.T, stream config.WorkstreamID) api.
 
 func (j *briefJourney) present(t *testing.T, stream config.WorkstreamID) api.DeliveryPresentation {
 	t.Helper()
-	p, err := j.c.Delivery(context.Background(), stream)
+	p, err := j.C.Delivery(context.Background(), stream)
 	fixturekit.Must(t, err)
 	return p
 }
 
 func (j *briefJourney) approvePresented(p api.DeliveryPresentation) (api.DeliveryApproval, error) {
-	return j.c.ApproveDelivery(context.Background(), p.Workstream, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
+	return j.C.ApproveDelivery(context.Background(), p.Workstream, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
 }
 
 func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, calls ...briefCall) []string {
@@ -388,7 +390,7 @@ func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, 
 		Calls []briefCall `json:"calls"`
 	}{id, calls})
 	fixturekit.Must(t, err)
-	_, err = j.c.Send(context.Background(), stream, briefDirective+string(data))
+	_, err = j.C.Send(context.Background(), stream, briefDirective+string(data))
 	fixturekit.Must(t, err)
 	var out []string
 	intakefixture.Eventually(t, "the chief of staff never made the calls of "+id, func() bool {
@@ -413,15 +415,15 @@ func (j *briefJourney) publish(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 	var op coreadapter.Operation
-	if ops := j.operations(t); len(ops) > 0 {
+	if ops := j.Operations(t); len(ops) > 0 {
 		op = ops[len(ops)-1]
 	} else {
-		op = j.request(t)
+		op = j.Request(t)
 	}
-	result, err := j.publisher().Apply(ctx, op)
+	result, err := j.Publisher().Apply(ctx, op)
 	fixturekit.Must(t, err)
-	if result.Outcome != "succeeded" || len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Prs[0].Draft {
-		t.Fatalf("marking ready %+v: %+v", result, j.pulls)
+	if result.Outcome != "succeeded" || len(j.Pulls.Prs) != 1 || j.Pulls.Creates != 1 || j.Pulls.Readies != 1 || j.Pulls.Prs[0].Draft {
+		t.Fatalf("marking ready %+v: %+v", result, j.Pulls)
 	}
-	return j.pulls.Prs[0].Body
+	return j.Pulls.Prs[0].Body
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -32,9 +33,11 @@ var must = fixturekit.Must
 var projectFixture = servicetest.ProjectFixture
 var activityFixture = servicetest.ActivityFixture
 var start = servicetest.Start
-var mutation = servicetest.Mutation
-var writeCharter = servicetest.WriteCharter
-var withWeb = servicetest.WithWeb
+var mutation = intakefixture.Mutation
+var writeCharter = intakefixture.WriteCharter
+var withWeb = func(t *testing.T, opts service.Options, addr string) {
+	intakefixture.WithWeb(t, opts.Config.Root, addr)
+}
 var newDesignEnforcementFixture = servicetest.NewDesignEnforcementFixture
 var sessionWebFixture = servicetest.SessionWebFixture
 var assertFeedAnnotations = func(t *testing.T, p *page, s string, n int) { AssertFeedAnnotations(t, p.Page, s, n) }
@@ -122,5 +125,5 @@ var sessionBranch = service.SessionBranchForTest
 
 func awaitFeedEvent(p *page, ws config.WorkstreamID) { AwaitFeedEvent(p.Page, ws) }
 
-var readFeed = servicetest.ReadFeed
+var readFeed = intakefixture.ReadFeed
 var awaitDesignConversation = servicetest.AwaitDesignConversation

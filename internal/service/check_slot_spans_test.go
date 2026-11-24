@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -76,12 +77,12 @@ func TestCheckPoolSendsHeldAndWaitSlotSpans(t *testing.T) {
 	waitForQueue(t, p, 2)
 	t2 := clock.Advance(5 * time.Second)
 	cancel()
-	if release := awaitCheck(t, canceled); release != nil {
+	if release := intakefixture.AwaitCheck(t, canceled); release != nil {
 		t.Fatal("a canceled check was granted a slot")
 	}
 	t3 := clock.Advance(5 * time.Second)
 	holder()
-	release := awaitCheck(t, queued)
+	release := intakefixture.AwaitCheck(t, queued)
 	t4 := clock.Advance(5 * time.Second)
 	release()
 
@@ -197,10 +198,10 @@ func TestPoolLimitsFollowTheConfigurationInForce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	before, _ := s.poolLimit(masonRole)
-	files.write(t, files.topText+"[capacity]\nmasons = "+strconv.Itoa(before+3)+"\n")
+	files.Write(t, files.TopText+"[capacity]\nmasons = "+strconv.Itoa(before+3)+"\n")
 	_, err := c.Reload(ctx)
 	fixturekit.Must(t, err)
 	if got, bounded := s.poolLimit(masonRole); !bounded || got != before+3 {

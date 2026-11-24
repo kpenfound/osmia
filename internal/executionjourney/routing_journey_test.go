@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"slices"
 	"strings"
@@ -13,6 +11,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/cli"
@@ -22,7 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -52,9 +53,9 @@ func (l *askedLog) all() []string {
 
 type routingJourney struct {
 	t      *testing.T
-	opts   Options
-	s      *Service
-	c      *Client
+	opts   journey.Options
+	s      *journey.Service
+	c      *journey.Client
 	repo   *trace.Repository
 	clock  *fixturekit.FixedClock
 	jev    *jevfixture.Transitions
@@ -67,7 +68,7 @@ type routingJourney struct {
 func newRoutingJourney(t *testing.T, p *jevfixture.Transitions) *routingJourney {
 	t.Helper()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "routing-")
+	opts, cfg := journey.ConversationFixture(t, "routing-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	fixturekit.RecordHanded(t, repo, fixturekit.Stream, "stdin", fixturekit.DemoStart)
@@ -99,22 +100,22 @@ func newRoutingJourney(t *testing.T, p *jevfixture.Transitions) *routingJourney 
 	return j
 }
 
-func (j *routingJourney) start(opts *Options) {
+func (j *routingJourney) start(opts *journey.Options) {
 	j.t.Helper()
 	opts.Reconciliation.Now = j.clock.Now
-	appendConfig(j.t, opts, jevfixture.Config(jevfixture.Key(j.t, true)))
+	journey.AppendConfig(j.t, opts, jevfixture.Config(jevfixture.Key(j.t, true)))
 	opts.JevProvider = j.jev.Factory()
-	opts.telemetryExporter = j.spans
+	opts.TelemetryExporter = j.spans
 	passes, onPass := intakefixture.ScheduleCounter()
-	j.passes, opts.schedulePassed = passes, onPass
+	j.passes, opts.SchedulePassed = passes, onPass
 
 	os.Setenv(service.RoutingPublishTokenEnv, "journey-publisher-token")
 	j.opts = *opts
-	j.s, j.c = start(j.t, *opts)
-	j.repo = j.s.sole().repository
+	j.s, j.c = journey.StartT(j.t, *opts)
+	j.repo = j.s.Sole().Repository
 }
 
-func (j *routingJourney) access() service.TestAccess { return service.InspectForTest(j.s.core()) }
+func (j *routingJourney) access() service.TestAccess { return service.InspectForTest(j.s.Core()) }
 
 func (j *routingJourney) stall(d time.Duration) {
 	j.t.Helper()
@@ -129,7 +130,7 @@ func (j *routingJourney) awaitRoutes(what, trigger, subject string, n int) []rou
 	var found []router.Record
 	intakefixture.Soon(j.t, what, func() bool {
 		found = found[:0]
-		for _, rec := range routeRecords(j.t, j.repo, fixturekit.Stream) {
+		for _, rec := range journey.RouteRecords(j.t, j.repo, fixturekit.Stream) {
 			if rec.Trigger == trigger && rec.Subject == subject && rec.Finished() {
 				found = append(found, rec)
 			}
@@ -139,11 +140,11 @@ func (j *routingJourney) awaitRoutes(what, trigger, subject string, n int) []rou
 	return found
 }
 
-func (j *routingJourney) routeSpans(trigger string, n int) servicetest.Spans {
+func (j *routingJourney) routeSpans(trigger string, n int) fixturekit.Spans {
 	j.t.Helper()
-	var spans servicetest.Spans
+	var spans fixturekit.Spans
 	intakefixture.Soon(j.t, "the route span of "+trigger, func() bool {
-		spans = servicetest.SpansOf(j.spans).Named("osmia.transition.route").With("osmia.trigger", trigger)
+		spans = fixturekit.SpansOf(j.spans).Named("osmia.transition.route").With("osmia.trigger", trigger)
 		return len(spans) >= n
 	})
 	return spans
@@ -245,7 +246,7 @@ func TestJourneyAStalledUnitIsDepartedFromByJev(t *testing.T) {
 
 	j.stall(40 * time.Minute)
 	intakefixture.AwaitFurtherPasses(t, j.passes, 2)
-	if recs := routeRecords(t, j.repo, fixturekit.Stream); len(recs) != 0 {
+	if recs := journey.RouteRecords(t, j.repo, fixturekit.Stream); len(recs) != 0 {
 		t.Fatalf("a unit quiet for 40 minutes raised %+v", recs)
 	}
 
@@ -254,7 +255,7 @@ func TestJourneyAStalledUnitIsDepartedFromByJev(t *testing.T) {
 	if rec.State != router.StateCommitted || rec.Outcome != router.OutcomeDeparted || rec.Default != execution.TargetWait || rec.Target != intake.UnitReviewing || rec.DecidedBy != trace.DecidedByJev || rec.Judgment == "" || !rec.JevRequested {
 		t.Fatalf("route %+v", rec)
 	}
-	if state := workflowOf(t, j.repo, fixturekit.Stream, routingUnit); state.Value != intake.UnitReviewing {
+	if state := intakefixture.UnitWorkflow(t, j.repo, fixturekit.Stream, routingUnit); state.Value != intake.UnitReviewing {
 		t.Fatalf("the unit is %s", state.Value)
 	}
 	moved := latestOf(t, j.repo, fixturekit.Stream, trace.UnitSubject(routingUnit))
@@ -267,8 +268,8 @@ func TestJourneyAStalledUnitIsDepartedFromByJev(t *testing.T) {
 		t.Fatalf("%d route spans for the stalled unit", len(spans))
 	}
 	for key, want := range map[string]string{"osmia.outcome": router.OutcomeDeparted, "osmia.default_state": execution.TargetWait, "osmia.next_state": intake.UnitReviewing, "osmia.judgment": rec.Judgment, "osmia.unit.id": routingUnit} {
-		if got, _ := servicetest.Attr(spans[0], key); got != want {
-			t.Fatalf("route span %s = %q, want %q: %v", key, got, want, servicetest.Strings(spans[0]))
+		if got, _ := fixturekit.Attr(spans[0], key); got != want {
+			t.Fatalf("route span %s = %q, want %q: %v", key, got, want, fixturekit.Strings(spans[0]))
 		}
 	}
 
@@ -362,7 +363,7 @@ func TestJourneyAnUnresolvedHoldBecomesAStallAndARecoveryCardTheOwnerApproves(t 
 	if first.State != router.StateHeld || first.Outcome != router.OutcomeHeld || first.Hold != router.HoldOrdersDisagree {
 		t.Fatalf("the first stall: %+v", first)
 	}
-	if state := workflowOf(t, j.repo, fixturekit.Stream, routingUnit); state.Value != execution.UnitChecking {
+	if state := intakefixture.UnitWorkflow(t, j.repo, fixturekit.Stream, routingUnit); state.Value != execution.UnitChecking {
 		t.Fatalf("a held stall moved the unit to %s", state.Value)
 	}
 	if hold, stalled := j.holdNotices(), j.stalledNotices(); hold != 1 || stalled != 0 {
@@ -447,13 +448,13 @@ func (j *routingJourney) approveRecoveryCard(card api.InboxEntry, subject string
 		t.Fatalf("the approved move %+v", moved)
 	}
 	var pinned bool
-	for _, rec := range routeRecords(t, j.repo, fixturekit.Stream) {
+	for _, rec := range journey.RouteRecords(t, j.repo, fixturekit.Stream) {
 		if rec.Trigger == execution.TriggerMoveOwner && rec.Subject == subject {
 			pinned = rec.State == router.StateCommitted && rec.Authority == router.AuthorityOwner && rec.DecidedBy == trace.DecidedByOwner && rec.Outcome == router.OutcomeFollowed && !rec.JevRequested
 		}
 	}
 	if !pinned {
-		t.Fatalf("no pinned owner move was routed: %+v", routeRecords(t, j.repo, fixturekit.Stream))
+		t.Fatalf("no pinned owner move was routed: %+v", journey.RouteRecords(t, j.repo, fixturekit.Stream))
 	}
 	if spans := j.routeSpans(execution.TriggerMoveOwner, 1); spans.With("osmia.outcome", router.OutcomeFollowed) == nil {
 		t.Fatal("the pinned move has no followed route span")

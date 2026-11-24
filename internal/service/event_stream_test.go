@@ -55,7 +55,7 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 		{"PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"}},
 		{"DELETE", "profile", ClearProfileRequest{Role: "mason"}},
 	} {
-		mutation(t, c, m.method, m.kind, m.input)
+		intakefixture.Mutation(t, c, m.method, m.kind, m.input)
 		if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventRuntime}) {
 			t.Fatalf("%s %s: %+v", m.method, m.kind, e)
 		}
@@ -123,7 +123,7 @@ func TestEventStreamOutlivesTheRequestTimeouts(t *testing.T) {
 	events, done := fixturekit.EventStream(t, c)
 	fixturekit.NextEvent(t, events)
 	time.Sleep(time.Second)
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventRuntime}) {
 		t.Fatalf("event after idling past the timeouts: %+v", e)
 	}

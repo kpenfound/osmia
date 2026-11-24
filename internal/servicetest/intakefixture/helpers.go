@@ -487,15 +487,7 @@ func ApiError(t *testing.T, err error, code api.Code, message string) {
 	}
 }
 
-func DecideWith(t *testing.T, tool coreadapter.Tool, input string) string {
-	t.Helper()
-	out, err := tool.Handle(context.Background(), json.RawMessage(input))
-	fixturekit.Must(t, err)
-	return string(out)
-}
-
 const (
-	ExitDebated   = "# Resumable uploads\n\nUploads that drop resume where they stopped.\n"
 	ExitCapped    = "# Upload retention\n\nUploads are kept for thirty days.\n"
 	ExitSmall     = "# Upload error names the chunk\n\nThe error says which chunk failed.\n"
 	ExitAbandoned = "# Upload quotas\n\nEach owner has an upload quota.\n"
@@ -505,7 +497,6 @@ const (
   {"id": "message", "title": "Name the chunk", "task": "Name the chunk", "acceptance": ["spec#1 holds, shown by TestUploadErrorNamesTheChunk (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]}
 ]}
 `
-	ExitCharter  = "1. Keep changes small.\n2. Every change has a test.\n"
 	ExitQuestion = "Do deleted uploads count against the retention period?"
 	ExitRuling   = "No. The period starts at upload and deletion ends it."
 	ExitRelayed  = "Retention runs from upload until deletion; deleted uploads are not kept."
@@ -1027,12 +1018,11 @@ func AwaitTurn(t *testing.T, repository func() *trace.Repository, stream config.
 
 // ChangeRaceGate stops only the selected production boundary after approval.
 type ChangeRaceGate struct {
-	Step        string
-	Armed       atomic.Bool
-	Reached     chan struct{}
-	Released    chan struct{}
-	Once        sync.Once
-	ReleaseOnce sync.Once
+	fixturekit.Latch
+	Step    string
+	Armed   atomic.Bool
+	Reached chan struct{}
+	Once    sync.Once
 }
 
 // ChiefEvent reports whether e is an event the chief of staff receives as
@@ -1338,14 +1328,12 @@ func (g *ChangeRaceGate) Checkpoint(ctx context.Context, step string) error {
 	}
 	g.Once.Do(func() { close(g.Reached) })
 	select {
-	case <-g.Released:
+	case <-g.Done():
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
-
-func (g *ChangeRaceGate) Release() { g.ReleaseOnce.Do(func() { close(g.Released) }) }
 
 func (m *FakeMasons) Check(t *testing.T) {
 	t.Helper()
@@ -1482,3 +1470,28 @@ func WebHTTP() *http.Client {
 type ProductionWorkerWorkspaces struct{ Production coreadapter.Workspaces }
 
 var ExampleCard = coreadapter.Card{Headline: "Uploads resume", Happened: "The storage client resumes uploads from the last chunk.", NeedsYou: "Review the candidate."}
+
+// IndependentPlan is ValidPlan with no dependency between its units.
+const IndependentPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]}
+]}
+`
+
+// DisjointPlan has three units whose footprints do not overlap.
+const DisjointPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]}
+]}
+`
+
+// AmendedSpec is ValidSpec with its first criterion rewritten.
+var AmendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
+
+// MasonRoles runs the chief of staff, mason and reviewer in containers, the
+// sandbox the fake engine's boundary check accepts.
+const MasonRoles = ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+
+// TestDrift is the drift rebase request a test makes.
+func TestDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

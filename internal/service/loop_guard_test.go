@@ -3,11 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -27,11 +28,6 @@ func recordSessions(t *testing.T, f *shedFixture, repository *trace.Repository, 
 		fixturekit.Must(t, repository.Append(context.Background(), trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "loop-fixture"},
 			Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: reviewerAgent("resume"), Turn: id, Role: reviewerRole}, AttemptID: id, At: at, Usage: coreadapter.Usage{CostUSD: 0.5, CostKnown: true, Turns: 1}}}))
 	}
-}
-
-func moveUnitNow(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit, to string) {
-	t.Helper()
-	intakefixture.MoveUnitNow(t, f.clock.Now(), foremanActor, repository, stream, unit, to)
 }
 
 func openRuntime(t *testing.T, f *shedFixture, stream config.WorkstreamID) {
@@ -66,13 +62,13 @@ func TestLoopGuardPausesAWorkstreamWithoutProgress(t *testing.T) {
 	if _, paused := loopPause(f, stream); paused {
 		t.Fatal("the loop guard paused the workstream below the limit")
 	}
-	moveUnitNow(t, f, repository, stream, "resume", UnitChecking)
+	intakefixture.MoveUnitNow(t, f.clock.Now(), foremanActor, repository, stream, "resume", UnitChecking)
 	recordSessions(t, f, repository, stream, 2)
 	fixturekit.Must(t, g.Pass(ctx))
 	if _, paused := loopPause(f, stream); paused {
 		t.Fatal("the loop guard counted sessions from before the latest progress")
 	}
-	moveUnitNow(t, f, repository, stream, "resume", UnitReviewing)
+	intakefixture.MoveUnitNow(t, f.clock.Now(), foremanActor, repository, stream, "resume", UnitReviewing)
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
 	fixturekit.Must(t, err)
 	recordSessions(t, f, repository, stream, 1)

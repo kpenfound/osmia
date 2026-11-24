@@ -30,7 +30,7 @@ func newCapacityRig(t *testing.T) *capacityRig {
 	t.Helper()
 	ctx := context.Background()
 	s, _, repo, clock := dailyBudgetService(t, 0, &adaptertest.Turns{})
-	fixturekit.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream, sibling}}}))
+	fixturekit.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream, fixturekit.Sibling}}}))
 	cfg := *s.cfg
 	cfg.Capacity = config.Capacity{Masons: 1, Reviewers: 1, Committee: 3, PerWorkstream: 5}
 	cfg.Project.Capacity.PerWorkstream = 2
@@ -38,7 +38,7 @@ func newCapacityRig(t *testing.T) *capacityRig {
 	for _, turn := range []struct {
 		stream      config.WorkstreamID
 		agent, role string
-	}{{fixturekit.Stream, "mason-1", masonRole}, {fixturekit.Stream, "mason-2", masonRole}, {fixturekit.Stream, "mason-3", masonRole}, {fixturekit.Stream, "r1", reviewerRole}, {fixturekit.Stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
+	}{{fixturekit.Stream, "mason-1", masonRole}, {fixturekit.Stream, "mason-2", masonRole}, {fixturekit.Stream, "mason-3", masonRole}, {fixturekit.Stream, "r1", reviewerRole}, {fixturekit.Stream, "c1", committeeRole}, {fixturekit.Sibling, "s1", masonRole}} {
 		fixturekit.QueueRoleTurn(t, repo, turn.stream, turn.agent, turn.role, "u-"+turn.agent, clock.Now())
 	}
 	_, err := repo.ClaimTurn(ctx, fixturekit.Stream, "mason-1", "token", t.TempDir(), clock.Now())
@@ -55,7 +55,7 @@ func (r *capacityRig) dispatch() {
 }
 
 func (r *capacityRig) siblingWaiting() SlotWait {
-	return SlotWait{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity}
+	return SlotWait{Workstream: fixturekit.Sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity}
 }
 
 func deferredUnit(unit, reason string) UnitStatus {
@@ -65,7 +65,7 @@ func deferredUnit(unit, reason string) UnitStatus {
 func (r *capacityRig) deferredList() []WorkstreamStatus {
 	gone := AbandonedState
 	return []WorkstreamStatus{
-		{Project: fixturekit.Project, Workstream: sibling, Units: []UnitStatus{deferredUnit("a", DeferCapacity), deferredUnit("b", DeferEntangled), deferredUnit("c", DeferPriority), deferredUnit("d", DeferWorkstreamCap), deferredUnit("e", DeferPaused)}},
+		{Project: fixturekit.Project, Workstream: fixturekit.Sibling, Units: []UnitStatus{deferredUnit("a", DeferCapacity), deferredUnit("b", DeferEntangled), deferredUnit("c", DeferPriority), deferredUnit("d", DeferWorkstreamCap), deferredUnit("e", DeferPaused)}},
 		{Project: fixturekit.Project, Workstream: fixturekit.Stream, Units: []UnitStatus{deferredUnit("f", DeferCapacity)}},
 		{Project: fixturekit.Project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferredUnit("g", DeferCapacity)}},
 	}
@@ -126,9 +126,9 @@ func TestStatusCapacityListsDeferredUnitsOfActiveWorkstreamsThatWaitForASlot(t *
 		}
 	}
 	want := []SlotWait{
-		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
-		{Workstream: sibling, Unit: "c", Reason: DeferPriority},
-		{Workstream: sibling, Unit: "d", Reason: DeferWorkstreamCap},
+		{Workstream: fixturekit.Sibling, Unit: "a", Reason: DeferCapacity},
+		{Workstream: fixturekit.Sibling, Unit: "c", Reason: DeferPriority},
+		{Workstream: fixturekit.Sibling, Unit: "d", Reason: DeferWorkstreamCap},
 		{Workstream: fixturekit.Stream, Unit: "f", Reason: DeferCapacity},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -149,9 +149,9 @@ func TestStatusCapacityDropsTheDeferredUnitsOfAPausedWorkstream(t *testing.T) {
 		}
 	}
 	want := []SlotWait{
-		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
-		{Workstream: sibling, Unit: "c", Reason: DeferPriority},
-		{Workstream: sibling, Unit: "d", Reason: DeferWorkstreamCap},
+		{Workstream: fixturekit.Sibling, Unit: "a", Reason: DeferCapacity},
+		{Workstream: fixturekit.Sibling, Unit: "c", Reason: DeferPriority},
+		{Workstream: fixturekit.Sibling, Unit: "d", Reason: DeferWorkstreamCap},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("deferred units waiting with the workstream paused\n%+v\nwant\n%+v", got, want)
@@ -228,10 +228,10 @@ func newProviderUsageRig(t *testing.T) *providerUsageRig {
 		_, err = a.Apply(ctx, op)
 		fixturekit.Must(t, err)
 	}
-	appendDayCost(t, repo, sibling, "unmatched", clock.Now(), 0.25, true)
-	appendDayCost(t, repo, sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
-	fixturekit.Must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: fixturekit.Project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
-		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
+	appendDayCost(t, repo, fixturekit.Sibling, "unmatched", clock.Now(), 0.25, true)
+	appendDayCost(t, repo, fixturekit.Sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
+	fixturekit.Must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
 	cfg := *s.cfg
 	cfg.Profiles = map[string]config.Profile{
 		"default": {Agent: "claude", Model: "test", Fallback: "other"},

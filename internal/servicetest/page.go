@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -49,7 +50,7 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	fixturekit.QueueRoleTurn(t, live, fixturekit.Stream, "agent_mason_audit", "mason", "audit", at)
 	fixturekit.Must(t, service.InspectForTest(s).Schedule(ctx, live))
 	f.Status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "A mason is building the upload unit.", Agents: []string{"A mason builds upload."}})
-	Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: config.WorkstreamID("w_fedcba9876543210fedcba9876543210")}, Mode: "soft", Reason: "The owner is travelling", Source: runtime.PauseOwner})
+	intakefixture.Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: config.WorkstreamID("w_fedcba9876543210fedcba9876543210")}, Mode: "soft", Reason: "The owner is travelling", Source: runtime.PauseOwner})
 	return f
 }
 

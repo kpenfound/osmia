@@ -11,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -69,10 +68,6 @@ func ActivityFixture(t *testing.T) (service.Options, *config.Config, *trace.Repo
 	t.Helper()
 	cfg, loaded, repo := fixturekit.Activity(t)
 	return Options(cfg), loaded, repo
-}
-func WithWeb(t *testing.T, opts service.Options, addr string) {
-	t.Helper()
-	intakefixture.WithWeb(t, opts.Config.Root, addr)
 }
 func ServiceChanges(t *testing.T, s *service.Service) (func(), func()) {
 	t.Helper()

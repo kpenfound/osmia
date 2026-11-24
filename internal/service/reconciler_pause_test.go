@@ -37,9 +37,9 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	ctx := context.Background()
 	cfg, repo, clock := hardPauseRepository(t, 0)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, sibling, clock.Now(), owner))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Sibling, clock.Now(), owner))
 	s, _ := hardPauseService(t, cfg, repo, clock, nil)
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream, sibling}}})
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream, fixturekit.Sibling}}})
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s.store = store
@@ -49,7 +49,7 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	fixturekit.Must(t, err)
 	check := func(what string, want map[config.WorkstreamID]bool) {
 		t.Helper()
-		for _, w := range []config.WorkstreamID{fixturekit.Stream, sibling} {
+		for _, w := range []config.WorkstreamID{fixturekit.Stream, fixturekit.Sibling} {
 			for _, action := range actions {
 				op := coreadapter.Operation{ID: "op", Boundary: coreadapter.RunnerBoundary, Action: action}
 				if got := hold(w, op); got != want[w] {
@@ -76,12 +76,12 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 		check(p.Reason, map[config.WorkstreamID]bool{fixturekit.Stream: true})
 		fixturekit.Must(t, store.ClearPause(p.Target, runtime.PauseOwner))
 	}
-	fixturekit.Must(t, s.setPause(ownerPause("workstream", fixturekit.Project, sibling, "soft", "Sibling")))
-	check("sibling", map[config.WorkstreamID]bool{sibling: true})
-	fixturekit.Must(t, store.ClearPause(runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: sibling}, runtime.PauseOwner))
+	fixturekit.Must(t, s.setPause(ownerPause("workstream", fixturekit.Project, fixturekit.Sibling, "soft", "Sibling")))
+	check("fixturekit.Sibling", map[config.WorkstreamID]bool{fixturekit.Sibling: true})
+	fixturekit.Must(t, store.ClearPause(runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Sibling}, runtime.PauseOwner))
 	for _, p := range []runtime.Pause{ownerPause("project", fixturekit.Project, "", "soft", "Project"), ownerPause("factory", "", "", "hard", "Factory")} {
 		fixturekit.Must(t, s.setPause(p))
-		check(p.Reason, map[config.WorkstreamID]bool{fixturekit.Stream: true, sibling: true})
+		check(p.Reason, map[config.WorkstreamID]bool{fixturekit.Stream: true, fixturekit.Sibling: true})
 		fixturekit.Must(t, store.ClearPause(p.Target, runtime.PauseOwner))
 	}
 	check("resumed", nil)
@@ -90,7 +90,7 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: ownerActor, Cause: abandonTransition}
 	_, err = repo.SetFeatureStateUnless(ctx, h, AbandonedState, "Superseded", AbandonedState, DeliveredState)
 	fixturekit.Must(t, err)
-	check("abandoned", map[config.WorkstreamID]bool{sibling: true})
+	check("abandoned", map[config.WorkstreamID]bool{fixturekit.Sibling: true})
 }
 
 func checkHeld(t *testing.T, passed *atomic.Int64, fetch func() trace.OperationRecord) {
@@ -117,7 +117,7 @@ func newArchitectFixtureCounting(t *testing.T) (*architectFixture, *atomic.Int64
 	added, err := f.c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
-	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
+	intakefixture.WriteCharter(t, f.c, added.Project.ID, intakefixture.ShedCharter)
 	return f, passed
 }
 
@@ -208,7 +208,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 		t.Fatal("the draft did not start")
 	}
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: paused}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the architect", Source: "owner"})
+	intakefixture.Mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the architect", Source: "owner"})
 	stopped := intakefixture.AwaitTurn(t, f.repository, paused, architectAgent, 0)
 	checkPauseStop(t, stopped, "workstream", "Stop the architect")
 
@@ -230,7 +230,7 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 		_, err := fixturekit.CallTool(ctx, tools, DraftTool, map[string]any{"path": plan.PlanPath, "content": fixturekit.ValidPlan})
 		return err
 	})
-	mutation(t, f.c, "DELETE", "pause", target)
+	intakefixture.Mutation(t, f.c, "DELETE", "pause", target)
 	f.await(t, paused, intakefixture.Sketched)
 	checkContinued(t, f.architectThread(t, paused), "draft-1-", "draft-1-1", continuation)
 	if spec := f.documents(t, paused, plan.SpecDocument); len(spec) != 1 || spec[0].Content != fixturekit.ValidSpec {
@@ -280,20 +280,20 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 		t.Fatal("the draft did not start")
 	}
 	target := runtime.Target{Scope: "factory"}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Hold new work", Source: "owner"})
+	intakefixture.Mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Hold new work", Source: "owner"})
 	close(release)
 	f.await(t, running, intakefixture.Sketched)
 
 	waiting := f.handIn(t, "waiting", fixturekit.HandedDesign)
 	intakefixture.AwaitPasses(t, passed, 3)
-	settled(t, func() int { return len(f.draftOperations(t, waiting)) })
+	intakefixture.Settled(t, func() int { return len(f.draftOperations(t, waiting)) })
 	if ops := f.draftOperations(t, waiting); len(ops) != 0 {
 		t.Fatalf("a draft was asked for under a soft pause: %+v", ops)
 	}
 	if state, err := f.repository().Workflow(waiting, draftSubject); err != nil || state.Value != "" {
 		t.Fatalf("draft state %+v: %v", state, err)
 	}
-	mutation(t, f.c, "DELETE", "pause", target)
+	intakefixture.Mutation(t, f.c, "DELETE", "pause", target)
 	f.await(t, waiting, intakefixture.Sketched)
 }
 
@@ -315,7 +315,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	}
 	intakefixture.AwaitTurn(t, f.repository, stream, committeeAgent(2), 0)
 	target := runtime.Target{Scope: "project", Project: f.project}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the committee", Source: "owner"})
+	intakefixture.Mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the committee", Source: "owner"})
 	stopped := intakefixture.AwaitTurn(t, f.repository, stream, member, 0)
 	checkPauseStop(t, stopped, "project", "Stop the committee")
 	round := func() trace.OperationRecord {
@@ -328,7 +328,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	}
 
 	continuation := continueTurn(f.architectFixture, stopped, nil)
-	mutation(t, f.c, "DELETE", "pause", target)
+	intakefixture.Mutation(t, f.c, "DELETE", "pause", target)
 	f.awaitShed(t, stream, "heard-1")
 	th, err := f.repository().Thread(stream, member)
 	fixturekit.Must(t, err)
@@ -453,7 +453,7 @@ func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 	store := openPauseStore(t, f.architectFixture, stream)
 	hard := ownerPause("workstream", f.project, stream, "hard", "Stop the amendment")
 
-	seedAmendment(t, f.architectFixture, repo, stream)
+	intakefixture.SeedAmendment(t, f.project, f.clock.Now, repo, stream)
 	drafts := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
 	fixturekit.Must(t, drafts.Pass(ctx))
 	draftOp := intakefixture.AmendmentOp(t, repo, stream, AmendmentDraftAction)

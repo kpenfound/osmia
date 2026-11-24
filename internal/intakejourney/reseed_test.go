@@ -4,17 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
@@ -197,7 +198,7 @@ func TestAmendmentResealReseedsFromTheFetchedUpstreamHead(t *testing.T) {
 		t.Fatalf("the clone already has %s", late)
 	}
 	revised := strings.Replace(amendedIndependentPlan, `"footprint": ["internal"]`, `"footprint": ["internal.late"]`, 1)
-	a, req := approveAmendment(t, f, repository, stream, journey.AmendedSpec, revised)
+	a, req := approveAmendment(t, f, repository, stream, intakefixture.AmendedSpec, revised)
 	intakefixture.Step(t, a, stream, req, intake.AmendmentResealed)
 
 	current, _, found, err := seal.Latest(repository, stream)

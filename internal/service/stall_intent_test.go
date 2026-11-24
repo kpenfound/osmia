@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -63,7 +64,7 @@ func (f *stallFixture) move(t *testing.T, n int, note string) {
 func (f *stallFixture) stalledWorkstream(t *testing.T) (text, raw string) {
 	t.Helper()
 	f.transition(t, "stall-seed-assembled", trace.FeatureSubject, BuildingState, AssembledState, "", stallSeeder, fixturekit.DemoStart)
-	f.quietFor(3 * time.Hour)
+	f.clock.QuietFor(3 * time.Hour)
 	rebase := f.queueOperation(t, "rebase-unit", f.clock.Now())
 	for range f.s.GiveUpLimit().Failures {
 		f.fail(t, rebase, "WATCHDOG-FAILURE the checkout is dirty")
@@ -80,21 +81,14 @@ func (f *stallFixture) stalledWorkstream(t *testing.T) (text, raw string) {
 	}
 	var asked []systemone.Request
 	for _, r := range f.jev.TransitionRequests() {
-		if strings.Contains(requestOf(t, r), "ws-stalled") || strings.Contains(requestOf(t, r), "ws.stalled") {
+		if strings.Contains(intakefixture.RequestJSON(t, r), "ws-stalled") || strings.Contains(intakefixture.RequestJSON(t, r), "ws.stalled") {
 			asked = append(asked, r)
 		}
 	}
 	if len(asked) != 1 {
 		t.Fatalf("Jev got %d transition requests for the stalled workstream, want 1", len(asked))
 	}
-	return summaryOf(t, asked[0]), requestOf(t, asked[0])
-}
-
-func requestOf(t *testing.T, r systemone.Request) string {
-	t.Helper()
-	data, err := json.Marshal(r)
-	fixturekit.Must(t, err)
-	return string(data)
+	return summaryOf(t, asked[0]), intakefixture.RequestJSON(t, asked[0])
 }
 
 func summaryOf(t *testing.T, r systemone.Request) string {
@@ -105,7 +99,7 @@ func summaryOf(t *testing.T, r systemone.Request) string {
 	if json.Unmarshal(state, &text) == nil {
 		state = []byte(text)
 	}
-	return string(state) + "\n" + requestOf(t, r)
+	return string(state) + "\n" + intakefixture.RequestJSON(t, r)
 }
 
 func requireStalledIn(t *testing.T, text string, wants ...string) {
@@ -217,7 +211,7 @@ func TestAStalledUnitExitDoesNotCarryTheWorkstreamSummary(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
 	f.sealWorkstream(t, "# Spec\n\n## Intent\n\nSTALLED-INTENT.\n\n## Acceptance criteria\n\n1. OUTCOME-ONE.\n", "")
-	f.quietFor(3 * time.Hour)
+	f.clock.QuietFor(3 * time.Hour)
 	exit, ok := f.pass(t, f.watch("45m"))[execution.TriggerStalled]
 	if !ok {
 		t.Fatal("the watchdog raised no stalled exit for the unit")

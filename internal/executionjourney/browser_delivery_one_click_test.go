@@ -2,12 +2,14 @@ package executionjourney
 
 import (
 	context "context"
+	reflect "reflect"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	reflect "reflect"
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	chromedp "github.com/chromedp/chromedp"
 	delivery "github.com/kpenfound/osmia/internal/delivery"
@@ -55,23 +57,23 @@ func awaitOneClickCard(t *testing.T, p *page, card string) string {
 func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
-	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
+	f, ws, repository, _ := journey.DeliveryFixtureWith(t, journey.ListenWeb)
 	fixturekit.Must(t, repository.Close())
-	f.start(t)
-	t.Cleanup(func() { f.stop(t) })
+	f.Start(t)
+	t.Cleanup(func() { f.Stop(t) })
 	ctx := context.Background()
-	entries := intakefixture.EntriesOf(t, f.c, api.InboxDelivery)
+	entries := intakefixture.EntriesOf(t, f.C, api.InboxDelivery)
 	if len(entries) != 1 {
 		t.Fatalf("delivery entries %+v", entries)
 	}
 	card := intakefixture.DecisionCard(entries[0])
-	presented, err := f.c.Delivery(ctx, ws)
+	presented, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if presented.Approval != nil || len(presented.Messages) == 0 {
 		t.Fatalf("the presentation %+v", presented)
 	}
 
-	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.Run(chromedp.Navigate("http://" + f.S.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
@@ -99,7 +101,7 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 			t.Fatalf("the page sent %q: %v", key, sent[0])
 		}
 	}
-	after, err := f.c.Delivery(ctx, ws)
+	after, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != description || after.Approval.DraftHash != presented.DraftHash || len(after.Approval.Messages) != len(messages) {
 		t.Fatalf("the recorded approval %+v", after.Approval)
@@ -114,40 +116,40 @@ func TestBrowserPageApprovesTheDraftInOneClick(t *testing.T) {
 func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
-	f, ws, repository, _ := deliveryFixtureWith(t, listenWeb)
+	f, ws, repository, _ := journey.DeliveryFixtureWith(t, journey.ListenWeb)
 	ctx := context.Background()
-	presented, apiErr := f.s.deliveryPresentation(ctx, string(ws))
+	presented, apiErr := f.S.DeliveryPresentation(ctx, string(ws))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	edited := "Edited description of the pull request.\n"
 	messages := presented.Messages
-	first, apiErr := f.s.approveDelivery(ctx, string(ws), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &edited})
+	first, apiErr := f.S.ApproveDelivery(ctx, string(ws), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &edited})
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	if first.Description != edited || edited == presented.Draft {
 		t.Fatalf("the edited approval %+v", first)
 	}
-	driver := (&publisher{s: f.s, repository: repository}).driver()
+	driver := (&journey.Publisher{S: f.S, Repository: repository}).Driver()
 	if _, err := driver.Refuse(ctx, ws, delivery.PublishInput{Approval: 1}, "the fork is gone"); err != nil {
 		t.Fatal(err)
 	}
 	fixturekit.Must(t, repository.Close())
-	f.start(t)
-	t.Cleanup(func() { f.stop(t) })
-	entries := intakefixture.EntriesOf(t, f.c, api.InboxDelivery)
+	f.Start(t)
+	t.Cleanup(func() { f.Stop(t) })
+	entries := intakefixture.EntriesOf(t, f.C, api.InboxDelivery)
 	if len(entries) != 1 {
 		t.Fatalf("delivery entries %+v", entries)
 	}
 	card := intakefixture.DecisionCard(entries[0])
-	offered, err := f.c.Delivery(ctx, ws)
+	offered, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if offered.Approval == nil || offered.Approval.Description != edited {
 		t.Fatalf("the reoffered presentation %+v", offered.Approval)
 	}
 
-	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
+	p.Run(chromedp.Navigate("http://" + f.S.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Mark ready for review")
@@ -173,7 +175,7 @@ func TestBrowserPageReapprovesTheEditedTextOfARefusedPublication(t *testing.T) {
 			t.Fatalf("the page sent %q: %v", key, sent[0])
 		}
 	}
-	after, err := f.c.Delivery(ctx, ws)
+	after, err := f.C.Delivery(ctx, ws)
 	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != description || after.Approval.DraftHash != presented.DraftHash {
 		t.Fatalf("the recorded approval %+v", after.Approval)

@@ -5,17 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -29,77 +31,19 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func newFinalFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
+func hostRunningService(t *testing.T, f *journey.ShedFixture, stream func() config.WorkstreamID) (string, *fixturekit.FakePulls) {
 	t.Helper()
-	f, stream, repository, a := newFinalFixtureWith(t, key, "")
-	hostFinalReviews(t, f, stream)
-	return f, stream, repository, a
-}
-
-func newFinalFixtureWith(t *testing.T, key, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, *finalReviewer) {
-	t.Helper()
-	f := newDebateFixtureWith(t, 1, 1, extra, nil)
-	stream, repository := f.buildFixture().SeedGit(t, key)
-	return f, stream, repository, &finalReviewer{s: f.s, repository: repository}
-}
-
-func hostFinalReviews(t *testing.T, f *shedFixture, stream config.WorkstreamID) (string, *fixturekit.FakePulls) {
-	t.Helper()
-	return hostService(t, f, func() config.WorkstreamID { return stream })
-}
-
-func hostService(t *testing.T, f *shedFixture, stream func() config.WorkstreamID) (string, *fixturekit.FakePulls) {
-	t.Helper()
-	var fork string
-	var pulls *fixturekit.FakePulls
-	fork, pulls = fixturekit.PublicationFork(t, f.clone, func() string {
-		tip, _ := fixturekit.PublicationForkBranch(t, fork, intake.FeatureBranch(stream()))
-		return tip
-	})
-	pulls.Branches = func(branch string) string {
-		tip, _ := fixturekit.PublicationForkBranch(t, fork, branch)
-		return tip
-	}
-	pulls.SyncHead = true
-	f.s.options.PullRequests = pulls
-	f.opts.PullRequests = pulls
-	return fork, pulls
-}
-
-func hostRunningService(t *testing.T, f *shedFixture, stream func() config.WorkstreamID) (string, *fixturekit.FakePulls) {
-	t.Helper()
-	fork, pulls := hostService(t, f, stream)
+	fork, pulls := journey.HostService(t, f, stream)
 	stopQuestionJourney(t, f)
-	f.start(t)
+	f.Start(t)
 	return fork, pulls
-}
-
-func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, files map[string]string) string {
-	t.Helper()
-	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), execution.ForemanActor, intake.UnitMerged)
-}
-
-func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
-	t.Helper()
-	return intakefixture.FinalOperations(t, repository, stream, delivery.FinalReviewAction)
-}
-
-func assembleBoth(t *testing.T, f *shedFixture, repository *trace.Repository, a *finalReviewer, stream config.WorkstreamID, resume, dedupe map[string]string) (string, coreadapter.Operation) {
-	t.Helper()
-	return intakefixture.AssembleBoth(t, repository, a, stream, func(unit string, files map[string]string) string {
-		return mergeDirectly(t, f, repository, stream, unit, files)
-	}, resume, dedupe, intake.AssembledState, delivery.FinalReviewAction)
-}
-
-func (f *shedFixture) finalTurn(k, attempt int, run func(context.Context, *mcp.ClientSession) error) string {
-	return intakefixture.FinalTurn(f.engine, delivery.FinalTurnID(k, intake.CommitteeAgent(1), attempt), run)
 }
 
 func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "final")
+	f, stream, repository, a := journey.NewFinalFixture(t, "final")
 	ctx := context.Background()
-	head, op := assembleBoth(t, f, repository, a, stream,
+	head, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	assembled := intakefixture.TransitionByID(t, repository, stream, intake.AssembledState)
@@ -117,11 +61,11 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	if in != (delivery.FinalReviewInput{Review: 1, Commit: head, Seal: 1, Spec: 1, Plan: 1, Charter: charter.Revision}) {
 		t.Fatalf("final review input %+v", in)
 	}
-	landed := strings.Split(strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "--format=%H %s", "-2", head)), "\n")
+	landed := strings.Split(strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "log", "--format=%H %s", "-2", head)), "\n")
 
-	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
 	var problems []error
-	turn := f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	turn := f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		for path, want := range map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan, "charter.md": intakefixture.ShedCharter,
 			"branch/internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n", "branch/UPSTREAM.md": "upstream moved\n"} {
 			if got, err := intakefixture.ReadTool(ctx, tools, path); err != nil || got != want {
@@ -160,7 +104,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 		t.Fatalf("final review result %+v", result)
 	}
 
-	g := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit)
+	g := intake.Workspaces(f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
 	fixturekit.Must(t, err)
 	if runs := intakefixture.StreamDocuments(t, repository, stream, delivery.FinalChecksDocument(1)); len(runs) != 1 || !strings.Contains(runs[0].Content, `"source": "pull_request"`) && !strings.Contains(runs[0].Content, `"source":"pull_request"`) {
@@ -176,7 +120,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	if on, err := g.Ancestor(ctx, upstream, tip); err != nil || !on || tip == head {
 		t.Fatalf("the feature branch at %s is not rebased onto upstream %s: %v", tip, upstream, err)
 	}
-	replayed := strings.Split(strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "--format=%H %s", upstream+".."+tip)), "\n")
+	replayed := strings.Split(strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "log", "--format=%H %s", upstream+".."+tip)), "\n")
 	if len(replayed) != len(landed) || slices.ContainsFunc(replayed, func(r string) bool { return slices.Contains(landed, r) }) {
 		t.Fatalf("the rebased branch holds %v, landed %v", replayed, landed)
 	}
@@ -187,11 +131,11 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 			t.Fatalf("replayed %q, landed %q", replayed[i], landed[i])
 		}
 	}
-	worktree := filepath.Join(f.opts.Config.Root, intake.BranchesDirectory, string(f.project), string(stream))
-	if at := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", worktree, "rev-parse", "HEAD")); at != tip {
+	worktree := filepath.Join(f.Opts.Config.Root, intake.BranchesDirectory, string(f.Project), string(stream))
+	if at := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", worktree, "rev-parse", "HEAD")); at != tip {
 		t.Fatalf("the feature worktree is at %s, not %s", at, tip)
 	}
-	if status := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", worktree, "status", "--porcelain")); status != "" {
+	if status := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", worktree, "status", "--porcelain")); status != "" {
 		t.Fatalf("the feature worktree after the rebase:\n%s", status)
 	}
 
@@ -223,7 +167,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	if body := intakefixture.NoticeOf(t, repository, stream, reviewed.ID); body != "The final review of the assembled branch is recorded: 0 blocking, 1 advisory.\nAdvisory: spec#2: Dedupe keeps acknowledged chunk IDs in memory only. Action: Persist them if restarts matter.\nNothing blocks delivery; the owner decides it with the advisory findings in view.\n"+delivery.BriefNotice(report, reports[0].Revision) {
 		t.Fatalf("the notice %q", body)
 	}
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" {
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "" {
 		t.Fatalf("the current report does not authorise: %q %v", reason, err)
 	}
 
@@ -232,51 +176,51 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 		t.Fatalf("applied again %+v: %v", again, err)
 	}
 	fixturekit.Must(t, a.Pass(ctx))
-	if ops := finalOperations(t, repository, stream); len(ops) != 1 || len(intakefixture.StreamDocuments(t, repository, stream, delivery.FinalReportDocument)) != 1 {
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 || len(intakefixture.StreamDocuments(t, repository, stream, delivery.FinalReportDocument)) != 1 {
 		t.Fatalf("final review operations after the review %+v", ops)
 	}
 
 	repository.Close()
-	f.start(t)
-	live := &finalReviewer{s: f.s, repository: f.repository()}
-	if after, _, err := delivery.LatestFinalReport(f.repository(), stream); err != nil || !reflect.DeepEqual(after, want) {
+	f.Start(t)
+	live := &journey.FinalReviewer{S: f.S, Repository: f.Repository()}
+	if after, _, err := delivery.LatestFinalReport(f.Repository(), stream); err != nil || !reflect.DeepEqual(after, want) {
 		t.Fatalf("the report after a restart %+v: %v", after, err)
 	}
-	if _, reason, err := live.finalGate(ctx, stream); err != nil || reason != "" {
+	if _, reason, err := live.FinalGate(ctx, stream); err != nil || reason != "" {
 		t.Fatalf("the report after a restart does not authorise: %q %v", reason, err)
 	}
 
-	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, f.repository(), stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &result) {
+	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return journey.FinalOperations(t, f.Repository(), stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &result) {
 		t.Fatalf("final review operations after a restart %+v", ops)
 	}
-	f.stop(t)
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	f.Stop(t)
+	repository, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	defer repository.Close()
-	a = &finalReviewer{s: f.s, repository: repository}
-	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+	a = &journey.FinalReviewer{S: f.S, Repository: repository}
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("the restarted service asked for another final review: %+v", ops)
 	}
 
-	moved := moveFeature(t, f, stream, map[string]string{"internal/trace/late.go": "package trace\n"})
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != fmt.Sprintf("final review 1 is stale: it read feature branch commit %s, and %s is current; a new final review is required", tip, moved) {
+	moved := journey.MoveFeature(t, f, stream, map[string]string{"internal/trace/late.go": "package trace\n"})
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != fmt.Sprintf("final review 1 is stale: it read feature branch commit %s, and %s is current; a new final review is required", tip, moved) {
 		t.Fatalf("a moved branch: %q %v", reason, err)
 	}
 	fixturekit.Must(t, a.Pass(ctx))
-	ops := finalOperations(t, repository, stream)
+	ops := journey.FinalOperations(t, repository, stream)
 	if len(ops) != 2 {
 		t.Fatalf("final review operations after the branch moved %+v", ops)
 	}
 	if in, err := delivery.DecodeFinalReview(ops[1].Operation); err != nil || in != (delivery.FinalReviewInput{Review: 2, Commit: moved, Seal: 1, Spec: 1, Plan: 1, Charter: charter.Revision}) {
 		t.Fatalf("the second review %+v: %v", in, err)
 	}
-	fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", worktree, "reset", "--hard", "--quiet", tip)
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" {
+	fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", worktree, "reset", "--hard", "--quiet", tip)
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "" {
 		t.Fatalf("the branch back at the reviewed commit: %q %v", reason, err)
 	}
 
 	fixturekit.RecordCharter(t, repository, intakefixture.ShedCharter+"3. Document every change.\n")
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != fmt.Sprintf("final review 1 is stale: it read charter revision %d, and %d is current; a new final review is required", charter.Revision, charter.Revision+1) {
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != fmt.Sprintf("final review 1 is stale: it read charter revision %d, and %d is current; a new final review is required", charter.Revision, charter.Revision+1) {
 		t.Fatalf("a changed charter: %q %v", reason, err)
 	}
 	specs := intakefixture.StreamDocuments(t, repository, stream, plan.SpecDocument)
@@ -285,24 +229,24 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 	amended.At = time.Now().UTC()
 	amended.Content = strings.Replace(fixturekit.ValidSpec, "never sent again", "never sent twice", 1)
 	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{amended}))
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 is stale: it read spec revision 1, and 2 is current; a new final review is required" {
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "final review 1 is stale: it read spec revision 1, and 2 is current; a new final review is required" {
 		t.Fatalf("a changed spec: %q %v", reason, err)
 	}
 }
 
 func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "blocking")
+	f, stream, repository, a := journey.NewFinalFixture(t, "blocking")
 	ctx := context.Background()
-	_, op := assembleBoth(t, f, repository, a, stream,
+	_, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
-	if result := settleOperation(t, f.s, repository, stream, op, a); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, op, a); result.Outcome != "succeeded" {
 		t.Fatalf("the first review %+v", result)
 	}
 	blocking := []string{"spec#2: The upload path never calls Dedupe. Action: Call Dedupe before sending a chunk."}
@@ -319,18 +263,18 @@ func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 		t.Fatalf("the notice %q", body)
 	}
 	fixturekit.Must(t, a.Pass(ctx))
-	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("the review was asked for again with nothing changed: %+v", ops)
 	}
 
-	moveFeature(t, f, stream, map[string]string{"internal/trace/upload.go": "package trace\n"})
+	journey.MoveFeature(t, f, stream, map[string]string{"internal/trace/upload.go": "package trace\n"})
 	fixturekit.Must(t, a.Pass(ctx))
-	ops := finalOperations(t, repository, stream)
+	ops := journey.FinalOperations(t, repository, stream)
 	if len(ops) != 2 {
 		t.Fatalf("no review of the changed branch: %+v", ops)
 	}
 	var problems []error
-	f.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		if since, err := fixturekit.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "since", "files_only": true}); err != nil || !strings.Contains(since, "internal/trace/upload.go") || strings.Contains(since, "dedupe.go") {
 			problems = append(problems, fmt.Errorf("the change since review 1 %q: %v", since, err))
 		}
@@ -338,7 +282,7 @@ func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
-	result := settleOperation(t, f.s, repository, stream, ops[1].Operation, a)
+	result := journey.SettleOperation(t, f.S, repository, stream, ops[1].Operation, a)
 	if err := errors.Join(problems...); err != nil {
 		t.Fatal(err)
 	}
@@ -347,34 +291,34 @@ func TestBlockingFinalFindingsWaitForTriageOrOwnerAcceptance(t *testing.T) {
 	if prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt; !strings.Contains(prompt, "Final review 1 read ") || !strings.Contains(prompt, "- blocking: "+blocking[0]) || !strings.Contains(prompt, "change since for what changed after final review 1") {
 		t.Fatalf("the second reader's prompt lacks the first review:\n%s", prompt)
 	}
-	if report, reason, err := a.finalGate(ctx, stream); err != nil || reason != "" || result.Outcome != "succeeded" || report.Review != 2 || !slices.Equal(delivery.ReportBlocking(report), blocking) {
+	if report, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "" || result.Outcome != "succeeded" || report.Review != 2 || !slices.Equal(delivery.ReportBlocking(report), blocking) {
 		t.Fatalf("the second review %+v, reason %q: %v", report, reason, err)
 	}
 
-	f.s.setSole(&activeProject{repository: repository})
-	p, apiErr := f.s.deliveryPresentation(ctx, string(stream))
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
 	if apiErr != nil || !slices.Equal(delivery.ReportBlocking(p.Report), blocking) {
 		t.Fatalf("presentation %+v: %v", p.Report, apiErr)
 	}
 	decision := api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
-	if _, apiErr := f.s.approveDelivery(ctx, string(stream), decision); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "approve with accept_blocking") {
+	if _, apiErr := f.S.ApproveDelivery(ctx, string(stream), decision); apiErr == nil || apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "approve with accept_blocking") {
 		t.Fatalf("approved without accepting the blocking finding: %v", apiErr)
 	}
 	decision.AcceptBlocking = true
-	approval, apiErr := f.s.approveDelivery(ctx, string(stream), decision)
+	approval, apiErr := f.S.ApproveDelivery(ctx, string(stream), decision)
 	if apiErr != nil || !slices.Equal(approval.AcceptedBlocking, blocking) {
 		t.Fatalf("the accepting approval %+v: %v", approval, apiErr)
 	}
-	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, approval.Description); err != nil || reason != "" {
+	if _, reason, err := f.S.DeliveryGate(ctx, repository, stream, approval.Description); err != nil || reason != "" {
 		t.Fatalf("the accepting approval does not authorise delivery: %q %v", reason, err)
 	}
 }
 
 func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "rounds")
+	f, stream, repository, a := journey.NewFinalFixture(t, "rounds")
 	ctx := context.Background()
-	assembleBoth(t, f, repository, a, stream,
+	journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	record := func(review int, severity string) {
@@ -383,7 +327,7 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 		fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: review, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
 	}
 	chief := func() *api.APIError {
-		return f.s.intake().EngineeringRevision(repository, stream, intake.AmendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
+		return f.S.Intake().EngineeringRevision(repository, stream, intake.AmendmentCase{}, seal.Seal{}, nil, "Groups the findings into one unit.")
 	}
 	const owners = "final reviews have found blocking problems 3 times; further revisions of the assembled plan require an owner decision"
 	record(1, delivery.FindingBlocking)
@@ -403,22 +347,22 @@ func TestRepeatedBlockingFinalReviewsLeaveRevisionsToTheOwner(t *testing.T) {
 
 func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "conflicted")
+	f, stream, repository, a := journey.NewFinalFixture(t, "conflicted")
 	ctx := context.Background()
-	head, op := assembleBoth(t, f, repository, a, stream,
+	head, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"CODEOWNERS": "/internal/ @feature\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	upstream := advanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
-	runs := len(f.runs())
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"CODEOWNERS": "/internal/ @upstream\n"})
+	runs := len(f.Runs())
 	result, err := a.Apply(ctx, op)
 	fixturekit.Must(t, err)
 	if result.Outcome != "failed" || !strings.Contains(result.Evidence, "CODEOWNERS conflicted") {
 		t.Fatalf("final review result %+v", result)
 	}
-	if tip, _, err := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit).Branch(ctx, intake.FeatureBranch(stream)); err != nil || tip != head {
+	if tip, _, err := intake.Workspaces(f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit).Branch(ctx, intake.FeatureBranch(stream)); err != nil || tip != head {
 		t.Fatalf("a conflicted rebase moved the feature branch to %s: %v", tip, err)
 	}
-	if ran := f.runs()[runs:]; len(ran) != 0 {
+	if ran := f.Runs()[runs:]; len(ran) != 0 {
 		t.Fatalf("a committee member ran %v on a branch that did not rebase", ran)
 	}
 	report, found, err := delivery.LatestFinalReport(repository, stream)
@@ -437,22 +381,22 @@ func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 	if body := intakefixture.NoticeOf(t, repository, stream, failed.ID); !strings.HasPrefix(body, "The final review of the assembled branch failed: feature branch ") || !strings.HasSuffix(body, "The failed review authorises nothing; a new review runs once the branch or its governing documents change, or once the workstream is moved to assembled with move_workstream.") {
 		t.Fatalf("the notice %q", body)
 	}
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 failed: "+report.Failure {
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "final review 1 failed: "+report.Failure {
 		t.Fatalf("a failed review authorises: %q %v", reason, err)
 	}
 
 	repository.Close()
-	f.start(t)
-	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return finalOperations(t, f.repository(), stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &result) {
+	f.Start(t)
+	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return journey.FinalOperations(t, f.Repository(), stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &result) {
 		t.Fatalf("final review operations after a restart %+v", ops)
 	}
-	f.stop(t)
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	f.Stop(t)
+	repository, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
 	defer repository.Close()
-	a = &finalReviewer{s: f.s, repository: repository}
+	a = &journey.FinalReviewer{S: f.S, Repository: repository}
 	fixturekit.Must(t, a.Pass(ctx))
-	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("the failed review was asked for again with nothing changed: %+v", ops)
 	}
 	if after, _, err := delivery.LatestFinalReport(repository, stream); err != nil || !reflect.DeepEqual(after, report) {
@@ -462,13 +406,13 @@ func TestFinalReviewThatCannotRebaseFailsAndAuthorisesNothing(t *testing.T) {
 
 func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "interrupted")
+	f, stream, repository, a := journey.NewFinalFixture(t, "interrupted")
 	ctx := context.Background()
-	head, op := assembleBoth(t, f, repository, a, stream,
+	head, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	first := advanceUpstream(t, f, map[string]string{"FIRST.md": "first\n"})
-	f.s.boundary = func(name string) error {
+	first := journey.AdvanceUpstream(t, f, map[string]string{"FIRST.md": "first\n"})
+	f.S.Boundary = func(name string) error {
 		if name == "final-rebase-recorded" {
 			return errors.New("the service stopped")
 		}
@@ -477,8 +421,8 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	if _, err := a.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
 		t.Fatalf("the interrupted review: %v", err)
 	}
-	f.s.boundary = nil
-	g := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit)
+	f.S.Boundary = nil
+	g := intake.Workspaces(f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit)
 	if tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream)); err != nil || tip != head {
 		t.Fatalf("the branch moved to %s before the review resumed: %v", tip, err)
 	}
@@ -487,9 +431,9 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	if len(rebases) != 1 || json.Unmarshal([]byte(rebases[0].Content), &rebase) != nil || rebase.Before != head || rebase.Upstream.Commit != first {
 		t.Fatalf("the recorded rebase %+v", rebases)
 	}
-	advanceUpstream(t, f, map[string]string{"SECOND.md": "second\n"})
+	journey.AdvanceUpstream(t, f, map[string]string{"SECOND.md": "second\n"})
 	var problems []error
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		if got, err := intakefixture.ReadTool(ctx, tools, "branch/FIRST.md"); err != nil || got != "first\n" {
 			problems = append(problems, fmt.Errorf("FIRST.md holds %q: %v", got, err))
 		}
@@ -511,7 +455,7 @@ func TestInterruptedFinalReviewKeepsItsRecordedRebase(t *testing.T) {
 	if result.Outcome != "failed" || report.Outcome != delivery.FinalFailed || report.Commit != rebase.Commit || report.Failure != "the committee member ended its turn without recording a report" {
 		t.Fatalf("result %+v, report %+v", result, report)
 	}
-	if _, reason, err := a.finalGate(ctx, stream); err != nil || reason != "final review 1 failed: the committee member ended its turn without recording a report" {
+	if _, reason, err := a.FinalGate(ctx, stream); err != nil || reason != "final review 1 failed: the committee member ended its turn without recording a report" {
 		t.Fatalf("a failed review authorises: %q %v", reason, err)
 	}
 }
@@ -526,14 +470,14 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 	for _, point := range []string{"final-rebase-replaying", "final-rebase-recorded", "final-rebase-moved"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
-			f, stream, repository, a := newFinalFixture(t, point)
+			f, stream, repository, a := journey.NewFinalFixture(t, point)
 			ctx := context.Background()
-			head, op := assembleBoth(t, f, repository, a, stream,
+			head, op := journey.AssembleBoth(t, f, repository, a, stream,
 				map[string]string{"internal/trace/resume.go": "package trace\n"},
 				map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-			upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+			upstream := journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 			replays, stop := 0, true
-			f.s.boundary = func(name string) error {
+			f.S.Boundary = func(name string) error {
 				if name == point && stop {
 					stop = false
 					return errors.New("the service stopped")
@@ -550,27 +494,27 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 				t.Fatalf("inspection after an interruption at %s: %+v %v", point, observed, err)
 			}
 			var problems []error
-			f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+			f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 				got, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				if err != nil || !strings.Contains(got, `"recorded":true`) {
 					problems = append(problems, fmt.Errorf("the report was not recorded: %s %v", got, err))
 				}
 				return nil
 			})
-			result := settleOperation(t, f.s, repository, stream, op, a)
+			result := journey.SettleOperation(t, f.S, repository, stream, op, a)
 			if err := errors.Join(problems...); err != nil {
 				t.Fatal(err)
 			}
-			tip, _, err := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit).Branch(ctx, intake.FeatureBranch(stream))
+			tip, _, err := intake.Workspaces(f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit).Branch(ctx, intake.FeatureBranch(stream))
 			fixturekit.Must(t, err)
 			var rebase delivery.FinalRebase
 			rebases := intakefixture.StreamDocuments(t, repository, stream, delivery.FinalRebaseDocument)
 			if replays != 1 || len(rebases) != 1 || json.Unmarshal([]byte(rebases[0].Content), &rebase) != nil || rebase.Before != head || rebase.Upstream.Commit != upstream || rebase.Commit != tip {
 				t.Fatalf("%d replays; the recorded rebases %+v; the branch is at %s", replays, rebases, tip)
 			}
-			home := filepath.Dir(f.clone)
-			landed := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "rev-list", "--count", strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "merge-base", head, upstream))+".."+head))
-			if count := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "rev-list", "--count", upstream+".."+tip)); count != landed {
+			home := filepath.Dir(f.Clone)
+			landed := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Clone, "rev-list", "--count", strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Clone, "merge-base", head, upstream))+".."+head))
+			if count := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Clone, "rev-list", "--count", upstream+".."+tip)); count != landed {
 				t.Fatalf("the rebased branch holds %s commits on upstream, %s landed", count, landed)
 			}
 			report, _, err := delivery.LatestFinalReport(repository, stream)
@@ -578,7 +522,7 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 			if result.Outcome != "succeeded" || report.Outcome != delivery.FinalReviewed || report.Commit != tip {
 				t.Fatalf("result %+v, report %+v", result, report)
 			}
-			if ops := finalOperations(t, repository, stream); len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
+			if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 				t.Fatalf("final review operations %+v", ops)
 			}
 		})
@@ -587,14 +531,14 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 
 func TestIncompleteFinalChecksCountTowardTheRetryDelay(t *testing.T) {
 	t.Parallel()
-	f, stream, repo, a := newFinalFixture(t, "final-checks-retry-delay")
-	at := f.clock.Now()
+	f, stream, repo, a := journey.NewFinalFixture(t, "final-checks-retry-delay")
+	at := f.Clock.Now()
 
 	for revision := 1; revision <= 2; revision++ {
 		content := fmt.Sprintf(`{"review":1,"operation":"review","commit":"candidate","status":"incomplete","exit_code":-1,"error":"offline","finished_at":%q}`, at.Format(time.RFC3339Nano))
 		fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalChecksDocument(1), Revision: revision, Project: repo.Project(), Workstream: stream, At: at, Actor: execution.ChecksActor, Cause: "checks"}, Path: delivery.FinalChecksPath(1), Content: content}}))
 	}
-	n, latest, err := a.incompleteChecks(stream, 1, "candidate")
+	n, latest, err := a.Driver().IncompleteChecks(stream, 1, "candidate")
 	fixturekit.Must(t, err)
 	if n != 2 || delivery.FinalCheckDelay(n) != 2*execution.CheckRetryDelay {
 		t.Fatalf("incomplete count %d: %+v", n, latest)

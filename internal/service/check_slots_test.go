@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
@@ -20,7 +21,7 @@ func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
 		wg.Go(cancel)
 		wg.Go(holder)
 		wg.Wait()
-		if release := awaitCheck(t, next); release != nil {
+		if release := intakefixture.AwaitCheck(t, next); release != nil {
 			release()
 		}
 		if st := p.status(); st.Used != 0 || len(st.Waiting) != 0 || len(st.Active) != 0 {

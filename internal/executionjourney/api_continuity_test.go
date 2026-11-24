@@ -15,6 +15,8 @@ import (
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -108,7 +110,7 @@ func demonstrate(t *testing.T, mode string) {
 		fixturekit.Must(t, err)
 		t.Cleanup(func() { os.RemoveAll(home) })
 	}
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	fixturekit.Must(t, err)
 	root := cfg.Root.String()
@@ -184,7 +186,7 @@ func demonstrate(t *testing.T, mode string) {
 		<-ctx.Done()
 		return &agent.Result{ClaudeID: "session-first", ResultText: "First answer", SessionDir: req.SessionDir, NumTurns: 3, CostUSD: 0.25, CostKnown: true}, nil
 	}
-	s, err := Start(ctx, opts)
+	s, err := journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	select {
 	case <-entered:
@@ -270,7 +272,7 @@ func demonstrate(t *testing.T, mode string) {
 		}
 		return &agent.Result{ClaudeID: id, ResultText: "Second answer", SessionDir: req.SessionDir, NumTurns: 2}, nil
 	}
-	s, err = Start(ctx, opts)
+	s, err = journey.Start(ctx, opts)
 	fixturekit.Must(t, err)
 	select {
 	case <-finished:

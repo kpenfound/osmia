@@ -4,6 +4,13 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -12,12 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	atomic "sync/atomic"
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	chromedp "github.com/chromedp/chromedp"
 	agent "github.com/kpenfound/agentcore/agent"
@@ -33,34 +35,34 @@ import (
 func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 1, fixturekit.ValidPlan)
-	t.Cleanup(func() { f.stop(t) })
+	f, masons := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	t.Cleanup(func() { f.Stop(t) })
 
-	f.stop(t)
-	configFile, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
+	f.Stop(t)
+	configFile, err := os.OpenFile(filepath.Join(f.Opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	fixturekit.Must(t, err)
-	_, err = configFile.WriteString(listenWeb)
+	_, err = configFile.WriteString(journey.ListenWeb)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, configFile.Close())
 
 	var stream config.WorkstreamID
-	home := filepath.Dir(f.clone)
+	home := filepath.Dir(f.Clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
-	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "add", "origin", fork)
 	forkBranch := func() string {
 		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}
 	prs := &fixturekit.FakePulls{Fork: forkBranch, SyncHead: true}
-	f.opts.PullRequests = prs
+	f.Opts.PullRequests = prs
 
 	var passed atomic.Int64
-	f.opts.schedulePassed = func() { passed.Add(1) }
+	f.Opts.SchedulePassed = func() { passed.Add(1) }
 
-	f.script("amend-1-1", map[string]string{plan.SpecPath: amendedSpec}, nil)
-	f.script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
-	f.script("amend-1-reply-1", nil, nil)
+	f.Script("amend-1-1", map[string]string{plan.SpecPath: intakefixture.AmendedSpec}, nil)
+	f.Script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
+	f.Script("amend-1-reply-1", nil, nil)
 
 	problems := &demoProblems{}
 	faults := &intakefixture.Faults{}
@@ -82,23 +84,23 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	masons.Mu.Unlock()
 
 	masons.Chief.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
-	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+	f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
 	})
 
-	f.engine.Mu.Lock()
+	f.Engine.Mu.Lock()
 
-	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(faults, "", "1")
-	f.engine.Turns[rulingTurn] = masons.Turn
+	f.Engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(faults, "", "1")
+	f.Engine.Turns[rulingTurn] = masons.Turn
 	for i := 1; i <= 3; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
+		f.Engine.Turns[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
 	}
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}
@@ -112,14 +114,14 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
-	f.start(t)
+	f.Engine.Mu.Unlock()
+	f.Start(t)
 
 	entry := func(kind string) api.InboxEntry {
 		t.Helper()
 		var out api.InboxEntry
 		intakefixture.Eventually(t, "the inbox never listed a "+kind+" entry", func() bool {
-			entries := f.inboxEntries(t, stream, kind)
+			entries := f.InboxEntries(t, stream, kind)
 			if len(entries) == 1 {
 				out = entries[0]
 			}
@@ -130,7 +132,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	ownerDocument := func(id string) trace.Document {
 		t.Helper()
-		docs := f.documents(t, stream, id)
+		docs := f.Documents(t, stream, id)
 		if len(docs) == 0 {
 			t.Fatalf("no document %s", id)
 		}
@@ -142,11 +144,11 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	}
 
 	p := openBrowser(t)
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Eval(`window.notReloaded = true`, nil)
 
-	stream = f.shedAs(t, "web-release")
+	stream = f.ShedAs(t, "web-release")
 	ws := `[data-workstream="` + string(stream) + `"] `
 	p.SelectWorkstream(stream)
 	p.AwaitText(ws+"[data-field=state]", intake.InShedState)
@@ -155,13 +157,13 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.Click(card + `[data-decision-choice="ratify"]`)
 	p.AwaitOutcome("the owner ratified spec.md revision 1 and plan.json revision 1")
 	p.AwaitGone("the ratified packet", card)
-	if record := f.ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 {
+	if record := f.Ratification(t, stream, 1); record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 {
 		t.Fatalf("the recorded ratification %+v", record)
 	}
-	if moves := f.ownerMoves(t, stream); !slices.Equal(moves, []string{"skipped", "ratified-1"}) {
+	if moves := f.OwnerMoves(t, stream); !slices.Equal(moves, []string{"skipped", "ratified-1"}) {
 		t.Fatalf("owner subject went %v", moves)
 	}
-	f.awaitFeature(t, stream, intake.BuildingState)
+	f.AwaitFeature(t, stream, intake.BuildingState)
 	p.AwaitText(ws+"[data-field=state]", intake.BuildingState)
 
 	card = intakefixture.DecisionCard(entry(api.InboxEscalation))
@@ -171,7 +173,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.AwaitOutcome("Answered inbox entry")
 	p.AwaitGone("the answered question", card)
 
-	rulings, err := trace.Read[trace.Ruling](f.repository(), stream)
+	rulings, err := trace.Read[trace.Ruling](f.Repository(), stream)
 	fixturekit.Must(t, err)
 	var r *trace.Ruling
 	for i, ruling := range rulings {
@@ -183,44 +185,44 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		t.Fatalf("the owner's ruling on question 1: %+v", r)
 	}
 
-	f.awaitAmendment(t, stream, intake.AmendmentPresented)
+	f.AwaitAmendment(t, stream, intake.AmendmentPresented)
 	card = intakefixture.DecisionCard(entry(api.InboxAmendment))
 	p.AwaitText(card+"[data-field=question]", "Change: Resume from a durable checkpoint")
 	p.TypeInto(card+"input[name=note]", "Keep the acknowledged-chunk contract.")
 	p.Click(card + `[data-decision-choice="` + intake.AmendmentReject + `"]`)
 	p.AwaitOutcome("Decided reject on amendment 1.")
 	p.AwaitGone("the decided amendment", card)
-	f.awaitAmendment(t, stream, intake.AmendmentRuled)
+	f.AwaitAmendment(t, stream, intake.AmendmentRuled)
 	var decided api.AmendmentDecision
 	fixturekit.Must(t, json.Unmarshal([]byte(ownerDocument(intake.AmendmentDecisionID("1")).Content), &decided))
 	if decided.Decision != intake.AmendmentReject || decided.Note != "Keep the acknowledged-chunk contract." || decided.Packet < 1 {
 		t.Fatalf("the recorded amendment decision %+v", decided)
 	}
 
-	f.awaitMerged(t, stream, "resume")
+	f.AwaitMerged(t, stream, "resume")
 	p.OpenActivity()
 	p.AwaitText(ws+`[data-kind=transition][data-unit=resume][data-to=merged]`, "Unit resume: approved → merged")
 	p.OpenConversation()
 
-	f.awaitUnit(t, stream, "dedupe", intake.UnitContested)
-	raiseFixtureContest(t, f.repository(), stream, "dedupe")
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitContested)
+	journey.RaiseFixtureContest(t, f.Repository(), stream, "dedupe")
 	card = intakefixture.DecisionCard(entry(api.InboxContested))
 	p.AwaitText(card+"[data-field=options]", "Revise the unit")
 	p.TypeInto(card+"input[name=note]", "Skip chunks the store acknowledged.")
 	p.Click(card + `[data-decision-choice="revise"]`)
 	p.AwaitOutcome("Ruled revise on unit dedupe.")
 	p.AwaitGone("the contested unit", card)
-	transitions := slices.DeleteFunc(f.transitions(t, stream), func(tr trace.Transition) bool {
+	transitions := slices.DeleteFunc(f.Transitions(t, stream), func(tr trace.Transition) bool {
 		return tr.Subject != trace.UnitSubject("dedupe") || tr.From != intake.UnitContested
 	})
 	if len(transitions) != 1 || transitions[0].Actor != intake.OwnerActor || transitions[0].To != intake.UnitImplementing || !strings.HasSuffix(transitions[0].Reason, "Skip chunks the store acknowledged.") {
 		t.Fatalf("the contested ruling %+v", transitions)
 	}
-	f.awaitMerged(t, stream, "dedupe")
+	f.AwaitMerged(t, stream, "dedupe")
 
-	f.awaitFeature(t, stream, intake.AssembledState)
+	f.AwaitFeature(t, stream, intake.AssembledState)
 	card = intakefixture.DecisionCard(entry(api.InboxDelivery))
-	presented, err := f.c.Delivery(ctx, stream)
+	presented, err := f.C.Delivery(ctx, stream)
 	fixturekit.Must(t, err)
 	target := "workstream:" + string(stream)
 	shownPause := `[data-pause="` + target + `"] `
@@ -234,9 +236,9 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.Click("#pause-form button[type=submit]")
 	p.AwaitText("#pause-result", "paused (soft)")
 	p.AwaitText(shownPause+"[data-field=source]", "the owner")
-	rt, err := f.c.Runtime(ctx)
+	rt, err := f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
-	paused := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
+	paused := runtime.Target{Scope: "workstream", Project: f.Project, Workstream: stream}
 	if pause, ok := fixturekit.PauseOf(rt, paused); !ok || pause.Source != runtime.PauseOwner || pause.Mode != "soft" || pause.Reason != "Hold the delivery until I have read it." {
 		t.Fatalf("the owner's pause %+v %v", pause, ok)
 	}
@@ -257,7 +259,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	intakefixture.Eventually(t, "reconciliation never got two passes to try publishing while the workstream was paused", func() bool {
 		return passed.Load()-base >= 2
 	})
-	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
+	if feature, err := f.Repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
 		t.Fatalf("the paused workstream went on to %+v %v", feature, err)
 	}
 
@@ -276,12 +278,12 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	p.Click(shownPause + "[data-field=resume]")
 	p.AwaitText("#pause-result", "resumed")
 	p.AwaitGone("the resumed pause", shownPause)
-	rt, err = f.c.Runtime(ctx)
+	rt, err = f.C.Runtime(ctx)
 	fixturekit.Must(t, err)
 	if _, ok := fixturekit.PauseOf(rt, paused); ok {
 		t.Fatal("the workstream is still paused after the owner resumed it")
 	}
-	f.awaitFeature(t, stream, intake.DeliveredState)
+	f.AwaitFeature(t, stream, intake.DeliveredState)
 	p.AwaitText(ws+"[data-field=state]", intake.DeliveredState)
 
 	problems.check(t)
@@ -292,7 +294,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 		t.Fatalf("pull requests %+v", prs.Prs)
 	}
 	prs.Mu.Unlock()
-	inbox, err := f.c.Inbox(ctx)
+	inbox, err := f.C.Inbox(ctx)
 	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after delivery: %+v", inbox.Entries)

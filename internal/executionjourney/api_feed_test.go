@@ -3,17 +3,19 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -23,7 +25,7 @@ import (
 func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	_, cfg := conversationFixture(t, "fd-")
+	_, cfg := journey.ConversationFixture(t, "fd-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()

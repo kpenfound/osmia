@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
@@ -45,11 +47,6 @@ func (c *heldChecks) Check(ctx context.Context, _ string, _ api.CheckIdentity, l
 	return intakefixture.HeldCheck(ctx, links, c.entered, c.release)
 }
 
-func awaitCheck[T any](t *testing.T, ch <-chan T) T {
-	t.Helper()
-	return intakefixture.AwaitCheck(t, ch)
-}
-
 func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 	t.Parallel()
 	for _, full := range []bool{false, true} {
@@ -67,8 +64,8 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 				probability = 0.1
 			}
 			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability), "check-1": jevtest.Noul(.1)}}}}}
-			useJevProvider(f.s, provider)
-			c := &checkers{masons: newMasonController(f.s, repo)}
+			useJevProvider(f.S, provider)
+			c := &journey.Checkers{Masons: journey.NewMasonController(f.S, repo)}
 			fixturekit.Must(t, c.Pass(context.Background()))
 			ops, err := repo.Operations(stream)
 			fixturekit.Must(t, err)
@@ -77,7 +74,7 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			finished := intakefixture.ApplyCheck(ctx, c, op)
-			ran := awaitCheck(t, checker.entered)
+			ran := intakefixture.AwaitCheck(t, checker.entered)
 			docs := intakefixture.StreamDocuments(t, repo, stream, execution.CheckSelectionDocument("resume", 1))
 			if len(docs) != 1 {
 				t.Fatalf("selection records while running: %+v", docs)
@@ -104,7 +101,7 @@ func TestUnitCheckSelectionIsReadableBeforeChecksFinish(t *testing.T) {
 				t.Fatalf("start changed workflow: %+v", state)
 			}
 			checker.release <- fixturekit.CheckOutcome{Result: api.CheckResult{Output: fixturekit.PassedReport}}
-			fixturekit.Must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, intakefixture.AwaitCheck(t, finished))
 			run := onlyRun(t, repo, stream)
 			if run.Status != checkrun.ChecksPassed || !reflect.DeepEqual(*run.Selection, selection) || !run.StartedAt.Equal(start.StartedAt) {
 				t.Fatalf("finished run changed selection: %+v", run)
@@ -123,9 +120,9 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			f, stream, repo := newChecksFixture(t, "selection-restart", checker)
 			p := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(0.9)}}}}}
 			if !full {
-				useJevProvider(f.s, p)
+				useJevProvider(f.S, p)
 			}
-			c := &checkers{masons: newMasonController(f.s, repo)}
+			c := &journey.Checkers{Masons: journey.NewMasonController(f.S, repo)}
 			fixturekit.Must(t, c.Pass(context.Background()))
 			ops, err := repo.Operations(stream)
 			fixturekit.Must(t, err)
@@ -134,17 +131,17 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			finished := intakefixture.ApplyCheck(ctx, c, op)
-			firstLinks := awaitCheck(t, checker.entered)
+			firstLinks := intakefixture.AwaitCheck(t, checker.entered)
 			before := intakefixture.StreamDocuments(t, repo, stream, execution.CheckSelectionDocument("resume", 1))
 			cancel()
-			if err := awaitCheck(t, finished); !errors.Is(err, context.Canceled) {
+			if err := intakefixture.AwaitCheck(t, finished); !errors.Is(err, context.Canceled) {
 				t.Fatalf("interrupted run: %v", err)
 			}
 			fixturekit.Must(t, repo.Close())
-			reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			reopened, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
 			t.Cleanup(func() { reopened.Close() })
-			c = &checkers{masons: newMasonController(f.s, reopened)}
+			c = &journey.Checkers{Masons: journey.NewMasonController(f.S, reopened)}
 			if runs, err := execution.CheckRuns(reopened, stream); err != nil || len(runs) != 0 {
 				t.Fatalf("interrupted run has a result: %+v %v", runs, err)
 			}
@@ -156,13 +153,13 @@ func TestUnitCheckRestartReusesOneSelectionRecord(t *testing.T) {
 			}
 
 			checker.links = []string{"dag+check://different/test"}
-			useJevProvider(f.s, &jevtest.Provider{})
+			useJevProvider(f.S, &jevtest.Provider{})
 			finished = intakefixture.ApplyCheck(context.Background(), c, op)
-			if links := awaitCheck(t, checker.entered); !slices.Equal(firstLinks, links) {
+			if links := intakefixture.AwaitCheck(t, checker.entered); !slices.Equal(firstLinks, links) {
 				t.Fatalf("restart changed check links: %v, originally %v", links, firstLinks)
 			}
 			checker.release <- fixturekit.CheckOutcome{Result: api.CheckResult{Output: fixturekit.PassedReport}}
-			fixturekit.Must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, intakefixture.AwaitCheck(t, finished))
 			if got := intakefixture.StreamDocuments(t, reopened, stream, execution.CheckSelectionDocument("resume", 1)); !reflect.DeepEqual(before, got) {
 				t.Fatalf("restart duplicated or rewrote selection: %+v", got)
 			}
@@ -191,8 +188,8 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 				probability = 0.1
 			}
 			provider := &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(probability)}}}}}
-			useJevProvider(f.s, provider)
-			c := &checkers{masons: newMasonController(f.s, repo)}
+			useJevProvider(f.S, provider)
+			c := &journey.Checkers{Masons: journey.NewMasonController(f.S, repo)}
 			fixturekit.Must(t, c.Pass(context.Background()))
 			ops, err := repo.Operations(stream)
 			fixturekit.Must(t, err)
@@ -201,7 +198,7 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			finished := intakefixture.ApplyCheck(ctx, c, op)
-			awaitCheck(t, checker.entered)
+			intakefixture.AwaitCheck(t, checker.entered)
 			before := intakefixture.StreamDocuments(t, repo, stream, execution.CheckSelectionDocument("resume", 1))
 			if len(before) != 1 {
 				t.Fatalf("running selection records: %+v", before)
@@ -212,14 +209,14 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 				t.Fatalf("running selection lost listed total: %+v", start.Selection)
 			}
 			cancel()
-			if err := awaitCheck(t, finished); !errors.Is(err, context.Canceled) {
+			if err := intakefixture.AwaitCheck(t, finished); !errors.Is(err, context.Canceled) {
 				t.Fatalf("interrupted run: %v", err)
 			}
 			fixturekit.Must(t, repo.Close())
-			reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+			reopened, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 			fixturekit.Must(t, err)
 			t.Cleanup(func() { reopened.Close() })
-			c = &checkers{masons: newMasonController(f.s, reopened)}
+			c = &journey.Checkers{Masons: journey.NewMasonController(f.S, reopened)}
 			if observed, err := c.Inspect(context.Background(), op); err != nil || observed.State != coreadapter.EffectAbsent || observed.Result != nil {
 				t.Fatalf("interrupted run completed: %+v %v", observed, err)
 			}
@@ -227,15 +224,15 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 			switch terminal {
 			case "preparation failure":
 
-				base := filepath.Join(f.s.cfg.Root.String(), "checks")
+				base := filepath.Join(f.S.Cfg.Root.String(), "checks")
 				fixturekit.Must(t, os.RemoveAll(base))
 				fixturekit.Must(t, os.WriteFile(base, []byte("blocks export preparation"), 0600))
 				wantError = "not a directory"
 			case "runner unavailable":
-				f.s.options.reviewChecks = nil
+				f.S.Options.ReviewChecks = nil
 				wantError = "candidate check runner is unavailable"
 			case "superseded":
-				moveUnitNow(t, f, reopened, stream, "resume", intake.UnitImplementing)
+				intakefixture.MoveUnitNow(t, f.Clock.Now(), execution.ForemanActor, reopened, stream, "resume", intake.UnitImplementing)
 				wantStatus, wantError = checkrun.ChecksSuperseded, "not checking"
 			}
 			_, err = c.Apply(context.Background(), op)
@@ -260,7 +257,7 @@ func TestUnitCheckRestartTerminalResultPreservesSelection(t *testing.T) {
 func TestUnitCheckSelectionWithoutAListedTotalMovesToReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := newChecksFixture(t, "selection-without-listed", &fixturekit.FakeChecks{Outcomes: fixturekit.Passing()})
-	c := &checkers{masons: newMasonController(f.s, repo)}
+	c := &journey.Checkers{Masons: journey.NewMasonController(f.S, repo)}
 	ctx := context.Background()
 	fixturekit.Must(t, c.Pass(ctx))
 	report := currentReport(t, repo, stream, "resume")
@@ -268,7 +265,7 @@ func TestUnitCheckSelectionWithoutAListedTotalMovesToReview(t *testing.T) {
 	selection := `{"mode":"selected","links":["dag+check://go/test"],"candidates":37,"judgment":"judgment-recorded"}`
 	var run execution.UnitCheckRun
 	fixturekit.Must(t, json.Unmarshal([]byte(fmt.Sprintf(`{"unit":"resume","run":1,"candidate":%q,"base":%q,"report":1,"status":"passed","selection":%s}`, report.Candidate, report.Base, selection)), &run))
-	_, err := c.record(ctx, execution.CheckInput{Workstream: stream, Unit: "resume", Run: 1}, run, "")
+	_, err := c.Driver().Record(ctx, (execution.CheckInput{Workstream: stream, Unit: "resume", Run: 1}), run, "")
 	fixturekit.Must(t, err)
 	decoded := onlyRun(t, repo, stream)
 	if decoded.Selection.Listed != nil || decoded.Selection.Candidates != 37 || decoded.Selection.Mode != checkrun.SelectionSelected {

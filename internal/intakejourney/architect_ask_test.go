@@ -4,12 +4,13 @@ import (
 	context "context"
 	json "encoding/json"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	slices "slices"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"

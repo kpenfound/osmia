@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +11,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -54,7 +55,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 	s, c, home, engine := newDesignEnforcementFixtureWith(t, "", handoffEventWindows)
 	f := &handoffTitleFixture{s: s, c: c, home: home, engine: engine, window: "1h"}
 	f.other = addDesignProject(t, c, "other-member")
-	journey.WriteCharter(t, c, f.other, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, f.other, "1. Keep changes small.\n")
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		prompt := intakefixture.OwnPrompt(req.Prompt)

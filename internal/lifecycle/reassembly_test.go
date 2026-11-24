@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -16,11 +18,11 @@ import (
 
 func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, a := newFinalFixture(t, "plan-only-reassembly")
-	hostFinalReviews(t, f, stream)
-	f.s.setSole(&activeProject{repository: repository})
+	f, stream, repository, a := journey.NewFinalFixtureWith(t, "plan-only-reassembly", "")
+	journey.HostFinalReviews(t, f, stream)
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
 	ctx := context.Background()
-	_, op := assembleBoth(t, f, repository, a, stream,
+	_, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	failFinalReview(t, f, repository, stream, a, 1, op)
@@ -43,7 +45,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 		return ids
 	}
 	for k, want := range []string{"assembled-2", "assembled-3"} {
-		if _, apiFault := f.s.lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
+		if _, apiFault := f.S.Lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
 			t.Fatalf("reopen %d: %s", k+1, apiFault.Message)
 		}
 		fixturekit.Must(t, a.Pass(ctx))

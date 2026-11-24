@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
@@ -22,22 +24,22 @@ import (
 func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{wait: lifecycleAwait})
-	defer f.stop(t)
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait})
+	defer f.Stop(t)
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(ctx, f.Stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	fixturekit.Must(t, err)
-	f.awaitApproved(t)
-	repo, err := f.s.repository(f.project2)
+	f.AwaitApproved(t)
+	repo, err := f.S.Repository(f.Project2)
 	fixturekit.Must(t, err)
-	f.wait(t, "member building", func() bool {
-		feature, err := repo.Workflow(f.stream2, trace.FeatureSubject)
+	f.Wait(t, "member building", func() bool {
+		feature, err := repo.Workflow(f.Stream2, trace.FeatureSubject)
 		fixturekit.Must(t, err)
 		return feature.Value == intake.BuildingState
 	})
 
-	member := string(f.stream2)
+	member := string(f.Stream2)
 	const marker = "Settle the client's discovered work."
 	type call struct {
 		tool  string
@@ -51,9 +53,9 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		{"inspect_code", map[string]any{"workstream": member, "path": "internal/trace/git.go"}},
 	}
 	results := make([]string, len(calls))
-	f.engine.Mu.Lock()
-	fallback := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	fallback := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, "message_") || !strings.HasSuffix(strings.TrimSpace(req.Prompt), marker) {
 			return fallback(ctx, req, verified, tools)
 		}
@@ -66,11 +68,11 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		}
 		return intakefixture.QuestionResult(req, "session-chief", "Client work settled."), nil
 	}
-	f.engine.Mu.Unlock()
-	sent, err := f.c.Send(ctx, f.stream1, marker)
+	f.Engine.Mu.Unlock()
+	sent, err := f.C.Send(ctx, f.Stream1, marker)
 	fixturekit.Must(t, err)
-	f.wait(t, "shared chief member turn completion", func() bool {
-		entries, err := f.c.Conversation(ctx, f.stream1)
+	f.Wait(t, "shared chief member turn completion", func() bool {
+		entries, err := f.C.Conversation(ctx, f.Stream1)
 		fixturekit.Must(t, err)
 		for _, e := range entries.Entries {
 			if e.Turn == sent.Turn && e.State == api.TurnDone {
@@ -80,7 +82,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		return false
 	})
 
-	docs, err := trace.Read[trace.Document](repo, f.stream2)
+	docs, err := trace.Read[trace.Document](repo, f.Stream2)
 	fixturekit.Must(t, err)
 	var listed map[string]int
 	_ = json.Unmarshal([]byte(results[0]), &listed)
@@ -111,8 +113,8 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	if len(units) == 0 || !strings.Contains(results[3], "units "+strings.Join(units, ", ")+" have not merged") {
 		t.Fatalf("move_workstream did not read the member's sealed plan %v: %s", units, results[3])
 	}
-	clone := f.repos[1].Clone
-	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+intake.FeatureBranch(f.stream2))
+	clone := f.Repos[1].Clone
+	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+intake.FeatureBranch(f.Stream2))
 	if tip == "" {
 		tip = gitOutput(t, clone, "rev-parse", "HEAD")
 	}
@@ -125,7 +127,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		t.Fatalf("inspect_code did not read the member's clone at %s: %s", tip, results[4])
 	}
 
-	authority, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream2)
+	authority, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream2)
 	fixturekit.Must(t, err)
 	hosted, err := trace.Read[trace.Document](authority, host)
 	closeAuthority()

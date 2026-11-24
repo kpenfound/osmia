@@ -2,13 +2,15 @@ package executionjourney
 
 import (
 	"fmt"
+	"strconv"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"strconv"
-	"testing"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/agentcore/jev/systemone"
@@ -44,18 +46,18 @@ func TestBrowserUnitChecksAppearLiveFromSelectionThroughResult(t *testing.T) {
 					}
 					answers[checkselect.Question(i)] = jevtest.Noul(probability)
 				}
-				useJevProvider(f.s, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
+				useJevProvider(f.S, &jevtest.Provider{Results: []jevtest.Result{{Response: systemone.Response{Model: "jev-test", Answers: answers}}}})
 				if mode == "picks" {
-					settings := f.s.jev.Config()
+					settings := f.S.Jev.Config()
 					settings.CheckFallbackPicks = selected
-					f.s.jev.Config = func() config.Jev { return settings }
+					f.S.Jev.Config = func() config.Jev { return settings }
 				}
 			}
 			p := openCheckFeed(t, f, stream)
 			const entry = `[data-kind=unit_checks][data-unit=resume][data-run="1"]`
 			p.Await("checks have not started", `!document.querySelector(`+browsertest.Quote(entry)+`)`)
 			allow()
-			ran := awaitCheck(t, checker.entered)
+			ran := intakefixture.AwaitCheck(t, checker.entered)
 			awaitFeedEvent(p, stream)
 			p.Await("the running check entry", `document.querySelector(`+browsertest.Quote(entry)+`)?.dataset.state === 'running'`)
 			p.AwaitText(entry+` [data-field=checks]`, "Unit resume, check run 1")

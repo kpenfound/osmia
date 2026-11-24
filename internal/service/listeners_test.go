@@ -57,7 +57,7 @@ type listenersRig struct {
 func newListenersRig(t *testing.T) *listenersRig {
 	t.Helper()
 	opts := eventTraceOptions(t)
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, c := start(t, opts)
 	return &listenersRig{t: t, s: s, c: c, node: *joined, listeners: []listenerEndpoint{

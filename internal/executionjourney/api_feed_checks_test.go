@@ -4,18 +4,20 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	filepath "path/filepath"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -24,7 +26,7 @@ import (
 
 func TestFeedUnitCheckRunShowsTheSelectionThatRanAfterARefusal(t *testing.T) {
 	t.Parallel()
-	_, cfg := conversationFixture(t, "fur-")
+	_, cfg := journey.ConversationFixture(t, "fur-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer func() { repo.Close() }()
@@ -44,7 +46,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 	t.Parallel()
 	for _, status := range []string{checkrun.ChecksPassed, checkrun.ChecksFailed, checkrun.ChecksIncomplete, checkrun.ChecksSuperseded} {
 		t.Run(status, func(t *testing.T) {
-			_, cfg := conversationFixture(t, "fuc-")
+			_, cfg := journey.ConversationFixture(t, "fuc-")
 			repo, err := trace.Open(cfg.Root, cfg.Project)
 			fixturekit.Must(t, err)
 			defer func() { repo.Close() }()
@@ -103,7 +105,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 
 func TestFeedUnitCheckSelectionWithoutAListedTotalShowsNone(t *testing.T) {
 	t.Parallel()
-	_, cfg := conversationFixture(t, "flu-")
+	_, cfg := journey.ConversationFixture(t, "flu-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
@@ -129,7 +131,7 @@ func TestFeedUnitCheckSelectionWithoutAListedTotalShowsNone(t *testing.T) {
 
 func TestFeedFinalChecksShowEachRecordedResult(t *testing.T) {
 	t.Parallel()
-	_, cfg := conversationFixture(t, "ffc-")
+	_, cfg := journey.ConversationFixture(t, "ffc-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer func() { repo.Close() }()
@@ -193,7 +195,7 @@ type claimedRolesFeed struct {
 
 func feedWithEveryClaimedRoleAndTwoFinalReports(t *testing.T) claimedRolesFeed {
 	t.Helper()
-	_, cfg := conversationFixture(t, "ffr-")
+	_, cfg := journey.ConversationFixture(t, "ffr-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()
@@ -274,12 +276,12 @@ func TestFeedFinalReviewOutcomesNameTheirReader(t *testing.T) {
 
 func TestEventStreamAnnouncesFeedCheckAndReviewRecords(t *testing.T) {
 	t.Parallel()
-	s, c := eventTraceFixture(t)
+	s, c := journey.EventTraceFixture(t)
 	events, _ := fixturekit.EventStream(t, c)
 	if e := fixturekit.NextEvent(t, events); e.Kind != api.EventResync {
 		t.Fatalf("initial event: %+v", e)
 	}
-	repo := s.sole().repository
+	repo := s.Sole().Repository
 	at := fixturekit.DemoStart
 	for _, record := range []struct {
 		id, path string
@@ -301,7 +303,7 @@ func TestEventStreamAnnouncesFeedCheckAndReviewRecords(t *testing.T) {
 
 func TestFeedIncludesEveryWorkflowSubject(t *testing.T) {
 	t.Parallel()
-	_, cfg := conversationFixture(t, "fts-")
+	_, cfg := journey.ConversationFixture(t, "fts-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer repo.Close()

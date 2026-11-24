@@ -4,8 +4,9 @@ import (
 	"context"
 	"os"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -18,38 +19,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type routeSpans struct {
-	mu    sync.Mutex
-	spans []router.SpanRoute
-}
-
-func (l *routeSpans) add(s router.SpanRoute) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.spans = append(l.spans, s)
-}
-
-func (l *routeSpans) of(trigger string) []router.SpanRoute {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []router.SpanRoute
-	for _, s := range l.spans {
-		if s.Trigger == trigger {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func collectSpans(s *Service) *routeSpans {
-	l := &routeSpans{}
-	s.core().Router().Spans = l.add
+func collectSpans(s *journey.Service) *journey.SpanLog {
+	l := &journey.SpanLog{}
+	s.Core().Router().Spans = l.Add
 	return l
 }
 
-func masonCapacityFixture(t *testing.T) *shedFixture {
+func masonCapacityFixture(t *testing.T) *journey.ShedFixture {
 	t.Helper()
-	return newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
+	return journey.NewDebateFixtureWith(t, 1, 1, "", func(opts *journey.Options) {
 		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, config.WorkspacesGit, "masons = 1\n", opts.Threads)
 	})
 }
@@ -57,7 +35,7 @@ func masonCapacityFixture(t *testing.T) *shedFixture {
 func (f *edgeGraphFixture) build(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	b := &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: f.repository}
+	b := &intake.Builder{S: f.s.Intake().BuilderDependencies(), Repository: f.repository}
 	fixturekit.Must(t, b.Pass(ctx))
 	for _, stream := range []config.WorkstreamID{f.upstream, f.downstream} {
 		ops, err := f.repository.Operations(stream)
@@ -89,7 +67,7 @@ func (f *edgeGraphFixture) dependentWork(t *testing.T) (state string, turns int)
 func (f *edgeGraphFixture) publish(t *testing.T, hooks *fixturekit.Hooks) []fixturekit.HooksPost {
 	t.Helper()
 	os.Setenv(service.RoutingPublishTokenEnv, "journey-publisher-token")
-	res, err := service.InspectForTest(f.s.core()).PublishToHearsay(context.Background(), f.repository, hooks.URL)
+	res, err := service.InspectForTest(f.s.Core()).PublishToHearsay(context.Background(), f.repository, hooks.URL)
 	fixturekit.Must(t, err)
 	if res.Unreachable {
 		t.Fatalf("the publish pass: %+v", res)
@@ -102,15 +80,15 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	ctx := context.Background()
 	sf := masonCapacityFixture(t)
 	p := dropsAt(0.95)
-	routeJev(sf.s, p)
-	spans := collectSpans(sf.s)
+	journey.InspectForTest(sf.S).SetRouterJudge(jevfixture.TransitionJudge(sf.S.Now, p))
+	spans := collectSpans(sf.S)
 	f, _ := sealedEdgeFixture(t, sf)
-	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.now())
-	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.now())
+	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.Now())
+	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.Now())
 	specBefore, _, _, err := f.repository.ProjectSpecOf(f.downstream)
 	fixturekit.Must(t, err)
 	f.build(t)
-	m := newMasonController(f.s, f.repository)
+	m := journey.NewMasonController(f.s, f.repository)
 	hooks := fixturekit.NewHooks(t)
 
 	f.resolvePasses(t)
@@ -119,7 +97,7 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
 
-	endStream(t, f.repository, f.s.now(), f.upstream)
+	endStream(t, f.repository, f.s.Now(), f.upstream)
 	f.resolvePasses(t)
 	subject := lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock)
 	dropped := lastOn(t, f.repository, f.downstream, subject)
@@ -130,7 +108,7 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	if len(records) != 1 || records[0].State != router.StateCommitted || records[0].Outcome != router.OutcomeDeparted || records[0].Target != lifecycle.DependencyWaived || records[0].Judgment != dropped.Judgment {
 		t.Fatalf("route %+v", records)
 	}
-	if got := spans.of(lifecycle.TriggerUpstreamTerminal); len(got) != 1 || got[0].Outcome != router.OutcomeDeparted || got[0].Default != lifecycle.DependencyKept || got[0].Chosen != lifecycle.DependencyWaived || got[0].Judgment != dropped.Judgment {
+	if got := spans.Of(lifecycle.TriggerUpstreamTerminal); len(got) != 1 || got[0].Outcome != router.OutcomeDeparted || got[0].Default != lifecycle.DependencyKept || got[0].Chosen != lifecycle.DependencyWaived || got[0].Judgment != dropped.Judgment {
 		t.Fatalf("route spans %+v", got)
 	}
 	waivers, revision, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
@@ -169,14 +147,14 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
-	m = newMasonController(f.s, f.repository)
+	m = journey.NewMasonController(f.s, f.repository)
 	f.resolvePasses(t)
 	fixturekit.Must(t, m.Pass(ctx))
 	check("after a restart")
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times for one piece of evidence", n)
 	}
-	if n := departuresInFeed(t, f.s, f.repository, f.downstream); n != 1 {
+	if n := jevDepartures(t, f.s, f.repository, f.downstream); n != 1 {
 		t.Fatalf("%d departures in the feed, want 1", n)
 	}
 
@@ -210,13 +188,13 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 	ctx := context.Background()
 	sf := masonCapacityFixture(t)
 	p := &jevfixture.Transitions{}
-	routeJev(sf.s, p)
-	spans := collectSpans(sf.s)
+	journey.InspectForTest(sf.S).SetRouterJudge(jevfixture.TransitionJudge(sf.S.Now, p))
+	spans := collectSpans(sf.S)
 	f, _ := sealedEdgeFixture(t, sf)
-	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.now())
-	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.now())
+	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.Now())
+	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.Now())
 	f.build(t)
-	m := newMasonController(f.s, f.repository)
+	m := journey.NewMasonController(f.s, f.repository)
 	hooks := fixturekit.NewHooks(t)
 
 	f.resolvePasses(t)
@@ -225,14 +203,14 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
 
-	endStream(t, f.repository, f.s.now(), f.upstream)
-	merged := advanceUpstream(t, sf, map[string]string{"upstream.go": "upstream\n", "UPSTREAM.md": "merged by hand\n"})
+	endStream(t, f.repository, f.s.Now(), f.upstream)
+	merged := journey.AdvanceUpstream(t, sf, map[string]string{"upstream.go": "upstream\n", "UPSTREAM.md": "merged by hand\n"})
 	f.resolvePasses(t)
 	records := routeFor(t, f.repository, f.downstream, lifecycle.TriggerUpstreamIntegrated)
 	if len(records) != 1 || records[0].State != router.StateCommitted || records[0].Default != lifecycle.DependencyAdopted || records[0].Outcome != router.OutcomeFollowed || records[0].Target != lifecycle.DependencyAdopted {
 		t.Fatalf("route %+v", records)
 	}
-	if got := spans.of(lifecycle.TriggerUpstreamIntegrated); len(got) != 1 || got[0].Outcome != router.OutcomeFollowed || got[0].Chosen != lifecycle.DependencyAdopted {
+	if got := spans.Of(lifecycle.TriggerUpstreamIntegrated); len(got) != 1 || got[0].Outcome != router.OutcomeFollowed || got[0].Chosen != lifecycle.DependencyAdopted {
 		t.Fatalf("route spans %+v", got)
 	}
 	observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
@@ -264,7 +242,7 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
-	m = newMasonController(f.s, f.repository)
+	m = journey.NewMasonController(f.s, f.repository)
 	f.resolvePasses(t)
 	fixturekit.Must(t, m.Pass(ctx))
 	check("after a restart")

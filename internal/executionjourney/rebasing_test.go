@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -23,35 +25,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
-	t.Helper()
-	f, _ := newMasonFixture(t, 1, independentPlan)
-	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
-	intakefixture.PrepareRebase(t, f.unitSeedDriver(repository), repository, stream, func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u string, o *coreadapter.Outcome) trace.QueuedTurn {
-		return captureMasonTurn(t, f, r, w, u, o)
-	})
-	return f, stream, repository
-}
-
-func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
-	t.Helper()
-	return intakefixture.MoveFeature(t, intake.Workspaces(f.s.current(), intake.BranchesDirectory, backendOf(t, f, stream)), stream, files)
-}
-
-func rebaseOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []trace.OperationRecord {
-	t.Helper()
-	return intakefixture.UnitOperations(t, repository, stream, unit, func(op coreadapter.Operation) (string, error) {
-		in, err := execution.DecodeRebase(op)
-		return in.Unit, err
-	})
-}
-
-func unitRebases(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []api.UnitRebase {
-	t.Helper()
-	return intakefixture.UnitRebases(t, repository, stream, unit, execution.RebaseDocument)
-}
 
 func latestReport(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, execution.UnitReport) {
 	t.Helper()
@@ -70,66 +43,51 @@ func latestReport(t *testing.T, repository *trace.Repository, stream config.Work
 	return latest, report
 }
 
-func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) trace.QueuedTurn {
-	t.Helper()
-	return f.sharedTurns().CompleteMasonTurn(t, repository, stream, unit, outcome)
-}
-
-func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
-	t.Helper()
-	return captureTurn(t, f, repository, stream, intake.MasonAgent(unit), outcome)
-}
-
-func captureTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
-	t.Helper()
-	return f.sharedTurns().CaptureTurn(t, repository, stream, agent, outcome)
-}
-
 func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newRebaseFixture(t, "writer")
+	f, stream, repository := journey.NewRebaseFixture(t, "writer")
 	defer func() { repository.Close() }()
 	ctx := context.Background()
-	m := newMasonController(f.s, repository)
-	lands := &foreman{masons: m}
-	units := newUnitWorkspaces(f.s.cfg, repository)
-	w, base, found, err := units.find(ctx, stream, "dedupe")
+	m := journey.NewMasonController(f.S, repository)
+	lands := &journey.Foreman{Masons: m}
+	units := journey.NewUnitWorkspaces(f.S.Cfg, repository)
+	w, base, found, err := units.Find(ctx, stream, "dedupe")
 	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
-	paths, err := units.paths(w)
+	paths, err := units.Driver().Paths(w)
 	fixturekit.Must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe"))
+	viewRoot := filepath.Join(f.S.Cfg.Root.String(), "views", string(f.Project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe"))
 	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "DEDUPE.md"), []byte("dedupe\n"), 0600))
-	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe")), f.clock.Now())
+	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "crashed", filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe")), f.Clock.Now())
 	fixturekit.Must(t, err)
-	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
+	landed := journey.MoveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
+	if ops := journey.RebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
 		t.Fatalf("a workspace with an interrupted writer was rebased: %+v", ops)
 	}
-	if ops := rebaseOperations(t, repository, stream, "resume"); len(ops) != 1 {
+	if ops := journey.RebaseOperations(t, repository, stream, "resume"); len(ops) != 1 {
 		t.Fatalf("resume, whose mason is idle, has rebases %+v", ops)
 	}
-	if ops := landOperations(t, repository, stream); len(ops) != 0 {
+	if ops := journey.LandOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("a landing was asked for while units are behind: %+v", ops)
 	}
-	if head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD")); head != base {
+	if head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", w.Path, "rev-parse", "HEAD")); head != base {
 		t.Fatalf("the writer's workspace moved to %s", head)
 	}
 
 	fixturekit.Must(t, repository.Close())
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repository, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
-	m.repository = repository
+	m.Repository = repository
 	fixturekit.Must(t, lands.Pass(ctx))
-	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
+	if ops := journey.RebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
 		t.Fatalf("a workspace with an interrupted writer was rebased: %+v", ops)
 	}
 	fixturekit.Must(t, m.Pass(ctx))
@@ -140,14 +98,14 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	if continuation.Request.TurnID != intake.MasonAgent("dedupe")+"-recover-1" || !continuation.CompletedAt.IsZero() {
 		t.Fatalf("the interrupted turn's continuation %+v", continuation)
 	}
-	admit := f.s.admit(f.s.current(), repository)
+	admit := journey.InspectForTest(f.S).Admit(f.S.Current(), repository)
 	candidate := scheduler.Candidate{Workstream: stream, Thread: th, Turn: continuation}
 	if admitted, err := admit(ctx, candidate); err != nil || admitted {
 		t.Fatalf("a mason turn of a unit behind its feature branch was admitted: %t %v", admitted, err)
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := rebaseOperations(t, repository, stream, "dedupe")
+	ops := journey.RebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
@@ -156,7 +114,7 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	if in != (execution.RebaseInput{Unit: "dedupe", Rebase: 1, Onto: landed}) {
 		t.Fatalf("rebase input %+v", in)
 	}
-	r := rebaser{lands}
+	r := journey.Rebaser{Foreman: lands}
 	result, err := r.Apply(ctx, ops[0].Operation)
 	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" {
@@ -167,19 +125,19 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 			t.Fatalf("the rebased workspace's %s holds %q, %v", name, data, err)
 		}
 	}
-	if status := fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "status", "--porcelain"); strings.TrimSpace(status) != "" {
+	if status := fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", w.Path, "status", "--porcelain"); strings.TrimSpace(status) != "" {
 		t.Fatalf("the rebased workspace:\n%s", status)
 	}
-	head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD"))
-	if parent := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%P", head)); parent != landed {
+	head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", w.Path, "rev-parse", "HEAD"))
+	if parent := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "log", "-1", "--format=%P", head)); parent != landed {
 		t.Fatalf("the rebased commit's parents %s, want %s", parent, landed)
 	}
-	rebases := unitRebases(t, repository, stream, "dedupe")
+	rebases := journey.UnitRebases(t, repository, stream, "dedupe")
 	if len(rebases) != 1 {
 		t.Fatalf("rebase records %+v", rebases)
 	}
 	got := rebases[0]
-	snapshot := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "show", got.Snapshot+":DEDUPE.md"))
+	snapshot := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), "-C", f.Clone, "show", got.Snapshot+":DEDUPE.md"))
 	want := api.UnitRebase{Unit: "dedupe", Rebase: 1, Operation: ops[0].Operation.ID, State: intake.UnitImplementing, Branch: execution.UnitBranch(stream, "dedupe"), Base: base, Onto: landed, Snapshot: got.Snapshot, Commit: head, Conflicts: []string{}}
 	if !reflect.DeepEqual(got, want) || snapshot != "dedupe" {
 		t.Fatalf("rebase.json %+v, want %+v; snapshot holds %q", got, want, snapshot)
@@ -199,7 +157,7 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	if err != nil || observed.State != coreadapter.EffectCompleted || !reflect.DeepEqual(*observed.Result, result) {
 		t.Fatalf("inspection after the rebase %+v %v", observed, err)
 	}
-	if n := len(unitRebases(t, repository, stream, "dedupe")); n != 1 {
+	if n := len(journey.UnitRebases(t, repository, stream, "dedupe")); n != 1 {
 		t.Fatalf("%d rebase records after the rebase applied again", n)
 	}
 }
@@ -215,28 +173,28 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 	for _, step := range []string{"rebase-snapshotting", "rebase-snapshotted", "rebase-moved", "rebase-recorded"} {
 		t.Run(step, func(t *testing.T) {
 			t.Parallel()
-			f, stream, repository := newRebaseFixture(t, "interrupted-rebase")
+			f, stream, repository := journey.NewRebaseFixture(t, "interrupted-rebase")
 			defer repository.Close()
 			ctx := context.Background()
-			lands := &foreman{masons: newMasonController(f.s, repository)}
-			w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "resume")
+			lands := &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}
+			w, _, _, err := journey.NewUnitWorkspaces(f.S.Cfg, repository).Find(ctx, stream, "resume")
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
-			landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
+			landed := journey.MoveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 			fixturekit.Must(t, lands.Pass(ctx))
-			ops := rebaseOperations(t, repository, stream, "resume")
+			ops := journey.RebaseOperations(t, repository, stream, "resume")
 			if len(ops) != 1 {
 				t.Fatalf("resume's rebases %+v", ops)
 			}
 			crashed := false
-			f.s.boundary = func(name string) error {
+			f.S.Boundary = func(name string) error {
 				if name == step && !crashed {
 					crashed = true
 					return errors.New("crash")
 				}
 				return nil
 			}
-			r := rebaser{lands}
+			r := journey.Rebaser{Foreman: lands}
 			if _, err := r.Apply(ctx, ops[0].Operation); err == nil || !strings.Contains(err.Error(), "crash") {
 				t.Fatalf("the rebase never reached %s: %v", step, err)
 			}
@@ -247,8 +205,8 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 			if err != nil || result.Outcome != "succeeded" {
 				t.Fatalf("the retried rebase %+v %v", result, err)
 			}
-			home := filepath.Dir(f.clone)
-			if count := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "rev-list", "--count", landed+".."+execution.UnitBranch(stream, "resume"))); count != "1" {
+			home := filepath.Dir(f.Clone)
+			if count := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.Clone, "rev-list", "--count", landed+".."+execution.UnitBranch(stream, "resume"))); count != "1" {
 				t.Fatalf("the unit branch gained %s commits on %s", count, landed)
 			}
 			for name, want := range map[string]string{"RESUME.md": "resume\n", "LANDED.md": "landed\n"} {
@@ -259,13 +217,13 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 			if status := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", w.Path, "status", "--porcelain")); status != "" {
 				t.Fatalf("the rebased workspace:\n%s", status)
 			}
-			rebases := unitRebases(t, repository, stream, "resume")
+			rebases := journey.UnitRebases(t, repository, stream, "resume")
 			head := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", w.Path, "rev-parse", "HEAD"))
 			if len(rebases) != 1 || rebases[0].Commit != head || rebases[0].Onto != landed {
 				t.Fatalf("rebase records %+v, head %s", rebases, head)
 			}
 			var outcomes []string
-			for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+			for _, tr := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 				if tr.Subject == execution.RebaseSubject("resume") && tr.From != "" {
 					outcomes = append(outcomes, tr.ID)
 				}
@@ -279,29 +237,29 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 
 func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newApprovedFixture(t, "conflict")
+	f, stream, repository := journey.NewApprovedFixture(t, "conflict")
 	defer repository.Close()
 	ctx := context.Background()
-	m := newMasonController(f.s, repository)
-	lands := &foreman{masons: m}
-	landed := moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
+	m := journey.NewMasonController(f.S, repository)
+	lands := &journey.Foreman{Masons: m}
+	landed := journey.MoveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
 	_, before := latestReport(t, repository, stream, "dedupe")
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := rebaseOperations(t, repository, stream, "dedupe")
+	ops := journey.RebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
 
-	result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
+	result := journey.SettleOperation(t, f.S, repository, stream, ops[0].Operation, journey.Rebaser{Foreman: lands})
 	if result.Outcome != "succeeded" {
 		t.Fatalf("the conflicted rebase %+v", result)
 	}
-	rebases := unitRebases(t, repository, stream, "dedupe")
+	rebases := journey.UnitRebases(t, repository, stream, "dedupe")
 	if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{fixturekit.MasonWrote}) || rebases[0].State != intake.UnitApproved || rebases[0].Snapshot != before.Candidate {
 		t.Fatalf("rebase records %+v", rebases)
 	}
-	w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
+	w, _, _, err := journey.NewUnitWorkspaces(f.S.Cfg, repository).Find(ctx, stream, "dedupe")
 	fixturekit.Must(t, err)
 	data, err := os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote))
 	fixturekit.Must(t, err)
@@ -321,7 +279,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	if ops := landOperations(t, repository, stream); len(ops) != 0 {
+	if ops := journey.LandOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("a landing was asked for with a conflicted unit: %+v", ops)
 	}
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
@@ -329,7 +287,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if state.Value != intake.UnitImplementing {
 		t.Fatalf("the conflicted unit is %s", state.Value)
 	}
-	moved := slices.IndexFunc(intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
+	moved := slices.IndexFunc(intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream), func(tr trace.Transition) bool {
 		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == intake.UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == execution.ForemanActor
 	})
 	if moved < 0 {
@@ -348,7 +306,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 		t.Fatalf("another pass queued more turns: %+v %v", again, err)
 	}
 
-	done := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	done := journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	fixturekit.Must(t, m.Pass(ctx))
 	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitImplementing {
 		t.Fatalf("a candidate with conflict markers left implementing: %+v %v", state, err)
@@ -364,7 +322,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
-	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	fixturekit.Must(t, m.Pass(ctx))
 	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != execution.UnitChecking {
 		t.Fatalf("the resolved unit is %+v %v", state, err)
@@ -373,25 +331,25 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	if report.Base != landed || report.Candidate == before.Candidate {
 		t.Fatalf("the resolved report %+v, want a new candidate from %s", report, landed)
 	}
-	req, _, err := m.candidateEvidence(ctx, stream, "dedupe")
+	req, _, err := m.CandidateEvidence(ctx, stream, "dedupe")
 	fixturekit.Must(t, err)
 	if strings.Contains(req.Diff, "<<<<<<<") || strings.Contains(req.Diff, ">>>>>>>") || !strings.Contains(req.Diff, "+// landed and deduplicated") {
 		t.Fatalf("the reviewer's diff:\n%s", req.Diff)
 	}
-	if paths, _, err := m.conflicts(stream, "dedupe"); err != nil || len(paths) != 0 {
+	if paths, _, err := m.Driver().Conflicts(stream, "dedupe"); err != nil || len(paths) != 0 {
 		t.Fatalf("resolved conflicts %v %v", paths, err)
 	}
 }
 
 func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newRebaseFixture(t, "done-behind")
+	f, stream, repository := journey.NewRebaseFixture(t, "done-behind")
 	defer repository.Close()
 	ctx := context.Background()
-	m := newMasonController(f.s, repository)
-	lands := &foreman{masons: m}
-	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
+	m := journey.NewMasonController(f.S, repository)
+	lands := &journey.Foreman{Masons: m}
+	journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	landed := journey.MoveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 
 	fixturekit.Must(t, m.Pass(ctx))
 	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitImplementing {
@@ -402,11 +360,11 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 	}
 
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := rebaseOperations(t, repository, stream, "dedupe")
+	ops := journey.RebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, ops[0].Operation, journey.Rebaser{Foreman: lands}); result.Outcome != "succeeded" {
 		t.Fatalf("the rebase %+v", result)
 	}
 	fixturekit.Must(t, m.Pass(ctx))
@@ -420,29 +378,29 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 
 func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newApprovedFixture(t, "conflict-bound")
+	f, stream, repository := journey.NewApprovedFixture(t, "conflict-bound")
 	defer repository.Close()
-	f.s.cfg.Mason.MaxCleanTurns = 1
+	f.S.Cfg.Mason.MaxCleanTurns = 1
 	ctx := context.Background()
-	m := newMasonController(f.s, repository)
-	lands := &foreman{masons: m}
-	moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
+	m := journey.NewMasonController(f.S, repository)
+	lands := &journey.Foreman{Masons: m}
+	journey.MoveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := rebaseOperations(t, repository, stream, "dedupe")
+	ops := journey.RebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, ops[0].Operation, journey.Rebaser{Foreman: lands}); result.Outcome != "succeeded" {
 		t.Fatalf("the conflicted rebase %+v", result)
 	}
 	fixturekit.Must(t, lands.Pass(ctx))
 
-	done := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	done := journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	fixturekit.Must(t, m.Pass(ctx))
 	if ids := intakefixture.TurnIDs(t, repository, stream, intake.MasonAgent("dedupe")); ids[len(ids)-1] != fmt.Sprintf("%s-markers-%d", intake.MasonAgent("dedupe"), done.Sequence) {
 		t.Fatalf("the mason's turns after a done with markers %v", ids)
 	}
-	again := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	again := journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	fixturekit.Must(t, m.Pass(ctx))
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
 	fixturekit.Must(t, err)
@@ -460,25 +418,25 @@ func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 
 func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newRebaseFixture(t, "resolution-before-reminder")
+	f, stream, repository := journey.NewRebaseFixture(t, "resolution-before-reminder")
 	defer func() { repository.Close() }()
 	ctx := context.Background()
-	m := newMasonController(f.s, repository)
-	lands := &foreman{masons: m}
-	w, _, found, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
+	m := journey.NewMasonController(f.S, repository)
+	lands := &journey.Foreman{Masons: m}
+	w, _, found, err := journey.NewUnitWorkspaces(f.S.Cfg, repository).Find(ctx, stream, "dedupe")
 	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// dedupe\n"), 0600))
-	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
+	journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	journey.MoveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
 	fixturekit.Must(t, lands.Pass(ctx))
-	ops := rebaseOperations(t, repository, stream, "dedupe")
+	ops := journey.RebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("rebases: %+v", ops)
 	}
-	result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
+	result := journey.SettleOperation(t, f.S, repository, stream, ops[0].Operation, journey.Rebaser{Foreman: lands})
 	if result.Outcome != "succeeded" {
 		t.Fatalf("rebase: %+v", result)
 	}
@@ -491,10 +449,10 @@ func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing
 	}
 
 	fixturekit.Must(t, repository.Close())
-	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	repository, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
-	m = newMasonController(f.s, repository)
-	lands = &foreman{masons: m}
+	m = journey.NewMasonController(f.S, repository)
+	lands = &journey.Foreman{Masons: m}
 	fixturekit.Must(t, m.Pass(ctx))
 	fixturekit.Must(t, lands.Pass(ctx))
 	th, err = repository.Thread(stream, intake.MasonAgent("dedupe"))
@@ -508,7 +466,7 @@ func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing
 		t.Fatalf("a queued resolution received a premature reminder: %v", ids)
 	}
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
-	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
+	journey.CompleteMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	fixturekit.Must(t, m.Pass(ctx))
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
 	fixturekit.Must(t, err)

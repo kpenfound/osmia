@@ -5,11 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/execution"
-	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	exec "os/exec"
 	filepath "path/filepath"
@@ -18,6 +13,13 @@ import (
 	strings "strings"
 	atomic "sync/atomic"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -28,28 +30,17 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var resumeReport = "resume from the last chunk"
-
-func newMasonController(s *Service, repository *trace.Repository) *masons {
-	return &masons{s: s, cfg: s.cfg, repository: repository}
-}
-
-func (f *shedFixture) awaitUnit(t *testing.T, stream config.WorkstreamID, unit, state string) {
+func reports(f *journey.ShedFixture, t *testing.T, stream config.WorkstreamID, unit string) []trace.Document {
 	t.Helper()
-	f.sharedTurns().AwaitUnit(t, stream, unit, state)
-}
-
-func (f *shedFixture) reports(t *testing.T, stream config.WorkstreamID, unit string) []trace.Document {
-	t.Helper()
-	docs, err := trace.Read[trace.Document](f.repository(), stream)
+	docs, err := trace.Read[trace.Document](f.Repository(), stream)
 	fixturekit.Must(t, err)
 	return slices.DeleteFunc(docs, func(d trace.Document) bool { return d.ID != execution.ReportDocument(unit) })
 }
 
-func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, report execution.UnitReport) {
+func checkCandidate(f *journey.ShedFixture, t *testing.T, stream config.WorkstreamID, report execution.UnitReport) {
 	t.Helper()
 	git := func(args ...string) string {
-		return strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), append([]string{"-C", f.clone}, args...)...))
+		return strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.Clone), append([]string{"-C", f.Clone}, args...)...))
 	}
 	if tip := git("rev-parse", execution.UnitBranch(stream, report.Unit)); report.Candidate != tip {
 		t.Fatalf("candidate %s, the unit's branch is at %s", report.Candidate, tip)
@@ -64,8 +55,8 @@ func (f *shedFixture) checkCandidate(t *testing.T, stream config.WorkstreamID, r
 
 func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	t.Parallel()
-	f, masons := newMasonFixture(t, 4, independentPlan)
-	defer func() { f.stop(t) }()
+	f, masons := journey.NewMasonFixture(t, 4, intakefixture.IndependentPlan)
+	defer func() { f.Stop(t) }()
 	refused := []struct {
 		args   map[string]any
 		reason string
@@ -105,14 +96,14 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		return intakefixture.ErrFailTurn
 	}
-	stream := f.seedBuilding(t, "design", independentPlan)
-	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
+	stream := seedBuilding(f, t, "design", intakefixture.IndependentPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
 
-	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 	masons.Check(t)
-	f.checkUnits(t, stream, []api.UnitStatus{{Unit: "resume", State: intake.UnitReviewing, Card: &intakefixture.ExampleCard}, {Unit: "dedupe", State: intake.UnitReviewing, Card: &intakefixture.ExampleCard}})
+	f.CheckUnits(t, stream, []api.UnitStatus{{Unit: "resume", State: intake.UnitReviewing, Card: &intakefixture.ExampleCard}, {Unit: "dedupe", State: intake.UnitReviewing, Card: &intakefixture.ExampleCard}})
 
-	th, err := f.repository().Thread(stream, intake.MasonAgent("resume"))
+	th, err := f.Repository().Thread(stream, intake.MasonAgent("resume"))
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 {
 		t.Fatalf("mason turns %+v", th.Turns)
@@ -124,7 +115,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("the mason's turn ended %s with %+v", turn.Status(), turn.Response.Result.Outcome)
 	}
 
-	docs := f.reports(t, stream, "resume")
+	docs := reports(f, t, stream, "resume")
 	if len(docs) != 1 {
 		t.Fatalf("reports %+v", docs)
 	}
@@ -134,73 +125,73 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}
 	var report execution.UnitReport
 	fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &report))
-	f.checkCandidate(t, stream, report)
+	checkCandidate(f, t, stream, report)
 	want := execution.UnitReport{Unit: "resume", Turn: execution.MasonTurnID("resume"), Seal: 1, Outcome: "approved", Card: &intakefixture.ExampleCard, Branch: execution.UnitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, want) {
 		t.Fatalf("report %+v, want %+v", report, want)
 	}
-	status, err := f.c.Status(context.Background(), stream)
+	status, err := f.C.Status(context.Background(), stream)
 	fixturekit.Must(t, err)
 	if len(status.Units) != 2 || status.Units[0].Card == nil || *status.Units[0].Card != intakefixture.ExampleCard || status.Units[1].Card == nil || *status.Units[1].Card != intakefixture.ExampleCard {
 		t.Fatalf("unit cards in status: %+v", status.Units)
 	}
 	var apiErr api.WorkstreamStatus
-	fixturekit.Must(t, f.c.Do(context.Background(), "GET", service.Prefix+"/status/"+string(stream), nil, &apiErr))
+	fixturekit.Must(t, f.C.Do(context.Background(), "GET", service.Prefix+"/status/"+string(stream), nil, &apiErr))
 	if !reflect.DeepEqual(apiErr.Units, status.Units) {
 		t.Fatalf("unit cards through API: %+v", apiErr.Units)
 	}
-	if data, err := fixturekit.WorkstreamDocument(t, f.s.cfg.Root, f.project, stream, "units/resume/report.json"); err != nil || string(data) != doc.Content {
+	if data, err := fixturekit.WorkstreamDocument(t, f.S.Cfg.Root, f.Project, stream, "units/resume/report.json"); err != nil || string(data) != doc.Content {
 		t.Fatalf("report file %q %v", data, err)
 	}
 
 	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", execution.MasonTurnID("resume"), report.Candidate, execution.UnitBranch(stream, "resume"), intake.FeatureBranch(stream), report.Base)
 	checking := intakefixture.TransitionMove{ID: execution.CheckingTransitionID("resume", 1), Subject: trace.UnitSubject("resume"), From: intake.UnitImplementing, To: execution.UnitChecking, Cause: turn.Response.ID, Reason: reason}
-	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
+	f.AwaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 	dedupeChecking := masonTransitions(t, f, stream)[3]
 	if dedupeChecking.ID != execution.CheckingTransitionID("dedupe", 1) || dedupeChecking.To != execution.UnitChecking {
 		t.Fatalf("dedupe's move to checking %+v", dedupeChecking)
 	}
-	if got, want := masonTransitions(t, f, stream), []intakefixture.TransitionMove{started("resume", f.startedReason(t, stream, "resume")), checking, started("dedupe", f.startedReason(t, stream, "dedupe")), dedupeChecking}; !reflect.DeepEqual(got, want) {
+	if got, want := masonTransitions(t, f, stream), []intakefixture.TransitionMove{started("resume", startedReason(f, t, stream, "resume")), checking, started("dedupe", startedReason(f, t, stream, "dedupe")), dedupeChecking}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
 	reviewNotice := fmt.Sprintf("Unit resume is checking: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", execution.MasonTurnID("resume"))
-	if body := f.notice(t, stream, execution.CheckingTransitionID("resume", 1)); body != reviewNotice {
+	if body := f.Notice(t, stream, execution.CheckingTransitionID("resume", 1)); body != reviewNotice {
 		t.Fatalf("the checking notice %q, want %q", body, reviewNotice)
 	}
-	f.awaitEventTurns(t, stream, reviewNotice, "Unit dedupe is implementing: its mason works on it in its unit workspace on "+execution.UnitBranch(stream, "dedupe")+".")
-	f.awaitAcknowledgedNotices(t, stream)
+	f.AwaitEventTurns(t, stream, reviewNotice, "Unit dedupe is implementing: its mason works on it in its unit workspace on "+execution.UnitBranch(stream, "dedupe")+".")
+	awaitAcknowledgedNotices(f, t, stream)
 
-	th, err = f.repository().Thread(stream, intake.MasonAgent("dedupe"))
+	th, err = f.Repository().Thread(stream, intake.MasonAgent("dedupe"))
 	fixturekit.Must(t, err)
 	failed := th.Turns[0]
 	if len(th.Turns) != 1 || failed.Status() != "failed" || failed.Response.Result.Outcome == nil || failed.Response.Result.Outcome.Status != execution.MasonDone {
 		t.Fatalf("the failing mason's turns %+v", th.Turns)
 	}
-	if got := f.reports(t, stream, "dedupe"); len(got) != 1 || got[0].Cause != failed.Response.ID {
+	if got := reports(f, t, stream, "dedupe"); len(got) != 1 || got[0].Cause != failed.Response.ID {
 		t.Fatalf("the failed turn's report %+v", got)
 	}
 
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: intake.MasonAgent("resume"), Turn: "late", Role: intake.MasonRole}
+	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Unit: "resume", Thread: intake.MasonAgent("resume"), Turn: "late", Role: intake.MasonRole}
 	raw, err := json.Marshal(map[string]any{"outcome": "Built"})
 	fixturekit.Must(t, err)
-	out, err := (&execution.MasonReports{}).Tool(f.repository(), scope).Handle(context.Background(), raw)
+	out, err := (&execution.MasonReports{}).Tool(f.Repository(), scope).Handle(context.Background(), raw)
 	fixturekit.Must(t, err)
 	if string(out) != `{"recorded":false,"reason":"unit resume is reviewing, not implementing"}` {
 		t.Fatalf("late done %s", out)
 	}
 
-	f.stop(t)
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
+	f.Stop(t)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
 	fixturekit.Must(t, err)
-	controller := newMasonController(f.s, repo)
-	b, found, err := controller.read(stream)
+	controller := journey.NewMasonController(f.S, repo)
+	b, found, err := controller.Read(stream)
 	if err != nil || !found {
 		t.Fatalf("read %v %v", found, err)
 	}
 	subject := trace.UnitSubject("resume")
 	b.States()[subject] = trace.WorkflowState{Version: b.States()[subject].Version - 1, Value: intake.UnitImplementing}
-	moved, blocked, err := controller.finish(context.Background(), b, "resume")
+	moved, blocked, err := controller.Finish(context.Background(), b, "resume")
 	if moved || blocked || err != nil {
 		t.Fatalf("finish on a stale read: moved %t, blocked %t, %v", moved, blocked, err)
 	}
@@ -209,25 +200,25 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	if n := len(slices.DeleteFunc(docs, func(d trace.Document) bool { return d.ID != execution.ReportDocument("resume") })); n != 1 {
 		t.Fatalf("a stale finish recorded a report: %d revisions", n)
 	}
-	f.start(t)
+	f.Start(t)
 }
 
 func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	t.Parallel()
 	var passed atomic.Int64
-	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(opts *Options) {
-		opts.schedulePassed = func() { passed.Add(1) }
+	f, masons := journey.NewMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", intakefixture.IndependentPlan, func(opts *journey.Options) {
+		opts.SchedulePassed = func() { passed.Add(1) }
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second")
+	built := seedBuildingPaused(f, t, factory, intakefixture.IndependentPlan, "first", "second")
 	blocked, other := intakefixture.LowHigh(built[0], built[1])
 	var lock string
 	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if intakefixture.SessionStream(req) != string(blocked) {
 			return nil
 		}
-		w, found, err := intake.Workspaces(f.s.cfg, intake.UnitsDirectory, config.WorkspacesGit).Workspace(ctx, execution.UnitName(blocked, "resume"))
+		w, found, err := intake.Workspaces(f.S.Cfg, intake.UnitsDirectory, config.WorkspacesGit).Workspace(ctx, execution.UnitName(blocked, "resume"))
 		if err != nil || !found {
 			return fmt.Errorf("the unit's workspace: %t %v", found, err)
 		}
@@ -243,20 +234,20 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	}
 
 	intakefixture.AwaitPasses(t, &passed, 3)
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMasonRan(t, other, "resume")
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
+	f.AwaitMasonRan(t, other, "resume")
 	intakefixture.AwaitPasses(t, &passed, 3)
-	intakefixture.Settled(t, func() int { return len(f.blocks(t, blocked, "resume")) })
+	intakefixture.Settled(t, func() int { return len(blocks(f, t, blocked, "resume")) })
 	masons.Check(t)
 	const prefix = "unit resume stays implementing: its mason reported done, and its candidate cannot be made: git add: "
-	if got := f.blocks(t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
+	if got := blocks(f, t, blocked, "resume"); len(got) != 1 || !strings.HasPrefix(got[0], prefix) || !strings.Contains(got[0], "index.lock") {
 		t.Fatalf("blocked %q", got)
 	}
-	f.checkUnits(t, blocked, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, f.deferred(t, blocked, "dedupe", api.UnitDispatch{Reason: execution.DeferBlocked, Blocked: "resume", Message: "Waits while the mason controller is blocked on unit resume of this workstream."})})
-	if got := f.reports(t, blocked, "resume"); len(got) != 0 {
+	f.CheckUnits(t, blocked, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, deferred(f, t, blocked, "dedupe", api.UnitDispatch{Reason: execution.DeferBlocked, Blocked: "resume", Message: "Waits while the mason controller is blocked on unit resume of this workstream."})})
+	if got := reports(f, t, blocked, "resume"); len(got) != 0 {
 		t.Fatalf("reports %+v", got)
 	}
-	if _, err := f.repository().Thread(blocked, intake.MasonAgent("dedupe")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := f.Repository().Thread(blocked, intake.MasonAgent("dedupe")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the workstream started another unit: %v", err)
 	}
 
@@ -264,12 +255,12 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	err := os.Remove(lock)
 	masons.Mu.Unlock()
 	fixturekit.Must(t, err)
-	f.awaitUnit(t, blocked, "resume", intake.UnitReviewing)
-	docs := f.reports(t, blocked, "resume")
+	f.AwaitUnit(t, blocked, "resume", intake.UnitReviewing)
+	docs := reports(f, t, blocked, "resume")
 	if len(docs) != 1 {
 		t.Fatalf("reports %+v", docs)
 	}
 	var report execution.UnitReport
 	fixturekit.Must(t, json.Unmarshal([]byte(docs[0].Content), &report))
-	f.checkCandidate(t, blocked, report)
+	checkCandidate(f, t, blocked, report)
 }
