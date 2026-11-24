@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -33,7 +34,7 @@ func newUnitsFixture(t *testing.T) unitsFixture {
 	home, err := os.MkdirTemp("", "uw-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 	must(t, err)
 	clone := cfg.Project.Clone
 	demoGit(t, home, "init", "--quiet", "-b", "main", clone)
@@ -358,7 +359,7 @@ func TestMasonDaggerDecidesWhichViewsHoldTheRepository(t *testing.T) {
 			base, err := os.ReadFile(file)
 			must(t, err)
 			must(t, os.WriteFile(file, append(base, []byte("[roles.mason]\nsandbox = 'sbx'\n"+dagger)...), 0600))
-			cfg, err := config.Load(options)
+			cfg, err := projectstore.LoadConfig(options)
 			must(t, err)
 			source := t.TempDir()
 			must(t, os.WriteFile(filepath.Join(source, "README"), []byte("widgets\n"), 0600))

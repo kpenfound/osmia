@@ -16,6 +16,7 @@ import (
 
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
@@ -34,23 +35,31 @@ func fixture(t *testing.T) service.Options {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, ".osmia")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", project), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version=1
-active_projects=[%q]
+	must(t, os.MkdirAll(root, 0700))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(`version=1
 [profiles.default]
 agent="claude"
 model="test"
 [profiles.other]
 agent="codex"
 model="other"
-`, project)), 0600))
-	must(t, os.WriteFile(filepath.Join(root, "projects", project, "config.toml"), []byte(fmt.Sprintf(`version=1
-upstream="upstream/repo"
-fork="owner/repo"
-clone=%q
-`, filepath.Join(home, "clone"))), 0600))
+`), 0600))
+	register(t, root, project, fmt.Sprintf("version=1\nupstream=\"upstream/repo\"\nfork=\"owner/repo\"\nclone=%q\n", filepath.Join(home, "clone")))
 	return service.Options{Config: config.Options{Root: root}, Workstreams: []config.WorkstreamID{stream}}
 }
+
+// register adds the project id with settings as its first revision to the
+// project store of the root at rootDirectory.
+func register(t *testing.T, rootDirectory, id, settings string) {
+	t.Helper()
+	root, err := config.ResolveRoot(rootDirectory, "")
+	must(t, err)
+	store := projectstore.Open(root)
+	_, err = store.WriteFirst(config.ProjectID(id), []byte(settings))
+	must(t, err)
+	must(t, store.Add(config.ProjectID(id)))
+}
+
 func invoke(t *testing.T, root string, args ...string) (int, string, string) {
 	t.Helper()
 	var out, diag bytes.Buffer
@@ -156,10 +165,8 @@ func TestClientDoesNotOpenState(t *testing.T) {
 	must(t, err)
 	defer s.Close()
 	root := opts.Config.Root
-	for _, p := range []string{"config.toml", filepath.Join("projects", project, "config.toml")} {
-		must(t, os.Remove(filepath.Join(root, p)))
-		must(t, os.Mkdir(filepath.Join(root, p), 0700))
-	}
+	must(t, os.Remove(filepath.Join(root, "config.toml")))
+	must(t, os.Mkdir(filepath.Join(root, "config.toml"), 0700))
 	for _, args := range [][]string{{"status"}, {"profiles"}, {"pause", "all"}, {"resume", "all"}, {"pause", stream}, {"resume", stream}, {"priority", "set", stream}, {"priority", "clear"}, {"profiles", "set", "mason", "other"}, {"profiles", "clear", "mason"}} {
 		successful(t, root, args...)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 )
@@ -27,16 +27,8 @@ func withTwoProjects(t *testing.T) service.Options {
 	t.Helper()
 	opts := fixture(t)
 	root := opts.Config.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(strings.Replace(string(top), fmt.Sprintf("active_projects=[%q]", project), fmt.Sprintf("active_projects=[%q, %q]", project, otherProject), 1)), 0600))
-	must(t, os.MkdirAll(filepath.Join(root, "projects", otherProject), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", otherProject, "config.toml"), []byte(fmt.Sprintf(`version=1
-upstream="upstream/other"
-fork="owner/other"
-clone=%q
-`, filepath.Join(filepath.Dir(root), "other"))), 0600))
-	cfg, err := config.Load(opts.Config)
+	register(t, root, otherProject, fmt.Sprintf("version=1\nupstream=\"upstream/other\"\nfork=\"owner/other\"\nclone=%q\n", filepath.Join(filepath.Dir(root), "other")))
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	escalate(t, cfg.Root, cfg.For(project).Project, stream, "Both fixed.", "No.")
 	escalate(t, cfg.Root, cfg.For(otherProject).Project, otherStream, "Other fixed.", "Please force-push this.")

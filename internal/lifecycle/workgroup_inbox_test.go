@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -67,19 +68,14 @@ func newCrossRepoInboxFixture(t *testing.T) *crossRepoInboxFixture {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
 	root := opts.Config.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	listed := strings.Replace(string(top), fmt.Sprintf("active_projects = [%q]", project), fmt.Sprintf("active_projects = [%q, %q]", project, otherProject), 1)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(listed), 0600))
 	home2 := filepath.Join(home, "repo2")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(otherProject)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(otherProject), "config.toml"), []byte(`version = 1
+	fixturekit.RegisterProject(t, root, otherProject, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+home2+`"
-`), 0600))
+`)
 	opts.Workstreams = nil
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 
 	clock := &fixedClock{At: demoStart}

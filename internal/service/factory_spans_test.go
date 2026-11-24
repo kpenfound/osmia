@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -106,8 +107,8 @@ func TestReloadSplitsOnlyThePoolWhoseLimitChanged(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	opts := fixture(t)
 	files := configFiles(t, opts)
-	files.write(t, files.topText+"[capacity]\nmasons = 2\n", files.projectText)
-	loaded, err := config.Load(opts.Config)
+	files.write(t, files.topText+"[capacity]\nmasons = 2\n")
+	loaded, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	seed, err := trace.Create(ctx, loaded.Root, loaded.Project, demoStart, serviceActor)
 	must(t, err)
@@ -125,11 +126,11 @@ func TestReloadSplitsOnlyThePoolWhoseLimitChanged(t *testing.T) {
 	defer release()
 
 	// A reload that changes nothing about the limits splits nothing.
-	files.write(t, files.topText+"[capacity]\nmasons = 2\n", files.projectText)
+	files.write(t, files.topText+"[capacity]\nmasons = 2\n")
 	_, err = c.Reload(ctx)
 	must(t, err)
 	before := time.Now().UTC()
-	files.write(t, files.topText+"[capacity]\nmasons = 4\n", files.projectText)
+	files.write(t, files.topText+"[capacity]\nmasons = 4\n")
 	_, err = c.Reload(ctx)
 	must(t, err)
 	after := time.Now().UTC()

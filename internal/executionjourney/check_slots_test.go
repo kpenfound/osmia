@@ -82,7 +82,7 @@ func TestCheckSlotsReloadAndFIFO(t *testing.T) {
 	s, client := start(t, opts)
 	files := configFiles(t, opts)
 	setLimit := func(limit int) {
-		files.write(t, files.topText+fmt.Sprintf("\n[capacity]\nchecks = %d\n", limit), files.projectText)
+		files.write(t, files.topText+fmt.Sprintf("\n[capacity]\nchecks = %d\n", limit))
 		_, err := client.Reload(context.Background())
 		must(t, err)
 		effective, err := client.Configuration(context.Background())

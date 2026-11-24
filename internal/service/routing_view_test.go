@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -21,7 +21,7 @@ const routingJudgment = "judgment_0123456789abcdef0123456789abcdef0123456789abcd
 func routedFixture(t *testing.T) *trace.Repository {
 	t.Helper()
 	ctx := context.Background()
-	cfg, err := config.Load(fixtureAt(t, t.TempDir()).Config)
+	cfg, err := projectstore.LoadConfig(fixtureAt(t, t.TempDir()).Config)
 	must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, owner)

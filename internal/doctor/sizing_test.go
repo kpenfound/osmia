@@ -3,7 +3,6 @@ package doctor
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +16,7 @@ const gib = uint64(1) << 30
 func sizing(t *testing.T, total uint64, roles string) []Check {
 	t.Helper()
 	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+roles+sbxDagger), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel+roles+sbxDagger), 0o600))
 	o.TotalMemory = func() (uint64, error) { return total, nil }
 	return Run(context.Background(), o)
 }
@@ -106,7 +105,7 @@ func TestOnlySbxRolesCount(t *testing.T) {
 
 func TestUnreadableHostMemoryWarns(t *testing.T) {
 	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf(topLevel, projectID)+sizedRoles+sbxDagger), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel+sizedRoles+sbxDagger), 0o600))
 	o.TotalMemory = func() (uint64, error) { return 0, errors.New("no meminfo") }
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "sandbox memory"), Warn, "no meminfo")

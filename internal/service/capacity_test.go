@@ -138,7 +138,7 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 func TestStatusCapacityWithoutProject(t *testing.T) {
 	t.Parallel()
 	s, _, _, _ := dailyBudgetService(t, 1, &adaptertest.Turns{})
-	s.cfg = s.cfg.WithoutProject()
+	s.cfg = s.cfg.WithLoadedProjects(nil)
 	got := s.statusList()
 	want := &CapacityStatus{PerWorkstream: s.cfg.Capacity.PerWorkstream, Roles: []RoleCapacity{
 		{Role: masonRole, Limit: fixturekit.Limit(s.cfg.Capacity.Masons), Waiting: []SlotWait{}},

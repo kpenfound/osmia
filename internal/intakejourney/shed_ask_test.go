@@ -21,6 +21,7 @@ import (
 	os "os"
 	filepath "path/filepath"
 
+	"github.com/kpenfound/osmia/internal/projectstore"
 	slices "slices"
 	strings "strings"
 	sync "sync"
@@ -501,7 +502,7 @@ func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	f.engine.Turns["*"] = c.Turn
 	f.engine.Mu.Unlock()
 
-	cfg, err := config.Load(f.opts.Config)
+	cfg, err := projectstore.LoadConfig(f.opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 	must(t, err)

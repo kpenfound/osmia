@@ -2,12 +2,12 @@ package runtime
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 const pidOther config.ProjectID = "p_fedcba9876543210fedcba9876543210"
@@ -19,16 +19,12 @@ func twoProjects(t *testing.T) Inputs {
 	t.Helper()
 	in := fixture(t)
 	root := in.Config.Root.String()
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(pidOther)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(pidOther), "config.toml"), []byte(`version = 1
+	register(t, root, pidOther, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+filepath.Join(root, "..", "other")+`"
-`), 0600))
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(strings.Replace(string(top), `active_projects = ["`+string(pid)+`"]`, `active_projects = ["`+string(pid)+`", "`+string(pidOther)+`"]`, 1)), 0600))
-	c, err := config.Load(config.Options{Root: root})
+`)
+	c, err := projectstore.LoadConfig(config.Options{Root: root})
 	must(t, err)
 	in.Config = c
 	in.Workstreams[pidOther] = []config.WorkstreamID{wOther}

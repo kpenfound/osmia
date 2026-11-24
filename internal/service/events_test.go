@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -28,7 +29,7 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 
@@ -169,7 +170,7 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 

@@ -31,6 +31,7 @@ import (
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -378,13 +379,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if opts.Repositories == nil {
 		opts.Repositories = pulls.GitHub{Token: os.Getenv("GITHUB_TOKEN"), HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}
-	migrationStep := func(name string) error {
-		if opts.boundary != nil {
-			return opts.boundary(ctx, name)
-		}
-		return nil
-	}
-	cfg, imported, err := loadForStart(ctx, opts.Config, migrationStep)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -431,22 +426,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	pendingRecovery := s.StartActivity("recovery-pending", ActivityRecovery, "", "", "recovering an interrupted project registration")
 	cfg, s.pending = s.recoverPending(ctx, cfg)
-	// An earlier version's interrupted registration finishes before the
-	// migration looks for projects to split: its trace may not be published
-	// yet, and its journal may carry a pinned charter copy. It waits for the
-	// import to list its project; a registration that fails for another
-	// reason keeps the import for the next start, and the projects load from
-	// their files as before it.
-	if !imported && (s.pending == nil || errors.Is(s.pending, errImportPending)) {
-		migrated, err := completeMigration(ctx, opts.Config, migrationStep)
-		if err != nil {
-			return nil, err
-		}
-		cfg = migrated
-		if s.pending != nil {
-			cfg, s.pending = s.recoverPending(ctx, cfg)
-		}
-	}
 	pendingRecovery.Finish(s.pending)
 	revisions, err := effectiveRevisions(cfg)
 	if err != nil {
@@ -542,9 +521,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
-	for _, warning := range cfg.Warnings {
-		logger.Warn(warning, "component", "config")
-	}
 	s.recoverArchiveLifecycle(ctx)
 	if s.tailnet != nil {
 		// A first join that fails leaves the tailnet down for the supervisor

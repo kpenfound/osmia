@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -20,7 +20,7 @@ func TestChiefOfStaffViewStagesLatestDocuments(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, owner)

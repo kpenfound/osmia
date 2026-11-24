@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -30,7 +31,7 @@ type webFixture struct {
 func newWebFixture(t *testing.T) *webFixture {
 	t.Helper()
 	ctx := context.Background()
-	cfg, err := config.Load(fixturekit.ConfigAt(t, t.TempDir()))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, t.TempDir()))
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}

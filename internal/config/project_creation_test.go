@@ -15,7 +15,7 @@ func TestProjectCreationIsOffUntilBothKeysAreSet(t *testing.T) {
 		"only dir":   "[projects]\nclone_dir = '~/new'\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig+table, projectConfig))
+			c, err := load(fixture(t, topConfig+table, projectConfig))
 			if err != nil || c.ProjectCreation.CreationEnabled() {
 				t.Fatalf("creation enabled without both keys: %+v %v", c.ProjectCreation, err)
 			}
@@ -32,7 +32,7 @@ func TestProjectCreationIsOffUntilBothKeysAreSet(t *testing.T) {
 
 func TestProjectCreationExpandsTheCloneDirectory(t *testing.T) {
 	opts := fixture(t, topConfig+"[projects]\nrepo_owner = 'octo-cat'\nclone_dir = '~/new/work'\n", projectConfig)
-	c, err := Load(opts)
+	c, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestProjectCreationExpandsTheCloneDirectory(t *testing.T) {
 		t.Fatalf("clone_dir %q, want %q", c.ProjectCreation.CloneDir, want)
 	}
 	absolute := filepath.Join(opts.Home, "elsewhere")
-	c, err = Load(fixture(t, topConfig+"[projects]\nrepo_owner = 'octo'\nclone_dir = '"+absolute+"'\n", projectConfig))
+	c, err = load(fixture(t, topConfig+"[projects]\nrepo_owner = 'octo'\nclone_dir = '"+absolute+"'\n", projectConfig))
 	if err != nil || !c.ProjectCreation.CreationEnabled() || filepath.Base(c.ProjectCreation.CloneDir) != "elsewhere" {
 		t.Fatalf("absolute clone_dir: %+v %v", c.ProjectCreation, err)
 	}
@@ -72,7 +72,7 @@ func TestProjectCreationRefusesInvalidSettingsByField(t *testing.T) {
 		"key type":         {"[projects]\nrepo_owner = 'octo'\nclone_dir = 4\n", "projects.clone_dir"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Load(fixture(t, topConfig+tc.table, projectConfig))
+			_, err := load(fixture(t, topConfig+tc.table, projectConfig))
 			var field *FieldError
 			if !errors.As(err, &field) || field.Field != tc.field {
 				t.Fatalf("got %v, want a field error naming %s", err, tc.field)

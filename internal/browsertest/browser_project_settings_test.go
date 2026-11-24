@@ -14,9 +14,9 @@ import (
 type ProjectConfigEdit = service.ProjectConfigEdit
 type ProjectConfigEditValues = service.ProjectConfigEditValues
 
-// ownerTables is what an owner keeps below a project's root keys: an ignored
-// [preview] table and a commented capacity.
-const ownerTables = "\n[preview]\ncall = [\"serve\"]\nport = 8080\n\n[capacity]\n# Keep this low.\ngit_operations = 3\n"
+// ownerTables is what an owner keeps below a project's root keys: a commented
+// capacity.
+const ownerTables = "\n[capacity]\n# Keep this low.\ngit_operations = 3\n"
 
 // settingsFixture is a running service with one project whose stored settings
 // carry an owner's own text, and a page on its Project management view.
@@ -196,7 +196,7 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheStore(t *testing.T) {
 		}
 	}
 	keepsOtherBytes(t, f.before, disk, "git_operations = 3")
-	for _, kept := range []string{"# Owner notes.", "[preview]", `call = ["serve"]`, "port = 8080", "# Keep this low."} {
+	for _, kept := range []string{"# Owner notes.", "[capacity]", "# Keep this low."} {
 		if !strings.Contains(disk, kept) {
 			t.Fatalf("%q was lost from the stored settings:\n%s", kept, disk)
 		}
@@ -335,7 +335,7 @@ func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 	if strings.Contains(disk, "checks_timeout") || strings.Contains(disk, "fork =") {
 		t.Fatalf("cleared keys are still in the stored settings:\n%s", disk)
 	}
-	for _, kept := range []string{"# Owner notes.", "[preview]", "# Keep this low.", "git_operations = 3", "upstream = "} {
+	for _, kept := range []string{"# Owner notes.", "[capacity]", "# Keep this low.", "git_operations = 3", "upstream = "} {
 		if !strings.Contains(disk, kept) {
 			t.Fatalf("%q was lost from the stored settings:\n%s", kept, disk)
 		}

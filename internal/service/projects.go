@@ -14,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -23,9 +22,8 @@ import (
 // written before any other file and removed last, so a restart finds every
 // interrupted registration and finishes it with the same identity.
 type pendingProject struct {
-	Version     int                     `json:"version"`
-	Project     config.Project          `json:"project"`
-	CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
+	Version int            `json:"version"`
+	Project config.Project `json:"project"`
 	// Creation is set when the registration is the end of a project creation,
 	// which first creates and clones the repository.
 	Creation *projectCreation `json:"creation,omitempty"`
@@ -226,7 +224,7 @@ func (s *Service) writePending(p pendingProject) error {
 	if err := writeFileSynced(path, append(data, '\n')); err != nil {
 		return err
 	}
-	return projectmigration.SyncDirectory(filepath.Dir(path))
+	return syncDirectory(filepath.Dir(path))
 }
 
 func (s *Service) readPending() (*pendingProject, error) {
@@ -241,67 +239,17 @@ func (s *Service) readPending() (*pendingProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	var stored struct {
-		Version int `json:"version"`
-		Project struct {
-			config.Project
-			Source config.ProjectID `json:"group_id,omitempty"`
-		} `json:"project"`
-		CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
-		Creation    *projectCreation        `json:"creation,omitempty"`
-	}
+	var p pendingProject
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
-	if err := d.Decode(&stored); err != nil {
+	if err := d.Decode(&p); err != nil {
 		return nil, err
 	}
-	p := pendingProject{Version: stored.Version, Project: stored.Project.Project, CharterCopy: stored.CharterCopy, Creation: stored.Creation}
 	if p.Version != 1 || config.CheckProjectIDs(p.Project.ID) != nil || !filepath.IsAbs(p.Project.Clone) {
 		return nil, errors.New("invalid project registration journal")
 	}
 	if c := p.Creation; c != nil && (!validRepoName(c.Owner, c.Repo) || c.Owner+"/"+c.Repo != p.Project.Upstream || strings.TrimSpace(c.Charter) == "" || c.Visibility != api.VisibilityPrivate && c.Visibility != api.VisibilityPublic) {
 		return nil, errors.New("invalid project creation journal")
-	}
-	if stored.Project.Source != "" && p.CharterCopy == nil {
-		cfg := s.current()
-		if !cfg.Active(stored.Project.Source) {
-			// Until the import, an earlier version's project files are the
-			// settings; after it the store holds them.
-			imported, err := s.settingsStore().Imported()
-			if err != nil {
-				return nil, err
-			}
-			if imported {
-				cfg, _, err = s.withStoredProject(cfg, stored.Project.Source)
-			} else {
-				cfg, err = cfg.AddProject(stored.Project.Source, s.options.Config.Home)
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-		if err := projectmigration.MigrateTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
-			return nil, err
-		}
-		r, err := trace.Open(cfg.Root, cfg.For(stored.Project.Source).Project)
-		if err != nil {
-			if r != nil {
-				r.Close()
-			}
-			return nil, err
-		}
-		charter, readErr := r.Charter(context.Background())
-		if err := errors.Join(readErr, r.Close()); err != nil {
-			return nil, err
-		}
-		charter.At = time.Now().UTC()
-		p.CharterCopy = &projectmigration.Split{Project: p.Project, Source: stored.Project.Source, Charter: charter}
-		if err := s.writePending(p); err != nil {
-			return nil, err
-		}
-		if err := s.step("project-charter-pinned"); err != nil {
-			return nil, err
-		}
 	}
 	return &p, nil
 }
@@ -337,30 +285,14 @@ func discardUnpublished(directory string) error {
 	return nil
 }
 
-// errImportPending reports a registration that has done every step that does
-// not need the project store and waits for the project import to complete: a
-// root that is not imported yet has no registry to list the project in. The
-// journal stays, and the registration finishes once the import has.
-var errImportPending = errors.New("the project import is not complete")
-
 // complete runs every registration step that is not yet done, in order, and
 // activates the project unless startup will. The journal goes last, once the
 // project is registered and running. Each step inspects the disk before
 // acting, so running it again after an interruption neither repeats an effect
-// nor skips one. A root whose import is not complete yet is the root of an
-// earlier version's interrupted registration: its steps run up to the
-// registration, which waits for the import (errImportPending).
+// nor skips one.
 func (s *Service) complete(ctx context.Context, pending pendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	root := s.current().Root
-	imported, err := s.settingsStore().Imported()
-	if err != nil {
-		return p, err
-	}
-	projectPath, err := root.ProjectConfig(p.ID)
-	if err != nil {
-		return p, err
-	}
 	directory, err := root.ProjectTrace(p.ID)
 	if err != nil {
 		return p, err
@@ -374,10 +306,8 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 		return p, err
 	}
 	if !published {
-		if imported {
-			if err := s.storeFirstSettings(p); err != nil {
-				return p, err
-			}
+		if err := s.storeFirstSettings(p); err != nil {
+			return p, err
 		}
 		if err := s.step("project-config-written"); err != nil {
 			return p, err
@@ -411,27 +341,6 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := s.step("trace-created"); err != nil {
 		return p, err
 	}
-	if pending.CharterCopy != nil {
-		if err := projectmigration.CopyCharter(ctx, root, *pending.CharterCopy, pending.CharterCopy.Charter.At); err != nil {
-			return p, err
-		}
-		if err := s.step("project-charter-copied"); err != nil {
-			return p, err
-		}
-		if !imported {
-			// Until the import reads it, the project file an earlier version
-			// wrote still names the group.
-			if err := config.RemoveProjectGroup(projectPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return p, err
-			}
-		}
-		if err := s.step("project-group-removed"); err != nil {
-			return p, err
-		}
-	}
-	if !imported {
-		return p, errImportPending
-	}
 	if err := s.register(p); err != nil {
 		return p, err
 	}
@@ -446,7 +355,7 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := os.Remove(journal); err != nil && !os.IsNotExist(err) {
 		return p, err
 	}
-	if err := projectmigration.SyncDirectory(filepath.Dir(journal)); err != nil {
+	if err := syncDirectory(filepath.Dir(journal)); err != nil {
 		return p, err
 	}
 	return p, s.step("journal-removed")
@@ -571,9 +480,6 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 		// steps find or make; registration alone would run on a clone that may
 		// not exist yet.
 		if _, err := s.runCreation(ctx, pending, false); err != nil {
-			if errors.Is(err, errImportPending) {
-				return cfg, err
-			}
 			return cfg, &creationError{ID: pending.Project.ID, Err: err}
 		}
 	} else if _, err := s.complete(ctx, *pending, false); err != nil {

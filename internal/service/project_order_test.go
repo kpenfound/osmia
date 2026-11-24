@@ -6,16 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // seededStream is a workstream created in the project at index project of the
-// active_projects list, at demoStart plus age. A session is a design or
+// registry, at demoStart plus age. A session is a design or
 // exploratory session workstream rather than a feature workstream.
 type seededStream struct {
 	project int
@@ -23,8 +24,8 @@ type seededStream struct {
 	session bool
 }
 
-// orderRoot is a root of count active projects, listed in the configuration
-// file in index order, each with its own trace holding the seeded streams.
+// orderRoot is a root of count active projects, registered in the store in
+// index order, each with its own trace holding the seeded streams.
 type orderRoot struct {
 	opts Options
 	cfg  *config.Config
@@ -39,16 +40,14 @@ func newOrderRoot(t *testing.T, count int, seeded []seededStream) orderRoot {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, "root")
 	var ids []config.ProjectID
-	var listed []string
+	must(t, os.MkdirAll(root, 0700))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nworkspaces = \"git\"\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	for i := 0; i < count; i++ {
 		id := config.ProjectID(fmt.Sprintf("p_%032x", i+1))
 		ids = append(ids, id)
-		listed = append(listed, fmt.Sprintf("%q", id))
-		must(t, os.MkdirAll(filepath.Join(root, "projects", string(id)), 0700))
-		must(t, os.WriteFile(filepath.Join(root, "projects", string(id), "config.toml"), []byte(fmt.Sprintf("version = 1\nupstream = \"upstream/repo%d\"\nfork = \"owner/repo%d\"\nclone = %q\n", i, i, filepath.Join(home, fmt.Sprintf("clone%d", i)))), 0600))
+		fixturekit.RegisterProject(t, root, id, fmt.Sprintf("version = 1\nupstream = \"upstream/repo%d\"\nfork = \"owner/repo%d\"\nclone = %q\n", i, i, filepath.Join(home, fmt.Sprintf("clone%d", i))))
 	}
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nactive_projects = ["+strings.Join(listed, ", ")+"]\nworkspaces = \"git\"\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
-	cfg, err := config.Load(config.Options{Root: root})
+	cfg, err := projectstore.LoadConfig(config.Options{Root: root})
 	must(t, err)
 	repos := map[config.ProjectID]*trace.Repository{}
 	for _, p := range cfg.Projects {
@@ -84,7 +83,7 @@ func createOrderStream(t *testing.T, repo *trace.Repository, w seededStream) {
 
 // listedProjects returns the configuration read's project IDs, after
 // checking that the runtime read lists the same projects in the same order
-// and that the effective configuration keeps the file's order.
+// and that the effective configuration keeps the registry's order.
 func listedProjects(t *testing.T, c *Client, file []config.ProjectID) []config.ProjectID {
 	t.Helper()
 	ctx := context.Background()
@@ -99,7 +98,7 @@ func listedProjects(t *testing.T, c *Client, file []config.ProjectID) []config.P
 		effective = append(effective, config.ProjectID(id))
 	}
 	if !reflect.DeepEqual(effective, file) {
-		t.Fatalf("effective.active_projects %v, want the file order %v", effective, file)
+		t.Fatalf("effective.active_projects %v, want the registry order %v", effective, file)
 	}
 	runtime, err := c.Runtime(ctx)
 	must(t, err)
@@ -125,7 +124,7 @@ func wantOrder(t *testing.T, got []config.ProjectID, ids []config.ProjectID, ind
 }
 
 // The configuration and runtime reads list the projects whose newest
-// workstream was created later first, whatever order the file names them in.
+// workstream was created later first, whatever order the registry lists them in.
 func TestConfigListsProjectsByNewestWorkstream(t *testing.T) {
 	t.Parallel()
 	f := newOrderRoot(t, 3, []seededStream{
@@ -155,7 +154,7 @@ func TestConfigCountsSessionsAsWorkstreams(t *testing.T) {
 }
 
 // Projects with the same newest creation time, and projects without a
-// workstream, which come last, keep their file order, on every read.
+// workstream, which come last, keep their registry order, on every read.
 func TestConfigKeepsFileOrderForTiesAndEmptyProjects(t *testing.T) {
 	t.Parallel()
 	f := newOrderRoot(t, 6, []seededStream{

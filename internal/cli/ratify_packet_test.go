@@ -15,6 +15,7 @@ import (
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -28,13 +29,8 @@ func packetWorkgroup(t *testing.T) (service.Options, *config.Config, trace.Workg
 	opts := fixture(t)
 	const other = "p_00000000000000000000000000000002"
 	root := opts.Config.Root
-	path := filepath.Join(root, "config.toml")
-	content, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, []byte(strings.Replace(string(content), fmt.Sprintf("active_projects=[%q]", project), fmt.Sprintf("active_projects=[%q,%q]", project, other), 1)), 0600))
-	must(t, os.MkdirAll(filepath.Join(root, "projects", other), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", other, "config.toml"), []byte(fmt.Sprintf("version=1\nupstream=\"owner/other\"\nfork=\"owner/other-fork\"\nclone=%q\n", filepath.Join(filepath.Dir(root), "other-clone"))), 0600))
-	cfg, err := config.Load(opts.Config)
+	register(t, root, other, fmt.Sprintf("version=1\nupstream=\"owner/other\"\nfork=\"owner/other-fork\"\nclone=%q\n", filepath.Join(filepath.Dir(root), "other-clone")))
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	ctx := context.Background()
 	actor := trace.Actor{Kind: "owner", ID: "local"}

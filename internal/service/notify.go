@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -532,6 +533,19 @@ func writeFileSynced(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// syncDirectory makes the entries of the directory at path durable.
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		return err
+	}
+	return nil
 }
 
 func (n *notifier) fail(reason string) {

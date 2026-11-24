@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func str(s string) *string { return &s }
@@ -39,7 +40,7 @@ func refused(t *testing.T, err error, code Code) *APIError {
 }
 
 // savedFile is a project file as an owner keeps it: commented, reordered,
-// with an ignored [preview] table.
+// with a table of its own.
 func savedFile(clone string) string {
 	return `# Settings of the shop project.
 version = 1
@@ -49,10 +50,6 @@ fork = "owner/repo"
 clone = "` + clone + `"
 checks_timeout = "15m" # the default, spelled out
 
-[preview]
-call = ["serve"]
-port = 8080
-
 [capacity]
 # Keep this low.
 git_operations = 3
@@ -60,7 +57,7 @@ git_operations = 3
 }
 
 // configFixture is a started service whose project's first stored revision is
-// savedFile, imported from a project file at the first start.
+// savedFile.
 type configFixture struct {
 	s     *Service
 	c     *Client
@@ -70,21 +67,18 @@ type configFixture struct {
 	text string
 }
 
-// projectConfigFixture starts a service whose project file is savedFile.
+// projectConfigFixture starts a service whose project's first stored revision
+// is savedFile.
 func projectConfigFixture(t *testing.T) configFixture {
 	t.Helper()
-	opts := fixture(t)
+	home, err := os.MkdirTemp("", "os-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(home) })
+	clone := filepath.Join(home, "clone")
+	opts := testOptions(fixturekit.ConfigWithSettings(t, home, savedFile(clone)))
 	files := configFiles(t, opts)
-	clone := filepath.Join(filepath.Dir(opts.Config.Root), "clone")
-	files.write(t, files.topText, savedFile(clone))
-	files.projectText = savedFile(clone)
 	s, c := start(t, opts)
-	f := configFixture{s: s, c: c, opts: opts, files: files}
-	f.text = string(f.stored(t).Data)
-	if f.text != savedFile(clone) {
-		t.Fatalf("the import stored %q", f.text)
-	}
-	return f
+	return configFixture{s: s, c: c, opts: opts, files: files, text: savedFile(clone)}
 }
 
 func (f configFixture) store(t *testing.T) *projectstore.Store {
@@ -259,10 +253,6 @@ hearsay_scope = "work:main:shop"
 name = "Shop"
 hearsay_declare_repo = true
 
-[preview]
-call = ["serve"]
-port = 8080
-
 [capacity]
 # Keep this low.
 git_operations = 2
@@ -271,7 +261,7 @@ per_workstream = 5
 [hearsay_entities]
 cart = "code:shop:cart"
 `
-	// New root keys follow the last root key, so they sit before [preview].
+	// New root keys follow the last root key, so they sit before [capacity].
 	stored := f.stored(t)
 	if string(stored.Data) != want || saved.Outcome != ProjectConfigApplied {
 		t.Fatalf("stored:\n%s\nwant:\n%s\noutcome %+v", stored.Data, want, saved)
@@ -351,7 +341,7 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 	ctx := context.Background()
 	f := projectConfigFixture(t)
 	s, c := f.s, f.c
-	more := strings.Replace(f.text, "\n\n[preview]", "\nlanding = \"squash\"\n\n[preview]", 1)
+	more := strings.Replace(f.text, "\n\n[capacity]", "\nlanding = \"squash\"\n\n[capacity]", 1)
 	more = strings.Replace(more, "[capacity]\n", "[capacity]\nper_workstream = 5\n", 1) + "\n[hearsay_entities]\na = \"code:a\"\nb = \"code:b\"\n"
 	read, err := c.ProjectConfig(ctx, project)
 	must(t, err)
@@ -374,7 +364,7 @@ func TestProjectConfigClearRemovesKeysAndRestoresDefaults(t *testing.T) {
 			t.Fatalf("%s is still in the stored settings:\n%s", gone, stored)
 		}
 	}
-	for _, kept := range []string{"# Keep this low.", "git_operations = 3", "[preview]", "b = \"code:b\""} {
+	for _, kept := range []string{"# Keep this low.", "git_operations = 3", "b = \"code:b\""} {
 		if !strings.Contains(stored, kept) {
 			t.Fatalf("%s is missing from the stored settings:\n%s", kept, stored)
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -35,7 +36,7 @@ func newCrossCharterFixture(t *testing.T) *crossCharterFixture {
 	home, err := os.MkdirTemp("", "charters-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 	fixturekit.Must(t, err)
 	owner := OwnerActor
 	a, err := trace.CreateSeeded(ctx, cfg.Root, cfg.Project, fixturekit.DemoStart, owner, []byte(`{"version":1,"entities":[{"id":"internal.trace","name":"Trace","paths":["internal/trace"]}]}`))

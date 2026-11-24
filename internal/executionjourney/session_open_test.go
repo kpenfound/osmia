@@ -8,10 +8,12 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	reconcile "github.com/kpenfound/osmia/internal/reconcile"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	maps "maps"
@@ -268,22 +270,21 @@ func newExclusionFixture(t *testing.T, extraConfig string) (*config.Config, *tra
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, "root")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(project)), 0700))
+	must(t, os.MkdirAll(root, 0700))
 	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version = 1
-active_projects = [%q]
 workspaces = "git"
 [profiles.default]
 agent = "claude"
 model = "test"
 %s
-`, project, extraConfig)), 0600))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(project), "config.toml"), []byte(`version = 1
+`, extraConfig)), 0600))
+	fixturekit.RegisterProject(t, root, project, `version = 1
 upstream = "upstream/repo"
 fork = "owner/repo"
 clone = "`+filepath.Join(home, "clone")+`"
-`), 0600))
+`)
 	must(t, os.MkdirAll(filepath.Join(home, "clone"), 0700))
-	cfg, err := config.Load(config.Options{Root: root})
+	cfg, err := projectstore.LoadConfig(config.Options{Root: root})
 	must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, owner)

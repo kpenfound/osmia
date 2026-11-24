@@ -204,7 +204,7 @@ func TestPoolLimitsFollowTheConfigurationInForce(t *testing.T) {
 	files := configFiles(t, opts)
 	s, c := start(t, opts)
 	before, _ := s.poolLimit(masonRole)
-	files.write(t, files.topText+"[capacity]\nmasons = "+strconv.Itoa(before+3)+"\n", files.projectText)
+	files.write(t, files.topText+"[capacity]\nmasons = "+strconv.Itoa(before+3)+"\n")
 	_, err := c.Reload(ctx)
 	must(t, err)
 	if got, bounded := s.poolLimit(masonRole); !bounded || got != before+3 {

@@ -23,7 +23,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/engine"
 	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -89,10 +88,6 @@ type Options struct {
 	// https://api.github.com.
 	GitHubAPI string
 	HTTP      *http.Client
-	// Step, when set, is called after each durable step of the project
-	// migration with its name. A failure stops the migration there, as a crash
-	// would. Tests use it.
-	Step func(string) error
 }
 
 // commandTimeout bounds each tool, remote and API probe.
@@ -138,8 +133,7 @@ func Run(ctx context.Context, o Options) []Check {
 	if lock != nil {
 		defer unlock(lock)
 	}
-	r.owned = lock != nil
-	cfg, projects := r.config(ctx)
+	cfg, projects := r.config()
 	r.toolchain(ctx, cfg)
 	if cfg != nil {
 		r.engine(ctx, cfg)
@@ -173,9 +167,6 @@ type run struct {
 	checks []Check
 	// running is set when a service owns the root.
 	running bool
-	// owned is set when doctor holds the root's ownership lock, so no service
-	// can start or write while it migrates the root's projects.
-	owned bool
 	// rootReady is set when the root is an accessible directory.
 	rootReady bool
 }
@@ -251,10 +242,8 @@ func (r *run) serviceLog() {
 }
 
 // config loads the top-level configuration and each active project's, and
-// returns the configuration with the projects that loaded. While no service
-// owns the root, it first completes the migration of the root's projects into
-// the store, as serve does on startup.
-func (r *run) config(ctx context.Context) (*config.Config, []config.Project) {
+// returns the configuration with the projects that loaded.
+func (r *run) config() (*config.Config, []config.Project) {
 	if !r.rootReady {
 		return nil, nil
 	}
@@ -269,57 +258,25 @@ func (r *run) config(ctx context.Context) (*config.Config, []config.Project) {
 		return nil, nil
 	}
 	r.add(GroupConfig, "config.toml", Pass, fmt.Sprintf("%s (%d profiles)", path, len(cfg.Profiles)), "")
-	return cfg, r.projects(ctx, cfg)
+	return cfg, r.projects(cfg)
 }
 
-// projects returns the root's active projects that load. Once the import is
-// complete they are the registry's, loaded from the store, and no project file
-// is read. Before it, doctor completes the import when it owns the root; a
-// root a service owns, or one with a project registration waiting for serve to
-// finish it, has its projects read from their files without any change.
-func (r *run) projects(ctx context.Context, cfg *config.Config) []config.Project {
+// projects returns the registry's projects that load from the project store.
+func (r *run) projects(cfg *config.Config) []config.Project {
 	store := projectstore.Open(cfg.Root)
-	imported, err := store.Imported()
+	ids, err := store.Projects()
 	if err != nil {
 		r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
 		return nil
 	}
-	if !imported && r.owned {
-		pending, _ := cfg.Root.PendingProject()
-		if _, err := os.Stat(pending); err == nil {
-			r.add(GroupConfig, "project import", Warn, "a project registration is waiting to finish, so the projects are not imported yet", "start the service; it finishes the registration and then imports the projects")
-		} else if err := projectmigration.New(cfg, r.Home, r.Step).Run(ctx); err != nil {
-			r.importFailed(cfg, err)
-			return nil
-		} else {
-			imported = true
-		}
-	}
 	var projects []config.Project
-	if imported {
-		ids, err := store.Projects()
+	for _, id := range ids {
+		file, _, err := store.Load(cfg, r.Home, id)
 		if err != nil {
-			r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
-			return nil
-		}
-		for _, id := range ids {
-			file, _, err := store.Load(cfg, r.Home, id)
-			if err != nil {
-				r.add(GroupConfig, "project "+string(id), Fail, storedReason(err), "correct the stored setting named with osmia project settings "+string(id)+" set NAME=VALUE while the service is stopped")
-				continue
-			}
-			projects = append(projects, r.projectLoaded(file.Project))
-		}
-		return projects
-	}
-	for _, s := range cfg.ActiveProjects {
-		id, _ := config.ParseProjectID(s)
-		loaded, err := cfg.WithProject(id, r.Home)
-		if err != nil {
-			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again")
+			r.add(GroupConfig, "project "+string(id), Fail, storedReason(err), "correct the stored setting named with osmia project settings "+string(id)+" set NAME=VALUE while the service is stopped")
 			continue
 		}
-		projects = append(projects, r.projectLoaded(loaded.Project))
+		projects = append(projects, r.projectLoaded(file.Project))
 	}
 	return projects
 }
@@ -328,26 +285,6 @@ func (r *run) projects(ctx context.Context, cfg *config.Config) []config.Project
 func (r *run) projectLoaded(p config.Project) config.Project {
 	r.add(GroupConfig, "project "+string(p.ID), Pass, fmt.Sprintf("%s (%s)", p.Name, p.Upstream), "")
 	return p
-}
-
-// importFailed reports a migration that stopped. A listed project's file that
-// did not load is reported as that project, with the file and the field; the
-// import then changed nothing.
-func (r *run) importFailed(cfg *config.Config, err error) {
-	var field *config.FieldError
-	if errors.As(err, &field) {
-		for _, s := range cfg.ActiveProjects {
-			id, perr := config.ParseProjectID(s)
-			if perr != nil {
-				continue
-			}
-			if path, perr := cfg.Root.ProjectConfig(id); perr == nil && path == field.Path {
-				r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again; the import changed nothing")
-				return
-			}
-		}
-	}
-	r.add(GroupConfig, "project import", Fail, configReason(err), "run osmia doctor again, or start the service; the import resumes where it stopped")
 }
 
 // storedReason is the text of a stored project's settings that did not load:

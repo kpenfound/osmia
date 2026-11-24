@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	wire "github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -27,7 +27,7 @@ func withShed(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, written, owner)

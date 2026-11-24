@@ -51,7 +51,7 @@ func TestDetachedServeReadinessDuplicateOwnerAndStop(t *testing.T) {
 	root, err := os.MkdirTemp("", "od-")
 	must(t, err)
 	defer os.RemoveAll(root)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	original := detachedCommand
 	detachedCommand = func(root string) (*exec.Cmd, error) {
 		return exec.Command(os.Args[0], "-test.run=^TestDetachedProcess$", "--", root), nil
@@ -198,7 +198,7 @@ func TestForegroundServeFailureIsAStructuredRecordOnStandardError(t *testing.T) 
 	root, err := os.MkdirTemp("", "fg-")
 	must(t, err)
 	defer os.RemoveAll(root)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	original := detachedCommand
 	detachedCommand = func(root string) (*exec.Cmd, error) {
 		return exec.Command(os.Args[0], "-test.run=^TestDetachedProcess$", "--", root), nil
@@ -239,7 +239,7 @@ func TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndResto
 	dir, err := os.MkdirTemp("", "rsg-")
 	must(t, err)
 	defer os.RemoveAll(dir)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	root, err := config.ResolveRoot(dir, "")
 	must(t, err)
 

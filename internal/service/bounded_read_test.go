@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -34,7 +34,7 @@ func httpStatus(t *testing.T, s *Service) (int, http.Header) {
 func TestStatusAnswersWithinBoundAndMarksAFallbackSnapshotStale(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)

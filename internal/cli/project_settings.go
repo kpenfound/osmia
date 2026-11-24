@@ -135,13 +135,6 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 // requireRegistered refuses a project the registry does not list. It reads the
 // registry only.
 func requireRegistered(store *projectstore.Store, id config.ProjectID, refuse func(string, ...any) int) int {
-	imported, err := store.Imported()
-	if err != nil {
-		return refuse("cannot read the project registry: %v", err)
-	}
-	if !imported {
-		return refuse("project %s is not in the registry: the registry is created when the service first starts and imports the projects; start it once, then use this command", id)
-	}
 	ids, err := store.Projects()
 	if err != nil {
 		return refuse("cannot read the project registry: %v", err)

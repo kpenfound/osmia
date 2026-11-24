@@ -216,7 +216,7 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 	files := configFiles(t, opts)
 
 	// A reload that fails leaves the loaded settings in force.
-	files.write(t, strings.Replace(files.topText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1))
 	reloadFails(t, c, files.top, "transcribe.url")
 	out, err := c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
 	must(t, err)
@@ -224,7 +224,7 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 		t.Fatalf("after a failed reload: %q %d", out.Text, len(first.received()))
 	}
 
-	files.write(t, strings.Replace(files.topText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n", files.projectText)
+	files.write(t, strings.Replace(files.topText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n")
 	_, err = c.Reload(ctx)
 	must(t, err)
 	out, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
@@ -240,7 +240,7 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 	}
 
 	// Emptying the url turns transcription off again.
-	files.write(t, strings.Replace(files.topText, first.url(), "", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, first.url(), "", 1))
 	_, err = c.Reload(ctx)
 	must(t, err)
 	_, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))

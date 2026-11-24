@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 // sizedRoles is a mason that runs in sbx from a template, with the Dagger CLI
@@ -34,7 +35,7 @@ func configLoader(t *testing.T, f unitsFixture) func(roles string) *config.Confi
 	return func(roles string) *config.Config {
 		t.Helper()
 		must(t, os.WriteFile(file, append(slices.Clone(base), roles...), 0600))
-		cfg, err := config.Load(config.Options{Root: f.cfg.Root.String()})
+		cfg, err := projectstore.LoadConfig(config.Options{Root: f.cfg.Root.String()})
 		must(t, err)
 		return cfg
 	}

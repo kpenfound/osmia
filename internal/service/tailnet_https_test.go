@@ -122,7 +122,7 @@ func TestTailnetHTTPSOptOutAndRestartRequired(t *testing.T) {
 	if status.HTTPSReason == "" || status.HTTPSAddress != "" || node.HTTPSCalls.Load() != 0 {
 		t.Fatalf("opt-out: %+v", status)
 	}
-	files.write(t, strings.Replace(files.topText, "tailnet_https = false", "tailnet_https = true", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "tailnet_https = false", "tailnet_https = true", 1))
 	reloaded, err := c.Reload(context.Background())
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet_https"}) {

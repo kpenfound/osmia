@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -61,7 +62,7 @@ func BusyReadsConfig(t *testing.T) config.Options {
 	Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := ConfigAt(t, home)
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, DemoStart, ServiceActor)
 	Must(t, err)

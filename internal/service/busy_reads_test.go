@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -159,7 +160,7 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 	t.Parallel()
 	blocking := newBlockedFactoryOperation()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)
@@ -230,7 +231,7 @@ func featureTransition(t *testing.T, repository *trace.Repository, id config.Wor
 func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)
@@ -301,7 +302,7 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)
@@ -353,7 +354,7 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)
@@ -412,7 +413,7 @@ func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testi
 	t.Parallel()
 	blocking := newBlockedFactoryOperation()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, demoStart, serviceActor)
 	must(t, err)

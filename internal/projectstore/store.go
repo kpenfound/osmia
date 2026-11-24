@@ -3,7 +3,7 @@
 //
 // The store is the directory Root.ProjectStore names, under the Osmia root:
 //
-//	registry.json                 the ordered project IDs and whether the import is complete
+//	registry.json                 the ordered project IDs
 //	settings/<id>/<number>.toml   one stored revision of a project's settings
 //	lock                          the lock every write holds
 //
@@ -39,15 +39,12 @@ var (
 	ErrPinRequired = errors.New("a save must name the revision it builds on")
 	// ErrNotFound reports a project with no stored settings.
 	ErrNotFound = errors.New("project has no stored settings")
-	// ErrNotImported reports an operation that needs the one-time import to be
-	// complete.
-	ErrNotImported = errors.New("the project import is not complete")
 )
 
 // Relabel returns err with the path of a *config.FieldError about project id's
-// settings replaced by the settings' own label. Decoding names the project
-// file the bytes would have come from, which is no longer read; the label names
-// the project instead. Any other error is returned as it is.
+// settings replaced by config.ProjectSettingsLabel: decoding stored bytes
+// reports the path of the project's file, which stored settings never come
+// from. Any other error is returned as it is.
 func Relabel(root config.Root, id config.ProjectID, err error) error {
 	var field *config.FieldError
 	if err == nil || !errors.As(err, &field) {
@@ -139,7 +136,6 @@ var revisionName = regexp.MustCompile(`^([0-9]{8})\.toml$`)
 
 type registry struct {
 	Version  int      `json:"version"`
-	Imported bool     `json:"imported"`
 	Projects []string `json:"projects"`
 }
 
@@ -182,7 +178,7 @@ func parseIDs(list []string) ([]config.ProjectID, error) {
 }
 
 // Projects returns the registry's project IDs in registry order: the order
-// they were imported or added in. A root without a registry has none.
+// they were added in. A root without a registry has none.
 func (s *Store) Projects() ([]config.ProjectID, error) {
 	r, err := s.readRegistry()
 	if err != nil {
@@ -191,14 +187,7 @@ func (s *Store) Projects() ([]config.ProjectID, error) {
 	return parseIDs(r.Projects)
 }
 
-// Imported reports whether the one-time import is complete.
-func (s *Store) Imported() (bool, error) {
-	r, err := s.readRegistry()
-	return r.Imported, err
-}
-
 // Add appends id to the registry. An id already registered keeps its place.
-// It needs the import to be complete.
 func (s *Store) Add(id config.ProjectID) error {
 	if err := config.CheckProjectIDs(id); err != nil {
 		return err
@@ -211,7 +200,7 @@ func (s *Store) Add(id config.ProjectID) error {
 }
 
 // Remove takes id off the registry. An id that is not registered changes
-// nothing. Its stored revisions stay. It needs the import to be complete.
+// nothing. Its stored revisions stay.
 func (s *Store) Remove(id config.ProjectID) error {
 	if err := config.CheckProjectIDs(id); err != nil {
 		return err
@@ -230,9 +219,6 @@ func (s *Store) editRegistry(edit func(*registry)) error {
 	r, err := s.readRegistry()
 	if err != nil {
 		return err
-	}
-	if !r.Imported {
-		return ErrNotImported
 	}
 	before := slices.Clone(r.Projects)
 	edit(&r)
@@ -257,8 +243,6 @@ func (s *Store) writeRegistry(r registry) error {
 	return s.publish(filepath.Join(dir, registryFile), append(data, '\n'), "registry-staged")
 }
 
-// lock takes the store's write lock, creating the store directory. The lock
-// serializes every writer of the root, in this process and in others.
 func (s *Store) lock() (func(), error) {
 	dir, err := s.directory()
 	if err != nil {
@@ -278,9 +262,6 @@ func (s *Store) lock() (func(), error) {
 	return func() { f.Close() }, nil
 }
 
-// publish writes data to path through a synced temporary file and a rename,
-// calling the step named staged between them. A step failure leaves the
-// temporary file, as a crash would; the next write clears it.
 func (s *Store) publish(path string, data []byte, staged string) error {
 	dir := filepath.Dir(path)
 	if err := clearTemporaries(dir); err != nil {
@@ -353,7 +334,6 @@ func (s *Store) settingsDirectory(id config.ProjectID) (string, error) {
 	return filepath.Join(dir, "settings", string(id)), nil
 }
 
-// numbers lists the recorded revision numbers of id, ascending.
 func (s *Store) numbers(id config.ProjectID) ([]int, error) {
 	dir, err := s.settingsDirectory(id)
 	if err != nil {
@@ -431,8 +411,6 @@ func (s *Store) Revisions(id config.ProjectID) ([]Revision, error) {
 	return out, nil
 }
 
-// record writes the next revision of id. It requires the write lock and that
-// the caller has checked the revision it builds on.
 func (s *Store) record(id config.ProjectID, number int, data []byte) (Revision, error) {
 	dir, err := s.settingsDirectory(id)
 	if err != nil {
@@ -487,7 +465,6 @@ func (s *Store) Replace(id config.ProjectID, pin string, data []byte) (Revision,
 	return s.record(id, current.Number+1, data)
 }
 
-// pinned returns the current revision of id when pin names it.
 func (s *Store) pinned(id config.ProjectID, pin string) (Revision, error) {
 	if pin == "" {
 		return Revision{}, ErrPinRequired
@@ -544,31 +521,29 @@ func (s *Store) Load(cfg *config.Config, home string, id config.ProjectID) (conf
 
 // Apply returns a copy of cfg whose active projects are the registry's, in
 // registry order, each loaded from its current stored revision. cfg is
-// unchanged. It needs the import to be complete.
+// unchanged. A project whose settings do not load is a *LoadError.
 func (s *Store) Apply(cfg *config.Config, home string) (*config.Config, error) {
-	r, err := s.readRegistry()
+	ids, err := s.Projects()
 	if err != nil {
 		return nil, err
 	}
-	if !r.Imported {
-		return nil, ErrNotImported
-	}
-	ids, err := parseIDs(r.Projects)
-	if err != nil {
-		return nil, err
-	}
-	out := *cfg
-	out.ActiveProjects, out.Projects, out.Project = []string{}, nil, config.Project{}
-	for _, id := range ids {
+	projects := make([]config.Project, len(ids))
+	for i, id := range ids {
 		file, _, err := s.Load(cfg, home, id)
 		if err != nil {
 			return nil, &LoadError{Project: id, Err: err}
 		}
-		out.ActiveProjects = append(out.ActiveProjects, string(id))
-		out.Projects = append(out.Projects, file.Project)
+		projects[i] = file.Project
 	}
-	if len(out.Projects) == 1 {
-		out.Project = out.Projects[0]
+	return cfg.WithLoadedProjects(projects), nil
+}
+
+// LoadConfig loads the top-level configuration the options locate and applies
+// the project registry of its root, as Apply does.
+func LoadConfig(options config.Options) (*config.Config, error) {
+	top, err := config.LoadTopLevel(options)
+	if err != nil {
+		return nil, err
 	}
-	return &out, nil
+	return Open(top.Root).Apply(top, options.Home)
 }

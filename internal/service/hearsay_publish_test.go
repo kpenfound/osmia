@@ -59,7 +59,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	}))
 	defer hooks.Close()
 	tables := strings.Replace(hearsayTables, "https://hooks.example", hooks.URL, 1)
-	files.write(t, files.topText+tables, files.projectText)
+	files.write(t, files.topText+tables)
 	s, c := start(t, opts)
 	ctx := context.Background()
 
@@ -80,7 +80,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	// A reload that fails on the publish table, even one whose value spells the
 	// token, names the field and none of the value.
 	bad := strings.Replace(files.topText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
-	files.write(t, bad, files.projectText)
+	files.write(t, bad)
 	_, err = c.Reload(ctx)
 	if err == nil || !strings.Contains(err.Error(), "hearsay.publish.hooks_url") || strings.Contains(err.Error(), token) {
 		t.Fatalf("reload error: %v", err)
@@ -101,7 +101,7 @@ func TestPublishAbsentLeavesConfigurationUnpublished(t *testing.T) {
 	opts := fixture(t)
 	files := configFiles(t, opts)
 	withoutPublish, _, _ := strings.Cut(hearsayTables, "[hearsay.publish]")
-	files.write(t, files.topText+withoutPublish, files.projectText)
+	files.write(t, files.topText+withoutPublish)
 	s, c := start(t, opts)
 	view, err := c.Configuration(context.Background())
 	must(t, err)

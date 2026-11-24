@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -54,7 +55,7 @@ func withStatus(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	cmd := exec.Command("git", "init", "--quiet", cfg.Project.Clone)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
@@ -130,7 +131,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		Status        wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	var recorded struct {
 		Workgroups []trace.Workgroup `json:"workgroups"`
@@ -417,7 +418,7 @@ func TestStatusPrintsOverlapAdvisories(t *testing.T) {
 func TestProjectRebaseAndDriftStatus(t *testing.T) {
 	opts := withStatus(t)
 	ctx := context.Background()
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)

@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -25,7 +26,7 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	runnerIntent(t, opts)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	chief := cfg.Roles[trace.ChiefOfStaff]
 	chief.Sandbox, chief.Image, chief.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
@@ -78,14 +79,14 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	files := configFiles(t, opts)
-	files.write(t, files.topText+"[skills]\nrefresh = \"always\"\n", files.projectText)
+	files.write(t, files.topText+"[skills]\nrefresh = \"always\"\n")
 	cache := skills.NewManager(filepath.Join(opts.Config.Root, "skills"))
 	opts.skills = cache
 	_, c := start(t, opts)
 	if cache.Refresh == nil || cache.Refresh() != "always" {
 		t.Fatal("skill cache does not follow the loaded refresh policy")
 	}
-	files.write(t, files.topText+"[skills]\nrefresh = \"never\"\n", files.projectText)
+	files.write(t, files.topText+"[skills]\nrefresh = \"never\"\n")
 	_, err := c.Reload(context.Background())
 	must(t, err)
 	if got := cache.Refresh(); got != "never" {

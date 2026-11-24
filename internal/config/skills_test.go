@@ -8,7 +8,7 @@ import (
 
 func TestRoleSkills(t *testing.T) {
 	refs := []string{"https://github.com/acme/skills#skills/tdd", "git@github.com:acme/review.git@v1"}
-	c, err := Load(fixture(t, topConfig+"[skills]\nrefresh = 'always'\n[roles.reviewer]\nskills = ['"+strings.Join(refs, "', '")+"']\n", projectConfig))
+	c, err := load(fixture(t, topConfig+"[skills]\nrefresh = 'always'\n[roles.reviewer]\nskills = ['"+strings.Join(refs, "', '")+"']\n", projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,14 +21,12 @@ func TestRoleSkills(t *testing.T) {
 	if _, settings, err := c.Execution("mason", "default"); err != nil || len(settings.Skills) != 0 {
 		t.Fatalf("mason settings %+v: %v", settings, err)
 	}
-	defaults, err := Load(fixture(t, topConfig, projectConfig))
+	defaults, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || defaults.Skills.Refresh != "24h" {
 		t.Fatalf("default refresh %+v: %v", defaults.Skills, err)
 	}
 }
 
-// roleSkillBrief writes each skill name as a reference into
-// https://github.com/kpenfound/skills.
 func roleSkillBrief(names ...string) []string {
 	refs := make([]string, len(names))
 	for i, name := range names {
@@ -68,7 +66,7 @@ func TestInvalidRoleSkills(t *testing.T) {
 		"unknown key":       {"[skills]\ncache = '/tmp'\n", "skills.cache"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Load(fixture(t, topConfig+c.top, projectConfig))
+			_, err := load(fixture(t, topConfig+c.top, projectConfig))
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err %v, want %q", err, c.want)
 			}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -166,11 +165,7 @@ func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 func setPullRequestPoll(t *testing.T, s *Service, cfg *config.Config, interval string) {
 	t.Helper()
 	id := cfg.Project.ID
-	path, err := cfg.Root.ProjectConfig(id)
-	must(t, err)
-	data, err := os.ReadFile(path)
-	must(t, err)
-	first, err := projectstore.Open(cfg.Root).WriteFirst(id, data)
+	first, err := projectstore.Open(cfg.Root).Current(id)
 	must(t, err)
 	saved, api := service.InspectForTest(s.core()).SaveProjectConfig(context.Background(), id, wire.ProjectConfigEdit{Pin: first.Pin, Set: wire.ProjectConfigValues{PullRequestPoll: &interval}})
 	if api != nil {

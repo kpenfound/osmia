@@ -21,6 +21,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	envelope "github.com/kpenfound/osmia/internal/envelope"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	reconcile "github.com/kpenfound/osmia/internal/reconcile"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
@@ -438,7 +439,7 @@ func TestInboxLeavesOutAbandonedWorkstreams(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	clock := &fixedClock{At: demoStart}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), ownerActor)

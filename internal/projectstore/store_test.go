@@ -2,7 +2,6 @@ package projectstore
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -23,75 +22,60 @@ const (
 	pidD = "p_dddddddddddddddddddddddddddddddd"
 )
 
-// projectFile is a project file of one project: an owner's file with
-// comments, some settings left to their defaults and a table.
-func projectFile(n string) string {
+func settingsOf(n string) string {
 	return "# Settings of project " + n + ".\nversion = 1\nupstream = \"upstream/" + n + "\"\nfork = \"owner/" + n + "\"\nclone = \"~/clone-" + n + "\"\nchecks_timeout = \"30m\"\n\n[capacity]\ngit_operations = 3\n"
 }
 
-// legacyRoot is an explicit root laid out as the version before the store
-// left it: a top-level file listing projects and each project's file.
-type legacyRoot struct {
+type testRoot struct {
 	t    *testing.T
 	home string
 	dir  string
 	opts config.Options
 }
 
-func newLegacyRoot(t *testing.T, list []string, files map[string]string) *legacyRoot {
+func newRoot(t *testing.T) *testRoot {
 	t.Helper()
-	// A short path keeps the Unix socket the loader checks within its limit.
 	base, err := os.MkdirTemp("", "ps-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(base) })
-	l := &legacyRoot{t: t, home: filepath.Join(base, "home"), dir: filepath.Join(base, "root")}
-	l.opts = config.Options{Root: l.dir, Home: l.home}
-	for _, d := range []string{l.home, l.dir} {
+	r := &testRoot{t: t, home: filepath.Join(base, "home"), dir: filepath.Join(base, "root")}
+	r.opts = config.Options{Root: r.dir, Home: r.home}
+	for _, d := range []string{r.home, r.dir} {
 		if err := os.MkdirAll(d, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	quoted := make([]string, len(list))
-	for i, id := range list {
-		quoted[i] = `"` + id + `"`
+	top := "version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test-model\"\n"
+	if err := os.WriteFile(filepath.Join(r.dir, "config.toml"), []byte(top), 0600); err != nil {
+		t.Fatal(err)
 	}
-	top := "version = 1\nactive_projects = [" + strings.Join(quoted, ", ") + "]\n[profiles.default]\nagent = \"claude\"\nmodel = \"test-model\"\n"
-	l.write(filepath.Join(l.dir, "config.toml"), top)
-	for id, data := range files {
-		l.write(filepath.Join(l.dir, "projects", id, "config.toml"), data)
-	}
-	return l
+	return r
 }
 
-func (l *legacyRoot) write(path, data string) {
-	l.t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		l.t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
-		l.t.Fatal(err)
-	}
-}
-
-func (l *legacyRoot) topLevel() string { return filepath.Join(l.dir, "config.toml") }
-func (l *legacyRoot) projectPath(id string) string {
-	return filepath.Join(l.dir, "projects", id, "config.toml")
-}
-
-func (l *legacyRoot) config() *config.Config {
-	l.t.Helper()
-	cfg, err := config.LoadTopLevel(l.opts)
+func (r *testRoot) config() *config.Config {
+	r.t.Helper()
+	cfg, err := config.LoadTopLevel(r.opts)
 	if err != nil {
-		l.t.Fatal(err)
+		r.t.Fatal(err)
 	}
 	return cfg
 }
 
-func (l *legacyRoot) store(options ...Option) *Store { return Open(l.config().Root, options...) }
+func (r *testRoot) store(options ...Option) *Store { return Open(r.config().Root, options...) }
 
-// snapshot records every file and directory of the tree: kind, mode and bytes.
+func (r *testRoot) register(id, settings string) {
+	r.t.Helper()
+	s := r.store()
+	if _, err := s.WriteFirst(config.ProjectID(id), []byte(settings)); err != nil {
+		r.t.Fatal(err)
+	}
+	if err := s.Add(config.ProjectID(id)); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
 func snapshot(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -121,17 +105,6 @@ func snapshot(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-// outside drops the entries of snapshot under the store's directory.
-func outside(snap map[string]string) map[string]string {
-	out := map[string]string{}
-	for k, v := range snap {
-		if k != "project-store" && !strings.HasPrefix(k, "project-store"+string(filepath.Separator)) {
-			out[k] = v
-		}
-	}
-	return out
-}
-
 func ids(t *testing.T, s *Store) []string {
 	t.Helper()
 	list, err := s.Projects()
@@ -145,24 +118,6 @@ func ids(t *testing.T, s *Store) []string {
 	return out
 }
 
-func imported(t *testing.T, s *Store) bool {
-	t.Helper()
-	ok, err := s.Imported()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ok
-}
-
-func mustImport(t *testing.T, l *legacyRoot) *Store {
-	t.Helper()
-	s := l.store()
-	if err := s.Import(context.Background(), l.config(), l.home); err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
 func revisions(t *testing.T, s *Store, id string) []Revision {
 	t.Helper()
 	r, err := s.Revisions(config.ProjectID(id))
@@ -173,56 +128,71 @@ func revisions(t *testing.T, s *Store, id string) []Revision {
 }
 
 func TestRegistryKeepsInsertionOrderAcrossReopen(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidB, pidA}, map[string]string{pidA: projectFile("a"), pidB: projectFile("b")})
-	mustImport(t, l)
-	reopened := l.store()
-	if got := ids(t, reopened); !slices.Equal(got, []string{pidB, pidA}) {
-		t.Fatalf("imported order %v", got)
+	r := newRoot(t)
+	r.register(pidB, settingsOf("b"))
+	r.register(pidA, settingsOf("a"))
+	if got := ids(t, r.store()); !slices.Equal(got, []string{pidB, pidA}) {
+		t.Fatalf("order %v", got)
 	}
 	for _, id := range []string{pidD, pidC} {
-		if err := reopened.Add(config.ProjectID(id)); err != nil {
+		if err := r.store().Add(config.ProjectID(id)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := ids(t, l.store()); !slices.Equal(got, []string{pidB, pidA, pidD, pidC}) {
+	if got := ids(t, r.store()); !slices.Equal(got, []string{pidB, pidA, pidD, pidC}) {
 		t.Fatalf("order after adds %v", got)
 	}
-	if err := l.store().Add(pidB); err != nil {
+}
+
+func TestAddOfARegisteredProjectKeepsItsPlace(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	r.register(pidB, settingsOf("b"))
+	if err := r.store().Add(pidA); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.store().Remove(pidA); err != nil {
-		t.Fatal(err)
+	if got := ids(t, r.store()); !slices.Equal(got, []string{pidA, pidB}) {
+		t.Fatalf("order %v", got)
 	}
-	if err := l.store().Remove(pidA); err != nil {
-		t.Fatal(err)
+}
+
+func TestRemoveTakesAProjectOffTheRegistryAndKeepsItsRevisions(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	r.register(pidB, settingsOf("b"))
+	r.register(pidC, settingsOf("c"))
+	for range 2 {
+		if err := r.store().Remove(pidB); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if got := ids(t, l.store()); !slices.Equal(got, []string{pidB, pidD, pidC}) {
+	s := r.store()
+	if got := ids(t, s); !slices.Equal(got, []string{pidA, pidC}) {
 		t.Fatalf("order after remove %v", got)
+	}
+	if len(revisions(t, s, pidB)) != 1 {
+		t.Fatal("removing a project dropped its revisions")
 	}
 }
 
 func TestAddAndRemoveChangeOnlyTheRegistry(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	s := mustImport(t, l)
-	before := snapshot(t, l.dir)
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s := r.store()
+	before := snapshot(t, r.dir)
 	if err := s.Add(pidB); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Remove(pidA); err != nil {
 		t.Fatal(err)
 	}
-	after := snapshot(t, l.dir)
-	if !reflect.DeepEqual(outside(before), outside(after)) {
-		t.Fatalf("add and remove changed files outside the store")
-	}
-	for k, v := range before {
-		if strings.HasPrefix(k, filepath.Join("project-store", "settings")) && after[k] != v {
-			t.Fatalf("add and remove changed %s", k)
+	after := snapshot(t, r.dir)
+	for k, v := range after {
+		if k == "project-store" || k == filepath.Join("project-store", "registry.json") || k == filepath.Join("project-store", "lock") {
+			continue
 		}
-	}
-	for k := range after {
-		if _, ok := before[k]; !ok && k != filepath.Join("project-store") && !strings.HasPrefix(k, filepath.Join("project-store")) {
-			t.Fatalf("new file %s", k)
+		if before[k] != v {
+			t.Fatalf("%s changed", k)
 		}
 	}
 	if len(revisions(t, s, pidA)) != 1 || len(revisions(t, s, pidB)) != 0 {
@@ -230,44 +200,15 @@ func TestAddAndRemoveChangeOnlyTheRegistry(t *testing.T) {
 	}
 }
 
-func TestRegistryNeedsTheImport(t *testing.T) {
-	l := newLegacyRoot(t, nil, nil)
-	s := l.store()
-	if err := s.Add(pidA); !errors.Is(err, ErrNotImported) {
-		t.Fatalf("add before import: %v", err)
-	}
-	if err := s.Remove(pidA); !errors.Is(err, ErrNotImported) {
-		t.Fatalf("remove before import: %v", err)
-	}
-	if _, err := s.Apply(l.config(), l.home); !errors.Is(err, ErrNotImported) {
-		t.Fatalf("apply before import: %v", err)
-	}
-	if imported(t, s) || len(ids(t, s)) != 0 {
-		t.Fatal("a root with no registry is not imported")
-	}
-}
-
-func TestEmptyRootImportsToAnEmptyRegistry(t *testing.T) {
-	l := newLegacyRoot(t, nil, nil)
-	s := mustImport(t, l)
-	if !imported(t, s) || len(ids(t, s)) != 0 {
-		t.Fatal("an empty root imports to an empty registry")
-	}
-	cfg, err := s.Apply(l.config(), l.home)
-	if err != nil || len(cfg.Projects) != 0 || cfg.HasProject() {
-		t.Fatalf("apply: %+v %v", cfg, err)
-	}
-}
-
 func TestSaveRecordsARevisionOnlyForTheCurrentPin(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	s := mustImport(t, l)
-	cfg := l.config()
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s, cfg := r.store(), r.config()
 	first, err := s.Current(pidA)
 	if err != nil || first.Number != 1 || first.Pin == "" {
 		t.Fatalf("current %+v %v", first, err)
 	}
-	second, file, err := s.Save(cfg, l.home, pidA, first.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}})
+	second, file, err := s.Save(cfg, r.home, pidA, first.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}})
 	if err != nil || second.Number != 2 || second.Pin == first.Pin || file.Project.Landing != "squash" {
 		t.Fatalf("save: %+v %+v %v", second, file.Project, err)
 	}
@@ -277,38 +218,61 @@ func TestSaveRecordsARevisionOnlyForTheCurrentPin(t *testing.T) {
 	if got, _ := s.Current(pidA); got.Pin != second.Pin || !bytes.Equal(got.Data, second.Data) {
 		t.Fatalf("current after save %+v", got)
 	}
-	stale, other := snapshot(t, l.dir), config.ProjectEdit{Strings: map[string]string{"landing": "commit-per-unit"}}
-	if _, _, err := s.Save(cfg, l.home, pidA, first.Pin, other); !errors.Is(err, ErrStale) {
+	third, err := s.Replace(pidA, second.Pin, append(second.Data, "# note\n"...))
+	if err != nil || third.Number != 3 {
+		t.Fatalf("replace: %+v %v", third, err)
+	}
+	if got := revisions(t, s, pidA); len(got) != 3 || !bytes.Equal(got[0].Data, []byte(settingsOf("a"))) {
+		t.Fatalf("history %d revisions", len(got))
+	}
+}
+
+func TestSaveWithAStaleOrMissingPinWritesNothing(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s, cfg := r.store(), r.config()
+	first, _ := s.Current(pidA)
+	if _, _, err := s.Save(cfg, r.home, pidA, first.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}}); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, r.dir)
+	other := config.ProjectEdit{Strings: map[string]string{"landing": "commit-per-unit"}}
+	if _, _, err := s.Save(cfg, r.home, pidA, first.Pin, other); !errors.Is(err, ErrStale) {
 		t.Fatalf("stale save: %v", err)
 	}
 	if _, err := s.Replace(pidA, first.Pin, []byte("version = 1\n")); !errors.Is(err, ErrStale) {
 		t.Fatalf("stale replace: %v", err)
 	}
-	if _, _, err := s.Save(cfg, l.home, pidA, "", other); !errors.Is(err, ErrPinRequired) {
+	if _, _, err := s.Save(cfg, r.home, pidA, "", other); !errors.Is(err, ErrPinRequired) {
 		t.Fatalf("save without a pin: %v", err)
 	}
-	if !reflect.DeepEqual(stale, snapshot(t, l.dir)) {
+	if !reflect.DeepEqual(before, snapshot(t, r.dir)) {
 		t.Fatal("a refused save wrote something")
 	}
-	third, err := s.Replace(pidA, second.Pin, append(second.Data, "# note\n"...))
-	if err != nil || third.Number != 3 {
-		t.Fatalf("replace: %+v %v", third, err)
+}
+
+func TestUnchangedSaveIsStillARevisionWithANewPin(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s, cfg := r.store(), r.config()
+	first, _ := s.Current(pidA)
+	edit := config.ProjectEdit{Strings: map[string]string{"landing": "squash"}}
+	second, _, err := s.Save(cfg, r.home, pidA, first.Pin, edit)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := revisions(t, s, pidA); len(got) != 3 || !bytes.Equal(got[0].Data, []byte(projectFile("a"))) {
-		t.Fatalf("history %d revisions", len(got))
-	}
-	// An unchanged save is still a revision, and its pin differs.
-	same, _, err := s.Save(cfg, l.home, pidA, third.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}})
-	if err != nil || same.Pin == third.Pin {
+	same, _, err := s.Save(cfg, r.home, pidA, second.Pin, edit)
+	if err != nil || same.Pin == second.Pin || same.Number != 3 {
 		t.Fatalf("unchanged save: %+v %v", same, err)
 	}
 }
 
 func TestInvalidEditIsRefusedNamingTheField(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	s := mustImport(t, l)
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s := r.store()
 	current, _ := s.Current(pidA)
-	before := snapshot(t, l.dir)
+	before := snapshot(t, r.dir)
 	for _, c := range []struct {
 		edit  config.ProjectEdit
 		field string
@@ -319,54 +283,50 @@ func TestInvalidEditIsRefusedNamingTheField(t *testing.T) {
 		{config.ProjectEdit{Ints: map[string]int{"capacity.per_workstream": 0}}, "capacity.per_workstream"},
 		{config.ProjectEdit{Clear: []string{"upstream"}}, "upstream"},
 	} {
-		_, _, err := s.Save(l.config(), l.home, pidA, current.Pin, c.edit)
+		_, _, err := s.Save(r.config(), r.home, pidA, current.Pin, c.edit)
 		var field *config.FieldError
 		if !errors.As(err, &field) || field.Field != c.field {
 			t.Fatalf("edit of %s: %v", c.field, err)
 		}
-		// The same refusal today's decoding gives for the edited file.
-		want := field.Error()
-		if !strings.Contains(want, c.field) || strings.Contains(want, "example.com") {
-			t.Fatalf("error text %q", want)
+		if text := field.Error(); !strings.Contains(text, c.field) || strings.Contains(text, "example.com") {
+			t.Fatalf("error text %q", text)
 		}
 	}
-	if !reflect.DeepEqual(before, snapshot(t, l.dir)) {
+	if !reflect.DeepEqual(before, snapshot(t, r.dir)) {
 		t.Fatal("a refused edit wrote something")
 	}
 }
 
 func TestSaveOverARevisionThatDoesNotLoad(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	s := mustImport(t, l)
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s := r.store()
 	current, _ := s.Current(pidA)
-	// The clone becomes a regular file after the settings were stored.
-	clone := filepath.Join(l.home, "clone-a")
+	clone := filepath.Join(r.home, "clone-a")
 	if err := os.WriteFile(clone, []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := l.config()
-	if _, rev, err := s.Load(cfg, l.home, pidA); err == nil || rev.Pin != current.Pin {
+	cfg := r.config()
+	if _, rev, err := s.Load(cfg, r.home, pidA); err == nil || rev.Pin != current.Pin {
 		t.Fatalf("load of a revision that does not load: %+v %v", rev, err)
 	}
-	if _, err := s.Apply(cfg, l.home); err == nil {
-		t.Fatal("apply loaded a project that does not load")
-	}
-	if _, _, err := s.Save(cfg, l.home, pidA, current.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}}); err == nil {
+	if _, _, err := s.Save(cfg, r.home, pidA, current.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}}); err == nil {
 		t.Fatal("saved a result that does not load")
 	}
-	fixed, file, err := s.Save(cfg, l.home, pidA, current.Pin, config.ProjectEdit{Strings: map[string]string{"clone": filepath.Join(l.home, "elsewhere")}})
-	if err != nil || fixed.Number != 2 || file.Project.Clone != filepath.Join(l.home, "elsewhere") {
+	elsewhere := filepath.Join(r.home, "elsewhere")
+	fixed, file, err := s.Save(cfg, r.home, pidA, current.Pin, config.ProjectEdit{Strings: map[string]string{"clone": elsewhere}})
+	if err != nil || fixed.Number != 2 || file.Project.Clone != elsewhere {
 		t.Fatalf("repair: %+v %v", fixed, err)
 	}
-	if _, _, err := s.Load(cfg, l.home, pidA); err != nil {
+	if _, _, err := s.Load(cfg, r.home, pidA); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestWriteFirstIsRevisionOneAndRepeatable(t *testing.T) {
-	l := newLegacyRoot(t, nil, nil)
-	s := mustImport(t, l)
-	data, err := config.ProjectConfigBytes(config.Project{Name: "Shop", Upstream: "owner/shop", Clone: filepath.Join(l.home, "shop"), BaseBranch: "main"})
+	r := newRoot(t)
+	s := r.store()
+	data, err := config.ProjectConfigBytes(config.Project{Name: "Shop", Upstream: "owner/shop", Clone: filepath.Join(r.home, "shop"), BaseBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +338,7 @@ func TestWriteFirstIsRevisionOneAndRepeatable(t *testing.T) {
 	if err != nil || again.Pin != first.Pin || len(revisions(t, s, pidA)) != 1 {
 		t.Fatalf("repeat: %+v %v", again, err)
 	}
-	file, _, err := s.Load(l.config(), l.home, pidA)
+	file, _, err := s.Load(r.config(), r.home, pidA)
 	if err != nil || file.Project.Name != "Shop" || !file.Set("landing") || file.Set("checks_timeout") {
 		t.Fatalf("load: %+v %v", file.Project, err)
 	}
@@ -387,380 +347,245 @@ func TestWriteFirstIsRevisionOneAndRepeatable(t *testing.T) {
 	}
 }
 
-func TestLoadFromTheStoreMatchesLoadingTheFiles(t *testing.T) {
-	files := map[string]string{
-		pidA: projectFile("a"),
-		pidB: "version = 1\nname = \"B\"\nupstream = \"upstream/b\"\nclone = \"/tmp/never-here-b\"\nlanding = \"squash\"\ndelivery = \"jev\"\nflake_fixes = true\nhearsay_scope = \"work:osmia:p_bbbb\"\n\n[hearsay_entities]\nshop = \"code:owner/b:shop\"\n",
-		pidC: "version = 1\nupstream = \"upstream/c\"\nclone = \"/tmp/never-here-c\"\nupstream_rebase = \"0\"\n",
+func TestAtReadsAnEarlierRevision(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	s := r.store()
+	first, _ := s.Current(pidA)
+	if _, err := s.Replace(pidA, first.Pin, []byte(settingsOf("a")+"# edited\n")); err != nil {
+		t.Fatal(err)
 	}
-	l := newLegacyRoot(t, []string{pidA, pidB, pidC}, files)
-	want, err := config.Load(l.opts)
+	got, err := s.At(pidA, 1)
+	if err != nil || got.Pin != first.Pin || !bytes.Equal(got.Data, first.Data) {
+		t.Fatalf("revision 1: %+v %v", got, err)
+	}
+	if _, err := s.At(pidA, 9); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a revision that does not exist: %v", err)
+	}
+}
+
+func TestApplyLoadsTheRegistryInOrderWithTheCurrentSettings(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidC, settingsOf("c"))
+	r.register(pidA, settingsOf("a"))
+	r.register(pidB, "version = 1\nname = \"B\"\nupstream = \"upstream/b\"\nclone = \"/tmp/never-here-b\"\nlanding = \"squash\"\ndelivery = \"jev\"\nflake_fixes = true\n")
+	s := r.store()
+	current, _ := s.Current(pidA)
+	if _, err := s.Replace(pidA, current.Pin, []byte(strings.Replace(settingsOf("a"), "checks_timeout", "base_branch = \"develop\"\nchecks_timeout", 1))); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.Apply(r.config(), r.home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := mustImport(t, l)
-	got, err := s.Apply(l.config(), l.home)
-	if err != nil {
-		t.Fatal(err)
+	if got := cfg.ProjectIDs(); !slices.Equal(got, []config.ProjectID{pidC, pidA, pidB}) || !slices.Equal(cfg.ActiveProjects, []string{pidC, pidA, pidB}) {
+		t.Fatalf("projects %v, active %v", got, cfg.ActiveProjects)
 	}
-	if !reflect.DeepEqual(want.Projects, got.Projects) || !reflect.DeepEqual(want.ActiveProjects, got.ActiveProjects) {
-		t.Fatalf("projects differ:\nfile  %+v\nstore %+v", want.Projects, got.Projects)
+	a, b := cfg.For(pidA).Project, cfg.For(pidB).Project
+	if a.BaseBranch != "develop" || a.ChecksTimeout != "30m" || a.Upstream != "upstream/a" {
+		t.Fatalf("project a does not hold its newest settings: %+v", a)
 	}
-	if got.HasProject() {
+	if b.Name != "B" || b.Landing != "squash" || b.Delivery != config.DeliveryJev || !b.FlakeFixes {
+		t.Fatalf("project b: %+v", b)
+	}
+	if cfg.HasProject() {
 		t.Fatal("several projects have no single project")
 	}
-	for id, data := range files {
-		fromFile, err := l.config().DecodeProject(config.ProjectID(id), l.home, []byte(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		fromStore, _, err := s.Load(l.config(), l.home, config.ProjectID(id))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, setting := range config.ProjectSettings {
-			if fromFile.Set(setting) != fromStore.Set(setting) {
-				t.Fatalf("%s: marker of %s differs", id, setting)
-			}
-		}
+}
+
+func TestApplyOfOneProjectSetsTheConfigurationsProject(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	cfg, err := r.store().Apply(r.config(), r.home)
+	if err != nil || !cfg.HasProject() || cfg.Project.ID != pidA || cfg.Project.Upstream != "upstream/a" {
+		t.Fatalf("single project: %+v %v", cfg, err)
 	}
-	// One project is the Project of the loaded configuration, as it is from files.
-	solo := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	soloWant, err := config.Load(solo.opts)
+}
+
+func TestApplyOfAnEmptyRegistryHoldsNoProject(t *testing.T) {
+	r := newRoot(t)
+	cfg, err := r.store().Apply(r.config(), r.home)
+	if err != nil || len(cfg.Projects) != 0 || cfg.HasProject() {
+		t.Fatalf("apply: %+v %v", cfg, err)
+	}
+}
+
+func TestApplyLeavesTheGivenConfigurationUnchanged(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	top := r.config()
+	if _, err := r.store().Apply(top, r.home); err != nil {
+		t.Fatal(err)
+	}
+	if len(top.Projects) != 0 || top.HasProject() {
+		t.Fatalf("the receiver changed: %+v", top)
+	}
+}
+
+func TestApplyNamesTheProjectWhoseSettingsDoNotLoad(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	r.register(pidB, strings.Replace(settingsOf("b"), `fork = "owner/b"`, `fork = "not a repository"`, 1))
+	r.register(pidC, settingsOf("c"))
+	_, err := r.store().Apply(r.config(), r.home)
+	var loadErr *LoadError
+	var field *config.FieldError
+	if !errors.As(err, &loadErr) || loadErr.Project != pidB || !errors.As(err, &field) || field.Field != "fork" {
+		t.Fatalf("apply: %v", err)
+	}
+	if strings.Contains(err.Error(), "not a repository") || strings.Contains(err.Error(), "config.toml") {
+		t.Fatalf("the error quotes a value or names a file: %v", err)
+	}
+	if !strings.Contains(err.Error(), "osmia project settings "+pidB+" set fork=VALUE") {
+		t.Fatalf("the error does not say how to repair the settings: %v", err)
+	}
+}
+
+func TestLoadConfigAppliesTheRegistryOfTheRoot(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidB, settingsOf("b"))
+	r.register(pidA, settingsOf("a"))
+	cfg, err := LoadConfig(r.opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	soloGot, err := mustImport(t, solo).Apply(solo.config(), solo.home)
-	if err != nil || !reflect.DeepEqual(soloWant.Project, soloGot.Project) || !soloGot.HasProject() {
-		t.Fatalf("single project: %+v %v", soloGot.Project, err)
+	if got := cfg.ProjectIDs(); !slices.Equal(got, []config.ProjectID{pidB, pidA}) {
+		t.Fatalf("projects %v", got)
+	}
+	if cfg.Listen.Socket == "" || cfg.Root.String() != r.dir {
+		t.Fatalf("top-level settings are missing: %+v", cfg.Listen)
 	}
 }
 
-func TestImportBringsInTheListAndEveryListedFile(t *testing.T) {
-	files := map[string]string{pidA: projectFile("a"), pidB: projectFile("b"), pidC: projectFile("c"), pidD: "this is not toml ["}
-	l := newLegacyRoot(t, []string{pidC, pidA, pidB}, files)
-	// pidD is a project directory the list does not name: not read, not changed.
-	l.write(filepath.Join(l.dir, "projects", pidD, "trace.db"), "database")
-	cfg := l.config()
-	before := snapshot(t, l.dir)
-	s := mustImport(t, l)
-	if got := ids(t, s); !slices.Equal(got, []string{pidC, pidA, pidB}) || !imported(t, s) {
-		t.Fatalf("registry %v", got)
-	}
-	retired := 0
-	for _, id := range []string{pidA, pidB, pidC} {
-		revs := revisions(t, s, id)
-		if len(revs) != 1 || string(revs[0].Data) != files[id] {
-			t.Fatalf("%s: revisions %+v", id, revs)
-		}
-		data, err := os.ReadFile(l.projectPath(id))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.HasPrefix(string(data), RetiredMark) || strings.Count(string(data), "Retired:") != 1 {
-			t.Fatalf("%s: no single retired mark:\n%s", id, data)
-		}
-		if strings.TrimPrefix(string(data), RetiredMark) != files[id] {
-			t.Fatalf("%s: the file lost bytes", id)
-		}
-		// The file still loads under the project-file rules, to the same settings.
-		marked, err := cfg.DecodeProject(config.ProjectID(id), l.home, data)
-		original, _ := cfg.DecodeProject(config.ProjectID(id), l.home, []byte(files[id]))
-		if err != nil || !reflect.DeepEqual(marked.Project, original.Project) {
-			t.Fatalf("%s: retired file decodes to %+v: %v", id, marked.Project, err)
-		}
-		for _, setting := range config.ProjectSettings {
-			if marked.Set(setting) != original.Set(setting) {
-				t.Fatalf("%s: retired file changes the marker of %s", id, setting)
-			}
-		}
-		retired++
-	}
-	after := snapshot(t, l.dir)
-	for _, id := range []string{pidD} {
-		for k, v := range before {
-			if strings.Contains(k, id) && after[k] != v {
-				t.Fatalf("unlisted project changed: %s", k)
-			}
-		}
-	}
-	if before["config.toml"] != after["config.toml"] {
-		t.Fatal("the top-level file changed")
-	}
-	if retired != 3 {
-		t.Fatal(retired)
-	}
-}
-
-// failureRoot lists three projects, the second of which does not load.
-func failureRoot(t *testing.T) *legacyRoot {
-	bad := strings.Replace(projectFile("b"), `fork = "owner/b"`, `fork = "not a repository"`, 1)
-	l := newLegacyRoot(t, []string{pidA, pidB, pidC}, map[string]string{pidA: projectFile("a"), pidB: bad, pidC: projectFile("c")})
-	l.write(filepath.Join(l.dir, "projects", pidD, "config.toml"), "version = 1\ngroup_id = \""+pidA+"\"\nupstream = \"upstream/d\"\nclone = \"~/d\"\n")
-	return l
-}
-
-func requireFieldError(t *testing.T, err error, id, field string) {
-	t.Helper()
-	var fe *config.FieldError
-	if !errors.As(err, &fe) || fe.Field != field || !strings.Contains(fe.Path, id) || !strings.HasSuffix(fe.Path, "config.toml") {
-		t.Fatalf("error %v, want a field error for %s of %s", err, field, id)
-	}
-	if strings.Contains(err.Error(), "not a repository") {
-		t.Fatalf("error quotes a value: %v", err)
-	}
-}
-
-func TestPreflightNamesTheFileAndFieldAndChangesNothing(t *testing.T) {
-	l := failureRoot(t)
-	before := snapshot(t, l.dir)
-	s := l.store()
-	requireFieldError(t, s.Preflight(l.config(), l.home), pidB, "fork")
-	if !reflect.DeepEqual(before, snapshot(t, l.dir)) {
-		t.Fatal("the preflight changed the root")
-	}
-	if _, err := os.Stat(filepath.Join(l.dir, "project-store")); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal("the preflight created the store")
-	}
-	// A listed file that is missing or unreadable is named too.
-	l = newLegacyRoot(t, []string{pidA}, nil)
-	err := l.store().Preflight(l.config(), l.home)
-	var fe *config.FieldError
-	if !errors.As(err, &fe) || !strings.Contains(fe.Path, pidA) || fe.Reason != "cannot be read" {
-		t.Fatalf("missing file: %v", err)
-	}
-}
-
-func TestPreflightPassesWhenEveryListedFileLoads(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA, pidB}, map[string]string{pidA: projectFile("a"), pidB: projectFile("b")})
-	before := snapshot(t, l.dir)
-	if err := l.store().Preflight(l.config(), l.home); err != nil {
+func TestLoadConfigRefusesAnInvalidTopLevelFile(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	if err := os.WriteFile(filepath.Join(r.dir, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"x\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(before, snapshot(t, l.dir)) {
-		t.Fatal("the preflight changed the root")
+	cfg, err := LoadConfig(r.opts)
+	var field *config.FieldError
+	if cfg != nil || !errors.As(err, &field) || field.Field != "active_projects" || field.Reason != "unknown configuration key" {
+		t.Fatalf("load: %+v %v", cfg, err)
 	}
 }
 
-func TestImportRefusesAFileThatDoesNotLoadAndRecordsNothing(t *testing.T) {
-	l := failureRoot(t)
-	before := snapshot(t, l.dir)
-	s := l.store()
-	requireFieldError(t, s.Import(context.Background(), l.config(), l.home), pidB, "fork")
-	if imported(t, s) || len(ids(t, s)) != 0 {
-		t.Fatal("a refused import recorded the registry")
+func TestRelabelNamesTheProjectInPlaceOfItsFile(t *testing.T) {
+	r := newRoot(t)
+	cfg := r.config()
+	_, err := cfg.DecodeProject(pidA, r.home, []byte("version = 1\nupstream = \"nope\"\nclone = \"~/x\"\n"))
+	var before *config.FieldError
+	if !errors.As(err, &before) {
+		t.Fatalf("decode: %v", err)
 	}
-	for _, id := range []string{pidA, pidB, pidC} {
-		if len(revisions(t, s, id)) != 0 {
-			t.Fatalf("%s: a refused import recorded settings", id)
-		}
+	var after *config.FieldError
+	relabeled := Relabel(cfg.Root, pidA, err)
+	if !errors.As(relabeled, &after) || after.Path != config.ProjectSettingsLabel(pidA) || after.Field != before.Field || after.Reason != before.Reason {
+		t.Fatalf("relabel: %v", relabeled)
 	}
-	if !reflect.DeepEqual(outside(before), outside(snapshot(t, l.dir))) {
-		t.Fatal("a refused import changed a source file")
+	other := errors.New("not a field error")
+	if Relabel(cfg.Root, pidA, other) != other || Relabel(cfg.Root, pidA, nil) != nil {
+		t.Fatal("an error that is not about the settings changed")
 	}
 }
 
-func TestInterruptedImportResumesWithoutDuplicates(t *testing.T) {
-	files := map[string]string{pidA: projectFile("a"), pidB: projectFile("b"), pidC: projectFile("c")}
-	list := []string{pidB, pidC, pidA}
-	var steps []string
-	record := newLegacyRoot(t, list, files)
-	if err := record.store(WithStep(func(name string) error { steps = append(steps, name); return nil })).Import(context.Background(), record.config(), record.home); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"import-checked", "registry-staged", "import-recorded"}
-	for _, w := range want {
-		if !slices.Contains(steps, w) {
-			t.Fatalf("steps %v lack %s", steps, w)
-		}
-	}
-	for _, id := range list {
-		for _, w := range []string{"revision-staged:" + id + ":1", "revision-recorded:" + id + ":1", "settings-imported:" + id, "file-retired:" + id} {
-			if !slices.Contains(steps, w) {
-				t.Fatalf("steps %v lack %s", steps, w)
-			}
-		}
-	}
+func TestAStepFailureStopsAWriteLikeACrash(t *testing.T) {
 	crash := errors.New("crash")
-	for _, step := range steps {
+	for _, step := range []string{"registry-staged", "revision-staged:" + pidA + ":1", "revision-recorded:" + pidA + ":1"} {
 		t.Run(step, func(t *testing.T) {
-			l := newLegacyRoot(t, list, files)
-			err := l.store(WithStep(func(name string) error {
+			r := newRoot(t)
+			interrupted := r.store(WithStep(func(name string) error {
 				if name == step {
 					return crash
 				}
 				return nil
-			})).Import(context.Background(), l.config(), l.home)
+			}))
+			var err error
+			if strings.HasPrefix(step, "registry") {
+				err = interrupted.Add(pidA)
+			} else {
+				_, err = interrupted.WriteFirst(pidA, []byte(settingsOf("a")))
+			}
 			if !errors.Is(err, crash) {
-				t.Fatalf("interrupted import: %v", err)
+				t.Fatalf("interrupted write: %v", err)
 			}
-			if step != "import-recorded" && imported(t, l.store()) {
-				t.Fatal("an interrupted import is recorded as complete")
+			if strings.HasPrefix(step, "registry") && len(ids(t, r.store())) != 0 {
+				t.Fatal("an interrupted registry write is visible")
 			}
-			var ran []string
-			s := l.store(WithStep(func(name string) error { ran = append(ran, name); return nil }))
-			if err := s.Import(context.Background(), l.config(), l.home); err != nil {
+			s := r.store()
+			if _, err := s.WriteFirst(pidA, []byte(settingsOf("a"))); err != nil {
 				t.Fatalf("resume: %v", err)
 			}
-			if !imported(t, s) || !slices.Equal(ids(t, s), list) {
-				t.Fatalf("resumed registry %v", ids(t, s))
+			if err := s.Add(pidA); err != nil {
+				t.Fatalf("resume: %v", err)
 			}
-			for id, data := range files {
-				revs := revisions(t, s, id)
-				if len(revs) != 1 || string(revs[0].Data) != data {
-					t.Fatalf("%s: %d revisions after resume", id, len(revs))
-				}
-				got, _ := os.ReadFile(l.projectPath(id))
-				if string(got) != RetiredMark+data {
-					t.Fatalf("%s: retired file:\n%s", id, got)
-				}
+			if got := revisions(t, s, pidA); len(got) != 1 {
+				t.Fatalf("%d revisions after resume", len(got))
 			}
-			filepath.WalkDir(l.dir, func(path string, d fs.DirEntry, err error) error {
+			filepath.WalkDir(r.dir, func(path string, d fs.DirEntry, err error) error {
 				if err == nil && strings.HasPrefix(d.Name(), tempPrefix) {
 					t.Errorf("temporary file %s left behind", path)
 				}
 				return nil
 			})
-			// A completed import is a no-op.
-			done := snapshot(t, l.dir)
-			ran = nil
-			if err := s.Import(context.Background(), l.config(), l.home); err != nil || len(ran) != 0 {
-				t.Fatalf("second import: %v, steps %v", err, ran)
-			}
-			if !reflect.DeepEqual(done, snapshot(t, l.dir)) {
-				t.Fatal("a completed import changed the root")
-			}
 		})
 	}
 }
 
-func TestCompletedImportReadsNoProjectFile(t *testing.T) {
-	files := map[string]string{pidA: projectFile("a")}
-	l := newLegacyRoot(t, []string{pidA}, files)
-	s := mustImport(t, l)
-	cfg := l.config()
-	// The retired file is unreadable, then invalid; neither matters.
-	for _, content := range []string{"", "not = [toml"} {
-		l.write(l.projectPath(pidA), content)
-		if err := os.Chmod(l.projectPath(pidA), 0); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Preflight(cfg, l.home); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Import(context.Background(), cfg, l.home); err != nil {
-			t.Fatal(err)
-		}
-		applied, err := s.Apply(cfg, l.home)
-		if err != nil || len(applied.Projects) != 1 || applied.Project.Upstream != "upstream/a" {
-			t.Fatalf("apply: %+v %v", applied, err)
-		}
-		os.Chmod(l.projectPath(pidA), 0600)
+func TestNoOperationWritesTheTopLevelFile(t *testing.T) {
+	r := newRoot(t)
+	top := filepath.Join(r.dir, "config.toml")
+	if err := os.Chmod(top, 0400); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestConcurrentImportsRecordOneRevisionPerProject(t *testing.T) {
-	files := map[string]string{pidA: projectFile("a"), pidB: projectFile("b")}
-	l := newLegacyRoot(t, []string{pidA, pidB}, files)
-	cfg := l.config()
-	var wg sync.WaitGroup
-	errs := make([]error, 6)
-	for i := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs[i] = Open(cfg.Root).Import(context.Background(), cfg, l.home)
-		}()
-	}
-	wg.Wait()
-	for _, err := range errs {
+	before := snapshot(t, r.dir)["config.toml"]
+	cfg := r.config()
+	s := Open(cfg.Root)
+	must := func(err error) {
+		t.Helper()
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	s := l.store()
-	for id, data := range files {
-		if revs := revisions(t, s, id); len(revs) != 1 || string(revs[0].Data) != data {
-			t.Fatalf("%s: %d revisions", id, len(revs))
-		}
-	}
-	if !slices.Equal(ids(t, s), []string{pidA, pidB}) {
-		t.Fatal(ids(t, s))
-	}
-}
-
-func TestNoOperationWritesTheTopLevelFile(t *testing.T) {
-	files := map[string]string{pidA: projectFile("a"), pidB: projectFile("b")}
-	l := newLegacyRoot(t, []string{pidA, pidB}, files)
-	top := l.topLevel()
-	if err := os.Chmod(top, 0400); err != nil {
-		t.Fatal(err)
-	}
-	before := snapshot(t, l.dir)
-	cfg := l.config()
-	exercise := func() {
-		s := Open(cfg.Root)
-		must := func(err error) {
-			t.Helper()
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		must(s.Preflight(cfg, l.home))
-		must(s.Import(context.Background(), cfg, l.home))
-		must(s.Add(pidC))
-		must(s.Remove(pidA))
-		current, err := s.Current(pidB)
-		must(err)
-		_, _, err = s.Save(cfg, l.home, pidB, current.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}})
-		must(err)
-		_, err = s.WriteFirst(pidC, []byte(files[pidA]))
-		must(err)
-		_, err = s.Apply(cfg, l.home)
-		must(err)
-	}
-	exercise()
-	if got, want := snapshot(t, l.dir)["config.toml"], before["config.toml"]; got != want {
+	_, err := s.WriteFirst(pidA, []byte(settingsOf("a")))
+	must(err)
+	must(s.Add(pidA))
+	must(s.Add(pidB))
+	must(s.Remove(pidB))
+	current, err := s.Current(pidA)
+	must(err)
+	_, _, err = s.Save(cfg, r.home, pidA, current.Pin, config.ProjectEdit{Strings: map[string]string{"landing": "squash"}})
+	must(err)
+	_, err = s.Apply(cfg, r.home)
+	must(err)
+	if got := snapshot(t, r.dir)["config.toml"]; got != before {
 		t.Fatal("the top-level file changed")
 	}
-	// Only the store and the imported project files are written.
-	for k, v := range outside(snapshot(t, l.dir)) {
-		if before[k] != v && k != filepath.Join("projects", pidA, "config.toml") && k != filepath.Join("projects", pidB, "config.toml") {
-			t.Fatalf("%s changed", k)
-		}
-	}
-	for k := range outside(snapshot(t, l.dir)) {
-		if _, ok := before[k]; !ok {
-			t.Fatalf("%s is new outside the store", k)
-		}
-	}
-	// With the top-level file gone, nothing recreates it.
-	if err := os.Remove(top); err != nil {
-		t.Fatal(err)
-	}
-	s := Open(cfg.Root)
-	if err := s.Add(pidD); err != nil {
-		t.Fatal(err)
-	}
-	current, _ := s.Current(pidB)
-	if _, err := s.Replace(pidB, current.Pin, []byte(files[pidB])); err != nil {
-		t.Fatal(err)
-	}
+	must(os.Remove(top))
+	must(s.Add(pidD))
 	if _, err := os.Lstat(top); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("the top-level file was created")
 	}
 }
 
 func TestStoreAddsNothingToProjectDirectories(t *testing.T) {
-	l := newLegacyRoot(t, []string{pidA}, map[string]string{pidA: projectFile("a")})
-	l.write(filepath.Join(l.dir, "projects", pidA, "trace.db"), "database")
-	l.write(filepath.Join(l.dir, "projects", pidA, "osmia.lock"), "")
-	s := mustImport(t, l)
-	current, _ := s.Current(pidA)
-	if _, err := s.Replace(pidA, current.Pin, []byte(projectFile("a"))); err != nil {
+	r := newRoot(t)
+	projectDir := filepath.Join(r.dir, "projects", pidA)
+	if err := os.MkdirAll(projectDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(filepath.Join(l.dir, "projects", pidA))
+	for _, name := range []string{"trace.db", "osmia.lock"} {
+		if err := os.WriteFile(filepath.Join(projectDir, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.register(pidA, settingsOf("a"))
+	s := r.store()
+	current, _ := s.Current(pidA)
+	if _, err := s.Replace(pidA, current.Pin, []byte(settingsOf("a"))); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(projectDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,10 +593,10 @@ func TestStoreAddsNothingToProjectDirectories(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if !slices.Equal(names, []string{"config.toml", "osmia.lock", "trace.db"}) {
+	if !slices.Equal(names, []string{"osmia.lock", "trace.db"}) {
 		t.Fatalf("project directory holds %v", names)
 	}
-	top, err := os.ReadDir(l.dir)
+	top, err := os.ReadDir(r.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,5 +606,88 @@ func TestStoreAddsNothingToProjectDirectories(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"config.toml", "project-store", "projects"}) {
 		t.Fatalf("root holds %v", names)
+	}
+}
+
+func TestConcurrentWritersRecordOneFirstRevisionAndEveryRegistration(t *testing.T) {
+	r := newRoot(t)
+	want := []string{pidA, pidB, pidC, pidD}
+	errs := make([]error, 8)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s := r.store()
+			for _, id := range want {
+				if _, err := s.WriteFirst(config.ProjectID(id), []byte(settingsOf(id[2:3]))); err != nil {
+					errs[i] = err
+					return
+				}
+				if err := s.Add(config.ProjectID(id)); err != nil {
+					errs[i] = err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := r.store()
+	registered := ids(t, s)
+	slices.Sort(registered)
+	if !slices.Equal(registered, want) {
+		t.Fatalf("registry %v, want every project once: %v", registered, want)
+	}
+	for _, id := range want {
+		if got := revisions(t, s, id); len(got) != 1 {
+			t.Fatalf("%s: %d first revisions", id, len(got))
+		}
+	}
+}
+
+func TestAddAndRemoveRefuseAnIDThatIsNotAProjectIdentity(t *testing.T) {
+	r := newRoot(t)
+	r.register(pidA, settingsOf("a"))
+	before := snapshot(t, r.dir)
+	for _, id := range []string{"../escape", "p_short", "w_" + pidA[2:]} {
+		if err := r.store().Add(config.ProjectID(id)); err == nil {
+			t.Fatalf("added %q", id)
+		}
+		if err := r.store().Remove(config.ProjectID(id)); err == nil {
+			t.Fatalf("removed %q", id)
+		}
+	}
+	if !reflect.DeepEqual(before, snapshot(t, r.dir)) {
+		t.Fatal("a refused registration wrote something")
+	}
+}
+
+func TestRegistryHoldingADuplicateOrMalformedIDDoesNotLoad(t *testing.T) {
+	for name, projects := range map[string]string{
+		"duplicate": `["` + pidA + `", "` + pidA + `"]`,
+		"traversal": `["../escape"]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRoot(t)
+			dir := filepath.Join(r.dir, "project-store")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			data := `{"version": 1, "projects": ` + projects + `}`
+			if err := os.WriteFile(filepath.Join(dir, "registry.json"), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.store().Projects(); err == nil {
+				t.Fatal("the registry loaded")
+			}
+			if _, err := r.store().Apply(r.config(), r.home); err == nil {
+				t.Fatal("apply loaded the registry")
+			}
+		})
 	}
 }

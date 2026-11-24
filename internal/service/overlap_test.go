@@ -15,6 +15,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	kb "github.com/kpenfound/osmia/internal/kb"
 	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -191,7 +192,7 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	// The landing controller reads each building workstream's feature branch
 	// from the clone, which has none.
 	demoGit(t, home, "init", "-q", filepath.Join(home, "clone"))
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	p := &overlapPlanted{t: t, opts: opts, cfg: cfg, clock: &fixedClock{At: demoStart}, ticks: make(chan time.Time)}
 	p.opts.Reconciliation.Now, p.opts.Reconciliation.Ticks = p.clock.Now, p.ticks

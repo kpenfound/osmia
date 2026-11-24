@@ -14,6 +14,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -48,7 +49,7 @@ func (r *interruptedRunner) Apply(ctx context.Context, _ coreadapter.Operation) 
 func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	actor := trace.Actor{Kind: "service", ID: "test"}
@@ -106,7 +107,7 @@ func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
 func TestServiceRejectsLockedTrace(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), trace.Actor{Kind: "service", ID: "test"})
 	must(t, err)
@@ -133,7 +134,7 @@ func (f forbiddenRunner) Apply(context.Context, coreadapter.Operation) (coreadap
 
 func runnerIntent(t *testing.T, opts Options) config.Root {
 	t.Helper()
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	actor := trace.Actor{Kind: "service", ID: "test"}
@@ -165,7 +166,7 @@ func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
 	if !errors.Is(err, failure) || bound == nil {
 		t.Fatalf("start with failing threads binding: %v", err)
 	}
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -198,7 +199,7 @@ func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
 	if len(adapters) != 1 || adapters[coreadapter.RunnerBoundary] != coreadapter.Reconciler(forbidden) {
 		t.Fatalf("caller adapters changed: %v", adapters)
 	}
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -231,7 +232,7 @@ func (a *orderedAdapter) Apply(_ context.Context, op coreadapter.Operation) (cor
 func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
@@ -283,7 +284,7 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 func TestServiceReportsScheduleFailure(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), trace.Actor{Kind: "service", ID: "test"})
 	must(t, err)

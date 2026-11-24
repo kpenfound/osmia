@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -18,68 +16,38 @@ import (
 	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// splitJourney prepares the legacy config using onboarded local repositories.
-// Only startup performs the split; all subsequent feature state comes from
-// owner API calls and queued agent tools through production enforcement.
-type splitJourney struct {
+// crossProjectJourney is two registered projects, named Server and Client,
+// started on local repositories. All feature state comes from owner API calls
+// and queued agent tools through production enforcement.
+type crossProjectJourney struct {
 	*productionDesignFixture
-	configs map[config.ProjectID]string
-	charter trace.Document
 }
 
-func newSplitJourney(t *testing.T) *splitJourney {
+func newCrossProjectJourney(t *testing.T) *crossProjectJourney {
 	t.Helper()
 	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{
 		handIn: true, wait: lifecycleAwait,
 		options: func(o *Options) { withWeb(t, *o, "127.0.0.1:0") },
 	})
-	charter, err := f.c.Charter(context.Background(), f.project)
-	must(t, err)
 	cfg := f.s.current()
 	f.stop(t)
-	j := &splitJourney{productionDesignFixture: f, configs: map[config.ProjectID]string{}, charter: charter}
 	for i, id := range []config.ProjectID{f.project, f.project2} {
 		p := cfg.For(id).Project
 		p.Name = []string{"Server", "Client"}[i]
-		path, err := cfg.Root.ProjectConfig(id)
-		must(t, err)
-		fixturekit.WriteProjectFile(t, path, p)
-		data, err := os.ReadFile(path)
-		must(t, err)
-		source := ""
-		if i == 1 {
-			source = string(f.project)
-		}
-		j.configs[id] = " # Repository settings\n" + string(data) + "\n# Keep this comment\n"
-		must(t, os.WriteFile(path, []byte(fmt.Sprintf("group_id = %q", source)+j.configs[id]), 0600))
+		fixturekit.SaveProjectSettings(t, cfg.Root.String(), p)
 	}
-	// The root is a legacy root again: its projects are listed and have files
-	// but nothing is imported, so the next start imports them and splits the
-	// grouped ones.
-	storeDirectory, err := cfg.Root.ProjectStore()
-	must(t, err)
-	must(t, os.RemoveAll(storeDirectory))
-	top, err := cfg.Root.Config()
-	must(t, err)
-	text, err := os.ReadFile(top)
-	must(t, err)
-	listed := regexp.MustCompile(`(?m)^active_projects = .*$`).ReplaceAllString(string(text), fmt.Sprintf("active_projects = [%q, %q]", f.project, f.project2))
-	if listed == string(text) {
-		t.Fatal("fixture did not list the projects")
-	}
-	must(t, os.WriteFile(top, []byte(listed), 0600))
 	f.start(t)
-	j.checkSplit(t)
+	j := &crossProjectJourney{productionDesignFixture: f}
+	j.checkProjects(t)
 	return j
 }
 
-func (j *splitJourney) checkSplit(t *testing.T) {
+func (j *crossProjectJourney) checkProjects(t *testing.T) {
 	t.Helper()
 	view, err := j.c.Configuration(context.Background())
 	must(t, err)
@@ -89,26 +57,14 @@ func (j *splitJourney) checkSplit(t *testing.T) {
 	for i, id := range []config.ProjectID{j.project, j.project2} {
 		p := view.Projects[i]
 		if p.ID != id || p.Name != []string{"Server", "Client"}[i] || len(p.Repos) != 1 || p.Repos[0].ID != id {
-			t.Fatalf("split project: %+v", p)
-		}
-		path, err := j.s.current().Root.ProjectConfig(id)
-		must(t, err)
-		data, err := os.ReadFile(path)
-		must(t, err)
-		if string(data) != projectstore.RetiredMark+j.configs[id] {
-			t.Fatalf("startup changed more than group_id: %q", data)
-		}
-		charter, err := j.c.Charter(context.Background(), id)
-		must(t, err)
-		if charter.Content != j.charter.Content || i == 1 && charter.Cause != fmt.Sprintf("split-project:%s:charter#%d", j.project, j.charter.Revision) {
-			t.Fatalf("split charter: %+v", charter)
+			t.Fatalf("project: %+v", p)
 		}
 	}
 }
 
-func (j *splitJourney) checkWorkgroup(t *testing.T, p *browsertest.Page) intake.DesignSelection {
+func (j *crossProjectJourney) checkWorkgroup(t *testing.T, p *browsertest.Page) intake.DesignSelection {
 	t.Helper()
-	j.checkSplit(t)
+	j.checkProjects(t)
 	j.awaitPacket(t)
 	j.checkContinuation(t)
 	r, err := j.s.repository(j.project)
@@ -155,13 +111,13 @@ func (j *splitJourney) checkWorkgroup(t *testing.T, p *browsertest.Page) intake.
 	return selection
 }
 
-func TestCrossProjectHandInJourneyAfterSplit(t *testing.T) {
+func TestCrossProjectHandInJourney(t *testing.T) {
 	t.Parallel()
 	for _, surface := range []string{"API", "CLI"} {
 		t.Run(surface, func(t *testing.T) {
 			t.Parallel()
 			p := openBrowser(t)
-			j := newSplitJourney(t)
+			j := newCrossProjectJourney(t)
 			if surface == "API" {
 				handInProduction(t, j.productionDesignFixture, HandInRequest{})
 			} else {
@@ -178,7 +134,7 @@ func TestCrossProjectHandInJourneyAfterSplit(t *testing.T) {
 	}
 }
 
-func (j *splitJourney) cliHandIn(t *testing.T) {
+func (j *crossProjectJourney) cliHandIn(t *testing.T) {
 	t.Helper()
 	// The CLI generates its own key. Hold fake model execution until the
 	// response supplies the identities used by the scripted drafting turns.
@@ -222,10 +178,10 @@ func (j *splitJourney) cliHandIn(t *testing.T) {
 	must(t, err)
 }
 
-func TestCrossProjectDesignJourneyAfterSplit(t *testing.T) {
+func TestCrossProjectDesignJourney(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
-	j := newSplitJourney(t)
+	j := newCrossProjectJourney(t)
 	ctx := context.Background()
 	opened, err := j.c.OpenDesign(ctx, j.project)
 	must(t, err)

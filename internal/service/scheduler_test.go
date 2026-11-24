@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -51,7 +52,7 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 
@@ -183,7 +184,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 
@@ -289,7 +290,7 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 
@@ -385,11 +386,8 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 	body, err := os.ReadFile(top)
 	must(t, err)
 	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 4\nper_workstream = 3\n[profiles.default]", 1)), 0600))
-	proj := filepath.Join(opts.Config.Root, "projects", string(project), "config.toml")
-	body, err = os.ReadFile(proj)
-	must(t, err)
-	must(t, os.WriteFile(proj, append(body, []byte("[capacity]\nper_workstream = 1\n")...), 0600))
-	cfg, err := config.Load(opts.Config)
+	fixturekit.EditProjectSettings(t, opts.Config.Root, project, func(text string) string { return text + "[capacity]\nper_workstream = 1\n" })
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	if cfg.Capacity.PerWorkstream != 3 || cfg.Project.Capacity.PerWorkstream != 1 {
 		t.Fatalf("capacity %+v, project %+v", cfg.Capacity, cfg.Project.Capacity)
@@ -476,7 +474,7 @@ func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 	body, err := os.ReadFile(top)
 	must(t, err)
 	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 1\n[profiles.default]", 1)), 0600))
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 

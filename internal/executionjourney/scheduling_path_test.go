@@ -23,6 +23,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -887,7 +888,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	data, err := os.ReadFile(path)
 	must(t, err)
 	must(t, os.WriteFile(path, append(data, []byte("\n[roles.chief_of_staff]\nevents_profile = \"other\"\n")...), 0600))
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	clock := &fixedClock{At: demoStart}
 	opts.Reconciliation.Now = clock.Now

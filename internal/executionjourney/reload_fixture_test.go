@@ -8,11 +8,11 @@ import (
 
 type reloadFiles struct {
 	fixturekit.ReloadFiles
-	top, project, topText, projectText string
+	top, topText string
 }
 
 func configFiles(t *testing.T, opts Options) reloadFiles {
-	f := fixturekit.ConfigFiles(t, opts.Config.Root, project)
-	return reloadFiles{f, f.Top, f.Project, f.TopText, f.ProjectText}
+	f := fixturekit.ConfigFiles(t, opts.Config.Root)
+	return reloadFiles{f, f.Top, f.TopText}
 }
-func (f reloadFiles) write(t *testing.T, top, project string) { f.ReloadFiles.Write(t, top, project) }
+func (f reloadFiles) write(t *testing.T, top string) { f.ReloadFiles.Write(t, top) }

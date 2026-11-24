@@ -99,7 +99,6 @@ func resolvePath(p, home, base string) (string, error) {
 	return canonical(p)
 }
 
-// canonical resolves existing ancestors while permitting missing descendants.
 func canonical(p string) (string, error) {
 	_, err := os.Lstat(p)
 	if err == nil {
@@ -136,7 +135,6 @@ func (r Root) managed(parts ...string) (string, error) {
 	if !beneath(r.directory, p) {
 		return "", fmt.Errorf("managed path %s escapes root %s", p, r.directory)
 	}
-	// Aliases inside the root could also make distinct identities share state.
 	if p != filepath.Join(append([]string{r.directory}, parts...)...) {
 		return "", fmt.Errorf("managed path must not contain symlink aliases: %s", p)
 	}

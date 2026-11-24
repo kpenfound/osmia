@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -75,7 +76,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	defer transferred.Release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) {
 		opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
-		cfg, err := config.Load(opts.Config)
+		cfg, err := projectstore.LoadConfig(opts.Config)
 		must(t, err)
 		runChief(opts, cfg, &chiefTurns{})
 		opts.boundary = func(ctx context.Context, name string) error {

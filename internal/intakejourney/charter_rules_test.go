@@ -16,6 +16,7 @@ import (
 	questions "github.com/kpenfound/osmia/internal/questions"
 	trace "github.com/kpenfound/osmia/internal/trace"
 
+	"github.com/kpenfound/osmia/internal/projectstore"
 	testing "testing"
 	time "time"
 )
@@ -47,7 +48,7 @@ func newCharterFixture(t *testing.T) *charterFixture {
 	t.Cleanup(func() { os.RemoveAll(home) })
 	f := &charterFixture{opts: fixtureAt(t, home), clock: &fixedClock{At: demoStart}, ticks: make(chan time.Time)}
 	f.opts.Reconciliation.Now, f.opts.Reconciliation.Ticks = f.clock.Now, f.ticks
-	f.cfg, err = config.Load(f.opts.Config)
+	f.cfg, err = projectstore.LoadConfig(f.opts.Config)
 	must(t, err)
 	demoGit(t, home, "init", "-q", f.cfg.Project.Clone)
 	repo, err := trace.Create(ctx, f.cfg.Root, f.cfg.Project, f.clock.Now(), ownerActor)

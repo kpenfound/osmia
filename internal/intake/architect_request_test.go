@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -13,7 +14,7 @@ import (
 func TestArchitectDoesNotRequestDraftAfterConcurrentAbandon(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cfg, err := config.Load(fixturekit.ConfigAt(t, t.TempDir()))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, t.TempDir()))
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}

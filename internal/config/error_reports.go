@@ -53,8 +53,6 @@ func defaultErrorReports() ErrorReports {
 // SourceEnabled reports whether errors of source are filed.
 func (e ErrorReports) SourceEnabled(source string) bool { return slices.Contains(e.Sources, source) }
 
-// The settings are validated whether or not the reporter is enabled, so turning
-// it on never reveals a broken value.
 func (e ErrorReports) validate(path string) error {
 	if !ValidRepository(e.Repository) {
 		return fieldError(path, "error_reports.repository", "must be an owner/name GitHub repository")

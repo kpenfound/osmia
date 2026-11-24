@@ -12,6 +12,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -45,7 +46,7 @@ func NewQuestionSetup(t *testing.T, prefix, global, charter string, askers []Que
 	data, err := os.ReadFile(path)
 	Must(t, err)
 	Must(t, os.WriteFile(path, append(data, []byte(global)...), 0600))
-	f.Config, err = config.Load(f.Options)
+	f.Config, err = projectstore.LoadConfig(f.Options)
 	Must(t, err)
 	cfg, clock := f.Config, f.Clock
 	Must(t, os.MkdirAll(cfg.Project.Clone, 0700))

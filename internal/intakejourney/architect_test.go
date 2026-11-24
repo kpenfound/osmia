@@ -19,6 +19,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -744,7 +745,7 @@ func TestArchitectDraftWaitsForARunner(t *testing.T) {
 	count := retried(0, 1)
 	f.stop(t)
 
-	cfg, err := config.Load(f.opts.Config)
+	cfg, err := projectstore.LoadConfig(f.opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 	must(t, err)
@@ -855,7 +856,7 @@ func TestArchitectDraftSurvivesRestart(t *testing.T) {
 			}
 			f.stop(t)
 
-			cfg, err := config.Load(f.opts.Config)
+			cfg, err := projectstore.LoadConfig(f.opts.Config)
 			must(t, err)
 			repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 			must(t, err)
@@ -1046,7 +1047,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 		}
 		f.stop(t)
 
-		cfg, err := config.Load(f.opts.Config)
+		cfg, err := projectstore.LoadConfig(f.opts.Config)
 		must(t, err)
 		repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 		must(t, err)
@@ -1071,7 +1072,7 @@ func TestAbandonStopsTheArchitectDraft(t *testing.T) {
 		f.stop(t)
 
 		ctx := context.Background()
-		cfg, err := config.Load(f.opts.Config)
+		cfg, err := projectstore.LoadConfig(f.opts.Config)
 		must(t, err)
 		repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 		must(t, err)

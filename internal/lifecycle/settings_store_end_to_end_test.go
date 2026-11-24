@@ -44,24 +44,22 @@ func osmia(t *testing.T, root string, args ...string) (int, string, string) {
 	return code, out.String(), diag.String()
 }
 
-// The whole path, from a legacy root whose top-level file is read-only and
-// carries active_projects and a project file: startup imports them, settings are
-// read and saved, a save the service cannot adopt stays pending across a reload
-// of the top-level file, projects are added, created and removed, an add is
-// interrupted, the service restarts, stored settings stop loading, startup
-// refuses, the repair command corrects them and the service starts again. The
-// top-level file stays byte-identical and untouched throughout, and no project
-// file is written after the import retired it.
+// The whole path on a store-backed root whose top-level file is read-only:
+// settings are read and saved, a save the service cannot adopt stays pending
+// across a reload of the top-level file, projects are added, created and
+// removed, an add is interrupted, the service restarts, stored settings stop
+// loading, startup refuses, the repair command corrects them and the service
+// starts again. The top-level file stays byte-identical and untouched
+// throughout, and no project file is written.
 //
 // Serial: the project creation needs GITHUB_TOKEN.
-func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
+func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
 	ctx := context.Background()
 	opts := fixture(t)
 	root := opts.Config.Root
 	home := filepath.Dir(root)
 	top := filepath.Join(root, "config.toml")
-	retiredPath := filepath.Join(root, "projects", string(project), "config.toml")
 
 	// Project creation, with a fake GitHub whose repository is a local bare one.
 	cloneDir := filepath.Join(home, "clones")
@@ -81,18 +79,11 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 		}
 	}
 
-	// Startup imports the list and the project's file.
 	s, c := start(t, opts)
 	untouched("startup")
 	store := projectstore.Open(mustRoot(t, root))
-	if done, err := store.Imported(); err != nil || !done {
-		t.Fatalf("import complete: %t %v", done, err)
-	}
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(project)}) {
-		t.Fatalf("registry after the import: %v", got)
-	}
-	if got := stateOf(t, retiredPath); !strings.HasPrefix(got.data, projectstore.RetiredMark) {
-		t.Fatalf("the imported file is not retired: %q", got.data)
+		t.Fatalf("registry at startup: %v", got)
 	}
 
 	// Read and save settings.
@@ -134,19 +125,13 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 	untouched("settings saves")
 
 	// With the save pending, a top-level change and a reload apply the top-level
-	// change only. Editing the retired file and the leftover list changes nothing.
+	// change only.
 	edited, err := os.ReadFile(top)
 	must(t, err)
-	relisted := strings.Replace(string(edited), `"`+string(project)+`"`, `"p_00000000000000000000000000000007"`, 1)
-	if relisted == string(edited) {
-		t.Fatal("the leftover list is not in the top-level file")
-	}
 	must(t, os.Chmod(top, 0600))
-	must(t, os.WriteFile(top, []byte(relisted+"\n[capacity]\nmasons = 7\n"), 0600))
+	must(t, os.WriteFile(top, append(edited, "\n[capacity]\nmasons = 7\n"...), 0600))
 	must(t, os.Chmod(top, 0400))
 	baseline = stateOf(t, top)
-	must(t, os.WriteFile(retiredPath, []byte("landing = \"sideways\"\n"), 0600))
-	retired := stateOf(t, retiredPath)
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	now, err := c.Configuration(ctx)
@@ -161,9 +146,6 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 	}
 	if now.Drift.Differs || len(now.Drift.Files) != 1 || now.Drift.Files[0].Path != top {
 		t.Fatalf("drift: %+v", now.Drift)
-	}
-	if got := stateOf(t, retiredPath); got != retired {
-		t.Fatal("the retired file changed")
 	}
 	untouched("reload")
 
@@ -224,7 +206,7 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 	if p := s.current().For(project).Project; p.ChecksTimeout != "45m" || p.Landing != "squash" {
 		t.Fatalf("the last saved settings after the restart: %+v", p)
 	}
-	if entries, err := os.ReadDir(filepath.Join(root, "projects")); err != nil || len(entries) != 4 {
+	if entries, err := os.ReadDir(filepath.Join(root, "projects")); err != nil || len(entries) != 3 {
 		t.Fatalf("project directories: %v %v", entries, err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "project-add.json")); !os.IsNotExist(err) {
@@ -263,18 +245,13 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 	if strings.Contains(err.Error(), "config.toml") || strings.Contains(err.Error(), "by hand") {
 		t.Fatalf("the refusal points at a file: %v", err)
 	}
-	// The command refuses nothing while the service is stopped, and repairs the
-	// stored settings without reading the retired file.
+	// The command refuses nothing while the service is stopped.
 	repaired := filepath.Join(home, "repaired-clone")
 	demoGit(t, home, "init", "--quiet", repaired)
-	must(t, os.Remove(retiredPath))
-	must(t, os.Mkdir(retiredPath, 0700))
 	code, text, diag = osmia(t, root, "project", "settings", string(project), "set", "clone="+repaired)
 	if code != 0 {
 		t.Fatalf("repair: %d %s %s", code, text, diag)
 	}
-	must(t, os.Remove(retiredPath))
-	must(t, os.WriteFile(retiredPath, []byte(retired.data), 0600))
 	untouched("the refused start and the repair")
 	s, c = start(t, opts)
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
@@ -284,17 +261,14 @@ func TestSettingsStoreRunsTheWholePathFromALegacyRoot(t *testing.T) {
 		t.Fatalf("settings after the repair: %+v", p)
 	}
 	untouched("the start after the repair")
-	// The import, two saves and the repair are the project's revisions, and no
-	// project file was written after the import retired it.
+	// The first settings, two saves and the repair are the project's revisions,
+	// and no project file was written.
 	if revisions, err := store.Revisions(project); err != nil || len(revisions) != 4 {
 		t.Fatalf("revisions: %d %v", len(revisions), err)
 	}
-	if got, _ := os.ReadFile(retiredPath); string(got) != retired.data {
-		t.Fatalf("the retired file changed:\n%s", got)
-	}
 	files, err := filepath.Glob(filepath.Join(root, "projects", "*", "config.toml"))
 	must(t, err)
-	if !reflect.DeepEqual(files, []string{retiredPath}) {
+	if len(files) != 0 {
 		t.Fatalf("project files: %v", files)
 	}
 	_ = c

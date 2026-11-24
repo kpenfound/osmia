@@ -16,6 +16,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	adaptertest "github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	reconcile "github.com/kpenfound/osmia/internal/reconcile"
 	router "github.com/kpenfound/osmia/internal/router"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -183,7 +184,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	data, err := os.ReadFile(global)
 	must(t, err)
 	must(t, os.WriteFile(global, append(data, []byte("[events]\nwindow = \"1000h\"\n")...), 0600))
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 
@@ -311,7 +312,7 @@ func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
 	home, err := os.MkdirTemp("", "ao-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixtureAt(t, home).Config)
+	cfg, err := projectstore.LoadConfig(fixtureAt(t, home).Config)
 	must(t, err)
 	clock := &demoClock{At: demoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}

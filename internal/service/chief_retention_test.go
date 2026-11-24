@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -16,7 +16,7 @@ func TestChiefActiveViewRetiresOwnDocumentsAndPreservesHistory(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			opts := fixtureAt(t, t.TempDir())
-			cfg, err := config.Load(opts.Config)
+			cfg, err := projectstore.LoadConfig(opts.Config)
 			must(t, err)
 			repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, ownerActor)
 			must(t, err)

@@ -2,10 +2,8 @@ package intakefixture
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -33,18 +32,13 @@ func NewWiringSetup(t *testing.T, home string, cfgOptions config.Options, agents
 	t.Helper()
 	ctx := context.Background()
 	root := cfgOptions.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	Must(t, err)
-	listed := strings.Replace(string(top), fmt.Sprintf("active_projects = [%q]", fixturekit.Project), fmt.Sprintf("active_projects = [%q, %q]", fixturekit.Project, fixturekit.OtherProject), 1)
-	Must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(listed), 0600))
 	home2 := filepath.Join(home, "repo2")
-	Must(t, os.MkdirAll(filepath.Join(root, "projects", string(fixturekit.OtherProject)), 0700))
-	Must(t, os.WriteFile(filepath.Join(root, "projects", string(fixturekit.OtherProject), "config.toml"), []byte(`version = 1
+	fixturekit.RegisterProject(t, root, fixturekit.OtherProject, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+home2+`"
-`), 0600))
-	cfg, err := config.Load(cfgOptions)
+`)
+	cfg, err := projectstore.LoadConfig(cfgOptions)
 	Must(t, err)
 
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}

@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 )
 
@@ -12,7 +11,7 @@ func TestSbxRoleConfigurationAndFallback(t *testing.T) {
 		for _, image := range []string{"", "example/sandbox:1"} {
 			t.Run(backend+"/"+image, func(t *testing.T) {
 				top := topConfig + fmt.Sprintf("fallback = 'backup'\n[profiles.backup]\nagent = %q\nmodel = 'test'\n[roles.mason]\nsandbox = 'sbx'\nimage = %q\n", backend, image) + managedDagger
-				cfg, err := Load(fixture(t, top, projectConfig))
+				cfg, err := load(fixture(t, top, projectConfig))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -27,8 +26,6 @@ func TestSbxRoleConfigurationAndFallback(t *testing.T) {
 	}
 }
 
-// managedDagger selects the managed engine at a release, which a mason in sbx
-// runs Dagger on.
 const managedDagger = "[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\n"
 
 // A mason in sbx runs Dagger on the service's engine: a host engine with the
@@ -45,7 +42,7 @@ func TestMasonDaggerFollowsTheServiceEngine(t *testing.T) {
 		{"managed with cloud fallback", "[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\ncloud_compute_token_env = 'OSMIA_CLOUD_TOKEN'\ncheck_fallback = 'cloud'\n", "docker-container://osmia-dagger-engine", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(fixture(t, topConfig+"[roles.mason]\nsandbox = 'sbx'\n"+tc.dagger, projectConfig))
+			cfg, err := load(fixture(t, topConfig+"[roles.mason]\nsandbox = 'sbx'\n"+tc.dagger, projectConfig))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,16 +66,13 @@ func TestMasonDaggerFollowsTheServiceEngine(t *testing.T) {
 					t.Fatalf("%s execution %+v: %v", role, settings, err)
 				}
 			}
-			if len(cfg.Warnings) != 0 {
-				t.Fatalf("warnings %v", cfg.Warnings)
-			}
 		})
 	}
 	for sandbox, roles := range map[string]string{
 		"container": "[roles.mason]\nsandbox = 'container'\nimage = 'example/mason:1'\n",
 		"none":      "[roles.mason]\nsandbox = 'none'\n",
 	} {
-		cfg, err := Load(fixture(t, topConfig+roles, projectConfig))
+		cfg, err := load(fixture(t, topConfig+roles, projectConfig))
 		if err != nil {
 			t.Fatalf("%s: %v", sandbox, err)
 		}
@@ -99,36 +93,7 @@ func TestMasonDaggerRefusesAnEngineItCannotFollow(t *testing.T) {
 		"address, no version": {"[dagger]\nengine = 'tcp://127.0.0.1:1234'\n", "dagger.version"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Load(fixture(t, topConfig+"[roles.mason]\nsandbox = 'sbx'\n"+c.dagger, projectConfig))
-			var field *FieldError
-			if !errors.As(err, &field) || field.Field != c.field {
-				t.Fatalf("got %#v (%v), want an error naming %s", field, err, c.field)
-			}
-		})
-	}
-}
-
-// A leftover [roles.mason.dagger] section loads with a warning and no effect:
-// the mason keeps the service's engine. Any other role's dagger section, and
-// any other key in the mason's, is refused.
-func TestMasonDaggerSectionIsIgnored(t *testing.T) {
-	top := topConfig + "[roles.mason]\nsandbox = 'sbx'\n[roles.mason.dagger]\nversion = 'v0.19.0'\nengine = 'tcp://127.0.0.1:1234'\n" + managedDagger
-	cfg, err := Load(fixture(t, top, projectConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(cfg.Warnings, []string{MasonDaggerIgnored}) {
-		t.Fatalf("warnings %v", cfg.Warnings)
-	}
-	if _, settings, err := cfg.Execution("mason", "default"); err != nil || settings.Dagger == nil || settings.Dagger.Engine != "docker-container://osmia-dagger-engine" || settings.Dagger.Version != "v0.20.5" {
-		t.Fatalf("mason execution %+v: %v", settings, err)
-	}
-	for name, c := range map[string]struct{ roles, field string }{
-		"other role":  {"[roles.reviewer]\nsandbox = 'sbx'\n[roles.reviewer.dagger]\nversion = 'v0.20.5'\n", "roles.reviewer.dagger"},
-		"unknown key": {"[roles.mason]\nsandbox = 'sbx'\n[roles.mason.dagger]\ncloud_token = 'x'\n" + managedDagger, "roles.mason.dagger.cloud_token"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := Load(fixture(t, topConfig+c.roles, projectConfig))
+			_, err := load(fixture(t, topConfig+"[roles.mason]\nsandbox = 'sbx'\n"+c.dagger, projectConfig))
 			var field *FieldError
 			if !errors.As(err, &field) || field.Field != c.field {
 				t.Fatalf("got %#v (%v), want an error naming %s", field, err, c.field)
@@ -141,7 +106,7 @@ func TestSbxRoleSizingReachesEveryProfileOfTheRole(t *testing.T) {
 	top := topConfig + "fallback = 'backup'\n[profiles.backup]\nagent = 'codex'\nmodel = 'test'\n" +
 		"[roles.mason]\nsandbox = 'sbx'\nimage = 'example/sandbox:1'\ncpus = 2\nmemory = '4g'\n" +
 		"[roles.reviewer]\nsandbox = 'sbx'\nmemory = '512m'\n[roles.committee]\nsandbox = 'sbx'\n" + managedDagger
-	cfg, err := Load(fixture(t, top, projectConfig))
+	cfg, err := load(fixture(t, top, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +148,10 @@ func TestSbxRoleSizingIsValidatedAtLoad(t *testing.T) {
 		"option in the value":         {"[roles.mason]\nsandbox = 'sbx'\nmemory = '4g --privileged'\n", "roles.mason.memory"},
 		"shell metacharacters":        {"[roles.mason]\nsandbox = 'sbx'\nmemory = '4g;reboot'\n", "roles.mason.memory"},
 		"sizing key not on knownKey":  {"[roles.mason]\nsandbox = 'sbx'\ncpu = 2\n", "roles.mason.cpu"},
-		"sizing in the dagger table":  {"[roles.mason]\nsandbox = 'sbx'\n[roles.mason.dagger]\ncpus = 2\n" + managedDagger, "roles.mason.dagger.cpus"},
 		"another role, wrong sandbox": {"[roles.committee]\nsandbox = 'none'\nmemory = '2g'\n", "roles.committee.memory"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Load(fixture(t, topConfig+c.roles, projectConfig))
+			_, err := load(fixture(t, topConfig+c.roles, projectConfig))
 			var field *FieldError
 			if !errors.As(err, &field) || field.Field != c.field {
 				t.Fatalf("got %#v (%v), want an error naming %s", field, err, c.field)
@@ -199,7 +163,7 @@ func TestSbxRoleSizingIsValidatedAtLoad(t *testing.T) {
 		"[roles.reviewer]\nsandbox = 'sbx'\nmemory = '32g'\n",
 		"[roles.mason]\nsandbox = 'sbx'\ncpus = 64\n",
 	} {
-		if _, err := Load(fixture(t, topConfig+roles+managedDagger, projectConfig)); err != nil {
+		if _, err := load(fixture(t, topConfig+roles+managedDagger, projectConfig)); err != nil {
 			t.Fatalf("%q: %v", roles, err)
 		}
 	}

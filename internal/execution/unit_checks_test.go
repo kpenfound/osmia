@@ -22,6 +22,7 @@ import (
 	checkselect "github.com/kpenfound/osmia/internal/checkselect"
 	config "github.com/kpenfound/osmia/internal/config"
 	jev "github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
@@ -618,7 +619,7 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 			top, err := os.ReadFile(path)
 			must(t, err)
 			must(t, os.WriteFile(path, append(top, []byte("\n[jev]\n"+value+"\n")...), 0600))
-			loaded, err := config.Load(config.Options{Root: f.cfg.Root.String()})
+			loaded, err := projectstore.LoadConfig(config.Options{Root: f.cfg.Root.String()})
 			must(t, err)
 			settings := loaded.Jev
 			response := systemone.Response{Model: "jev-test", Answers: map[string]systemone.Answer{"check-0": jevtest.Noul(.1), "check-1": jevtest.Noul(.4), "check-2": jevtest.Noul(.3)}}

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 )
 
 // configDrift compares the top-level configuration file on disk with cfg,
@@ -17,7 +16,7 @@ func (s *Service) configDrift(cfg *config.Config, reloaded error) ConfigDrift {
 	file := ConfigFile{Path: path, State: ConfigUnchanged}
 	if disk, err := config.LoadTopLevel(s.options.Config); err != nil {
 		file.State, file.Reason = ConfigInvalid, fileReason(err)
-	} else if digest(projectmigration.Compose(disk, cfg.Projects)) != digest(cfg) {
+	} else if digest(disk.WithLoadedProjects(cfg.Projects)) != digest(cfg) {
 		file.State = ConfigChanged
 	}
 	if reloaded != nil && file.State != ConfigInvalid {

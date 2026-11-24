@@ -11,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/recordspans"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/telemetry"
@@ -46,7 +47,7 @@ func TestStatusTelemetryIdentityMatchesTheSpansTheRecorderSends(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	exporter := tracetest.NewInMemoryExporter()
@@ -127,7 +128,7 @@ func TestStatusTelemetryIdentityIsOnEveryRowWithoutExportAndAcrossRestarts(t *te
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	created := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
 	archived := config.WorkstreamID("w_00000000000000000000000000000a01")

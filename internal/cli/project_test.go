@@ -25,7 +25,6 @@ func emptyFixture(t *testing.T) (service.Options, string) {
 	must(t, os.MkdirAll(root, 0700))
 	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(`# owner comment
 version=1
-active_projects=[]
 [profiles.default]
 agent="claude"
 model="test"
@@ -85,7 +84,7 @@ func TestProjectCommands(t *testing.T) {
 	text, err := os.ReadFile(filepath.Join(root, "config.toml"))
 	must(t, err)
 	// The registration lists the project in the store, never in the top-level file.
-	if !strings.HasPrefix(string(text), "# owner comment\n") || !strings.Contains(string(text), "active_projects=[]\n") || strings.Contains(string(text), string(id)) {
+	if !strings.HasPrefix(string(text), "# owner comment\n") || strings.Contains(string(text), string(id)) {
 		t.Fatalf("configuration:\n%s", text)
 	}
 	status = successful(t, root, "status")

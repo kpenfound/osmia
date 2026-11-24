@@ -19,7 +19,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	names := map[config.ProjectID]string{project: "Dagger", otherProject: "Osmia"}
 	for _, p := range f.cfg.Projects {
 		p.Name = names[p.ID]
-		fixturekit.WriteProjectFile(t, filepath.Join(f.opts.Config.Root, "projects", string(p.ID), "config.toml"), p)
+		fixturekit.SaveProjectSettings(t, f.opts.Config.Root, p)
 	}
 	withWeb(t, f.opts, "127.0.0.1:0")
 	clone := filepath.Join(t.TempDir(), "client")

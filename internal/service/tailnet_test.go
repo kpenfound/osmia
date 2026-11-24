@@ -142,7 +142,7 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	s, c := start(t, opts)
 	node, addr := *joined, s.TailnetAddr()
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia-2\"", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia-2\"", 1))
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) {
@@ -157,14 +157,14 @@ func TestReloadKeepsTheTailnetListener(t *testing.T) {
 		t.Fatalf("tailnet after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("removed listen.tailnet: %+v, bound %s", reloaded, s.TailnetAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia.example\"", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia.example\"", 1))
 	reloadFails(t, c, files.top, "listen.tailnet")
 }
 

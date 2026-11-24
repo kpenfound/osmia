@@ -132,7 +132,7 @@ func TestReloadKeepsTheWebListener(t *testing.T) {
 	s, c := start(t, opts)
 	addr := s.WebAddr()
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "[::1]:0", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "[::1]:0", 1))
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) {
@@ -147,14 +147,14 @@ func TestReloadKeepsTheWebListener(t *testing.T) {
 		t.Fatalf("web after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) || s.WebAddr() != addr {
 		t.Fatalf("removed listen.web: %+v, bound %s", reloaded, s.WebAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "0.0.0.0:0", 1), files.projectText)
+	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "0.0.0.0:0", 1))
 	reloadFails(t, c, files.top, "listen.web")
 }
 

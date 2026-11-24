@@ -29,8 +29,6 @@ func defaultTranscribe() Transcribe {
 // Enabled reports whether a transcription endpoint is configured.
 func (t Transcribe) Enabled() bool { return t.URL != "" }
 
-// The settings are validated whether or not transcription is on, so setting
-// the URL never reveals a broken model or key name.
 func (t Transcribe) validate(path string) error {
 	if t.URL != "" {
 		u, err := url.Parse(t.URL)

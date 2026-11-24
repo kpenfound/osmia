@@ -15,9 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-// settingsRoot is a root whose project registry and settings hold one project,
-// imported from a legacy root the way the service imports it. The project's
-// retired file is replaced by a directory, so any read of it fails.
+// settingsRoot is a root whose project registry and settings hold one project.
 type settingsRoot struct {
 	t     *testing.T
 	root  string
@@ -30,24 +28,15 @@ func newSettingsRoot(t *testing.T) *settingsRoot {
 	base := shortDir(t)
 	r := &settingsRoot{t: t, root: filepath.Join(base, "r"), clone: filepath.Join(base, "clone")}
 	must(t, os.Mkdir(r.clone, 0700))
-	writeFile(t, filepath.Join(r.root, "config.toml"), "# owned elsewhere\nversion = 1\nactive_projects = [\""+project+"\"]\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n")
-	writeFile(t, filepath.Join(r.root, "projects", project, "config.toml"), "# the project's own comment\nversion = 1\nupstream = \"upstream/repo\"\nfork = \"owner/repo\"\nclone = \""+r.clone+"\"\n")
+	writeFile(t, filepath.Join(r.root, "config.toml"), "# owned elsewhere\nversion = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n")
+	register(t, r.root, project, "# the project's own comment\nversion = 1\nupstream = \"upstream/repo\"\nfork = \"owner/repo\"\nclone = \""+r.clone+"\"\n")
 	cfg, err := config.LoadTopLevel(config.Options{Root: r.root})
 	must(t, err)
 	r.store = projectstore.Open(cfg.Root)
-	must(t, r.store.Import(context.Background(), cfg, ""))
 	return r
 }
 
 func (r *settingsRoot) topLevel() string { return filepath.Join(r.root, "config.toml") }
-
-// unreadableRetiredFile makes the project's retired file unreadable: a read of
-// it fails.
-func (r *settingsRoot) unreadableRetiredFile() {
-	path := filepath.Join(r.root, "projects", project, "config.toml")
-	must(r.t, os.Remove(path))
-	must(r.t, os.Mkdir(path, 0700))
-}
 
 // breakClone turns the project's clone path into a regular file, so the
 // stored settings no longer load.
@@ -77,7 +66,6 @@ func (r *settingsRoot) run(args ...string) (int, string, string) {
 
 func TestProjectSettingsRepairsSettingsThatDoNotLoad(t *testing.T) {
 	r := newSettingsRoot(t)
-	r.unreadableRetiredFile()
 	r.breakClone()
 	must(t, os.Chmod(r.topLevel(), 0400))
 	if r.loadErr() == nil {
@@ -135,9 +123,6 @@ func TestProjectSettingsRepairsSettingsThatDoNotLoad(t *testing.T) {
 	}
 	if now, err := os.ReadFile(r.topLevel()); err != nil || string(now) != string(topLevel) {
 		t.Fatalf("the top-level file changed: %v\n%s", err, now)
-	}
-	if info, err := os.Stat(filepath.Join(r.root, "projects", project, "config.toml")); err != nil || !info.IsDir() {
-		t.Fatal("the retired file was touched")
 	}
 
 	code, out, diag = r.run("show")
@@ -252,10 +237,6 @@ func TestProjectSettingsEditsAndClearsSettings(t *testing.T) {
 func TestProjectSettingsRefusesWhileTheServiceRuns(t *testing.T) {
 	opts := fixture(t)
 	root := opts.Config.Root
-	cfg, err := config.LoadTopLevel(config.Options{Root: root})
-	must(t, err)
-	store := projectstore.Open(cfg.Root)
-	must(t, store.Import(context.Background(), cfg, ""))
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
@@ -335,10 +316,6 @@ func TestProjectSettingsHoldsTheServiceLockWhileItWrites(t *testing.T) {
 func TestProjectSettingsRefusesAProjectNotInTheRegistry(t *testing.T) {
 	const other = "p_fedcba9876543210fedcba9876543210"
 	r := newSettingsRoot(t)
-	// The other project has a file of its own that a legacy Osmia would read,
-	// made unreadable: the command must not read it.
-	must(t, os.MkdirAll(filepath.Join(r.root, "projects", other, "config.toml"), 0700))
-	r.unreadableRetiredFile()
 	before := snapshot(t, r.root)
 	for _, args := range [][]string{{"show"}, {"set", "base_branch=trunk"}} {
 		code, out, diag := invoke(t, r.root, append([]string{"project", "settings", other}, args...)...)
@@ -352,23 +329,6 @@ func TestProjectSettingsRefusesAProjectNotInTheRegistry(t *testing.T) {
 	// The registered project is not affected by the refusals.
 	if code, out, diag := r.run("show"); code != 0 {
 		t.Fatalf("%d\n%s\n%s", code, out, diag)
-	}
-}
-
-func TestProjectSettingsRefusesARootThatIsNotImported(t *testing.T) {
-	base := shortDir(t)
-	root := filepath.Join(base, "r")
-	writeFile(t, filepath.Join(root, "config.toml"), "version = 1\nactive_projects = [\""+project+"\"]\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n")
-	// The legacy project file is the only record of the project; it must not be
-	// read, and no store is created.
-	writeFile(t, filepath.Join(root, "projects", project, "config.toml"), "version = 1\nupstream = \"a/b\"\nclone = \""+base+"/clone\"\n")
-	before := snapshot(t, root)
-	code, out, diag := invoke(t, root, "project", "settings", project, "set", "base_branch=trunk")
-	if code == 0 || out != "" || !strings.Contains(diag, "not in the registry") {
-		t.Fatalf("%d\n%s\n%s", code, out, diag)
-	}
-	if !reflect.DeepEqual(before, snapshot(t, root)) {
-		t.Fatal("a refused command changed the root")
 	}
 }
 

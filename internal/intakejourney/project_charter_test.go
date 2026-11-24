@@ -28,9 +28,7 @@ func TestProjectCharterRemainsReadableWhileMemberTurnsDrain(t *testing.T) {
 			_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{otherStream}, f.clock.Now(), serviceActor, "fixture")
 			must(t, err)
 			must(t, repo.Close())
-			path, err := f.cfg.Root.ProjectConfig(member.ID)
-			must(t, err)
-			fixturekit.WriteProjectFile(t, path, member)
+			fixturekit.SaveProjectSettings(t, f.cfg.Root.String(), member)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }

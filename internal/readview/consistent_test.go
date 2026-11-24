@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -16,7 +17,7 @@ import (
 func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	t.Parallel()
 	opts := fixturekit.ConfigAt(t, t.TempDir())
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)
@@ -65,7 +66,7 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 func TestConsistentReadReturnsWithoutARacingWrite(t *testing.T) {
 	t.Parallel()
 	opts := fixturekit.ConfigAt(t, t.TempDir())
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)

@@ -67,7 +67,7 @@ func newReporterRig(t *testing.T, text string, tune func(*ErrorReporterOptions))
 	}
 	r.files = configFiles(t, r.opts)
 	if text != "" {
-		r.files.write(t, r.files.topText+text, r.files.projectText)
+		r.files.write(t, r.files.topText+text)
 	}
 	t.Cleanup(r.stop)
 	r.launch()
@@ -101,7 +101,7 @@ func (r *reporterRig) restart() {
 // reload replaces the error reports section and reloads the service.
 func (r *reporterRig) reload(text string) {
 	r.t.Helper()
-	r.files.write(r.t, r.files.topText+text, r.files.projectText)
+	r.files.write(r.t, r.files.topText+text)
 	_, err := r.c.Reload(context.Background())
 	must(r.t, err)
 }

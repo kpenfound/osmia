@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -21,7 +22,7 @@ import (
 // engines: one for the architect and one for the committee.
 func webTurnController(t *testing.T) (*lifecycle.Controller, *adaptertest.Engine, *adaptertest.RecordingHosts, *adaptertest.Engine, *adaptertest.RecordingHosts) {
 	t.Helper()
-	cfg, err := config.Load(fixturekit.ConfigAt(t, t.TempDir()))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, t.TempDir()))
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.MkdirAll(filepath.Join(cfg.Root.String(), "views"), 0700))
 	architect, architectHosts := &adaptertest.Engine{}, &adaptertest.RecordingHosts{}

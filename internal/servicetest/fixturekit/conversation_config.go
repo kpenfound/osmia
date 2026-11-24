@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -18,7 +19,7 @@ func Conversation(t *testing.T, prefix string) (config.Options, *config.Config) 
 	Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := ConfigAt(t, home)
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	Must(t, err)
 	Must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 	DemoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")

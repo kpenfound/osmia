@@ -19,6 +19,7 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/kpenfound/osmia/internal/projectstore"
 	testing "testing"
 	time "time"
 )
@@ -620,7 +621,7 @@ func TestReplyRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			f.stop(t)
 			p.Check(t)
 
-			cfg, err := config.Load(f.opts.Config)
+			cfg, err := projectstore.LoadConfig(f.opts.Config)
 			must(t, err)
 			repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 			must(t, err)

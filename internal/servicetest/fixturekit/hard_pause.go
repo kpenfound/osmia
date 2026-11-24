@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 	"testing"
 )
@@ -15,7 +16,7 @@ func HardPauseRepository(t *testing.T, n int) (*config.Config, *trace.Repository
 	t.Helper()
 	ctx := context.Background()
 	home := t.TempDir()
-	cfg, err := config.Load(ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(ConfigAt(t, home))
 	Must(t, err)
 	clock := &DemoClock{At: DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}

@@ -2,7 +2,7 @@ package executionjourney
 
 import (
 	context "context"
-	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	http "net/http"
 	httptest "net/http/httptest"
@@ -14,7 +14,7 @@ import (
 func traceService(t *testing.T, f *walkFixture) *Service {
 	t.Helper()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	return &Service{cfg: cfg, projects: []*activeProject{runtimeFor(f.repo)}}
 }

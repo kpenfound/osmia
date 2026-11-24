@@ -10,6 +10,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -62,7 +63,7 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
@@ -277,7 +278,7 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")

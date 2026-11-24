@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -19,7 +19,7 @@ func TestServiceSendsWorkstreamSpansAndTheRootOnArchive(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	created := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, created, serviceActor)

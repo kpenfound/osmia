@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// githubUser is a GitHub user account name: 1 to 39 letters, digits and
-// single hyphens, neither starting nor ending with a hyphen.
 var githubUser = regexp.MustCompile(`^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$`)
 
 // ProjectCreation is the top-level [projects] table. RepoOwner is the GitHub
@@ -35,8 +33,6 @@ func (p ProjectCreation) MissingSetting() string {
 	return ""
 }
 
-// validate checks both keys and resolves CloneDir. An unset key is valid;
-// creation simply stays off.
 func (p *ProjectCreation) validate(path string, root Root, home string) error {
 	if p.RepoOwner != "" && (len(p.RepoOwner) > 39 || !githubUser.MatchString(p.RepoOwner)) {
 		return fieldError(path, "projects.repo_owner", "must be a GitHub user account name: up to 39 letters, digits and single hyphens")

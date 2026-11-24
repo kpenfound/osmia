@@ -46,26 +46,6 @@ func TestStartWithAPreexistingBeekeeperDirectoryLeavesItUntouched(t *testing.T) 
 	}
 }
 
-// TestTopLevelConfigurationWithABeekeeperSectionStartsTheService shows that
-// a top-level configuration still carrying a [beekeeper] section, left
-// behind from an earlier version, loads without error and the service
-// starts with it (spec#4): the section has no effect.
-func TestTopLevelConfigurationWithABeekeeperSectionStartsTheService(t *testing.T) {
-	t.Parallel()
-	opts, _ := projectFixture(t)
-	path := filepath.Join(opts.Config.Root, "config.toml")
-	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("[beekeeper]\nname = \"Hive\"\nprofile = \"default\"\nsandbox = \"none\"\n")...), 0600))
-
-	_, c := start(t, opts)
-	health, err := c.Health(context.Background())
-	must(t, err)
-	if !health.Ready {
-		t.Fatalf("service did not start ready with a leftover [beekeeper] section: %+v", health)
-	}
-}
-
 // TestLegacyBeekeeperAttributedTurnReadsThroughEveryView builds a registered
 // project's trace holding an ordinary owner chief-of-staff exchange and a
 // chief-of-staff turn whose request actor has the legacy "beekeeper" kind,

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,39 +48,5 @@ func TestServiceStartsWithJevUnconfigured(t *testing.T) {
 		if _, ok := fields["enabled"]; ok {
 			t.Fatalf("%s response carries the removed switch: %s", name, raw)
 		}
-	}
-}
-
-// The removed [jev] enabled switch is accepted and ignored. A false value
-// logs one warning each time the configuration is loaded or reloaded, and a
-// true value logs none.
-func TestJevEnabledSwitchWarnsOnceWhenFalse(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		value string
-		want  int
-	}{{"true", 0}, {"false", 1}} {
-		t.Run(tc.value, func(t *testing.T) {
-			t.Parallel()
-			opts := fixture(t)
-			withTopLevel(t, opts, "\n[jev]\nenabled = "+tc.value+"\n")
-			var buf syncBuffer
-			opts.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
-			_, c := start(t, opts)
-			warnings := func() int { return strings.Count(buf.String(), `"level":"WARN","msg":"jev.enabled = false is ignored`) }
-			if got := warnings(); got != tc.want {
-				t.Fatalf("%d warnings after start, want %d: %s", got, tc.want, buf.String())
-			}
-			runtime, err := c.Runtime(context.Background())
-			must(t, err)
-			if runtime.Jev.Mode == "" {
-				t.Fatalf("status = %+v", runtime.Jev)
-			}
-			_, err = c.Reload(context.Background())
-			must(t, err)
-			if got := warnings(); got != 2*tc.want {
-				t.Fatalf("%d warnings after reload, want %d: %s", got, 2*tc.want, buf.String())
-			}
-		})
 	}
 }

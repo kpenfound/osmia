@@ -24,7 +24,6 @@ import (
 const projectID = "p_0123456789abcdef0123456789abcdef"
 
 const topLevel = `version = 1
-active_projects = [%q]
 
 [profiles.default]
 agent = "claude"
@@ -99,11 +98,13 @@ func fixture(t *testing.T) (Options, string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 	dir := filepath.Join(base, "r")
 	must(t, os.MkdirAll(filepath.Join(dir, "projects", projectID), 0o700))
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), fmt.Appendf(nil, topLevel, projectID), 0o600))
-	project := fmt.Sprintf("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = %q\n", clone)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "config.toml"), []byte(project), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel), 0o600))
 	root, err := config.ResolveRoot(dir, "")
 	must(t, err)
+	store := projectstore.Open(root)
+	_, err = store.WriteFirst(projectID, fmt.Appendf(nil, "version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = %q\n", clone))
+	must(t, err)
+	must(t, store.Add(projectID))
 	h := host{}
 	return Options{
 		Root: root, LookPath: h.lookPath, Command: h.command,
@@ -284,8 +285,12 @@ func TestConfigurationErrorsNameTheField(t *testing.T) {
 }
 
 func TestProjectConfigurationError(t *testing.T) {
-	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "config.toml"), []byte("version = 1\nname = \"widgets\"\nupstream = \"https://github.com/acme/widgets\"\nclone = \"/x\"\n"), 0o600))
+	o, _ := fixture(t)
+	store := projectstore.Open(o.Root)
+	current, err := store.Current(projectID)
+	must(t, err)
+	_, err = store.Replace(projectID, current.Pin, []byte("version = 1\nname = \"widgets\"\nupstream = \"https://github.com/acme/widgets\"\nclone = \"/x\"\n"))
+	must(t, err)
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "project "+projectID), Fail, "upstream")
 	absent(t, checks, "widgets clone")
@@ -293,7 +298,7 @@ func TestProjectConfigurationError(t *testing.T) {
 
 func TestToolchainFollowsConfiguration(t *testing.T) {
 	o, dir := fixture(t)
-	cfg := "workspaces = \"jujutsu\"\n" + fmt.Sprintf(topLevel, projectID) + `[profiles.backup]
+	cfg := "workspaces = \"jujutsu\"\n" + topLevel + `[profiles.backup]
 agent = "codex"
 model = "gpt"
 [profiles.main]
@@ -319,7 +324,7 @@ sandbox = "sbx"
 	expect(t, find(t, checks, "dagger"), Warn, "not on PATH")
 	expect(t, find(t, checks, "jj"), Fail, "jj is missing")
 
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), fmt.Appendf(nil, topLevel, projectID), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel), 0o600))
 	checks = Run(context.Background(), o)
 	expect(t, find(t, checks, "jj"), Warn, "Git worktrees")
 	absent(t, checks, "codex")
@@ -373,7 +378,6 @@ func TestProjectRemotes(t *testing.T) {
 
 	git(t, clone, "remote", "add", "origin", filepath.Join(filepath.Dir(dir), "remotes", "acme", "widgets"))
 	project := fmt.Sprintf("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nfork = \"me/widgets\"\nbase_branch = \"trunk\"\nclone = %q\n", clone)
-	// The first run imported the project, so its settings change in the store.
 	store := projectstore.Open(o.Root)
 	current, err := store.Current(projectID)
 	must(t, err)
@@ -429,66 +433,30 @@ func TestJevNeedsItsKey(t *testing.T) {
 	}
 }
 
-// Doctor imports a legacy root's projects into the store as serve does, and
-// from then on reads no project file: its checks pass with the retired file
-// unreadable, and it changes nothing.
-func TestImportsProjectsThenReadsOnlyTheStore(t *testing.T) {
+func TestDoctorChangesNoTopLevelFile(t *testing.T) {
 	o, dir := fixture(t)
-	file := filepath.Join(dir, "projects", projectID, "config.toml")
-	original, err := os.ReadFile(file)
+	before, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	must(t, err)
-	top, err := os.ReadFile(filepath.Join(dir, "config.toml"))
-	must(t, err)
-
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
-	store := projectstore.Open(o.Root)
-	if done, err := store.Imported(); err != nil || !done {
-		t.Fatalf("import complete: %t %v", done, err)
-	}
-	retired, err := os.ReadFile(file)
-	must(t, err)
-	if string(retired) != projectstore.RetiredMark+string(original) {
-		t.Fatalf("retired file %q", retired)
-	}
-
-	must(t, os.Remove(file))
-	must(t, os.Mkdir(file, 0o700))
-	var steps []string
-	o.Step = func(name string) error { steps = append(steps, name); return nil }
-	checks = Run(context.Background(), o)
-	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
-	if len(steps) != 0 {
-		t.Fatalf("a completed import ran steps: %v", steps)
-	}
 	after, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	must(t, err)
-	if string(after) != string(top) {
+	if string(after) != string(before) {
 		t.Fatal("doctor changed the top-level file")
 	}
 }
 
-// A listed file that does not load stops the import with nothing changed, and
-// the check names the project's file and field.
-func TestImportRefusesAListedFileThatDoesNotLoad(t *testing.T) {
-	o, dir := fixture(t)
-	file := filepath.Join(dir, "projects", projectID, "config.toml")
-	must(t, os.WriteFile(file, []byte("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = \"/x\"\nlanding = \"sideways\"\n"), 0o600))
-	before, err := os.ReadFile(file)
+func TestStoredSettingsThatDoNotLoadNameTheFieldWithoutItsValue(t *testing.T) {
+	o, _ := fixture(t)
+	store := projectstore.Open(o.Root)
+	current, err := store.Current(projectID)
+	must(t, err)
+	_, err = store.Replace(projectID, current.Pin, []byte("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = \"/x\"\nlanding = \"sideways\"\n"))
 	must(t, err)
 	checks := Run(context.Background(), o)
 	c := find(t, checks, "project "+projectID)
-	expect(t, c, Fail, file)
 	expect(t, c, Fail, "landing")
-	if strings.Contains(c.Detail, "sideways") || !Failed(checks) {
+	if strings.Contains(c.Detail, "sideways") || strings.Contains(c.Detail, "config.toml") || !Failed(checks) {
 		t.Fatalf("%+v", c)
-	}
-	after, err := os.ReadFile(file)
-	must(t, err)
-	if string(before) != string(after) {
-		t.Fatal("a refused import changed the file")
-	}
-	if done, err := projectstore.Open(o.Root).Imported(); err != nil || done {
-		t.Fatalf("imported: %t %v", done, err)
 	}
 }

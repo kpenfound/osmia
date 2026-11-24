@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -155,7 +156,7 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			home, err := os.MkdirTemp("", "picks-")
 			must(t, err)
 			t.Cleanup(func() { os.RemoveAll(home) })
-			cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+			cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 			must(t, err)
 			repository, err := trace.Create(t.Context(), cfg.Root, cfg.Project, fixturekit.DemoStart, trace.Actor{Kind: "service", ID: "fixture"})
 			must(t, err)

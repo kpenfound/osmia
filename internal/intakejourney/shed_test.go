@@ -19,6 +19,7 @@ import (
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/projectstore"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
@@ -566,7 +567,7 @@ func TestRoundRecordedBeforeAStopIsNotRecordedAgain(t *testing.T) {
 			}
 			f.stop(t)
 
-			cfg, err := config.Load(f.opts.Config)
+			cfg, err := projectstore.LoadConfig(f.opts.Config)
 			must(t, err)
 			repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
 			must(t, err)

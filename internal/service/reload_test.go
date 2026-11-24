@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,23 +18,24 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// reloadFiles are the top-level and project configuration files of a fixture
-// with their original contents.
+// reloadFiles is the top-level configuration file of a fixture with its
+// original contents.
 type reloadFiles struct {
 	fixturekit.ReloadFiles
-	top, project, topText, projectText string
+	top, topText string
 }
 
 func configFiles(t *testing.T, opts Options) reloadFiles {
-	f := fixturekit.ConfigFiles(t, opts.Config.Root, project)
-	return reloadFiles{f, f.Top, f.Project, f.TopText, f.ProjectText}
+	f := fixturekit.ConfigFiles(t, opts.Config.Root)
+	return reloadFiles{f, f.Top, f.TopText}
 }
-func (f reloadFiles) write(t *testing.T, top, project string) { f.ReloadFiles.Write(t, top, project) }
+func (f reloadFiles) write(t *testing.T, top string) { f.ReloadFiles.Write(t, top) }
 
 func hasCode(ds []Diagnostic, field string, code Code) bool {
 	for _, d := range ds {
@@ -51,8 +53,7 @@ func reloadFails(t *testing.T, c *Client, path, field string) {
 
 // A reload validates the top-level file before applying it: a bad file leaves
 // the loaded configuration and its digest as they were, and the failure stays
-// in the configuration view until a reload succeeds. A project's retired file
-// is never read, whatever it holds.
+// in the configuration view until a reload succeeds.
 func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -62,9 +63,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	before, err := c.Configuration(ctx)
 	must(t, err)
 
-	// The retired project file is not read: a valid top-level change applies
-	// while it holds a setting that would not load.
-	files.write(t, files.topText+"[capacity]\nmasons = 0\n", files.projectText+"landing = \"sideways\"\n")
+	files.write(t, files.topText+"[capacity]\nmasons = 0\n")
 	reloadFails(t, c, files.top, "capacity.masons")
 	now, err := c.Configuration(ctx)
 	must(t, err)
@@ -79,7 +78,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	}
 
 	// Fixing the file on disk leaves the last error until a reload succeeds.
-	files.write(t, files.topText+"[capacity]\nmasons = 7\n", files.projectText)
+	files.write(t, files.topText+"[capacity]\nmasons = 7\n")
 	now, err = c.Configuration(ctx)
 	must(t, err)
 	if now.LastError == nil || now.Digest != before.Digest || !hasCode(now.Diagnostics, "configuration", ReloadRequired) {
@@ -87,7 +86,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	}
 
 	// TOML that does not parse names the file and line, never its text.
-	files.write(t, files.topText+"credential = 'secret-reload-text'\n[broken", files.projectText)
+	files.write(t, files.topText+"credential = 'secret-reload-text'\n[broken")
 	_, err = c.Reload(ctx)
 	if err == nil || strings.Contains(err.Error(), "secret-reload-text") || !strings.Contains(err.Error(), files.top+": ") {
 		t.Fatalf("unparsable reload: %v", err)
@@ -99,7 +98,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 		t.Fatalf("after an unparsable reload: %s", encoded)
 	}
 
-	files.write(t, files.topText+"[capacity]\nmasons = 7\n", files.projectText+"landing = \"sideways\"\n")
+	files.write(t, files.topText+"[capacity]\nmasons = 7\n")
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
@@ -123,7 +122,7 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 	s, c := start(t, opts)
 	socket := s.Socket()
 
-	files.write(t, files.topText+"[listen]\nsocket = \"local.sock\"\n[capacity]\nreviewers = 5\n", files.projectText)
+	files.write(t, files.topText+"[listen]\nsocket = \"local.sock\"\n[capacity]\nreviewers = 5\n")
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.socket"}) {
@@ -137,17 +136,47 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 	if !hasCode(now.Diagnostics, "configuration", RestartRequired) || hasCode(now.Diagnostics, "configuration", ReloadRequired) {
 		t.Fatalf("diagnostics: %+v", now.Diagnostics)
 	}
+}
 
-	// A reload never removes a project: emptying the leftover active_projects
-	// list changes nothing.
-	unlisted := strings.Replace(files.topText, `active_projects = ["`+string(project)+`"]`, "active_projects = []", 1)
-	files.write(t, unlisted, files.projectText)
-	reloaded, err = c.Reload(ctx)
+func TestReloadKeepsTheRunningProjectsAndTheirEffectiveSettings(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := newOrderRoot(t, 2, nil)
+	s, c := start(t, root.opts)
+	first, second := root.ids[0], root.ids[1]
+	store := projectstore.Open(root.cfg.Root)
+	current, err := store.Current(first)
 	must(t, err)
-	now, err = c.Configuration(ctx)
+	newer, err := store.Replace(first, current.Pin, append(current.Data, "checks_timeout = \"30m\"\n"...))
 	must(t, err)
-	if len(reloaded.RestartRequired) != 0 || len(now.Effective.Projects) != 1 || now.Effective.Projects[0].ID != project || now.Effective.Listen.Socket != socket {
-		t.Fatalf("unlisted project: %+v %+v", reloaded, now.Effective)
+	newcomer := config.ProjectID("p_cccccccccccccccccccccccccccccccc")
+	_, err = store.WriteFirst(newcomer, []byte("version = 1\nupstream = \"upstream/new\"\nclone = \""+filepath.Join(t.TempDir(), "new")+"\"\n"))
+	must(t, err)
+	must(t, store.Add(newcomer))
+	must(t, store.Remove(second))
+	files := configFiles(t, root.opts)
+	files.write(t, files.topText+"[capacity]\nper_workstream = 5\n")
+
+	_, err = c.Reload(ctx)
+	must(t, err)
+
+	loaded := s.current()
+	if got := loaded.ProjectIDs(); !slices.Equal(got, root.ids) {
+		t.Fatalf("projects after the reload %v, want the running set %v", got, root.ids)
+	}
+	if got := loaded.For(first).Project.ChecksTimeout; got != config.DefaultChecksTimeout {
+		t.Fatalf("the reload adopted the saved revision: checks_timeout %q", got)
+	}
+	read, err := c.ProjectConfig(ctx, first)
+	must(t, err)
+	timeout := settingOf(t, read, "checks_timeout")
+	if read.Pin != newer.Pin || !timeout.Pending || timeout.Value != "30m" || timeout.Effective != config.DefaultChecksTimeout {
+		t.Fatalf("the saved revision is not pending: %+v", timeout)
+	}
+	for _, id := range root.ids {
+		if got := loaded.For(id).Project.Capacity.PerWorkstream; got != 5 {
+			t.Fatalf("project %s: the reloaded inherited per_workstream is %d, want 5", id, got)
+		}
 	}
 }
 
@@ -174,7 +203,7 @@ max_issues_per_hour = 1
 max_issues_per_day = 2
 max_comments_per_day = 3
 sources = ["github"]
-`, files.projectText)
+`)
 	reloaded, err := c.Reload(ctx)
 	must(t, err)
 	now, err := c.Configuration(ctx)
@@ -184,7 +213,7 @@ sources = ["github"]
 		t.Fatalf("reload %+v, effective %+v, diagnostics %+v", reloaded, now.Effective.ErrorReports, now.Diagnostics)
 	}
 
-	files.write(t, files.topText, files.projectText)
+	files.write(t, files.topText)
 	reloaded, err = c.Reload(ctx)
 	must(t, err)
 	now, err = c.Configuration(ctx)
@@ -193,7 +222,7 @@ sources = ["github"]
 		t.Fatalf("after removing the section: %+v %+v", reloaded, now.Effective.ErrorReports)
 	}
 
-	files.write(t, files.topText+"[error_reports]\nrepository = \"not a repository\"\n", files.projectText)
+	files.write(t, files.topText+"[error_reports]\nrepository = \"not a repository\"\n")
 	reloadFails(t, c, files.top, "error_reports.repository")
 }
 
@@ -223,7 +252,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 		}
 	}
 
-	files.write(t, files.topText+"[roles.reviewer]\nprofile = \"other\"\n", files.projectText)
+	files.write(t, files.topText+"[roles.reviewer]\nprofile = \"other\"\n")
 	_, err = c.Reload(ctx)
 	must(t, err)
 	unchanged(t)
@@ -238,7 +267,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 
 	// Without the overridden profile the override is excluded, not dropped.
 	withoutOther := strings.Replace(files.topText, "[profiles.other]\nagent = \"codex\"\nmodel = \"other\"\n", "", 1)
-	files.write(t, withoutOther, files.projectText)
+	files.write(t, withoutOther)
 	_, err = c.Reload(ctx)
 	must(t, err)
 	unchanged(t)
@@ -247,7 +276,7 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	if now.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) || !hasCode(now.Diagnostics, "profiles", Validation) {
 		t.Fatalf("stale override: %+v %+v", now.Profiles, now.Diagnostics)
 	}
-	files.write(t, files.topText, files.projectText)
+	files.write(t, files.topText)
 	_, err = c.Reload(ctx)
 	must(t, err)
 	unchanged(t)
@@ -293,7 +322,7 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 		t.Fatal("the first message did not run")
 	}
 
-	files.write(t, files.topText+"[roles.chief_of_staff]\nprofile = \"other\"\n[capacity]\nmasons = 7\n", files.projectText)
+	files.write(t, files.topText+"[roles.chief_of_staff]\nprofile = \"other\"\n[capacity]\nmasons = 7\n")
 	_, err = c.Reload(ctx)
 	must(t, err)
 	second, err := c.Send(ctx, stream, "second")

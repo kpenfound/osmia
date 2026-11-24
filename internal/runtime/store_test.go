@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
 const pid config.ProjectID = "p_0123456789abcdef0123456789abcdef"
@@ -27,25 +28,37 @@ func fixture(t *testing.T) Inputs {
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, "root")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(pid)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(fmt.Sprintf(`version = 1
-active_projects = [%q]
+	must(t, os.MkdirAll(root, 0700))
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(`version = 1
 [profiles.default]
 agent = "claude"
 model = "test"
 [profiles.other]
 agent = "codex"
 model = "test-other"
-`, pid)), 0600))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(pid), "config.toml"), []byte(`version = 1
+`), 0600))
+	register(t, root, pid, `version = 1
 upstream = "upstream/repo"
 fork = "owner/repo"
 clone = "`+filepath.Join(home, "clone")+`"
-`), 0600))
-	c, err := config.Load(config.Options{Root: root})
+`)
+	c, err := projectstore.LoadConfig(config.Options{Root: root})
 	must(t, err)
 	return Inputs{c, map[config.ProjectID][]config.WorkstreamID{pid: {w1, w2}}}
 }
+
+// register adds the project id with settings as its first revision to the
+// project store of the root at rootDirectory.
+func register(t *testing.T, rootDirectory string, id config.ProjectID, settings string) {
+	t.Helper()
+	root, err := config.ResolveRoot(rootDirectory, "")
+	must(t, err)
+	store := projectstore.Open(root)
+	_, err = store.WriteFirst(id, []byte(settings))
+	must(t, err)
+	must(t, store.Add(id))
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
@@ -228,7 +241,7 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	}
 	// Load changed declarative input through the actual loader.
 	must(t, os.WriteFile(configPath, append(original, []byte("\n[roles.mason]\nprofile = 'other'\n")...), 0600))
-	changed, err := config.Load(config.Options{Root: in.Config.Root.String()})
+	changed, err := projectstore.LoadConfig(config.Options{Root: in.Config.Root.String()})
 	must(t, err)
 	in.Config = changed
 	must(t, restarted.SetProfile("mason", "default"))
@@ -507,7 +520,7 @@ func TestFilesystemBoundariesAndInputIsolation(t *testing.T) {
 
 func TestProjectlessInputs(t *testing.T) {
 	in := fixture(t)
-	in.Config = in.Config.WithoutProject()
+	in.Config = in.Config.WithLoadedProjects(nil)
 	in.Workstreams = nil
 	s := open(t, in)
 	must(t, s.Resolve(in))

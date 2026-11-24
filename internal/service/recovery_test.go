@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -20,7 +21,7 @@ func TestStartupRecoversClaimedAndUnclaimedSessionsForEveryRole(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, ownerActor)
 	must(t, err)
@@ -104,7 +105,7 @@ func TestServiceStartRunsChiefInterruptionTurn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, ownerActor)
 	must(t, err)
@@ -145,7 +146,7 @@ func TestStartupPreservesHardPausedTurn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixtureAt(t, t.TempDir())
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, ownerActor)
 	must(t, err)

@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -22,7 +23,7 @@ func TestWorkgroupResolutionPreservesTraceErrorLogging(t *testing.T) {
 	for _, failure := range []string{"unknown-workstream", "unknown-member-with-design", "damaged-trace", "missing-trace-after-discovery"} {
 		t.Run(failure, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := config.Load(fixture(t).Config)
+			cfg, err := projectstore.LoadConfig(fixture(t).Config)
 			must(t, err)
 			repo, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), serviceActor)
 			must(t, err)

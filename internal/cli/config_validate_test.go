@@ -94,16 +94,6 @@ func TestConfigValidateAcceptsRoleSkillLists(t *testing.T) {
 	}
 }
 
-func TestConfigValidateWarnsAndStillSucceeds(t *testing.T) {
-	dir := shortDir(t)
-	file := filepath.Join(dir, "staged.toml")
-	writeFile(t, file, validTopLevel+"[roles.librarian]\n")
-	code, _, diag := validateRun(t, "config", "validate", "--config", file)
-	if code != 0 || !strings.Contains(diag, "roles.librarian is ignored") {
-		t.Fatalf("code=%d stderr=%q", code, diag)
-	}
-}
-
 func TestConfigValidateNamesTheFileAndFieldWithoutQuotingValues(t *testing.T) {
 	const secret = "SECRET-VALUE-4f2a"
 	for name, c := range map[string]struct{ text, field string }{
@@ -112,7 +102,6 @@ func TestConfigValidateNamesTheFileAndFieldWithoutQuotingValues(t *testing.T) {
 		"wrong type":          {validTopLevel + "[capacity]\nmasons = \"" + secret + "\"\n", "capacity.masons"},
 		"out of range":        {strings.Replace(validTopLevel, "version = 1", "version = 2", 1), "version"},
 		"bad env name":        {validTopLevel + "[jev]\napi_key_env = \"not a name " + secret + "\"\n", "jev.api_key_env"},
-		"malformed active id": {"active_projects = [\"" + secret + "\"]\n" + validTopLevel, "active_projects[0]"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := shortDir(t)
@@ -193,31 +182,24 @@ func TestConfigValidateResolvesTheDefaultRootsFile(t *testing.T) {
 	}
 }
 
-func TestConfigValidateAcceptsActiveProjects(t *testing.T) {
-	const first, second = "p_11111111111111111111111111111111", "p_22222222222222222222222222222222"
+func TestConfigValidateRefusesRetiredKeysAsUnknown(t *testing.T) {
 	dir := shortDir(t)
-	base := filepath.Join(dir, "base.toml")
-	listed := filepath.Join(dir, "listed.toml")
-	writeFile(t, base, validTopLevel)
-	// The listed projects have no directory under the root, so a read of a
-	// project file would fail the validation.
-	writeFile(t, listed, "active_projects = [\""+first+"\", \""+second+"\"]\n"+validTopLevel)
-	for _, file := range []string{base, listed} {
-		if code, _, diag := validateRun(t, "--root", filepath.Join(dir, "root"), "config", "validate", "--config", file); code != 0 || diag != "" {
-			t.Fatalf("%s: code=%d stderr=%q", file, code, diag)
+	file := filepath.Join(dir, "staged.toml")
+	for field, text := range map[string]string{
+		"active_projects": "active_projects = []\n" + validTopLevel,
+		"roles.librarian": validTopLevel + "[roles.librarian]\n",
+	} {
+		writeFile(t, file, text)
+		code, out, diag := validateRun(t, "config", "validate", "--config", file)
+		if code == 0 || out != "" || !strings.HasPrefix(diag, file+": "+field+": unknown configuration key") {
+			t.Fatalf("%s: code=%d stdout=%q stderr=%q", field, code, out, diag)
 		}
-	}
-	// A malformed list is still refused.
-	writeFile(t, listed, "active_projects = [\""+first+"\", \""+first+"\"]\n"+validTopLevel)
-	if code, _, diag := validateRun(t, "config", "validate", "--config", listed); code == 0 || !strings.HasPrefix(diag, listed+": active_projects: ") {
-		t.Fatalf("code=%d stderr=%q", code, diag)
 	}
 }
 
 func TestConfigValidateIsOffline(t *testing.T) {
-	const listedProject = "p_33333333333333333333333333333333"
 	const sentinel = "SENTINEL-ENV-VALUE-91c7"
-	text := "active_projects = [\"" + listedProject + "\"]\n" + validTopLevel + "[jev]\napi_key_env = \"OSMIA_VALIDATE_JEV_KEY\"\n[transcribe]\napi_key_env = \"OSMIA_VALIDATE_TRANSCRIBE_KEY\"\n"
+	text := validTopLevel + "[jev]\napi_key_env = \"OSMIA_VALIDATE_JEV_KEY\"\n[transcribe]\napi_key_env = \"OSMIA_VALIDATE_TRANSCRIBE_KEY\"\n"
 	for name, set := range map[string]bool{"variables unset": false, "variables set to a sentinel": true} {
 		t.Run(name, func(t *testing.T) {
 			for _, variable := range []string{"OSMIA_VALIDATE_JEV_KEY", "OSMIA_VALIDATE_TRANSCRIBE_KEY"} {
@@ -247,9 +229,7 @@ func TestConfigValidateIsOffline(t *testing.T) {
 			}
 
 			// An existing root is left as it was, with no trace, runtime
-			// record or project file opened or written, and an unreadable
-			// project file under it is never read.
-			writeFile(t, filepath.Join(root, "projects", listedProject, "config.toml"), "not toml ][")
+			// record or project store opened or written.
 			writeFile(t, filepath.Join(root, "config.toml"), "version = 7\n")
 			before := snapshot(t, dir)
 			code, out, diag = validateRun(t, "--root", root, "config", "validate", "--config", file)

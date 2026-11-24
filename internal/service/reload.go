@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/ghlog"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/redact"
@@ -183,9 +182,6 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	}
 	s.reporter.configure(next)
 	s.hub.Publish(events...)
-	for _, warning := range next.Warnings {
-		s.log().Warn(warning, "component", "config")
-	}
 	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0)
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
@@ -202,7 +198,7 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 		return nil, nil, err
 	}
 	registerHearsaySecrets(top.Hearsay)
-	next := projectmigration.Compose(top, s.effectiveProjects(top, cfg))
+	next := top.WithLoadedProjects(s.effectiveProjects(top, cfg))
 	restart := []string{}
 	if next.Listen.Socket != cfg.Listen.Socket {
 		restart = append(restart, "listen.socket")

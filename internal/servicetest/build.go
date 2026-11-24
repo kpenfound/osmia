@@ -8,7 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/projectmigration"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -63,7 +63,7 @@ func (f *Project) SeedBuild(t *testing.T, key, graph, backend, base string) (con
 	return intakefixture.SeedBuild(t, f.Stop, func() *config.Config {
 		top, err := config.LoadTopLevel(f.Options.Config)
 		fixturekit.Must(t, err)
-		cfg, err := projectmigration.Apply(top, f.Options.Config.Home)
+		cfg, err := projectstore.Open(top.Root).Apply(top, f.Options.Config.Home)
 		fixturekit.Must(t, err)
 		return cfg.For(f.ID)
 	}, f.recordBuild, key, graph, backend, base)

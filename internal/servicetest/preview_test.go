@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -137,33 +136,5 @@ func assertNoPreviewBytes(t *testing.T, png []byte, value any) {
 	fixturekit.Must(t, err)
 	if bytes.Contains(data, png) || bytes.Contains(data, []byte(base64.StdEncoding.EncodeToString(png))) {
 		t.Fatal("image bytes in retained metadata")
-	}
-}
-
-func TestChiefPreviewIgnoresProjectTable(t *testing.T) {
-	f := NewPreviewJourney(t)
-	cfg := service.InspectForTest(f.S).Config()
-	store := projectstore.Open(cfg.Root)
-	original, err := store.Current(f.ID)
-	fixturekit.Must(t, err)
-	text := string(original.Data) + "\n# ignored preview values\n[preview]\ncall = ['unused', '--source=/outside']\nport = 1\npath = '/unused'\ntimeout = 'invalid'\n"
-	stored, err := store.Replace(f.ID, original.Pin, []byte(text))
-	fixturekit.Must(t, err)
-	if _, _, err := store.Load(cfg, "", f.ID); err != nil {
-		t.Fatalf("stored settings with a preview table do not load: %v", err)
-	}
-	for i := 0; i < 2; i++ {
-		_, err := f.C.Reload(context.Background())
-		fixturekit.Must(t, err)
-	}
-	// The fixture requires the chief's chosen web call, port 8080 and default /.
-	image := f.Capture(t)
-	if image.ID == "" {
-		t.Fatal("ignored table prevented preview capture")
-	}
-	after, err := store.Current(f.ID)
-	fixturekit.Must(t, err)
-	if after.Pin != stored.Pin || string(after.Data) != text {
-		t.Fatal("reload or capture rewrote project settings")
 	}
 }

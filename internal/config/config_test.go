@@ -14,7 +14,6 @@ import (
 const pid = "p_0123456789abcdef0123456789abcdef"
 const wid = "w_0123456789abcdef0123456789abcdef"
 const topConfig = `version = 1
-active_projects = ["` + pid + `"]
 [profiles.default]
 agent = "claude"
 model = "test-model"
@@ -27,7 +26,6 @@ clone = "~/clone"
 
 func fixture(t *testing.T, top, project string) Options {
 	t.Helper()
-	// Short roots keep the Unix socket portable even for long subtest names.
 	home, err := os.MkdirTemp("", "oc-")
 	if err != nil {
 		t.Fatal(err)
@@ -36,21 +34,35 @@ func fixture(t *testing.T, top, project string) Options {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	opts := Options{Home: home}
-	dir := filepath.Join(rootDirectory(opts), "projects", pid)
-	for _, d := range []string{dir, filepath.Dir(configFile(opts))} {
+	for _, d := range []string{rootDirectory(opts), filepath.Dir(configFile(opts))} {
 		if err := os.MkdirAll(d, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write(t, configFile(opts), top)
-	write(t, filepath.Join(dir, "config.toml"), project)
+	write(t, projectFile(opts), project)
 	return opts
 }
 
-// rootDirectory and configFile are the fixture's default root and top-level
-// file.
+func load(opts Options) (*Config, error) {
+	top, err := LoadTopLevel(opts)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(projectFile(opts))
+	if err != nil {
+		return nil, err
+	}
+	file, err := top.DecodeProject(pid, opts.Home, data)
+	if err != nil {
+		return nil, err
+	}
+	return top.WithLoadedProjects([]Project{file.Project}), nil
+}
+
 func rootDirectory(o Options) string { return filepath.Join(o.Home, ".local", "share", "osmia") }
 func configFile(o Options) string    { return filepath.Join(o.Home, ".config", "osmia", "config.toml") }
+func projectFile(o Options) string   { return filepath.Join(o.Home, "project.toml") }
 func write(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -59,7 +71,7 @@ func write(t *testing.T, path, data string) {
 }
 func TestDefaults(t *testing.T) {
 	opts := fixture(t, topConfig, projectConfig)
-	c, err := Load(opts)
+	c, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,39 +116,18 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestJevSettingsAlwaysEnableTheJudge(t *testing.T) {
-	c, err := Load(fixture(t, topConfig+"[jev]\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
+	c, err := load(fixture(t, topConfig+"[jev]\nmodel = 'jev-1.13.0'\ntimeout = '3s'\n", projectConfig))
 	if err != nil || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" || c.Jev.URL != DefaultJevURL || c.Jev.APIKeyEnv != DefaultJevAPIKeyEnv || c.Jev.Settings().Timeout != 3*time.Second {
 		t.Fatalf("jev: %+v %v", c.Jev, err)
-	}
-	if len(c.Warnings) != 0 {
-		t.Fatalf("warnings %q", c.Warnings)
-	}
-}
-
-// The removed [jev] enabled switch is accepted and ignored; false warns.
-func TestJevEnabledSwitchIsAcceptedAndIgnored(t *testing.T) {
-	for _, tc := range []struct {
-		value    string
-		warnings []string
-	}{{"true", nil}, {"false", []string{JevEnabledIgnored}}} {
-		opts := fixture(t, topConfig+"[jev]\nenabled = "+tc.value+"\nmodel = 'jev-1.13.0'\n", projectConfig)
-		c, err := Load(opts)
-		if err != nil || !slices.Equal(c.Warnings, tc.warnings) || !c.Jev.Settings().Enabled || c.Jev.Model != "jev-1.13.0" {
-			t.Fatalf("enabled = %s: warnings %q, jev %+v, err %v", tc.value, c.Warnings, c.Jev, err)
-		}
-		top, err := LoadTopLevel(opts)
-		if err != nil || !slices.Equal(top.Warnings, tc.warnings) {
-			t.Fatalf("enabled = %s: top-level warnings %q, err %v", tc.value, top.Warnings, err)
-		}
 	}
 }
 
 func TestTranscribeDefaultsToOff(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || c.Transcribe != (Transcribe{Model: "large-v3-turbo", APIKeyEnv: "WHISPER_API_KEY"}) || c.Transcribe.Enabled() {
 		t.Fatalf("transcribe defaults: %+v %v", c.Transcribe, err)
 	}
-	c, err = Load(fixture(t, topConfig+"[transcribe]\nurl = ''\n", projectConfig))
+	c, err = load(fixture(t, topConfig+"[transcribe]\nurl = ''\n", projectConfig))
 	if err != nil || c.Transcribe.Enabled() {
 		t.Fatalf("an empty url turns transcription off: %+v %v", c.Transcribe, err)
 	}
@@ -144,11 +135,11 @@ func TestTranscribeDefaultsToOff(t *testing.T) {
 
 func TestTranscribeSettings(t *testing.T) {
 	const url = "http://whisper.tail1234.ts.net:8000/v1/audio/transcriptions"
-	c, err := Load(fixture(t, topConfig+"[transcribe]\nurl = '"+url+"'\n", projectConfig))
+	c, err := load(fixture(t, topConfig+"[transcribe]\nurl = '"+url+"'\n", projectConfig))
 	if err != nil || c.Transcribe != (Transcribe{URL: url, Model: DefaultTranscribeModel, APIKeyEnv: DefaultTranscribeAPIKeyEnv}) || !c.Transcribe.Enabled() {
 		t.Fatalf("a url alone keeps the other defaults: %+v %v", c.Transcribe, err)
 	}
-	c, err = Load(fixture(t, topConfig+"[transcribe]\nurl = 'https://whisper.example/v1/audio/transcriptions'\nmodel = 'whisper-1'\napi_key_env = 'MY_WHISPER_KEY'\n", projectConfig))
+	c, err = load(fixture(t, topConfig+"[transcribe]\nurl = 'https://whisper.example/v1/audio/transcriptions'\nmodel = 'whisper-1'\napi_key_env = 'MY_WHISPER_KEY'\n", projectConfig))
 	if err != nil || c.Transcribe != (Transcribe{URL: "https://whisper.example/v1/audio/transcriptions", Model: "whisper-1", APIKeyEnv: "MY_WHISPER_KEY"}) {
 		t.Fatalf("transcribe: %+v %v", c.Transcribe, err)
 	}
@@ -159,7 +150,7 @@ func TestJevCheckThreshold(t *testing.T) {
 		value string
 		want  float64
 	}{{"0.7", 0.7}, {"1", 1}} {
-		cfg, err := Load(fixture(t, topConfig+"[jev]\ncheck_threshold = "+c.value+"\n", projectConfig))
+		cfg, err := load(fixture(t, topConfig+"[jev]\ncheck_threshold = "+c.value+"\n", projectConfig))
 		if err != nil || cfg.Jev.CheckThreshold != c.want {
 			t.Fatalf("check_threshold = %s: %+v %v", c.value, cfg, err)
 		}
@@ -171,12 +162,12 @@ func TestJevDecisionThreshold(t *testing.T) {
 		value string
 		want  float64
 	}{{"0.75", 0.75}, {"1", 1}} {
-		cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = "+c.value+"\n", projectConfig))
+		cfg, err := load(fixture(t, topConfig+"[jev]\ndecision_threshold = "+c.value+"\n", projectConfig))
 		if err != nil || cfg.Jev.DecisionThreshold != c.want {
 			t.Fatalf("decision_threshold = %s: %+v %v", c.value, cfg, err)
 		}
 	}
-	cfg, err := Load(fixture(t, topConfig, projectConfig))
+	cfg, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || cfg.Jev.DecisionThreshold != 0.9 {
 		t.Fatalf("default decision threshold = %v %v", cfg.Jev.DecisionThreshold, err)
 	}
@@ -189,12 +180,12 @@ func TestJevOwnerThreshold(t *testing.T) {
 		value string
 		want  float64
 	}{{"0.95", 0.95}, {"1", 1}, {"0.4", 0.4}} {
-		cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\nowner_threshold = "+c.value+"\n", projectConfig))
+		cfg, err := load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\nowner_threshold = "+c.value+"\n", projectConfig))
 		if err != nil || cfg.Jev.OwnerThreshold != c.want || cfg.Jev.DecisionThreshold != 0.7 {
 			t.Fatalf("owner_threshold = %s: %+v %v", c.value, cfg.Jev, err)
 		}
 	}
-	cfg, err := Load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\n", projectConfig))
+	cfg, err := load(fixture(t, topConfig+"[jev]\ndecision_threshold = 0.7\n", projectConfig))
 	if err != nil || cfg.Jev.OwnerThreshold != 0.9 || cfg.Jev.DecisionThreshold != 0.7 {
 		t.Fatalf("default owner threshold = %+v %v", cfg.Jev, err)
 	}
@@ -204,7 +195,7 @@ func TestJevOwnerThreshold(t *testing.T) {
 // off and leaves the window a failing operation is retried for at 45m; a
 // neighbouring key that does not exist is still refused.
 func TestLoopStallAfter(t *testing.T) {
-	cfg, err := Load(fixture(t, topConfig, projectConfig))
+	cfg, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || cfg.Loop.StallAfter != "45m" || cfg.StallWindow() != 45*time.Minute || cfg.GiveUpWindow() != 45*time.Minute || cfg.Loop.MaxSessions != 30 {
 		t.Fatalf("default stall_after: %+v %v", cfg.Loop, err)
 	}
@@ -212,7 +203,7 @@ func TestLoopStallAfter(t *testing.T) {
 		value         string
 		stall, giveUp time.Duration
 	}{{"20m", 20 * time.Minute, 20 * time.Minute}, {"1h30m", 90 * time.Minute, 90 * time.Minute}, {"0", 0, 45 * time.Minute}, {"0s", 0, 45 * time.Minute}} {
-		cfg, err := Load(fixture(t, topConfig+"[loop]\nstall_after = '"+c.value+"'\n", projectConfig))
+		cfg, err := load(fixture(t, topConfig+"[loop]\nstall_after = '"+c.value+"'\n", projectConfig))
 		if err != nil || cfg.StallWindow() != c.stall || cfg.GiveUpWindow() != c.giveUp || cfg.Loop.MaxSessions != 30 {
 			t.Fatalf("stall_after = %q: %+v %v", c.value, cfg, err)
 		}
@@ -225,7 +216,7 @@ func TestLoopStallAfter(t *testing.T) {
 		{"another neighbouring key", "stall = '45m'", "loop.stall: unknown configuration key"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			cfg, err := Load(fixture(t, topConfig+"[loop]\n"+c.loop+"\n", projectConfig))
+			cfg, err := load(fixture(t, topConfig+"[loop]\n"+c.loop+"\n", projectConfig))
 			if cfg != nil || err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("got config=%+v err=%v; want nil and %q", cfg, err, c.want)
 			}
@@ -234,7 +225,7 @@ func TestLoopStallAfter(t *testing.T) {
 }
 
 func TestBudgetLimits(t *testing.T) {
-	c, err := Load(fixture(t, topConfig+"[budget]\nper_session = '5.00'\nper_unit = '40.00'\nper_day = '150.00'\n", projectConfig))
+	c, err := load(fixture(t, topConfig+"[budget]\nper_session = '5.00'\nper_unit = '40.00'\nper_day = '150.00'\n", projectConfig))
 	if err != nil || c.Budget.SessionLimitUSD() != 5 || c.Budget.PerUnit != "40.00" || c.Budget.PerDay != "150.00" {
 		t.Fatalf("budget: %+v %v", c, err)
 	}
@@ -244,68 +235,15 @@ func TestBudgetLimits(t *testing.T) {
 	}
 	for _, field := range []string{"per_session", "per_unit", "per_day"} {
 		for _, value := range []string{"'0'", "'-1'", "'abc'", "'1e3'", "'NaN'", "''"} {
-			_, err := Load(fixture(t, topConfig+"[budget]\n"+field+" = "+value+"\n", projectConfig))
+			_, err := load(fixture(t, topConfig+"[budget]\n"+field+" = "+value+"\n", projectConfig))
 			if err == nil || !strings.Contains(err.Error(), "budget."+field) {
 				t.Fatalf("%s %s: %v", field, value, err)
 			}
 		}
 	}
-	without, err := Load(fixture(t, topConfig, projectConfig))
+	without, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || without.Budget.SessionLimitUSD() != 0 {
 		t.Fatalf("absent budget: %+v %v", without, err)
-	}
-}
-
-// A leftover classifier setting, per project or as roles.classifier, loads
-// and has no effect.
-func TestClassifierSettingsAreIgnored(t *testing.T) {
-	plain, err := Load(fixture(t, topConfig, projectConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	top := topConfig + "[profiles.other]\nagent = 'codex'\nmodel = 'other'\n[roles.mason]\nsandbox = 'claude'\n[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n"
-	for name, tc := range map[string]struct{ top, project string }{
-		"project profile":         {topConfig, projectConfig + "classifier = 'default'\n"},
-		"unknown project profile": {topConfig, projectConfig + "classifier = 'missing'\n"},
-		"role":                    {topConfig + "[roles.classifier]\nprofile = 'missing'\nsandbox = 'bogus'\n", projectConfig},
-		"role and project":        {top, projectConfig + "classifier = 'other'\n"},
-	} {
-		c, err := Load(fixture(t, tc.top, tc.project))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		got, want := c.Project, plain.Project
-		// The clone path is expanded against each fixture's own home.
-		got.Clone, want.Clone = "", ""
-		if _, ok := c.Roles["classifier"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s: classifier setting took effect: %+v", name, c)
-		}
-	}
-}
-
-// A leftover [roles.librarian] table from the removed librarian role loads and
-// has no effect, apart from a warning that names it.
-func TestLibrarianRoleTableIsIgnoredWithAWarning(t *testing.T) {
-	plain, err := Load(fixture(t, topConfig, projectConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plain.Warnings) != 0 {
-		t.Fatalf("warnings without the table: %v", plain.Warnings)
-	}
-	c, err := Load(fixture(t, topConfig+"[roles.librarian]\nprofile = 'missing'\nsandbox = 'bogus'\nimage = 'x'\nmemory = '2g'\n", projectConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := c.Roles["librarian"]; ok || len(c.Roles) != len(roleNames) || !reflect.DeepEqual(c.Roles, plain.Roles) {
-		t.Fatalf("the librarian table took effect: %+v", c.Roles)
-	}
-	if !slices.Equal(c.Warnings, []string{LibrarianIgnored}) || !strings.Contains(LibrarianIgnored, "roles.librarian") {
-		t.Fatalf("warnings %q", c.Warnings)
-	}
-	top, err := LoadTopLevel(fixture(t, topConfig+"[roles.librarian]\nsandbox = 'sbx'\n", projectConfig))
-	if err != nil || !slices.Equal(top.Warnings, []string{LibrarianIgnored}) {
-		t.Fatalf("top-level load: %v %q", err, top.Warnings)
 	}
 }
 
@@ -343,7 +281,7 @@ landing = "squash"
 [capacity]
 per_workstream = 3
 `)
-	c, err := Load(opts)
+	c, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,9 +326,6 @@ func TestInvalid(t *testing.T) {
 		{"socket state collision", topConfig + "[listen]\nsocket = 'runtime.json'\n", "", "direct child"},
 		{"duplicate key", topConfig + "model = 'other'\n", "", "config.toml:"},
 
-		{"second active project missing", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "p_1123456789abcdef0123456789abcdef"`, 1), "", "p_1123456789abcdef0123456789abcdef/config.toml: cannot be read"},
-		{"duplicate identity", strings.Replace(topConfig, `"`+pid+`"`, `"`+pid+`", "`+pid+`"`, 1), "", "identity already exists"},
-		{"traversal", strings.Replace(topConfig, pid, "../escape", 1), "", "active_projects[0]"},
 		{"zero capacity", topConfig + "[capacity]\nmasons = 0\n", "", "capacity.masons"},
 		{"negative reviews", topConfig + "[capacity]\nreviewers = -1\n", "", "capacity.reviewers"},
 		{"zero checks", topConfig + "[capacity]\nchecks = 0\n", "", "capacity.checks"},
@@ -479,7 +414,6 @@ func TestInvalid(t *testing.T) {
 		{"transcribe key empty", topConfig + "[transcribe]\napi_key_env = ''\n", "", "transcribe.api_key_env"},
 		{"transcribe unknown key", topConfig + "[transcribe]\ntimeout = '5s'\n", "", "transcribe.timeout"},
 		{"transcribe wrong type", topConfig + "[transcribe]\nurl = 1\n", "", "config.toml:"},
-		{"beekeeper unknown key", topConfig + "[beekeeper]\nfoo = 1\n", "", "beekeeper.foo"},
 		{"pause override", topConfig + "[pause]\n", "", "runtime overrides belong in runtime.json"},
 		{"priority override", topConfig + "[priority]\n", "", "runtime overrides belong in runtime.json"},
 		{"notify unknown key", topConfig + "[notify]\nemail = 'owner@example.com'\n", "", "notify.email: unknown configuration key"},
@@ -546,7 +480,7 @@ func TestInvalid(t *testing.T) {
 			if project == "" {
 				project = projectConfig
 			}
-			c, err := Load(fixture(t, top, project))
+			c, err := load(fixture(t, top, project))
 			if c != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got config=%+v err=%v; want nil and %q", c, err, tc.want)
 			}
@@ -554,25 +488,11 @@ func TestInvalid(t *testing.T) {
 	}
 }
 
-// A leftover [beekeeper] section from the removed Beekeeper feature keeps
-// loading without error, whatever values its documented fields hold, and
-// has no effect on the loaded configuration.
-func TestLeftoverBeekeeperSectionLoadsWithoutEffect(t *testing.T) {
-	top := topConfig + "[beekeeper]\nname = 'Hive'\nprofile = 'other'\nsandbox = 'container'\nimage = 'beekeeper-image'\n"
-	c, err := Load(fixture(t, top, projectConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c == nil {
-		t.Fatal("configuration is nil")
-	}
-}
-
 // listen.tailnet accepts one DNS label; empty disables it.
 func TestListenTailnet(t *testing.T) {
 	for _, value := range []string{"", "osmia", "o", "osmia-2", "7", strings.Repeat("a", 63)} {
 		t.Run(value, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig+"[listen]\ntailnet = '"+value+"'\n", projectConfig))
+			c, err := load(fixture(t, topConfig+"[listen]\ntailnet = '"+value+"'\n", projectConfig))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -588,7 +508,7 @@ func TestListenTailnet(t *testing.T) {
 func TestListenWeb(t *testing.T) {
 	for _, value := range []string{"", "localhost:8080", "LocalHost:0", "127.0.0.1:8080", "127.1.2.3:65535", "[::1]:8080", "[::ffff:127.0.0.1]:80"} {
 		t.Run(value, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig+"[listen]\nweb = '"+value+"'\n", projectConfig))
+			c, err := load(fixture(t, topConfig+"[listen]\nweb = '"+value+"'\n", projectConfig))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -604,7 +524,7 @@ func TestListenWeb(t *testing.T) {
 func TestUpstreamRebase(t *testing.T) {
 	for value, want := range map[string]time.Duration{"1m": time.Minute, "90m": 90 * time.Minute, "24h": 24 * time.Hour, "0": 0, "0s": 0} {
 		t.Run(value, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig, projectConfig+"upstream_rebase = '"+value+"'\n"))
+			c, err := load(fixture(t, topConfig, projectConfig+"upstream_rebase = '"+value+"'\n"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -619,7 +539,7 @@ func TestUpstreamRebase(t *testing.T) {
 func TestChecksTimeout(t *testing.T) {
 	for value, want := range map[string]time.Duration{"1m": time.Minute, "45m": 45 * time.Minute, "24h": 24 * time.Hour} {
 		t.Run(value, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig, projectConfig+"checks_timeout = '"+value+"'\n"))
+			c, err := load(fixture(t, topConfig, projectConfig+"checks_timeout = '"+value+"'\n"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -630,21 +550,13 @@ func TestChecksTimeout(t *testing.T) {
 	}
 }
 
-func TestMissingFiles(t *testing.T) {
-	for _, file := range []string{"config.toml", "projects/" + pid + "/config.toml"} {
-		t.Run(file, func(t *testing.T) {
-			opts := fixture(t, topConfig, projectConfig)
-			path := filepath.Join(rootDirectory(opts), file)
-			if file == "config.toml" {
-				path = configFile(opts)
-			}
-			if err := os.Remove(path); err != nil {
-				t.Fatal(err)
-			}
-			if c, err := Load(opts); c != nil || err == nil || !strings.Contains(err.Error(), path) {
-				t.Fatalf("%+v %v", c, err)
-			}
-		})
+func TestMissingTopLevelFile(t *testing.T) {
+	opts := fixture(t, topConfig, projectConfig)
+	if err := os.Remove(configFile(opts)); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := load(opts); c != nil || err == nil || !strings.Contains(err.Error(), configFile(opts)) {
+		t.Fatalf("%+v %v", c, err)
 	}
 }
 func TestPathsAndIdentity(t *testing.T) {
@@ -708,6 +620,9 @@ func TestSymlinkBoundaries(t *testing.T) {
 			opts := fixture(t, topConfig, projectConfig)
 			root := rootDirectory(opts)
 			projects := filepath.Join(root, "projects")
+			if err := os.MkdirAll(projects, 0700); err != nil {
+				t.Fatal(err)
+			}
 			destination := filepath.Join(opts.Home, "elsewhere")
 			if target == "inside" {
 				destination = filepath.Join(root, "alias")
@@ -718,7 +633,7 @@ func TestSymlinkBoundaries(t *testing.T) {
 			if err := os.Symlink(destination, projects); err != nil {
 				t.Fatal(err)
 			}
-			if c, err := Load(opts); c != nil || err == nil {
+			if c, err := load(opts); c != nil || err == nil {
 				t.Fatalf("alias accepted: %+v %v", c, err)
 			}
 		})
@@ -727,19 +642,18 @@ func TestSymlinkBoundaries(t *testing.T) {
 	if err := os.Symlink(rootDirectory(opts), filepath.Join(opts.Home, "clone")); err != nil {
 		t.Fatal(err)
 	}
-	if c, err := Load(opts); c != nil || err == nil || !strings.Contains(err.Error(), "non-nested") {
+	if c, err := load(opts); c != nil || err == nil || !strings.Contains(err.Error(), "non-nested") {
 		t.Fatalf("clone alias: %+v %v", c, err)
 	}
 }
 func TestMetadataDoesNotChangeIdentity(t *testing.T) {
 	opts := fixture(t, topConfig, projectConfig)
-	before, err := Load(opts)
+	before, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, _ := before.Root.ProjectConfig(before.Project.ID)
-	write(t, path, strings.Replace(projectConfig, "~/clone", "~/renamed-clone", 1)+"name = 'New display name'\n")
-	after, err := Load(opts)
+	write(t, projectFile(opts), strings.Replace(projectConfig, "~/clone", "~/renamed-clone", 1)+"name = 'New display name'\n")
+	after, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +682,7 @@ func TestNamedBindings(t *testing.T) {
 	for _, role := range roleNames {
 		top += "\n[roles." + role + "]\nprofile = 'custom'\n"
 	}
-	c, err := Load(fixture(t, top, projectConfig))
+	c, err := load(fixture(t, top, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +703,6 @@ func TestFilesystemErrors(t *testing.T) {
 				opts.Root = filepath.Join(opts.Home, "file")
 				write(t, opts.Root, "not a directory")
 			case "config alias":
-				// An explicit root's config.toml is managed and must not be a symlink.
 				opts.Root = root
 				if err := os.Symlink(configFile(opts), filepath.Join(root, "config.toml")); err != nil {
 					t.Fatal(err)
@@ -801,7 +714,7 @@ func TestFilesystemErrors(t *testing.T) {
 			case "socket file":
 				write(t, filepath.Join(root, "osmia.sock"), "not a socket")
 			}
-			if c, err := Load(opts); c != nil || err == nil {
+			if c, err := load(opts); c != nil || err == nil {
 				t.Fatalf("accepted: %+v %v", c, err)
 			}
 		})
@@ -812,7 +725,7 @@ func TestFilesystemErrors(t *testing.T) {
 func TestNotifyWebhook(t *testing.T) {
 	for _, value := range []string{"", "https://ntfy.sh/osmia-topic", "http://127.0.0.1:8080/hook?token=x", "HTTPS://hooks.example.com"} {
 		t.Run(value, func(t *testing.T) {
-			c, err := Load(fixture(t, topConfig+"[notify]\nwebhook = '"+value+"'\n", projectConfig))
+			c, err := load(fixture(t, topConfig+"[notify]\nwebhook = '"+value+"'\n", projectConfig))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -822,7 +735,7 @@ func TestNotifyWebhook(t *testing.T) {
 		})
 	}
 	secret := "https://hooks.example.com/services/SECRET"
-	_, err := Load(fixture(t, topConfig+"[notify]\nwebhook = 'gopher://hooks.example.com/services/SECRET'\n", projectConfig))
+	_, err := load(fixture(t, topConfig+"[notify]\nwebhook = 'gopher://hooks.example.com/services/SECRET'\n", projectConfig))
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("rejected webhook error %v must not quote %s", err, secret)
 	}
@@ -831,7 +744,7 @@ func TestNotifyWebhook(t *testing.T) {
 // Without an [error_reports] section the reporter is off and files to the
 // Osmia repository with the documented labels, caps and sources.
 func TestErrorReportsDefaults(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -854,7 +767,7 @@ func TestErrorReportsDefaults(t *testing.T) {
 
 // Every [error_reports] key is read, and a key left out keeps its default.
 func TestErrorReportsSettings(t *testing.T) {
-	c, err := Load(fixture(t, topConfig+`[error_reports]
+	c, err := load(fixture(t, topConfig+`[error_reports]
 enabled = true
 repository = "owner/name.repo"
 labels = ["bug"]
@@ -873,7 +786,7 @@ sources = ["api", "github"]
 	if c.ErrorReports.SourceEnabled("operation") || !c.ErrorReports.SourceEnabled("github") {
 		t.Fatalf("sources %v", c.ErrorReports.Sources)
 	}
-	partial, err := Load(fixture(t, topConfig+"[error_reports]\nenabled = true\n", projectConfig))
+	partial, err := load(fixture(t, topConfig+"[error_reports]\nenabled = true\n", projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -885,7 +798,7 @@ sources = ["api", "github"]
 // The reporter's saved state is a managed file at the top of the root, beside
 // the notification ledger.
 func TestErrorReportsStatePath(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +818,7 @@ func TestErrorReportsStatePath(t *testing.T) {
 // workspaces defaults to auto, accepts auto, git and jujutsu, and rejects
 // anything else with an error that names the values it accepts.
 func TestWorkspaces(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -916,7 +829,7 @@ func TestWorkspaces(t *testing.T) {
 		return strings.Replace(topConfig, "[profiles.default]", "workspaces = "+value+"\n[profiles.default]", 1)
 	}
 	for _, value := range []string{WorkspacesAuto, WorkspacesGit, WorkspacesJujutsu} {
-		c, err := Load(fixture(t, with("'"+value+"'"), projectConfig))
+		c, err := load(fixture(t, with("'"+value+"'"), projectConfig))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -925,13 +838,13 @@ func TestWorkspaces(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"'jj'", "'Git'", "''"} {
-		_, err := Load(fixture(t, with(value), projectConfig))
+		_, err := load(fixture(t, with(value), projectConfig))
 		var field *FieldError
 		if !errors.As(err, &field) || field.Field != "workspaces" || field.Reason != `must be "auto", "git" or "jujutsu"` {
 			t.Fatalf("workspaces = %s: %v", value, err)
 		}
 	}
-	if _, err := Load(fixture(t, with("1"), projectConfig)); err == nil {
+	if _, err := load(fixture(t, with("1"), projectConfig)); err == nil {
 		t.Fatal("workspaces = 1 loaded")
 	}
 }
@@ -958,7 +871,6 @@ func TestXDGDirectories(t *testing.T) {
 	if path, err := explicit.Config(); err != nil || path != filepath.Join(explicit.String(), "config.toml") {
 		t.Fatalf("explicit root read %s %v", path, err)
 	}
-	// Relative XDG values are ignored.
 	t.Setenv("XDG_DATA_HOME", "data")
 	t.Setenv("XDG_CONFIG_HOME", "config")
 	r, err = ResolveRoot("", home)
@@ -983,7 +895,7 @@ func TestSymlinkedConfig(t *testing.T) {
 	if err := os.Symlink(target, configFile(opts)); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(opts)
+	c, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -994,13 +906,13 @@ func TestSymlinkedConfig(t *testing.T) {
 	if info, err := os.Lstat(configFile(opts)); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("symlink replaced: %v", err)
 	}
-	if _, err := Load(opts); err != nil {
+	if _, err := load(opts); err != nil {
 		t.Fatalf("symlinked config: %v", err)
 	}
 }
 
 func TestCommitteeAssignments(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1008,7 +920,7 @@ func TestCommitteeAssignments(t *testing.T) {
 		t.Fatalf("default committee: %+v", c.Committee)
 	}
 	top := topConfig + "[profiles.second]\nagent = 'codex'\nmodel = 'other'\n[committee]\nperspectives = ['scope', 'correctness']\nprofiles = ['default', 'second']\n"
-	c, err = Load(fixture(t, top, projectConfig))
+	c, err = load(fixture(t, top, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +938,7 @@ func TestPullRequestPollInterval(t *testing.T) {
 				text += "pull_request_poll = '" + value + "'\n"
 				want, _ = time.ParseDuration(value)
 			}
-			c, err := Load(fixture(t, topConfig, text))
+			c, err := load(fixture(t, topConfig, text))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1041,7 +953,7 @@ func TestPullRequestPollInterval(t *testing.T) {
 }
 
 func TestProjectGitOperationCapacity(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig+"[capacity]\ngit_operations = 2\n"))
+	c, err := load(fixture(t, topConfig, projectConfig+"[capacity]\ngit_operations = 2\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1056,7 +968,7 @@ func TestListenTailnetHTTPS(t *testing.T) {
 		setting string
 		want    bool
 	}{{"", true}, {"tailnet_https = true", true}, {"tailnet_https = false", false}} {
-		c, err := Load(fixture(t, topConfig+"[listen]\n"+tc.setting+"\n", projectConfig))
+		c, err := load(fixture(t, topConfig+"[listen]\n"+tc.setting+"\n", projectConfig))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1064,26 +976,51 @@ func TestListenTailnetHTTPS(t *testing.T) {
 			t.Fatalf("%s: HTTPS = %v", tc.setting, c.Listen.TailnetHTTPS)
 		}
 	}
-	if _, err := Load(fixture(t, topConfig+"[listen]\ntailnet_https = 'false'\n", projectConfig)); err == nil {
+	if _, err := load(fixture(t, topConfig+"[listen]\ntailnet_https = 'false'\n", projectConfig)); err == nil {
 		t.Fatal("accepted non-boolean HTTPS setting")
 	}
 }
 
 func TestJevCheckFallbackPicks(t *testing.T) {
-	for _, enabled := range []string{"true", "false"} {
-		for _, value := range []string{"", "check_fallback_picks = 0\n", "check_fallback_picks = 2\n"} {
-			cfg, err := Load(fixture(t, topConfig+"[jev]\nenabled = "+enabled+"\n"+value, projectConfig))
-			want := 0
-			if strings.Contains(value, "= 2") {
-				want = 2
-			}
-			if err != nil || cfg.Jev.CheckFallbackPicks != want {
-				t.Fatalf("%s %s: %+v %v", enabled, value, cfg, err)
-			}
+	for _, value := range []string{"", "check_fallback_picks = 0\n", "check_fallback_picks = 2\n"} {
+		cfg, err := load(fixture(t, topConfig+"[jev]\n"+value, projectConfig))
+		want := 0
+		if strings.Contains(value, "= 2") {
+			want = 2
 		}
-		_, err := Load(fixture(t, topConfig+"[jev]\nenabled = "+enabled+"\ncheck_fallback_picks = -1\n", projectConfig))
-		if err == nil || !strings.Contains(err.Error(), "jev.check_fallback_picks") {
-			t.Fatalf("negative (%s): %v", enabled, err)
+		if err != nil || cfg.Jev.CheckFallbackPicks != want {
+			t.Fatalf("%s: %+v %v", value, cfg, err)
 		}
+	}
+	_, err := load(fixture(t, topConfig+"[jev]\ncheck_fallback_picks = -1\n", projectConfig))
+	if err == nil || !strings.Contains(err.Error(), "jev.check_fallback_picks") {
+		t.Fatalf("negative: %v", err)
+	}
+}
+
+func TestRetiredKeysFailAsUnknownConfigurationKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name, top, project, field string
+	}{
+		{"beekeeper table", topConfig + "[beekeeper]\nname = 'Hive'\n", projectConfig, "beekeeper"},
+		{"preview table", topConfig + "[preview]\nport = 1\n", projectConfig, "preview"},
+		{"project preview table", topConfig, projectConfig + "[preview]\nport = 1\n", "preview"},
+		{"jev.enabled", topConfig + "[jev]\nenabled = true\n", projectConfig, "jev.enabled"},
+		{"roles.mason.dagger", topConfig + "[roles.mason]\nsandbox = 'sbx'\n[roles.mason.dagger]\nversion = 'v0.19.0'\n", projectConfig, "roles.mason.dagger"},
+		{"roles.librarian", topConfig + "[roles.librarian]\nprofile = 'default'\n", projectConfig, "roles.librarian"},
+		{"project group_id", topConfig, projectConfig + "group_id = 'g_0123456789abcdef0123456789abcdef'\n", "group_id"},
+		{"project classifier", topConfig, projectConfig + "classifier = 'default'\n", "classifier"},
+		{"active_projects", "active_projects = []\n" + topConfig, projectConfig, "active_projects"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := load(fixture(t, tc.top, tc.project))
+			var field *FieldError
+			if !errors.As(err, &field) || field.Field != tc.field || field.Reason != "unknown configuration key" {
+				t.Fatalf("got %#v (%v), want an unknown configuration key error naming %s", field, err, tc.field)
+			}
+			if text := strings.ToLower(err.Error()); strings.Contains(text, "retired") || strings.Contains(text, "removed") || strings.Contains(text, "ignored") {
+				t.Fatalf("the error describes the key as retired: %q", err)
+			}
+		})
 	}
 }

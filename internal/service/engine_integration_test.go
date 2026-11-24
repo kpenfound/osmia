@@ -180,7 +180,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 	o := fixture(t)
 	files := configFiles(t, o)
 	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
-	files.write(t, top, files.projectText)
+	files.write(t, top)
 	must(t, os.Remove(fake.Version))
 	s, c := start(t, o)
 	if !strings.Contains(fake.Commands(t), "registry.dagger.io/engine:v0.20.5") {
@@ -202,7 +202,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 	defer held()
 	defer turn()
 	next := strings.Replace(top, "version = 'v0.20.5'", "version = 'v0.21.0'", 1)
-	files.write(t, next, files.projectText)
+	files.write(t, next)
 	_, err = c.Reload(t.Context())
 	must(t, err)
 	for _, action := range []string{"restart", "prune"} {
@@ -224,7 +224,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 		t.Fatalf("reloaded status: %+v", status)
 	}
 	// Invalid reload leaves the engine selection and the check client bound to managed.
-	files.write(t, strings.Replace(next, "engine = \"managed\"", "engine = 'bad-mode'", 1), files.projectText)
+	files.write(t, strings.Replace(next, "engine = \"managed\"", "engine = 'bad-mode'", 1))
 	if _, err = c.Reload(t.Context()); err == nil {
 		t.Fatal("invalid reload accepted")
 	}
@@ -249,7 +249,7 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 		}
 	}
 	for _, mode := range []string{"auto", "tcp://external:1234", "cloud"} {
-		files.write(t, files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"), files.projectText)
+		files.write(t, files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
 		_, err = c.Reload(t.Context())
 		must(t, err)
 		before := fake.Commands(t)
@@ -280,7 +280,7 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			t.Setenv("DOCKER_CONTEXT", "named")
 			o := fixture(t)
 			files := configFiles(t, o)
-			files.write(t, files.topText+engineConfig(mode, ""), files.projectText)
+			files.write(t, files.topText+engineConfig(mode, ""))
 			s, err := Start(t.Context(), o)
 			assertConflict := func(err error) {
 				t.Helper()
@@ -296,10 +296,10 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			if _, err := os.Stat(fake.Environments); !os.IsNotExist(err) {
 				t.Fatalf("startup invoked engine: %v", err)
 			}
-			files.write(t, files.topText, files.projectText)
+			files.write(t, files.topText)
 			s, c := start(t, o)
 			before := s.current()
-			files.write(t, files.topText+engineConfig(mode, ""), files.projectText)
+			files.write(t, files.topText+engineConfig(mode, ""))
 			_, err = c.Reload(t.Context())
 			assertConflict(err)
 			if s.current() != before {
@@ -397,7 +397,7 @@ func TestCreatingEngineAPIRespondsAtDeadline(t *testing.T) {
 	t.Setenv("DOCKER_CONTEXT", "default")
 	o := fixture(t)
 	files := configFiles(t, o)
-	files.write(t, files.topText+engineConfig("managed", ""), files.projectText)
+	files.write(t, files.topText+engineConfig("managed", ""))
 	s, _ := start(t, o)
 	entered := filepath.Join(fake.Directory, "creating")
 	script := fmt.Sprintf(`#!/bin/sh

@@ -12,6 +12,7 @@ import (
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -26,7 +27,7 @@ func withInbox(t *testing.T) service.Options {
 func withInboxRecommendations(t *testing.T, first, second string) service.Options {
 	t.Helper()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	escalate(t, cfg.Root, cfg.Project, stream, first, second)
 	opts.Reconciliation.Now = func() time.Time { return written.Add(2 * time.Hour) }
@@ -167,7 +168,7 @@ func TestAnswerAccept(t *testing.T) {
 		t.Fatal("typed ruling produced no confirmation")
 	}
 	must(t, s.Close())
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)

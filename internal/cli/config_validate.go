@@ -30,13 +30,9 @@ func runConfigValidate(root, file string, stdout, stderr io.Writer) int {
 		}
 		options.File = file
 	}
-	cfg, err := config.LoadTopLevel(options)
-	if err != nil {
+	if _, err := config.LoadTopLevel(options); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
-	}
-	for _, warning := range cfg.Warnings {
-		fmt.Fprintln(stderr, "warning: "+warning)
 	}
 	path := options.File
 	if path == "" {

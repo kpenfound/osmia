@@ -9,6 +9,7 @@ import (
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	thread "github.com/kpenfound/osmia/internal/thread"
@@ -115,7 +116,7 @@ func demonstrate(t *testing.T, mode string) {
 		t.Cleanup(func() { os.RemoveAll(home) })
 	}
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	root := cfg.Root.String()
 	traceDir, err := cfg.Root.ProjectTrace(project)

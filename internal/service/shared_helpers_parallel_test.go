@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -24,7 +25,7 @@ func TestSharedTestHelpersIsolateStatePerCaller(t *testing.T) {
 		return func(t *testing.T) {
 			t.Parallel()
 			opts := fixture(t)
-			cfg, err := config.Load(opts.Config)
+			cfg, err := projectstore.LoadConfig(opts.Config)
 			must(t, err)
 			must(t, os.MkdirAll(cfg.Project.Clone, 0700))
 			demoGit(t, filepath.Dir(cfg.Project.Clone), "-C", cfg.Project.Clone, "init", "-q")
