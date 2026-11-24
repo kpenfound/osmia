@@ -13,7 +13,7 @@ import (
 )
 
 func projectDocument(id, path, content string, revision int) Document {
-	return Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: revision, Project: projectID, At: at, Actor: Actor{Kind: "agent", ID: "agent_librarian"}, Cause: "operation_1", Depth: 1}, Path: path, Content: content}
+	return Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: revision, Project: projectID, At: at, Actor: Actor{Kind: "agent", ID: "agent_scribe"}, Cause: "operation_1", Depth: 1}, Path: path, Content: content}
 }
 func projectDocuments(t *testing.T, r *Repository, id string) []Document {
 	t.Helper()
@@ -45,7 +45,6 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 	if got := kbFiles(t, r); !reflect.DeepEqual(got, map[string]string{"trace.md": "# trace\n", "service.md": "# service\n", "entities.json": "{\"version\":1,\"entities\":[]}\n"}) {
 		t.Fatalf("knowledge base: %v", got)
 	}
-	// Every revision in the batch is checked before anything is written.
 	invalid := [][]Document{
 		{projectDocument("subsystem-trace", "kb/trace.md", "x\n", 2), projectDocument("subsystem-service", "kb/service.md", "x\n", 3)},
 		{projectDocument("subsystem-trace", "kb/trace.md", "x\n", 2), projectDocument("subsystem-other", "kb/trace.md", "x\n", 1)},
@@ -69,7 +68,6 @@ func TestRecordDocumentsIsOneCommit(t *testing.T) {
 	if got := kbFiles(t, r); len(got) != 3 || got["trace.md"] != "# trace\n" {
 		t.Fatalf("knowledge base after refused batches: %v", got)
 	}
-	// An empty revision removes the subsystem; its history stays readable.
 	second := []Document{projectDocument("subsystem-trace", "kb/trace.md", "# trace 2\n", 2), projectDocument("subsystem-service", "kb/service.md", "", 2), projectDocument(EntitiesDocument, EntitiesPath, "{\"version\":1,\"entities\":[]}\n", 2)}
 	if err := r.RecordDocuments(ctx, second); err != nil {
 		t.Fatal(err)
@@ -137,7 +135,6 @@ func TestRecordDocumentsPublicationFailures(t *testing.T) {
 			if got := projectDocuments(t, r, "subsystem-service"); len(got) != revisions {
 				t.Fatalf("revisions: %+v", got)
 			}
-			// The same batch is recorded once whether or not it committed.
 			if err := r.RecordDocuments(ctx, second); committed != (err != nil) {
 				t.Fatalf("retry after committed=%t: %v", committed, err)
 			}
@@ -148,8 +145,6 @@ func TestRecordDocumentsPublicationFailures(t *testing.T) {
 	}
 }
 
-// A crash before or after the database commit leaves a document and the
-// transition and outbox entries recorded with it all visible, or none.
 func TestRecordDocumentsWithPublicationFailures(t *testing.T) {
 	for _, step := range []string{boundaryBeforeCommit, boundaryCommitted} {
 		t.Run(step, func(t *testing.T) {
@@ -218,7 +213,6 @@ func TestAbandonTurnRecordsInterruption(t *testing.T) {
 	enqueue(t, r, "one")
 	enqueue(t, r, "two")
 	claimed := claimTurn(t, r, "token")
-	// The reserving session cannot abandon its own running turn.
 	if err := r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Second)); !errors.Is(err, ErrClaim) {
 		t.Fatalf("own session: %v", err)
 	}
@@ -236,7 +230,6 @@ func TestAbandonTurnRecordsInterruption(t *testing.T) {
 	if err := r.AbandonTurn(ctx, streamID, "mason", "one", time.Time{}); err == nil {
 		t.Fatal("zero timestamp accepted")
 	}
-	// A timestamp before the claim is raised to it.
 	if err := r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +249,6 @@ func TestAbandonTurnRecordsInterruption(t *testing.T) {
 	if err := r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Second)); !errors.Is(err, ErrClaim) {
 		t.Fatalf("abandoning twice: %v", err)
 	}
-	// The successor is eligible, and the abandoned turn cannot be resumed from.
 	if next := claimTurn(t, r, "next"); next.Request.TurnID != "two" {
 		t.Fatalf("successor: %+v", next)
 	}
@@ -285,8 +277,6 @@ func TestAbandonTurnRefusesCapturedTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	// The captured result outlives the session that reserved the turn: only
-	// completion may close the turn.
 	if err := r.AbandonTurn(ctx, streamID, "mason", "one", at.Add(time.Minute)); !errors.Is(err, ErrClaim) {
 		t.Fatalf("captured turn abandoned: %v", err)
 	}
@@ -322,7 +312,6 @@ func TestRecordDocumentsRefusesUnpublishablePaths(t *testing.T) {
 			t.Fatalf("%s: knowledge base: %v", path, got)
 		}
 	}
-	// The trace reopens cleanly: nothing partial was committed.
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +328,6 @@ func streamDocument(id, path, content string, revision int) Document {
 	return d
 }
 
-// streamFile is the logical path of a workstream document of streamID.
 func streamFile(path string) string { return "workstreams/" + string(streamID) + "/" + path }
 
 func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
@@ -371,9 +359,6 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	if project, err := Read[Document](r, ""); err != nil || len(project) != 1 {
 		t.Fatalf("project documents changed: %+v %v", project, err)
 	}
-	// Every revision in the batch is checked before anything is written: mixed
-	// scopes, a handed revision, a project path in a workstream, an unknown
-	// workstream and a repeated revision are all refused whole.
 	other := streamDocument("spec", "spec.md", "x\n", 1)
 	other.Workstream = threadlessStream
 	handed2 := streamDocument("handed", "handed/design.md", "changed\n", 2)
@@ -418,8 +403,6 @@ func TestRecordDocumentsRecordsWorkstreamDocumentsAsOneCommit(t *testing.T) {
 	}
 }
 
-// acceptedPath records content at path of streamID as a workstream document
-// and refuses an unlisted name beside it.
 func acceptedPath(t *testing.T, id, path, content, unlisted string) {
 	t.Helper()
 	r, _, _ := create(t)
@@ -451,9 +434,6 @@ func TestEdgeWaiverDocumentPathIsAccepted(t *testing.T) {
 	acceptedPath(t, "workstream-edge-waivers", "edge-waivers.json", "{\"waivers\":[]}\n", "edge-waivers-extra.json")
 }
 
-// A session's check run and its captured output are recorded under
-// session-checks/, mirroring a workstream's own final check runs under
-// final/; an unlisted name in the same directory is refused.
 func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -475,9 +455,6 @@ func TestSessionCheckDocumentPathIsAccepted(t *testing.T) {
 	}
 }
 
-// A workstream move is a workstream document at moves/move-<n>.json,
-// recorded together with the transitions it makes; other names under moves/
-// are refused.
 func TestWorkstreamMoveDocumentPathIsAccepted(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -495,9 +472,6 @@ func TestWorkstreamMoveDocumentPathIsAccepted(t *testing.T) {
 	}
 }
 
-// A shed record is a workstream document under shed/round-<n>/: a batch is one
-// commit through RecordDocuments, Append records one too, a project-scoped
-// shed path is refused, and the trace reopens with every record readable.
 func TestShedRecordsAreWorkstreamDocuments(t *testing.T) {
 	r, root, p := create(t)
 	s := mustScoped(t, r, streamID)
@@ -546,8 +520,6 @@ func unitReport(content string, revision int) Document {
 	return Document{Header: h, Path: "units/parser/report.json", Content: content}
 }
 
-// A unit report and the transitions recorded with it are one commit, and a
-// refused transition records neither.
 func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
@@ -604,9 +576,6 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	if _, err := Get[Document](r, streamID, "unit-parser-report", 1); err != nil {
 		t.Fatal(err)
 	}
-	// A unit's landing, rebase, change, dispatch decision, check runs, moves
-	// and the chief of staff's contest decisions are unit documents; other
-	// paths under units/ are not.
 	for _, path := range []string{"units/parser/other.json", "units/parser", "units/../report.json", "units/a/b/report.json", "units/parser/chief-.json", "units/parser/chief-a b.json", "units/parser/checks-0.json", "units/parser/checks-x.json", "units/parser/checks-0-output.txt", "units/parser/checks-x-output.txt", "final/checks-0-output.txt", "final/checks-x-output.txt", "units/parser/move-0.json", "units/parser/move-x.json"} {
 		d := unitReport("{}\n", 2)
 		d.ID, d.Path = "unit-other", path
@@ -685,7 +654,6 @@ func TestRecordDocumentsWithTransitionsIsOneCommit(t *testing.T) {
 	}
 }
 
-// draft records the workstream's spec and plan and moves it to state.
 func draft(t *testing.T, r *Repository, state string) {
 	t.Helper()
 	ctx := context.Background()
@@ -719,14 +687,12 @@ func TestEditDraftComparesRevisionsAndChecksContent(t *testing.T) {
 	if checked["spec"] != "# Spec 2\n" || checked["plan"] != "{\"cycle\":true}\n" {
 		t.Fatalf("checked content: %v", checked)
 	}
-	// Unchanged content records nothing.
 	if got, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec\n", "{}\n", later, accept); err != nil || got["spec"].Revision != 1 || got["plan"].Revision != 1 {
 		t.Fatalf("unchanged draft: %+v %v", got, err)
 	}
 	if got := commits(t, s); got != before {
 		t.Fatalf("refused or unchanged edits committed: %d, %d before", got, before)
 	}
-	// Only the changed document gets a new revision, as the owner's.
 	got, err := r.EditDraft(ctx, streamID, 1, 1, "# Spec 2\n", "{}\n", later, accept)
 	if err != nil || got["spec"].Revision != 2 || got["spec"].Content != "# Spec 2\n" || got["spec"].Actor != owner || got["spec"].Cause != "owner-edit" || got["plan"].Revision != 1 {
 		t.Fatalf("edit: %+v %v", got, err)

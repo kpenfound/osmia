@@ -30,110 +30,53 @@ var ErrLocked = errors.New("trace repository already open")
 // serialize; reads of committed records never wait on a write in progress.
 // External writers must not modify or move the trace while it is open.
 //
-// A Repository value is one trace directory and its database: either the
-// project's own trace, holding only durable project knowledge (the charter,
-// the entity map and lasting project decisions), or one
-// workstream's dedicated trace, holding that workstream's complete trace.
-// stream is empty for the project's own instance and set to the workstream
-// a workstream instance is dedicated to. The project instance alone opens
-// and tracks workstream instances, lazily, in workstreams; a workstream
-// instance never recurses into another. Every exported method that names a
-// workstream resolves to the right instance through scoped before it takes
-// any lock, so a call against one workstream never waits on another's lock,
-// only ever on the project's own brief bookkeeping and that workstream's own.
+// A Repository is either the project's own trace, holding durable project
+// knowledge (the charter, the entity map and lasting project decisions), or
+// one workstream's dedicated trace. A call that names a workstream resolves
+// to that workstream's trace, so it never waits on another workstream's lock.
 type Repository struct {
-	mu sync.Mutex
-	// Active attempts are admitted under mu and joined before files close.
-	attempts map[string]bool
-	active   sync.WaitGroup
-	closing  bool
-	workflow bool
-	// members retains fixed member identities and references to project-owned
-	// handles. Lifecycle evidence is checked before resolving a member, so an
-	// open shared handle never pins a deleted workstream handle as live.
+	mu                     sync.Mutex
+	attempts               map[string]bool
+	active                 sync.WaitGroup
+	closing                bool
+	workflow               bool
 	membersMu              sync.RWMutex
 	members                map[config.WorkstreamID]CrossRepoMember
 	memberLifecycle        atomic.Pointer[WorkgroupMemberLifecycle]
 	questionCommitBoundary atomic.Pointer[func(string) error]
 	questionReadBoundary   atomic.Pointer[func(config.WorkstreamID) error]
-	// processLock is held, on a cross-repo workgroup's own trace instance,
-	// from a successful acquireWorkgroupTrace until Close: it serializes
-	// every goroutine of this one process that opens the same workgroup
-	// trace, so they hand off its OS-level flock in turn through Go's own
-	// scheduler instead of each polling and backing off against the
-	// others, which a shared reconciliation cadence could otherwise
-	// synchronize into a standing collision. nil on every other instance.
-	processLock *sync.Mutex
-	// shared is set only on a cross-repo workgroup's own trace instance
-	// created or opened through the shared registry: it is the one registry entry
-	// every caller that opens the same workgroup id while this instance is
-	// still open shares, so they all call methods on this one instance,
-	// through its own brief locking, instead of each taking a second
-	// exclusive hold on the same directory. Close decrements its reference
-	// count and only actually closes this instance once it reaches zero,
-	// so a long-running caller such as a dispatched chief-of-staff turn
-	// never has to finish before a short-lived caller's own open of the
-	// same workgroup succeeds. nil on every other instance, where Close
-	// behaves exactly as it does today.
-	shared          *sharedWorkgroupTrace
-	root            config.Root
-	project         config.ProjectID
-	stream          config.WorkstreamID
-	directory       string
-	lock            *os.File
-	session         string
-	wake            *coreadapter.WakeAdapter
-	failPublication func(string) error
-	observer        atomic.Pointer[func(Commit)]
-	spanObserver    atomic.Pointer[func(CommitDetail)]
-	// db is the write connection and reads the read-only pool of the
-	// trace's database.
-	db    *sql.DB
-	reads *sql.DB
-	// cache holds the trace's decoded records under its own lock.
-	cache recordCache
-	// created caches each workstream's creation time, which never changes
-	// once written, under createdMu.
-	createdMu sync.Mutex
-	created   map[config.WorkstreamID]time.Time
-	// manifests holds each manifest last checked, with the stored bytes it
-	// was checked from, by file name, under manifestsMu.
-	manifestsMu sync.Mutex
-	manifests   map[string]checkedManifest
-	// manifestDecodes counts the manifests this handle read and checked.
-	manifestDecodes atomic.Uint64
-	// decoded counts the stored records this handle decoded.
-	decoded        atomic.Uint64
-	workgroupReads atomic.Uint64
-	// approvalDecodes counts the approval documents this handle decoded.
-	approvalDecodes atomic.Uint64
-	// groupTraces holds, on a project instance, the shared workgroup trace
-	// references its approval reads keep until Close. Guarded by
-	// groupTracesMu, which is never held while opening or closing a trace.
-	groupTracesMu     sync.Mutex
-	groupTraces       map[config.WorkgroupID]*Repository
-	groupTracesClosed bool
-	// parent is the project instance that opened this workstream instance
-	// through scoped, nil on the project's own instance. observed delegates
-	// to it so that Observe, called once on the project instance, also
-	// reports commits a workstream instance makes, however and whenever that
-	// instance was opened.
-	parent *Repository
-	// workstreamsMu guards workstreams and closed, the project instance's
-	// lazily opened workstream instances, by ID, and whether this instance's
-	// Close has begun. Unused on a workstream instance.
-	workstreamsMu sync.Mutex
-	workstreams   map[config.WorkstreamID]*Repository
-	// snapshotMu excludes trace deletion while a short discovery snapshot is
-	// assembled. Operation admission and results proceed independently of it.
-	snapshotMu sync.RWMutex
-	// closed is set under workstreamsMu once Close has begun, so a scoped
-	// call racing it never opens a child Close could miss.
-	closed bool
-	// generation counts the commits that landed in this trace.
-	generation atomic.Uint64
-	// workflows holds each workstream's committed workflow, under mu.
-	workflows map[config.WorkstreamID]*cachedWorkflow
+	processLock            *sync.Mutex
+	shared                 *sharedWorkgroupTrace
+	root                   config.Root
+	project                config.ProjectID
+	stream                 config.WorkstreamID
+	directory              string
+	lock                   *os.File
+	session                string
+	wake                   *coreadapter.WakeAdapter
+	failPublication        func(string) error
+	observer               atomic.Pointer[func(Commit)]
+	spanObserver           atomic.Pointer[func(CommitDetail)]
+	db                     *sql.DB
+	reads                  *sql.DB
+	cache                  recordCache
+	createdMu              sync.Mutex
+	created                map[config.WorkstreamID]time.Time
+	manifestsMu            sync.Mutex
+	manifests              map[string]checkedManifest
+	manifestDecodes        atomic.Uint64
+	decoded                atomic.Uint64
+	workgroupReads         atomic.Uint64
+	groupTracesMu          sync.Mutex
+	groupTraces            map[config.WorkgroupID]*Repository
+	groupTracesClosed      bool
+	parent                 *Repository
+	workstreamsMu          sync.Mutex
+	workstreams            map[config.WorkstreamID]*Repository
+	snapshotMu             sync.RWMutex
+	closed                 bool
+	generation             atomic.Uint64
+	workflows              map[config.WorkstreamID]*cachedWorkflow
 }
 
 func location(root config.Root, project config.Project) (string, error) {
@@ -166,8 +109,6 @@ func openDirectory(root config.Root, project config.Project) (*Repository, error
 	return r, err
 }
 
-// openWorkstreamDirectory opens stream's own dedicated trace directory,
-// under the Osmia root and outside every target repository.
 func openWorkstreamDirectory(root config.Root, project config.ProjectID, stream config.WorkstreamID) (*Repository, error) {
 	directory, err := root.WorkstreamTrace(project, stream)
 	if err != nil {
@@ -190,26 +131,6 @@ func openStoreDirectory(root config.Root, project config.ProjectID, stream confi
 	return &Repository{root: root, project: project, stream: stream, directory: directory, session: rand.Text(), wake: coreadapter.NewWakeups()}, nil
 }
 
-// scoped returns the Repository instance that owns the files of the given
-// workstream of a project's own trace instance, opening and recovering its
-// dedicated trace on this handle's first use of it. An empty id
-// returns r itself: the project's own instance. Calling scoped on a
-// workstream instance, or with a workstream not already known to this
-// project instance, is a programming error the caller must rule out first
-// (for example by checking Workstreams or an earlier scan); it refuses
-// rather than silently creating a workstream's trace. This call only briefly
-// takes r's own bookkeeping lock and, the first time, the opened
-// workstream's lock: it never waits on another workstream's lock, and a
-// later use of the same id reuses the open instance without taking r's lock
-// again. It refuses once r's Close has begun, so it never opens a child that
-// Close could miss and leave with its flock held past this process's
-// lifetime.
-//
-// On a cross-repo workgroup's own trace instance, id naming one of its
-// real members (a key of r.members) returns that member's own, already
-// open instance directly, never opening or locking a second handle on it;
-// id naming anything else, including the trace's own host workstream, is
-// resolved the ordinary way, inside the workgroup trace itself.
 func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	if id == "" || id == r.stream {
 		return r, nil
@@ -252,15 +173,11 @@ func (r *Repository) scoped(id config.WorkstreamID) (*Repository, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Every workstream shares the project instance's wake signal, so a wait
-	// on the project's WaitWorkflow wakes for any workstream's durable write,
-	// not only the project's own.
 	s.wake = r.wake
 	s.parent = r
 	ok := false
 	defer func() {
 		if !ok {
-			// The instance was never published and has no attempts to join.
 			s.closeFiles()
 		}
 	}()
@@ -319,14 +236,6 @@ func (r *Repository) ProjectFor(stream config.WorkstreamID) (*Repository, error)
 	return m.Project, nil
 }
 
-// diskStreams lists every workstream that has its own trace directory under
-// the project's workstream traces, the way Workstreams and every aggregate
-// read discover the project's workstreams: from the storage that is
-// authoritative for their existence, not from anything the project trace
-// itself records. On a cross-repo workgroup's own trace instance it
-// instead lists live real members. Retirement needs durable lifecycle
-// evidence; historical membership stays in Workgroups. The host carrying
-// the shared chief thread is never a real member.
 func (r *Repository) diskStreams() ([]config.WorkstreamID, error) {
 	if members := r.memberBindings(); members != nil {
 		ids := make([]config.WorkstreamID, 0, len(members))
@@ -370,12 +279,6 @@ func (r *Repository) diskStreams() ([]config.WorkstreamID, error) {
 	return ids, nil
 }
 
-// scanAll returns every record of the project trace and of every workstream
-// that has its own trace directory, and those workstreams, as scan does for
-// one store. Each workstream's own scan is cached by its own instance and
-// taken under its own lock alone, so one slow or damaged workstream's scan
-// does not hold the project's lock any longer than copying its result, and
-// never holds another workstream's lock at all.
 func (r *Repository) scanAll() ([]Record, []config.WorkstreamID, error) {
 	r.mu.Lock()
 	records, _, err := r.scan()
@@ -427,10 +330,6 @@ func (r *Repository) Observe(f func(Commit)) {
 	r.observer.Store(&f)
 }
 
-// observed passes a published commit to the observer, if any, and to the
-// project instance's observer when this is a workstream instance: Observe is
-// called once, on the project instance, and must still hear every workstream
-// instance's commits, however and whenever each was opened.
 func (r *Repository) observed(c Commit) {
 	if f := r.observer.Load(); f != nil && *f != nil {
 		(*f)(c)
@@ -441,18 +340,12 @@ func (r *Repository) observed(c Commit) {
 }
 
 // Close closes this instance and, on the project's own instance, every
-// workstream instance it opened. Setting closed under the same lock that
-// captures the children to close means a scoped call that arrives after
-// this point finds no workstream to reuse and opens none of its own, so
-// Close never misses a child and leaks its flock past this process's
-// lifetime.
+// workstream instance it opened.
 //
-// On a cross-repo workgroup's own trace instance created or opened through
-// the shared registry, Close instead decrements the shared reference
-// count it was opened under and returns at once while another caller
-// still holds it: the instance, and every workstream it has opened, stays
-// exactly as open and usable as it was, and only the call that brings the
-// count to zero runs the rest of this method.
+// On a cross-repo workgroup's own trace instance opened through the shared
+// registry, Close instead decrements the shared reference count and returns
+// at once while another caller still holds it; only the call that brings the
+// count to zero closes the trace.
 func (r *Repository) Close() error {
 	if r.shared != nil {
 		r.shared.Lock()
@@ -484,8 +377,6 @@ func (r *Repository) Close() error {
 	return errors.Join(errs...)
 }
 
-// closeFiles releases this instance's flock and database after attempts join,
-// or on the failure path of an instance that has not been published.
 func (r *Repository) closeFiles() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -494,8 +385,6 @@ func (r *Repository) closeFiles() error {
 	var errs []error
 	errs = append(errs, r.closeDatabases())
 	if r.lock != nil {
-		// A child process forked but not yet executed shares the open file,
-		// so closing alone would leave the lock held until it executes.
 		errs = append(errs, syscall.Flock(int(r.lock.Fd()), syscall.LOCK_UN), r.lock.Close())
 		r.lock = nil
 	}
@@ -533,7 +422,6 @@ const (
 	EntitiesDocument = "kb-entities"
 )
 
-// ownerActor records the owner's edits of project and workstream documents.
 var ownerActor = Actor{Kind: "owner", ID: "local"}
 
 func charterRevision(project config.ProjectID, at time.Time, actor Actor, cause string, revision int, content string) Document {
@@ -639,15 +527,12 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	if err != nil {
 		return nil, err
 	}
-	// Only the project's existing configuration may precede trace creation.
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if e.Name() != "config.toml" {
-			return nil, fmt.Errorf("%w: %s already contains %s", ErrConflict, directory, e.Name())
-		}
+	if len(entries) > 0 {
+		return nil, fmt.Errorf("%w: %s already contains %s", ErrConflict, directory, entries[0].Name())
 	}
 	r, err := openDirectory(root, project)
 	if err != nil {
@@ -670,8 +555,6 @@ func createTrace(ctx context.Context, root config.Root, project config.Project, 
 	return r, nil
 }
 
-// createManifest requires a new, empty trace. It commits the trace's
-// manifest, m under header h, at name together with records.
 func (r *Repository) createManifest(ctx context.Context, name string, m any, records []Record, message string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -753,12 +636,6 @@ func (r *Repository) openAll() (*Repository, error) {
 // ordinary workstream's Kind is empty.
 const SessionKind = "session"
 
-// manifestRecord is a project or workstream manifest. Workspaces is the
-// workspace backend a workstream was created on; it is empty in the project
-// manifest and in a workstream manifest that records none. Kind, Profile,
-// Base, Branch and Title are set only for a session workstream: its kind,
-// its fixed profile, the base commit it opened from, its branch and its
-// optional title.
 type manifestRecord struct {
 	Header
 	Workspaces string `json:"workspaces,omitempty"`
@@ -769,18 +646,12 @@ type manifestRecord struct {
 	Title      string `json:"title,omitempty"`
 }
 
-// checkedManifest is a manifest that passed its checks and the stored bytes
-// it was decoded from.
 type checkedManifest struct {
 	data           []byte
 	schema, stream string
 	manifest       manifestRecord
 }
 
-// readManifest reads the stored manifest name on every call, so a manifest
-// that went missing or was damaged is reported at once. Stored bytes equal to
-// the ones this handle last checked for the same schema and workstream
-// return that check's result without decoding them again.
 func (r *Repository) readManifest(name, schema string, stream config.WorkstreamID) (manifestRecord, error) {
 	data, err := r.file(name)
 	if err != nil {
@@ -828,16 +699,10 @@ func (r *Repository) decodeManifest(name string, data []byte, schema string, str
 	return m, nil
 }
 
-// validWorkspaces reports whether a workstream manifest may record the
-// backend: Git, Jujutsu or none.
 func validWorkspaces(backend string) bool {
 	return backend == "" || backend == config.WorkspacesGit || backend == config.WorkspacesJujutsu
 }
 
-// validSessionFields checks a manifest's Kind, Profile, Base, Branch and
-// Title against each other: the project manifest and an ordinary
-// workstream's carry none of them; a session workstream's Kind is
-// SessionKind with a non-empty profile, base commit and branch.
 func validSessionFields(stream config.WorkstreamID, m manifestRecord) error {
 	if stream == "" || m.Kind == "" {
 		if m.Kind != "" || m.Profile != "" || m.Base != "" || m.Branch != "" || m.Title != "" {
@@ -900,8 +765,6 @@ func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 	return m.Kind, nil
 }
 
-// workstreamManifest reads a workstream's creation manifest, whose Header.At
-// is the workstream's creation time.
 func (r *Repository) workstreamManifest(stream config.WorkstreamID) (manifestRecord, error) {
 	name := "workstreams/" + string(stream) + "/workstream.json"
 	return r.readManifest(name, "osmia.trace.workstream", stream)
@@ -940,16 +803,6 @@ func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.Workstrea
 	return err
 }
 
-// createWorkstreamTrace creates and commits id's own dedicated trace, whose
-// manifest is m under a header recording cause. It refuses an existing
-// directory with ErrConflict.
-//
-// The trace is built under a staging directory outside WorkstreamTraces and
-// only moved into its final place, by one atomic rename, once its database
-// holds the manifest and is closed. A directory listing of WorkstreamTraces
-// (diskStreams, which every concurrent read and background pass uses to
-// discover a project's workstreams) therefore never observes the workstream
-// before its trace is complete.
 func createWorkstreamTrace(ctx context.Context, root config.Root, project config.ProjectID, id config.WorkstreamID, m manifestRecord, cause, message string, at time.Time, actor Actor) error {
 	if err := config.CheckWorkstreamIDs(id); err != nil {
 		return err
@@ -1076,16 +929,12 @@ func (r *Repository) WithWorkstreamDiscovery(read func([]config.WorkstreamID) er
 }
 
 // Generation reports how many commits landed in the trace through this
-// handle. It never decreases while the handle is open, and it is
-// unchanged exactly when no write landed between two calls: a caller that
-// assembles a response from several separate reads can call it before and
-// after and retry the assembly when it differs, so the response never mixes
-// state from before a commit with state from after it. It never blocks on
-// mu, so it is safe to call around a read held up by a long-running write.
-// On the project's own instance it sums its own generation with that of
-// every workstream instance opened so far, so it also advances when a
-// workstream's trace changes; a workstream not yet opened by this handle
-// has contributed no writes of its own to observe.
+// handle. It never decreases while the handle is open, and it is unchanged
+// exactly when no write landed between two calls: a caller that assembles a
+// response from several separate reads can call it before and after and retry
+// the assembly when it differs. It never blocks on a write. On the project's
+// own instance it sums its own generation with that of every workstream
+// instance opened so far.
 func (r *Repository) Generation() uint64 {
 	total := r.generation.Load()
 	r.workstreamsMu.Lock()
@@ -1147,8 +996,6 @@ func (r *Repository) Append(ctx context.Context, v Record) error {
 	return r.append(ctx, v)
 }
 
-// append requires r.mu. It checks v against the committed records of its
-// identity and path alone, and commits it.
 func (r *Repository) append(ctx context.Context, v Record) error {
 	if _, ok := v.(Image); ok && !r.imageStorageScope() {
 		return fmt.Errorf("images belong only to member or session traces")
@@ -1198,10 +1045,6 @@ func (r *Repository) append(ctx context.Context, v Record) error {
 	return r.publish(ctx, change{records: []Record{v}, message: fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision)})
 }
 
-// checkRevisions requires r.mu. It checks that each of records, in order,
-// is the next revision of its record with a stable identity, and that a
-// document's path has no other identity, against the committed records of
-// those identities and paths alone.
 func (r *Repository) checkRevisions(ctx context.Context, records []Record) error {
 	pending := map[string]Record{}
 	paths := map[string]string{}

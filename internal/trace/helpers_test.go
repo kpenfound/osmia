@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// storedBodies returns the bodies of the records stored at the logical path
-// name, in seq order.
 func storedBodies(t *testing.T, r *Repository, name string) []string {
 	t.Helper()
 	rows, err := r.db.QueryContext(context.Background(), "SELECT body FROM records WHERE path = ? ORDER BY seq", name)
@@ -30,8 +28,6 @@ func storedBodies(t *testing.T, r *Repository, name string) []string {
 	return bodies
 }
 
-// storeExec runs a statement against r's database directly, bypassing every
-// check, to stage damage a test then reads back.
 func storeExec(t *testing.T, r *Repository, query string, args ...any) {
 	t.Helper()
 	if _, err := r.db.ExecContext(context.Background(), query, args...); err != nil {
@@ -43,7 +39,6 @@ func storeExec(t *testing.T, r *Repository, query string, args ...any) {
 	r.workflows = nil
 }
 
-// commits returns how many commits r's own trace holds.
 func commits(t *testing.T, r *Repository) int {
 	t.Helper()
 	n, err := r.CommitCount(string(r.stream))
@@ -53,8 +48,6 @@ func commits(t *testing.T, r *Repository) int {
 	return n
 }
 
-// fileOf reads the trace file name of r: a stored file, or the latest
-// revision of the document at that logical path.
 func fileOf(t *testing.T, r *Repository, name string) string {
 	t.Helper()
 	data, err := r.file(name)
@@ -64,9 +57,6 @@ func fileOf(t *testing.T, r *Repository, name string) string {
 	return string(data)
 }
 
-// kbFiles returns the project's kb files by file name: the latest revision of
-// each prose file whose content is not empty, and the latest entity map when
-// one is recorded.
 func kbFiles(t *testing.T, r *Repository) map[string]string {
 	t.Helper()
 	documents, err := r.ProjectDocuments()
@@ -88,8 +78,6 @@ func kbFiles(t *testing.T, r *Repository) map[string]string {
 	return out
 }
 
-// closedStoreExec runs a statement against the database of the closed trace
-// in directory.
 func closedStoreExec(t *testing.T, directory, query string, args ...any) {
 	t.Helper()
 	db, err := sql.Open("sqlite", databaseDSN(TraceDatabase(directory)))

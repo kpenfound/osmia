@@ -123,8 +123,6 @@ func readAssumptions(r *Repository, stream config.WorkstreamID) ([]Assumption, e
 // Replaying the same text and targets in a turn returns the original entry.
 func (r *Repository) LogAssumption(ctx context.Context, agent string, scope coreadapter.Scope, text string, at time.Time, affected ...config.WorkstreamID) (Assumption, error) {
 	stream := config.WorkstreamID(scope.Workstream)
-	// Resolve membership before acquiring the scoped mutex: group documents and
-	// the active turn live in different scopes.
 	members := []config.WorkstreamID{stream}
 	if scope.Role == ChiefOfStaff {
 		var err error

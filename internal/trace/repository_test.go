@@ -58,9 +58,6 @@ func create(t *testing.T) (*Repository, config.Root, config.Project) {
 	return r, root, p
 }
 
-// mustScoped returns the workstream's own trace instance, the way every
-// workstream-scoped write and read resolves it: its own directory, lock and
-// database, independent of the project's.
 func mustScoped(t *testing.T, r *Repository, stream config.WorkstreamID) *Repository {
 	t.Helper()
 	s, err := r.scoped(stream)
@@ -91,7 +88,6 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every workstream carries its chief-of-staff identity alongside the specimen.
 	list = slices.DeleteFunc(list, func(v T) bool {
 		a, ok := any(v).(Agent)
 		return ok && a.ID == ChiefOfStaff
@@ -107,7 +103,6 @@ func checkTyped[T Record](t *testing.T, r *Repository, want Record) {
 func TestCreateRoundTripReopen(t *testing.T) {
 	r, root, p := create(t)
 	s := mustScoped(t, r, streamID)
-	// Each trace directory holds its database and lock, and nothing else.
 	for _, dir := range []string{r.directory, s.directory} {
 		for _, name := range []string{databaseFile, lockFile} {
 			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
@@ -133,7 +128,6 @@ func TestCreateRoundTripReopen(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// Typed reads do not need the target clone or a backend transcript.
 	if err := os.RemoveAll(p.Clone); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +343,7 @@ func TestSeparationAndBoundaryRejection(t *testing.T) {
 		})
 	}
 }
-func TestExistingTraceAndSecondWriter(t *testing.T) {
+func TestCreateRefusesAnExistingTrace(t *testing.T) {
 	root, p := fixture(t)
 	r, err := Create(context.Background(), root, p, at, owner)
 	if err != nil {
@@ -360,6 +354,15 @@ func TestExistingTraceAndSecondWriter(t *testing.T) {
 		second.Close()
 		t.Fatal("existing trace initialized again")
 	}
+}
+
+func TestOpenRefusesASecondWriter(t *testing.T) {
+	root, p := fixture(t)
+	r, err := Create(context.Background(), root, p, at, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
 	if second, err := Open(root, p); !errors.Is(err, ErrLocked) {
 		if second != nil {
 			second.Close()
@@ -401,7 +404,6 @@ func TestCorruptionPreservesValidHistory(t *testing.T) {
 			}
 			name := recordPath(d)
 			if damage == "path" {
-				// A valid record stored under another record's path.
 				name = "workstreams/" + string(streamID) + "/events.jsonl"
 			}
 			storeExec(t, s, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES ((SELECT max(seq) FROM commits), ?, ?, ?, ?, ?)", name, next.Schema, next.ID, next.Revision, string(body))
@@ -454,7 +456,6 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	if successes != 1 {
 		t.Fatalf("duplicate append successes: %d", successes)
 	}
-	// A commit that fails before the database commits records nothing.
 	d := specimens()[0].(Document)
 	d.Revision = 2
 	d.Content = "pending"
@@ -488,7 +489,6 @@ func TestConcurrentAppendAndFailedCommit(t *testing.T) {
 	}
 }
 
-// A cancelled caller commits nothing.
 func TestAppendWithACancelledContextCommitsNothing(t *testing.T) {
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)
@@ -506,12 +506,6 @@ func TestAppendWithACancelledContextCommitsNothing(t *testing.T) {
 	}
 }
 
-// TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject is the
-// isolation separate traces give: each workstream's own trace is its own
-// database with its own lock, so a write that happens to hold one
-// workstream's own lock for a long time never serializes a write to another
-// workstream or a read of the project's own trace, since neither shares a
-// lock or a database with it.
 func TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject(t *testing.T) {
 	r, _, _ := create(t)
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -557,16 +551,8 @@ func TestWorkstreamLockDoesNotSerializeAnotherWorkstreamOrTheProject(t *testing.
 	}
 }
 
-// Observe is called once, on the project instance, before or after a
-// workstream instance exists. Either way it must still hear that
-// workstream's own commits: service.go relies on this to publish the event
-// stream every workstream write feeds, and a missed call here previously
-// left API and test subscribers waiting on a slow fallback poll instead of
-// the commit's own wake.
 func TestObserveReportsWorkstreamCommitsOnTheProjectInstance(t *testing.T) {
 	r, _, _ := create(t)
-	// CreateWorkstream, inside create, already opened and cached the
-	// workstream's own instance before Observe is called below.
 	var commits []Commit
 	r.Observe(func(c Commit) { commits = append(commits, c) })
 	if err := r.Append(context.Background(), specimens()[0]); err != nil {
@@ -575,7 +561,6 @@ func TestObserveReportsWorkstreamCommitsOnTheProjectInstance(t *testing.T) {
 	if len(commits) != 1 || !slices.Contains(commits[0].Paths, "workstreams/"+string(streamID)+"/documents.jsonl") {
 		t.Fatalf("observed commits: %+v", commits)
 	}
-	// A workstream opened after Observe was called delegates just the same.
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
 	if err := r.CreateWorkstream(context.Background(), second, at, owner); err != nil {
 		t.Fatal(err)
@@ -608,7 +593,7 @@ func TestReopenAfterProcessExit(t *testing.T) {
 		if err := r.Append(context.Background(), specimens()[1]); err != nil {
 			t.Fatal(err)
 		}
-		os.Exit(0) // The OS must release the trace lock without Close.
+		os.Exit(0)
 	}
 	root, p := fixture(t)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestReopenAfterProcessExit$")
@@ -622,34 +607,6 @@ func TestReopenAfterProcessExit(t *testing.T) {
 	}
 	defer r.Close()
 	checkTyped[Transition](t, r, specimens()[1])
-}
-
-func TestExistingConfigurationIsNotCommitted(t *testing.T) {
-	root, p := fixture(t)
-	name, err := root.ProjectConfig(p.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(name), 0700); err != nil {
-		t.Fatal(err)
-	}
-	data := []byte("version = 1\n")
-	if err := os.WriteFile(name, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	r, err := Create(context.Background(), root, p, at, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	got, err := os.ReadFile(name)
-	if err != nil || string(got) != string(data) {
-		t.Fatalf("configuration changed: %s %v", got, err)
-	}
-	var stored int
-	if err := r.db.QueryRow("SELECT count(*) FROM files WHERE path LIKE '%config.toml%'").Scan(&stored); err != nil || stored != 0 {
-		t.Fatalf("configuration included in the trace: %d %v", stored, err)
-	}
 }
 
 func TestCreateSeededRecordsEntityMap(t *testing.T) {
@@ -702,8 +659,6 @@ func TestCreateSeededWithCharterRecordsItAsTheFirstRevision(t *testing.T) {
 
 func TestCloseReleasesALockItsDescriptorsShare(t *testing.T) {
 	r, root, p := create(t)
-	// A duplicate descriptor shares the lock the way a child process forked
-	// but not yet executed does.
 	dup, err := syscall.Dup(int(r.lock.Fd()))
 	if err != nil {
 		t.Fatal(err)

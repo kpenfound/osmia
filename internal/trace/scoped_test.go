@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// A first-time open of a broken workstream must return its error without
-// leaking ownership or preventing another workstream's bookkeeping.
 func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 	r, _, _ := create(t)
 	other := config.WorkstreamID("w_00000000000000000000000000000002")
@@ -20,8 +18,6 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A directory with no ".git" of its own fails scoped's first checkGit,
-	// so this is a first-time open, not a cached one.
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +38,6 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 		t.Fatal("a failed first-time open inside Serialize did not return within the bound; it deadlocked")
 	}
 
-	// The project instance remains usable after the failed open.
 	if err := r.Serialize(func() error { return nil }); err != nil {
 		t.Fatalf("Serialize after the failed open: %v", err)
 	}
@@ -51,12 +46,6 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 	}
 }
 
-// TestScopedRefusesAfterCloseAndLeaksNoFlock races scoped against Close on
-// the same project instance and confirms that whichever runs first, no
-// workstream is ever opened twice and nothing of Close's is left for a
-// racing scoped to miss: the project's trace opens cleanly again in the same
-// process, which a leaked flock on a workstream Close never joined would
-// refuse.
 func TestScopedRefusesAfterCloseAndLeaksNoFlock(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
@@ -64,10 +53,6 @@ func TestScopedRefusesAfterCloseAndLeaksNoFlock(t *testing.T) {
 	if err := r.CreateWorkstream(ctx, other, at, owner); err != nil {
 		t.Fatal(err)
 	}
-	// CreateWorkstream eagerly opened and cached other's instance; release
-	// its flock and forget it, so the race below makes scoped open it for
-	// the first time, as it would for a workstream this instance has not
-	// touched yet, rather than return the already-cached one.
 	r.workstreamsMu.Lock()
 	cached := r.workstreams[other]
 	delete(r.workstreams, other)
@@ -95,9 +80,6 @@ func TestScopedRefusesAfterCloseAndLeaksNoFlock(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// Whichever of the two ran first, the project's trace, including the
-	// workstream's own flock, is free again: a fresh Open in this same
-	// process succeeds.
 	_ = scopedErr
 	reopened, err := Open(root, p)
 	if err != nil {
@@ -108,8 +90,6 @@ func TestScopedRefusesAfterCloseAndLeaksNoFlock(t *testing.T) {
 		t.Fatalf("workstreams after reopening = %v, %v", streams, err)
 	}
 
-	// Once Close has fully run, scoped refuses rather than opening a new,
-	// now-unjoined child.
 	if _, err := r.scoped(other); err == nil {
 		t.Fatal("scoped opened a child after Close completed")
 	}

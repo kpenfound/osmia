@@ -54,7 +54,6 @@ func TestSharedConversationWithOneSelectedWorkstreamUsesIndividualApproval(t *te
 			if err != nil || approved == multiple {
 				t.Fatalf("group completion barrier: %v %v", approved, err)
 			}
-			// No group completion substitutes for the member's own owner decision.
 			state, err := r2.Workflow(crossMember2, FeatureSubject)
 			if err != nil || state.Value != "" {
 				t.Fatalf("selection granted member ratification: %+v %v", state, err)

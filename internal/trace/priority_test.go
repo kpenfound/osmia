@@ -13,8 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// chiefTurnFrom creates a chief-of-staff thread for agent with one claimed
-// turn that actor asked for, and returns the scope of that turn.
 func chiefTurnFrom(t *testing.T, r *Repository, agent, turn string, actor Actor) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -60,14 +58,11 @@ func TestSetPriorityRecordsTheOwnersRequest(t *testing.T) {
 		t.Fatalf("priority log: %q", bodies)
 	}
 
-	// An apply error records nothing and is returned as it is.
 	failed := errors.New("runtime unavailable")
 	if _, err := r.SetPriority(ctx, "chief", scope, at, func() ([]config.WorkstreamID, error) { return nil, failed }); !errors.Is(err, failed) {
 		t.Fatalf("apply error: %v", err)
 	}
 
-	// A turn the owner did not ask for, and a turn of another role, change
-	// nothing.
 	called := false
 	apply := func() ([]config.WorkstreamID, error) { called = true; return nil, nil }
 	events := chiefTurnFrom(t, r, "chief_events", "events1", Actor{Kind: "service", ID: "events"})

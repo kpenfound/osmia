@@ -66,9 +66,6 @@ func (r *Repository) MemberRetired(stream config.WorkstreamID) (bool, error) {
 	return m.Project.workgroupMemberRetired(group, stream)
 }
 
-// memberReadError requires the resolved member's mutex. Lifecycle readers must
-// use the shared receiver: the child may have been closed since resolution.
-// The evidence callback does not lock or read the member's history.
 func (r *Repository) memberReadError(stream config.WorkstreamID) error {
 	retired, err := r.MemberRetired(stream)
 	if err != nil {
@@ -91,8 +88,6 @@ func (r *Repository) SetQuestionReadBoundary(boundary func(config.WorkstreamID) 
 	return nil
 }
 
-// questionRead is lockQuestionRead for a read of committed records alone,
-// which takes no lock: it never waits on a write in progress.
 func (r *Repository) questionRead(stream config.WorkstreamID) (*Repository, error) {
 	target, err := r.scoped(stream)
 	if err != nil {
@@ -140,8 +135,6 @@ func (r *Repository) memberBindings() map[config.WorkstreamID]CrossRepoMember {
 	return maps.Clone(r.members)
 }
 
-// retiredRead verifies lifecycle evidence again when a live aggregate meets a
-// retired binding. An error carrying the sentinel alone is not retirement.
 func (r *Repository) retiredRead(stream config.WorkstreamID, readErr error) (bool, error) {
 	if !errors.Is(readErr, ErrMemberRetired) {
 		return false, readErr
@@ -301,7 +294,6 @@ func ApprovedWorkgroupMembers(r *Repository, g Workgroup, approval GroupApproval
 		}
 		Followups map[config.WorkstreamID]config.WorkstreamID
 	}
-	// Iteration permits a later approved delta to follow up an earlier addition.
 	for changed := true; changed; {
 		changed = false
 		for _, doc := range latest {

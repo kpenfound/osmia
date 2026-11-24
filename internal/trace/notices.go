@@ -40,9 +40,6 @@ func (r *Repository) NotifyTool(scope coreadapter.Scope, now func() time.Time) c
 		if scope.Role != ChiefOfStaff {
 			return nil, errors.New("only the chief of staff can publish notices")
 		}
-		// The triggering turn is checked against its own workstream's trace;
-		// the notice itself is project knowledge, recorded in the project's
-		// own trace once that check has passed.
 		workstream, err := r.scoped(config.WorkstreamID(scope.Workstream))
 		if err != nil {
 			return nil, err

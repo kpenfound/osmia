@@ -36,8 +36,6 @@ func TestPrepareDesignWorkgroupFailureAndRetry(t *testing.T) {
 			ctx := context.Background()
 			var restore []byte
 			if failure == "host-cancelled" || failure == "open-damaged" {
-				// The committed group directory survives an interruption before
-				// its host and membership record are published.
 				r, err := createWorkgroupTraceDirectory(ctx, root, id, at, owner, "design-start")
 				if err != nil {
 					t.Fatal(err)
@@ -106,7 +104,6 @@ func TestPrepareDesignWorkgroupFailureAndRetry(t *testing.T) {
 				t.Fatal("failed preparation retained a shared handle")
 			}
 			if restore != nil {
-				// Repair the damaged manifest without discarding committed history.
 				closedStoreExec(t, directory, "UPDATE files SET content = ? WHERE path = 'project.json'", restore)
 			}
 			if failure == "directory-file" {

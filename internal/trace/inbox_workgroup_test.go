@@ -10,9 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// askerThreadOn is askerThread for a workstream other than streamID: it
-// creates its asker's thread with one claimed turn on stream and returns the
-// scope of that turn.
 func askerThreadOn(t *testing.T, r *Repository, stream config.WorkstreamID, agent, role, turn string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -33,14 +30,6 @@ func askerThreadOn(t *testing.T, r *Repository, stream config.WorkstreamID, agen
 	return coreadapter.Scope{Project: string(projectID), Workstream: string(stream), Unit: "unit1", Thread: agent + "_thread", Turn: turn, Role: role}
 }
 
-// TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues builds a
-// three-workstream workgroup, shares the first member (its host) as the
-// chief of staff for all three, and shows a genuine gap affecting two of
-// them escalated together as one consolidated inbox entry (spec#18): the
-// third member's own independent question is answered directly in the same
-// pass and never waits on it. The owner's one ruling on that one entry
-// resumes both paused askers, and only them: the third member's already-
-// answered question is untouched.
 func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -73,9 +62,6 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 	chief := chiefThread(t, r, "chief_turn")
 	chiefAt := at.Add(time.Minute)
 
-	// The gap affects both A's and B's questions together: the chief
-	// escalates them as one consolidated batch, naming B's question
-	// qualified since it belongs to another member of the shared workgroup.
 	batch, err := r.EscalateQuestions(ctx, "chief", chief, EscalationRequest{
 		Questions: []string{"1", string(secondStream) + ":1"}, Rephrasing: "Where does the upload index live, and does it rebuild on start?",
 		Section: "spec#3", Conflict: "The spec says the index is derived, but doesn't say whether a restart may recompute it.",
@@ -86,13 +72,10 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatal(err)
 	}
 
-	// C's own question is unaffected by the gap: the chief answers it
-	// directly, in the same pass, without waiting for the owner.
 	if _, err := r.AnswerQuestion(ctx, "chief", chief, string(thirdStream)+":1", "Fixed; see the logging guide.", []string{"kb/logging.md"}, chiefAt); err != nil {
 		t.Fatal(err)
 	}
 
-	// Only A and B paused: their questions are escalated, and only theirs.
 	qa, err := r.Questions(streamID)
 	if err != nil || len(qa) != 1 || qa[0].State != QuestionEscalated {
 		t.Fatalf("A's question: %+v err=%v", qa, err)
@@ -106,8 +89,6 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatalf("C's question should be answered directly, unaffected: %+v err=%v", qc, err)
 	}
 
-	// The owner sees one consolidated inbox entry, spanning A and B, not two
-	// separate ones, and nothing naming C.
 	inbox, err := r.Inbox()
 	if err != nil || len(inbox) != 1 {
 		t.Fatalf("inbox: %+v err=%v", inbox, err)
@@ -120,7 +101,6 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatalf("inbox entry questions do not name both affected workstreams: %+v", entry.Questions)
 	}
 
-	// The owner answers the one consolidated entry, once.
 	ownerText := "Keep the index fixed at start."
 	rulingAt := at.Add(2 * time.Minute)
 	ruled, err := r.Rule(ctx, entry.Number, ownerText, owner, rulingAt)
@@ -131,8 +111,6 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatalf("ruled entry: %+v", ruled)
 	}
 
-	// The chief relays the ruling, naming only one of the batch's questions:
-	// the relay still resumes every question of that one batch.
 	relayedText := "The index does not rebuild on start."
 	relayAt := at.Add(3 * time.Minute)
 	relayed, err := r.RelayRuling(ctx, "chief", chief, "1", relayedText, ScopeLocal, relayAt)
@@ -143,9 +121,6 @@ func TestConsolidatedEscalationPausesOnlyItsMembersWhileAThirdContinues(t *testi
 		t.Fatalf("relayed batch: %+v", relayed)
 	}
 
-	// Both A and B are resumed, with the same relayed answer. C, never part
-	// of the gap, keeps the independent answer it already had and is
-	// untouched by the relay.
 	qa, err = r.Questions(streamID)
 	if err != nil || len(qa) != 1 || qa[0].State != QuestionAnswered || qa[0].Ruling == nil || qa[0].Ruling.ReturnedAnswer != relayedText {
 		t.Fatalf("A after the relay: %+v err=%v", qa, err)

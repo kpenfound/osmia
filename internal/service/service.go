@@ -30,7 +30,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/readview"
@@ -928,22 +927,12 @@ func (s *Service) cleanupSocket() {
 }
 
 // openAll opens the runtime of every active project of cfg that has a trace,
-// in registry order, after moving every cross-repo workgroup's Git
-// trace to its database. A project whose trace migration could not complete
-// is logged and left unopened, so it is not scheduled this run; every other
-// project still opens. Any other failure opens none.
+// in registry order. Any failure opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
-	if err := trace.MigrateWorkgroups(context.Background(), cfg.Root, s.migrationLog); err != nil {
-		s.log().Warn("workgroup trace migration incomplete", "error", err.Error())
-	}
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
 		p, err := s.open(cfg.For(id))
 		if err != nil {
-			if errors.Is(err, trace.ErrMigrationIncomplete) {
-				s.log().Warn("project trace migration incomplete; project not opened", "project", string(id), "error", err.Error())
-				continue
-			}
 			for _, opened := range out {
 				opened.repository.Close()
 			}
@@ -1262,18 +1251,6 @@ func (s *Service) stop(projects ...*activeProject) error {
 	return err
 }
 
-// migrationLog reports trace.Migrate's progress through s's structured
-// logger, naming only the project and workstream, never transcript content
-// or credentials, the way the tailnet supervisor reports its own retries.
-func (s *Service) migrationLog(format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	if strings.Contains(format, "failed") {
-		s.log().Warn(msg)
-		return
-	}
-	s.log().Info(msg)
-}
-
 // openReconciliation leaves trace creation to project registration; an existing
 // trace must open cleanly before the service can report readiness. The runner
 // boundary is served by the bound thread reconciler for turns and by the
@@ -1300,13 +1277,10 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if exists, err := trace.HasTrace(directory); err != nil {
+	if exists, err := trace.HasTraceDatabase(directory); err != nil {
 		return nil, nil, nil, err
 	} else if !exists {
 		return nil, nil, nil, nil
-	}
-	if err := trace.Migrate(context.Background(), cfg.Root, cfg.Project.ID, plan.DraftCheck(directory), s.migrationLog); err != nil {
-		return nil, nil, nil, err
 	}
 	repository, err := trace.Open(cfg.Root, cfg.Project)
 	if err != nil {

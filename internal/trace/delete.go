@@ -36,8 +36,6 @@ func (r *Repository) markWorkstreamTraceForDeletion(stream config.WorkstreamID, 
 	defer r.snapshotMu.Unlock()
 	r.workstreamsMu.Lock()
 	defer r.workstreamsMu.Unlock()
-	// Scoped opens must see either the cached live handle or the missing
-	// directory, never an evicted handle whose flock has not been released.
 	child := r.workstreams[stream]
 	delete(r.workstreams, stream)
 	if beforeClose != nil {

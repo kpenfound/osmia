@@ -8,17 +8,10 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// projectSpecSnapshot is the effective project spec of one workgroup at one
-// set of source revisions, with the workgroup record it was read under. It is
-// shared with the cache and never changed after it is built: readers copy
-// what they hand out, or read it in place through a documented accessor.
 type projectSpecSnapshot struct {
-	group Workgroup
-	spec  ProjectSpec
-	// found reports whether a spec is recorded. The group is set whenever the
-	// workgroup is recorded, whether or not a spec is.
-	found bool
-	// incoming lists each workstream's incoming graph edges, in graph order.
+	group    Workgroup
+	spec     ProjectSpec
+	found    bool
 	incoming map[config.WorkstreamID][]Edge
 }
 
@@ -33,26 +26,13 @@ func newProjectSpecSnapshot(g Workgroup, spec ProjectSpec, found bool) *projectS
 	return s
 }
 
-// projectSpecKey names the inputs of the choice workgroupProjectSpec makes:
-// the workgroups document, then the approved revision, then the immutable
-// approval, then the latest draft. Only the inputs the choice reached are set,
-// so a draft recorded after an approval does not change the key.
 type projectSpecKey struct {
 	groupsSeq int64
-	// tier is 0 when the workgroup is not recorded, 1 for the approved
-	// revision, 2 for the approval and 3 for the latest draft.
-	tier int
-	// seq is the stored sequence of the document tiers 1 and 3 read.
-	seq int64
-	// approval is the cached approval decision tier 2 read.
-	approval *GroupApproval
+	tier      int
+	seq       int64
+	approval  *GroupApproval
 }
 
-// projectSpecCache holds the effective project spec of one workgroup. It
-// belongs to the workgroup's registry entry and is dropped with the approval
-// cache when the last holder of the workgroup trace closes. The durable trace
-// stays authoritative: every read probes the sequence of each document the
-// choice reached and decodes again when one changed.
 type projectSpecCache struct {
 	mu sync.Mutex
 
@@ -73,9 +53,6 @@ func (c *projectSpecCache) reset() {
 	c.mu.Unlock()
 }
 
-// projectSpecSnapshotOf returns the effective project spec of workgroup id
-// read through wt, decoding each source document at most once per revision.
-// The snapshot is shared: callers must not change it.
 func (wt *Repository) projectSpecSnapshotOf(id config.WorkgroupID) (*projectSpecSnapshot, error) {
 	c := &projectSpecCache{}
 	if wt.shared != nil {
@@ -173,8 +150,6 @@ func (wt *Repository) cachedProjectSpecSnapshot(c *projectSpecCache, id config.W
 	return build(spec, found), nil
 }
 
-// uncachedProjectSpecSnapshot reads the effective spec from the trace without
-// keeping it.
 func (wt *Repository) uncachedProjectSpecSnapshot(id config.WorkgroupID) (*projectSpecSnapshot, error) {
 	spec, g, found, err := wt.workgroupProjectSpec(id)
 	if err != nil {
@@ -183,10 +158,6 @@ func (wt *Repository) uncachedProjectSpecSnapshot(id config.WorkgroupID) (*proje
 	return newProjectSpecSnapshot(g, spec, found), nil
 }
 
-// crossRepoProjectSpecSnapshot reads the effective project spec of cross-repo
-// workgroup id through a handle on its trace that r's project instance keeps
-// for the life of the instance. exists is false when no trace exists yet for
-// id. The snapshot is shared: callers must not change it.
 func (r *Repository) crossRepoProjectSpecSnapshot(id config.WorkgroupID) (snap *projectSpecSnapshot, exists bool, err error) {
 	sharedWorkgroupTraceFor(id).projectSpecReads.Add(1)
 	directory, err := r.root.WorkgroupTrace(id)

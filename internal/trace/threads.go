@@ -78,7 +78,6 @@ func (t QueuedTurn) Status() string {
 	}
 }
 
-// storedThread is a thread as workflow.json holds it.
 type storedThread struct {
 	Identity Agent                      `json:"identity"`
 	Session  coreadapter.BackendSession `json:"session"`
@@ -87,22 +86,15 @@ type storedThread struct {
 	Turns    []storedTurn               `json:"turns,omitempty"`
 }
 
-// storedTurn is a queued turn as workflow.json holds it. In the current
-// workflow version, RequestID and ResponseID name the turn's records in the
-// agent's log.jsonl, which hold their content. Workflow version 1 carries
-// Request and Response whole instead.
 type storedTurn struct {
 	Attempts    []TurnAttempt `json:"attempts,omitempty"`
 	Sequence    uint64        `json:"sequence"`
 	RequestID   string        `json:"request_id,omitempty"`
-	Request     *TurnRequest  `json:"request,omitempty"`
 	Claim       *TurnClaim    `json:"claim,omitempty"`
 	ResponseID  string        `json:"response_id,omitempty"`
-	Response    *TurnResponse `json:"response,omitempty"`
 	CompletedAt time.Time     `json:"completed_at,omitempty"`
 }
 
-// storeThreads returns threads as the current workflow version stores them.
 func storeThreads(threads map[string]Thread) map[string]storedThread {
 	if len(threads) == 0 {
 		return nil
@@ -122,13 +114,9 @@ func storeThreads(threads map[string]Thread) map[string]storedThread {
 	return stored
 }
 
-// loadThreads restores stored threads of workflow version with their requests
-// and responses from records. It returns the record keys of turns whose
-// content the workflow carries itself, which validateThreads compares with
-// the records.
-func loadThreads(stored map[string]storedThread, version int, records []Record, stream config.WorkstreamID) (map[string]Thread, map[string]bool, error) {
+func loadThreads(stored map[string]storedThread, records []Record, stream config.WorkstreamID) (map[string]Thread, error) {
 	if len(stored) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	requests, responses := map[string]TurnRequest{}, map[string]TurnResponse{}
 	for _, rec := range records {
@@ -144,44 +132,32 @@ func loadThreads(stored map[string]storedThread, version int, records []Record, 
 		}
 	}
 	threads := make(map[string]Thread, len(stored))
-	carried := map[string]bool{}
 	for id, s := range stored {
 		t := Thread{Identity: s.Identity, Session: s.Session, Status: s.Status, Active: s.Active}
 		for _, turn := range s.Turns {
 			q := QueuedTurn{Attempts: turn.Attempts, Sequence: turn.Sequence, Claim: turn.Claim, CompletedAt: turn.CompletedAt}
-			switch {
-			case version == 1 && turn.Request != nil && turn.RequestID == "" && turn.ResponseID == "":
-				q.Request, q.Response = *turn.Request, turn.Response
-				carried[recordKey(q.Request)] = true
-				if q.Response != nil {
-					carried[recordKey(*q.Response)] = true
-				}
-			case version == workflowVersion && turn.Request == nil && turn.Response == nil:
-				req, ok := requests[turn.RequestID]
+			if turn.RequestID == "" {
+				return nil, fmt.Errorf("invalid queued turn")
+			}
+			req, ok := requests[turn.RequestID]
+			if !ok {
+				return nil, fmt.Errorf("owned thread record missing")
+			}
+			q.Request = req
+			if turn.ResponseID != "" {
+				res, ok := responses[turn.ResponseID]
 				if !ok {
-					return nil, nil, fmt.Errorf("owned thread record missing")
+					return nil, fmt.Errorf("owned thread record missing")
 				}
-				q.Request = req
-				if turn.ResponseID != "" {
-					res, ok := responses[turn.ResponseID]
-					if !ok {
-						return nil, nil, fmt.Errorf("owned thread record missing")
-					}
-					q.Response = &res
-				}
-			default:
-				return nil, nil, fmt.Errorf("invalid queued turn")
+				q.Response = &res
 			}
 			t.Turns = append(t.Turns, q)
 		}
 		threads[id] = t
 	}
-	return threads, carried, nil
+	return threads, nil
 }
 
-// validateThreads checks threads against their records. Every managed record
-// must belong to exactly one identity or turn of threads. Identities, and the
-// turns whose record keys compare names, must also equal their records.
 func validateThreads(threads map[string]Thread, records []Record, project config.ProjectID, stream config.WorkstreamID, compare map[string]bool) error {
 	expected := map[string]Record{}
 	for id, t := range threads {
@@ -322,10 +298,9 @@ const ChiefOfStaff = "chief_of_staff"
 
 // EnsureChiefOfStaff creates the chief-of-staff thread of stream's workgroup
 // unless it already exists, and returns the thread. The thread lives on the
-// workgroup's host (its first member), so a one-workstream workgroup keeps
-// exactly today's behaviour and no other member ever gets a thread of its
-// own. The first creation fixes the identity's timestamp and actor; later
-// calls leave it unchanged.
+// workgroup's host (its first member), so no other member ever gets a thread
+// of its own. The first creation fixes the identity's timestamp and actor;
+// later calls leave it unchanged.
 func (r *Repository) EnsureChiefOfStaff(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
 	host, err := r.ChiefOfStaffHost(stream)
 	if err != nil {
@@ -367,17 +342,14 @@ func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.Works
 }
 
 // RetractChiefOfStaff removes stream's own chief-of-staff thread identity,
-// if hand-in already created one before stream joined a cross-repo
-// workgroup. A new workstream gets this identity at once
-// (CreateWorkstreamOn), before anything can know it will later become a
-// cross-repo workgroup's member; once RecordCrossRepoWorkgroup points it at
-// its shared thread in the workgroup's own trace, that earlier, unused
-// identity on stream's own repository would otherwise make the chief of
-// staff authoritative in two places (charter#2). It changes nothing when
-// stream carries no chief-of-staff thread of its own. It refuses, changing
-// nothing, when that thread already has turns: retracting a real
-// conversation is not this function's job, and r must be the project's own
-// repository, not an instance already scoped to one workstream.
+// if one was created before stream joined a cross-repo workgroup. Once
+// RecordCrossRepoWorkgroup points stream at its shared thread in the
+// workgroup's own trace, the unused identity on stream's own repository
+// would make the chief of staff authoritative in two places. It changes
+// nothing when stream carries no chief-of-staff thread of its own. It
+// refuses, changing nothing, when that thread already has turns. r must be
+// the project's own repository, not an instance already scoped to one
+// workstream.
 func (r *Repository) RetractChiefOfStaff(ctx context.Context, stream config.WorkstreamID) error {
 	sr, err := r.scoped(stream)
 	if err != nil {
@@ -713,9 +685,6 @@ func (r *Repository) RecoverUnclaimedTurn(ctx context.Context, stream config.Wor
 	return ErrClaim
 }
 
-// settleAttempt makes a recovered turn's response and its final attempt one
-// value. A final attempt with a recorded result supplies the response's result,
-// failure and failure class; one without receives the response's.
 func settleAttempt(q *QueuedTurn, response *TurnResponse) {
 	n := len(q.Attempts)
 	if n == 0 {
@@ -896,9 +865,6 @@ func (r *Repository) CompleteTurn(ctx context.Context, stream config.WorkstreamI
 	return ErrClaim
 }
 
-// saveThread requires r.mu. It commits log, whose threads changed, with
-// additions, the threads' new records. Each changed thread is checked
-// against its records first.
 func (r *Repository) saveThread(ctx context.Context, stream config.WorkstreamID, log workflowLog, additions ...Record) error {
 	if err := ctx.Err(); err != nil {
 		return err

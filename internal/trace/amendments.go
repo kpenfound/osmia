@@ -100,7 +100,7 @@ func (r *Repository) FileBudgetAmendment(ctx context.Context, stream config.Work
 // per-workstream Amendment, or, when the request would change a contract
 // section read-only to the requesting workstream, a ProjectAmendment
 // recorded at the project level instead, debated as a delta against the
-// ratified project spec and never applied inside the workstream (spec#10).
+// ratified project spec and never applied inside the workstream.
 // ProjectLevel reports which; exactly one of Amendment.ID and
 // ProjectAmendment.ID is set.
 type AmendmentOutcome struct {
@@ -109,10 +109,6 @@ type AmendmentOutcome struct {
 	ProjectLevel     bool
 }
 
-// contractTouch returns stream's own workgroup's recorded project spec, its
-// workgroup ID, and which of citations names one of stream's own
-// contract-criteria numbers in it: read-only inside stream. project must be
-// the project's own repository.
 func contractTouch(project *Repository, stream config.WorkstreamID, citations []string) (ProjectSpec, config.WorkgroupID, []string, error) {
 	spec, workgroup, found, err := project.ProjectSpecOf(stream)
 	if err != nil || !found {
@@ -121,8 +117,6 @@ func contractTouch(project *Repository, stream config.WorkstreamID, citations []
 	return touchedCitations(spec, workgroup, stream, citations)
 }
 
-// contractTouchLocked is contractTouch's variant for a caller that already
-// holds member's own scoped repository locked: see projectSpecOfLocked.
 func contractTouchLocked(project *Repository, v *workflowView, member config.WorkstreamID, citations []string, records []Record) (ProjectSpec, config.WorkgroupID, []string, error) {
 	spec, workgroup, found, err := projectSpecOfLocked(project, v, member, records)
 	if err != nil || !found {
@@ -248,11 +242,6 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 			return AmendmentOutcome{Amendment: a}, nil
 		}
 	}
-	// A question already routed to a ProjectAmendment leaves no Amendment
-	// record for the loop above to match, since it is never recorded
-	// against the workstream at all: a repeated chief call for the same
-	// question is still idempotent, checked here before openQuestion below
-	// would otherwise refuse it as already routed.
 	if scope.Role == ChiefOfStaff && req.QuestionID != "" {
 		pas, _, err := ProjectAmendments(project)
 		if err != nil {
@@ -320,10 +309,6 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		}
 	}
 
-	// target.mu is already held (deferred above): v is already loaded for
-	// member under that lock, so this must use the locked variant, never
-	// contractTouch itself, which would re-lock the same instance through
-	// ProjectSpecOf -> CrossRepoWorkgroupOf -> Workflow -> scoped(member).
 	_, workgroup, touched, err := contractTouchLocked(project, v, member, req.Citations, records)
 	if err != nil {
 		return AmendmentOutcome{}, err
@@ -336,12 +321,6 @@ func (r *Repository) FileAmendment(ctx context.Context, agent string, scope core
 		}
 		var txs []Transaction
 		if req.QuestionID != "" {
-			// These two transitions land on member's own trace, through
-			// target.stage below, so they are stamped with target's own
-			// project identity. For a workgroup confined to one repo that
-			// is the same value as project.Project(); for a cross-repo
-			// workgroup it is member's own real project, never the
-			// workgroup trace's own synthetic one.
 			h := Header{Version: Version, Project: target.project, Workstream: member, At: at, Actor: Actor{Kind: "agent", ID: agent}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}
 			txs = append(txs, questionTransition(v, h, req.QuestionID, QuestionOpen, QuestionRouted, fmt.Sprintf("The chief of staff routed question %s to project-level amendment %s of workgroup %s", req.QuestionID, filed.ID, workgroup)))
 		}

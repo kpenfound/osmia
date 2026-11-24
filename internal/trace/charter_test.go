@@ -63,7 +63,6 @@ func TestCharterReturnsTheLatestRevision(t *testing.T) {
 		t.Fatalf("charter.md reads %q", got)
 	}
 
-	// Reopening finds the recorded revision.
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -81,14 +80,12 @@ func TestEditCharterComparesRevisions(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
 	before := commits(t, r)
-	// Unchanged content records nothing.
 	if got, err := r.EditCharter(ctx, 1, CharterTemplate, at); err != nil || got.Revision != 1 {
 		t.Fatalf("unchanged edit: %+v %v", got, err)
 	}
 	if commits(t, r) != before {
 		t.Fatal("an unchanged edit committed")
 	}
-	// An edit of any revision but the latest is a conflict.
 	for _, revision := range []int{0, 2, 3} {
 		if _, err := r.EditCharter(ctx, revision, "1. Rule.\n", at); !errors.Is(err, ErrConflict) {
 			t.Fatalf("revision %d: %v", revision, err)
@@ -100,7 +97,6 @@ func TestEditCharterComparesRevisions(t *testing.T) {
 	if _, err := r.EditCharter(ctx, 1, "1. Stale rule.\n", at); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale edit: %v", err)
 	}
-	// Reverting to the template is a new revision.
 	got, err := r.EditCharter(ctx, 2, CharterTemplate, at)
 	if err != nil || got.Revision != 3 || got.Content != CharterTemplate || got.Cause != "owner-edit" {
 		t.Fatalf("revert: %+v %v", got, err)

@@ -263,8 +263,6 @@ func (r *Repository) BeginOperation(ctx context.Context, stream config.Workstrea
 		return nil, empty, nil
 	}
 	a := &OperationAttempt{repository: r, stream: stream, class: class, claim: OperationAction{EventID: event, Token: rand.Text(), Session: r.session, Kind: "claim", At: at, Actor: actor, Cause: o.Operation.ID, Depth: o.Transition.Depth}}
-	// loadWorkflow returns a private view, so this snapshot stays immutable
-	// while later bookkeeping publishes new views.
 	record := *o
 	if err := a.record(ctx, a.claim); err != nil {
 		return nil, empty, err
@@ -296,8 +294,6 @@ func (a *OperationAttempt) Close() {
 		r.workflow = false
 	}
 	r.active.Done()
-	// Wake after releasing admission, so a scan cannot consume the result's
-	// hint while the workstream is still reserved and strand the next intent.
 	_ = r.wake.Notify(context.Background())
 }
 
@@ -342,7 +338,6 @@ func (a *OperationAttempt) Record(ctx context.Context, action OperationAction) e
 	return a.record(ctx, action)
 }
 
-// record is called with the repository bookkeeping lock held.
 func (a *OperationAttempt) record(ctx context.Context, action OperationAction) error {
 	r := a.repository
 	if err := ctx.Err(); err != nil {

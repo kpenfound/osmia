@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// approvalFixture is a cross-repo workgroup whose two members point at it
-// and whose first member is at a feature state.
 type approvalFixture struct {
 	root     config.Root
 	r1, r2   *Repository
@@ -130,7 +128,6 @@ func TestApprovalCompletionIsSeenOnTheNextWorkflowStatesCall(t *testing.T) {
 			t.Fatalf("complete approval: %q", got)
 		}
 	}
-	// RecordGroupApproval reads the document itself; the cache adds one decode.
 	if n := GroupApprovalDecodeCount(f.g.ID) - before; n > 2 {
 		t.Fatalf("completion decoded the approval %d times", n)
 	}
@@ -183,7 +180,6 @@ func TestColdRestartRebuildsApprovalStateFromTheTrace(t *testing.T) {
 		t.Fatal("approval answer was not cached")
 	}
 	oldTrace := f.wt
-	// Every holder closes: the test's workgroup handle and both members.
 	for _, r := range []*Repository{f.wt, f.r1, f.r2} {
 		if err := r.Close(); err != nil {
 			t.Fatal(err)
@@ -208,8 +204,6 @@ func TestColdRestartRebuildsApprovalStateFromTheTrace(t *testing.T) {
 	}
 	probe.Close()
 
-	// Reopening validates the member bindings against the approval, so the
-	// rebuild may happen there or on the first read; it happens once.
 	decodes := GroupApprovalDecodeCount(f.g.ID)
 	r1, err := Open(f.root, f.p1)
 	if err != nil {
@@ -242,7 +236,6 @@ func TestColdRestartRebuildsApprovalStateFromTheTrace(t *testing.T) {
 	if got := feature(t, r1, crossMember1); got != "building" {
 		t.Fatalf("feature after restart: %q", got)
 	}
-	// A revision recorded after the reopen is seen on the next read.
 	changed := want
 	changed.ProjectSpec.Behavior += " Changed."
 	if err := RecordGroupApproval(ctx, wt, f.host, changed, at, owner); !errors.Is(err, ErrConflict) {
@@ -276,7 +269,6 @@ func TestApprovalHandlesAreReleasedByTheirOwner(t *testing.T) {
 	if err := f.wt.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The member repository still holds the trace for its approval reads.
 	shared := sharedWorkgroupTraceFor(f.g.ID)
 	shared.Lock()
 	refs := shared.refs
@@ -305,7 +297,6 @@ func TestApprovalHandlesAreReleasedByTheirOwner(t *testing.T) {
 		t.Fatalf("lock held after owner closed: %v", err)
 	}
 	probe.Close()
-	// A closed owner reads without keeping anything.
 	if ok, err := f.r1.GroupApproved(crossMember1); err == nil {
 		t.Logf("read on a closed member: approved=%v", ok)
 	}

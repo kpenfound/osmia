@@ -165,11 +165,8 @@ func (v *workflowView) delivery(a DeliveryAction) error {
 	return nil
 }
 
-// workflowVersion is the workflow version whose threads name their turns'
-// records rather than carrying them.
 const workflowVersion = 2
 
-// workflowFile is a legacy trace's workflow.json.
 type workflowFile struct {
 	Schema       string                  `json:"schema"`
 	Version      int                     `json:"version"`
@@ -179,15 +176,12 @@ type workflowFile struct {
 	Threads      map[string]storedThread `json:"threads,omitempty"`
 }
 
-// cachedWorkflow is a workstream's committed workflow, checked against its
-// records, with each thread's stored form as committed, by agent ID.
 type cachedWorkflow struct {
 	log     workflowLog
 	view    *workflowView
 	threads map[string]string
 }
 
-// clone returns a copy of log that its holder may change without changing log.
 func (log workflowLog) clone() workflowLog {
 	log.Transactions = slices.Clone(log.Transactions)
 	log.Deliveries = slices.Clone(log.Deliveries)
@@ -209,7 +203,6 @@ func (log workflowLog) clone() workflowLog {
 	return log
 }
 
-// clone returns a copy of v that its holder may change without changing v.
 func (v *workflowView) clone() *workflowView {
 	c := &workflowView{states: maps.Clone(v.states), transactions: maps.Clone(v.transactions), entries: make(map[string]*OutboxEntry, len(v.entries)), operations: make(map[string]*OperationRecord, len(v.operations))}
 	for id, e := range v.entries {
@@ -225,11 +218,6 @@ func (v *workflowView) clone() *workflowView {
 	return c
 }
 
-// readWorkflowView requires r.mu. It returns the workstream's checked
-// workflow view for reading only: once the workflow is cached, the cached view
-// itself, which the caller must not change and must not keep after it
-// releases r.mu. A commit replaces the cached workflow rather than changing
-// it, so the view stays consistent while r.mu is held.
 func (r *Repository) readWorkflowView(stream config.WorkstreamID) (*workflowView, error) {
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
 		return nil, err
@@ -247,10 +235,6 @@ func (r *Repository) readWorkflowView(stream config.WorkstreamID) (*workflowView
 	return v, err
 }
 
-// loadWorkflow requires r.mu. It returns the workstream's checked workflow,
-// which the caller may change. The workflow is read and checked against the
-// records it names once per handle; the handle keeps it current as it
-// commits changes, and later calls return copies.
 func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *workflowView, error) {
 	var log workflowLog
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
@@ -341,8 +325,6 @@ func (r *Repository) loadWorkflow(stream config.WorkstreamID) (workflowLog, *wor
 	return log, v, nil
 }
 
-// workflowRecords reads the records a workflow names: the workstream's
-// transitions and the identities and logs of its threads' agents.
 func (r *Repository) workflowRecords(ctx context.Context, stream config.WorkstreamID, file workflowFile) ([]Record, error) {
 	prefix := "workstreams/" + string(stream) + "/"
 	paths := []string{prefix + "events.jsonl"}
@@ -376,16 +358,12 @@ func (r *Repository) workflowRecords(ctx context.Context, stream config.Workstre
 	return records, nil
 }
 
-// checkWorkflow returns the workflow file holds, with its threads' turns
-// restored from records, and its view, checked against records: every
-// managed transition and thread record appears in the trace exactly as the
-// workflow holds it.
 func (r *Repository) checkWorkflow(stream config.WorkstreamID, file workflowFile, records []Record) (workflowLog, *workflowView, error) {
 	var log workflowLog
-	if file.Schema != "osmia.workflow" || (file.Version != 1 && file.Version != workflowVersion) {
+	if file.Schema != "osmia.workflow" || file.Version != workflowVersion {
 		return log, nil, fmt.Errorf("unsupported workflow schema/version")
 	}
-	threads, carried, err := loadThreads(file.Threads, file.Version, records, stream)
+	threads, err := loadThreads(file.Threads, records, stream)
 	if err != nil {
 		return log, nil, err
 	}
@@ -410,13 +388,12 @@ func (r *Repository) checkWorkflow(stream config.WorkstreamID, file workflowFile
 	if len(found) != len(v.transactions) {
 		return log, nil, fmt.Errorf("workflow transition missing from trace")
 	}
-	if err := validateThreads(log.Threads, records, r.project, stream, carried); err != nil {
+	if err := validateThreads(log.Threads, records, r.project, stream, nil); err != nil {
 		return log, nil, err
 	}
 	return log, v, nil
 }
 
-// viewOf replays log's transactions, deliveries and operations.
 func (r *Repository) viewOf(stream config.WorkstreamID, log workflowLog) (*workflowView, error) {
 	v := &workflowView{states: map[string]WorkflowState{}, transactions: map[string]Transaction{}, entries: map[string]*OutboxEntry{}, operations: map[string]*OperationRecord{}}
 	for _, tx := range log.Transactions {
@@ -503,9 +480,6 @@ func (r *Repository) transact(ctx context.Context, tx Transaction) (WorkflowStat
 	return states[0], nil
 }
 
-// commitWorkflow requires r.mu. It commits txs, applied in order to the
-// loaded workflow of stream, wakes the workflow's waiters and returns the
-// state each transaction produced.
 func (r *Repository) commitWorkflow(ctx context.Context, stream config.WorkstreamID, log workflowLog, v *workflowView, txs ...Transaction) ([]WorkflowState, error) {
 	c, states, err := r.stage(ctx, stream, log, v, nil, txs...)
 	if err != nil {
@@ -518,10 +492,6 @@ func (r *Repository) commitWorkflow(ctx context.Context, stream config.Workstrea
 	return states, nil
 }
 
-// stage requires r.mu. It applies txs in order to the loaded workflow of
-// stream and returns one commit that records them together with records,
-// and the state each transaction produced. The caller has validated the
-// records and their revisions.
 func (r *Repository) stage(ctx context.Context, stream config.WorkstreamID, log workflowLog, v *workflowView, records []Record, txs ...Transaction) (change, []WorkflowState, error) {
 	var states []WorkflowState
 	for _, tx := range txs {

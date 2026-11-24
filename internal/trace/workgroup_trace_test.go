@@ -19,9 +19,6 @@ const (
 	crossMember2  config.WorkstreamID = "w_00000000000000000000000000000022"
 )
 
-// crossRepoFixture builds two independent project repositories, the way
-// two repos of one multi-repo project each keep their own trace, outside
-// any notion of a workgroup. Neither repository is told about the other.
 func crossRepoFixture(t *testing.T) (root config.Root, r1, r2 *Repository, p1, p2 config.Project) {
 	t.Helper()
 	ctx := context.Background()
@@ -63,9 +60,6 @@ func crossRepoFixture(t *testing.T) (root config.Root, r1, r2 *Repository, p1, p
 	return root, r1, r2, p1, p2
 }
 
-// createCrossRepoWorkgroup builds the workgroup-level trace sharing
-// crossMember1 (in r1) and crossMember2 (in r2): the way a multi-repo
-// workgroup's members must join before either gets a chief of staff.
 func createCrossRepoWorkgroup(t *testing.T, root config.Root, r1, r2 *Repository) (*Repository, Workgroup) {
 	t.Helper()
 	wg, g, err := CreateWorkgroupTrace(context.Background(), root, []CrossRepoMember{{crossMember1, r1}, {crossMember2, r2}}, at, owner, "test-workgroup")
@@ -76,10 +70,6 @@ func createCrossRepoWorkgroup(t *testing.T, root config.Root, r1, r2 *Repository
 	return wg, g
 }
 
-// reopenCrossRepoWorkgroup simulates a restart: it closes every repository
-// the test still holds open and reopens all three, rebuilding the
-// workgroup trace's member map from the freshly reopened member projects,
-// the way the service would after a crash or stop.
 func reopenCrossRepoWorkgroup(t *testing.T, root config.Root, p1, p2 config.Project, wg, r1, r2 *Repository, group config.WorkgroupID) (*Repository, *Repository, *Repository) {
 	t.Helper()
 	if err := wg.Close(); err != nil {
@@ -109,14 +99,6 @@ func reopenCrossRepoWorkgroup(t *testing.T, root config.Root, p1, p2 config.Proj
 	return nwg, nr1, nr2
 }
 
-// claimCrossRepoTurn creates agent's thread on r if needed, enqueues and
-// claims a turn naming stream and unit, and returns its scope. project is
-// the identity the turn's records are stamped with: the workgroup trace's
-// own synthetic identity for the shared chief-of-staff thread, or a
-// member's own real project identity for an ordinary worker turn. The
-// chief's own thread is never created here: CreateWorkgroupTrace already
-// made it, with its own cause, when it created the workgroup's host
-// workstream.
 func claimCrossRepoTurn(t *testing.T, r *Repository, project config.ProjectID, stream config.WorkstreamID, agent, role, unit, turnID string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -143,11 +125,6 @@ func claimCrossRepoTurn(t *testing.T, r *Repository, project config.ProjectID, s
 	return coreadapter.Scope{Project: string(project), Workstream: string(stream), Unit: unit, Thread: threadID, Turn: turnID, Role: role}
 }
 
-// TestCrossRepoWorkgroupSharesOneChiefOfStaffThreadAcrossMembersAndARestart
-// covers spec#4's cross-repo extension: questions from roles in both repos
-// reach one chief-of-staff thread, hosted on the workgroup's own trace, and
-// each answer resumes the right asker in its own repo's trace. It then
-// simulates a restart and shows the same holds after reopening.
 func TestCrossRepoWorkgroupSharesOneChiefOfStaffThreadAcrossMembersAndARestart(t *testing.T) {
 	root, r1, r2, p1, p2 := crossRepoFixture(t)
 	wg, g := createCrossRepoWorkgroup(t, root, r1, r2)
@@ -220,9 +197,6 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffThreadAcrossMembersAndARestart(t
 	checkAnswered(r2, crossMember2, q2.ID, "member2's answer")
 }
 
-// setBuilding puts stream's feature state at building and unit's at
-// implementing, and records a seal, so a route_amendment on it is
-// eligible, as the single-repo questions tests do.
 func setBuilding(t *testing.T, r *Repository, stream config.WorkstreamID, project config.ProjectID, unit string) {
 	t.Helper()
 	ctx := context.Background()
@@ -239,11 +213,6 @@ func setBuilding(t *testing.T, r *Repository, stream config.WorkstreamID, projec
 	}
 }
 
-// TestCrossRepoRouteAmendmentLandsOnAskingMemberAndResumes covers spec#9's
-// routing extension: a qualified non-host plan amendment through
-// FileAmendment (what the route_amendment tool calls) lands on the asking
-// member's own trace, never the workgroup's host, and the member's parked
-// unit resumes once the amendment is decided.
 func TestCrossRepoRouteAmendmentLandsOnAskingMemberAndResumes(t *testing.T) {
 	root, r1, r2, _, _ := crossRepoFixture(t)
 	wg, g := createCrossRepoWorkgroup(t, root, r1, r2)
@@ -282,10 +251,6 @@ func TestCrossRepoRouteAmendmentLandsOnAskingMemberAndResumes(t *testing.T) {
 		t.Fatalf("member2's unit state %+v: %v", state, err)
 	}
 
-	// Once the amendment is decided the owner resumes the unit directly,
-	// exactly as a single-repo workstream's own unit resumes after its
-	// amendment is applied: resuming is ordinary per-workstream workflow
-	// mechanics, unaffected by where the amendment itself was filed.
 	if _, err := r2.Transact(ctx, Transaction{ExpectedVersion: state.Version, Transition: Transition{Header: Header{Schema: "osmia.trace.transition", Version: Version, ID: "resumed", Revision: 1, Project: crossProject2, Workstream: crossMember2, Unit: "resume", At: at, Actor: owner, Cause: "test"}, Subject: UnitSubject("resume"), From: "waiting", To: "implementing", Reason: "amendment decided"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -295,11 +260,6 @@ func TestCrossRepoRouteAmendmentLandsOnAskingMemberAndResumes(t *testing.T) {
 	}
 }
 
-// TestCrossRepoContractChangeBecomesProjectLevelAmendment covers spec#10's
-// cross-repo extension: a question that would change a contract section of
-// a member's slice becomes a project-level amendment recorded with the
-// workgroup's own trace, never against the workgroup's host workstream or
-// the asking member's own trace.
 func TestCrossRepoContractChangeBecomesProjectLevelAmendment(t *testing.T) {
 	root, r1, r2, _, _ := crossRepoFixture(t)
 	wg, g := createCrossRepoWorkgroup(t, root, r1, r2)
@@ -353,16 +313,6 @@ func TestCrossRepoContractChangeBecomesProjectLevelAmendment(t *testing.T) {
 	}
 }
 
-// TestCrossRepoContractCitingRouteAmendmentReturnsWithinBoundedTime is a
-// regression guard for the self-deadlock FileAmendment's second
-// contractTouch once caused on this exact path (a chief-of-staff
-// route_amendment, on the workgroup trace itself, citing a contract
-// section of the asking member's slice): ProjectSpecOf -> CrossRepoWorkgroupOf
-// -> Workflow -> scoped(member) re-locked the member's own scoped instance
-// FileAmendment already holds. A caller that regresses this hangs forever
-// on that mutex, so the call runs on its own goroutine and the test fails
-// fast, rather than hanging out to the suite's own timeout, if it ever
-// returns.
 func TestCrossRepoContractCitingRouteAmendmentReturnsWithinBoundedTime(t *testing.T) {
 	root, r1, r2, _, _ := crossRepoFixture(t)
 	wg, g := createCrossRepoWorkgroup(t, root, r1, r2)
@@ -414,12 +364,6 @@ func TestCrossRepoContractCitingRouteAmendmentReturnsWithinBoundedTime(t *testin
 	}
 }
 
-// TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigins
-// covers spec#17 and spec#18's cross-repo extension: one consolidated
-// escalation spanning both repos' questions is still one inbox entry
-// numbered from the workgroup's own trace, survives a restart, and the
-// relayed ruling resumes all and only the affected origins in both repos
-// while an unaffected question on either member stays untouched.
 func TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigins(t *testing.T) {
 	root, r1, r2, p1, p2 := crossRepoFixture(t)
 	wg, g := createCrossRepoWorkgroup(t, root, r1, r2)
@@ -431,9 +375,6 @@ func TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A second question of the same workstream must come from a separate
-	// turn on a thread with no turn still active: a different agent's
-	// thread, since the first turn's own thread is still active.
 	worker1b := claimCrossRepoTurn(t, r1, crossProject1, crossMember1, "mason1b", "mason", "", "build1b")
 	unaffected, err := r1.Ask(ctx, "mason1b", worker1b, "Member1's unrelated question", at)
 	if err != nil {
@@ -483,8 +424,6 @@ func TestCrossRepoConsolidatedEscalationSurvivesRestartAndRelayResumesBothOrigin
 		t.Fatal(err)
 	}
 
-	// A real restart recovers the chief's own interrupted turn before any
-	// new one claims its thread, the way the service's own startup does.
 	if err := wg.AbandonTurn(ctx, host, ChiefOfStaff, "chief1", at); err != nil {
 		t.Fatal(err)
 	}

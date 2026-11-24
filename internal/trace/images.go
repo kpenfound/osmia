@@ -123,7 +123,6 @@ func (r *Repository) StoredImage(stream config.WorkstreamID, id string) (Image, 
 	return Get[Image](r, stream, id, 1)
 }
 
-// imageStorageScope accepts only the dedicated trace of a registered project member.
 func (r *Repository) imageStorageScope() bool {
 	if r.stream == "" || r.shared != nil || r.parent != nil && r.parent.shared != nil {
 		return false

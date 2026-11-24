@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -269,7 +268,6 @@ func TestThreadPublicationFailures(t *testing.T) {
 					t.Fatalf("missing injection: %v %v", err, hit)
 				}
 				s.failPublication = nil
-				// Same-session retry reconciles either side of the publication boundary.
 				if err := apply(); err != nil {
 					t.Fatalf("retry: %v", err)
 				}
@@ -487,26 +485,6 @@ func TestThreadRestartDuringCaptureAndCompletion(t *testing.T) {
 	}
 }
 
-// embeddedWorkflow returns log as workflow version 1 stores it, with each
-// turn's request and response whole.
-func embeddedWorkflow(t *testing.T, log workflowLog) []byte {
-	t.Helper()
-	f := workflowFile{Schema: "osmia.workflow", Version: 1, Transactions: log.Transactions, Deliveries: log.Deliveries, Operations: log.Operations, Threads: map[string]storedThread{}}
-	for id, th := range log.Threads {
-		s := storedThread{Identity: th.Identity, Session: th.Session, Status: th.Status, Active: th.Active}
-		for _, q := range th.Turns {
-			req := q.Request
-			s.Turns = append(s.Turns, storedTurn{Attempts: q.Attempts, Sequence: q.Sequence, Request: &req, Claim: q.Claim, Response: q.Response, CompletedAt: q.CompletedAt})
-		}
-		f.Threads[id] = s
-	}
-	data, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return append(data, '\n')
-}
-
 func TestThreadOwnedRecordValidation(t *testing.T) {
 	for _, mode := range []string{"missing-log", "unknown-request"} {
 		t.Run(mode, func(t *testing.T) {
@@ -539,7 +517,6 @@ func TestThreadOwnedRecordValidation(t *testing.T) {
 	}
 }
 
-// storedWorkflowThread returns the stored form of agent's thread.
 func storedWorkflowThread(t *testing.T, s *Repository, agent string) (storedThread, string) {
 	t.Helper()
 	var body string
@@ -578,11 +555,6 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 	if turns[0].RequestID != "request_one" || turns[0].ResponseID != "response_one" || turns[1].RequestID != "request_two" || turns[1].ResponseID != "" {
 		t.Fatalf("stored turn references: %+v", turns)
 	}
-	for _, turn := range turns {
-		if turn.Request != nil || turn.Response != nil {
-			t.Fatalf("stored turn carries its records: %+v", turn)
-		}
-	}
 	for _, content := range []string{"Message one", "Captured final"} {
 		if strings.Contains(body, content) {
 			t.Fatalf("the stored thread repeats turn content %q", content)
@@ -596,56 +568,6 @@ func TestWorkflowStoresTurnReferences(t *testing.T) {
 	defer reopened.Close()
 	if after := mustThread(t, reopened); !equalJSON(after, before) {
 		t.Fatalf("reopened thread differs:\n%+v\n%+v", after, before)
-	}
-}
-
-func TestWorkflowLoadsEmbeddedTurns(t *testing.T) {
-	r, _, _ := create(t)
-	s := mustScoped(t, r, streamID)
-	ctx := context.Background()
-	if err := r.CreateThread(ctx, threadAgent()); err != nil {
-		t.Fatal(err)
-	}
-	enqueue(t, r, "one")
-	q := claimTurn(t, r, "token")
-	if err := r.CaptureTurn(ctx, "token", threadResponse(q)); err != nil {
-		t.Fatal(err)
-	}
-	before := mustThread(t, r)
-	log, _, err := s.loadWorkflow(streamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	records, _, err := s.scan()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var embedded workflowFile
-	if err := decode(embeddedWorkflow(t, log), &embedded); err != nil {
-		t.Fatal(err)
-	}
-	loaded, _, err := s.checkWorkflow(streamID, embedded, records)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after := loaded.Threads["mason"]; !equalJSON(after.Turns, before.Turns) || after.Status != before.Status {
-		t.Fatalf("embedded thread differs:\n%+v\n%+v", after, before)
-	}
-	stored := storeThreads(loaded.Threads)["mason"]
-	if stored.Turns[0].Request != nil || stored.Turns[0].RequestID != before.Turns[0].Request.ID {
-		t.Fatalf("an embedded turn is stored by reference: %+v", stored.Turns[0])
-	}
-
-	// A version 1 workflow whose embedded turn differs from its records is
-	// refused.
-	th := log.Threads["mason"]
-	th.Turns[0].Request.Prompt = "tampered"
-	log.Threads["mason"] = th
-	if err := decode(embeddedWorkflow(t, log), &embedded); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.checkWorkflow(streamID, embedded, records); err == nil {
-		t.Fatal("a changed embedded queue was accepted")
 	}
 }
 
@@ -726,7 +648,6 @@ func TestCancelTurnsCompletesUnheldTurns(t *testing.T) {
 	if _, err := r.CancelTurns(ctx, streamID, at, actor, " "); err == nil {
 		t.Fatal("empty reason accepted")
 	}
-	// This session's reserved turn, and its successor, are left to the runner.
 	if n, err := r.CancelTurns(ctx, streamID, at, actor, "gone"); err != nil || n != 0 {
 		t.Fatalf("held turn: %d %v", n, err)
 	}
@@ -761,7 +682,6 @@ func TestCancelTurnsCompletesUnheldTurns(t *testing.T) {
 	if n, err := r.CancelTurns(ctx, streamID, later, actor, "gone"); err != nil || n != 0 {
 		t.Fatalf("repeat: %d %v", n, err)
 	}
-	// A turn queued afterwards is cancelled by the next call.
 	enqueue(t, r, "three")
 	if n, err := r.CancelTurns(ctx, streamID, later, actor, "gone"); err != nil || n != 1 {
 		t.Fatalf("new turn: %d %v", n, err)
@@ -788,9 +708,6 @@ func TestCancelTurnsLeavesCapturedTurns(t *testing.T) {
 	}
 }
 
-// TestRecoverySettlesFinalAttempt stops a session after it recorded an
-// attempt: recovery writes the response and the final attempt from one value,
-// so the recovered trace opens again.
 func TestRecoverySettlesFinalAttempt(t *testing.T) {
 	actor := Actor{Kind: "service", ID: "abandon"}
 	abandon := func(ctx context.Context, r *Repository) error {
@@ -806,7 +723,7 @@ func TestRecoverySettlesFinalAttempt(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		result   *coreadapter.SessionResult
-		recorded string // the failure the stopped session recorded with the result
+		recorded string
 		class    coreadapter.FailureKind
 		recover  func(context.Context, *Repository) error
 		failure  string

@@ -15,8 +15,6 @@ import (
 // recorded, and the latest recorded revision stays the current one.
 var ErrInvalidEdit = errors.New("owner edit is invalid")
 
-// ownerEditable maps the record ID of each workstream document the owner
-// edits to its path.
 var ownerEditable = map[string]string{"spec": "spec.md", "plan": "plan.json"}
 
 // EditCharter records content as the owner's next charter revision when

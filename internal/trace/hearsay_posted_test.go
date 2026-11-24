@@ -43,7 +43,6 @@ func TestHearsayPostedDigestsPersistAcrossReopenAndSkipUnchangedEntries(t *testi
 	if got := posted[PostedID("owner", "document/charter")]; got.Digest != "d2" || !got.UpdatedAt.Equal(at) {
 		t.Fatalf("other digest %+v", got)
 	}
-	// The same key on another source is another artifact.
 	if PostedID("work", "k") == PostedID("owner", "k") {
 		t.Fatal("source is not part of the identity")
 	}

@@ -69,10 +69,6 @@ func (r *Repository) PublishedWorkgroupOf(stream config.WorkstreamID) (Published
 	return out, true, nil
 }
 
-// approve fills the owner-approved project spec of g from the repository
-// holding its host: the latest approved revision, or else the group approval
-// of a cross-repo workgroup. ApprovedAt is the first approval record's time,
-// so it does not move when a later revision is recorded.
 func (p *PublishedWorkgroup) approve(host *Repository, g Workgroup) error {
 	if len(g.Members) == 0 {
 		return nil

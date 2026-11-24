@@ -14,14 +14,12 @@ import (
 	"time"
 )
 
-// reportRevision is a revision of a unit's report document.
 func reportRevision(unit string, revision int, content string) Document {
 	h := header("document", "report-"+unit)
 	h.Revision = revision
 	return Document{Header: h, Path: "units/" + unit + "/report.json", Content: content}
 }
 
-// directorySize sums the sizes of the regular files in directory.
 func directorySize(t *testing.T, directory string) int64 {
 	t.Helper()
 	entries, err := os.ReadDir(directory)
@@ -211,7 +209,6 @@ func TestStoreFileAliasesAreRefused(t *testing.T) {
 				present := statErr == nil
 				switch {
 				case kind == "symlink" && present:
-					// The symlink names the moved file itself.
 					moved := filepath.Join(p.Clone, name)
 					if err := os.Rename(full, moved); err != nil {
 						t.Fatal(err)
@@ -296,8 +293,6 @@ func TestDamagedDatabaseFailsTheIntegrityCheck(t *testing.T) {
 	if len(data) < 3*pageSize {
 		t.Fatalf("database too small to damage: %d bytes", len(data))
 	}
-	// Page 1 holds the header and schema; every later page is a table,
-	// index or overflow page the check walks.
 	for i := pageSize; i < len(data); i++ {
 		data[i] = 0xff
 	}

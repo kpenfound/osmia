@@ -6,10 +6,10 @@ import (
 )
 
 // Who decided an ordinary decision record. A record names its decider in
-// DecidedBy; an empty value is the one the record's kind has always had: the
-// owner for the owner's rulings, ratifications and dispositions, the chief of
-// staff for its own decisions. A decision Jev made is the same record with
-// DecidedBy "jev" and Judgment naming the judgment record it comes from.
+// DecidedBy; an empty value means the decider of the record's kind: the owner
+// for the owner's rulings, ratifications and dispositions, the chief of staff
+// for its own decisions. A decision Jev made is the same record with DecidedBy
+// "jev" and Judgment naming the judgment record it comes from.
 const (
 	DecidedByOwner = "owner"
 	DecidedByChief = ChiefOfStaff
@@ -41,11 +41,6 @@ func Decider(by, fallback string) string {
 	return by
 }
 
-// validRulingActor reports whether a ruling's header actor agrees with its
-// decider. A ruling Jev decided is written by the Jev actor, and the Jev actor
-// writes no other decider's ruling, so a Jev decision never reads as the
-// owner's. The one other writer of a Jev ruling is the chief of staff's relay
-// of it, a later revision that adds the returned answer.
 func validRulingActor(v Ruling) bool {
 	if v.DecidedBy != DecidedByJev {
 		return v.Actor != JevActor
@@ -60,8 +55,6 @@ var (
 	charterDecisionPath   = regexp.MustCompile(`^questions/[^/]+/charter\.json$`)
 )
 
-// deliveryApprovalPath is the document of the approval to mark a pull request
-// ready for review.
 const deliveryApprovalPath = "final/delivery.json"
 
 // ValidDecisionActor reports whether the header actor of a document that
@@ -90,8 +83,6 @@ func ValidDecisionActor(d Document) bool {
 		if json.Unmarshal([]byte(d.Content), &c) != nil {
 			return true
 		}
-		// The service's later revision that records the rule in the charter
-		// keeps the decision as it was decided.
 		return d.Actor != JevActor || c.Decision != "" && c.DecidedBy == DecidedByJev
 	case ratificationPath.MatchString(d.Path):
 		var c struct {

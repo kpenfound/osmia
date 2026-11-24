@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// prose reports whether p is a knowledge-base prose file, kb/<subsystem>.md.
 func prose(p string) bool {
 	parts := strings.Split(p, "/")
 	return len(parts) == 2 && parts[0] == "kb" && strings.HasSuffix(parts[1], ".md")
@@ -79,9 +78,6 @@ func (r *Repository) RecordDocumentsWith(ctx context.Context, docs []Document, t
 	return states, nil
 }
 
-// documentFiles requires r.mu. It checks the document revisions of one scope
-// against the recorded history of their own documents and paths, and returns
-// the commit that records them.
 func (r *Repository) documentFiles(ctx context.Context, docs []Document) (change, error) {
 	if len(docs) == 0 {
 		return change{}, fmt.Errorf("no documents to record")

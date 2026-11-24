@@ -13,7 +13,6 @@ import (
 )
 
 func decode(data []byte, v any) error {
-	// Validate object names without allocating a Go value for every JSON token.
 	if _, err := jsontext.NewDecoder(bytes.NewBuffer(data), jsontext.AllowInvalidUTF8(true)).ReadValue(); err != nil {
 		return err
 	}
@@ -65,7 +64,6 @@ func decodeRecord(data []byte) (Record, error) {
 	default:
 		return nil, fmt.Errorf("unsupported record schema %q", marker.Schema)
 	}
-	// Decode into the concrete value without exposing pointers as record variants.
 	switch v := r.(type) {
 	case Image:
 		err := decode(data, &v)
@@ -110,7 +108,6 @@ func decodeRecord(data []byte) (Record, error) {
 	panic("unreachable")
 }
 
-// syncDirectory flushes the directory entries of directory.
 func syncDirectory(directory string) error {
 	f, err := os.Open(directory)
 	if err != nil {

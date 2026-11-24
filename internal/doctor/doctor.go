@@ -22,7 +22,6 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/engine"
-	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -611,12 +610,8 @@ func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header,
 }
 
 // state opens each project's trace and the runtime state as serve does on
-// startup, first moving any Git trace to its database exactly as serve
-// would.
+// startup.
 func (r *run) state(cfg *config.Config, projects []config.Project) {
-	if err := trace.MigrateWorkgroups(context.Background(), cfg.Root, nil); err != nil {
-		r.add(GroupState, "workgroup traces", Fail, "trace migration is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the workgroup traces under "+filepath.Join(cfg.Root.String(), "workgroups"))
-	}
 	workstreams := map[config.ProjectID][]config.WorkstreamID{}
 	for _, p := range projects {
 		check := p.Name + " trace"
@@ -625,15 +620,11 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 			r.add(GroupState, check, Fail, reason(err), "")
 			continue
 		}
-		if exists, err := trace.HasTrace(directory); err != nil {
+		if exists, err := trace.HasTraceDatabase(directory); err != nil {
 			r.add(GroupState, check, Fail, reason(err), "")
 			continue
 		} else if !exists {
 			r.add(GroupState, check, Warn, "the project has no trace, so it runs idle", "add it again with osmia project add")
-			continue
-		}
-		if err := trace.Migrate(context.Background(), cfg.Root, p.ID, plan.DraftCheck(directory), nil); err != nil {
-			r.add(GroupState, check, Fail, "trace migration is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the trace at "+directory)
 			continue
 		}
 		repository, err := trace.Open(cfg.Root, p)

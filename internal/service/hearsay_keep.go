@@ -347,7 +347,7 @@ func (s *Service) publishRemovedProject(ctx context.Context, id config.ProjectID
 		s.projectMu.Unlock()
 		return false, false
 	}
-	if ok, err := trace.HasTrace(directory); err != nil || !ok {
+	if ok, err := trace.HasTraceDatabase(directory); err != nil || !ok {
 		s.projectMu.Unlock()
 		return false, err == nil
 	}

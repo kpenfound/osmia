@@ -59,8 +59,6 @@ func (r *Repository) ObserveSpans(f func(CommitDetail)) {
 	r.spanObserver.Store(&f)
 }
 
-// spansObserved reports whether this handle or the project instance it was
-// opened through has a span observer.
 func (r *Repository) spansObserved() bool {
 	if f := r.spanObserver.Load(); f != nil && *f != nil {
 		return true
@@ -68,8 +66,6 @@ func (r *Repository) spansObserved() bool {
 	return r.parent != nil && r.parent.spansObserved()
 }
 
-// reportSpans passes d to every span observer on the way up to the project
-// instance, each one contained.
 func (r *Repository) reportSpans(d CommitDetail) {
 	if f := r.spanObserver.Load(); f != nil && *f != nil {
 		func() {
@@ -82,8 +78,6 @@ func (r *Repository) reportSpans(d CommitDetail) {
 	}
 }
 
-// commitDetail requires r.mu. It describes c, a commit of stream just
-// published, against prior, the workflow committed before it.
 func (r *Repository) commitDetail(c change, stream config.WorkstreamID, prior *cachedWorkflow) (d CommitDetail) {
 	d = CommitDetail{Project: r.project, Workstream: stream}
 	defer func() {
@@ -117,8 +111,6 @@ func (r *Repository) commitDetail(c change, stream config.WorkstreamID, prior *c
 	return d
 }
 
-// closedState describes the interval t ends, when t is a transition of the
-// workstream's feature state or of a unit's own state.
 func (r *Repository) closedState(t Transition, earlier []Transaction, batch []Transition, stream config.WorkstreamID) (ClosedState, bool) {
 	feature := t.Subject == FeatureSubject
 	if !feature && (t.Unit == "" || t.Subject != UnitSubject(t.Unit)) {
@@ -149,7 +141,6 @@ func (r *Repository) closedState(t Transition, earlier []Transaction, batch []Tr
 	return closed, true
 }
 
-// finishedTurn finds response's turn in thread.
 func finishedTurn(t Thread, response TurnResponse) (FinishedTurn, bool) {
 	for _, q := range t.Turns {
 		if q.Request.ID != response.RequestID || q.Request.Revision != response.RequestRevision {

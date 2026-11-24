@@ -25,8 +25,6 @@ func TestValidDecider(t *testing.T) {
 	}
 }
 
-// A ruling Jev decided is the ordinary ruling record: it keeps its decider and
-// its judgment link when read back, after a restart included.
 func TestRulingDecidedByJevRoundTripsWithItsJudgment(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)

@@ -12,9 +12,6 @@ import (
 const secondStream config.WorkstreamID = "w_00000000000000000000000000000002"
 const thirdStream config.WorkstreamID = "w_00000000000000000000000000000003"
 
-// errText requires a non-nil error and returns its message, for assertions
-// against plain errors rather than the agent-facing *QuestionRefused
-// refusal.go handles.
 func errText(t *testing.T, err error) string {
 	t.Helper()
 	if err == nil {
@@ -23,8 +20,6 @@ func errText(t *testing.T, err error) string {
 	return err.Error()
 }
 
-// TestValidateGraphAcceptsEveryEdgeType shows a graph whose edges are each of
-// the three supported types, naming only known members, validates.
 func TestValidateGraphAcceptsEveryEdgeType(t *testing.T) {
 	members := []config.WorkstreamID{streamID, secondStream, thirdStream}
 	edges := []Edge{
@@ -37,9 +32,6 @@ func TestValidateGraphAcceptsEveryEdgeType(t *testing.T) {
 	}
 }
 
-// TestValidateGraphRefusesAnEdgeNamingAnUnknownWorkstream shows that an edge
-// whose From or To is not one of the workgroup's own members is refused,
-// naming the unknown workstream.
 func TestValidateGraphRefusesAnEdgeNamingAnUnknownWorkstream(t *testing.T) {
 	members := []config.WorkstreamID{streamID, secondStream}
 	outside := config.WorkstreamID("w_00000000000000000000000000000099")
@@ -50,9 +42,6 @@ func TestValidateGraphRefusesAnEdgeNamingAnUnknownWorkstream(t *testing.T) {
 	}
 }
 
-// TestValidateGraphRefusesACycleOfAnyEdgeTypesTogether shows that a cycle
-// formed by edges of different types together, not only of one type, is
-// still refused.
 func TestValidateGraphRefusesACycleOfAnyEdgeTypesTogether(t *testing.T) {
 	members := []config.WorkstreamID{streamID, secondStream, thirdStream}
 	edges := []Edge{
@@ -65,8 +54,6 @@ func TestValidateGraphRefusesACycleOfAnyEdgeTypesTogether(t *testing.T) {
 	}
 }
 
-// TestValidateGraphRefusesAnUnknownEdgeType shows that an edge type other
-// than contract, hard_block or merge_order is refused.
 func TestValidateGraphRefusesAnUnknownEdgeType(t *testing.T) {
 	members := []config.WorkstreamID{streamID, secondStream}
 	edges := []Edge{{From: streamID, To: secondStream, Type: "integration_gate"}}
@@ -75,11 +62,6 @@ func TestValidateGraphRefusesAnUnknownEdgeType(t *testing.T) {
 	}
 }
 
-// TestContractCitationNamesOnlyAWorkstreamsOwnContractCriteria shows that
-// ContractCitation reports true only for a citation naming one of the
-// member's own slice's contract-criteria numbers, false for a citation of
-// another member's slice, a non-contract citation of its own slice, and a
-// citation that does not parse as spec#<n>.
 func TestContractCitationNamesOnlyAWorkstreamsOwnContractCriteria(t *testing.T) {
 	spec := ProjectSpec{
 		Behavior: "Two repos exchange a fixed interface.",
@@ -98,7 +80,7 @@ func TestContractCitationNamesOnlyAWorkstreamsOwnContractCriteria(t *testing.T) 
 		{streamID, "spec#1", false},
 		{secondStream, "spec#1", true},
 		{secondStream, "spec#3", false},
-		{thirdStream, "spec#3", false}, // no slice recorded for this member
+		{thirdStream, "spec#3", false},
 		{streamID, "plan#unit", false},
 		{streamID, "spec#0", false},
 		{streamID, "not-a-citation", false},
@@ -110,8 +92,6 @@ func TestContractCitationNamesOnlyAWorkstreamsOwnContractCriteria(t *testing.T) 
 	}
 }
 
-// TestSliceForReturnsFalseWhenNoSliceIsRecorded shows SliceFor's reported ok
-// distinguishes a recorded slice from none.
 func TestSliceForReturnsFalseWhenNoSliceIsRecorded(t *testing.T) {
 	spec := ProjectSpec{Slices: []Slice{{Workstream: streamID, Spec: "spec.md", Plan: "plan.json"}}}
 	if _, ok := SliceFor(spec, secondStream); ok {
@@ -123,9 +103,6 @@ func TestSliceForReturnsFalseWhenNoSliceIsRecorded(t *testing.T) {
 	}
 }
 
-// TestProjectSpecValidRefusesAnInvalidGraphOrSlice shows that recording a
-// project spec is refused, and nothing written, when its graph is invalid or
-// a slice is malformed or repeated, mirroring RecordProjectSpec's own checks.
 func TestProjectSpecValidRefusesAnInvalidGraphOrSlice(t *testing.T) {
 	members := []config.WorkstreamID{streamID, secondStream}
 	cases := []struct {
@@ -149,9 +126,6 @@ func TestProjectSpecValidRefusesAnInvalidGraphOrSlice(t *testing.T) {
 	}
 }
 
-// TestRecordProjectSpecRefusesAnInvalidGraphAndWritesNothing shows that
-// RecordProjectSpec, given a graph with a cycle, refuses and records no
-// document: a later read still finds none.
 func TestRecordProjectSpecRefusesAnInvalidGraphAndWritesNothing(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -179,10 +153,6 @@ func TestRecordProjectSpecRefusesAnInvalidGraphAndWritesNothing(t *testing.T) {
 	}
 }
 
-// TestRecordProjectSpecSealsTheGraphAndEverySlice shows a valid acyclic
-// graph and every member's slice recorded together, readable by
-// ProjectSpecFor and ProjectSpecOf, and that a later revision replaces the
-// earlier one rather than appending beside it.
 func TestRecordProjectSpecSealsTheGraphAndEverySlice(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -218,9 +188,6 @@ func TestRecordProjectSpecSealsTheGraphAndEverySlice(t *testing.T) {
 		t.Fatalf("project spec active before any member resolves: active=%v err=%v", active, err)
 	}
 
-	// A later revision replaces the earlier one rather than appending beside
-	// it: reading back still finds exactly one spec for the workgroup, with
-	// the new behaviour.
 	revised := spec
 	revised.Behavior = "Two repos exchange a revised fixed interface."
 	if err := RecordProjectSpec(ctx, r, wg, revised, at, owner, "owner-ratified-again"); err != nil {
@@ -245,11 +212,6 @@ func TestRecordProjectSpecSealsTheGraphAndEverySlice(t *testing.T) {
 	}
 }
 
-// TestProjectSpecActiveUntilEveryMemberResolves shows that a workgroup's
-// project spec stays active while any member is unresolved, and leaves
-// active state only once every member of the workgroup is marked resolved,
-// matching the two-level retention spec#22 describes: its own trace history
-// stays readable regardless.
 func TestProjectSpecActiveUntilEveryMemberResolves(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -268,8 +230,6 @@ func TestProjectSpecActiveUntilEveryMemberResolves(t *testing.T) {
 	resolvedSet := map[config.WorkstreamID]bool{}
 	resolved := func(stream config.WorkstreamID) (bool, error) { return resolvedSet[stream], nil }
 
-	// Resolving one member leaves the project spec active for the chief of
-	// staff and the other, unresolved member.
 	resolvedSet[streamID] = true
 	if _, err := MarkWorkgroupsResolved(ctx, r, []Workgroup{wg}, resolved, at, owner, "first-member-resolved"); err != nil {
 		t.Fatal(err)
@@ -282,8 +242,6 @@ func TestProjectSpecActiveUntilEveryMemberResolves(t *testing.T) {
 		t.Fatalf("project spec still readable after one member resolves: found=%v err=%v", found, err)
 	}
 
-	// Resolving the second member retires the project spec from active
-	// state, though its trace history stays readable.
 	resolvedSet[secondStream] = true
 	if _, err := MarkWorkgroupsResolved(ctx, r, []Workgroup{wg}, resolved, at, owner, "every-member-resolved"); err != nil {
 		t.Fatal(err)
@@ -325,7 +283,6 @@ func TestProjectSpecActiveFollowsCrossRepoAuthority(t *testing.T) {
 	if err := wg.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// A cold authority read needs neither member bindings nor member history.
 	if active, err := ProjectSpecActive(r1, group.ID); err != nil || active {
 		t.Fatalf("cold authority read: active=%v err=%v", active, err)
 	}

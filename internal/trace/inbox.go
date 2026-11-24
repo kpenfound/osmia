@@ -38,22 +38,12 @@ type InboxEntry struct {
 	Questions      []QuestionState
 }
 
-// inboxCounterFile is the project's own durable record of the next inbox
-// number to hand out. It is not a versioned trace record: only its current
-// value matters, and nothing but ReserveInboxNumber ever writes it.
 const inboxCounterFile = "inbox-counter.json"
 
 type inboxCounter struct {
 	Next int `json:"next"`
 }
 
-// reserveInboxNumber durably advances the project's own inbox counter and
-// returns the number it reserves, unique across every workstream of the
-// project and never reused. It must run on the project's own trace instance,
-// not a workstream's: inbox numbering is project-level bookkeeping, held in
-// the project's trace and reserved there before the escalation that uses the
-// number is recorded in its workstream's own trace. A crash between the two
-// leaves the reserved number unused rather than ever handing it out again.
 func (r *Repository) reserveInboxNumber(ctx context.Context) (int, error) {
 	if r.stream != "" {
 		return 0, fmt.Errorf("inbox numbering belongs to the project's own trace")
@@ -92,16 +82,6 @@ func (r *Repository) Inbox() ([]InboxEntry, error) {
 	return r.inbox()
 }
 
-// inbox aggregates every workstream's own escalated questions into one
-// entry per escalation, by inbox number: a consolidated escalation spans
-// every member of a shared workgroup a genuine gap affects, so its
-// questions are recorded, one commit apiece, across each of their own
-// workstreams, but the owner reads it, and answers it, as the one entry it
-// is. The inbox number, not the batch ID, is the aggregation key: batch IDs
-// are reserved per workstream, so two workstreams' own first escalations
-// both carry batch "escalation_1", while the inbox number is reserved once
-// per escalation from the project's own counter and is unique across the
-// whole project.
 func (r *Repository) inbox() ([]InboxEntry, error) {
 	ids, err := r.diskStreams()
 	if err != nil {
@@ -122,18 +102,6 @@ func (r *Repository) inbox() ([]InboxEntry, error) {
 	}
 	for _, id := range ids {
 		if r.memberBindings() == nil {
-			// A member of a cross-repo workgroup reserves its escalation's
-			// inbox number from that workgroup's own counter, never this
-			// project's own, even though the escalated question's revision
-			// is committed into this project's own trace (scoped(member)
-			// on the workgroup's own trace resolves there directly). Read
-			// on the workgroup's own trace instance (r.members != nil),
-			// the same number correctly aggregates that member's own
-			// question with its fellow members'; read here, on this
-			// project's own instance, the same raw number can collide
-			// with an escalation this project's own counter issued, so a
-			// member's own cross-repo escalation is left for
-			// workgroupInbox to report instead.
 			workgroup, err := r.CrossRepoWorkgroupOf(id)
 			if err != nil {
 				return nil, err
@@ -172,13 +140,6 @@ func (r *Repository) inbox() ([]InboxEntry, error) {
 	out := make([]InboxEntry, 0, len(order))
 	for _, n := range order {
 		entry := byNumber[n]
-		// A consolidated escalation's members each commit their own ruling
-		// separately (Rule, one commit per workstream); a crash between two
-		// of those commits must not make the batch read as "ruled" while one
-		// of its own questions is still escalated; see Rule's own retry of
-		// exactly such a member. Questions[0]'s own state, set above, is
-		// right whenever every member moved together, so it stands unless
-		// some other question of the same batch is still escalated.
 		anyEscalated, anyRuled := false, false
 		for _, q := range entry.Questions {
 			if q.Asked.Workstream != "" {
@@ -208,7 +169,6 @@ func (r *Repository) inbox() ([]InboxEntry, error) {
 	return out, nil
 }
 
-// escalations groups a workstream's escalated questions by batch.
 func escalations(states []QuestionState) []InboxEntry {
 	byID := map[string]QuestionState{}
 	for _, q := range states {
@@ -230,11 +190,6 @@ func escalations(states []QuestionState) []InboxEntry {
 	return out
 }
 
-// ruleInterrupt lets a test simulate the service stopping between two
-// members' own ruling commits inside Rule, the same way
-// ensureWorkgroupsInterrupt (internal/service) tests a crash mid-pass: it is
-// called, when set, right after each member workstream's own commit, with
-// the workstream just committed.
 var ruleInterrupt func(config.WorkstreamID) error
 
 // Rule records text as the owner's ruling on inbox entry number: revision 1 of
@@ -297,15 +252,6 @@ func (r *Repository) RuleDecided(ctx context.Context, number int, text string, o
 	if entry.Hold != "" && entry.Hold != ErrMemberRetired.Error() {
 		return entry, fmt.Errorf("%s", entry.Hold)
 	}
-	// A consolidated escalation's questions may belong to several of the
-	// workgroup's own workstreams; each is its own trace, so the
-	// ruling is recorded as one commit per distinct workstream the batch
-	// touches. Every one of them is checked, in the same order the single-
-	// workstream check always ran in (feature state before "already
-	// ruled"), before any of them is written. A workstream already ruled by
-	// an earlier, interrupted call to this same batch (its own questions no
-	// longer escalated) is recorded here too, so a different retried text
-	// can be caught, but it is left out of pending and never rewritten.
 	byStream := map[config.WorkstreamID][]QuestionState{}
 	var order []config.WorkstreamID
 	var ids []string
@@ -374,16 +320,6 @@ func (r *Repository) RuleDecided(ctx context.Context, number int, text string, o
 	if alreadyRuled && priorText != text {
 		return InboxEntry{}, fmt.Errorf("%w: %d", ErrRuled, number)
 	}
-	// inbox() keeps an entry escalated while any of its own questions still
-	// is, so reaching here means at least one member has a pending question.
-	// Whichever member's commit is the last to clear its own pending
-	// questions in this call is the one that moves the whole entry out of
-	// "escalated"; the owner's one ruling notice belongs there; attaching it
-	// to an earlier member's commit, as a crash between two members' own
-	// commits can show, would announce the ruling before the batch is
-	// actually whole. A retry that completes the batch always has a last
-	// pending member of its own, so the notice always goes out exactly once,
-	// on the call that actually finishes the batch.
 	pendingByStream := map[config.WorkstreamID][]QuestionState{}
 	var lastPending config.WorkstreamID
 	for _, ws := range order {
@@ -468,13 +404,11 @@ func (r *Repository) RuleDecided(ctx context.Context, number int, text string, o
 //
 // A crash between two of those commits leaves some members answered and
 // others still ruled; a retry lands here again. It skips a member already
-// answered with the same text, leaving it untouched, and completes the
-// rest. A different text on an already-answered member, while some other
-// member is still ruled, is refused: a resume in progress must finish with
-// the one text the owner's ruling was relayed as. Once every member of the
-// batch is already answered, calling this again is refused with "already
-// answered" regardless of text, matching a single-workstream relay's
-// always having had no second attempt to resume.
+// answered with the same text and completes the rest. A different text on an
+// already-answered member, while some other member is still ruled, is refused:
+// a resume in progress must finish with the one text the owner's ruling was
+// relayed as. Once every member of the batch is answered, calling this again
+// is refused with "already answered" regardless of text.
 func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coreadapter.Scope, id, text, reach string, at time.Time) ([]string, error) {
 	project := r
 	member, localID, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
@@ -504,9 +438,6 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 	}
 	escalation := existing[i].Latest.Escalation
 	if escalation == nil {
-		// Answered directly, through answer_question, with no ruling batch
-		// at all: already fully resolved, the same as a batch every one of
-		// whose members is already answered.
 		return nil, refused("question %s is already answered", localID)
 	}
 	batch := slices.Clone(escalation.Questions)
@@ -519,15 +450,6 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 		}
 		byStream[ws] = append(byStream[ws], qid)
 	}
-	// The batch's questions may belong to several of the workgroup's own
-	// workstreams, each its own trace. A first pass across every
-	// member the batch touches, none of its own locks held while another
-	// member's is, finds which of them are still ruled (pending this call's
-	// own relay) and which are already answered from an earlier, interrupted
-	// call to this same batch; an already-answered member with a different
-	// text, while some other member is still pending, is caught here rather
-	// than attempting to redo a ruled-to-answered transition that already
-	// happened and cannot run twice.
 	pendingByStream := map[config.WorkstreamID][]string{}
 	allAnswered := true
 	var held error
@@ -582,8 +504,6 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 	if mismatch != "" {
 		return nil, refused("question %s is already answered with a different ruling", mismatch)
 	}
-	// The relay is recorded as one commit per distinct workstream the batch
-	// still has pending; a member already answered above is left untouched.
 	for _, ws := range order {
 		pending, ok := pendingByStream[ws]
 		if !ok {
@@ -654,8 +574,4 @@ func (r *Repository) RelayRuling(ctx context.Context, agent string, scope coread
 	return batch, held
 }
 
-// relayInterrupt lets a test simulate the service stopping between two
-// members' own relay commits inside RelayRuling, the same way ruleInterrupt
-// tests a crash inside Rule: it is called, when set, right after each
-// member workstream's own commit, with the workstream just committed.
 var relayInterrupt func(config.WorkstreamID) error

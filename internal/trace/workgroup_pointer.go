@@ -16,10 +16,10 @@ import (
 // CrossRepoWorkgroupSubject is the workflow subject, recorded on a real
 // member's own trace, naming the cross-repo workgroup it belongs to. It is a
 // locator only: it never duplicates the workgroup's membership list or its
-// project spec, which stay authoritative only in the workgroup's own trace
-// (charter#2). It lets a caller holding just one member's own trace, and
-// that member's workstream ID, find and read that workgroup's trace,
-// without opening every member's repository first.
+// project spec, which stay authoritative only in the workgroup's own trace.
+// It lets a caller holding just one member's own trace, and that member's
+// workstream ID, find and read that workgroup's trace, without opening every
+// member's repository first.
 const CrossRepoWorkgroupSubject = "cross-repo-workgroup"
 
 // PendingCrossRepoWorkgroup authenticates a member whose owner-recorded
@@ -211,8 +211,6 @@ func (r *Repository) openCrossRepoSnapshot(id config.WorkgroupID) (*Repository, 
 	return wt, snap, nil
 }
 
-// workgroupProjectSpec reads the effective project spec from the trace
-// without keeping it; projectSpecSnapshotOf is the cached read.
 func (wt *Repository) workgroupProjectSpec(id config.WorkgroupID) (ProjectSpec, Workgroup, bool, error) {
 	groups, _, err := Workgroups(wt)
 	if err != nil {
@@ -229,9 +227,6 @@ func (wt *Repository) workgroupProjectSpec(id config.WorkgroupID) (ProjectSpec, 
 	if !found {
 		return ProjectSpec{}, Workgroup{}, false, nil
 	}
-	// An accepted decision owns the project spec used by member context and
-	// graph interpretation, even if newer draft documents appear during
-	// recovery. Draft history stays readable in ProjectSpecFor.
 	if len(g.Members) > 0 {
 		revision, published, err := ApprovedWorkgroupRevision(wt, g.Members[0])
 		if err != nil {

@@ -97,8 +97,6 @@ func TestMoveFeatureStateRequiresTheExpectedState(t *testing.T) {
 	if err != nil || state != (WorkflowState{Version: 2, Value: "sketched"}) {
 		t.Fatalf("state %v: %v", state, err)
 	}
-	// The same transition again returns the committed state whatever the
-	// expected state says, so a retry after a commit is not refused.
 	if again, err := r.MoveFeatureState(ctx, header("transition", "sketched"), "handed", "sketched", "Draft accepted"); err != nil || again != state {
 		t.Fatalf("retry %v: %v", again, err)
 	}
@@ -145,8 +143,6 @@ func TestMoveFeatureStateWithRecordsTheOthersInTheSameCommit(t *testing.T) {
 	a, b := UnitSubject("a"), UnitSubject("b")
 	with := []Transaction{unit("unit-a-planned", a, "", "planned", 0), unit("unit-a-ready", a, "planned", "ready", 1), unit("unit-b-planned", b, "", "planned", 0)}
 
-	// A feature transaction among the others is refused, and so is the
-	// whole commit when one of them does not apply.
 	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", unit("again", FeatureSubject, "building", "delivered", 2)); err == nil || !strings.Contains(err.Error(), "must be of another subject") {
 		t.Fatalf("a feature transaction among the others: %v", err)
 	}
@@ -165,7 +161,6 @@ func TestMoveFeatureStateWithRecordsTheOthersInTheSameCommit(t *testing.T) {
 	if states, err := r.WorkflowStates(streamID); err != nil || !reflect.DeepEqual(states, want) {
 		t.Fatalf("states %+v: %v", states, err)
 	}
-	// A retry of the feature transition records nothing more.
 	if again, err := r.MoveFeatureStateWith(ctx, header("transition", "building"), "ratified", "building", "Built", with...); err != nil || again != state {
 		t.Fatalf("retry %v: %v", again, err)
 	}

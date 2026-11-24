@@ -10,9 +10,7 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	legacytrace "github.com/kpenfound/osmia/internal/trace/legacytrace"
 	os "os"
-	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
 	testing "testing"
@@ -258,86 +256,6 @@ func TestDeliverDeltaCheckAcceptance(t *testing.T) {
 				t.Fatalf("legacy carryover rejected: %s", out)
 			}
 		})
-	}
-}
-
-func TestStoredCheckAcceptanceMigratesAndLoads(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	f := newArchitectFixture(t)
-	f.stop(t)
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	stream, err := config.NewWorkstreamID()
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, f.s.now(), ownerActor))
-	groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
-	must(t, err)
-	oldSpec := strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)
-	oldGraph := acceptancePlan(t, validPlan, "dagger check passes")
-	group := groups[0]
-	projectSpec := trace.ProjectSpec{Behavior: "Resumable uploads", Slices: []trace.Slice{{Workstream: stream, Spec: oldSpec, Plan: oldGraph}}}
-	must(t, trace.RecordProjectSpec(ctx, repo, group, projectSpec, f.s.now(), architectActor, "fixture"))
-	projectDocs, err := trace.Read[trace.Document](repo, "")
-	must(t, err)
-	projectFiles := map[string][]byte{"project.json": legacytrace.ProjectManifest(string(f.project), f.s.now())}
-	var projectRecords []any
-	for _, d := range projectDocs {
-		projectRecords = append(projectRecords, d)
-		projectFiles[d.Path] = []byte(d.Content)
-	}
-	projectFiles["documents.jsonl"], err = legacytrace.JSONL(projectRecords...)
-	must(t, err)
-	// Both project slices and member documents enter through actual Git migration.
-	check := plan.DraftCheck(f.trace)
-	must(t, check(map[string]string{plan.SpecDocument: oldSpec, plan.PlanDocument: oldGraph}))
-	must(t, repo.Close())
-	must(t, os.RemoveAll(f.trace))
-	must(t, legacytrace.Build(f.trace, projectFiles))
-	directory, err := f.s.cfg.Root.WorkstreamTrace(f.project, stream)
-	must(t, err)
-	must(t, os.RemoveAll(directory))
-	files := legacytrace.Workstream(string(f.project), string(stream), f.s.now())
-	prefix := "workstreams/" + string(stream) + "/"
-	var docs []any
-	for _, item := range []struct{ id, path, text string }{
-		{plan.SpecDocument, plan.SpecPath, oldSpec}, {plan.PlanDocument, plan.PlanPath, oldGraph},
-		{"amendment_1_spec", "amendments/1/spec.md", oldSpec}, {"amendment_1_plan", "amendments/1/plan.json", oldGraph},
-	} {
-		d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: item.id, Revision: 1, Project: f.project, Workstream: stream, At: f.s.now(), Actor: architectActor, Cause: "fixture"}, Path: item.path, Content: item.text}
-		docs = append(docs, d)
-		files[prefix+item.path] = []byte(item.text)
-	}
-	files[prefix+"documents.jsonl"], err = legacytrace.JSONL(docs...)
-	must(t, err)
-	must(t, legacytrace.Build(directory, files))
-	must(t, trace.Migrate(ctx, f.s.cfg.Root, f.project, check, func(string, ...any) {}))
-	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	defer repo.Close()
-	recorded, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
-	if len(recorded) != len(docs) {
-		t.Fatalf("stored documents lost: %+v", recorded)
-	}
-	for _, d := range recorded {
-		if d.Content != oldSpec && d.Content != oldGraph {
-			t.Fatalf("stored text changed: %+v", d)
-		}
-	}
-	loaded, _, found, err := repo.ProjectSpecOf(stream)
-	must(t, err)
-	if !found || len(loaded.Slices) != 1 || loaded.Slices[0].Spec != oldSpec || loaded.Slices[0].Plan != oldGraph {
-		t.Fatalf("legacy slice not loadable: %+v", loaded)
-	}
-	for _, sl := range loaded.Slices {
-		must(t, check(map[string]string{plan.SpecDocument: sl.Spec, plan.PlanDocument: sl.Plan}))
-	}
-	if _, err := plan.Parse([]byte(loaded.Slices[0].Plan)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(directory, ".git")); !os.IsNotExist(err) {
-		t.Fatalf("Git trace not migrated: %v", err)
 	}
 }
 

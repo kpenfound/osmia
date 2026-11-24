@@ -58,7 +58,6 @@ func (r *Repository) WorkgroupCharters(ctx context.Context, stream config.Workst
 			out = append(out, MemberCharter{binding.Project.Project(), member, d})
 			continue
 		}
-		// The first stream of a cross-project authority is its synthetic chief host.
 		if member == members[0] {
 			continue
 		}

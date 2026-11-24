@@ -78,8 +78,6 @@ func TestOnlyAJevDepartureIsDeparted(t *testing.T) {
 	}
 }
 
-// A transition written with the routing fields reads back with them, from the
-// trace and from the workflow, and again after the trace is opened afresh.
 func TestRoutedTransitionRoundTrips(t *testing.T) {
 	r, root, p := create(t)
 	ctx := context.Background()
@@ -111,8 +109,6 @@ func TestRoutedTransitionRoundTrips(t *testing.T) {
 	defer r.Close()
 	check(r)
 
-	// A retry of the identical request returns the committed state, and a retry
-	// that records another routing conflicts.
 	if _, err := r.Transact(ctx, routed("t2", state.Version, "checking", "implementing", route)); err != nil {
 		t.Fatalf("identical retry: %v", err)
 	}
@@ -121,7 +117,6 @@ func TestRoutedTransitionRoundTrips(t *testing.T) {
 	if _, err := r.Transact(ctx, routed("t2", state.Version, "checking", "implementing", other)); !errors.Is(err, ErrConflict) {
 		t.Fatalf("retry with another routing: %v", err)
 	}
-	// An invalid routing is refused before anything is written.
 	bad := route
 	bad.Judgment = ""
 	if _, err := r.Transact(ctx, routed("t3", 2, "implementing", "checking", bad)); err == nil {
@@ -132,10 +127,8 @@ func TestRoutedTransitionRoundTrips(t *testing.T) {
 	}
 }
 
-// A transition record written before the routing fields existed has none of
-// them in its JSON, and reads as a transition no router chose.
-func TestTransitionRecordWithoutRoutingStillReads(t *testing.T) {
-	plain := Transition{Header: header("transition", "old"), Subject: "feature", From: "handed", To: "sketched", Reason: "drafted"}
+func TestTransitionWithoutRoutingReadsAsUnrouted(t *testing.T) {
+	plain := Transition{Header: header("transition", "plain"), Subject: "feature", From: "handed", To: "sketched", Reason: "drafted"}
 	data, err := json.Marshal(plain)
 	if err != nil {
 		t.Fatal(err)
@@ -159,8 +152,9 @@ func TestTransitionRecordWithoutRoutingStillReads(t *testing.T) {
 	if err := validate(got); err != nil {
 		t.Fatalf("validating: %v", err)
 	}
+}
 
-	// The same record on disk, in a trace that also holds routed transitions.
+func TestRoutedTransitionCanFollowAnUnroutedOne(t *testing.T) {
 	r, _, _ := create(t)
 	tx := transaction("t1", 0, "", "handed", 0)
 	transact(t, r, tx)
@@ -174,8 +168,6 @@ func TestTransitionRecordWithoutRoutingStillReads(t *testing.T) {
 	}
 }
 
-// Every commit path that picks a state records the routing: the feature
-// setters and a transition committed together with documents.
 func TestRoutingIsRecordedOnEveryCommitPath(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -194,7 +186,6 @@ func TestRoutingIsRecordedOnEveryCommitPath(t *testing.T) {
 	if _, err := r.SetFeatureStateUnlessRouted(ctx, header("transition", "f4"), "abandoned", "ended", Routing{DecidedBy: DecidedByOwner, DefaultTo: "in-shed"}, "delivered"); err != nil {
 		t.Fatal(err)
 	}
-	// A retry that records another routing conflicts, as one with another reason does.
 	if _, err := r.SetFeatureStateRouted(ctx, header("transition", "f1"), "handed", "handed in", code("sketched")); !errors.Is(err, ErrConflict) {
 		t.Fatalf("retry with another routing: %v", err)
 	}
@@ -218,7 +209,6 @@ func TestRoutingIsRecordedOnEveryCommitPath(t *testing.T) {
 			t.Errorf("%s recorded %+v, want %+v", id, by[id].Routing(), want)
 		}
 	}
-	// The unrouted setters record none.
 	if _, err := r.SetFeatureState(ctx, header("transition", "f5"), "assembled", "assembled"); err != nil {
 		t.Fatal(err)
 	}

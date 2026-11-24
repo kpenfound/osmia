@@ -17,8 +17,7 @@ var MigrationActor = trace.Actor{Kind: "service", ID: "osmia"}
 
 // EnsureWorkgroupsInterrupt lets tests simulate a crash partway through
 // EnsureWorkgroups, right before a given project's workgroups would be
-// recorded, the same way migrationInterrupt tests the trace-layout
-// migration.
+// recorded.
 var EnsureWorkgroupsInterrupt func(config.ProjectID) error
 
 // EnsureWorkgroups wraps every existing non-session workstream of each

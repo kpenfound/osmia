@@ -92,7 +92,6 @@ func TestPendingCrossRepoWorkgroupRequiresRecordedRetractionAndAuthority(t *test
 	if id, err := r1.PendingCrossRepoWorkgroup(crossMember1); err != nil || id != g.ID {
 		t.Fatalf("recorded join: %s %v", id, err)
 	}
-	// The group exists and is readable, but doesn't contain this other retraction.
 	bare := config.WorkstreamID("w_00000000000000000000000000000129")
 	if err := r1.CreateWorkstream(ctx, bare, at, owner); err != nil {
 		t.Fatal(err)

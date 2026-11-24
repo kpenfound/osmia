@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// Workflow reads answer from the handle's cached workflow: they see every
-// commit, check the stored manifest on every read but decode unchanged bytes
-// only once, and leave the cached view as it was however the returned states
-// are changed.
 func TestWorkflowReadsFollowCommitsFromTheCachedWorkflowAndManifest(t *testing.T) {
 	r, root, p := create(t)
 	transact(t, r, transaction("first", 0, "", "active", 1))
@@ -28,7 +24,6 @@ func TestWorkflowReadsFollowCommitsFromTheCachedWorkflowAndManifest(t *testing.T
 		t.Fatalf("the manifest was decoded %d more times after it was cached", got)
 	}
 
-	// A damaged manifest is reported on the next read, cached or not.
 	manifest := "workstreams/" + string(streamID) + "/workstream.json"
 	var original []byte
 	if err := s.db.QueryRowContext(context.Background(), "SELECT content FROM files WHERE path = ?", manifest).Scan(&original); err != nil {

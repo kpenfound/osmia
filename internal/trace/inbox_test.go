@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// The owner rules on an escalation once, the ruling and its notice land in one
-// commit, and the chief of staff relays it once to the whole batch.
 func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)
@@ -53,7 +51,6 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 		t.Fatalf("single entry: %+v", e)
 	}
 
-	// Nothing is relayed before the owner rules.
 	when := escalated.Add(time.Hour)
 	for id, reason := range map[string]string{"1": "question 1 has no ruling from the owner to relay", "4": "question 4 has no ruling from the owner to relay", "9": "there is no question 9 in this workstream"} {
 		if got := refusal(t, second(r.RelayRuling(ctx, "chief", chief, id, "Resume.", ScopeLocal, when))); got != reason {
@@ -80,7 +77,6 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	if _, err := r.Rule(ctx, 9, "Resume.", owner, when); !errors.Is(err, ErrInboxEntry) {
 		t.Fatalf("unknown entry: %v", err)
 	}
-	// An entry of a workstream in a refused feature state takes no ruling.
 	if e, err := r.Rule(ctx, 1, "Resume uploads.", owner, when, "delivered", "abandoned"); !errors.Is(err, ErrFeatureState) || e.Number != 1 || e.Workstream != streamID {
 		t.Fatalf("ruling on a refused workstream's entry: %+v %v", e, err)
 	}
@@ -139,7 +135,6 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 		t.Fatalf("open questions after the ruling: %d", got)
 	}
 
-	// A second answer conflicts and changes nothing.
 	if _, err := r.Rule(ctx, 1, "Restart uploads.", owner, when); !errors.Is(err, ErrRuled) {
 		t.Fatalf("second ruling: %v", err)
 	}
@@ -222,8 +217,6 @@ func TestOwnerRulesOnceAndTheChiefOfStaffRelaysOnce(t *testing.T) {
 	check(reopened)
 }
 
-// An escalation carries its inbox number, and a ruling holds what the owner
-// said, what went back or both, with a scope only on what went back.
 func TestEscalationAndRulingValidation(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)

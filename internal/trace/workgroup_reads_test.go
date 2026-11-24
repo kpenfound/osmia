@@ -43,7 +43,6 @@ func TestWorkgroupApprovalReadsDecodeOnlyLatestRecord(t *testing.T) {
 	if err := RecordGroupApproval(ctx, wt, host, decision, at, owner); err != nil {
 		t.Fatal(err)
 	}
-	// Empty the whole-record cache, as on a freshly opened host handle.
 	scoped.cache.mu.Lock()
 	scoped.resetCache()
 	scoped.cache.mu.Unlock()
@@ -65,7 +64,6 @@ func TestWorkgroupApprovalReadsDecodeOnlyLatestRecord(t *testing.T) {
 			t.Fatalf("approval decoded %d records", n)
 		}
 	}
-	// Identical retries remain no-ops; conflicting retries remain conflicts.
 	before, err := wt.CommitCount(string(host))
 	if err != nil {
 		t.Fatal(err)

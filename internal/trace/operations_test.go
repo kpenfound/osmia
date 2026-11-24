@@ -155,8 +155,6 @@ func TestOperationPublicationRecovery(t *testing.T) {
 	}
 }
 
-// Worker attempts keep their operation claim while Unlocked and Relock allow
-// independent operations of the same workstream to keep making progress.
 func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -254,7 +252,6 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 	}
 }
 
-// Relock and Beside both leave independent claims free to proceed.
 func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -411,7 +408,6 @@ func TestCloseJoinsEveryOperationClassBeforeClosingFiles(t *testing.T) {
 	}
 	closed := make(chan error, 1)
 	go func() { closed <- r.Close() }()
-	// Each class pins the repository until its own attempt finishes.
 	for _, a := range attempts {
 		select {
 		case err := <-closed:

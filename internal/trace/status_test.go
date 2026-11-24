@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// chiefThread creates a chief-of-staff thread with one claimed turn and
-// returns the scope of that turn.
 func chiefThread(t *testing.T, r *Repository, turn string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -73,7 +71,6 @@ func TestSetStatusStoresWholeRevisions(t *testing.T) {
 		t.Fatalf("status log: %q", bodies)
 	}
 
-	// A restarted service reads the same status.
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +216,6 @@ func TestSetStatusRefusals(t *testing.T) {
 	if _, err := r.SetStatus(ctx, "chief", scope, valid, at, nil); err == nil {
 		t.Error("stored without a check")
 	}
-	// A mason thread cannot write a status even with a claimed turn.
 	if err := r.CreateThread(ctx, threadAgent()); err != nil {
 		t.Fatal(err)
 	}
