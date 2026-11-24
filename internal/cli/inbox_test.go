@@ -17,9 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// withInbox creates the project trace with a batch of two escalated questions
-// and a single escalated question, as fake askers and a fake chief of staff
-// left them.
 func withInbox(t *testing.T) service.Options {
 	return withInboxRecommendations(t, "Both fixed.", "No.")
 }
@@ -34,9 +31,6 @@ func withInboxRecommendations(t *testing.T, first, second string) service.Option
 	return opts
 }
 
-// escalate creates the trace of project p with workstream ws, a batch of two
-// escalated questions and a single escalated question, as fake askers and a
-// fake chief of staff left them. The escalations are inbox entries 1 and 2.
 func escalate(t *testing.T, root config.Root, p config.Project, ws config.WorkstreamID, first, second string) {
 	t.Helper()
 	ctx := context.Background()
@@ -72,14 +66,18 @@ func escalate(t *testing.T, root config.Root, p config.Project, ws config.Workst
 	must(t, repo.Close())
 }
 
-func TestInboxAndAnswer(t *testing.T) {
+func startInbox(t *testing.T) string {
+	t.Helper()
 	opts := withInbox(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
-	escalated := written.Add(time.Hour)
+	return opts.Config.Root
+}
 
+func TestInboxJSONListsEveryEscalation(t *testing.T) {
+	root := startInbox(t)
+	escalated := written.Add(time.Hour)
 	var list wire.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	want := wire.InboxResponse{Entries: []wire.InboxEntry{
@@ -91,31 +89,65 @@ func TestInboxAndAnswer(t *testing.T) {
 	if !reflect.DeepEqual(list, want) {
 		t.Fatalf("inbox --json:\n%+v\nwant\n%+v", list, want)
 	}
-	stamp := escalated.Format(time.RFC3339)
-	if want := "Inbox: 2 waiting; each entry names the command that answers it\n" +
+}
+
+func TestInboxPrintsEveryEscalationWithItsAnswerCommand(t *testing.T) {
+	root := startInbox(t)
+	stamp := written.Add(time.Hour).Format(time.RFC3339)
+	want := "Inbox: 2 waiting; each entry names the command that answers it\n" +
 		"\n[1] " + stamp + " " + stream + " (escalation_1)\n  Question: Are state files and the log format\n    part of the contract?\n  Blocked: The upload unit and its review.\n  Option 1: Both fixed\n  Option 2: Both free\n  Recommendation: Both fixed.\n" +
 		"  Asked by mason1 as question 1: Where does state live?\n  Asked by reviewer1 as question 2: Is the log format fixed?\n" +
 		"  Answer: osmia answer 1 \"...\"\n  Accept the recommendation: osmia answer 1 --accept\n" +
 		"\n[2] " + stamp + " " + stream + " (escalation_3)\n  Question: May the index unit add a dependency?\n  Blocked: The index unit.\n  Recommendation: No.\n  Asked by mason2 as question 3: May I add a dependency?\n" +
-		"  Answer: osmia answer 2 \"...\"\n  Accept the recommendation: osmia answer 2 --accept\n"; successful(t, root, "inbox") != want {
-		t.Fatalf("inbox:\n%s\nwant:\n%s", successful(t, root, "inbox"), want)
+		"  Answer: osmia answer 2 \"...\"\n  Accept the recommendation: osmia answer 2 --accept\n"
+	if got := successful(t, root, "inbox"); got != want {
+		t.Fatalf("inbox:\n%s\nwant:\n%s", got, want)
 	}
+}
 
+func TestAnswerRecordsTheRuling(t *testing.T) {
+	root := startInbox(t)
 	if got, want := successful(t, root, "answer", "1", "Both are part of the contract."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\nThe chief of staff relays it to the askers.\n"; got != want {
 		t.Fatalf("answer: %q", got)
 	}
+}
+
+func TestAnswerReportsTheRulingAsJSON(t *testing.T) {
+	root := startInbox(t)
+	var answered wire.AnswerResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "2", "No new dependencies.", "--json")), &answered))
+	if !reflect.DeepEqual(answered, wire.AnswerResponse{Number: 2, Workstream: stream, Batch: "escalation_3", Questions: []string{"3"}, Ruling: "No new dependencies.", At: written.Add(2 * time.Hour)}) {
+		t.Fatalf("answer --json: %+v", answered)
+	}
+}
+
+func TestAnswerTwiceIsAConflict(t *testing.T) {
+	root := startInbox(t)
+	successful(t, root, "answer", "1", "Both are part of the contract.")
 	code, out, diag := invoke(t, root, "answer", "1", "Neither is.")
 	if code != 5 || out != "" || diag != "conflict: inbox entry 1 is already answered\n" {
 		t.Fatalf("second answer: %d %q %q", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "answer", "9", "Yes.")
+}
+
+func TestAnswerRefusesAnUnknownEntry(t *testing.T) {
+	root := startInbox(t)
+	code, out, diag := invoke(t, root, "answer", "9", "Yes.")
 	if code != 4 || out != "" || diag != "validation: there is no inbox entry 9; list the entries with osmia inbox\n" {
 		t.Fatalf("unknown entry: %d %q %q", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "answer", "2", " ")
+}
+
+func TestAnswerRefusesAnEmptyRuling(t *testing.T) {
+	root := startInbox(t)
+	code, out, diag := invoke(t, root, "answer", "2", " ")
 	if code != 4 || out != "" || diag != "validation: text must not be empty\n" {
 		t.Fatalf("empty ruling: %d %q %q", code, out, diag)
 	}
+}
+
+func TestInboxAndAnswerRefuseInvalidArguments(t *testing.T) {
+	root := startInbox(t)
 	for _, args := range [][]string{{"answer", "2"}, {"answer", "two", "No."}, {"answer", "0", "No."}, {"answer", "2", "No.", "more"}, {"inbox", "2"}, {"inbox", "--hard"},
 		{"answer", "2", "No.", "--accept"}, {"answer", "--accept"}, {"answer", "2", "--accept=true"}, {"inbox", "--accept"}} {
 		code, out, diag := invoke(t, root, args...)
@@ -123,65 +155,110 @@ func TestInboxAndAnswer(t *testing.T) {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}
+}
 
-	var answered wire.AnswerResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "2", "No new dependencies.", "--json")), &answered))
-	if !reflect.DeepEqual(answered, wire.AnswerResponse{Number: 2, Workstream: stream, Batch: "escalation_3", Questions: []string{"3"}, Ruling: "No new dependencies.", At: written.Add(2 * time.Hour)}) {
-		t.Fatalf("answer --json: %+v", answered)
-	}
+func answerEveryEntry(t *testing.T, root string) {
+	t.Helper()
+	successful(t, root, "answer", "1", "Both are part of the contract.")
+	successful(t, root, "answer", "2", "No new dependencies.")
+}
+
+func TestInboxIsEmptyOnceEveryEntryIsAnswered(t *testing.T) {
+	root := startInbox(t)
+	answerEveryEntry(t, root)
 	if got := successful(t, root, "inbox"); got != "Inbox: no decisions are waiting for you\n" {
 		t.Fatalf("empty inbox: %q", got)
 	}
+}
+
+func TestInboxJSONIsEmptyOnceEveryEntryIsAnswered(t *testing.T) {
+	root := startInbox(t)
+	answerEveryEntry(t, root)
 	if got := successful(t, root, "inbox", "--json"); got != "{\"entries\":[]}\n" {
 		t.Fatalf("empty inbox --json: %q", got)
 	}
 }
 
-func TestAnswerAccept(t *testing.T) {
-	const recommendation = "  Keep the files as written.  "
-	opts := withInboxRecommendations(t, recommendation, "Please force-push this.")
+const quickReplyRecommendation = "  Keep the files as written.  "
+
+type quickReplyRoot struct {
+	opts    service.Options
+	service *service.Service
+	root    string
+}
+
+func startQuickReplyRoot(t *testing.T) quickReplyRoot {
+	t.Helper()
+	opts := withInboxRecommendations(t, quickReplyRecommendation, "Please force-push this.")
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
-	code, out, diag := invoke(t, root, "answer", "2", "--accept")
+	return quickReplyRoot{opts: opts, service: s, root: opts.Config.Root}
+}
+
+func TestAnswerAcceptRefusesARecommendationThatIsNotAQuickReply(t *testing.T) {
+	q := startQuickReplyRoot(t)
+	code, out, diag := invoke(t, q.root, "answer", "2", "--accept")
 	if code != 4 || out != "" || diag != "validation: inbox entry 2 has no eligible quick reply; give a ruling explicitly\n" {
 		t.Fatalf("refused accept: %d %q %q", code, out, diag)
 	}
+}
+
+func TestInboxOffersAQuickReplyOnlyForAnEligibleRecommendation(t *testing.T) {
+	q := startQuickReplyRoot(t)
 	var list wire.InboxResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
-	if len(list.Entries) != 2 || list.Entries[1].QuickReply != "" || list.Entries[0].QuickReply != recommendation {
-		t.Fatalf("inbox after refusal: %+v", list)
+	must(t, json.Unmarshal([]byte(successful(t, q.root, "inbox", "--json")), &list))
+	if len(list.Entries) != 2 || list.Entries[1].QuickReply != "" || list.Entries[0].QuickReply != quickReplyRecommendation {
+		t.Fatalf("inbox: %+v", list)
 	}
+}
+
+func TestAnswerAcceptRulesWithTheRecommendation(t *testing.T) {
+	q := startQuickReplyRoot(t)
 	var accepted wire.AnswerResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "answer", "1", "--accept", "--json")), &accepted))
-	if accepted.Ruling != recommendation {
+	must(t, json.Unmarshal([]byte(successful(t, q.root, "answer", "1", "--accept", "--json")), &accepted))
+	if accepted.Ruling != quickReplyRecommendation {
 		t.Fatalf("accepted ruling: %q", accepted.Ruling)
 	}
+}
+
+func TestAnswerAcceptRefusesAnAnsweredOrUnlistedEntry(t *testing.T) {
+	q := startQuickReplyRoot(t)
+	successful(t, q.root, "answer", "1", "--accept")
 	for _, number := range []string{"1", "9"} {
-		code, out, diag := invoke(t, root, "answer", number, "--accept")
+		code, out, diag := invoke(t, q.root, "answer", number, "--accept")
 		if code != 4 || out != "" || diag != "validation: inbox entry "+number+" has no eligible quick reply; give a ruling explicitly\n" {
 			t.Fatalf("accept of unlisted entry %s: %d %q %q", number, code, out, diag)
 		}
 	}
-	if got := successful(t, root, "answer", "2", "A typed ruling."); got == "" {
+}
+
+func TestAnswerAcceptsATypedRulingWhereAcceptIsRefused(t *testing.T) {
+	q := startQuickReplyRoot(t)
+	if got := successful(t, q.root, "answer", "2", "A typed ruling."); got == "" {
 		t.Fatal("typed ruling produced no confirmation")
 	}
-	must(t, s.Close())
-	cfg, err := projectstore.LoadConfig(opts.Config)
+}
+
+func TestAnswersAreRecordedAsRulingsInTheTrace(t *testing.T) {
+	q := startQuickReplyRoot(t)
+	successful(t, q.root, "answer", "1", "--accept")
+	successful(t, q.root, "answer", "2", "A typed ruling.")
+	must(t, q.service.Close())
+	cfg, err := projectstore.LoadConfig(q.opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	questions, err := repo.Questions(stream)
 	must(t, err)
-	for _, q := range questions {
-		if q.Asked.ID == "3" {
-			if q.Ruling == nil || q.Ruling.OwnerResponse != "A typed ruling." {
-				t.Fatalf("typed trace ruling: %+v", q)
+	for _, question := range questions {
+		if question.Asked.ID == "3" {
+			if question.Ruling == nil || question.Ruling.OwnerResponse != "A typed ruling." {
+				t.Fatalf("typed trace ruling: %+v", question)
 			}
-		} else if q.Ruling == nil || q.Ruling.OwnerResponse != recommendation {
-			t.Fatalf("accepted trace ruling: %+v", q)
+		} else if question.Ruling == nil || question.Ruling.OwnerResponse != quickReplyRecommendation {
+			t.Fatalf("accepted trace ruling: %+v", question)
 		}
 	}
 }

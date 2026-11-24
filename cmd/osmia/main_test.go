@@ -38,7 +38,15 @@ func gitInit(t *testing.T, dir string) {
 	}
 }
 
-func TestServeLoadsTheStoreBackedRootInRegistryOrderWithTheCurrentSettings(t *testing.T) {
+type servedRoot struct {
+	ids    []config.ProjectID
+	client *service.Client
+	cmd    *exec.Cmd
+	exited chan error
+}
+
+func serveStoreBackedRoot(t *testing.T) servedRoot {
+	t.Helper()
 	base, err := os.MkdirTemp("", "om-")
 	if err != nil {
 		t.Fatal(err)
@@ -109,10 +117,14 @@ func TestServeLoadsTheStoreBackedRootInRegistryOrderWithTheCurrentSettings(t *te
 	case <-time.After(time.Minute):
 		t.Fatal("the service was not ready within a minute")
 	}
-
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
-	defer c.Close()
-	view, err := c.Configuration(context.Background())
+	t.Cleanup(c.Close)
+	return servedRoot{ids: ids, client: c, cmd: cmd, exited: exited}
+}
+
+func TestServeLoadsTheStoreBackedRootsProjectsInRegistryOrder(t *testing.T) {
+	served := serveStoreBackedRoot(t)
+	view, err := served.client.Configuration(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,22 +132,34 @@ func TestServeLoadsTheStoreBackedRootInRegistryOrderWithTheCurrentSettings(t *te
 	for _, s := range view.Effective.ActiveProjects {
 		got = append(got, config.ProjectID(s))
 	}
-	if !slices.Equal(got, ids) {
-		t.Fatalf("active projects %v, want the registry order %v", got, ids)
+	if !slices.Equal(got, served.ids) {
+		t.Fatalf("active projects %v, want the registry order %v", got, served.ids)
+	}
+}
+
+func TestServeAppliesTheCurrentStoredSettingsOfEachProject(t *testing.T) {
+	served := serveStoreBackedRoot(t)
+	view, err := served.client.Configuration(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
 	branches := map[config.ProjectID]string{}
 	for _, p := range view.Effective.Projects {
 		branches[p.ID] = p.BaseBranch
 	}
+	ids := served.ids
 	if branches[ids[0]] != "main" || branches[ids[1]] != "trunk" || branches[ids[2]] != "main" {
 		t.Fatalf("effective base branches %v: the current stored settings are not in effect", branches)
 	}
+}
 
-	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+func TestServeStopsCleanlyOnInterrupt(t *testing.T) {
+	served := serveStoreBackedRoot(t)
+	if err := served.cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case err := <-exited:
+	case err := <-served.exited:
 		if err != nil {
 			t.Fatalf("the service did not stop cleanly: %v", err)
 		}

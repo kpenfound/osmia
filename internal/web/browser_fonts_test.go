@@ -11,16 +11,12 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// The page loads its bundled sans and mono from its own origin without a
-// content-security-policy violation, and the face a text node uses is the
-// bundled one rather than a system font.
-func TestBrowserPageLoadsItsBundledFontsWithoutPolicyViolations(t *testing.T) {
-	t.Parallel()
+func openFontsPage(t *testing.T) *page {
+	t.Helper()
 	api := newFakeAPI(1)
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)
 	p := openBrowser(t)
-
 	p.run(chromedp.EmulateViewport(1280, 800),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			_, err := cdppage.AddScriptToEvaluateOnNewDocument(`window.__violations = [];
@@ -29,7 +25,12 @@ document.addEventListener('securitypolicyviolation', (e) => window.__violations.
 		}),
 		chromedp.Navigate(server.URL+"/"))
 	p.await("the workstream list", `document.querySelectorAll('#workstream-list [data-select]').length === 1`)
+	return p
+}
 
+func TestBrowserPageLoadsItsBundledFontFaces(t *testing.T) {
+	t.Parallel()
+	p := openFontsPage(t)
 	var loaded []string
 	p.run(chromedp.Evaluate(`(async () => {
 		await Promise.all([document.fonts.load('400 14px "Instrument Sans"'), document.fonts.load('600 14px "Instrument Sans"'), document.fonts.load('400 14px "JetBrains Mono"')]);
@@ -40,19 +41,33 @@ document.addEventListener('securitypolicyviolation', (e) => window.__violations.
 	if !strings.Contains(joined, "Instrument Sans") || !strings.Contains(joined, "JetBrains Mono") {
 		t.Fatalf("loaded font faces: %q", loaded)
 	}
+}
 
+func TestBrowserPageLoadsItsFontsWithoutPolicyViolations(t *testing.T) {
+	t.Parallel()
+	p := openFontsPage(t)
+	p.run(chromedp.Evaluate(`document.fonts.ready.then(() => true)`, new(bool), func(params *runtime.EvaluateParams) *runtime.EvaluateParams { return params.WithAwaitPromise(true) }))
 	var violations []string
 	p.eval(`window.__violations`, &violations)
 	if len(violations) != 0 {
 		t.Fatalf("content-security-policy violations: %q", violations)
 	}
+}
 
+func TestBrowserPageRequestsEachBundledFontFileOnce(t *testing.T) {
+	t.Parallel()
+	p := openFontsPage(t)
+	p.run(chromedp.Evaluate(`document.fonts.ready.then(() => true)`, new(bool), func(params *runtime.EvaluateParams) *runtime.EvaluateParams { return params.WithAwaitPromise(true) }))
 	var served []string
 	p.eval(`performance.getEntriesByType('resource').filter((r) => r.name.endsWith('.woff2')).map((r) => new URL(r.name).pathname + ' ' + (r.decodedBodySize > 0))`, &served)
 	if len(served) != 2 {
 		t.Fatalf("font requests: %q", served)
 	}
+}
 
+func TestBrowserPageSetsBodyTextInInstrumentSansAndCodeInJetBrainsMono(t *testing.T) {
+	t.Parallel()
+	p := openFontsPage(t)
 	var faces struct{ Body, Code string }
 	p.eval(`(() => {
 		const code = document.createElement('code'); code.textContent = 'w_01'; document.body.append(code);

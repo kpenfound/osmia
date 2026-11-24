@@ -17,18 +17,15 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// chatAPI extends the ordinary fake API with the conversation kinds
-// and records messages at their real endpoints, without running agents.
 type chatAPI struct {
-	base     *fakeAPI
-	mu       sync.Mutex
-	messages []chatMessage
-	posts    []string
-	entries  map[string][]map[string]any
-	action   fakeAction
-	// transcribe answers the page's transcription route and says whether the
-	// configuration reports transcription as on.
+	base       *fakeAPI
+	mu         sync.Mutex
+	messages   []chatMessage
+	posts      []string
+	entries    map[string][]map[string]any
+	action     fakeAction
 	transcribe fakeTranscribe
+	received   counter
 }
 
 type chatMessage struct {
@@ -120,6 +117,7 @@ func (a *chatAPI) handler() http.Handler {
 				a.entries[view.id] = append(a.entries[view.id], entry)
 			}
 			a.mu.Unlock()
+			a.received.add()
 			encoded, _ := json.Marshal(entry)
 			a.action.serve(w, r, string(encoded))
 		})
@@ -141,8 +139,6 @@ func openChatPage(t *testing.T, width, height int64, browserOptions ...chromedp.
 	server := httptest.NewServer(a.handler())
 	t.Cleanup(server.Close)
 	p := openBrowser(t, browserOptions...)
-	// Set only the viewport metrics: EmulateViewport also resets touch and
-	// pointer capabilities, which the keyboard and touch tests set explicitly.
 	p.run(emulation.SetDeviceMetricsOverride(width, height, 1, false), chromedp.Navigate(server.URL+"/"))
 	p.await("the conversations", `document.querySelectorAll('#workstream-list [data-select]').length === 5`)
 	return p, a
@@ -180,20 +176,94 @@ func (p *page) checkSendIcon(form string) {
 	}
 }
 
-func TestBrowserConversationWidthsAndSendIcons(t *testing.T) {
-	t.Parallel()
+func forEachChatSize(t *testing.T, check func(t *testing.T, p *page, phone bool)) {
+	t.Helper()
 	for _, size := range []struct{ width, height int64 }{{1920, 1080}, {1440, 900}, {390, 844}} {
 		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
 			p, _ := openChatPage(t, size.width, size.height)
-			phone := size.width == 390
-			for _, view := range chatViews {
-				p.selectChat(view, phone)
-				p.checkSendIcon(view.form)
-				var m struct {
-					Pane, Content, Left, Right, PaddingLeft, PaddingRight float64
-					Overflow, Sidebar, Picker                             bool
+			check(t, p, size.width == 390)
+		})
+	}
+}
+
+func TestBrowserSendIconsMatchOnEveryConversation(t *testing.T) {
+	t.Parallel()
+	forEachChatSize(t, func(t *testing.T, p *page, phone bool) {
+		for _, view := range chatViews {
+			p.selectChat(view, phone)
+			p.checkSendIcon(view.form)
+		}
+	})
+}
+
+func TestBrowserConversationHasAGutterAndNeverOverflows(t *testing.T) {
+	t.Parallel()
+	forEachChatSize(t, func(t *testing.T, p *page, phone bool) {
+		for _, view := range chatViews {
+			p.selectChat(view, phone)
+			m := readConversationLayout(p)
+			if m.Overflow || m.Left <= 0 || m.Right <= 0 {
+				t.Fatalf("%s has overflow or no gutter: %+v", view.name, m)
+			}
+		}
+	})
+}
+
+func TestBrowserConversationUsesTheSpaceTheScreenAllows(t *testing.T) {
+	t.Parallel()
+	forEachChatSize(t, func(t *testing.T, p *page, phone bool) {
+		for _, view := range chatViews {
+			p.selectChat(view, phone)
+			m := readConversationLayout(p)
+			if phone {
+				if m.Sidebar || !m.Picker || m.PaddingLeft != 12 || m.PaddingRight != 12 {
+					t.Fatalf("%s phone layout: %+v", view.name, m)
 				}
-				p.eval(`(() => {
+			} else if !m.Sidebar || m.Content < .75*m.Pane {
+				t.Fatalf("%s desktop content is too narrow: %+v", view.name, m)
+			}
+		}
+	})
+}
+
+func TestBrowserLongMessagesHoldTheReadingWidth(t *testing.T) {
+	t.Parallel()
+	forEachChatSize(t, func(t *testing.T, p *page, phone bool) {
+		for _, view := range chatViews {
+			if view.name == "session" {
+				continue
+			}
+			p.selectChat(view, phone)
+			for _, bubble := range readBubbles(p, view) {
+				if !phone && (bubble.Width > bubble.Cap+1 || bubble.Width < .5*bubble.Cap) {
+					t.Fatalf("%s long message is not held to the reading width: %+v", view.name, bubble)
+				}
+				if phone && bubble.Kind == "message" && (bubble.Max != "92%" || bubble.Width > .92*bubble.Column+1) {
+					t.Fatalf("%s phone bubble limit: %+v", view.name, bubble)
+				}
+			}
+		}
+	})
+}
+
+func TestBrowserConversationLoadsAssetsOnlyFromTheServiceOrigin(t *testing.T) {
+	t.Parallel()
+	forEachChatSize(t, func(t *testing.T, p *page, phone bool) {
+		for _, view := range chatViews {
+			p.selectChat(view, phone)
+		}
+		p.await("assets from the service origin", `performance.getEntriesByType('resource').every(r => new URL(r.name).origin === location.origin)`)
+	})
+}
+
+type conversationLayout struct {
+	Pane, Content, Left, Right, PaddingLeft, PaddingRight float64
+	Overflow, Sidebar, Picker                             bool
+}
+
+func readConversationLayout(p *page) conversationLayout {
+	var m conversationLayout
+	p.eval(`(() => {
      const pane = document.querySelector('#main'), view = document.querySelector('.view:not([hidden])');
      const p = pane.getBoundingClientRect(), v = view.getBoundingClientRect(), s = getComputedStyle(view);
      const l = parseFloat(s.paddingLeft), r = parseFloat(s.paddingRight);
@@ -201,27 +271,19 @@ func TestBrowserConversationWidthsAndSendIcons(t *testing.T) {
       PaddingLeft:l,PaddingRight:r,Overflow:document.documentElement.scrollWidth > innerWidth || document.body.scrollWidth > innerWidth || pane.scrollWidth > pane.clientWidth,
       Sidebar:getComputedStyle(document.querySelector('#sidebar')).display !== 'none', Picker:getComputedStyle(document.querySelector('#picker-toggle')).display !== 'none'};
     })()`, &m)
-				t.Logf("%s layout: %+v", view.name, m)
-				if m.Overflow || m.Left <= 0 || m.Right <= 0 {
-					t.Fatalf("%s has overflow or no gutter: %+v", view.name, m)
-				}
-				if phone {
-					if m.Sidebar || !m.Picker || m.PaddingLeft != 12 || m.PaddingRight != 12 {
-						t.Fatalf("phone layout: %+v", m)
-					}
-				} else if !m.Sidebar || m.Content < .75*m.Pane {
-					t.Fatalf("desktop content is too narrow: %+v", m)
-				}
-				if view.name == "session" {
-					continue
-				}
-				feed := `[data-view="` + view.name + `"] .feed`
-				p.await("long owner and agent messages", `document.querySelectorAll(`+quote(feed+` .entry .text`)+`).length === 2`)
-				var bubbles []struct {
-					Kind, Max          string
-					Width, Column, Cap float64
-				}
-				p.eval(`Array.from(document.querySelectorAll(`+quote(feed+` .entry .text`)+`), text => {
+	return m
+}
+
+type bubbleSize struct {
+	Kind, Max          string
+	Width, Column, Cap float64
+}
+
+func readBubbles(p *page, view chatView) []bubbleSize {
+	feed := `[data-view="` + view.name + `"] .feed`
+	p.await("long owner and agent messages", `document.querySelectorAll(`+quote(feed+` .entry .text`)+`).length === 2`)
+	var bubbles []bubbleSize
+	p.eval(`Array.from(document.querySelectorAll(`+quote(feed+` .entry .text`)+`), text => {
      const probe = document.createElement('div');
      probe.style.width = '70ch';
      (text.querySelector('.markdown') || text).append(probe);
@@ -232,28 +294,12 @@ func TestBrowserConversationWidthsAndSendIcons(t *testing.T) {
       Column:text.closest('.feed').getBoundingClientRect().width, Cap:cap
      };
     })`, &bubbles)
-				for _, bubble := range bubbles {
-					t.Logf("%s bubble: %+v", view.name, bubble)
-					// Prose stops at a reading width of about 70ch, however wide the pane.
-					if !phone && (bubble.Width > bubble.Cap+1 || bubble.Width < .5*bubble.Cap) {
-						t.Fatalf("long message is not held to the reading width: %+v", bubble)
-					}
-					if phone && bubble.Kind == "message" && (bubble.Max != "92%" || bubble.Width > .92*bubble.Column+1) {
-						t.Fatalf("phone bubble limit: %+v", bubble)
-					}
-				}
-			}
-			p.await("assets from the service origin", `performance.getEntriesByType('resource').every(r => new URL(r.name).origin === location.origin)`)
-		})
-	}
+	return bubbles
 }
 
 func assertChatMessage(t *testing.T, a *chatAPI, count int, view chatView, step, text string) {
 	t.Helper()
-	deadline := time.Now().Add(browserTimeout)
-	for a.count() < count && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
+	a.received.wait(func(n int) bool { return n >= count })
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.messages) != count {
@@ -267,63 +313,136 @@ func assertChatMessage(t *testing.T, a *chatAPI, count int, view chatView, step,
 	}
 }
 
-func TestBrowserChatComposersClickAndKeyboard(t *testing.T) {
-	t.Parallel()
-	// A container need not have a physical mouse. Give Chromium a fine
-	// pointer (Blink's enum value 4) so this exercises desktop Enter handling.
+type chatComposer struct {
+	t        *testing.T
+	p        *page
+	a        *chatAPI
+	view     chatView
+	textarea string
+	button   string
+	result   string
+	messages int
+}
+
+func forEachDesktopChatComposer(t *testing.T, check func(c *chatComposer)) {
+	t.Helper()
 	p, a := openChatPage(t, 1440, 900, chromedp.Flag("blink-settings", "primaryPointerType=4,availablePointerTypes=4"))
 	p.await("a desktop fine pointer", `matchMedia('(pointer: fine)').matches`)
-	count := 0
 	for _, view := range chatViews {
 		p.selectChat(view, false)
-		textarea, button, result := view.form+" textarea", view.form+" button[type=submit]", view.form+" .result"
-		// Observe the disabled icon and existing pending/result reporting while
-		// the server is still processing a click.
-		release := sync.OnceFunc(a.action.holdResponse())
-		t.Cleanup(release)
-		p.typeInto(textarea, "  Click the arrow  ")
-		p.click(button)
-		count++
-		assertChatMessage(t, a, count, view, "click", "Click the arrow")
-		p.await("the disabled in-flight arrow", `document.querySelector(`+quote(button)+`).disabled`)
-		p.awaitText(result, "Sending…")
-		p.checkSendIcon(view.form)
-		release()
-		p.awaitText(result, view.result)
-		p.await("the enabled arrow and empty input", `!document.querySelector(`+quote(button)+`).disabled && document.querySelector(`+quote(textarea)+`).value === ''`)
-		p.awaitText(`[data-view="`+view.name+`"] .feed`, "Click the arrow")
-
-		p.typeInto(textarea, "First line")
-		p.run(chromedp.Focus(textarea, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(input.ModifierShift)))
-		p.typeInto(textarea, "Second line")
-		p.await("Shift+Enter inserts a newline", `document.querySelector(`+quote(textarea)+`).value === 'First line\nSecond line'`)
-		// A composing Enter must not submit even on a desktop pointer.
-		p.eval(`document.querySelector(`+quote(textarea)+`).dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))`, nil)
-		if got := awaitQuiet(t, a.count, 200*time.Millisecond); got != count {
-			t.Fatalf("%s Shift+Enter or IME submitted: %d messages, want %d", view.name, got, count)
-		}
-		p.run(chromedp.Focus(textarea, chromedp.ByQuery))
-		p.await(view.name+" focused desktop composer", `document.activeElement === document.querySelector(`+quote(textarea)+`) && matchMedia('(pointer: fine)').matches`)
-		settleEnter := sync.OnceFunc(a.action.holdResponse())
-		t.Cleanup(settleEnter)
-		p.run(chromedp.KeyEvent(kb.Enter))
-		count++
-		assertChatMessage(t, a, count, view, "Enter", "First line\nSecond line")
-		p.awaitText(result, "Sending…")
-		settleEnter()
-		p.awaitText(result, view.result)
-		p.await("the cleared input after Enter", `document.querySelector(`+quote(textarea)+`).value === ''`)
-
-		a.action.failNext("The agent is busy.")
-		p.typeInto(textarea, "Keep this draft")
-		p.click(button)
-		count++
-		assertChatMessage(t, a, count, view, "refused click", "Keep this draft")
-		p.awaitText(result, "The agent is busy.")
-		p.await("the draft and enabled icon after refusal", `document.querySelector(`+quote(textarea)+`).value === 'Keep this draft' && !document.querySelector(`+quote(button)+`).disabled`)
-		p.checkSendIcon(view.form)
-		a.action.failNext("")
+		check(&chatComposer{t: t, p: p, a: a, view: view, textarea: view.form + " textarea", button: view.form + " button[type=submit]", result: view.form + " .result", messages: a.count()})
 	}
+}
+
+func (c *chatComposer) holdSend() func() {
+	release := sync.OnceFunc(c.a.action.holdResponse())
+	c.t.Cleanup(release)
+	return release
+}
+
+func (c *chatComposer) assertSent(step, text string) {
+	c.t.Helper()
+	c.messages++
+	assertChatMessage(c.t, c.a, c.messages, c.view, step, text)
+}
+
+func (c *chatComposer) focusTextarea() {
+	c.p.run(chromedp.Focus(c.textarea, chromedp.ByQuery))
+	c.p.await(c.view.name+" focused desktop composer", `document.activeElement === document.querySelector(`+quote(c.textarea)+`) && matchMedia('(pointer: fine)').matches`)
+}
+
+func (c *chatComposer) typeTwoLines() {
+	c.p.typeInto(c.textarea, "First line")
+	c.p.run(chromedp.Focus(c.textarea, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(input.ModifierShift)))
+	c.p.typeInto(c.textarea, "Second line")
+}
+
+func TestBrowserChatClickSendsTheTrimmedDraft(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		release := c.holdSend()
+		c.p.typeInto(c.textarea, "  Click the arrow  ")
+		c.p.click(c.button)
+		c.assertSent("click", "Click the arrow")
+		release()
+	})
+}
+
+func TestBrowserChatSendInFlightDisablesTheArrowAndShowsSending(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		release := c.holdSend()
+		c.p.typeInto(c.textarea, "Click the arrow")
+		c.p.click(c.button)
+		c.p.await("the disabled in-flight arrow", `document.querySelector(`+quote(c.button)+`).disabled`)
+		c.p.awaitText(c.result, "Sending…")
+		c.p.checkSendIcon(c.view.form)
+		release()
+	})
+}
+
+func TestBrowserChatCompletedSendClearsTheInputAndShowsTheMessage(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		release := c.holdSend()
+		c.p.typeInto(c.textarea, "Click the arrow")
+		c.p.click(c.button)
+		release()
+		c.p.awaitText(c.result, c.view.result)
+		c.p.await("the enabled arrow and empty input", `!document.querySelector(`+quote(c.button)+`).disabled && document.querySelector(`+quote(c.textarea)+`).value === ''`)
+		c.p.awaitText(`[data-view="`+c.view.name+`"] .feed`, "Click the arrow")
+	})
+}
+
+func TestBrowserChatShiftEnterInsertsANewlineWithoutSending(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		c.typeTwoLines()
+		c.p.await("Shift+Enter inserts a newline", `document.querySelector(`+quote(c.textarea)+`).value === 'First line\nSecond line'`)
+		if got := awaitQuiet(t, c.a.count, 200*time.Millisecond); got != c.messages {
+			t.Fatalf("%s Shift+Enter submitted: %d messages, want %d", c.view.name, got, c.messages)
+		}
+	})
+}
+
+func TestBrowserChatEnterDuringCompositionDoesNotSend(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		c.p.typeInto(c.textarea, "Composing")
+		c.p.eval(`document.querySelector(`+quote(c.textarea)+`).dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))`, nil)
+		if got := awaitQuiet(t, c.a.count, 200*time.Millisecond); got != c.messages {
+			t.Fatalf("%s IME Enter submitted: %d messages, want %d", c.view.name, got, c.messages)
+		}
+	})
+}
+
+func TestBrowserChatEnterSendsTheDraft(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		c.typeTwoLines()
+		c.focusTextarea()
+		release := c.holdSend()
+		c.p.run(chromedp.KeyEvent(kb.Enter))
+		c.assertSent("Enter", "First line\nSecond line")
+		c.p.awaitText(c.result, "Sending…")
+		release()
+		c.p.awaitText(c.result, c.view.result)
+		c.p.await("the cleared input after Enter", `document.querySelector(`+quote(c.textarea)+`).value === ''`)
+	})
+}
+
+func TestBrowserChatRefusedSendKeepsTheDraftAndEnablesTheArrow(t *testing.T) {
+	t.Parallel()
+	forEachDesktopChatComposer(t, func(c *chatComposer) {
+		c.a.action.failNext("The agent is busy.")
+		c.p.typeInto(c.textarea, "Keep this draft")
+		c.p.click(c.button)
+		c.assertSent("refused click", "Keep this draft")
+		c.p.awaitText(c.result, "The agent is busy.")
+		c.p.await("the draft and enabled icon after refusal", `document.querySelector(`+quote(c.textarea)+`).value === 'Keep this draft' && !document.querySelector(`+quote(c.button)+`).disabled`)
+		c.p.checkSendIcon(c.view.form)
+		c.a.action.failNext("")
+	})
 }
 
 func TestBrowserChatTouchEnterInsertsNewline(t *testing.T) {

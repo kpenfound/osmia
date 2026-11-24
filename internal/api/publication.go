@@ -28,8 +28,8 @@ type DeliveryPublication struct {
 	PushedAt       time.Time           `json:"pushed_at,omitzero"`
 	Operation      string              `json:"operation"`
 	Status         string              `json:"status"`
-	// Draft records whether the recorded pull request opened, or stays,
-	// a draft: see publishInput.Draft.
+	// Draft records whether the recorded pull request opened, or stays, a
+	// draft.
 	Draft           bool   `json:"draft,omitempty"`
 	Style           string `json:"style"`
 	Fork            string `json:"fork"`

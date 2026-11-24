@@ -14,17 +14,13 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// browserTimeout bounds each wait for the page to show something.
 const browserTimeout = 30 * time.Second
 
-// page drives one headless Chromium tab.
 type page struct {
 	t   *testing.T
 	ctx context.Context
 }
 
-// requireBrowser skips t without failing it when OSMIA_BROWSER names no
-// Chromium binary; the browser Dagger check sets it.
 func requireBrowser(t *testing.T) string {
 	t.Helper()
 	binary := os.Getenv("OSMIA_BROWSER")
@@ -34,8 +30,6 @@ func requireBrowser(t *testing.T) string {
 	return binary
 }
 
-// openBrowser starts the Chromium binary OSMIA_BROWSER names, or skips the
-// test without one.
 func openBrowser(t *testing.T, browserOptions ...chromedp.ExecAllocatorOption) *page {
 	t.Helper()
 	binary := requireBrowser(t)
@@ -48,15 +42,12 @@ func openBrowser(t *testing.T, browserOptions ...chromedp.ExecAllocatorOption) *
 		cancel()
 		cancelAllocator()
 	})
-	// The first run starts the browser for the lifetime of ctx, before any
-	// per-action context.WithTimeout wraps it.
 	if err := chromedp.Run(ctx); err != nil {
 		t.Fatalf("starting the browser: %v", err)
 	}
 	return &page{t: t, ctx: ctx}
 }
 
-// run runs the actions, and fails with the page's text when one fails.
 func (p *page) run(actions ...chromedp.Action) {
 	p.t.Helper()
 	ctx, cancel := context.WithTimeout(p.ctx, browserTimeout)
@@ -75,30 +66,68 @@ func (p *page) eval(expression string, out any) {
 	p.run(chromedp.Evaluate(expression, out))
 }
 
-// await waits until the expression is true, and fails with the page's text
-// when it stays false.
 func (p *page) await(what, expression string) {
 	p.t.Helper()
-	deadline := time.Now().Add(browserTimeout)
-	for {
-		var ok bool
-		p.eval("!!("+expression+")", &ok)
-		if ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			var text string
-			p.eval("document.body?.innerText ?? ''", &text)
-			p.t.Fatalf("the page never showed %s:\n%s", what, text)
-		}
-		time.Sleep(50 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(p.ctx, browserTimeout)
+	defer cancel()
+	var ok bool
+	if err := chromedp.Run(ctx, chromedp.Poll("!!("+expression+")", &ok)); err != nil {
+		var text string
+		p.eval("document.body?.innerText ?? ''", &text)
+		p.t.Fatalf("the page never showed %s: %v\n%s", what, err, text)
 	}
 }
 
-// awaitQuiet waits until read() stops changing for quiet, bounded by
-// browserTimeout, and returns the settled value. It fails with the last
-// observed value if read() keeps changing until the deadline, rather than
-// assuming a fixed wait was long enough.
+type counter struct {
+	mu      sync.Mutex
+	n       int
+	changed chan struct{}
+}
+
+func (c *counter) add() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	if c.changed != nil {
+		close(c.changed)
+		c.changed = nil
+	}
+}
+
+func (c *counter) load() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+func (c *counter) wait(ready func(n int) bool) bool {
+	timedOut := time.After(browserTimeout)
+	for {
+		c.mu.Lock()
+		if ready(c.n) {
+			c.mu.Unlock()
+			return true
+		}
+		if c.changed == nil {
+			c.changed = make(chan struct{})
+		}
+		changed := c.changed
+		c.mu.Unlock()
+		select {
+		case <-changed:
+		case <-timedOut:
+			return false
+		}
+	}
+}
+
+func (c *counter) await(t *testing.T, what string, ready func(n int) bool) {
+	t.Helper()
+	if !c.wait(ready) {
+		t.Fatalf("%s; the count is %d", what, c.load())
+	}
+}
+
 func awaitQuiet(t *testing.T, read func() int, quiet time.Duration) int {
 	t.Helper()
 	deadline := time.Now().Add(browserTimeout)
@@ -117,28 +146,22 @@ func awaitQuiet(t *testing.T, read func() int, quiet time.Duration) int {
 	}
 }
 
-// quote returns s as a JavaScript string literal.
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-// awaitText waits until the first element selector matches contains want.
 func (p *page) awaitText(selector, want string) {
 	p.t.Helper()
 	expr := "(document.querySelector(" + quote(selector) + `)?.textContent ?? '').includes(` + quote(want) + `)`
 	p.await(want+" in "+selector, expr)
 }
 
-// openTab shows one tab of the displayed workstream: conversation, activity,
-// documents or trace.
 func (p *page) openTab(tab string) {
 	p.t.Helper()
 	p.click(`[data-tab="` + tab + `"]`)
 	p.await("the "+tab+" tab", `!document.querySelector('[data-panel="`+tab+`"]').hidden`)
 }
 
-// openActivity shows the displayed workstream's Activity tab with every
-// folded run opened, and waits until the log is drawn.
 func (p *page) openActivity() {
 	p.t.Helper()
 	p.openTab("activity")
@@ -153,16 +176,12 @@ func (p *page) openActivity() {
 })()`)
 }
 
-// awaitOutcome waits until a feed shows an entry for the outcome of the
-// owner's own accepted command, containing want.
 func (p *page) awaitOutcome(want string) {
 	p.t.Helper()
 	p.await(want+" as an owner command outcome in the feed",
 		`[...document.querySelectorAll('[data-field=feed] [data-kind=outcome]')].some(n => n.textContent.includes(`+quote(want)+`))`)
 }
 
-// outcomeTexts lists the text of every owner command outcome entry inside
-// the elements scope selects, in the order the feed shows them.
 func (p *page) outcomeTexts(scope string) []string {
 	p.t.Helper()
 	var texts []string
@@ -170,8 +189,6 @@ func (p *page) outcomeTexts(scope string) []string {
 	return texts
 }
 
-// assertOutcomes fails the test unless the feed inside scope shows exactly
-// the outcome entries want, and the shared result line is empty.
 func (p *page) assertOutcomes(scope string, want ...string) {
 	p.t.Helper()
 	texts := p.outcomeTexts(scope)
@@ -185,8 +202,6 @@ func (p *page) assertOutcomes(scope string, want ...string) {
 	}
 }
 
-// assertNoOutcomes fails the test when the feed inside scope shows any
-// owner command outcome entry.
 func (p *page) assertNoOutcomes(scope string) {
 	p.t.Helper()
 	if texts := p.outcomeTexts(scope); len(texts) != 0 {
@@ -194,37 +209,22 @@ func (p *page) assertNoOutcomes(scope string) {
 	}
 }
 
-// fakeAPI serves the page's own files, through Serve, beside a minimal,
-// hand-built /v1 API: just enough of every view the first page load reads
-// for the page to render without error, with no backing service. It counts
-// the requests made for the workstream list and can hold its response open
-// until a test chooses to let it go, so tests can see what the page does
-// before that response arrives, and how many requests it took. inboxEntries
-// and events let a test control what the inbox answers and announce a
-// change on the event stream, as browser_feed_dismiss_test.go's tests do.
 type fakeAPI struct {
 	workstreams int
 
 	mu         sync.Mutex
 	statusHits int
-	inboxHits  int
+	inbox      counter
 	hold       chan struct{}
 
 	inboxEntries    []string
 	activityEntries []string
-	// feeds holds each workstream's feed entries, as JSON, empty until a
-	// test sets some. state is the workflow state every workstream shows,
-	// building when unset. units is the JSON array every workstream's units
-	// are read as, none when unset. charter is the JSON the charter read
-	// answers, no proposals when unset.
-	feeds   map[string][]string
-	state   string
-	units   string
-	charter string
-	events  chan string
+	feeds           map[string][]string
+	state           string
+	units           string
+	charter         string
+	events          chan string
 
-	// contested and ratify answer the inbox entries' own decision
-	// endpoints that browser_feed_dismiss_test.go's tests submit to.
 	contested, ratify fakeAction
 }
 
@@ -232,8 +232,6 @@ func newFakeAPI(workstreams int) *fakeAPI {
 	return &fakeAPI{workstreams: workstreams, events: make(chan string, 8)}
 }
 
-// holdStatus makes every /v1/status response already in flight, and every
-// one requested until release is called, wait for release.
 func (f *fakeAPI) holdStatus() (release func()) {
 	ch := make(chan struct{})
 	f.mu.Lock()
@@ -259,9 +257,6 @@ func handleJSON(body string) http.HandlerFunc {
 	}
 }
 
-// handleStatus answers the workstream list: a fixed shape with as many
-// workstreams as the test asked for, each with enough of a status for the
-// page to show it without reading anything per workstream.
 func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.statusHits++
@@ -292,8 +287,6 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 		`"provider_usage":null,"diagnostics":[],"workspaces":{"setting":"git","backend":"git"}}`)
 }
 
-// handleFeed answers any workstream's feed with none of its history, which
-// is enough for the page to show it without error.
 func (f *fakeAPI) handleFeed(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/v1/feed/")
 	f.mu.Lock()
@@ -302,7 +295,6 @@ func (f *fakeAPI) handleFeed(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, fmt.Sprintf(`{"workstream":%s,"entries":[%s]}`, quote(id), entries))
 }
 
-// setFeed replaces the entries, as JSON, the workstream's feed answers with.
 func (f *fakeAPI) setFeed(workstream string, entries ...string) {
 	f.mu.Lock()
 	if f.feeds == nil {
@@ -312,8 +304,6 @@ func (f *fakeAPI) setFeed(workstream string, entries ...string) {
 	f.mu.Unlock()
 }
 
-// handleCharter answers the charter's proposals: none unless a test set
-// charter.
 func (f *fakeAPI) handleCharter(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	body := f.charter
@@ -324,10 +314,6 @@ func (f *fakeAPI) handleCharter(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, body)
 }
 
-// handleEvents answers the event stream with a single resync and then holds
-// the connection open, the way the real service does until the page closes
-// it or the stream is lost, relaying any event a test pushes through
-// pushEvent meanwhile.
 func (f *fakeAPI) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -349,34 +335,24 @@ func (f *fakeAPI) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleInbox answers the inbox with whatever entries setInbox last set,
-// none until a test sets some.
 func (f *fakeAPI) handleInbox(w http.ResponseWriter, r *http.Request) {
+	f.inbox.add()
 	f.mu.Lock()
-	f.inboxHits++
 	entries := strings.Join(f.inboxEntries, ",")
 	f.mu.Unlock()
 	writeJSON(w, `{"entries":[`+entries+`]}`)
 }
 
-// inboxRequests returns how many times /v1/inbox has been answered, so a
-// test can confirm the page has actually fetched a particular inbox state,
-// set through setInbox, before changing that state again.
 func (f *fakeAPI) inboxRequests() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.inboxHits
+	return f.inbox.load()
 }
 
-// setInbox replaces the entries /v1/inbox answers with.
 func (f *fakeAPI) setInbox(entries ...string) {
 	f.mu.Lock()
 	f.inboxEntries = entries
 	f.mu.Unlock()
 }
 
-// handleActivity answers the backend activity record with whatever entries
-// setActivity last set, none until a test sets some.
 func (f *fakeAPI) handleActivity(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	entries := strings.Join(f.activityEntries, ",")
@@ -384,16 +360,12 @@ func (f *fakeAPI) handleActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, `{"activity":[`+entries+`]}`)
 }
 
-// setActivity replaces the entries /v1/activity answers with.
 func (f *fakeAPI) setActivity(entries ...string) {
 	f.mu.Lock()
 	f.activityEntries = entries
 	f.mu.Unlock()
 }
 
-// pushEvent sends a server-sent event of the given kind on the page's open
-// event stream, the way the real service announces a change for the page
-// to read again.
 func (f *fakeAPI) pushEvent(kind string) {
 	f.events <- kind
 }
@@ -420,24 +392,16 @@ func (f *fakeAPI) handler() http.Handler {
 	return mux
 }
 
-// The page draws its layout and a visible loading state for the workstream
-// list immediately, before the workstream list's response arrives, and
-// shows the list once it does.
 func TestBrowserFirstLoadShowsLayoutAndLoadingBeforeTheListArrives(t *testing.T) {
 	t.Parallel()
 	api := newFakeAPI(3)
 	release := api.holdStatus()
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)
-	// The browser holds the event stream open, so it must be torn down
-	// (as a later-registered, and so earlier-run, cleanup) before the
-	// server closes, or Close blocks on that connection.
 	p := openBrowser(t)
 
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 
-	// The layout and a visible loading state show up before the held
-	// response arrives.
 	p.await("the sidebar and main layout", `document.getElementById('sidebar') !== null && document.getElementById('main') !== null &&
 		getComputedStyle(document.getElementById('sidebar')).display !== 'none'`)
 	p.awaitText(`#workstream-list [data-field=loading]`, "Loading")
@@ -452,9 +416,6 @@ func TestBrowserFirstLoadShowsLayoutAndLoadingBeforeTheListArrives(t *testing.T)
 	p.await("the loading state gone", `document.querySelector('#workstream-list [data-field=loading]') === null`)
 }
 
-// On first page load, the page requests the workstream list the same number
-// of times whether there is one workstream or twenty: the request does not
-// grow with the number of workstreams.
 func TestBrowserFirstLoadRequestsTheWorkstreamListInBoundedRequests(t *testing.T) {
 	t.Parallel()
 	requireBrowser(t)
@@ -462,16 +423,10 @@ func TestBrowserFirstLoadRequestsTheWorkstreamListInBoundedRequests(t *testing.T
 		api := newFakeAPI(workstreams)
 		server := httptest.NewServer(api.handler())
 		t.Cleanup(server.Close)
-		// The browser holds the event stream open, so it must be torn
-		// down (as a later-registered, and so earlier-run, cleanup)
-		// before the server closes, or Close blocks on that connection.
 		p := openBrowser(t)
 
 		p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 		p.await("every workstream listed", fmt.Sprintf(`document.querySelectorAll('#workstream-list [data-select]').length === %d`, workstreams))
-		// Wait for the request count to stop changing, rather than assuming
-		// any further, unwanted requests the first render might still
-		// trigger have settled after a fixed delay.
 		return awaitQuiet(t, api.statusRequests, 200*time.Millisecond)
 	}
 

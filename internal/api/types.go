@@ -68,8 +68,7 @@ type Identity struct {
 // "ready" with no blocking work, "not_ready" while startup or project
 // recovery is in progress, and "degraded" when a backend operation has
 // failed or made no progress for ActivityStallThreshold; Cause then names
-// the operation. Ready is kept for existing clients: it is Backend ==
-// "ready".
+// the operation. Ready is true exactly when Backend is "ready".
 type HealthResponse struct {
 	Ready      bool     `json:"ready"`
 	API        bool     `json:"api"`
@@ -494,7 +493,7 @@ type RatifyRequest struct {
 // the round it was given in, and the state of its sealing: requested by this
 // call, or pending or running from an earlier one. Members lists every
 // workstream this one ratification sealed; it names only the named
-// workstream for a one-workstream workgroup, exactly as today.
+// workstream for a one-workstream workgroup.
 type RatifyResponse struct {
 	Project    config.ProjectID      `json:"project"`
 	Workstream config.WorkstreamID   `json:"workstream"`
@@ -879,7 +878,7 @@ type WorkstreamStatus struct {
 	// Wait names, in plain words, an edge or merge the workstream waits on,
 	// for example "waiting on owner: repo-a#123 merge". It is "" while
 	// nothing is waited on. A wait is status only: it never creates an
-	// inbox entry or a notification (spec#15).
+	// inbox entry or a notification.
 	Wait string `json:"wait,omitempty"`
 	// TelemetryTraceID and TelemetryRootSpanID are the workstream's
 	// OpenTelemetry identity, derived from the workstream ID alone.
@@ -888,7 +887,7 @@ type WorkstreamStatus struct {
 }
 
 // WorkgroupView presents recorded membership and the workstream graph. It
-// carries no workflow authority; the service's existing gates govern members.
+// carries no workflow authority; the service's gates govern members.
 type WorkgroupView struct {
 	ID      config.WorkgroupID    `json:"id"`
 	Members []config.WorkstreamID `json:"members"`
@@ -1149,7 +1148,7 @@ type InboxJev struct {
 	Judgment   string  `json:"judgment"`
 }
 
-// InboxAnswer is the existing endpoint that answers an inbox entry, or that
+// InboxAnswer is the endpoint that answers an inbox entry, or that
 // shows the delivery of a publication entry, which takes no answer. Body
 // holds the request fields that pin what the owner read; the client adds the
 // decision fields of that endpoint's request.
@@ -1386,8 +1385,7 @@ type FeedUnitChecks struct {
 const CheckSourcePullRequest = "pull_request"
 
 // CheckCounts are the check counts of a Dagger Cloud run, taken from its
-// per-check commit statuses. Cancelled is zero in a new result; a record
-// written earlier may carry a value.
+// per-check commit statuses. Cancelled counts the checks the run cancelled.
 type CheckCounts struct {
 	Total     int `json:"total"`
 	Passed    int `json:"passed"`

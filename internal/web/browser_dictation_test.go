@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
@@ -19,14 +18,6 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// fakeDictationScript replaces the browser's microphone and recorder. A
-// recorder reports its clip and its end a moment after stop, as a browser
-// does, and the test can call data and finish again on a recorder that has
-// long ended, so the tests exercise the recording fence rather than a
-// cooperative browser. Setting mediaError makes the microphone refuse;
-// setting silence makes recorders produce an empty clip. Every settled
-// transcription fetch is counted in transcribeSettled once the page has had
-// a moment to act on the answer.
 const fakeDictationScript = `
  window.recorders = [];
  window.tracks = [];
@@ -64,16 +55,12 @@ const fakeDictationScript = `
  };
  `
 
-// transcribeRequest is one upload the fake transcription route received.
 type transcribeRequest struct {
 	ContentType string
 	MIMEType    string
 	Audio       []byte
 }
 
-// fakeTranscribe stands in for the service's transcription route and for
-// the configuration that says whether transcription is on. It answers the
-// queued texts in order, can be held open, and can be made to refuse.
 type fakeTranscribe struct {
 	mu       sync.Mutex
 	url      string
@@ -84,6 +71,8 @@ type fakeTranscribe struct {
 	hold     chan struct{}
 	requests []transcribeRequest
 	answered int
+
+	uploaded, responded counter
 }
 
 func (f *fakeTranscribe) setURL(url string) {
@@ -92,22 +81,18 @@ func (f *fakeTranscribe) setURL(url string) {
 	f.mu.Unlock()
 }
 
-// answer queues the texts the next uploads are answered with.
 func (f *fakeTranscribe) answer(texts ...string) {
 	f.mu.Lock()
 	f.texts = append(f.texts, texts...)
 	f.mu.Unlock()
 }
 
-// refuse makes every upload from now on fail with the status, code and
-// message, until refuse(0, "", "") restores answers.
 func (f *fakeTranscribe) refuse(status int, code, message string) {
 	f.mu.Lock()
 	f.status, f.code, f.message = status, code, message
 	f.mu.Unlock()
 }
 
-// holdResponse makes every upload answer only once release is called.
 func (f *fakeTranscribe) holdResponse() (release func()) {
 	ch := make(chan struct{})
 	f.mu.Lock()
@@ -142,12 +127,16 @@ func (f *fakeTranscribe) handle(w http.ResponseWriter, r *http.Request) {
 	f.requests = append(f.requests, transcribeRequest{r.Header.Get("Content-Type"), body.MIMEType, audio})
 	hold := f.hold
 	f.mu.Unlock()
+	f.uploaded.add()
 	if hold != nil {
 		<-hold
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	defer func() { f.answered++ }()
+	defer func() {
+		f.answered++
+		f.responded.add()
+	}()
 	if f.status != 0 {
 		w.WriteHeader(f.status)
 		writeJSON(w, fmt.Sprintf(`{"error":{"code":%s,"message":%s}}`, quote(f.code), quote(f.message)))
@@ -160,23 +149,15 @@ func (f *fakeTranscribe) handle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, fmt.Sprintf(`{"text":%s}`, quote(text)))
 }
 
-// uploads returns how many clips the route received.
 func (f *fakeTranscribe) uploads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.requests)
 }
 
-// awaitUploads waits until the route has received n clips in total.
 func (f *fakeTranscribe) awaitUploads(t *testing.T, n int) {
 	t.Helper()
-	deadline := time.Now().Add(browserTimeout)
-	for f.uploads() < n {
-		if time.Now().After(deadline) {
-			t.Fatalf("the transcription route received %d uploads, want %d", f.uploads(), n)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	f.uploaded.await(t, fmt.Sprintf("the transcription route received too few uploads, want %d", n), func(count int) bool { return count >= n })
 }
 
 func (f *fakeTranscribe) upload(i int) transcribeRequest {
@@ -185,10 +166,6 @@ func (f *fakeTranscribe) upload(i int) transcribeRequest {
 	return f.requests[i]
 }
 
-// openDictationPage serves the regular conversation fixture plus a second
-// design and exploration, without agents or microphone services. Sends use
-// the ordinary fake API. Each option adjusts the fake before the page loads.
-// The page's requests to any other origin are recorded in the returned list.
 func openDictationPage(t *testing.T, phone bool, script string, options ...func(*chatAPI)) (*page, *chatAPI, func() []string) {
 	t.Helper()
 	a := newChatAPI()
@@ -298,7 +275,6 @@ func checkDictationIcon(p *page, form string, recording bool) {
  })()`)
 }
 
-// startRecording taps the microphone and waits until the recorder runs.
 func startRecording(p *page, form string) {
 	p.t.Helper()
 	var before int
@@ -308,7 +284,6 @@ func startRecording(p *page, form string) {
 	checkDictationIcon(p, form, true)
 }
 
-// stopRecording taps the microphone again and waits for the upload to start.
 func stopRecording(p *page, form string) {
 	p.t.Helper()
 	p.click(form + ` [aria-label=Dictate]`)
@@ -316,181 +291,388 @@ func stopRecording(p *page, form string) {
 	checkDictationIcon(p, form, false)
 }
 
-// awaitAnswerSeen waits until the page has received the n-th transcription
-// answer and had time to act on it.
 func awaitAnswerSeen(p *page, n int) {
 	p.t.Helper()
 	p.await("the transcription answer", fmt.Sprintf(`transcribeSettled >= %d`, n))
 }
 
-func TestBrowserDictationComposers(t *testing.T) {
+type composer struct {
+	t        *testing.T
+	p        *page
+	a        *chatAPI
+	view     chatView
+	phone    bool
+	releases []func()
+	mic      string
+	textarea string
+	result   string
+	draft    string
+	outcome  string
+	pressed  string
+	idle     string
+	uploads  int
+	messages int
+}
+
+func forEachComposer(t *testing.T, check func(c *composer)) {
+	t.Helper()
+	for _, phone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("phone=%t", phone), func(t *testing.T) {
+			t.Parallel()
+			p, a, _ := openDictationPage(t, phone, fakeDictationScript)
+			for _, view := range chatViews {
+				p.selectChat(view, phone)
+				c := &composer{t: t, p: p, a: a, view: view, phone: phone,
+					mic: view.form + ` [aria-label=Dictate]`, textarea: view.form + ` textarea`, result: view.form + ` .result`,
+					uploads: a.transcribe.uploads(), messages: a.count()}
+				c.draft = `document.querySelector(` + quote(c.textarea) + `).value`
+				c.outcome = `document.querySelector(` + quote(c.result) + `).textContent`
+				c.pressed = `document.querySelector(` + quote(c.mic) + `).getAttribute('aria-pressed')`
+				c.idle = `document.querySelector(` + quote(c.mic) + `).getAttribute('aria-pressed') === 'false' && !document.querySelector(` + quote(c.mic) + `).disabled`
+				checkDictationIcon(p, view.form, false)
+				check(c)
+				for _, release := range c.releases {
+					release()
+				}
+			}
+		})
+	}
+}
+
+func (c *composer) setDraft(text string) {
+	c.p.eval(`(() => { const t = document.querySelector(`+quote(c.textarea)+`); t.value = `+quote(text)+`; t.focus(); t.setSelectionRange(7, 13); })()`, nil)
+}
+
+func (c *composer) startRecording() { startRecording(c.p, c.view.form) }
+
+func (c *composer) stopRecording() { stopRecording(c.p, c.view.form) }
+
+func (c *composer) holdTranscription() func() {
+	release := sync.OnceFunc(c.a.transcribe.holdResponse())
+	c.t.Cleanup(release)
+	c.releases = append(c.releases, release)
+	return release
+}
+
+func (c *composer) holdSend() func() {
+	release := sync.OnceFunc(c.a.action.holdResponse())
+	c.t.Cleanup(release)
+	c.releases = append(c.releases, release)
+	return release
+}
+
+func (c *composer) dictate(words string) {
+	c.a.transcribe.answer(words)
+	c.startRecording()
+	c.p.click(c.mic)
+	c.uploads++
+}
+
+func (c *composer) dictateAndAwait(words, draft string) {
+	c.dictate(words)
+	c.p.await("the transcription of "+words, c.draft+` === `+quote(draft))
+}
+
+func (c *composer) refuseAs(status int, code, message string) {
+	c.a.transcribe.refuse(status, code, message)
+	c.t.Cleanup(func() { c.a.transcribe.refuse(0, "", "") })
+}
+
+func (c *composer) assertDraftKeptAndIdle(draft string) {
+	c.t.Helper()
+	assertDictation(c.p, c.draft+` === `+quote(draft)+` && `+c.idle)
+}
+
+func (c *composer) assertSentMessage(step, text string) {
+	c.t.Helper()
+	c.messages++
+	assertChatMessage(c.t, c.a, c.messages, c.view, step, text)
+}
+
+func (c *composer) assertUploads() {
+	c.t.Helper()
+	if got := c.a.transcribe.uploads(); got != c.uploads {
+		c.t.Fatalf("%s: %d uploads, want %d", c.view.name, got, c.uploads)
+	}
+}
+
+func TestBrowserDictationRecordsAudioAndUploadsIt(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Before SELECT after")
+		c.a.transcribe.answer("hello world")
+		c.startRecording()
+		assertDictation(c.p, `recorders.at(-1).starts === 1 && recorders.at(-1).mimeType === 'audio/webm;codecs=opus' && mediaConstraints.audio === true`)
+		c.holdTranscription()
+		c.stopRecording()
+		c.uploads++
+		c.a.transcribe.awaitUploads(c.t, c.uploads)
+		assertDictation(c.p, `recorders.at(-1).stops === 1 && tracks.at(-1).stopped`)
+		if got := c.a.transcribe.upload(c.uploads - 1); got.ContentType != "application/json" || got.MIMEType != "audio/webm;codecs=opus" || string(got.Audio) != "voice" {
+			c.t.Fatalf("%s upload = %+v", c.view.name, got)
+		}
+	})
+}
+
+func TestBrowserDictationKeepsTheDraftWhileTranscribing(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Before SELECT after")
+		c.a.transcribe.answer("hello world")
+		c.startRecording()
+		c.holdTranscription()
+		c.stopRecording()
+		c.uploads++
+		c.a.transcribe.awaitUploads(c.t, c.uploads)
+		assertDictation(c.p, c.draft+` === 'Before SELECT after' && `+c.outcome+`.includes('Transcribing')`)
+	})
+}
+
+func TestBrowserDictationAppendsTheTranscriptionAfterTheDraft(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Before SELECT after")
+		c.dictate("hello world")
+		c.p.await("the appended transcription", c.draft+` === 'Before SELECT after hello world' && `+c.outcome+` === ''`)
+		assertDictation(c.p, c.idle)
+	})
+}
+
+func TestBrowserDictationAppendsEveryTranscription(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Before SELECT after")
+		c.dictateAndAwait("hello world", "Before SELECT after hello world")
+		c.dictateAndAwait("and more", "Before SELECT after hello world and more")
+		assertDictation(c.p, c.idle)
+	})
+}
+
+func TestBrowserDictationIntoAnEmptyDraftHoldsOnlyTheWords(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("")
+		c.dictateAndAwait("Just the words.", "Just the words.")
+	})
+}
+
+func TestBrowserDictationNeverSendsAMessage(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("")
+		c.dictateAndAwait("Just the words.", "Just the words.")
+		if got := c.a.count(); got != c.messages {
+			c.t.Fatalf("%s: recording sent a message: %d, want %d", c.view.name, got, c.messages)
+		}
+	})
+}
+
+func TestBrowserDictationReportsADeniedMicrophone(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Keep this draft")
+		c.p.eval(`window.mediaError = 'NotAllowedError'`, nil)
+		c.p.click(c.mic)
+		c.p.awaitText(c.result, "Microphone permission denied")
+		c.assertDraftKeptAndIdle("Keep this draft")
+		c.p.eval(`window.mediaError = null`, nil)
+	})
+}
+
+func TestBrowserDictationReportsARecordingWithNoAudio(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Keep this draft")
+		c.p.eval(`window.silence = true`, nil)
+		c.startRecording()
+		c.p.click(c.mic)
+		c.p.awaitText(c.result, "Nothing was recorded")
+		c.assertDraftKeptAndIdle("Keep this draft")
+		c.p.eval(`window.silence = false`, nil)
+	})
+}
+
+func TestBrowserDictationShowsTheServicesTranscriptionRefusal(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		for _, failure := range []struct {
+			status        int
+			code, message string
+		}{
+			{http.StatusConflict, "transcription_off", "transcription is not configured on this service"},
+			{http.StatusBadGateway, "transcription_failed", "the transcription server could not be reached"},
+		} {
+			c.setDraft("Keep this draft")
+			c.refuseAs(failure.status, failure.code, failure.message)
+			c.startRecording()
+			c.p.click(c.mic)
+			c.uploads++
+			c.p.awaitText(c.result, failure.message)
+			assertDictation(c.p, c.draft+` === 'Keep this draft' && `+c.idle+` && `+c.outcome+`.length > 0`)
+		}
+	})
+}
+
+func TestBrowserDictationReportsATranscriptionWithNoSpeech(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Keep this draft")
+		c.dictate("   ")
+		c.p.awaitText(c.result, "No speech was detected")
+		c.assertDraftKeptAndIdle("Keep this draft")
+		c.assertUploads()
+	})
+}
+
+func TestBrowserDictationReportsARecorderFailure(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("Keep this draft")
+		c.startRecording()
+		c.p.eval(`recorders.at(-1).error('device lost')`, nil)
+		c.p.awaitText(c.result, "Recording failed")
+		assertDictation(c.p, c.draft+` === 'Keep this draft' && `+c.idle+` && tracks.at(-1).stopped && recorders.at(-1).stops === 1`)
+	})
+}
+
+func (c *composer) sendWhileRecording() (releaseSend func()) {
+	c.setDraft("Keep this draft")
+	c.startRecording()
+	releaseSend = c.holdSend()
+	c.p.click(c.view.form + ` [aria-label=Send]`)
+	return releaseSend
+}
+
+func TestBrowserDictationSendWhileRecordingSendsTheDraftAndStopsTheRecorder(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.sendWhileRecording()
+		c.assertSentMessage("send while recording", "Keep this draft")
+		assertDictation(c.p, `recorders.at(-1).stops === 1 && tracks.at(-1).stopped && `+c.pressed+` === 'false'`)
+	})
+}
+
+func TestBrowserDictationIgnoresDataFromARecorderStoppedBySend(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		releaseSend := c.sendWhileRecording()
+		c.assertSentMessage("send while recording", "Keep this draft")
+		c.p.awaitText(c.result, "Sending…")
+		c.p.await("the stopped recorder's callbacks", `recorders.at(-1).delivered`)
+		c.p.eval(`recorders.at(-1).data('late'); recorders.at(-1).finish()`, nil)
+		assertDictation(c.p, c.outcome+` === 'Sending…'`)
+		releaseSend()
+		c.p.awaitText(c.result, c.view.result)
+		c.p.await("cleared input after send", c.draft+` === ''`)
+	})
+}
+
+func TestBrowserDictationUploadsNothingForARecordingStoppedBySend(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		releaseSend := c.sendWhileRecording()
+		c.assertSentMessage("send while recording", "Keep this draft")
+		releaseSend()
+		c.p.awaitText(c.result, c.view.result)
+		c.assertUploads()
+	})
+}
+
+func (c *composer) sendWhileTranscribing() (releaseSend, releaseTranscription func()) {
+	c.setDraft("Keep this draft")
+	c.a.transcribe.answer("late words")
+	releaseTranscription = c.holdTranscription()
+	c.startRecording()
+	c.stopRecording()
+	c.uploads++
+	c.a.transcribe.awaitUploads(c.t, c.uploads)
+	releaseSend = c.holdSend()
+	c.p.click(c.view.form + ` [aria-label=Send]`)
+	return releaseSend, releaseTranscription
+}
+
+func TestBrowserDictationSendWhileTranscribingSendsTheDraft(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.sendWhileTranscribing()
+		c.assertSentMessage("send while transcribing", "Keep this draft")
+		c.p.awaitText(c.result, "Sending…")
+	})
+}
+
+func TestBrowserDictationLeavesTheDraftAloneWhenATranscriptionArrivesAfterSend(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		answers := c.a.transcribe.answeredCount()
+		releaseSend, releaseTranscription := c.sendWhileTranscribing()
+		c.assertSentMessage("send while transcribing", "Keep this draft")
+		c.p.awaitText(c.result, "Sending…")
+		releaseTranscription()
+		c.a.transcribe.awaitAnswered(c.t, answers+1)
+		awaitAnswerSeen(c.p, c.uploads)
+		assertDictation(c.p, c.draft+` === 'Keep this draft' && `+c.outcome+` === 'Sending…'`)
+		releaseSend()
+		c.p.awaitText(c.result, c.view.result)
+		c.p.await("cleared input after the send", c.draft+` === '' && `+c.idle)
+	})
+}
+
+func TestBrowserDictationAfterASendHoldsOnlyTheNextTranscription(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		answers := c.a.transcribe.answeredCount()
+		releaseSend, releaseTranscription := c.sendWhileTranscribing()
+		c.assertSentMessage("send while transcribing", "Keep this draft")
+		releaseTranscription()
+		c.a.transcribe.awaitAnswered(c.t, answers+1)
+		awaitAnswerSeen(c.p, c.uploads)
+		releaseSend()
+		c.p.await("cleared input after the send", c.draft+` === '' && `+c.idle)
+		c.dictateAndAwait("fresh words", "fresh words")
+	})
+}
+
+func TestBrowserDictationSendsAnEditedTranscription(t *testing.T) {
+	t.Parallel()
+	forEachComposer(t, func(c *composer) {
+		c.setDraft("")
+		c.dictateAndAwait("fresh words", "fresh words")
+		c.p.eval(`(() => { const t = document.querySelector(`+quote(c.textarea)+`); t.value += ' (edited)'; })()`, nil)
+		if c.phone {
+			c.p.run(chromedp.Focus(c.textarea, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+			if got := c.a.count(); got != c.messages {
+				c.t.Fatalf("phone Enter sent: %d, want %d", got, c.messages)
+			}
+			c.p.click(c.view.form + ` [aria-label=Send]`)
+		} else {
+			c.p.run(chromedp.Focus(c.textarea, chromedp.ByQuery))
+			c.p.await("focused desktop textarea", `document.activeElement === document.querySelector(`+quote(c.textarea)+`) && matchMedia('(pointer: fine)').matches`)
+			c.p.run(chromedp.KeyEvent(kb.Enter))
+		}
+		c.assertSentMessage("edited transcription", "fresh words (edited)")
+		c.p.awaitText(c.result, c.view.result)
+		c.p.await("cleared input after Enter", c.draft+` === ''`)
+	})
+}
+
+func TestBrowserDictationContactsOnlyTheServiceOrigin(t *testing.T) {
 	t.Parallel()
 	for _, phone := range []bool{false, true} {
 		t.Run(fmt.Sprintf("phone=%t", phone), func(t *testing.T) {
 			t.Parallel()
 			p, a, foreign := openDictationPage(t, phone, fakeDictationScript)
-			count, uploads := 0, 0
+			messages := 0
 			for _, view := range chatViews {
 				p.selectChat(view, phone)
-				form := view.form
-				mic, textarea, result := form+` [aria-label=Dictate]`, form+` textarea`, form+` .result`
-				draft := `document.querySelector(` + quote(textarea) + `).value`
-				outcome := `document.querySelector(` + quote(result) + `).textContent`
-				pressed := `document.querySelector(` + quote(mic) + `).getAttribute('aria-pressed')`
-				idle := `document.querySelector(` + quote(mic) + `).getAttribute('aria-pressed') === 'false' && !document.querySelector(` + quote(mic) + `).disabled`
-				setDraft := func(text string) {
-					p.eval(`(() => { const t = document.querySelector(`+quote(textarea)+`); t.value = `+quote(text)+`; t.focus(); t.setSelectionRange(7, 13); })()`, nil)
-				}
-				checkDictationIcon(p, form, false)
-
-				// A recording starts on the first tap and uploads on the second; the
-				// existing text stays whatever the selection, and the answer follows it.
-				setDraft("Before SELECT after")
-				a.transcribe.answer("hello world")
-				startRecording(p, form)
-				assertDictation(p, `recorders.at(-1).starts === 1 && recorders.at(-1).mimeType === 'audio/webm;codecs=opus' && mediaConstraints.audio === true`)
-				release := sync.OnceFunc(a.transcribe.holdResponse())
-				t.Cleanup(release)
-				stopRecording(p, form)
-				uploads++
-				a.transcribe.awaitUploads(t, uploads)
-				assertDictation(p, `recorders.at(-1).stops === 1 && tracks.at(-1).stopped`)
-				if got := a.transcribe.upload(uploads - 1); got.ContentType != "application/json" || got.MIMEType != "audio/webm;codecs=opus" || string(got.Audio) != "voice" {
-					t.Fatalf("%s upload = %+v", view.name, got)
-				}
-				assertDictation(p, draft+` === 'Before SELECT after' && `+outcome+`.includes('Transcribing')`)
-				release()
-				p.await("the appended transcription", draft+` === 'Before SELECT after hello world' && `+outcome+` === ''`)
-				assertDictation(p, idle)
-
-				// A second recording appends again; an empty draft receives the text as is.
-				a.transcribe.answer("and more")
-				startRecording(p, form)
-				p.click(mic)
-				p.await("the second transcription", draft+` === 'Before SELECT after hello world and more'`)
-				assertDictation(p, idle)
-				setDraft("")
-				a.transcribe.answer("Just the words.")
-				startRecording(p, form)
-				p.click(mic)
-				uploads += 2
-				p.await("the transcription of an empty draft", draft+` === 'Just the words.'`)
-				if got := a.count(); got != count {
-					t.Fatalf("%s: recording sent a message: %d, want %d", view.name, got, count)
-				}
-
-				// A refused microphone, an empty recording, an unconfigured service, a
-				// failed transcription and a silent one leave the draft alone.
-				setDraft("Keep this draft")
-				p.eval(`window.mediaError = 'NotAllowedError'`, nil)
-				p.click(mic)
-				p.awaitText(result, "Microphone permission denied")
-				assertDictation(p, draft+` === 'Keep this draft' && `+idle)
-				p.eval(`window.mediaError = null; window.silence = true`, nil)
-				startRecording(p, form)
-				p.click(mic)
-				p.awaitText(result, "Nothing was recorded")
-				assertDictation(p, draft+` === 'Keep this draft' && `+idle)
-				p.eval(`window.silence = false`, nil)
-				for _, failure := range []struct {
-					status        int
-					code, message string
-				}{
-					{http.StatusConflict, "transcription_off", "transcription is not configured on this service"},
-					{http.StatusBadGateway, "transcription_failed", "the transcription server could not be reached"},
-				} {
-					a.transcribe.refuse(failure.status, failure.code, failure.message)
-					startRecording(p, form)
-					p.click(mic)
-					uploads++
-					p.awaitText(result, failure.message)
-					assertDictation(p, draft+` === 'Keep this draft' && `+idle+` && `+outcome+`.length > 0`)
-				}
-				a.transcribe.refuse(0, "", "")
-				a.transcribe.answer("   ")
-				startRecording(p, form)
-				p.click(mic)
-				uploads++
-				p.awaitText(result, "No speech was detected")
-				assertDictation(p, draft+` === 'Keep this draft' && `+idle)
-				if got := a.transcribe.uploads(); got != uploads {
-					t.Fatalf("%s: %d uploads, want %d", view.name, got, uploads)
-				}
-
-				// A recording with a microphone that fails while recording ends it.
-				startRecording(p, form)
-				p.eval(`recorders.at(-1).error('device lost')`, nil)
-				p.awaitText(result, "Recording failed")
-				assertDictation(p, draft+` === 'Keep this draft' && `+idle+` && tracks.at(-1).stopped && recorders.at(-1).stops === 1`)
-
-				// Sending stops the recording first: a stopped recorder that still
-				// reports its clip uploads nothing and changes neither draft nor outcome.
-				startRecording(p, form)
-				releaseSend := sync.OnceFunc(a.action.holdResponse())
-				t.Cleanup(releaseSend)
-				p.click(form + ` [aria-label=Send]`)
-				count++
-				assertChatMessage(t, a, count, view, "send while recording", "Keep this draft")
-				assertDictation(p, `recorders.at(-1).stops === 1 && tracks.at(-1).stopped && `+pressed+` === 'false'`)
-				p.awaitText(result, "Sending…")
-				p.await("the stopped recorder's callbacks", `recorders.at(-1).delivered`)
-				p.eval(`recorders.at(-1).data('late'); recorders.at(-1).finish()`, nil)
-				assertDictation(p, `document.querySelector(`+quote(result)+`).textContent === 'Sending…'`)
-				releaseSend()
-				p.awaitText(result, view.result)
-				p.await("cleared input after send", draft+` === ''`)
-				if got := a.transcribe.uploads(); got != uploads {
-					t.Fatalf("%s: a recording stopped by Send uploaded: %d uploads, want %d", view.name, got, uploads)
-				}
-
-				// Sending while the transcription is in progress discards its answer.
-				setDraft("Keep this draft")
-				a.transcribe.answer("late words")
-				releaseTranscription := sync.OnceFunc(a.transcribe.holdResponse())
-				t.Cleanup(releaseTranscription)
-				startRecording(p, form)
-				stopRecording(p, form)
-				uploads++
-				a.transcribe.awaitUploads(t, uploads)
-				answers := a.transcribe.answeredCount()
-				releaseSend = sync.OnceFunc(a.action.holdResponse())
-				t.Cleanup(releaseSend)
-				p.click(form + ` [aria-label=Send]`)
-				count++
-				assertChatMessage(t, a, count, view, "send while transcribing", "Keep this draft")
-				p.awaitText(result, "Sending…")
-				releaseTranscription()
-				a.transcribe.awaitAnswered(t, answers+1)
-				awaitAnswerSeen(p, uploads)
-				assertDictation(p, draft+` === 'Keep this draft' && `+outcome+` === 'Sending…'`)
-				releaseSend()
-				p.awaitText(result, view.result)
-				p.await("cleared input after the send", draft+` === '' && `+idle)
-				// The late words are not used by the next recording.
-				a.transcribe.refuse(0, "", "")
-				a.transcribe.answer("fresh words")
-				startRecording(p, form)
-				p.click(mic)
-				uploads++
-				p.await("only the next transcription", draft+` === 'fresh words'`)
-
-				// Send and Enter still send the edited draft.
-				p.eval(`(() => { const t = document.querySelector(`+quote(textarea)+`); t.value += ' (edited)'; })()`, nil)
-				if phone {
-					p.run(chromedp.Focus(textarea, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
-					if got := a.count(); got != count {
-						t.Fatalf("phone Enter sent: %d, want %d", got, count)
-					}
-					p.click(form + ` [aria-label=Send]`)
-				} else {
-					p.run(chromedp.Focus(textarea, chromedp.ByQuery))
-					p.await("focused desktop textarea", `document.activeElement === document.querySelector(`+quote(textarea)+`) && matchMedia('(pointer: fine)').matches`)
-					p.run(chromedp.KeyEvent(kb.Enter))
-				}
-				count++
-				assertChatMessage(t, a, count, view, "edited transcription", "fresh words (edited)")
-				p.awaitText(result, view.result)
-				p.await("cleared input after Enter", draft+` === ''`)
+				c := &composer{t: t, p: p, a: a, view: view, phone: phone,
+					mic: view.form + ` [aria-label=Dictate]`, textarea: view.form + ` textarea`, result: view.form + ` .result`}
+				c.draft = `document.querySelector(` + quote(c.textarea) + `).value`
+				c.setDraft("")
+				c.dictateAndAwait("hello", "hello")
+				p.click(view.form + ` [aria-label=Send]`)
+				messages++
+				assertChatMessage(t, a, messages, view, "send", "hello")
+				p.awaitText(c.result, view.result)
 			}
 			a.mu.Lock()
 			var extra []string
@@ -500,8 +682,8 @@ func TestBrowserDictationComposers(t *testing.T) {
 				}
 			}
 			a.mu.Unlock()
-			if len(extra) != count {
-				t.Fatalf("requests other than transcriptions and messages: %v, want %d messages", extra, count)
+			if len(extra) != messages {
+				t.Fatalf("requests other than transcriptions and messages: %v, want %d messages", extra, messages)
 			}
 			if got := foreign(); len(got) != 0 {
 				t.Fatalf("the page contacted other origins: %v", got)
@@ -518,13 +700,7 @@ func (f *fakeTranscribe) answeredCount() int {
 
 func (f *fakeTranscribe) awaitAnswered(t *testing.T, n int) {
 	t.Helper()
-	deadline := time.Now().Add(browserTimeout)
-	for f.answeredCount() < n {
-		if time.Now().After(deadline) {
-			t.Fatalf("the transcription route answered %d uploads, want %d", f.answeredCount(), n)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	f.responded.await(t, fmt.Sprintf("the transcription route answered too few uploads, want %d", n), func(count int) bool { return count >= n })
 }
 
 func TestBrowserDictationAvailability(t *testing.T) {
@@ -558,8 +734,6 @@ func TestBrowserDictationAvailability(t *testing.T) {
 	}
 }
 
-// Turning transcription off or on in the configuration hides or shows the
-// microphone without a reload, and ends a recording in progress.
 func TestBrowserDictationFollowsTranscriptionConfig(t *testing.T) {
 	t.Parallel()
 	p, a, _ := openDictationPage(t, false, fakeDictationScript)
@@ -581,75 +755,140 @@ func TestBrowserDictationFollowsTranscriptionConfig(t *testing.T) {
 	}
 }
 
-func TestBrowserDictationConversationOwnership(t *testing.T) {
+type pairedComposer struct {
+	*composer
+	other                chatView
+	bMic, bText, bResult string
+}
+
+func forEachPairedComposer(t *testing.T, check func(c *pairedComposer)) {
+	t.Helper()
+	forEachComposer(t, func(c *composer) {
+		other := chatViews[0]
+		switch c.view.name {
+		case "workstream":
+			other = chatViews[1]
+		case "session":
+			other = chatView{name: "session", id: "w_005", form: "#session-form"}
+		case "design":
+			other = chatView{name: "design", id: "w_006", form: "#design-form"}
+		}
+		check(&pairedComposer{composer: c, other: other,
+			bMic: other.form + ` [aria-label=Dictate]`, bText: other.form + ` textarea`, bResult: other.form + ` .result`})
+	})
+}
+
+func (c *pairedComposer) openOther() { c.p.selectChat(c.other, c.phone) }
+
+func (c *pairedComposer) openThis() { c.p.selectChat(c.view, c.phone) }
+
+func (c *pairedComposer) leaveWhileRecording() {
+	c.p.typeInto(c.textarea, "A draft")
+	c.startRecording()
+	c.p.eval(`window.aRecorder = recorders.at(-1); window.aTrack = tracks.at(-1)`, nil)
+	c.openOther()
+}
+
+func (c *pairedComposer) writeOtherDraft() {
+	c.p.eval(`document.querySelector(`+quote(c.bText)+`).value = 'B draft'; window.bOutcome = document.querySelector(`+quote(c.bResult)+`).textContent`, nil)
+}
+
+func (c *pairedComposer) assertOtherUntouched() {
+	c.t.Helper()
+	assertDictation(c.p, `document.querySelector(`+quote(c.bText)+`).value === 'B draft' && document.querySelector(`+quote(c.bResult)+`).textContent === bOutcome && document.querySelector(`+quote(c.bMic)+`).getAttribute('aria-pressed') === 'false'`)
+}
+
+func TestBrowserDictationStopsRecordingWhenTheConversationChanges(t *testing.T) {
 	t.Parallel()
-	for _, phone := range []bool{false, true} {
-		t.Run(fmt.Sprintf("phone=%t", phone), func(t *testing.T) {
-			t.Parallel()
-			p, a, _ := openDictationPage(t, phone, fakeDictationScript)
-			uploads := 0
-			for _, view := range chatViews {
-				p.selectChat(view, phone)
-				form := view.form
-				mic, textarea, result := form+` [aria-label=Dictate]`, form+` textarea`, form+` .result`
-				other := chatViews[0]
-				switch view.name {
-				case "workstream":
-					other = chatViews[1]
-				case "session":
-					other = chatView{name: "session", id: "w_005", form: "#session-form"}
-				case "design":
-					other = chatView{name: "design", id: "w_006", form: "#design-form"}
-				}
-				bMic, bText, bResult := other.form+` [aria-label=Dictate]`, other.form+` textarea`, other.form+` .result`
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.leaveWhileRecording()
+		assertDictation(c.p, `aRecorder.stops === 1 && aTrack.stopped && document.querySelector(`+quote(c.mic)+`).getAttribute('aria-pressed') === 'false'`)
+	})
+}
 
-				// Switching conversation while recording stops the recorder; what the
-				// stopped recorder reports later reaches no composer.
-				p.typeInto(textarea, "A draft")
-				startRecording(p, form)
-				p.eval(`window.aRecorder = recorders.at(-1); window.aTrack = tracks.at(-1)`, nil)
-				p.selectChat(other, phone)
-				assertDictation(p, `aRecorder.stops === 1 && aTrack.stopped && document.querySelector(`+quote(mic)+`).getAttribute('aria-pressed') === 'false'`)
-				p.eval(`document.querySelector(`+quote(bText)+`).value = 'B draft'; window.bOutcome = document.querySelector(`+quote(bResult)+`).textContent`, nil)
-				p.await("the stopped recorder's callbacks", `aRecorder.delivered`)
-				p.eval(`aRecorder.data('late A'); aRecorder.finish(); aRecorder.error('late')`, nil)
-				assertDictation(p, `document.querySelector(`+quote(bText)+`).value === 'B draft' && document.querySelector(`+quote(bResult)+`).textContent === bOutcome && document.querySelector(`+quote(bMic)+`).getAttribute('aria-pressed') === 'false'`)
-				if got := a.transcribe.uploads(); got != uploads {
-					t.Fatalf("%s: a recording left behind uploaded: %d uploads, want %d", view.name, got, uploads)
-				}
-				// Returning to A cannot reactivate its ended recording.
-				p.selectChat(view, phone)
-				p.eval(`window.returnDraft = document.querySelector(`+quote(textarea)+`).value; window.returnOutcome = document.querySelector(`+quote(result)+`).textContent`, nil)
-				p.eval(`aRecorder.data('old A on return'); aRecorder.finish()`, nil)
-				assertDictation(p, `document.querySelector(`+quote(textarea)+`).value === returnDraft && document.querySelector(`+quote(result)+`).textContent === returnOutcome && document.querySelector(`+quote(mic)+`).getAttribute('aria-pressed') === 'false'`)
+func TestBrowserDictationIgnoresLateDataFromARecorderLeftBehind(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.leaveWhileRecording()
+		c.writeOtherDraft()
+		c.p.await("the stopped recorder's callbacks", `aRecorder.delivered`)
+		c.p.eval(`aRecorder.data('late A'); aRecorder.finish(); aRecorder.error('late')`, nil)
+		c.assertOtherUntouched()
+	})
+}
 
-				// A transcription finishing after the owner left the conversation
-				// changes neither it nor the conversation now shown, and leaves no
-				// progress message behind.
-				a.transcribe.answer("answer for A")
-				release := sync.OnceFunc(a.transcribe.holdResponse())
-				t.Cleanup(release)
-				startRecording(p, form)
-				stopRecording(p, form)
-				uploads++
-				a.transcribe.awaitUploads(t, uploads)
-				answers := a.transcribe.answeredCount()
-				p.selectChat(other, phone)
-				p.eval(`document.querySelector(`+quote(bText)+`).value = 'B draft'; window.bOutcome = document.querySelector(`+quote(bResult)+`).textContent`, nil)
-				release()
-				a.transcribe.awaitAnswered(t, answers+1)
-				awaitAnswerSeen(p, uploads)
-				assertDictation(p, `document.querySelector(`+quote(bText)+`).value === 'B draft' && document.querySelector(`+quote(bResult)+`).textContent === bOutcome && document.querySelector(`+quote(bMic)+`).getAttribute('aria-pressed') === 'false'`)
-				p.selectChat(view, phone)
-				assertDictation(p, `document.querySelector(`+quote(textarea)+`).value === returnDraft && document.querySelector(`+quote(result)+`).textContent === '' && document.querySelector(`+quote(mic)+`).getAttribute('aria-pressed') === 'false' && !document.querySelector(`+quote(mic)+`).disabled`)
+func TestBrowserDictationUploadsNothingForARecorderLeftBehind(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.leaveWhileRecording()
+		c.p.await("the stopped recorder's callbacks", `aRecorder.delivered`)
+		c.p.eval(`aRecorder.data('late A'); aRecorder.finish()`, nil)
+		c.assertUploads()
+	})
+}
 
-				// The same microphone records again afterwards.
-				a.transcribe.answer("second")
-				startRecording(p, form)
-				p.click(mic)
-				uploads++
-				p.await("a fresh transcription", `document.querySelector(`+quote(textarea)+`).value === (returnDraft ? returnDraft + ' ' : '') + 'second'`)
-			}
-		})
-	}
+func TestBrowserDictationIgnoresOldRecorderDataOnReturn(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.leaveWhileRecording()
+		c.p.await("the stopped recorder's callbacks", `aRecorder.delivered`)
+		c.openThis()
+		c.p.eval(`window.returnDraft = document.querySelector(`+quote(c.textarea)+`).value; window.returnOutcome = document.querySelector(`+quote(c.result)+`).textContent`, nil)
+		c.p.eval(`aRecorder.data('old A on return'); aRecorder.finish()`, nil)
+		assertDictation(c.p, `document.querySelector(`+quote(c.textarea)+`).value === returnDraft && document.querySelector(`+quote(c.result)+`).textContent === returnOutcome && document.querySelector(`+quote(c.mic)+`).getAttribute('aria-pressed') === 'false'`)
+	})
+}
+
+func (c *pairedComposer) captureReturnState() {
+	c.openOther()
+	c.writeOtherDraft()
+	c.openThis()
+	c.p.eval(`window.returnDraft = document.querySelector(`+quote(c.textarea)+`).value`, nil)
+}
+
+func (c *pairedComposer) transcribeWhileAway() {
+	c.a.transcribe.answer("answer for A")
+	release := c.holdTranscription()
+	c.startRecording()
+	c.stopRecording()
+	c.uploads++
+	c.a.transcribe.awaitUploads(c.t, c.uploads)
+	answers := c.a.transcribe.answeredCount()
+	c.openOther()
+	c.writeOtherDraft()
+	release()
+	c.a.transcribe.awaitAnswered(c.t, answers+1)
+	awaitAnswerSeen(c.p, c.uploads)
+}
+
+func TestBrowserDictationTranscriptionForAnotherConversationLeavesTheOpenOneAlone(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.p.typeInto(c.textarea, "A draft")
+		c.transcribeWhileAway()
+		c.assertOtherUntouched()
+	})
+}
+
+func TestBrowserDictationReturnShowsTheDraftWithoutAStaleTranscription(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.p.typeInto(c.textarea, "A draft")
+		c.captureReturnState()
+		c.transcribeWhileAway()
+		c.openThis()
+		assertDictation(c.p, `document.querySelector(`+quote(c.textarea)+`).value === returnDraft && document.querySelector(`+quote(c.result)+`).textContent === '' && document.querySelector(`+quote(c.mic)+`).getAttribute('aria-pressed') === 'false' && !document.querySelector(`+quote(c.mic)+`).disabled`)
+	})
+}
+
+func TestBrowserDictationWorksAfterReturningToAConversation(t *testing.T) {
+	t.Parallel()
+	forEachPairedComposer(t, func(c *pairedComposer) {
+		c.p.typeInto(c.textarea, "A draft")
+		c.captureReturnState()
+		c.transcribeWhileAway()
+		c.openThis()
+		c.dictate("second")
+		c.p.await("a fresh transcription", `document.querySelector(`+quote(c.textarea)+`).value === (returnDraft ? returnDraft + ' ' : '') + 'second'`)
+	})
 }

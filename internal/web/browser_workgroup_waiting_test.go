@@ -10,13 +10,8 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// waitingHeading is the "Waiting for you" heading inside the workgroup view.
 const waitingHeading = `#workgroup-content h3.needs-title`
 
-// openWorkgroupWaitingPage opens a browser on a fake API serving the live
-// workgroup g_test of two unarchived members, with the given inbox entries,
-// and shows the workgroup view once its composer is there and the page has
-// read the inbox.
 func openWorkgroupWaitingPage(t *testing.T, entries ...string) (*page, *fakeAPI) {
 	t.Helper()
 	api := newFakeAPI(0)
@@ -43,21 +38,17 @@ func openWorkgroupWaitingPage(t *testing.T, entries ...string) (*page, *fakeAPI)
 	p.awaitVisible("the workgroup row", row)
 	p.click(row)
 	p.awaitVisible("the workgroup composer", `#workgroup-content form[data-field=send]`)
-	soon(t, "the page never read the inbox", func() bool { return api.inboxRequests() > 0 })
+	api.inbox.await(t, "the page never read the inbox", func(n int) bool { return n > 0 })
 	return p, api
 }
 
-// refreshInbox makes the page read the inbox again and waits until the fake
-// API has answered that read.
 func refreshInbox(t *testing.T, api *fakeAPI) {
 	t.Helper()
 	hits := api.inboxRequests()
 	api.pushEvent("inbox")
-	soon(t, "the page never read the inbox again", func() bool { return api.inboxRequests() > hits })
+	api.inbox.await(t, "the page never read the inbox again", func(n int) bool { return n > hits })
 }
 
-// The workgroup view places the "Waiting for you" heading only while a card
-// waits under it.
 func TestBrowserWorkgroupWaitingHeadingTracksTheCardsShown(t *testing.T) {
 	t.Parallel()
 	p, api := openWorkgroupWaitingPage(t)
@@ -67,7 +58,6 @@ func TestBrowserWorkgroupWaitingHeadingTracksTheCardsShown(t *testing.T) {
   return !!area && !document.querySelector(`+quote(waitingHeading)+`) && document.querySelectorAll('#workgroup-content [data-decision]').length === 0;
  })()`)
 
-	// An entry arriving brings the heading, above its card.
 	api.setInbox(contestedEntry("w_003", "index"))
 	refreshInbox(t, api)
 	p.awaitVisible("the contested unit", card)
@@ -77,8 +67,6 @@ func TestBrowserWorkgroupWaitingHeadingTracksTheCardsShown(t *testing.T) {
    !!(heading.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) && heading.parentElement === card.parentElement;
  })()`)
 
-	// Answering the last card dismisses it at once: the heading goes with it
-	// while the inbox still lists the entry, and the result line stays.
 	release := api.contested.holdResponse()
 	p.typeInto(card+`input[name=note]`, "Review it again.")
 	p.click(card + `[data-decision-choice="review"]`)
@@ -91,8 +79,6 @@ func TestBrowserWorkgroupWaitingHeadingTracksTheCardsShown(t *testing.T) {
 	p.awaitGone("the contested unit", card)
 	p.awaitGone("the waiting heading", waitingHeading)
 
-	// Once the inbox stops listing the entry, a new one brings the heading
-	// back, and the heading goes again when the inbox drops it.
 	api.setInbox()
 	refreshInbox(t, api)
 	api.setInbox(ratificationEntry("w_004"))
@@ -106,8 +92,6 @@ func TestBrowserWorkgroupWaitingHeadingTracksTheCardsShown(t *testing.T) {
 	p.awaitGone("the waiting heading", waitingHeading)
 }
 
-// A workgroup whose only listed entry is dismissed in the page shows no
-// heading, and the heading returns with the card when its submission fails.
 func TestBrowserWorkgroupWaitingHeadingReturnsWithARestoredCard(t *testing.T) {
 	t.Parallel()
 	p, api := openWorkgroupWaitingPage(t, contestedEntry("w_003", "index"))

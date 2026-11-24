@@ -21,8 +21,6 @@ const (
 	otherStream  = "w_fedcba9876543210fedcba9876543210"
 )
 
-// withTwoProjects lists a second project beside the fixture's, and gives each
-// project's trace the inbox entries 1 and 2 that escalate writes.
 func withTwoProjects(t *testing.T) service.Options {
 	t.Helper()
 	opts := fixture(t)
@@ -37,13 +35,17 @@ func withTwoProjects(t *testing.T) service.Options {
 	return opts
 }
 
-func TestAnswerNamesTheProjectOfTheEntry(t *testing.T) {
+func startTwoProjects(t *testing.T) (root string, s *service.Service) {
+	t.Helper()
 	opts := withTwoProjects(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+	return opts.Config.Root, s
+}
 
+func TestInboxEntriesNameTheProjectThatAnswersThem(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	var list wire.InboxResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "inbox", "--json")), &list))
 	byProject := map[config.ProjectID][]int{}
@@ -56,31 +58,56 @@ func TestAnswerNamesTheProjectOfTheEntry(t *testing.T) {
 	if len(byProject[project]) != 2 || len(byProject[otherProject]) != 2 {
 		t.Fatalf("inbox entries by project %v", byProject)
 	}
+}
 
-	// Both projects have an open entry 1: the answer has to name one.
+func TestAnswerRefusesAnEntryNumberOpenInSeveralProjects(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	code, out, diag := invoke(t, root, "answer", "1", "Both are part of the contract.")
 	if code != 4 || out != "" || diag != "validation: inbox entry 1 is open in projects "+project+", "+otherProject+"; name one with --project\n" {
 		t.Fatalf("ambiguous answer: %d %q %q", code, out, diag)
 	}
+}
+
+func TestAnswerWithProjectRulesOnThatProjectsEntry(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	if got, want := successful(t, root, "answer", "1", "Neither is.", "--project", otherProject), "Ruling recorded on inbox entry 1 ("+otherStream+", questions 1, 2)\n"; !strings.HasPrefix(got, want) {
 		t.Fatalf("answer in the other project: %q", got)
 	}
-	// Entry 1 is now open only in the first project, which the answer finds.
+}
+
+func TestAnswerFindsTheOnlyProjectThatStillHoldsTheEntryNumber(t *testing.T) {
+	root, _ := startTwoProjects(t)
+	successful(t, root, "answer", "1", "Neither is.", "--project", otherProject)
 	if got, want := successful(t, root, "answer", "1", "Both are."), "Ruling recorded on inbox entry 1 ("+stream+", questions 1, 2)\n"; !strings.HasPrefix(got, want) {
 		t.Fatalf("answer found by number: %q", got)
 	}
-	// Entry 2 of the other project has no quick reply; the first project's does.
-	code, out, diag = invoke(t, root, "answer", "2", "--accept", "--project", otherProject)
+}
+
+func TestAnswerAcceptRefusesAnEntryWithoutAQuickReply(t *testing.T) {
+	root, _ := startTwoProjects(t)
+	code, out, diag := invoke(t, root, "answer", "2", "--accept", "--project", otherProject)
 	if code != 4 || out != "" || diag != "validation: inbox entry 2 has no eligible quick reply; give a ruling explicitly\n" {
 		t.Fatalf("accept without a quick reply: %d %q %q", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "answer", "2", "--accept")
+}
+
+func TestAnswerAcceptRefusesAnEntryNumberOpenInSeveralProjects(t *testing.T) {
+	root, _ := startTwoProjects(t)
+	code, out, diag := invoke(t, root, "answer", "2", "--accept")
 	if code != 4 || !strings.Contains(diag, "inbox entry 2 is open in projects") {
 		t.Fatalf("ambiguous accept: %d %q %q", code, out, diag)
 	}
+}
+
+func TestAnswerAcceptWithProjectRulesWithThatProjectsRecommendation(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	if got := successful(t, root, "answer", "2", "--accept", "--project", project); !strings.HasPrefix(got, "Ruling recorded on inbox entry 2 ("+stream+", questions 3)\n") {
 		t.Fatalf("accept in the first project: %q", got)
 	}
+}
+
+func TestProjectFlagRefusesInvalidArguments(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	for _, args := range [][]string{{"answer", "2", "No.", "--project", "bad"}, {"inbox", "--project", project}, {"answer", "2", "No.", "--project"}} {
 		if code, _, _ := invoke(t, root, args...); code != 2 {
 			t.Fatalf("%v: exit %d", args, code)
@@ -88,35 +115,43 @@ func TestAnswerNamesTheProjectOfTheEntry(t *testing.T) {
 	}
 }
 
-func TestPauseAndPriorityFindTheProjectOfTheWorkstream(t *testing.T) {
-	opts := withTwoProjects(t)
-	s, err := service.Start(context.Background(), opts)
-	must(t, err)
-	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+func TestPauseFindsTheProjectOfTheWorkstream(t *testing.T) {
+	root, s := startTwoProjects(t)
 	c := service.NewClient(s.Socket())
 	t.Cleanup(c.Close)
-
 	successful(t, root, "pause", otherStream)
-	successful(t, root, "priority", "set", otherStream)
 	rt, err := c.Runtime(context.Background())
 	must(t, err)
 	want := runtime.Target{Scope: "workstream", Project: otherProject, Workstream: otherStream}
 	if len(rt.Effective.Pauses) != 1 || rt.Effective.Pauses[0].Target != want {
 		t.Fatalf("pauses %+v", rt.Effective.Pauses)
 	}
+}
+
+func TestPriorityFindsTheProjectOfTheWorkstream(t *testing.T) {
+	root, s := startTwoProjects(t)
+	c := service.NewClient(s.Socket())
+	t.Cleanup(c.Close)
+	successful(t, root, "priority", "set", otherStream)
+	rt, err := c.Runtime(context.Background())
+	must(t, err)
 	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != otherProject {
 		t.Fatalf("priorities %+v", rt.Effective.Priorities)
 	}
-	successful(t, root, "resume", otherStream)
+}
 
-	// Without a workstream there is no project to act on.
+func TestPriorityClearNeedsAWorkstreamWhenSeveralProjectsAreActive(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	code, out, diag := invoke(t, root, "priority", "clear")
 	if code != 4 || out != "" || diag != "validation: several projects are active ("+project+", "+otherProject+"); name a workstream of the project\n" {
 		t.Fatalf("priority clear: %d %q %q", code, out, diag)
 	}
+}
+
+func TestPauseRefusesAWorkstreamOutsideTheActiveProjects(t *testing.T) {
+	root, _ := startTwoProjects(t)
 	unknown := "w_00000000000000000000000000000abc"
-	code, out, diag = invoke(t, root, "pause", unknown)
+	code, out, diag := invoke(t, root, "pause", unknown)
 	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
 		t.Fatalf("pause of an unknown workstream: %d %q %q", code, out, diag)
 	}

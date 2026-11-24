@@ -13,9 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// withCharterProposal creates a project trace whose workstream has a charter
-// rule proposed from the owner's ruling on question 1, as a stopped service
-// left it.
 func withCharterProposal(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
@@ -41,60 +38,98 @@ func withCharterProposal(t *testing.T) service.Options {
 	return opts
 }
 
-func TestCharterCommands(t *testing.T) {
+func startCharter(t *testing.T) string {
+	t.Helper()
 	opts := withCharterProposal(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
-	proposed := "Question 1 of " + stream + ", proposed " + written.Format(time.RFC3339) + ": proposed\n" +
+	return opts.Config.Root
+}
+
+func proposedText() string {
+	return "Question 1 of " + stream + ", proposed " + written.Format(time.RFC3339) + ": proposed\n" +
 		"  Rule: charter#2 would be: Uploads resume.\n" +
 		"  From: workstreams/" + stream + "/questions/1/rulings.jsonl revision 2\n" +
 		"  Your ruling: Uploads always resume.\n    No exceptions.\n"
+}
 
-	if out := successful(t, root, "charter"); out != "Charter: 1 proposed rules waiting; decide one with osmia charter <workstream-id> <question> ratify|decline\n\n"+proposed {
+func ratifyCharterProposal(t *testing.T, root string) {
+	t.Helper()
+	successful(t, root, "charter", stream, "1", "ratify", "It holds everywhere.")
+	eventually(t, 10*time.Second, func() (bool, string) {
+		var view wire.CharterProposalView
+		must(t, json.Unmarshal([]byte(successful(t, root, "charter", stream, "1", "--json")), &view))
+		return view.State == trace.CharterChartered, "proposal stayed " + string(view.State)
+	})
+}
+
+func TestCharterListsTheProposedRules(t *testing.T) {
+	root := startCharter(t)
+	if out := successful(t, root, "charter"); out != "Charter: 1 proposed rules waiting; decide one with osmia charter <workstream-id> <question> ratify|decline\n\n"+proposedText() {
 		t.Fatalf("charter output %q", out)
 	}
+}
+
+func TestCharterListsTheProposedRulesAsJSON(t *testing.T) {
+	root := startCharter(t)
 	var list wire.CharterProposalsResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "charter", "--json")), &list))
 	if len(list.Proposals) != 1 || list.Proposals[0].State != trace.CharterProposed || list.Proposals[0].Rule != "Uploads resume." {
 		t.Fatalf("charter --json %+v", list)
 	}
-	if out := successful(t, root, "charter", stream, "1"); out != proposed {
+}
+
+func TestCharterShowsOneProposal(t *testing.T) {
+	root := startCharter(t)
+	if out := successful(t, root, "charter", stream, "1"); out != proposedText() {
 		t.Fatalf("proposal output %q", out)
 	}
+}
+
+func TestCharterRefusesAnUnknownProposal(t *testing.T) {
+	root := startCharter(t)
 	code, out, diag := invoke(t, root, "charter", stream, "2")
 	if code != 4 || out != "" || !strings.Contains(diag, "has no charter proposal for question 2") {
 		t.Fatalf("unknown proposal: %d %q %q", code, out, diag)
 	}
+}
 
-	out = successful(t, root, "charter", stream, "1", "ratify", "It holds everywhere.")
+func TestCharterRatifyRecordsTheDecision(t *testing.T) {
+	root := startCharter(t)
+	out := successful(t, root, "charter", stream, "1", "ratify", "It holds everywhere.")
 	if !strings.HasPrefix(out, "Question 1 of "+stream) || !strings.Contains(out, ": ratified\n") || !strings.HasSuffix(out, "  Decision: ratify\n  Note: It holds everywhere.\nthe owner ratified the charter proposal of question 1; the rule is appended to the charter next: It holds everywhere.\n") {
 		t.Fatalf("ratify output %q", out)
 	}
-	code, _, diag = invoke(t, root, "charter", stream, "1", "decline")
+}
+
+func TestCharterRefusesToDeclineARatifiedProposal(t *testing.T) {
+	root := startCharter(t)
+	successful(t, root, "charter", stream, "1", "ratify", "It holds everywhere.")
+	code, _, diag := invoke(t, root, "charter", stream, "1", "decline")
 	if code != 5 || !strings.Contains(diag, "already decided: ratify") {
 		t.Fatalf("declining a ratified proposal: %d %q", code, diag)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	var view wire.CharterProposalView
-	for {
-		must(t, json.Unmarshal([]byte(successful(t, root, "charter", stream, "1", "--json")), &view))
-		if view.State == trace.CharterChartered {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("proposal stayed %s", view.State)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+}
+
+func TestRatifiedProposalIsRecordedInTheCharter(t *testing.T) {
+	root := startCharter(t)
+	ratifyCharterProposal(t, root)
 	if out := successful(t, root, "charter", stream, "1"); !strings.Contains(out, "  Rule: charter#2 is: Uploads resume.\n") || !strings.Contains(out, "  Recorded in charter.md revision ") {
 		t.Fatalf("chartered output %q", out)
 	}
+}
+
+func TestCharterListIsEmptyOnceTheProposalIsDecided(t *testing.T) {
+	root := startCharter(t)
+	ratifyCharterProposal(t, root)
 	if out := successful(t, root, "charter"); out != "Charter: no proposed rules are waiting for you\n" {
 		t.Fatalf("charter output after the decision %q", out)
 	}
+}
 
+func TestCharterRefusesInvalidArguments(t *testing.T) {
+	root := startCharter(t)
 	for _, args := range [][]string{
 		{"charter", stream},
 		{"charter", "w_x", "1"},

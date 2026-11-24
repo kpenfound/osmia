@@ -61,7 +61,6 @@ A started entry keeps its original place when its result arrives. Unfinished
 starts survive restart without implying success or failure. Workstream events
 on /v1/events tell an open client to read this feed again.`
 
-// parameters describes each path parameter the routes use.
 var parameters = map[string]string{
 	"workstream": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
 	"project":    "Project ID.",
@@ -88,7 +87,6 @@ func Spec() ([]byte, error) {
 		jsonschema.InterceptDefName(func(_ reflect.Type, name string) string {
 			name = strings.TrimPrefix(name, "Service")
 			name = strings.TrimPrefix(name, "Api")
-			// A package's type named after it, such as config.Config.
 			if half := len(name) / 2; len(name)%2 == 0 && name[:half] == name[half:] {
 				return name[:half]
 			}
@@ -146,9 +144,6 @@ func Spec() ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// deleteBody attaches route's request body to its DELETE operation.
-// openapi-go reflects bodies only for methods that usually carry one, so the
-// body is reflected on a temporary POST operation and moved.
 func deleteBody(r *openapi31.Reflector, route service.Route) error {
 	scratch := "/delete-body" + route.Path
 	oc, err := r.NewOperationContext(http.MethodPost, scratch)
@@ -168,8 +163,6 @@ func deleteBody(r *openapi31.Reflector, route service.Route) error {
 	return nil
 }
 
-// operationID names route after its method and path, such as
-// getStatusByWorkstream for GET /v1/status/{workstream}.
 func operationID(route service.Route) string {
 	id := strings.ToLower(route.Method)
 	for _, segment := range strings.Split(strings.TrimPrefix(route.Path, wire.Prefix+"/"), "/") {
@@ -183,8 +176,6 @@ func operationID(route service.Route) string {
 	return id
 }
 
-// pathParameters returns a zero value of a struct with one string field per
-// placeholder in path, tagged for openapi-go, or nil when path has none.
 func pathParameters(path string) any {
 	var fields []reflect.StructField
 	for _, m := range placeholder.FindAllStringSubmatch(path, -1) {

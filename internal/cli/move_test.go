@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// A unit move and a workstream move reach the service and report why it
-// refuses one: a workstream moves its units only while building or
-// assembled, moves to assembled only once it is built, and never moves once
-// abandoned.
 func TestMoveCommand(t *testing.T) {
 	root, project, _ := handInFixture(t)
 	id := handInStdin(t, root, project, "# Design\n")

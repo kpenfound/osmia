@@ -6,22 +6,36 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-func TestTraceUsesServiceAPI(t *testing.T) {
-	t.Parallel()
+type traceServer struct {
+	root, socket string
+	mu           sync.Mutex
+	paths        []string
+}
+
+func (s *traceServer) requests() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.paths...)
+}
+
+func startTraceServer(t *testing.T) *traceServer {
+	t.Helper()
 	root := t.TempDir()
-	socket := filepath.Join(root, "fixture.sock")
-	listener, err := net.Listen("unix", socket)
+	ts := &traceServer{root: root, socket: filepath.Join(root, "fixture.sock")}
+	listener, err := net.Listen("unix", ts.socket)
 	must(t, err)
 	t.Cleanup(func() { listener.Close() })
-	paths := []string{}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.URL.Path)
+		ts.mu.Lock()
+		ts.paths = append(ts.paths, r.URL.Path)
+		ts.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case wire.Prefix + "/trace/" + stream:
@@ -39,25 +53,47 @@ func TestTraceUsesServiceAPI(t *testing.T) {
 	})}
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
-	base := []string{"--socket", socket, "trace", stream}
+	return ts
+}
+
+func TestTraceShowsEachSelectorFromOneServiceRequest(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
+		name string
 		tail []string
 		want string
-	}{{nil, "Criterion spec#1: Works"}, {[]string{"unit", "a"}, "Gap: review [not-created]"}, {[]string{"criterion", "spec#1"}, "Criterion spec#1"}, {[]string{"commit", strings.Repeat("a", 40)}, "landing revision 2"}} {
-		code, out, diag := invoke(t, root, append(base, test.tail...)...)
-		if code != 0 || diag != "" || !strings.Contains(out, test.want) {
-			t.Fatalf("%v: code=%d out=%s err=%s", test.tail, code, out, diag)
-		}
+	}{
+		{"workstream", nil, "Criterion spec#1: Works"},
+		{"unit", []string{"unit", "a"}, "Gap: review [not-created]"},
+		{"criterion", []string{"criterion", "spec#1"}, "Criterion spec#1"},
+		{"commit", []string{"commit", strings.Repeat("a", 40)}, "landing revision 2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ts := startTraceServer(t)
+			code, out, diag := invoke(t, ts.root, append([]string{"--socket", ts.socket, "trace", stream}, test.tail...)...)
+			if code != 0 || diag != "" || !strings.Contains(out, test.want) {
+				t.Fatalf("%v: code=%d out=%s err=%s", test.tail, code, out, diag)
+			}
+			if paths := ts.requests(); len(paths) != 1 {
+				t.Fatalf("API requests %v", paths)
+			}
+		})
 	}
-	if len(paths) != 4 {
-		t.Fatalf("API requests %v", paths)
-	}
-	code, _, diag := invoke(t, root, append(base, "unit", "missing")...)
+}
+
+func TestTraceReportsAMissingSelector(t *testing.T) {
+	t.Parallel()
+	ts := startTraceServer(t)
+	code, _, diag := invoke(t, ts.root, "--socket", ts.socket, "trace", stream, "unit", "missing")
 	if code != 4 || !strings.Contains(diag, "not in trace") {
 		t.Fatalf("missing selector: %d %s", code, diag)
 	}
-	code, _, _ = invoke(t, root, append(base, "other", "a")...)
-	if code != 2 {
+}
+
+func TestTraceRefusesAnUnknownSelectorKind(t *testing.T) {
+	t.Parallel()
+	ts := startTraceServer(t)
+	if code, _, _ := invoke(t, ts.root, "--socket", ts.socket, "trace", stream, "other", "a"); code != 2 {
 		t.Fatalf("invalid selector: %d", code)
 	}
 }

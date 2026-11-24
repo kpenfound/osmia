@@ -9,86 +9,112 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-func TestSessionDestroy(t *testing.T) {
+func openDesignSession(t *testing.T, root string, project config.ProjectID) config.WorkstreamID {
+	t.Helper()
+	var opened service.DesignResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "design", "open", string(project), "--json")), &opened))
+	return opened.Design.Workstream
+}
+
+func TestSessionDestroyReportsTheDestroyedSession(t *testing.T) {
+	root, project, _ := sessionFixture(t)
+	id := openSession(t, root, project).Workstream
+	if out := successful(t, root, "session", "destroy", string(id)); out != "Session "+string(id)+" destroyed\n" {
+		t.Fatalf("destroy text: %q", out)
+	}
+}
+
+func TestSessionDestroyReportsAnEndedSessionAsJSON(t *testing.T) {
+	root, project, _ := sessionFixture(t)
+	id := openSession(t, root, project).Workstream
+	successful(t, root, "session", "end", string(id))
+	var result service.SessionDestroyResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "session", "destroy", string(id), "--json")), &result))
+	if !result.Destroyed || result.Project != project || result.Workstream != id {
+		t.Fatalf("destroy JSON: %+v", result)
+	}
+}
+
+func TestSessionDestroyRemovesTheSession(t *testing.T) {
 	root, project, _ := sessionFixture(t)
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
-	for _, ended := range []bool{false, true} {
-		var opened service.SessionResponse
-		must(t, json.Unmarshal([]byte(successful(t, root, "session", "open", string(project), "--profile", "default", "--json")), &opened))
-		id := opened.Session.Workstream
-		args := []string{"session", "destroy", string(id)}
-		if ended {
-			successful(t, root, "session", "end", string(id))
-			args = append(args, "--json")
-		}
-		out := successful(t, root, args...)
-		if ended {
-			var result service.SessionDestroyResponse
-			must(t, json.Unmarshal([]byte(out), &result))
-			if !result.Destroyed || result.Project != project || result.Workstream != id {
-				t.Fatalf("destroy JSON: %+v", result)
-			}
-		} else if out != "Session "+string(id)+" destroyed\n" {
-			t.Fatalf("destroy text: %q", out)
-		}
-		list, err := c.Sessions(context.Background(), project)
-		must(t, err)
-		if len(list.Sessions) != 0 {
-			t.Fatalf("sessions after destroy: %+v", list.Sessions)
-		}
-		code, out, diag := invoke(t, root, args...)
-		if code != 4 || out != "" || diag != "not_found: session not found\n" {
-			t.Fatalf("destroy again: %d %q %q", code, out, diag)
+	successful(t, root, "session", "destroy", string(openSession(t, root, project).Workstream))
+	list, err := c.Sessions(context.Background(), project)
+	must(t, err)
+	if len(list.Sessions) != 0 {
+		t.Fatalf("sessions after destroy: %+v", list.Sessions)
+	}
+}
+
+func TestSessionDestroyTwiceIsNotFound(t *testing.T) {
+	root, project, _ := sessionFixture(t)
+	id := openSession(t, root, project).Workstream
+	successful(t, root, "session", "destroy", string(id))
+	code, out, diag := invoke(t, root, "session", "destroy", string(id))
+	if code != 4 || out != "" || diag != "not_found: session not found\n" {
+		t.Fatalf("destroy again: %d %q %q", code, out, diag)
+	}
+}
+
+func TestDesignDestroyReportsTheDestroyedSession(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	id := openDesignSession(t, root, project)
+	if out := successful(t, root, "design", "destroy", string(id)); out != "Design session "+string(id)+" destroyed\n" {
+		t.Fatalf("destroy text: %q", out)
+	}
+}
+
+func TestDesignDestroyReportsTheDestroyedSessionAsJSON(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	id := openDesignSession(t, root, project)
+	var result service.SessionDestroyResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "design", "destroy", string(id), "--json")), &result))
+	if !result.Destroyed || result.Project != project || result.Workstream != id {
+		t.Fatalf("destroy JSON: %+v", result)
+	}
+}
+
+func TestDesignDestroyRemovesTheSession(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	successful(t, root, "design", "destroy", string(openDesignSession(t, root, project)))
+	var list service.DesignsResponse
+	must(t, json.Unmarshal([]byte(successful(t, root, "design", "list", string(project), "--json")), &list))
+	if len(list.Designs) != 0 {
+		t.Fatalf("designs after destroy: %+v", list.Designs)
+	}
+}
+
+func TestDestroyedDesignSessionIsNotFound(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	id := openDesignSession(t, root, project)
+	successful(t, root, "design", "destroy", string(id))
+	for _, command := range []string{"destroy", "read"} {
+		code, out, diag := invoke(t, root, "design", command, string(id))
+		if code != 4 || out != "" || !strings.HasPrefix(diag, "not_found: ") {
+			t.Fatalf("%s after destroy: %d %q %q", command, code, out, diag)
 		}
 	}
 }
 
-func TestDesignDestroy(t *testing.T) {
-	root, project, _ := handInFixture(t)
-	for _, asJSON := range []bool{false, true} {
-		var opened service.DesignResponse
-		must(t, json.Unmarshal([]byte(successful(t, root, "design", "open", string(project), "--json")), &opened))
-		id := opened.Design.Workstream
-		args := []string{"design", "destroy", string(id)}
-		if asJSON {
-			args = append(args, "--json")
-		}
-		out := successful(t, root, args...)
-		if asJSON {
-			var result service.SessionDestroyResponse
-			must(t, json.Unmarshal([]byte(out), &result))
-			if !result.Destroyed || result.Project != project || result.Workstream != id {
-				t.Fatalf("destroy JSON: %+v", result)
-			}
-		} else if out != "Design session "+string(id)+" destroyed\n" {
-			t.Fatalf("destroy text: %q", out)
-		}
-		var list service.DesignsResponse
-		must(t, json.Unmarshal([]byte(successful(t, root, "design", "list", string(project), "--json")), &list))
-		if len(list.Designs) != 0 {
-			t.Fatalf("designs after destroy: %+v", list.Designs)
-		}
-		for _, command := range []string{"destroy", "read"} {
-			code, out, diag := invoke(t, root, "design", command, string(id))
-			if code != 4 || out != "" || !strings.HasPrefix(diag, "not_found: ") {
-				t.Fatalf("%s after destroy: %d %q %q", command, code, out, diag)
-			}
-		}
-	}
-}
-
-func TestDestroyRefusals(t *testing.T) {
-	root, project, _ := handInFixture(t)
-	other := handInStdin(t, root, project, "# Keep this feature\n")
+func TestDestroyRefusesAWorkgroup(t *testing.T) {
+	root, _, _ := handInFixture(t)
 	for _, kind := range []string{"session", "design"} {
 		code, out, diag := invoke(t, root, kind, "destroy", "g_0123456789abcdef0123456789abcdef")
 		if code != 5 || out != "" || diag != "conflict: workgroups cannot be destroyed; only sessions can be destroyed\n" {
 			t.Fatalf("%s workgroup: %d %q %q", kind, code, out, diag)
 		}
+	}
+}
+
+func TestDestroyRefusesAWorkstreamThatIsNotASessionAndKeepsIt(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	other := handInStdin(t, root, project, "# Keep this feature\n")
+	for _, kind := range []string{"session", "design"} {
 		for _, flag := range [][]string{nil, {"--json"}} {
 			code, out, diag := invoke(t, root, append([]string{kind, "destroy", other}, flag...)...)
 			if code != 5 || out != "" || diag != "conflict: only an open design session or an exploratory session can be destroyed\n" {
@@ -97,9 +123,11 @@ func TestDestroyRefusals(t *testing.T) {
 		}
 	}
 	successful(t, root, "status", other)
-	var opened service.DesignResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "design", "open", string(project), "--json")), &opened))
-	id := string(opened.Design.Workstream)
+}
+
+func TestDesignDestroyRefusesWhileATurnRunsAndKeepsTheSession(t *testing.T) {
+	root, project, _ := handInFixture(t)
+	id := string(openDesignSession(t, root, project))
 	successful(t, root, "design", "send", id, "Discuss this feature")
 	code, out, diag := invoke(t, root, "design", "destroy", id)
 	if code != 5 || out != "" || diag != "conflict: a turn or control is running for this session; try again once it finishes\n" {
@@ -108,8 +136,13 @@ func TestDestroyRefusals(t *testing.T) {
 	if !strings.Contains(successful(t, root, "design", "list"), id) {
 		t.Fatal("refused design disappeared")
 	}
+}
+
+func TestHelpListsTheDestroyCommands(t *testing.T) {
+	root, _, _ := handInFixture(t)
+	help := successful(t, root, "--help")
 	for _, command := range []string{"session destroy <session-id> [--json]", "design destroy <design-id> [--json]"} {
-		if !strings.Contains(successful(t, root, "--help"), command) {
+		if !strings.Contains(help, command) {
 			t.Fatalf("help missing %q", command)
 		}
 	}
@@ -130,18 +163,25 @@ func (c heldDestroyChecks) Check(ctx context.Context, _ string, _ api.CheckIdent
 	}
 }
 
-func TestSessionDestroyRefusesInFlightCheck(t *testing.T) {
+type inFlightCheck struct {
+	root   string
+	id     config.WorkstreamID
+	client *service.Client
+	ctx    context.Context
+	checks heldDestroyChecks
+	done   chan error
+}
+
+func startInFlightCheck(t *testing.T) inFlightCheck {
+	t.Helper()
 	checks := heldDestroyChecks{started: make(chan struct{}), release: make(chan struct{}, 1)}
 	root, project, _ := sessionFixtureWithChecks(t, checks)
-	// Release the checker before the fixture closes, even on a failed assertion.
-	defer close(checks.release)
-	var opened service.SessionResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "session", "open", string(project), "--profile", "default", "--json")), &opened))
-	id := opened.Session.Workstream
+	t.Cleanup(func() { close(checks.release) })
+	id := openSession(t, root, project).Workstream
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
-	defer c.Close()
+	t.Cleanup(c.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	checked := make(chan error, 1)
 	go func() {
 		_, err := c.SessionCheck(ctx, id)
@@ -152,13 +192,22 @@ func TestSessionDestroyRefusesInFlightCheck(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("check did not start")
 	}
-	code, out, diag := invoke(t, root, "session", "destroy", string(id), "--json")
+	return inFlightCheck{root: root, id: id, client: c, ctx: ctx, checks: checks, done: checked}
+}
+
+func TestSessionDestroyRefusesWhileACheckIsInFlightAndKeepsTheSession(t *testing.T) {
+	f := startInFlightCheck(t)
+	code, out, diag := invoke(t, f.root, "session", "destroy", string(f.id), "--json")
 	if code != 5 || out != "" || diag != "conflict: a turn or control is running for this session; try again once it finishes\n" {
 		t.Fatalf("busy session: %d %q %q", code, out, diag)
 	}
-	_, err := c.Session(ctx, id)
+	_, err := f.client.Session(f.ctx, f.id)
 	must(t, err)
-	checks.release <- struct{}{}
-	must(t, <-checked)
-	successful(t, root, "session", "destroy", string(id))
+}
+
+func TestSessionDestroySucceedsOnceTheCheckFinishes(t *testing.T) {
+	f := startInFlightCheck(t)
+	f.checks.release <- struct{}{}
+	must(t, <-f.done)
+	successful(t, f.root, "session", "destroy", string(f.id))
 }

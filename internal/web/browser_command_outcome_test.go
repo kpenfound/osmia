@@ -8,7 +8,6 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// outcomeOf reads the data-outcome attribute #inbox-result currently shows.
 func (p *page) outcomeOf(selector string) string {
 	p.t.Helper()
 	var outcome string
@@ -16,13 +15,14 @@ func (p *page) outcomeOf(selector string) string {
 	return outcome
 }
 
-// Deciding a ratification shows the three outcomes the owner's command can
-// have: accepted and durably recorded ('ok'), temporarily unavailable with
-// the blocking operation named ('unavailable'), and rejected with a reason
-// ('error'). Refusals restore the actionable card; an accepted ratification
-// keeps it dismissed.
-func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testing.T) {
-	t.Parallel()
+type ratifyOutcomePage struct {
+	p    *page
+	api  *fakeAPI
+	card string
+}
+
+func openRatifyOutcomePage(t *testing.T) ratifyOutcomePage {
+	t.Helper()
 	api := newFakeAPI(1)
 	api.setInbox(ratificationEntry("w_000"))
 	server := httptest.NewServer(api.handler())
@@ -31,61 +31,76 @@ func TestBrowserPageShowsAcceptedUnavailableAndRejectedCommandOutcomes(t *testin
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(server.URL+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.click(`[data-select="w_000"]`)
-
 	card := decisionSelector("ratification", "w_000", "")
 	p.awaitVisible("the ratification packet", card)
+	return ratifyOutcomePage{p: p, api: api, card: card}
+}
 
-	// Temporarily unavailable: the sealing controller is busy with another
-	// operation. The card comes back so the owner can try again, and the
-	// result names the blocking operation. The response is held open so the
-	// card's "gone" state, between the optimistic dismiss and the restore
-	// that follows the failure, is actually observable: answering at once
-	// would let dismiss and restore both happen before awaitGone's next
-	// poll, so the window could close before the test ever sees it.
-	release := sync.OnceFunc(api.ratify.holdResponse())
+func (o ratifyOutcomePage) ratify(t *testing.T) {
+	t.Helper()
+	release := sync.OnceFunc(o.api.ratify.holdResponse())
 	t.Cleanup(release)
-	api.ratify.failNextUnavailable("sealing workstream w_000 is already in progress")
-	p.click(card + `[data-decision-choice="ratify"]`)
-	p.awaitGone("the ratification packet", card)
+	o.p.click(o.card + `[data-decision-choice="ratify"]`)
+	o.p.awaitGone("the ratification packet", o.card)
 	release()
-	p.awaitText("#inbox-result", "sealing workstream w_000 is already in progress")
-	if outcome := p.outcomeOf("#inbox-result"); outcome != "unavailable" {
+}
+
+func TestBrowserPageShowsAnUnavailableCommandOutcome(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNextUnavailable("sealing workstream w_000 is already in progress")
+	o.ratify(t)
+	o.p.awaitText("#inbox-result", "sealing workstream w_000 is already in progress")
+	if outcome := o.p.outcomeOf("#inbox-result"); outcome != "unavailable" {
 		t.Fatalf("unavailable outcome: data-outcome=%q", outcome)
 	}
-	p.awaitVisible("the ratification packet, restored after unavailable", card)
-	p.assertNoOutcomes("#workstreams")
+}
 
-	// Rejected: the owner's view is stale. The card comes back the same
-	// way, but the outcome is distinct from unavailable. Held open for the
-	// same reason as above.
-	release = sync.OnceFunc(api.ratify.holdResponse())
-	t.Cleanup(release)
-	api.ratify.failNext("spec.md revision 2 is ratified already, read it with osmia status")
-	p.click(card + `[data-decision-choice="ratify"]`)
-	p.awaitGone("the ratification packet", card)
-	release()
-	p.awaitText("#inbox-result", "spec.md revision 2 is ratified already")
-	if outcome := p.outcomeOf("#inbox-result"); outcome != "error" {
+func TestBrowserPageRestoresTheCardAfterAnUnavailableCommand(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNextUnavailable("sealing workstream w_000 is already in progress")
+	o.ratify(t)
+	o.p.awaitVisible("the ratification packet, restored after unavailable", o.card)
+	o.p.assertNoOutcomes("#workstreams")
+}
+
+func TestBrowserPageShowsARejectedCommandOutcome(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNext("spec.md revision 2 is ratified already, read it with osmia status")
+	o.ratify(t)
+	o.p.awaitText("#inbox-result", "spec.md revision 2 is ratified already")
+	if outcome := o.p.outcomeOf("#inbox-result"); outcome != "error" {
 		t.Fatalf("rejected outcome: data-outcome=%q", outcome)
 	}
-	p.awaitVisible("the ratification packet, restored after rejection", card)
-	p.assertNoOutcomes("#workstreams")
+}
 
-	// Accepted: a fresh submission succeeds and dismisses the card for
-	// good. Success never restores the card (app.js's submit calls
-	// acknowledge, not restore, on success), so there is no "gone, then
-	// back" window to race here; holding the response is not needed to
-	// observe the dismissal, only to see it happen before the server
-	// answers, as the already-passing dismiss tests do.
-	release = sync.OnceFunc(api.ratify.holdResponse())
-	t.Cleanup(release)
-	api.ratify.failNext("")
-	p.click(card + `[data-decision-choice="ratify"]`)
-	p.awaitGone("the ratification packet", card)
-	release()
-	p.awaitOutcome("the owner ratified the packet.")
-	p.assertOutcomes("#workstreams", "the owner ratified the packet.")
-	if outcome := p.outcomeOf("#inbox-result"); outcome != "" {
+func TestBrowserPageRestoresTheCardAfterARejectedCommand(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNext("spec.md revision 2 is ratified already, read it with osmia status")
+	o.ratify(t)
+	o.p.awaitVisible("the ratification packet, restored after rejection", o.card)
+	o.p.assertNoOutcomes("#workstreams")
+}
+
+func TestBrowserPageShowsAnAcceptedCommandOutcomeInTheFeed(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNext("")
+	o.ratify(t)
+	o.p.awaitOutcome("the owner ratified the packet.")
+	o.p.assertOutcomes("#workstreams", "the owner ratified the packet.")
+}
+
+func TestBrowserAcceptedCommandLeavesNoOutcomeOnTheSharedResultLine(t *testing.T) {
+	t.Parallel()
+	o := openRatifyOutcomePage(t)
+	o.api.ratify.failNext("")
+	o.ratify(t)
+	o.p.awaitOutcome("the owner ratified the packet.")
+	if outcome := o.p.outcomeOf("#inbox-result"); outcome != "" {
 		t.Fatalf("accepted outcome left data-outcome=%q on the shared result line", outcome)
 	}
 }

@@ -23,18 +23,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The project onboarding demonstration: a project is added from a local fixture
-// clone, registration records the entity map seeded from its tracked files as
-// the only knowledge, the owner writes the charter, and the project's local
-// context resolves without any network.
-
 const onboardingCharter = `# Charter
 
 1. Keep the trace append-only.
 2. Every change ships with a test.
 `
 
-// onboardingGit runs git with no user or system configuration.
 func onboardingGit(t *testing.T, home string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -46,8 +40,6 @@ func onboardingGit(t *testing.T, home string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// treeHash hashes every path, mode and file content below dir, VCS metadata
-// included.
 func treeHash(t *testing.T, dir string) string {
 	t.Helper()
 	h := sha256.New()
@@ -82,14 +74,21 @@ func onboardingStatus(t *testing.T, root string) wire.ConfigResponse {
 	return st.Configuration
 }
 
-func TestProjectOnboarding(t *testing.T) {
+type onboarded struct {
+	root        string
+	clone       string
+	cloneBefore string
+	id          config.ProjectID
+	db          string
+	added       wire.ProjectResponse
+	service     *service.Service
+}
+
+func onboardProject(t *testing.T) onboarded {
+	t.Helper()
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		t.Setenv(name, "ghp_onboarding_credential_must_not_be_used")
 	}
-	ctx := context.Background()
-
-	// 1. A fresh root with no project, and a fixture clone with CODEOWNERS
-	// and a few subsystems.
 	opts, clone := emptyFixture(t)
 	home := filepath.Dir(clone)
 	for path, content := range map[string]string{
@@ -107,37 +106,33 @@ func TestProjectOnboarding(t *testing.T) {
 	cloneBefore := treeHash(t, clone)
 	opts.ShutdownTimeout = 100 * time.Millisecond
 	root := opts.Config.Root
-	s, err := service.Start(ctx, opts)
+	s, err := service.Start(context.Background(), opts)
 	must(t, err)
-	stopped := false
-	t.Cleanup(func() {
-		if !stopped {
-			s.Close()
-		}
-	})
+	t.Cleanup(func() { s.Close() })
 	if cfg := onboardingStatus(t, root); cfg.Project != nil {
 		t.Fatalf("fresh root has a project: %+v", cfg.Project)
 	}
-
-	// 2. project add registers the project; the trace lives under the root.
 	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "demo", "--upstream", "owner/demo", "--fork", "fork/demo", "--clone", clone, "--json")), &added))
-	id := added.Project.ID
-	traceDir := added.Project.Trace
-	resolvedRoot, err := config.ResolveRoot(root, "")
-	must(t, err)
-	if traceDir != filepath.Join(resolvedRoot.String(), "projects", string(id)) || strings.HasPrefix(traceDir, added.Project.Clone) {
-		t.Fatalf("trace %s, clone %s", traceDir, added.Project.Clone)
-	}
-	db := trace.TraceDatabase(traceDir)
+	return onboarded{root: root, clone: clone, cloneBefore: cloneBefore, id: added.Project.ID, db: trace.TraceDatabase(added.Project.Trace), added: added, service: s}
+}
 
-	// 3. Registration recorded the seeded entity map as the owner's first
-	// revision and nothing else: no knowledge prose and no further map.
-	seeded, err := kb.Seed(clone)
+func TestProjectAddKeepsItsTraceOutsideTheClone(t *testing.T) {
+	o := onboardProject(t)
+	resolvedRoot, err := config.ResolveRoot(o.root, "")
+	must(t, err)
+	if traceDir := o.added.Project.Trace; traceDir != filepath.Join(resolvedRoot.String(), "projects", string(o.id)) || strings.HasPrefix(traceDir, o.added.Project.Clone) {
+		t.Fatalf("trace %s, clone %s", traceDir, o.added.Project.Clone)
+	}
+}
+
+func TestProjectAddRecordsTheSeededEntityMapAndNothingElse(t *testing.T) {
+	o := onboardProject(t)
+	seeded, err := kb.Seed(o.clone)
 	must(t, err)
 	want, err := kb.Encode(seeded)
 	must(t, err)
-	docs := traceDocuments(t, db, "documents.jsonl")
+	docs := traceDocuments(t, o.db, "documents.jsonl")
 	if entities := docs["kb-entities"]; len(entities) != 1 || entities[0].Revision != 1 || entities[0].Content != string(want) || entities[0].Actor != (trace.Actor{Kind: "owner", ID: "local"}) {
 		t.Fatalf("entity map revisions: %+v", entities)
 	}
@@ -146,35 +141,46 @@ func TestProjectOnboarding(t *testing.T) {
 			t.Fatalf("registration recorded %s", doc)
 		}
 	}
-	if status := successful(t, root, "status"); strings.Contains(status, "Knowledge base") {
-		t.Fatalf("status reports a knowledge base:\n%s", status)
-	}
-	if treeHash(t, clone) != cloneBefore {
+}
+
+func TestProjectAddLeavesTheCloneUnchanged(t *testing.T) {
+	o := onboardProject(t)
+	if treeHash(t, o.clone) != o.cloneBefore {
 		t.Fatal("onboarding changed the clone")
 	}
+}
 
-	// 4. The owner writes rules with osmia edit; status shows them and the
-	// context is file-based.
-	setCharter(t, root, id, onboardingCharter)
-	status := successful(t, root, "status")
+func TestStatusReportsNoKnowledgeBase(t *testing.T) {
+	o := onboardProject(t)
+	if status := successful(t, o.root, "status"); strings.Contains(status, "Knowledge base") {
+		t.Fatalf("status reports a knowledge base:\n%s", status)
+	}
+}
+
+func TestOwnerCharterEditAppearsInStatusAndTheTrace(t *testing.T) {
+	o := onboardProject(t)
+	setCharter(t, o.root, o.id, onboardingCharter)
+	status := successful(t, o.root, "status")
 	for _, want := range []string{
-		"Charter: 2 rules, revision 2; edit it with osmia edit charter " + string(id) + "\n",
-		"Context: " + string(id) + " context_mode=file",
+		"Charter: 2 rules, revision 2; edit it with osmia edit charter " + string(o.id) + "\n",
+		"Context: " + string(o.id) + " context_mode=file",
 	} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("status lacks %q:\n%s", want, status)
 		}
 	}
-	charters := traceDocuments(t, db, "documents.jsonl")["charter"]
+	charters := traceDocuments(t, o.db, "documents.jsonl")["charter"]
 	if edit := charters[len(charters)-1]; len(charters) != 2 || edit.Revision != 2 || edit.Actor != (trace.Actor{Kind: "owner", ID: "local"}) || edit.Cause != "owner-edit" || edit.Content != onboardingCharter {
 		t.Fatalf("charter revisions: %+v", charters)
 	}
-	if commits := commitCount(t, db); commits < 2 {
+	if commits := commitCount(t, o.db); commits < 2 {
 		t.Fatalf("trace history: %d commits", commits)
 	}
+}
 
-	// 5. Resolution reads the local entity map alone.
-	local, err := kb.Parse([]byte(latestDocument(t, db, "documents.jsonl", trace.EntitiesPath).Content))
+func TestSeededEntityMapResolvesEntitiesAndPaths(t *testing.T) {
+	o := onboardProject(t)
+	local, err := kb.Parse([]byte(latestDocument(t, o.db, "documents.jsonl", trace.EntitiesPath).Content))
 	must(t, err)
 	fp := local.ResolveEntities([]string{"trace", "internal"})
 	entities := slices.Sorted(slices.Values(fp.Entities))
@@ -185,12 +191,16 @@ func TestProjectOnboarding(t *testing.T) {
 	if want := []kb.PathMatch{{Path: "internal/trace/git.go", Entities: []string{"internal", "internal.trace"}}, {Path: "cmd/demo/main.go", Entities: []string{"cmd", "cmd.demo"}}, {Path: "docs/unknown.md", Entities: []string{kb.RootID}}}; len(loc.Matches) != len(want) || len(loc.Unresolved) != 0 || !slices.Equal(loc.Matches[2].Entities, []string{kb.RootID}) {
 		t.Fatalf("paths to entities: %+v", loc)
 	}
-	// The service's file provider assembles a footprint's bundle.
-	provider := s.Context()
-	if provider.Mode(id) != bundle.ModeFile {
-		t.Fatalf("mode %s", provider.Mode(id))
+}
+
+func TestFileContextBundleCarriesTheCharterAndTheScopedEntities(t *testing.T) {
+	o := onboardProject(t)
+	setCharter(t, o.root, o.id, onboardingCharter)
+	provider := o.service.Context()
+	if provider.Mode(o.id) != bundle.ModeFile {
+		t.Fatalf("mode %s", provider.Mode(o.id))
 	}
-	b, err := provider.Assemble(ctx, id, bundle.Scope{Entities: []string{"trace"}})
+	b, err := provider.Assemble(context.Background(), o.id, bundle.Scope{Entities: []string{"trace"}})
 	must(t, err)
 	if b.Charter.Revision != 2 || len(b.Charter.Rules) != 2 || len(b.Decisions) != 0 || b.Entities.Revision != 1 {
 		t.Fatalf("bundle: %+v", b)
@@ -204,25 +214,26 @@ func TestProjectOnboarding(t *testing.T) {
 			t.Fatalf("rendered bundle lacks %q:\n%s", want, rendered)
 		}
 	}
+}
 
-	// 6. Removing the project keeps the trace and the clone.
-	traceBefore := commitCount(t, db)
-	removed := successful(t, root, "project", "remove", string(id))
-	if !strings.Contains(removed, string(id)) {
+func TestProjectRemoveKeepsTheTraceAndTheClone(t *testing.T) {
+	o := onboardProject(t)
+	setCharter(t, o.root, o.id, onboardingCharter)
+	traceBefore := commitCount(t, o.db)
+	removed := successful(t, o.root, "project", "remove", string(o.id))
+	if !strings.Contains(removed, string(o.id)) {
 		t.Fatalf("remove output:\n%s", removed)
 	}
-	if cfg := onboardingStatus(t, root); cfg.Project != nil {
+	if cfg := onboardingStatus(t, o.root); cfg.Project != nil {
 		t.Fatalf("project still active: %+v", cfg.Project)
 	}
-	if commits := commitCount(t, db); commits != traceBefore {
+	if commits := commitCount(t, o.db); commits != traceBefore {
 		t.Fatalf("trace moved on removal: %d commits, %d before", commits, traceBefore)
 	}
-	if got := latestDocument(t, db, "documents.jsonl", "charter.md").Content; got != onboardingCharter {
+	if got := latestDocument(t, o.db, "documents.jsonl", "charter.md").Content; got != onboardingCharter {
 		t.Fatalf("charter after removal: %q", got)
 	}
-	if treeHash(t, clone) != cloneBefore {
+	if treeHash(t, o.clone) != o.cloneBefore {
 		t.Fatal("removal changed the clone")
 	}
-	must(t, s.Close())
-	stopped = true
 }

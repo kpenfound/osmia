@@ -26,11 +26,8 @@ import (
 
 const readinessEnv = "OSMIA_SERVICE_READY_FD"
 
-// Startup can ensure the managed engine before it acknowledges readiness.
 const detachedReadinessTimeout = engine.ActionTimeout + 30*time.Second
 
-// detachedCommand is the process boundary; tests launch an idle fake service.
-// An empty root serves the default root.
 var detachedCommand = func(root string) (*exec.Cmd, error) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -42,8 +39,6 @@ var detachedCommand = func(root string) (*exec.Cmd, error) {
 	return exec.Command(executable, "serve", "--root", root), nil
 }
 
-// rootFlag is the --root argument that selects root again, empty for the
-// default root.
 func rootFlag(root config.Root) string {
 	if root.SelfContained() {
 		return root.String()
@@ -51,11 +46,6 @@ func rootFlag(root config.Root) string {
 	return ""
 }
 
-// baseServiceOptions builds the service's own Options from root and its
-// structured logger, before enforcement. Tests override it, the same way
-// they override detachedCommand and enforcement, to inject a fake GitHub
-// client into a detached child subprocess that exercises a real GitHub
-// action through serve's actual process boundary against a fake server.
 var baseServiceOptions = func(root config.Root, logger *slog.Logger) service.Options {
 	return service.Options{Config: root.Options(""), Build: build(), Logger: logger}
 }
@@ -67,10 +57,6 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 	if detached {
 		return detach(ctx, root, stdout)
 	}
-	// This process is the service itself (foreground or the detached
-	// child): give embedded code's standard log.Printf calls, and any
-	// slog top-level call that bypasses logger, the same structured
-	// handler as the service's own records for as long as it runs.
 	restore := installGlobalLog(logger)
 	defer restore()
 	ready := os.Getenv(readinessEnv) == "3"
@@ -96,15 +82,11 @@ func runService(ctx context.Context, root config.Root, detached bool, stdout io.
 	return nil
 }
 
-// stoppedError is the failure that stopped a service after it started.
 type stoppedError struct{ err error }
 
 func (e stoppedError) Error() string { return e.err.Error() }
 func (e stoppedError) Unwrap() error { return e.err }
 
-// reportServeFailure explains why serve failed. A service that stopped
-// after it started names the failure; startup errors may contain raw TOML
-// values or paths, so they are not echoed.
 func reportServeFailure(stderr io.Writer, err error, at time.Time) {
 	if stopped := (stoppedError{}); errors.As(err, &stopped) {
 		fmt.Fprintf(stderr, "%s service stopped after a failure: %s\n", at.Format(time.RFC3339), failureText(stopped.err))
@@ -114,11 +96,6 @@ func reportServeFailure(stderr io.Writer, err error, at time.Time) {
 	fmt.Fprintln(stderr, "service startup failed; run osmia doctor to find the cause, and stop any existing owner before starting another")
 }
 
-// logServeFailure records why the service process itself failed, at
-// startup or after it started, as one error-level structured record on
-// logger: a foreground osmia serve logs it to its own standard error, and
-// the detached child logs it to <root>/service.log, which is its own
-// standard error. It keeps failureText's redaction and today's guidance.
 func logServeFailure(logger *slog.Logger, err error) {
 	if stopped := (stoppedError{}); errors.As(err, &stopped) {
 		logger.Error("service stopped after a failure", "error", failureText(stopped.err), "guidance", "fix the cause above, then start the service again")
@@ -127,34 +104,12 @@ func logServeFailure(logger *slog.Logger, err error) {
 	logger.Error("service startup failed", "guidance", "run osmia doctor to find the cause, and stop any existing owner before starting another")
 }
 
-// newServiceLogger builds the structured logger every line the service
-// process writes to w, its own standard error, goes through: the service's
-// own records, embedded Tailscale's and the GitHub activity log. A
-// redacting writer bounds it underneath, so a record built without
-// failureText's own redaction still never carries a known secret.
 func newServiceLogger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(redactingWriter{w}, nil))
 }
 
-// globalLogMu guards the standard log package's output and slog's default
-// logger, both process-wide state, across every call to installGlobalLog in
-// this process.
 var globalLogMu sync.Mutex
 
-// installGlobalLog tries to take globalLogMu and route the standard log
-// package's output, and slog's default logger, through logger:
-// slog.SetDefault makes the log package's default Logger write through
-// logger's handler, which catches a dependency linked into serve (e.g.
-// agentcore or tailscale code other than tsnet's UserLogf) that still
-// calls log.Printf. If another service already running in this process
-// holds the lock, installGlobalLog installs nothing — that service's own
-// structured handler already receives every standard-log call, since both
-// go through the same process-wide defaults — and returns a no-op restore,
-// so a second service started in the same process (as in tests that run
-// serve in-process) never blocks waiting for the first to stop. Otherwise
-// the caller must call the returned restore exactly once, when the service
-// it represents stops, to give back the previous defaults and release the
-// lock.
 func installGlobalLog(logger *slog.Logger) (restore func()) {
 	if !globalLogMu.TryLock() {
 		return func() {}
@@ -171,8 +126,6 @@ func installGlobalLog(logger *slog.Logger) (restore func()) {
 	}
 }
 
-// redactingWriter redacts known secrets from every write, a final guard
-// under the structured logger besides each record's own redaction.
 type redactingWriter struct{ w io.Writer }
 
 func (r redactingWriter) Write(p []byte) (int, error) {
@@ -182,17 +135,10 @@ func (r redactingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// credentialURL matches the user information of a URL, which may hold a
-// credential.
 var credentialURL = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@`)
 
-// maxFailureText bounds the failure text the service prints when it stops.
 const maxFailureText = 4000
 
-// failureText renders err for the service's own output: credentials in URLs
-// and the GitHub token are redacted, joined errors are separated by
-// semicolons, other control characters become spaces and the text is
-// bounded.
 func failureText(err error) string {
 	text := credentialURL.ReplaceAllString(err.Error(), "${1}[redacted]@")
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -215,8 +161,6 @@ func failureText(err error) string {
 	return text
 }
 
-// detach acknowledges startup only through the child's private readiness pipe.
-// Root ownership and socket recovery remain the service's responsibility.
 func detach(ctx context.Context, root config.Root, stdout io.Writer) error {
 	return detachWithin(ctx, root, stdout, detachedReadinessTimeout)
 }

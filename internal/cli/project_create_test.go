@@ -16,8 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// creationService starts a service with an empty root, a [projects] table and a
-// fake GitHub whose created repository is a local bare repository.
 func creationService(t *testing.T) (root, cloneDir string, github *servicetest.FakeGitHub) {
 	t.Helper()
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
@@ -41,11 +39,32 @@ func creationService(t *testing.T) (root, cloneDir string, github *servicetest.F
 	return root, cloneDir, github
 }
 
-func TestProjectCreateCommand(t *testing.T) {
-	root, cloneDir, github := creationService(t)
+type createdProject struct {
+	root, cloneDir, charter string
+	github                  *servicetest.FakeGitHub
+	response                wire.ProjectResponse
+}
+
+func writeCharterFile(t *testing.T) string {
+	t.Helper()
 	charter := filepath.Join(t.TempDir(), "charter.md")
 	must(t, os.WriteFile(charter, []byte("# Charter\n\n1. Keep it small.\n"), 0600))
+	return charter
+}
 
+func createNewProject(t *testing.T) createdProject {
+	t.Helper()
+	root, cloneDir, github := creationService(t)
+	charter := writeCharterFile(t)
+	c := createdProject{root: root, cloneDir: cloneDir, charter: charter, github: github}
+	out := successful(t, root, "project", "create", "New Project", "--repo", "newrepo", "--description", "A new project", "--charter-file", charter, "--json")
+	must(t, json.Unmarshal([]byte(out), &c.response))
+	return c
+}
+
+func TestProjectCreateRefusesInvalidArgumentsBeforeReachingGitHub(t *testing.T) {
+	root, cloneDir, github := creationService(t)
+	charter := writeCharterFile(t)
 	for _, args := range [][]string{
 		{"project", "create", "New Project"},
 		{"project", "create", "New Project", "--repo", "newrepo"},
@@ -57,40 +76,62 @@ func TestProjectCreateCommand(t *testing.T) {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}
+	if github.CreateCalls() != 0 {
+		t.Fatal("a refused command reached GitHub")
+	}
+}
+
+func TestProjectCreateRefusesAnUnreadableCharterBeforeReachingGitHub(t *testing.T) {
+	root, _, github := creationService(t)
 	if code, _, diag := invoke(t, root, "project", "create", "New Project", "--repo", "newrepo", "--charter-file", filepath.Join(t.TempDir(), "missing.md")); code != 1 || !strings.Contains(diag, "cannot read the charter") {
 		t.Fatalf("%d %q", code, diag)
 	}
 	if github.CreateCalls() != 0 {
 		t.Fatal("a refused command reached GitHub")
 	}
+}
 
-	var created wire.ProjectResponse
-	out := successful(t, root, "project", "create", "New Project", "--repo", "newrepo", "--description", "A new project", "--charter-file", charter, "--json")
-	must(t, json.Unmarshal([]byte(out), &created))
-	if created.Project.Name != "New Project" || created.Project.Upstream != "owner/newrepo" || created.Project.Fork != "" || created.Project.BaseBranch != "main" || created.Project.Clone != filepath.Join(cloneDir, "newrepo") {
+func TestProjectCreateRegistersTheProjectOnTheNewRepository(t *testing.T) {
+	c := createNewProject(t)
+	created := c.response
+	if created.Project.Name != "New Project" || created.Project.Upstream != "owner/newrepo" || created.Project.Fork != "" || created.Project.BaseBranch != "main" || created.Project.Clone != filepath.Join(c.cloneDir, "newrepo") {
 		t.Fatalf("%+v", created)
 	}
-	repo, ok := github.Repo("owner/newrepo")
+}
+
+func TestProjectCreateMakesAPrivateRepositoryWithTheDescription(t *testing.T) {
+	c := createNewProject(t)
+	repo, ok := c.github.Repo("owner/newrepo")
 	if !ok || !repo.Private || !repo.AutoInit || repo.Description != "A new project" {
 		t.Fatalf("%+v", repo)
 	}
-	// The charter is the project's charter.
-	client := service.NewClient(filepath.Join(root, "osmia.sock"))
+}
+
+func TestProjectCreateRecordsTheCharterFile(t *testing.T) {
+	c := createNewProject(t)
+	client := service.NewClient(filepath.Join(c.root, "osmia.sock"))
 	defer client.Close()
 	var doc trace.Document
-	must(t, client.Do(context.Background(), "GET", wire.Prefix+"/projects/charter/"+string(created.Project.ID), nil, &doc))
+	must(t, client.Do(context.Background(), "GET", wire.Prefix+"/projects/charter/"+string(c.response.Project.ID), nil, &doc))
 	if doc.Revision != 1 || doc.Content != "# Charter\n\n1. Keep it small.\n" {
 		t.Fatalf("charter: %+v", doc)
 	}
-	// Repeating the command with the same identity returns the project.
-	again := successful(t, root, "project", "create", "New Project", "--repo", "newrepo", "--description", "A new project", "--charter-file", charter, "--id", string(created.Project.ID), "--json")
+}
+
+func TestProjectCreateAgainWithTheSameIdentityCreatesNothingNew(t *testing.T) {
+	c := createNewProject(t)
+	again := successful(t, c.root, "project", "create", "New Project", "--repo", "newrepo", "--description", "A new project", "--charter-file", c.charter, "--id", string(c.response.Project.ID), "--json")
 	var repeated wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(again), &repeated))
-	if repeated.Project.ID != created.Project.ID || github.CreateCalls() != 1 {
-		t.Fatalf("%+v, %d create calls", repeated, github.CreateCalls())
+	if repeated.Project.ID != c.response.Project.ID || c.github.CreateCalls() != 1 {
+		t.Fatalf("%+v, %d create calls", repeated, c.github.CreateCalls())
 	}
+}
+
+func TestProjectCreateRefusesARepositoryNameThatIsTaken(t *testing.T) {
+	root, _, github := creationService(t)
 	github.AddRepo("owner/other", "elsewhere", "main")
-	code, text, diag := invoke(t, root, "project", "create", "Again", "--repo", "other", "--charter-file", charter)
+	code, text, diag := invoke(t, root, "project", "create", "Again", "--repo", "other", "--charter-file", writeCharterFile(t))
 	if code != 4 || text != "" || !strings.Contains(diag, "already exists on GitHub") {
 		t.Fatalf("a taken name: %d %q %q", code, text, diag)
 	}
@@ -113,12 +154,8 @@ func TestProjectCreateReadsTheCharterFromStandardInput(t *testing.T) {
 	}
 }
 
-// The identity alone finishes a planned creation, and a stuck creation's
-// inbox entry names that command.
-func TestProjectCreateWithOnlyAnIdentity(t *testing.T) {
-	root, _, github := creationService(t)
-	charter := filepath.Join(t.TempDir(), "charter.md")
-	must(t, os.WriteFile(charter, []byte("# Charter\n\n1. Keep it small.\n"), 0600))
+func TestProjectCreateWithAnIdentityRefusesInvalidArguments(t *testing.T) {
+	root, _, _ := creationService(t)
 	for _, args := range [][]string{
 		{"project", "create", "--id", "nope"},
 		{"project", "create", "--id", "p_0123456789abcdef0123456789abcdef", "--repo", "newrepo"},
@@ -129,47 +166,22 @@ func TestProjectCreateWithOnlyAnIdentity(t *testing.T) {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}
-	created := successful(t, root, "project", "create", "New Project", "--repo", "newrepo", "--charter-file", charter, "--json")
-	var first wire.ProjectResponse
-	must(t, json.Unmarshal([]byte(created), &first))
-	again := successful(t, root, "project", "create", "--id", string(first.Project.ID), "--json")
+}
+
+func TestProjectCreateWithOnlyAnIdentityRepeatsTheExistingProject(t *testing.T) {
+	c := createNewProject(t)
+	again := successful(t, c.root, "project", "create", "--id", string(c.response.Project.ID), "--json")
 	var repeated wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(again), &repeated))
-	if repeated.Project.ID != first.Project.ID || github.CreateCalls() != 1 {
-		t.Fatalf("%+v, %d create calls", repeated, github.CreateCalls())
+	if repeated.Project.ID != c.response.Project.ID || c.github.CreateCalls() != 1 {
+		t.Fatalf("%+v, %d create calls", repeated, c.github.CreateCalls())
 	}
+}
+
+func TestProjectCreateWithAnUnknownIdentityAndNoPlanFails(t *testing.T) {
+	root, _, _ := creationService(t)
 	code, out, diag := invoke(t, root, "project", "create", "--id", "p_0123456789abcdef0123456789abcdef")
 	if code == 0 || out != "" || diag == "" {
 		t.Fatalf("an identity with no plan: %d %q %q", code, out, diag)
-	}
-}
-
-func TestInboxNamesTheCommandThatRetriesAStuckCreation(t *testing.T) {
-	var out bytes.Buffer
-	showInbox(&out, wire.InboxResponse{Entries: []wire.InboxEntry{{
-		Kind: wire.InboxProjectCreation, Question: "Creating the project for owner/gadget stopped.", Blocked: "Creating and registering the project.",
-		Options: []string{"retry"}, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/projects/create", Body: map[string]any{"id": "p_0123456789abcdef0123456789abcdef"}},
-	}}})
-	for _, want := range []string{"[project-creation]", "Options: retry", "osmia project create --id p_0123456789abcdef0123456789abcdef"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("inbox lacks %q:\n%s", want, out.String())
-		}
-	}
-}
-
-func TestInboxTellsHowARefusedStartsProjectIsCreated(t *testing.T) {
-	var out bytes.Buffer
-	showInbox(&out, wire.InboxResponse{Entries: []wire.InboxEntry{{
-		Kind: wire.InboxProjectCreation, Question: "Creating the project for gadget was refused before it began: GITHUB_TOKEN is not set.", Blocked: "Starting the workgroup: the new project is allocated once it is created.",
-		Options: []string{"retry"}, Answer: wire.InboxAnswer{Method: "POST", Path: "/v1/projects/create", Body: map[string]any{"id": "p_0123456789abcdef0123456789abcdef", "name": "Gadget", "repo": "gadget", "charter": "Keep it small."}},
-	}}})
-	text := out.String()
-	for _, want := range []string{"[project-creation]", "the service creates Gadget (repository gadget) under p_0123456789abcdef0123456789abcdef on its next pass"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("inbox lacks %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "osmia project create --id") {
-		t.Fatalf("inbox offers a command that cannot create a refused start's project:\n%s", text)
 	}
 }

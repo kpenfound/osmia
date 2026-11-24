@@ -20,9 +20,6 @@ const (
 	member   = "agent_committee_1"
 )
 
-// withShed creates a project trace whose workstream is in the shed after one
-// round: the committee's record of it holds one objection, and debate has
-// concluded, as a stopped service left it.
 func withShed(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
@@ -37,8 +34,6 @@ func withShed(t *testing.T) service.Options {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "agent", ID: "agent_architect"}, Cause: "draft-1"}, Path: path, Content: content}
 	}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{document(plan.SpecDocument, plan.SpecPath, shedSpec), document(plan.PlanDocument, plan.PlanPath, shedPlan)}))
-	// The plan's footprint names an entity of the project's map, which
-	// ratification validates it against.
 	entities := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.EntitiesDocument, Revision: 1, Project: project, At: written, Actor: owner, Cause: "test"},
 		Path: trace.EntitiesPath, Content: `{"version":1,"entities":[{"id":"internal.store","name":"store","paths":["internal/store/**"]}]}` + "\n"}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{entities}))
@@ -53,8 +48,6 @@ func withShed(t *testing.T) service.Options {
 	h.ID = "shed-concluded-1"
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "shed", From: "", To: "concluded-1", Reason: "planted"}})
 	must(t, err)
-	// The chief of staff presented the packet of the conclusion, which is
-	// what osmia ratify reads the revisions from.
 	packet, err := shed.EncodePacket(shed.Present(1, shed.Pin{Spec: 1, Plan: 1}, false, "planted", shed.DissentRecord([]shed.Record{record}, nil, nil)))
 	must(t, err)
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: shed.PacketDocumentID(1), Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "service", ID: "shed"}, Cause: "ratification-packet"}, Path: shed.PacketPath(1), Content: string(packet)}}))
@@ -62,87 +55,145 @@ func withShed(t *testing.T) service.Options {
 	return opts
 }
 
-func TestShedCommands(t *testing.T) {
+func startShed(t *testing.T) (root, objection string) {
+	t.Helper()
 	opts := withShed(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
-	objection := shed.ObjectionID(1, member, 1)
+	return opts.Config.Root, shed.ObjectionID(1, member, 1)
+}
 
+func ownerObjects(t *testing.T, root string) {
+	t.Helper()
+	successful(t, root, "shed", "object", stream, "The plan never names the retry budget.")
+}
+
+func TestShedObjectRecordsTheOwnersObjection(t *testing.T) {
+	root, _ := startShed(t)
 	text := successful(t, root, "shed", "object", stream, "The plan never names the retry budget.")
 	if want := "Shed of workstream " + stream + ": objected\nthe owner objected to round 1 against spec.md revision 1 and plan.json revision 1: The plan never names the retry budget.\n"; text != want {
 		t.Fatalf("object output %q, want %q", text, want)
 	}
+}
+
+func TestShedRuleDismissReportsTheRulingAsJSON(t *testing.T) {
+	root, objection := startShed(t)
 	var ruled wire.ShedResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "shed", "rule", stream, objection, "dismiss", "I accept the risk.", "--json")), &ruled))
 	if ruled.Action != string(shed.Dismissed) || ruled.Objection != objection || ruled.Round != 1 || !strings.Contains(ruled.Detail, "I accept the risk.") {
 		t.Fatalf("rule --json %+v", ruled)
 	}
-	// The note is optional.
+}
+
+func TestShedRuleAcceptsNoNote(t *testing.T) {
+	root, _ := startShed(t)
+	ownerObjects(t, root)
 	if out := successful(t, root, "shed", "rule", stream, "owner-r1-1", "sustain"); !strings.Contains(out, "sustained") {
 		t.Fatalf("rule without a note %q", out)
 	}
+}
+
+func TestShedMoreAsksForFurtherRounds(t *testing.T) {
+	root, _ := startShed(t)
 	if out := successful(t, root, "shed", "more", stream, "2"); !strings.Contains(out, "2 more rounds of debate after round 1") {
 		t.Fatalf("more output %q", out)
 	}
+}
+
+func TestShedRedraftAsksForANewDraft(t *testing.T) {
+	root, _ := startShed(t)
 	if out := successful(t, root, "shed", "redraft", stream, "Split the resume unit."); !strings.Contains(out, "a redraft of spec.md revision 1 and plan.json revision 1 after round 1: Split the resume unit.") {
 		t.Fatalf("redraft output %q", out)
 	}
+}
+
+func TestShedSkipMovesTheWorkstreamToRatification(t *testing.T) {
+	root, _ := startShed(t)
 	if out := successful(t, root, "shed", "skip", stream); !strings.Contains(out, "ratification") {
 		t.Fatalf("skip output %q", out)
 	}
-	// Ratification is refused while the owner's own sustained objection
-	// blocks, and passes once the owner has overruled it instead.
-	code, out, diag := invoke(t, root, "ratify", stream)
-	if code != 5 || out != "" || !strings.Contains(diag, "blocks and is sustained and is not conceded") {
-		t.Fatalf("ratifying over a sustained objection: %d %q %q", code, out, diag)
+}
+
+func TestShedSkipTwiceIsAConflict(t *testing.T) {
+	root, _ := startShed(t)
+	successful(t, root, "shed", "skip", stream)
+	code, out, diag := invoke(t, root, "shed", "skip", stream)
+	if code != 5 || out != "" || !strings.Contains(diag, "already skipped") {
+		t.Fatalf("skipping twice: %d %q %q", code, out, diag)
 	}
+}
+
+func TestShedOverruleReportsTheRulingAsJSON(t *testing.T) {
+	root, _ := startShed(t)
+	ownerObjects(t, root)
+	successful(t, root, "shed", "rule", stream, "owner-r1-1", "sustain")
 	var overruled wire.ShedResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "shed", "overrule", stream, "owner-r1-1", "I accept the risk.", "--json")), &overruled))
 	if overruled.Action != string(shed.Overruled) || overruled.Objection != "owner-r1-1" || !strings.Contains(overruled.Detail, "I accept the risk.") {
 		t.Fatalf("overrule --json %+v", overruled)
 	}
-	// The reason is optional.
+}
+
+func TestShedOverruleAcceptsNoReason(t *testing.T) {
+	root, objection := startShed(t)
+	successful(t, root, "shed", "rule", stream, objection, "dismiss", "I accept the risk.")
 	if out := successful(t, root, "shed", "overrule", stream, objection); !strings.Contains(out, "overruled") {
 		t.Fatalf("overrule without a reason %q", out)
 	}
-	// ratify pins the revisions it read from the packet and asks for the
-	// sealing. This fixture's clone is no Git repository, so the sealing
-	// never completes and the workstream stays in the shed.
+}
+
+func TestRatifyRefusesASustainedObjection(t *testing.T) {
+	root, _ := startShed(t)
+	ownerObjects(t, root)
+	successful(t, root, "shed", "rule", stream, "owner-r1-1", "sustain")
+	code, out, diag := invoke(t, root, "ratify", stream)
+	if code != 5 || out != "" || !strings.Contains(diag, "blocks and is sustained and is not conceded") {
+		t.Fatalf("ratifying over a sustained objection: %d %q %q", code, out, diag)
+	}
+}
+
+func TestRatifyReportsTheRatificationAsJSON(t *testing.T) {
+	root, objection := startShed(t)
+	successful(t, root, "shed", "rule", stream, objection, "dismiss", "I accept the risk.")
 	var ratified wire.RatifyResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "ratify", stream, "--json")), &ratified))
 	if ratified.Spec != 1 || ratified.Plan != 1 || ratified.Round != 1 || ratified.Sealing != "requested" || ratified.Workstream != stream || !strings.HasSuffix(ratified.Detail, "; the sealing is asked for") {
 		t.Fatalf("ratify --json %+v", ratified)
 	}
-	// Ratifying the same revisions again reports the sealing asked for,
-	// pending or running as the loop has it at the time.
+}
+
+func TestRatifyTwiceReportsTheExistingRatification(t *testing.T) {
+	root, objection := startShed(t)
+	successful(t, root, "shed", "rule", stream, objection, "dismiss", "I accept the risk.")
+	successful(t, root, "ratify", stream)
 	want := "Workstream " + stream + " ratified: spec.md revision 1 and plan.json revision 1\nworkstream " + stream +
 		" is ratified at spec.md revision 1 and plan.json revision 1 already; "
 	if out := successful(t, root, "ratify", stream); !strings.HasPrefix(out, want) || !strings.HasSuffix(out, "\n") {
 		t.Fatalf("ratify output %q, want a prefix %q", out, want)
 	}
+}
 
-	// Refusals reach the owner with the service's own message.
-	code, out, diag = invoke(t, root, "shed", "skip", stream)
-	if code != 5 || out != "" || !strings.Contains(diag, "already skipped") {
-		t.Fatalf("skipping twice: %d %q %q", code, out, diag)
-	}
-	code, out, diag = invoke(t, root, "shed", "more", stream, "0")
-	if code != 4 || out != "" || !strings.Contains(diag, "shed.max_rounds") {
-		t.Fatalf("no rounds: %d %q %q", code, out, diag)
-	}
-	code, out, diag = invoke(t, root, "shed", "rule", stream, "agent_committee_9-r1-1", "dismiss")
-	if code != 4 || out != "" || !strings.Contains(diag, "no objection") {
-		t.Fatalf("unknown objection: %d %q %q", code, out, diag)
-	}
-	code, out, diag = invoke(t, root, "shed", "object", stream, "  ")
-	if code != 4 || out != "" || !strings.Contains(diag, "an objection requires an argument") {
-		t.Fatalf("empty argument: %d %q %q", code, out, diag)
+func TestShedCommandsRefuseInvalidRequests(t *testing.T) {
+	root, _ := startShed(t)
+	for _, c := range []struct {
+		name string
+		args []string
+		diag string
+	}{
+		{"no rounds", []string{"shed", "more", stream, "0"}, "shed.max_rounds"},
+		{"unknown objection", []string{"shed", "rule", stream, "agent_committee_9-r1-1", "dismiss"}, "no objection"},
+		{"empty argument", []string{"shed", "object", stream, "  "}, "an objection requires an argument"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			code, out, diag := invoke(t, root, c.args...)
+			if code != 4 || out != "" || !strings.Contains(diag, c.diag) {
+				t.Fatalf("%d %q %q", code, out, diag)
+			}
+		})
 	}
 }
 
-// The shed group takes exactly its own arguments.
 func TestShedCommandArguments(t *testing.T) {
 	opts := fixture(t)
 	s, err := service.Start(context.Background(), opts)

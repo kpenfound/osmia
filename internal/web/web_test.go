@@ -17,8 +17,6 @@ func serve(method, path string) (*httptest.ResponseRecorder, bool) {
 	return w, Serve(w, httptest.NewRequest(method, path, nil))
 }
 
-// The page and its assets are served for GET and HEAD with their content
-// types and a policy that keeps the page to its own origin.
 func TestServeServesThePageAndItsAssets(t *testing.T) {
 	for path, want := range map[string]struct{ contentType, contains string }{
 		"/":                                    {"text/html; charset=utf-8", `<script src="/app.js" defer></script>`},
@@ -44,26 +42,36 @@ func TestServeServesThePageAndItsAssets(t *testing.T) {
 			t.Fatalf("HEAD %s: served %v, status %d, headers %v", path, ok, head.Code, head.Header())
 		}
 	}
-	if !strings.Contains(policy, "default-src 'none'") || !strings.Contains(policy, "connect-src 'self'") || !strings.Contains(policy, "font-src 'self'") || !strings.Contains(policy, "frame-ancestors 'none'") {
-		t.Fatalf("policy %q", policy)
+}
+
+func TestPolicyAllowsOnlyTheOwnOrigin(t *testing.T) {
+	for _, directive := range []string{"default-src 'none'", "script-src 'self'", "connect-src 'self'", "font-src 'self'", "frame-ancestors 'none'"} {
+		if !strings.Contains(policy, directive) {
+			t.Fatalf("policy %q lacks %s", policy, directive)
+		}
 	}
 }
 
-// The page declares exactly one SVG favicon in its head, and fetching it
-// returns the bee emoji with no reference to anything outside the service.
-func TestPageDeclaresABeeFaviconServedAsSVG(t *testing.T) {
+func TestPolicyAllowsNoInlineOrEvaluatedScript(t *testing.T) {
+	for _, directive := range []string{"unsafe-inline", "unsafe-eval"} {
+		if strings.Contains(policy, directive) {
+			t.Fatalf("policy %q allows %s", policy, directive)
+		}
+	}
+}
+
+func faviconHref(t *testing.T) string {
+	t.Helper()
 	w, ok := serve(http.MethodGet, "/")
 	if !ok || w.Code != http.StatusOK {
 		t.Fatalf("GET /: served %v, status %d", ok, w.Code)
 	}
 	page := w.Body.String()
-	head := page
-	if i, j := strings.Index(page, "<head>"), strings.Index(page, "</head>"); i >= 0 && j > i {
-		head = page[i:j]
-	} else {
+	i, j := strings.Index(page, "<head>"), strings.Index(page, "</head>")
+	if i < 0 || j <= i {
 		t.Fatalf("page has no <head>...</head>: %s", page)
 	}
-	links := regexp.MustCompile(`<link\s+rel="icon"[^>]*>`).FindAllString(head, -1)
+	links := regexp.MustCompile(`<link\s+rel="icon"[^>]*>`).FindAllString(page[i:j], -1)
 	if len(links) != 1 {
 		t.Fatalf("head has %d <link rel=\"icon\"> elements, want 1: %v", len(links), links)
 	}
@@ -78,16 +86,29 @@ func TestPageDeclaresABeeFaviconServedAsSVG(t *testing.T) {
 	if strings.Contains(href[1], "://") {
 		t.Fatalf("icon href points off the service: %s", href[1])
 	}
+	return href[1]
+}
 
-	icon, ok := serve(http.MethodGet, href[1])
+func favicon(t *testing.T) []byte {
+	t.Helper()
+	href := faviconHref(t)
+	icon, ok := serve(http.MethodGet, href)
 	if !ok || icon.Code != http.StatusOK {
-		t.Fatalf("GET %s: served %v, status %d", href[1], ok, icon.Code)
+		t.Fatalf("GET %s: served %v, status %d", href, ok, icon.Code)
 	}
 	if ct := icon.Header().Get("Content-Type"); ct != "image/svg+xml" {
-		t.Fatalf("GET %s content type %q, want image/svg+xml", href[1], ct)
+		t.Fatalf("GET %s content type %q, want image/svg+xml", href, ct)
 	}
-	body := icon.Body.Bytes()
-	dec := xml.NewDecoder(icon.Body)
+	return icon.Body.Bytes()
+}
+
+func TestPageDeclaresOneSVGFaviconOnItsOwnOrigin(t *testing.T) {
+	favicon(t)
+}
+
+func TestFaviconIsWellFormedXMLDrawingABee(t *testing.T) {
+	body := favicon(t)
+	dec := xml.NewDecoder(bytes.NewReader(body))
 	for {
 		_, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -100,11 +121,10 @@ func TestPageDeclaresABeeFaviconServedAsSVG(t *testing.T) {
 	if !strings.Contains(string(body), "\U0001F41D") && !strings.Contains(string(body), "&#x1F41D;") {
 		t.Fatalf("icon body has no bee: %s", body)
 	}
-	// A standalone image/svg+xml document still needs its xmlns declaration to
-	// render, so the external-reference check walks tokens for actual
-	// resource references (href/xlink:href/src, url(), @import) instead of
-	// matching "http://" as a raw substring of the body.
-	dec = xml.NewDecoder(bytes.NewReader(body))
+}
+
+func TestFaviconReferencesNoExternalResource(t *testing.T) {
+	dec := xml.NewDecoder(bytes.NewReader(favicon(t)))
 	inStyle := false
 	for {
 		tok, err := dec.Token()
@@ -146,7 +166,6 @@ func TestPageDeclaresABeeFaviconServedAsSVG(t *testing.T) {
 	}
 }
 
-// Other methods and paths are left to the caller.
 func TestServeLeavesOtherRequests(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{http.MethodPost, "/"},
@@ -161,27 +180,35 @@ func TestServeLeavesOtherRequests(t *testing.T) {
 	}
 }
 
-// The two bundled fonts are the only font files, are small enough to ship
-// with the page, and each sits beside its licence in the source tree.
-func TestBundledFontsStayWithinTheirBudgetAndKeepTheirLicences(t *testing.T) {
-	total := 0
-	for path, licence := range map[string]string{
-		"/fonts/InstrumentSans-Variable.woff2": "fonts/instrument-sans/OFL.txt",
-		"/fonts/JetBrainsMono-Variable.woff2":  "fonts/jetbrains-mono/OFL.txt",
-	} {
-		w, ok := serve(http.MethodGet, path)
-		if !ok {
-			t.Fatalf("%s is not served", path)
-		}
-		total += w.Body.Len()
+var bundledFonts = map[string]string{
+	"/fonts/InstrumentSans-Variable.woff2": "fonts/instrument-sans/OFL.txt",
+	"/fonts/JetBrainsMono-Variable.woff2":  "fonts/jetbrains-mono/OFL.txt",
+}
+
+func TestBundledFontsKeepTheirLicences(t *testing.T) {
+	for _, licence := range bundledFonts {
 		text, err := assets.ReadFile(licence)
 		if err != nil || !strings.Contains(string(text), "SIL Open Font License") {
 			t.Fatalf("%s is not the SIL Open Font License: %v", licence, err)
 		}
 	}
+}
+
+func TestBundledFontsStayWithinTheirBudget(t *testing.T) {
+	total := 0
+	for path := range bundledFonts {
+		w, ok := serve(http.MethodGet, path)
+		if !ok {
+			t.Fatalf("%s is not served", path)
+		}
+		total += w.Body.Len()
+	}
 	if total < 50_000 || total > 250_000 {
 		t.Fatalf("the bundled fonts total %d bytes, want about 200 KB or less", total)
 	}
+}
+
+func TestPageServesOneSansAndOneMonoFont(t *testing.T) {
 	var fonts int
 	for path := range paths {
 		if strings.HasPrefix(path, "/fonts/") {
@@ -193,45 +220,53 @@ func TestBundledFontsStayWithinTheirBudgetAndKeepTheirLicences(t *testing.T) {
 	}
 }
 
-// The stylesheet is dark only and keeps to the design language's rules: one
-// palette in OKLCH custom properties, no light branch, no capitals styling,
-// no transition on every property, reduced motion honoured and an outline
-// never removed from the composer.
-func TestStylesheetKeepsToTheDesignLanguage(t *testing.T) {
+func stylesheet() (css, root string) {
 	w, _ := serve(http.MethodGet, "/style.css")
-	css := w.Body.String()
-	root := css[strings.Index(css, ":root {"):]
-	root = root[:strings.Index(root, "\n}\n")]
+	css = w.Body.String()
+	root = css[strings.Index(css, ":root {"):]
+	return css, root[:strings.Index(root, "\n}\n")]
+}
+
+func TestStylesheetHasOnlyTheDarkPalette(t *testing.T) {
+	css, root := stylesheet()
 	if !strings.Contains(root, "color-scheme: dark") {
 		t.Fatal("the palette does not declare color-scheme: dark")
 	}
 	if strings.Contains(css, "prefers-color-scheme") || strings.Contains(css, "color-scheme: light") {
 		t.Fatal("the stylesheet has a light palette branch")
 	}
-	for _, banned := range []string{"text-transform", "transition: all", "outline: none", "outline:none"} {
-		if strings.Contains(css, banned) {
-			t.Fatalf("the stylesheet contains %q", banned)
-		}
-	}
-	for _, want := range []string{"prefers-reduced-motion: reduce", ":focus-visible", "scrollbar-color", "select option", "font-display: swap"} {
-		if !strings.Contains(css, want) {
-			t.Fatalf("the stylesheet lacks %q", want)
-		}
-	}
-	// Outside the palette block no rule holds a literal colour.
-	literal := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(`)
-	if found := literal.FindString(strings.Replace(css, root, "", 1)); found != "" {
-		t.Fatalf("a component rule holds the literal colour %q", found)
-	}
-	// The page itself asks for the dark scheme.
 	page, _ := serve(http.MethodGet, "/")
 	if !strings.Contains(page.Body.String(), `<meta name="color-scheme" content="dark">`) {
 		t.Fatal("the page does not declare the dark colour scheme")
 	}
 }
 
-// No element in the page repeats an attribute: a browser keeps only the first,
-// so a second class list would never apply.
+func TestStylesheetAvoidsTheBannedDeclarations(t *testing.T) {
+	css, _ := stylesheet()
+	for _, banned := range []string{"text-transform", "transition: all", "outline: none", "outline:none"} {
+		if strings.Contains(css, banned) {
+			t.Fatalf("the stylesheet contains %q", banned)
+		}
+	}
+}
+
+func TestStylesheetHonoursMotionFocusScrollAndFontPreferences(t *testing.T) {
+	css, _ := stylesheet()
+	for _, want := range []string{"prefers-reduced-motion: reduce", ":focus-visible", "scrollbar-color", "select option", "font-display: swap"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("the stylesheet lacks %q", want)
+		}
+	}
+}
+
+func TestStylesheetHoldsColourLiteralsOnlyInThePalette(t *testing.T) {
+	css, root := stylesheet()
+	literal := regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(`)
+	if found := literal.FindString(strings.Replace(css, root, "", 1)); found != "" {
+		t.Fatalf("a component rule holds the literal colour %q", found)
+	}
+}
+
 func TestPageElementsNeverRepeatAnAttribute(t *testing.T) {
 	w, _ := serve(http.MethodGet, "/")
 	tag := regexp.MustCompile(`<[a-zA-Z][^<>]*>`)
@@ -247,8 +282,6 @@ func TestPageElementsNeverRepeatAnAttribute(t *testing.T) {
 	}
 }
 
-// The four create forms share one layout: the form class, fields with a
-// label tied to their control, and the actions after the last field.
 func TestCreateFormsShareOneLayoutInTheMarkup(t *testing.T) {
 	w, _ := serve(http.MethodGet, "/")
 	page := w.Body.String()
@@ -278,8 +311,6 @@ func TestCreateFormsShareOneLayoutInTheMarkup(t *testing.T) {
 	}
 }
 
-// The script never asks the browser to confirm anything: the actions that
-// need confirming open the page's own dialog.
 func TestScriptNeverUsesTheNativeConfirmation(t *testing.T) {
 	w, _ := serve(http.MethodGet, "/app.js")
 	for _, banned := range []string{"window.confirm", "confirm(", "alert(", "prompt("} {

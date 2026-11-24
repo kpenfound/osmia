@@ -17,9 +17,6 @@ func historyEvent(id, summary, decidedBy string, departed bool) wire.TraceEvent 
 	return wire.TraceEvent{Ref: wire.TraceRef{Kind: "transition", ID: id, Revision: 1}, Summary: summary, DecidedBy: decidedBy, DefaultTo: "reviewing", Departed: departed}
 }
 
-// `osmia trace` labels a transition "decided by Jev" when Jev departed from the
-// default, and no other: a followed default, a fallback, a pinned owner or gate
-// decision, a reviewer's verdict and an unrouted transition show nothing extra.
 func TestTraceLabelsOnlyTransitionsJevDepartedOn(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -62,7 +59,6 @@ func TestTraceLabelsOnlyTransitionsJevDepartedOn(t *testing.T) {
 	}
 }
 
-// `osmia feed` lists a transition and labels it only when Jev departed.
 func TestFeedLabelsOnlyTransitionsJevDepartedOn(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

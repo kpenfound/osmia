@@ -11,13 +11,10 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// archivedGroupAPI serves a workgroup whose members are all archived. Its
-// shared feed is readable until gone is set.
 type archivedGroupAPI struct {
 	base *fakeAPI
 	mu   sync.Mutex
 	gone bool
-	// sent counts the POSTs to the workgroup, which a read-only view never makes.
 	sent int
 }
 
@@ -72,8 +69,6 @@ func openArchivedGroupPage(t *testing.T, a *archivedGroupAPI, members ...string)
 	return p
 }
 
-// A workgroup whose members are all archived is reached from the list and read
-// as a conversation that cannot be written to.
 func TestBrowserArchivedWorkgroupShowsItsRetainedConversationReadOnly(t *testing.T) {
 	t.Parallel()
 	a := &archivedGroupAPI{base: newFakeAPI(0)}
@@ -105,8 +100,6 @@ func TestBrowserArchivedWorkgroupShowsItsRetainedConversationReadOnly(t *testing
 	}
 }
 
-// A workgroup whose shared feed is gone, or that the status no longer lists, is
-// unavailable.
 func TestBrowserWorkgroupWithoutItsSharedFeedIsUnavailable(t *testing.T) {
 	t.Parallel()
 	t.Run("feed gone", func(t *testing.T) {

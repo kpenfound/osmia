@@ -49,8 +49,6 @@ const quiet = "w_fedcba9876543210fedcba9876543210"
 
 var written = time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
 
-// withStatus creates the project trace with two workstreams and has a fake
-// chief of staff write a status for the first one.
 func withStatus(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
@@ -88,49 +86,17 @@ func withStatus(t *testing.T) service.Options {
 	return opts
 }
 
-func TestStatusShowsWorkstreams(t *testing.T) {
+func startStatusFixture(t *testing.T) (service.Options, string) {
+	t.Helper()
 	opts := withStatus(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+	return opts, opts.Config.Root
+}
 
-	overview := successful(t, root, "status")
-	for _, want := range []string{
-		"ready=true",
-		"Profiles:\n",
-		"Jev: unconfigured model=",
-		// Pools without a factory-wide limit never show as zero slots.
-		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
-			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
-			"  checks: 0 of 2 slot(s) in use\n",
-		// The service's jj decides what auto gives new workstreams.
-		"Workspaces: setting=auto new_workstreams=",
-		"Workstreams:\n" +
-			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
-			"    Goal: Ship resumable uploads.\n" +
-			"    Attention: none\n" +
-			"  " + quiet + " state=not recorded open_questions=0 context_mode=file workspaces=git\n" +
-			"    no status yet\n",
-	} {
-		if !strings.Contains(overview, want) {
-			t.Fatalf("overview lacks %q:\n%s", want, overview)
-		}
-	}
-	if strings.Contains(overview, "of 0 slot") || strings.Contains(overview, "0/0") {
-		t.Fatalf("overview shows a pool as zero slots:\n%s", overview)
-	}
-	if strings.Contains(overview, "The plan is drafted") {
-		t.Fatalf("overview shows the note:\n%s", overview)
-	}
-
-	var all struct {
-		Health        wire.HealthResponse
-		Configuration wire.ConfigResponse
-		Runtime       wire.RuntimeResponse
-		Status        wire.StatusResponse
-	}
-	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
+func expectedWorkstreamStatuses(t *testing.T, opts service.Options, root string) (full, none wire.WorkstreamStatus) {
+	t.Helper()
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	var recorded struct {
@@ -145,13 +111,63 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		must(t, config.CheckWorkgroupIDs(group.ID))
 		return &wire.WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}
 	}
-	// Handed and not-yet-started workstreams are both planning; the CLI's
-	// text output retains their underlying recorded states.
 	handed := "handed"
-	full := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(stream).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(stream).String(), Status: &wire.StatusView{
+	full = wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(stream), Workstream: stream, Project: project, State: &handed, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(stream).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(stream).String(), Status: &wire.StatusView{
 		Goal: "Ship resumable uploads.", Note: "The plan is drafted. Review is underway.",
 		Agents: []string{"The architect is preparing the packet.", "A reviewer is idle."}, Revision: 1, UpdatedAt: written}}
-	none := wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(quiet).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(quiet).String()}
+	none = wire.WorkstreamStatus{DisplayState: "planning", Workgroup: workgroup(quiet), Workstream: quiet, Project: project, Units: []wire.UnitStatus{}, Advisories: []wire.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []wire.AgentStatus{}, ContextMode: "file", Workspaces: "git", TelemetryTraceID: telemetry.WorkstreamTrace(quiet).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(quiet).String()}
+	return full, none
+}
+
+func TestStatusOverviewShowsProfilesCapacityAndWorkstreams(t *testing.T) {
+	_, root := startStatusFixture(t)
+	overview := successful(t, root, "status")
+	for _, want := range []string{
+		"ready=true",
+		"Profiles:\n",
+		"Jev: unconfigured model=",
+		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
+			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
+			"  checks: 0 of 2 slot(s) in use\n",
+		"Workspaces: setting=auto new_workstreams=",
+		"Workstreams:\n" +
+			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
+			"    Goal: Ship resumable uploads.\n" +
+			"    Attention: none\n" +
+			"  " + quiet + " state=not recorded open_questions=0 context_mode=file workspaces=git\n" +
+			"    no status yet\n",
+	} {
+		if !strings.Contains(overview, want) {
+			t.Fatalf("overview lacks %q:\n%s", want, overview)
+		}
+	}
+}
+
+func TestStatusOverviewShowsNoPoolAsZeroSlots(t *testing.T) {
+	_, root := startStatusFixture(t)
+	overview := successful(t, root, "status")
+	if strings.Contains(overview, "of 0 slot") || strings.Contains(overview, "0/0") {
+		t.Fatalf("overview shows a pool as zero slots:\n%s", overview)
+	}
+}
+
+func TestStatusOverviewLeavesOutTheNote(t *testing.T) {
+	_, root := startStatusFixture(t)
+	if overview := successful(t, root, "status"); strings.Contains(overview, "The plan is drafted") {
+		t.Fatalf("overview shows the note:\n%s", overview)
+	}
+}
+
+func TestStatusJSONHoldsEveryWorkstreamProfilesCapacityAndWorkspaces(t *testing.T) {
+	opts, root := startStatusFixture(t)
+	full, none := expectedWorkstreamStatuses(t, opts, root)
+	var all struct {
+		Health        wire.HealthResponse
+		Configuration wire.ConfigResponse
+		Runtime       wire.RuntimeResponse
+		Status        wire.StatusResponse
+	}
+	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
@@ -162,7 +178,10 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	if ws := all.Status.Workspaces; ws.Setting != "auto" || ws.Backend != "git" && ws.Backend != "jujutsu" || ws.Problem != "" {
 		t.Fatalf("status --json workspaces: %+v", ws)
 	}
+}
 
+func TestStatusOfOneWorkstreamShowsItsNarrative(t *testing.T) {
+	_, root := startStatusFixture(t)
 	one := successful(t, root, "status", stream)
 	if want := "Workstream: " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
 		"Goal: Ship resumable uploads.\n" +
@@ -174,30 +193,52 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 		"Updated: 2026-09-16T10:00:00Z (revision 1)\n"; one != want {
 		t.Fatalf("status <workstream>:\n%s\nwant:\n%s", one, want)
 	}
+}
+
+func TestStatusJSONOfOneWorkstream(t *testing.T) {
+	opts, root := startStatusFixture(t)
+	full, _ := expectedWorkstreamStatuses(t, opts, root)
 	var got wire.WorkstreamStatus
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &got))
 	if !reflect.DeepEqual(got, full) {
 		t.Fatalf("status <workstream> --json: %+v", got)
 	}
+}
 
+func TestStatusOfAWorkstreamWithoutAStatusSaysSo(t *testing.T) {
+	_, root := startStatusFixture(t)
 	if out := successful(t, root, "status", quiet); out != "Workstream: "+quiet+" state=not recorded open_questions=0 context_mode=file workspaces=git\nStatus: none yet; the chief of staff has not written one\n" {
 		t.Fatalf("no status:\n%s", out)
 	}
-	raw := map[string]json.RawMessage{}
-	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &raw))
-	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json", quiet)), &got))
+}
+
+func TestStatusJSONOfAWorkstreamWithoutAStatusHoldsNulls(t *testing.T) {
+	opts, root := startStatusFixture(t)
+	_, none := expectedWorkstreamStatuses(t, opts, root)
+	out := successful(t, root, "status", "--json", quiet)
+	var got wire.WorkstreamStatus
+	must(t, json.Unmarshal([]byte(out), &got))
 	if !reflect.DeepEqual(got, none) {
 		t.Fatalf("no status --json: %+v", got)
 	}
+	raw := map[string]json.RawMessage{}
+	must(t, json.Unmarshal([]byte(out), &raw))
 	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["context_mode"]) != `"file"` || string(raw["open_questions"]) != "0" || string(raw["drift"]) != "null" {
 		t.Fatalf("no status JSON: %v", raw)
 	}
+}
 
+func TestStatusOfAnUnknownWorkstreamIsNotFound(t *testing.T) {
+	_, root := startStatusFixture(t)
 	unknown := "w_00000000000000000000000000000009"
 	code, out, diag := invoke(t, root, "status", unknown)
 	if code != 4 || out != "" || diag != "not_found: workstream "+unknown+" is not in an active project; list workstreams with osmia status\n" {
 		t.Fatalf("unknown workstream: %d %q %q", code, out, diag)
 	}
+}
+
+func TestStatusRefusesBadWorkstreamArguments(t *testing.T) {
+	_, root := startStatusFixture(t)
 	for _, args := range [][]string{{"status", "not-a-workstream"}, {"status", project}, {"status", stream, quiet}} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
@@ -206,7 +247,7 @@ func TestStatusShowsWorkstreams(t *testing.T) {
 	}
 }
 
-func TestStatusWithoutWorkstreams(t *testing.T) {
+func TestStatusWithoutWorkstreamsListsNone(t *testing.T) {
 	opts := fixture(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
@@ -219,12 +260,14 @@ func TestStatusWithoutWorkstreams(t *testing.T) {
 	if code != 4 || out != "" || !strings.HasPrefix(diag, "not_found: workstream "+stream) {
 		t.Fatalf("no trace: %d %q %q", code, out, diag)
 	}
+}
 
+func TestStatusWithoutAProjectNamesProjectAdd(t *testing.T) {
 	empty, _ := emptyFixture(t)
 	idle, err := service.Start(context.Background(), empty)
 	must(t, err)
 	t.Cleanup(func() { idle.Close() })
-	code, out, diag = invoke(t, empty.Config.Root, "status", stream)
+	code, out, diag := invoke(t, empty.Config.Root, "status", stream)
 	if code != 4 || out != "" || diag != "no_project: no project is configured; add one with osmia project add\n" {
 		t.Fatalf("no project: %d %q %q", code, out, diag)
 	}
@@ -233,8 +276,6 @@ func TestStatusWithoutWorkstreams(t *testing.T) {
 	}
 }
 
-// The Workspaces line names the setting, what new workstreams get (none when
-// jujutsu finds no supported jj) and the jj found.
 func TestStatusTextShowsWorkspaces(t *testing.T) {
 	for _, c := range []struct {
 		ws   wire.WorkspacesStatus
@@ -252,19 +293,26 @@ func TestStatusTextShowsWorkspaces(t *testing.T) {
 	}
 }
 
-func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
-	st := wire.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
+func statusWithoutAttentionOrAgents() wire.WorkstreamStatus {
+	return wire.WorkstreamStatus{Workstream: stream, Project: project, OpenQuestions: 2, ContextMode: "file", Workspaces: "git", Status: &wire.StatusView{
 		Goal: "Ship resumable uploads.", Note: "Work is starting.", Agents: []string{}, Revision: 3, UpdatedAt: written}}
+}
+
+func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 	var one strings.Builder
-	showStatus(&one, st)
+	showStatus(&one, statusWithoutAttentionOrAgents())
 	if want := "Workstream: " + stream + " state=not recorded open_questions=2 context_mode=file workspaces=git\n" +
 		"Goal: Ship resumable uploads.\nAttention: none\nNote: Work is starting.\nAgents:\n  none active\n" +
 		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
 	}
+}
+
+func TestStatusTextListsTheUnitsOfABuildingWorkstream(t *testing.T) {
+	st := statusWithoutAttentionOrAgents()
 	building := "building"
 	st.State, st.Units = &building, []wire.UnitStatus{{Unit: "parser", State: "ready"}, {Unit: "validator", State: "planned"}}
-	one.Reset()
+	var one strings.Builder
 	showStatus(&one, st)
 	if want := "Workstream: " + stream + " state=building open_questions=2 context_mode=file workspaces=git\n" +
 		"Units:\n  parser ready\n  validator planned\n" +
@@ -272,14 +320,19 @@ func TestStatusTextWithoutAttentionOrAgents(t *testing.T) {
 		"Updated: 2026-09-16T10:00:00Z (revision 3)\n"; one.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", one.String(), want)
 	}
-	st.State, st.Units = nil, nil
+}
+
+func TestStatusOverviewShowsTheWorkstreamAndTheDiagnostic(t *testing.T) {
 	var all strings.Builder
-	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{st}, Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
+	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{statusWithoutAttentionOrAgents()}, Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
 	if want := "Workstreams:\n  " + stream + " state=not recorded open_questions=2 context_mode=file workspaces=git\n" +
 		"    Goal: Ship resumable uploads.\n    Attention: none\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
 	}
-	all.Reset()
+}
+
+func TestStatusOverviewWithoutWorkstreamsShowsTheDiagnostic(t *testing.T) {
+	var all strings.Builder
 	showWorkstreams(&all, wire.StatusResponse{Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})
 	if want := "Workstreams:\n  none\nDiagnostic: workstreams: internal: cannot read\n"; all.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", all.String(), want)
@@ -413,46 +466,72 @@ func TestStatusPrintsOverlapAdvisories(t *testing.T) {
 	}
 }
 
-// project rebase reports the workstreams it covers and skips, and status
-// shows each workstream's latest drift rebase.
-func TestProjectRebaseAndDriftStatus(t *testing.T) {
+const driftSkipReason = "drift rebase 1 changed nothing: the workstream is handed, not building, assembled or delivered with a pull request"
+
+func startDriftRoot(t *testing.T) string {
+	t.Helper()
 	opts := withStatus(t)
 	ctx := context.Background()
 	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
-	reason := "drift rebase 1 changed nothing: the workstream is handed, not building, assembled or delivered with a pull request"
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "drift-1-skipped", Revision: 1, Project: project, Workstream: stream, At: written, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "drift-1-run"}
-	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "drift", To: "skipped-1", Reason: reason}})
+	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: "drift", To: "skipped-1", Reason: driftSkipReason}})
 	must(t, err)
 	must(t, repo.Close())
 	s, err := service.Start(ctx, opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+	return opts.Config.Root
+}
 
+func TestStatusOverviewShowsTheDriftRebase(t *testing.T) {
+	root := startDriftRoot(t)
 	if out := successful(t, root, "status"); !strings.Contains(out, "  "+stream+" state=handed open_questions=0 context_mode=file workspaces=git\n    Drift: rebase 1 skipped at 2026-09-16T10:00:00Z\n    Goal: ") {
 		t.Fatalf("overview lacks the drift rebase:\n%s", out)
 	}
-	if out := successful(t, root, "status", stream); !strings.Contains(out, "\nDrift: rebase 1 skipped at 2026-09-16T10:00:00Z\n  Reason: "+reason+"\n") {
+}
+
+func TestStatusOfAWorkstreamShowsTheDriftRebaseAndItsReason(t *testing.T) {
+	root := startDriftRoot(t)
+	if out := successful(t, root, "status", stream); !strings.Contains(out, "\nDrift: rebase 1 skipped at 2026-09-16T10:00:00Z\n  Reason: "+driftSkipReason+"\n") {
 		t.Fatalf("status <workstream> lacks the drift rebase:\n%s", out)
 	}
+}
+
+func TestStatusJSONCarriesTheDriftRebase(t *testing.T) {
+	root := startDriftRoot(t)
 	var one wire.WorkstreamStatus
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", stream, "--json")), &one))
-	if want := (&wire.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: reason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
+	if want := (&wire.DriftStatus{Drift: 1, Outcome: "skipped", At: written, Reason: driftSkipReason, Moved: []string{}}); !reflect.DeepEqual(one.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", one.Drift, want)
 	}
+}
 
-	skipped := []wire.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building, assembled or delivered with a pull request"}, {Workstream: quiet, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}}
+func skippedDriftWorkstreams() []wire.DriftSkip {
+	return []wire.DriftSkip{{Workstream: stream, Reason: "the workstream is handed, not building, assembled or delivered with a pull request"}, {Workstream: quiet, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}}
+}
+
+func TestProjectRebaseReportsTheSkippedWorkstreams(t *testing.T) {
+	root := startDriftRoot(t)
+	skipped := skippedDriftWorkstreams()
 	if out := successful(t, root, "project", "rebase", project); out != "Drift rebase requested for project "+project+"\nCovered: none\nSkipped: "+stream+": "+skipped[0].Reason+"\nSkipped: "+quiet+": "+skipped[1].Reason+"\n" {
 		t.Fatalf("project rebase:\n%s", out)
 	}
+}
+
+func TestProjectRebaseReportsTheSkippedWorkstreamsAsJSON(t *testing.T) {
+	root := startDriftRoot(t)
 	var got wire.ProjectRebaseResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "rebase", project, "--json")), &got))
-	if want := (wire.ProjectRebaseResponse{Project: project, Covered: []wire.DriftCoverage{}, Skipped: skipped}); !reflect.DeepEqual(got, want) {
+	if want := (wire.ProjectRebaseResponse{Project: project, Covered: []wire.DriftCoverage{}, Skipped: skippedDriftWorkstreams()}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("project rebase --json: %+v", got)
 	}
+}
+
+func TestProjectRebaseRefusesAProjectThatIsNotActive(t *testing.T) {
+	root := startDriftRoot(t)
 	other := "p_ffffffffffffffffffffffffffffffff"
 	if code, out, diag := invoke(t, root, "project", "rebase", other); code != 4 || out != "" || !strings.Contains(diag, "not_found: project "+other+" is not an active project") {
 		t.Fatalf("project rebase of another project: %d %s %s", code, out, diag)
@@ -469,8 +548,6 @@ func TestStatusShowsTheTailnetListener(t *testing.T) {
 		t.Fatalf("tailnet lines:\n%s", out.String())
 	}
 
-	// A tailnet that cannot be joined leaves the service and its status
-	// working over the socket.
 	opts := fixture(t)
 	path := opts.Config.Root + "/config.toml"
 	top, err := os.ReadFile(path)
@@ -538,42 +615,74 @@ func TestStatusPrintsProviderUsage(t *testing.T) {
 	}
 }
 
-func TestConfigCommandShowsDiskDrift(t *testing.T) {
+type configRoot struct {
+	root, top string
+	original  []byte
+	loaded    wire.ConfigResponse
+}
+
+func startConfigRoot(t *testing.T) configRoot {
+	t.Helper()
 	opts := fixture(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
-	var loaded wire.ConfigResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &loaded))
-	// The drift covers the top-level file only; the registry's projects follow.
-	if len(loaded.Drift.Files) != 1 || len(loaded.Effective.Projects) != 1 {
-		t.Fatalf("drift files %+v, projects %+v", loaded.Drift.Files, loaded.Effective.Projects)
+	c := configRoot{root: opts.Config.Root}
+	must(t, json.Unmarshal([]byte(successful(t, c.root, "config", "--json")), &c.loaded))
+	if len(c.loaded.Drift.Files) != 1 || len(c.loaded.Effective.Projects) != 1 {
+		t.Fatalf("drift files %+v, projects %+v", c.loaded.Drift.Files, c.loaded.Effective.Projects)
 	}
-	top, p := loaded.Drift.Files[0].Path, loaded.Effective.Projects[0]
+	c.top = c.loaded.Drift.Files[0].Path
+	c.original, err = os.ReadFile(c.top)
+	must(t, err)
+	return c
+}
+
+func (c configRoot) append(t *testing.T, text string) {
+	t.Helper()
+	must(t, os.WriteFile(c.top, append(append([]byte{}, c.original...), text...), 0600))
+}
+
+func TestConfigShowsTheLoadedConfigurationAsUnchanged(t *testing.T) {
+	c := startConfigRoot(t)
+	p := c.loaded.Effective.Projects[0]
 	registered := fmt.Sprintf("Registered project: %s (%s) upstream=%s push-repository=%s clone=%s base_branch=%s\n", p.ID, p.Name, p.Upstream, p.PushRepository(), p.Clone, p.BaseBranch)
 	errorReports := "[error_reports]\nenabled = false\nrepository = \"kpenfound/osmia\"\nlabels = [\"factory-error\", \"automated\"]\nmax_issues_per_hour = 5\nmax_issues_per_day = 20\nmax_comments_per_day = 20\nsources = [\"api\", \"operation\", \"github\"]\n"
-	if want := "Configuration: " + loaded.Digest + " (" + loaded.Root + ")\nConfig file: " + top + ": unchanged\n" + registered + errorReports; successful(t, root, "config") != want {
-		t.Fatalf("config as loaded:\n%s\nwant:\n%s", successful(t, root, "config"), want)
+	if want := "Configuration: " + c.loaded.Digest + " (" + c.loaded.Root + ")\nConfig file: " + c.top + ": unchanged\n" + registered + errorReports; successful(t, c.root, "config") != want {
+		t.Fatalf("config as loaded:\n%s\nwant:\n%s", successful(t, c.root, "config"), want)
 	}
+}
 
-	original, err := os.ReadFile(top)
-	must(t, err)
-	must(t, os.WriteFile(top, append(append([]byte{}, original...), "[capacity]\nmasons = 0\n"...), 0600))
-	text := successful(t, root, "config")
-	if !strings.Contains(text, "Config file: "+top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(text, "Diagnostic: configuration: validation: ") {
+func TestConfigNamesAnInvalidFileOnDisk(t *testing.T) {
+	c := startConfigRoot(t)
+	c.append(t, "[capacity]\nmasons = 0\n")
+	text := successful(t, c.root, "config")
+	if !strings.Contains(text, "Config file: "+c.top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(text, "Diagnostic: configuration: validation: ") {
 		t.Fatalf("config with an invalid file:\n%s", text)
 	}
-	if status := successful(t, root, "status"); !strings.Contains(status, "Config file: "+top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(status, "Capacity (per workstream ") || !strings.Contains(status, "Provider usage on ") {
+}
+
+func TestStatusNamesAnInvalidConfigFileAndStillShowsTheService(t *testing.T) {
+	c := startConfigRoot(t)
+	c.append(t, "[capacity]\nmasons = 0\n")
+	if status := successful(t, c.root, "status"); !strings.Contains(status, "Config file: "+c.top+": invalid: capacity.masons: must be positive\n") || !strings.Contains(status, "Capacity (per workstream ") || !strings.Contains(status, "Provider usage on ") {
 		t.Fatalf("status with an invalid file:\n%s", status)
 	}
-	must(t, os.WriteFile(top, append(append([]byte{}, original...), "[capacity]\nmasons = 7\n"...), 0600))
+}
+
+func TestConfigJSONReportsAnEditedFileAsDriftFromTheLoadedDigest(t *testing.T) {
+	c := startConfigRoot(t)
+	c.append(t, "[capacity]\nmasons = 7\n")
 	var drift wire.ConfigResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "config", "--json")), &drift))
-	if !drift.Drift.Differs || drift.Drift.Files[0].State != wire.ConfigChanged || drift.Digest != loaded.Digest {
+	must(t, json.Unmarshal([]byte(successful(t, c.root, "config", "--json")), &drift))
+	if !drift.Drift.Differs || drift.Drift.Files[0].State != wire.ConfigChanged || drift.Digest != c.loaded.Digest {
 		t.Fatalf("config with an edited file: %+v", drift)
 	}
-	if code, out, diag := invoke(t, root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
+}
+
+func TestConfigRefusesArguments(t *testing.T) {
+	c := startConfigRoot(t)
+	if code, out, diag := invoke(t, c.root, "config", "extra"); code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
 		t.Fatalf("config with arguments: %d %q %q", code, out, diag)
 	}
 }
@@ -629,17 +738,10 @@ func TestStatusCommandReportsTailnetHTTPS(t *testing.T) {
 			s, err := service.Start(context.Background(), opts)
 			must(t, err)
 			t.Cleanup(func() { s.Close() })
-			deadline := time.Now().Add(10 * time.Second)
-			for {
+			eventually(t, 10*time.Second, func() (bool, string) {
 				output := successful(t, opts.Config.Root, "status")
-				if strings.Contains(output, tc.want) {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("status did not show HTTPS state:\n%s", output)
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
+				return strings.Contains(output, tc.want), "status did not show HTTPS state:\n" + output
+			})
 		})
 	}
 }

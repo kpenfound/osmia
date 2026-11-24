@@ -5,7 +5,7 @@ package api
 // every check, because of Reason, with Detail. Listed is the number of links
 // the project listed, before narrowing, or nil when listing did not complete.
 // Covered is how many of the listed checks the run covered, or nil when the
-// listing did not complete or the record predates the count.
+// listing did not complete or no count was recorded.
 type CheckSelection struct {
 	// FallbackPicks is the configured count when no check reached the threshold.
 	FallbackPicks   int               `json:"fallback_picks,omitempty"`

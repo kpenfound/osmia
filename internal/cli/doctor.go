@@ -10,14 +10,10 @@ import (
 	"github.com/kpenfound/osmia/internal/doctor"
 )
 
-// doctorOptions is what doctor checks the root through; tests replace the
-// host boundaries.
 var doctorOptions = func(root config.Root) doctor.Options {
 	return doctor.Options{Root: root, Token: os.Getenv("GITHUB_TOKEN")}
 }
 
-// runDoctor prints every check grouped by area, or the checks as JSON, and
-// exits 1 when one failed.
 func runDoctor(ctx context.Context, root config.Root, asJSON bool, stdout, stderr io.Writer) int {
 	checks := doctor.Run(ctx, doctorOptions(root))
 	code := 0

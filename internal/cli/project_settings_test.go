@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-// settingsRoot is a root whose project registry and settings hold one project.
 type settingsRoot struct {
 	t     *testing.T
 	root  string
@@ -38,8 +37,6 @@ func newSettingsRoot(t *testing.T) *settingsRoot {
 
 func (r *settingsRoot) topLevel() string { return filepath.Join(r.root, "config.toml") }
 
-// breakClone turns the project's clone path into a regular file, so the
-// stored settings no longer load.
 func (r *settingsRoot) breakClone() {
 	must(r.t, os.Remove(r.clone))
 	must(r.t, os.WriteFile(r.clone, []byte("not a directory"), 0600))
@@ -64,68 +61,128 @@ func (r *settingsRoot) run(args ...string) (int, string, string) {
 	return invoke(r.t, r.root, append([]string{"project", "settings", project}, args...)...)
 }
 
-func TestProjectSettingsRepairsSettingsThatDoNotLoad(t *testing.T) {
+type brokenSettings struct {
+	*settingsRoot
+	before       map[string]string
+	registry     []byte
+	topLevelData []byte
+}
+
+func newBrokenSettings(t *testing.T) brokenSettings {
+	t.Helper()
 	r := newSettingsRoot(t)
 	r.breakClone()
 	must(t, os.Chmod(r.topLevel(), 0400))
 	if r.loadErr() == nil {
 		t.Fatal("the stored settings still load")
 	}
-	before := snapshot(t, r.root)
 	registry, err := os.ReadFile(filepath.Join(r.root, "project-store", "registry.json"))
 	must(t, err)
-	topLevel, err := os.ReadFile(r.topLevel())
+	topLevelData, err := os.ReadFile(r.topLevel())
 	must(t, err)
+	return brokenSettings{settingsRoot: r, before: snapshot(t, r.root), registry: registry, topLevelData: topLevelData}
+}
 
-	code, out, diag := r.run("show")
+func (b brokenSettings) repair(t *testing.T) string {
+	t.Helper()
+	good := filepath.Join(filepath.Dir(b.clone), "good")
+	must(t, os.Mkdir(good, 0700))
+	code, out, diag := b.run("set", "clone="+good)
+	if code != 0 || diag != "" {
+		t.Fatalf("repair: %d\n%s\n%s", code, out, diag)
+	}
+	return good
+}
+
+func TestProjectSettingsShowReportsSettingsThatDoNotLoad(t *testing.T) {
+	b := newBrokenSettings(t)
+	code, out, diag := b.run("show")
 	if code != 0 || diag != "" || !strings.Contains(out, "do not load") || !strings.Contains(out, "clone: must be a directory") || !strings.Contains(out, "upstream/repo") {
 		t.Fatalf("show: %d\n%s\n%s", code, out, diag)
 	}
-	if !reflect.DeepEqual(before, snapshot(t, r.root)) {
+}
+
+func TestProjectSettingsShowChangesNothingInTheRoot(t *testing.T) {
+	b := newBrokenSettings(t)
+	b.run("show")
+	if !reflect.DeepEqual(b.before, snapshot(t, b.root)) {
 		t.Fatal("show changed the root")
 	}
+}
 
-	// An edit that leaves the clone broken is refused, naming the field.
-	code, out, diag = r.run("set", "base_branch=trunk")
+func TestProjectSettingsRefusesAnEditThatLeavesTheCloneBroken(t *testing.T) {
+	b := newBrokenSettings(t)
+	code, out, diag := b.run("set", "base_branch=trunk")
 	if code == 0 || out != "" || !strings.Contains(diag, "clone: must be a directory") || !strings.Contains(diag, "nothing was written") {
 		t.Fatalf("edit leaving the clone broken: %d\n%s\n%s", code, out, diag)
 	}
-	if !reflect.DeepEqual(before, snapshot(t, r.root)) {
+}
+
+func TestProjectSettingsRefusedEditChangesNothingInTheRoot(t *testing.T) {
+	b := newBrokenSettings(t)
+	b.run("set", "base_branch=trunk")
+	if !reflect.DeepEqual(b.before, snapshot(t, b.root)) {
 		t.Fatal("a refused edit changed the root")
 	}
+}
 
-	good := filepath.Join(filepath.Dir(r.clone), "good")
+func TestProjectSettingsRepairRecordsTheNextRevision(t *testing.T) {
+	b := newBrokenSettings(t)
+	good := filepath.Join(filepath.Dir(b.clone), "good")
 	must(t, os.Mkdir(good, 0700))
-	code, out, diag = r.run("set", "clone="+good)
+	code, out, diag := b.run("set", "clone="+good)
 	if code != 0 || diag != "" || !strings.Contains(out, "revision 2") || !strings.Contains(out, "replaces revision 1") {
 		t.Fatalf("repair: %d\n%s\n%s", code, out, diag)
 	}
-	if err := r.loadErr(); err != nil {
+	if r := b.revisions(); r != 2 {
+		t.Fatalf("%d revisions, want the original and the corrected one", r)
+	}
+}
+
+func TestProjectSettingsRepairedSettingsLoad(t *testing.T) {
+	b := newBrokenSettings(t)
+	good := b.repair(t)
+	if err := b.loadErr(); err != nil {
 		t.Fatalf("the repaired settings do not load: %v", err)
 	}
-	cfg, err := config.LoadTopLevel(config.Options{Root: r.root})
+	cfg, err := config.LoadTopLevel(config.Options{Root: b.root})
 	must(t, err)
-	file, revision, err := r.store.Load(cfg, "", config.ProjectID(project))
+	file, revision, err := b.store.Load(cfg, "", config.ProjectID(project))
 	must(t, err)
 	if revision.Number != 2 || file.Project.Clone != good || file.Project.Upstream != "upstream/repo" || file.Project.Fork != "owner/repo" {
 		t.Fatalf("repaired project %+v at revision %d", file.Project, revision.Number)
 	}
+}
+
+func TestProjectSettingsRepairRewritesOnlyTheClone(t *testing.T) {
+	b := newBrokenSettings(t)
+	b.repair(t)
+	cfg, err := config.LoadTopLevel(config.Options{Root: b.root})
+	must(t, err)
+	_, revision, err := b.store.Load(cfg, "", config.ProjectID(project))
+	must(t, err)
 	if !strings.Contains(string(revision.Data), "# the project's own comment") {
 		t.Fatalf("the edit rewrote more than the clone:\n%s", revision.Data)
 	}
-	if r.revisions() != 2 {
-		t.Fatalf("%d revisions, want the original and the corrected one", r.revisions())
-	}
-	after, err := os.ReadFile(filepath.Join(r.root, "project-store", "registry.json"))
+}
+
+func TestProjectSettingsRepairLeavesTheRegistryAndTopLevelFileAlone(t *testing.T) {
+	b := newBrokenSettings(t)
+	b.repair(t)
+	after, err := os.ReadFile(filepath.Join(b.root, "project-store", "registry.json"))
 	must(t, err)
-	if string(after) != string(registry) {
-		t.Fatalf("the registry changed:\n%s\n%s", registry, after)
+	if string(after) != string(b.registry) {
+		t.Fatalf("the registry changed:\n%s\n%s", b.registry, after)
 	}
-	if now, err := os.ReadFile(r.topLevel()); err != nil || string(now) != string(topLevel) {
+	if now, err := os.ReadFile(b.topLevel()); err != nil || string(now) != string(b.topLevelData) {
 		t.Fatalf("the top-level file changed: %v\n%s", err, now)
 	}
+}
 
-	code, out, diag = r.run("show")
+func TestProjectSettingsShowAfterTheRepairNamesTheNewClone(t *testing.T) {
+	b := newBrokenSettings(t)
+	good := b.repair(t)
+	code, out, diag := b.run("show")
 	if code != 0 || diag != "" || !strings.Contains(out, "revision 2") || !strings.Contains(out, `"`+good+`"`) || strings.Contains(out, "do not load") {
 		t.Fatalf("show after the repair: %d\n%s\n%s", code, out, diag)
 	}
@@ -137,8 +194,6 @@ func TestProjectSettingsRefusesAnInvalidEditNamingTheField(t *testing.T) {
 	must(t, err)
 	current, err := r.store.Current(config.ProjectID(project))
 	must(t, err)
-	// A settings save of the same edit is refused with this text, which names the
-	// project's settings rather than a file.
 	_, _, saveErr := cfg.EditProject(config.ProjectID(project), "", current.Data, config.ProjectEdit{Strings: map[string]string{"checks_timeout": "soon"}})
 	if saveErr == nil {
 		t.Fatal("the edit is valid")
@@ -184,20 +239,39 @@ func TestProjectSettingsRefusesAnInvalidEditNamingTheField(t *testing.T) {
 	}
 }
 
-func TestProjectSettingsEditsAndClearsSettings(t *testing.T) {
-	r := newSettingsRoot(t)
+func (r *settingsRoot) setSeveral(t *testing.T) projectSettingsSaved {
+	t.Helper()
 	code, out, diag := r.run("set", "base_branch=trunk", "capacity.git_operations=5", "flake_fixes=true", "hearsay_entities.local=code:owner/repo:main", "--json")
 	var saved projectSettingsSaved
-	if code != 0 || diag != "" || json.Unmarshal([]byte(out), &saved) != nil || saved.Project != project || saved.Revision != 2 || saved.Previous != 1 || saved.Pin == "" {
+	if code != 0 || diag != "" || json.Unmarshal([]byte(out), &saved) != nil {
 		t.Fatalf("set: %d\n%s\n%s", code, out, diag)
 	}
+	return saved
+}
+
+func TestProjectSettingsSetSavesTheNextRevision(t *testing.T) {
+	r := newSettingsRoot(t)
+	saved := r.setSeveral(t)
+	if saved.Project != project || saved.Revision != 2 || saved.Previous != 1 || saved.Pin == "" {
+		t.Fatalf("set: %+v", saved)
+	}
+}
+
+func TestProjectSettingsSetReportsThePinOfTheStoredRevision(t *testing.T) {
+	r := newSettingsRoot(t)
+	saved := r.setSeveral(t)
 	current, err := r.store.Current(config.ProjectID(project))
 	must(t, err)
 	if current.Pin != saved.Pin {
 		t.Fatalf("pin %s, stored %s", saved.Pin, current.Pin)
 	}
+}
+
+func TestProjectSettingsShowReportsTheSavedValuesAndDefaults(t *testing.T) {
+	r := newSettingsRoot(t)
+	saved := r.setSeveral(t)
 	var view projectSettingsView
-	code, out, diag = r.run("show", "--json")
+	code, out, diag := r.run("show", "--json")
 	if code != 0 || diag != "" || json.Unmarshal([]byte(out), &view) != nil || view.Revision != 2 || view.Pin != saved.Pin || view.Error != "" {
 		t.Fatalf("show: %d\n%s\n%s", code, out, diag)
 	}
@@ -212,25 +286,38 @@ func TestProjectSettingsEditsAndClearsSettings(t *testing.T) {
 		!values["landing"].Default || values["upstream"].Default {
 		t.Fatalf("settings %+v", view.Settings)
 	}
+}
 
-	successfulSettings := func(args ...string) {
-		t.Helper()
-		if code, out, diag := r.run(args...); code != 0 || diag != "" {
-			t.Fatalf("%v: %d\n%s\n%s", args, code, out, diag)
-		}
-	}
-	successfulSettings("clear", "base_branch", "hearsay_entities.local", "capacity.git_operations")
-	successfulSettings("set", "fork=")
+func (r *settingsRoot) loadStored(t *testing.T) (config.ProjectFile, projectstore.Revision) {
+	t.Helper()
 	cfg, err := config.LoadTopLevel(config.Options{Root: r.root})
 	must(t, err)
 	file, revision, err := r.store.Load(cfg, "", config.ProjectID(project))
 	must(t, err)
+	return file, revision
+}
+
+func TestProjectSettingsClearRestoresTheDefaults(t *testing.T) {
+	r := newSettingsRoot(t)
+	r.setSeveral(t)
+	if code, out, diag := r.run("clear", "base_branch", "hearsay_entities.local", "capacity.git_operations"); code != 0 || diag != "" {
+		t.Fatalf("clear: %d\n%s\n%s", code, out, diag)
+	}
+	file, revision := r.loadStored(t)
 	p := file.Project
-	if revision.Number != 4 || p.BaseBranch != "main" || len(p.HearsayEntities) != 0 || p.Capacity.GitOperations != config.DefaultGitOperations || p.Fork != "" || !p.FlakeFixes {
+	if revision.Number != 3 || p.BaseBranch != "main" || len(p.HearsayEntities) != 0 || p.Capacity.GitOperations != config.DefaultGitOperations || file.Set("base_branch") || !file.Set("flake_fixes") {
 		t.Fatalf("project %+v at revision %d\n%s", p, revision.Number, revision.Data)
 	}
-	if file.Set("base_branch") || file.Set("fork") || !file.Set("flake_fixes") {
-		t.Fatalf("settings left set:\n%s", revision.Data)
+}
+
+func TestProjectSettingsSetWithAnEmptyValueUnsetsTheSetting(t *testing.T) {
+	r := newSettingsRoot(t)
+	if code, out, diag := r.run("set", "fork="); code != 0 || diag != "" {
+		t.Fatalf("set: %d\n%s\n%s", code, out, diag)
+	}
+	file, revision := r.loadStored(t)
+	if file.Project.Fork != "" || file.Set("fork") {
+		t.Fatalf("fork left set at revision %d:\n%s", revision.Number, revision.Data)
 	}
 }
 
@@ -256,7 +343,6 @@ func TestProjectSettingsRefusesWhileTheServiceRuns(t *testing.T) {
 	if now, err := os.ReadFile(filepath.Join(root, "config.toml")); err != nil || string(now) != string(topLevel) {
 		t.Fatalf("the top-level file changed: %v", err)
 	}
-	// Once the service stops, the same command works.
 	s.Close()
 	if code, out, diag := invoke(t, root, "project", "settings", project, "set", "base_branch=trunk"); code != 0 {
 		t.Fatalf("after the service stopped: %d\n%s\n%s", code, out, diag)
@@ -289,7 +375,6 @@ func TestProjectSettingsRefusesWhileALockIsHeld(t *testing.T) {
 			if !reflect.DeepEqual(before, snapshot(t, r.root)) {
 				t.Fatal("a refused command changed the root")
 			}
-			// Released, the command goes through.
 			must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_UN))
 			if code, out, diag := r.run("set", "base_branch=trunk"); code != 0 {
 				t.Fatalf("after the lock was released: %d\n%s\n%s", code, out, diag)
@@ -300,8 +385,6 @@ func TestProjectSettingsRefusesWhileALockIsHeld(t *testing.T) {
 
 func TestProjectSettingsHoldsTheServiceLockWhileItWrites(t *testing.T) {
 	r := newSettingsRoot(t)
-	// While the command holds the root, a service cannot take it; the lock is
-	// free again after the command returns.
 	if code, out, diag := r.run("set", "base_branch=trunk"); code != 0 {
 		t.Fatalf("%d\n%s\n%s", code, out, diag)
 	}
@@ -326,14 +409,12 @@ func TestProjectSettingsRefusesAProjectNotInTheRegistry(t *testing.T) {
 	if !reflect.DeepEqual(before, snapshot(t, r.root)) {
 		t.Fatal("a refused command changed the root")
 	}
-	// The registered project is not affected by the refusals.
 	if code, out, diag := r.run("show"); code != 0 {
 		t.Fatalf("%d\n%s\n%s", code, out, diag)
 	}
 }
 
 func TestProjectSettingsIsOffline(t *testing.T) {
-	// A root that does not exist stays uncreated, and no socket is involved.
 	root := filepath.Join(shortDir(t), "missing")
 	code, out, diag := invoke(t, root, "project", "settings", project, "show")
 	if code == 0 || out != "" || diag == "" {

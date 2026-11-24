@@ -13,20 +13,15 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// settingsAPI answers Project management's project settings the way the
-// service does, for one project whose stored settings the test controls: a
-// snapshot of the current revision with a pin, and a save that is pinned to
-// it. The first save records a revision but cannot apply it, so the snapshot
-// after it shows the saved value as not yet applied; later saves apply.
 type settingsAPI struct {
 	*fakeAPI
 
 	mu       sync.Mutex
 	pin      string
-	timeout  string // checks_timeout in the stored settings
-	landing  string // landing in the stored settings
-	inEffect string // checks_timeout in the loaded configuration
-	unloaded bool   // the stored revision does not load: no pin, the values in effect
+	timeout  string
+	landing  string
+	inEffect string
+	unloaded bool
 	saves    []settingsSave
 }
 
@@ -35,7 +30,6 @@ type settingsSave struct {
 	Set map[string]json.RawMessage `json:"set"`
 }
 
-// snapshot is the project's stored settings as the read reports them.
 func (a *settingsAPI) snapshot() map[string]any {
 	setting := func(name string, value, effective any, isDefault bool) map[string]any {
 		return map[string]any{"name": name, "value": value, "default": isDefault, "effective": effective, "pending": !reflect.DeepEqual(value, effective)}
@@ -109,8 +103,6 @@ func (a *settingsAPI) handler() http.Handler {
 	return mux
 }
 
-// openProjectSettings opens the Projects section of Settings on project p_fake and
-// waits for its stored settings to be read.
 func (p *page) openProjectSettings(url string) {
 	p.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(url+"/"))
 	p.await("the live connection", `document.body.dataset.connection === 'live'`)
@@ -127,46 +119,93 @@ func (a *settingsAPI) seen() []settingsSave {
 	return append([]settingsSave(nil), a.saves...)
 }
 
-// A save the service reports as saved but not applied is shown as saved and
-// pending, not as a refusal. The form takes the returned pin, shows the saved
-// value as not yet applied beside the value in effect, and a later save
-// from it is accepted rather than refused as stale.
-func TestBrowserProjectSettingsShowASavedButNotAppliedOutcomeAndAdoptItsPin(t *testing.T) {
-	t.Parallel()
+type savedSettingsPage struct {
+	p   *page
+	api *settingsAPI
+}
+
+func settingField(name string) string { return `#project-config [data-setting="` + name + `"] ` }
+
+func openSettingsPage(t *testing.T) savedSettingsPage {
+	t.Helper()
 	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)
 	p := openBrowser(t)
 	p.openProjectSettings(server.URL)
-	field := func(name string) string { return `#project-config [data-setting="` + name + `"] ` }
 	p.awaitText("#config-file", "Stored settings of project p_fake, revision 1")
-	p.await("the stored value", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '15m'`)
+	p.await("the stored value", `document.querySelector(`+quote(settingField("checks_timeout")+"input")+`).value === '15m'`)
+	return savedSettingsPage{p: p, api: api}
+}
 
-	p.eval(`document.querySelector(`+quote(field("checks_timeout")+"input")+`).value = '30m'`, nil)
-	p.click("#project-config [type=submit]")
-	p.await("the save shown as saved but not applied", `document.querySelector('#project-config .result').dataset.outcome === 'saved-not-applied'`)
-	p.awaitText("#project-config .result", "the stages could not be prepared.")
-	p.awaitText("#project-config .result", "next save or a restart")
-	p.awaitText(field("checks_timeout")+`[data-marker=pending]`, "Not yet applied. In effect: 15m")
-	p.await("the saved value kept and the returned pin adopted", `document.querySelector(`+quote(field("checks_timeout")+"input")+`).value === '30m' && document.querySelector('#project-config').dataset.pin === 'pin-2'`)
-	p.await("no stale notice", `document.querySelector('#config-changed').hidden`)
+func (s savedSettingsPage) saveTimeout() {
+	s.p.eval(`document.querySelector(`+quote(settingField("checks_timeout")+"input")+`).value = '30m'`, nil)
+	s.p.click("#project-config [type=submit]")
+	s.p.await("the save shown as saved but not applied", `document.querySelector('#project-config .result').dataset.outcome === 'saved-not-applied'`)
+}
 
-	p.eval(`document.querySelector(`+quote(field("landing")+"input")+`).value = 'squash'`, nil)
-	p.click("#project-config [type=submit]")
-	p.await("the later save accepted", `document.querySelector('#project-config .result').dataset.outcome === 'ok'`)
-	saves := api.seen()
+func (s savedSettingsPage) saveLanding() {
+	s.p.eval(`document.querySelector(`+quote(settingField("landing")+"input")+`).value = 'squash'`, nil)
+	s.p.click("#project-config [type=submit]")
+	s.p.await("the later save accepted", `document.querySelector('#project-config .result').dataset.outcome === 'ok'`)
+}
+
+func TestBrowserProjectSettingsShowASavedButNotAppliedOutcome(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.awaitText("#project-config .result", "the stages could not be prepared.")
+	s.p.awaitText("#project-config .result", "next save or a restart")
+}
+
+func TestBrowserProjectSettingsMarkTheSavedValueAsPending(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.awaitText(settingField("checks_timeout")+`[data-marker=pending]`, "Not yet applied. In effect: 15m")
+}
+
+func TestBrowserProjectSettingsKeepTheSavedValueAndAdoptTheReturnedPin(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.await("the saved value kept and the returned pin adopted", `document.querySelector(`+quote(settingField("checks_timeout")+"input")+`).value === '30m' && document.querySelector('#project-config').dataset.pin === 'pin-2'`)
+	s.p.await("no stale notice", `document.querySelector('#config-changed').hidden`)
+}
+
+func TestBrowserProjectSettingsPinALaterSaveToTheReturnedPin(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.await("the returned pin adopted", `document.querySelector('#project-config').dataset.pin === 'pin-2'`)
+	s.saveLanding()
+	saves := s.api.seen()
 	if len(saves) != 2 || saves[0].Pin != "pin-1" || saves[1].Pin != "pin-2" {
 		t.Fatalf("saves were pinned to %+v, want the first read's pin and then the returned one", saves)
 	}
-	if len(saves[1].Set) != 1 || strings.TrimSpace(string(saves[1].Set["landing"])) != `"squash"` {
-		t.Fatalf("the later save sent more than the changed setting: %+v", saves[1])
-	}
-	p.await("the saved values applied", `!document.querySelector(`+quote(field("checks_timeout")+"[data-marker=pending]")+`).textContent`)
 }
 
-// The page names the stored settings of a project and never a file: nothing in
-// the settings form tells the owner to edit a project's config.toml, and the
-// form reads from the store.
+func TestBrowserProjectSettingsSendOnlyTheChangedSetting(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.await("the returned pin adopted", `document.querySelector('#project-config').dataset.pin === 'pin-2'`)
+	s.saveLanding()
+	saves := s.api.seen()
+	if len(saves) != 2 || len(saves[1].Set) != 1 || strings.TrimSpace(string(saves[1].Set["landing"])) != `"squash"` {
+		t.Fatalf("the later save sent more than the changed setting: %+v", saves)
+	}
+}
+
+func TestBrowserProjectSettingsClearThePendingMarkerOnceApplied(t *testing.T) {
+	t.Parallel()
+	s := openSettingsPage(t)
+	s.saveTimeout()
+	s.p.await("the returned pin adopted", `document.querySelector('#project-config').dataset.pin === 'pin-2'`)
+	s.saveLanding()
+	s.p.await("the saved values applied", `!document.querySelector(`+quote(settingField("checks_timeout")+"[data-marker=pending]")+`).textContent`)
+}
+
 func TestBrowserProjectSettingsNameTheStoredSettingsNotAFile(t *testing.T) {
 	t.Parallel()
 	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
@@ -184,9 +223,6 @@ func TestBrowserProjectSettingsNameTheStoredSettingsNotAFile(t *testing.T) {
 	}
 }
 
-// A save pinned to a revision that is no longer the current one is refused as
-// stale: the form keeps the draft and its pin, says the settings changed
-// elsewhere, and a later read loads the stored values and accepts a save.
 func TestBrowserProjectSettingsSurfaceAConflictAndKeepTheDraft(t *testing.T) {
 	t.Parallel()
 	api := &settingsAPI{fakeAPI: newFakeAPI(0), pin: "pin-1", timeout: "15m", landing: "commit-per-unit", inEffect: "15m"}
@@ -219,9 +255,6 @@ func TestBrowserProjectSettingsSurfaceAConflictAndKeepTheDraft(t *testing.T) {
 	}
 }
 
-// Stored settings that do not load are shown as read-only values in effect
-// with the loader's error, no save is offered, and the owner is pointed to the
-// offline repair command naming the field.
 func TestBrowserProjectSettingsThatDoNotLoadPointToTheRepairCommand(t *testing.T) {
 	t.Parallel()
 	api := &settingsAPI{fakeAPI: newFakeAPI(0), unloaded: true, inEffect: "15m"}

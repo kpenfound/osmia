@@ -227,11 +227,8 @@ func parse(args []string) (o options, err error) {
 	return o, nil
 }
 
-// enforcement is what serve runs role turns through.
 var enforcement = service.CoreEnforcement
 
-// build is the version and commit stamped into this binary. An unstamped
-// build reports version dev and an empty commit.
 func build() wire.Identity {
 	version := buildinfo.Version
 	if version == "" {
@@ -240,8 +237,6 @@ func build() wire.Identity {
 	return wire.Identity{Version: version, Commit: buildinfo.Commit}
 }
 
-// versionLine is what osmia --version prints: the version, followed by the
-// commit in parentheses when one was stamped.
 func versionLine(b wire.Identity) string {
 	if b.Commit == "" {
 		return "osmia " + b.Version
@@ -349,7 +344,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return invalid()
 	}
 	if cmd == "config" && len(a) == 1 {
-		// Offline: dispatched before any socket, client or state is set up.
 		return runConfigValidate(o.root, o.config, stdout, stderr)
 	}
 	root, err := config.ResolveRoot(o.root, "")
@@ -361,16 +355,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		logger := newServiceLogger(stderr)
 		if err := runService(ctx, root, o.detach, stdout, logger); err != nil {
 			if o.detach {
-				// detach() returned this error about the launcher's own
-				// attempt to start and wait for the detached child; it never
-				// ran the service itself, so its report stays human-readable
-				// text on this terminal.
 				reportServeFailure(stderr, err, time.Now())
 			} else {
-				// This process ran the service itself, in the foreground or
-				// as the detached child whose stderr is service.log; either
-				// way its own failure is a structured record on its own
-				// standard error.
 				logServeFailure(logger, err)
 			}
 			return 6
@@ -381,7 +367,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runDoctor(ctx, root, o.json, stdout, stderr)
 	}
 	if cmd == "project" && a[0] == "settings" {
-		// Offline: dispatched before any socket or client is set up.
 		id, err := config.ParseProjectID(a[1])
 		if err != nil {
 			return invalid()
@@ -437,9 +422,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stderr, "no project is configured; add one with osmia project add")
 		return 4
 	}
-	// refuse reports why a command found no project to act on: none is
-	// configured, several are and the command names no workstream, or the
-	// workstream it names is in none of them.
 	refuse := func(err error) int {
 		var api *wire.APIError
 		if errors.As(err, &api) && api.Code == wire.NoProject {
@@ -523,7 +505,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cmd == "project" {
 		var result wire.ProjectResponse
 		if a[0] == "create" && len(a) == 1 {
-			// Only the identity: finish the creation already planned under it.
 			id, err := config.ParseProjectID(o.id)
 			if err != nil {
 				return invalid()
@@ -712,8 +693,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return fail(err)
 		}
-		// The answer pins the push and offer the inbox entry names, so it
-		// can only apply to the question the owner read.
 		var entry *wire.InboxEntry
 		for i, e := range list.Entries {
 			if e.Kind == wire.InboxChecksChoice && e.Workstream == id {
@@ -755,8 +734,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return fail(err)
 		}
-		// The approval pins the move the card shows, so it can only apply the
-		// move the owner read.
 		var entries []wire.InboxEntry
 		for _, e := range list.Entries {
 			if e.Kind == wire.InboxRecovery && e.Workstream == id && (len(a) == 1 || e.Unit == a[1]) {
@@ -867,8 +844,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		case "redraft":
 			result, err = c.ShedRedraft(ctx, id, a[2])
 		case "more":
-			// A count that is not a number is a usage error; one out of range
-			// is the service's to refuse, naming shed.max_rounds.
 			n, convErr := strconv.Atoi(a[2])
 			if convErr != nil {
 				return invalid()
@@ -926,8 +901,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			return invalid()
 		}
-		// The decision is on the packet revision read here: a packet the
-		// chief of staff presented again since is the service's to refuse.
 		view, err := c.Amendment(ctx, id, a[1])
 		if err != nil {
 			return fail(err)
@@ -1221,8 +1194,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return invalid()
 			}
 		}
-		// The inbox names the project of each escalation, so an entry number
-		// that only one project carries needs no --project.
 		list, err := c.Inbox(ctx)
 		if err != nil && o.accept {
 			return fail(err)
@@ -1317,7 +1288,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			if _, err := config.ParseWorkgroupID(a[1]); err != nil {
 				return invalid()
 			}
-			// Let the service explain why a workgroup cannot be destroyed.
 			id = config.WorkstreamID(a[1])
 		}
 		destroy, label := c.DestroySession, "Session"
@@ -1687,7 +1657,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	return 0
 }
 
-// showPacket presents the packet and the exact pins needed for a cross-repo decision.
 func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse) {
 	fmt.Fprintf(w, "Packet revision %d of workstream %s: spec.md revision %d and plan.json revision %d\n", packet.Revision, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
 	fmt.Fprintf(w, "%s\n%s\n", packet.Packet.Conclusion, packet.Packet.Recommendation)
@@ -1720,9 +1689,6 @@ func output(w, stderr io.Writer, v any) int {
 	return 0
 }
 
-// projectOf returns the project a command about stream acts on: the only
-// active project, or, while several are active, the project stream belongs
-// to. Without a stream several active projects are refused.
 func projectOf(ctx context.Context, c *service.Client, cfg wire.ConfigResponse, stream config.WorkstreamID) (config.ProjectID, error) {
 	switch {
 	case cfg.Project != nil:
@@ -1743,8 +1709,6 @@ func projectOf(ctx context.Context, c *service.Client, cfg wire.ConfigResponse, 
 	return st.Project, nil
 }
 
-// showSession prints a session's fixed profile, branch, base and state. The
-// chat itself is not shown here: it happens through the web page or the API.
 func showSession(w io.Writer, s wire.SessionView) {
 	fmt.Fprintf(w, "Session %s project=%s profile=%s state=%s\n", s.Workstream, s.Project, s.Profile, s.State)
 	fmt.Fprintf(w, "Branch: %s base: %s\n", s.Branch, s.Base)
@@ -1819,7 +1783,6 @@ func showRuntime(w io.Writer, rt wire.RuntimeResponse) {
 	diagnostics(w, rt.Diagnostics)
 }
 
-// showJev prints Jev's mode and, when it is not ready, why.
 func showJev(w io.Writer, s jev.Status) {
 	line := "Jev: " + string(s.Mode)
 	if s.Model != "" {
@@ -1834,8 +1797,6 @@ func showJev(w io.Writer, s jev.Status) {
 	fmt.Fprintln(w, line)
 }
 
-// showDailyBudget prints today's known spend against the daily budget, if
-// one is configured.
 func showDailyBudget(w io.Writer, b *wire.DailyBudgetStatus) {
 	if b == nil {
 		return
@@ -1847,8 +1808,6 @@ func showDailyBudget(w io.Writer, b *wire.DailyBudgetStatus) {
 	fmt.Fprintln(w)
 }
 
-// showConfigDrift prints the top-level configuration file's state against the
-// loaded configuration.
 func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 	for _, f := range d.Files {
 		line := "Config file: " + f.Path + ": " + f.State
@@ -1859,15 +1818,12 @@ func showConfigDrift(w io.Writer, d wire.ConfigDrift) {
 	}
 }
 
-// showRegistry prints the active projects in registry order, each with the
-// settings it runs with, which come from the project store.
 func showRegistry(w io.Writer, projects []config.Project) {
 	for _, p := range projects {
 		fmt.Fprintf(w, "Registered project: %s (%s) upstream=%s push-repository=%s clone=%s base_branch=%s\n", p.ID, p.Name, p.Upstream, p.PushRepository(), p.Clone, p.BaseBranch)
 	}
 }
 
-// showErrorReports prints the effective [error_reports] section.
 func showErrorReports(w io.Writer, e config.ErrorReports) {
 	list := func(values []string) string {
 		quoted := make([]string, len(values))
@@ -1886,8 +1842,6 @@ func showErrorReports(w io.Writer, e config.ErrorReports) {
 	fmt.Fprintf(w, "sources = %s\n", list(e.Sources))
 }
 
-// showProviderUsage prints today's known spend by provider, each provider's
-// usage limit and the roles it moved to a fallback profile or paused.
 func showProviderUsage(w io.Writer, u *wire.ProviderUsageStatus) {
 	if u == nil {
 		return
@@ -1921,9 +1875,6 @@ func showProviderUsage(w io.Writer, u *wire.ProviderUsageStatus) {
 	}
 }
 
-// showCapacity prints the slots used of each shared role kind and the work
-// waiting for one. A pool without a factory-wide limit shows as unbounded,
-// never as a number of slots.
 func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 	if c == nil {
 		return
@@ -1951,17 +1902,12 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 	}
 }
 
-// showFailureStreaks prints each role and profile whose latest turn attempts
-// failed with infrastructure failures.
 func showFailureStreaks(w io.Writer, streaks []wire.FailureStreak) {
 	for _, f := range streaks {
 		fmt.Fprintf(w, "Infrastructure failures: %s on profile %s failed %d time(s) in a row; last at %s: %s\n", f.Role, f.Profile, f.Consecutive, f.LastAt.Format(time.RFC3339), f.LastFailure)
 	}
 }
 
-// showWorkspaces prints the workspace backend new workstreams get, none
-// when workspaces = "jujutsu" finds no supported jj, which a diagnostic
-// then describes.
 func showWorkspaces(w io.Writer, ws wire.WorkspacesStatus) {
 	backend := ws.Backend
 	if backend == "" {
@@ -1974,8 +1920,6 @@ func showWorkspaces(w io.Writer, ws wire.WorkspacesStatus) {
 	fmt.Fprintln(w)
 }
 
-// showWorkstreams prints each non-archived workstream's gates, overlap
-// advisories, latest drift rebase, goal and attention.
 func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 	fmt.Fprintln(w, "Workstreams:")
 	listed := 0
@@ -2009,12 +1953,10 @@ func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 	diagnostics(w, all.Diagnostics)
 }
 
-// drift describes a workstream's latest drift rebase.
 func drift(d *wire.DriftStatus) string {
 	return fmt.Sprintf("rebase %d %s at %s", d.Drift, d.Outcome, d.At.UTC().Format(time.RFC3339))
 }
 
-// showStatus prints one workstream's full status.
 func showStatus(w io.Writer, st wire.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
 	for _, gate := range st.Gates {
@@ -2101,10 +2043,6 @@ func showDesignBrief(w io.Writer, d wire.DesignView) {
 	}
 }
 
-// showConversation prints each entry's time, author, turn and state, then
-// its text indented. hint names the command that sends the next message
-// ("send" for an ordinary chief of staff, "design send" for a design
-// session), shown only when there is nothing to show yet.
 func showConversation(w io.Writer, list wire.ConversationResponse, hint string) {
 	fmt.Fprintf(w, "Conversation: %s\n", list.Workstream)
 	if len(list.Entries) == 0 {
@@ -2122,10 +2060,6 @@ func showConversation(w io.Writer, list wire.ConversationResponse, hint string) 
 	}
 }
 
-// showInbox prints each entry's kind, when it opened, its workstream and what
-// identifies it, then the question, what it blocks, the options, the
-// recommendation, an escalation's questions as asked, what the answer is
-// taken on and the command that answers it.
 func showInbox(w io.Writer, list wire.InboxResponse) {
 	if len(list.Entries) == 0 {
 		fmt.Fprintln(w, "Inbox: no decisions are waiting for you")
@@ -2213,8 +2147,6 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 			}
 		case wire.InboxProjectCreation:
 			if name, refused := e.Answer.Body["name"]; refused {
-				// A creation refused before it began carries its whole request;
-				// --id alone only finishes a creation that started.
 				block("Answer", fmt.Sprintf("none once the cause is fixed: the service creates %v (repository %v) under %v on its next pass; retry from the web inbox to try now", name, e.Answer.Body["repo"], e.Answer.Body["id"]))
 			} else {
 				block("Answer", fmt.Sprintf("osmia project create --id %v once the cause is fixed; the retry reuses only the repository this creation made", e.Answer.Body["id"]))
@@ -2229,7 +2161,6 @@ func showInbox(w io.Writer, list wire.InboxResponse) {
 	}
 }
 
-// showLanding says what approving the landing of a workstream did.
 func showLanding(w io.Writer, id config.WorkstreamID, landed wire.DeliveryLandResponse) {
 	switch landed.Outcome {
 	case wire.LandOutcomeLanded:
@@ -2245,7 +2176,6 @@ func showLanding(w io.Writer, id config.WorkstreamID, landed wire.DeliveryLandRe
 	}
 }
 
-// recoveryLine describes the move of a recovery entry on one line.
 func recoveryLine(e wire.InboxEntry) string {
 	if m := e.Recovery; m != nil {
 		return fmt.Sprintf("%s from %s to %s (%s)", m.Subject, m.From, m.Target, m.Origin)
@@ -2253,7 +2183,6 @@ func recoveryLine(e wire.InboxEntry) string {
 	return e.Question
 }
 
-// recoveryAnswer is how the owner approves the move of a recovery entry.
 func recoveryAnswer(stream string, e wire.InboxEntry) string {
 	if e.Unit != "" {
 		return fmt.Sprintf("osmia recover %s %s approves exactly this move; it applies only while the subject is still in the state shown", stream, e.Unit)
@@ -2322,8 +2251,6 @@ func attention(s string) string {
 	return s
 }
 
-// handInKey identifies one hand-in command, so the service creates one
-// workstream however often the request reaches it.
 func handInKey() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -2332,9 +2259,6 @@ func handInKey() (string, error) {
 	return "cli-" + hex.EncodeToString(b[:]), nil
 }
 
-// report maps an API error to exit code and guidance. Project operations
-// compose their own messages from the caller's fields and identities, so those
-// are shown; other messages are fixed to keep raw file and parser text out.
 func report(w io.Writer, err error, project bool) int {
 	var api *wire.APIError
 	if !errors.As(err, &api) {
@@ -2397,9 +2321,6 @@ func showEngine(w io.Writer, s wire.EngineStatus) {
 	}
 }
 
-// showBrief prints the delivery brief of final review of stream: its text,
-// its "Before you ship" items and the path of each screenshot, or why there is
-// no brief. A presentation with no brief field prints nothing.
 func showBrief(w io.Writer, stream config.WorkstreamID, review int, b *wire.DeliveryBrief) {
 	if b == nil {
 		return
@@ -2425,7 +2346,6 @@ func showBrief(w io.Writer, stream config.WorkstreamID, review int, b *wire.Deli
 	fmt.Fprintln(w)
 }
 
-// showBriefEntry prints the delivery brief a feed entry carries.
 func showBriefEntry(w io.Writer, b *wire.FeedBrief) {
 	fmt.Fprintf(w, "  Delivery brief for final review %d:\n  %s\n", b.Review, strings.TrimSpace(b.Text))
 	for _, item := range b.BeforeYouShip {
@@ -2440,7 +2360,6 @@ func showBriefEntry(w io.Writer, b *wire.FeedBrief) {
 	}
 }
 
-// showFeed renders attachments without downloading their bytes.
 func showFeed(w io.Writer, entries []wire.FeedEntry) {
 	for _, e := range entries {
 		fmt.Fprintf(w, "%s %s", e.At.Format(time.RFC3339), e.Kind)
@@ -2469,9 +2388,6 @@ func showFeed(w io.Writer, entries []wire.FeedEntry) {
 	}
 }
 
-// readCharter reads the charter a project creation records: the file at path,
-// or standard input for "-". It returns the exit code to stop with, zero when
-// the charter was read.
 func readCharter(path string, stdin io.Reader, stderr io.Writer) (string, int) {
 	var (
 		data []byte

@@ -6,16 +6,11 @@ import (
 	"testing"
 )
 
-// amendmentEntry is an amendment inbox entry offering approve, reject and
-// round, recommending approve and carrying two questions asked.
 const amendmentEntry = `{"kind":"amendment","project":"p_fake","workstream":"w_000","number":0,"unit":"","amendment":"1","revision":1,` +
 	`"question":"Raise the budget?","options":["approve","reject","round"],"recommendation":"approve: no objection stands","quick_reply":"",` +
 	`"opened_at":"2026-01-01T00:00:00Z","asked":[{"asked_by":"mason","unit":"index","question":"May the budget rise?"},{"asked_by":"reviewer","question":"Is the budget enough?"}],` +
 	`"answer":{"method":"POST","path":"/v1/amendment/w_000/1","body":{"packet":3}}}`
 
-// A decision card puts the question first and the recommendation as its one
-// primary button; every other option is a secondary button that sends its
-// own answer.
 func TestBrowserDecisionCardLeadsWithTheQuestionAndRecommendsOneOption(t *testing.T) {
 	t.Parallel()
 	f := newDecisionButtonFixture(t, amendmentEntry)
@@ -50,9 +45,6 @@ func TestBrowserDecisionCardLeadsWithTheQuestionAndRecommendsOneOption(t *testin
 	assertDecisionRequest(t, f, "/v1/amendment/w_000/1", map[string]any{"packet": float64(3), "decision": "reject"})
 }
 
-// On a question, accepting the recommendation is the primary button, and
-// the other options and writing an answer are secondary; each sends the
-// answer it did before.
 func TestBrowserEscalationCardRecommendsTheQuickReply(t *testing.T) {
 	t.Parallel()
 	const entry = `{"kind":"escalation","project":"p_fake","workstream":"w_000","number":1,"question":"Where should state live?",` +
@@ -92,45 +84,75 @@ func TestBrowserEscalationCardRecommendsTheQuickReply(t *testing.T) {
 	}
 }
 
-// Revision and commit details are a collapsed mono footnote that opens in
-// place, and "What was asked" and "decided by" read the same way: the same
-// mono face, size and colour.
-func TestBrowserDecisionFootnotesAreCollapsedMonoAndMatchDecidedBy(t *testing.T) {
-	t.Parallel()
+const amendmentCard = `[data-decision][data-kind="amendment"] `
+
+func openFootnotesPage(t *testing.T) *page {
+	t.Helper()
 	f := newOutcomeFeedFixture(t, 1, func(api *fakeAPI) {
 		api.setInbox(amendmentEntry)
 		api.setFeed("w_000", routedTransitionEntry("2026-01-01T00:00:01Z", "ratified", "service:jev", "jev", "building", true))
 	})
-	p := f.p
-	card := `[data-decision][data-kind="amendment"] `
-	p.awaitVisible("the amendment", card+"details.footnote.revisions")
+	f.p.awaitVisible("the amendment", amendmentCard+"details.footnote.revisions")
+	return f.p
+}
+
+func TestBrowserDecisionFootnotesStartCollapsedAndHidden(t *testing.T) {
+	t.Parallel()
+	p := openFootnotesPage(t)
 	var closed struct {
 		Asked, Revisions bool
 		Hidden           bool
 		Pins             string
-		Mono             bool
 	}
 	p.eval(`(() => {
-  const card = document.querySelector(`+quote(card)+`);
+  const card = document.querySelector(`+quote(amendmentCard)+`);
   const pins = card.querySelector('details.footnote.revisions [data-field=pins]');
   return {
     asked: card.querySelector('details.footnote.asked').open,
     revisions: card.querySelector('details.footnote.revisions').open,
     hidden: !pins.checkVisibility(),
     pins: pins.textContent,
-    mono: getComputedStyle(pins).fontFamily.includes('JetBrains Mono') && getComputedStyle(card.querySelector('details.footnote.revisions summary')).fontFamily.includes('JetBrains Mono'),
   };
 })()`, &closed)
-	if closed.Asked || closed.Revisions || !closed.Hidden || !closed.Mono || !strings.Contains(closed.Pins, "amendment 1, packet revision 3") {
+	if closed.Asked || closed.Revisions || !closed.Hidden || !strings.Contains(closed.Pins, "amendment 1, packet revision 3") {
 		t.Fatalf("the closed footnotes: %+v", closed)
 	}
-	p.click(card + "details.footnote.revisions summary")
+}
+
+func TestBrowserDecisionFootnotesAreSetInMono(t *testing.T) {
+	t.Parallel()
+	p := openFootnotesPage(t)
+	var mono bool
+	p.eval(`(() => {
+  const card = document.querySelector(`+quote(amendmentCard)+`);
+  const pins = card.querySelector('details.footnote.revisions [data-field=pins]');
+  return getComputedStyle(pins).fontFamily.includes('JetBrains Mono') && getComputedStyle(card.querySelector('details.footnote.revisions summary')).fontFamily.includes('JetBrains Mono');
+})()`, &mono)
+	if !mono {
+		t.Fatal("the footnotes are not set in the mono face")
+	}
+}
+
+func TestBrowserDecisionFootnoteRevisionsOpenInPlace(t *testing.T) {
+	t.Parallel()
+	p := openFootnotesPage(t)
+	p.click(amendmentCard + "details.footnote.revisions summary")
 	p.await("the revisions open in place", `(() => {
-  const pins = document.querySelector(`+quote(card+"[data-field=pins]")+`);
+  const pins = document.querySelector(`+quote(amendmentCard+"[data-field=pins]")+`);
   return pins.checkVisibility() && !!pins.closest('[data-decision]');
 })()`)
-	p.click(card + "details.footnote.asked summary")
-	p.awaitText(card+"[data-field=asked]", "May the budget rise?")
+}
+
+func TestBrowserDecisionFootnoteAskedShowsTheQuestion(t *testing.T) {
+	t.Parallel()
+	p := openFootnotesPage(t)
+	p.click(amendmentCard + "details.footnote.asked summary")
+	p.awaitText(amendmentCard+"[data-field=asked]", "May the budget rise?")
+}
+
+func TestBrowserDecisionFootnotesLookLikeTheDecidedByLabel(t *testing.T) {
+	t.Parallel()
+	p := openFootnotesPage(t)
 	p.openActivity()
 	p.awaitVisible("the decided by label", "#workstream-activity [data-field=decided-by]")
 	var look struct {
@@ -138,7 +160,7 @@ func TestBrowserDecisionFootnotesAreCollapsedMonoAndMatchDecidedBy(t *testing.T)
 	}
 	p.eval(`(() => {
   const style = (node) => { const s = getComputedStyle(node); return [s.fontFamily, s.fontSize, s.color]; };
-  const card = document.querySelector(`+quote(card)+`);
+  const card = document.querySelector(`+quote(amendmentCard)+`);
   return {
     asked: style(card.querySelector('details.footnote.asked summary')),
     revisions: style(card.querySelector('details.footnote.revisions summary')),
@@ -150,8 +172,6 @@ func TestBrowserDecisionFootnotesAreCollapsedMonoAndMatchDecidedBy(t *testing.T)
 	}
 }
 
-// The delivery card reads as a release note: the brief, the findings, the
-// criteria and the preview in that order, with the publish button last.
 func TestBrowserDeliveryCardReadsAsAReleaseNote(t *testing.T) {
 	t.Parallel()
 	presentation := strings.Replace(deliveryPresentation(`{"state":"recorded","review":2,"review_revision":3,"commit":"abc123","text":"Owners see the new page."}`),

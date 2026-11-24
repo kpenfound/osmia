@@ -12,7 +12,18 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-func TestEngineCommands(t *testing.T) {
+type engineRoot struct {
+	fake     fixturekit.EngineCLIs
+	root     string
+	service  *service.Service
+	path     string
+	original []byte
+}
+
+const managedEngineConfig = "\n[dagger]\nengine = 'managed'\nversion = 'v0.21.0'\n"
+
+func startEngineRoot(t *testing.T, daggerConfig string) engineRoot {
+	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("DOCKER_HOST", "ssh://user:private@engine.example.ts.net")
 	t.Setenv("DOCKER_CONTEXT", "default")
@@ -20,68 +31,108 @@ func TestEngineCommands(t *testing.T) {
 	path := filepath.Join(o.Config.Root, "config.toml")
 	original, err := os.ReadFile(path)
 	must(t, err)
-	managed := append(append([]byte{}, original...), []byte("\n[dagger]\nengine = 'managed'\nversion = 'v0.21.0'\n")...)
-	must(t, os.WriteFile(path, managed, 0600))
-	s, err := service.Start(t.Context(), o)
+	e := engineRoot{fake: fake, root: o.Config.Root, path: path, original: original}
+	must(t, os.WriteFile(path, append(append([]byte{}, original...), []byte(daggerConfig)...), 0600))
+	e.service, err = service.Start(t.Context(), o)
 	must(t, err)
-	t.Cleanup(func() { s.Close() })
-	text := successful(t, o.Config.Root, "engine", "status")
+	t.Cleanup(func() { e.service.Close() })
+	return e
+}
+
+func (e engineRoot) rewrite(t *testing.T, daggerConfig string) {
+	t.Helper()
+	must(t, os.WriteFile(e.path, append(append([]byte{}, e.original...), []byte(daggerConfig)...), 0600))
+	successful(t, e.root, "reload")
+}
+
+func TestEngineStatusReportsTheManagedEngine(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
+	text := successful(t, e.root, "engine", "status")
 	for _, want := range []string{"mode=managed", "reachable=true", "v0.20.5", "configured=v0.21.0", "configured_mismatch=true", "4096 bytes", "Docker host: ssh://engine.example.ts.net"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q: %s", want, text)
 		}
 	}
+}
+
+func TestEngineStatusOmitsDockerHostCredentials(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
+	text := successful(t, e.root, "engine", "status")
 	if strings.Contains(text, "user") || strings.Contains(text, "private") {
 		t.Fatalf("host credentials: %s", text)
 	}
+}
+
+func TestEngineStatusJSON(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
 	var status api.EngineStatus
-	must(t, json.Unmarshal([]byte(successful(t, o.Config.Root, "engine", "status", "--json")), &status))
+	must(t, json.Unmarshal([]byte(successful(t, e.root, "engine", "status", "--json")), &status))
 	if !status.Reachable || status.CacheSizeBytes == nil || status.DockerHost != "ssh://engine.example.ts.net" {
 		t.Fatalf("JSON status: %+v", status)
 	}
-	release, err := service.InspectForTest(s).AcquireCheckSlot(t.Context(), service.CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "busy-unit"})
+}
+
+func TestEngineRestartAndPruneRefuseWhileACheckSlotIsHeld(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
+	release, err := service.InspectForTest(e.service).AcquireCheckSlot(t.Context(), service.CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "busy-unit"})
 	must(t, err)
+	defer release()
 	for _, action := range []string{"restart", "prune"} {
-		code, out, diag := invoke(t, o.Config.Root, "engine", action)
+		code, out, diag := invoke(t, e.root, "engine", action)
 		if code != 3 || out != "" || !strings.Contains(diag, "temporarily unavailable") || !strings.Contains(diag, "busy-unit") {
 			t.Fatalf("busy %s: %d %s %s", action, code, out, diag)
 		}
 	}
-	release()
+}
+
+func TestEngineRestartAdoptsTheConfiguredVersion(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
 	for _, action := range []string{"restart", "prune"} {
-		successful(t, o.Config.Root, "engine", action)
+		successful(t, e.root, "engine", action)
 	}
-	must(t, json.Unmarshal([]byte(successful(t, o.Config.Root, "engine", "status", "--json")), &status))
+	var status api.EngineStatus
+	must(t, json.Unmarshal([]byte(successful(t, e.root, "engine", "status", "--json")), &status))
 	if status.Version != "v0.21.0" || status.ConfiguredVersionMismatch {
 		t.Fatalf("restarted status: %+v", status)
 	}
-	external := append(append([]byte{}, original...), []byte("\n[dagger]\nengine = 'docker-container://explicit'\n")...)
-	must(t, os.WriteFile(path, external, 0600))
-	successful(t, o.Config.Root, "reload")
-	text = successful(t, o.Config.Root, "engine", "status")
+}
+
+func TestEngineStatusNamesTheDockerHostOfAnExternalEngine(t *testing.T) {
+	e := startEngineRoot(t, managedEngineConfig)
+	e.rewrite(t, "\n[dagger]\nengine = 'docker-container://explicit'\n")
+	text := successful(t, e.root, "engine", "status")
 	if !strings.Contains(text, "Docker host: ssh://engine.example.ts.net") {
 		t.Fatal(text)
 	}
+}
+
+func TestEngineStatusReportsConflictingDockerSelectors(t *testing.T) {
+	e := startEngineRoot(t, "\n[dagger]\nengine = 'docker-container://explicit'\n")
 	t.Setenv("DOCKER_CONTEXT", "named")
-	text = successful(t, o.Config.Root, "engine", "status")
+	text := successful(t, e.root, "engine", "status")
 	if !strings.Contains(text, "DOCKER_HOST") || !strings.Contains(text, "DOCKER_CONTEXT") || strings.Contains(text, "Docker host:") {
 		t.Fatalf("conflicting selectors: %s", text)
 	}
-	t.Setenv("DOCKER_CONTEXT", "default")
-	before := fake.Commands(t)
-	must(t, os.WriteFile(path, original, 0600))
-	successful(t, o.Config.Root, "reload")
+}
+
+func TestEngineRestartAndPruneAreNotApplicableToAnAutomaticEngine(t *testing.T) {
+	e := startEngineRoot(t, "")
+	before := e.fake.Commands(t)
 	for _, action := range []string{"restart", "prune"} {
-		code, _, diag := invoke(t, o.Config.Root, "engine", action)
+		code, _, diag := invoke(t, e.root, "engine", action)
 		if code != 5 || !strings.Contains(diag, "not applicable") {
 			t.Fatalf("unmanaged %s: %d %s", action, code, diag)
 		}
 	}
-	if fake.Commands(t) != before {
+	if e.fake.Commands(t) != before {
 		t.Fatal("auto controls touched Docker")
 	}
+}
+
+func TestEngineRefusesInvalidArguments(t *testing.T) {
+	e := startEngineRoot(t, "")
 	for _, args := range [][]string{{"engine"}, {"engine", "unknown"}, {"engine", "status", "extra"}} {
-		if code, _, _ := invoke(t, o.Config.Root, args...); code != 2 {
+		if code, _, _ := invoke(t, e.root, args...); code != 2 {
 			t.Fatalf("arguments accepted: %v", args)
 		}
 	}

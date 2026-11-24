@@ -27,11 +27,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// launches is the process-launch seam every serve in these tests runs its
-// role turns through: core's fake enforcer, which starts no process.
-var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}, views: map[string]map[string]string{}}
+var launches = &launchEngine{runs: map[string]*enforcertest.Turn{}, views: map[string]map[string]string{}, started: make(chan struct{})}
 
-// production is serve's own enforcement, which TestMain replaces.
 var production = enforcement
 
 func TestMain(m *testing.M) {
@@ -43,21 +40,14 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// refusal is the reason the fake platform gives for a sandbox it cannot
-// enforce.
 const refusal = "this platform cannot hold the claude sandbox"
 
-// launchEngine hands out core's fake enforcer for each role's sandbox. It
-// records the turns its agent runs and refuses the claude sandbox the way a
-// platform without a confiner does.
 type launchEngine struct {
-	mu    sync.Mutex
-	turns []string
-	// runs holds the turn the agent ran under each name.
-	runs map[string]*enforcertest.Turn
-	// views holds the files of each chief-of-staff message turn's view, by
-	// path relative to the view, as the agent found them.
-	views map[string]map[string]string
+	mu      sync.Mutex
+	turns   []string
+	runs    map[string]*enforcertest.Turn
+	views   map[string]map[string]string
+	started chan struct{}
 }
 
 func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.Enforcer, error) {
@@ -76,6 +66,8 @@ func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.E
 			if view != nil {
 				e.views[turn.Request.Name] = view
 			}
+			close(e.started)
+			e.started = make(chan struct{})
 			e.mu.Unlock()
 			return &agent.Result{ClaudeID: "session-" + turn.Request.Name, ResultText: "Noted", NumTurns: 1}, nil
 		}}
@@ -85,7 +77,6 @@ func (e *launchEngine) Enforcer(settings coreadapter.ExecutionSettings) (agent.E
 	return f, nil
 }
 
-// viewFiles reads every file under dir by its slash-separated relative path.
 func viewFiles(dir string) (map[string]string, error) {
 	files := map[string]string{}
 	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
@@ -103,18 +94,19 @@ func viewFiles(dir string) (map[string]string, error) {
 	return files, err
 }
 
-// await waits until the agent has run a turn named name and returns it.
 func (e *launchEngine) await(t *testing.T, name string, diagnostics ...func()) *enforcertest.Turn {
 	t.Helper()
-	deadline := time.Now().Add(time.Minute)
+	timedOut := time.After(time.Minute)
 	for {
 		e.mu.Lock()
-		turn := e.runs[name]
+		turn, started := e.runs[name], e.started
 		e.mu.Unlock()
 		if turn != nil {
 			return turn
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-started:
+		case <-timedOut:
 			for _, diagnostic := range diagnostics {
 				diagnostic()
 			}
@@ -122,7 +114,6 @@ func (e *launchEngine) await(t *testing.T, name string, diagnostics ...func()) *
 			defer e.mu.Unlock()
 			t.Fatalf("turn %s did not run; ran %v", name, e.turns)
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -132,9 +123,10 @@ func (e *launchEngine) reset() {
 	e.turns = nil
 	e.runs = map[string]*enforcertest.Turn{}
 	e.views = map[string]map[string]string{}
+	close(e.started)
+	e.started = make(chan struct{})
 }
 
-// serve runs osmia serve on root until the test ends.
 func serve(t *testing.T, root string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,57 +151,76 @@ func serve(t *testing.T, root string) {
 	})
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
 	defer c.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := c.Health(context.Background()); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("serve did not start")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	awaitHealth(t, c, true, 5*time.Second, diag.String)
 }
 
-// TestServeRunsRoleTurns shows a service started by osmia serve running role
-// turns through the enforcers it builds: the architect drafts a handed
-// workstream and a message to the chief of staff is dispatched. Adding a
-// project runs no turn.
-func TestServeRunsRoleTurns(t *testing.T) {
+type servedProject struct {
+	root   string
+	clone  string
+	client *service.Client
+	added  wire.ProjectResponse
+}
+
+func serveWithProject(t *testing.T) servedProject {
+	t.Helper()
 	launches.reset()
 	opts, clone := emptyFixture(t)
 	root := opts.Config.Root
 	serve(t, root)
-
 	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
+	c := service.NewClient(filepath.Join(root, "osmia.sock"))
+	t.Cleanup(c.Close)
+	return servedProject{root: root, clone: clone, client: c, added: added}
+}
+
+func (p servedProject) handIn(t *testing.T) wire.HandInResponse {
+	t.Helper()
+	setCharter(t, p.root, p.added.Project.ID, "1. Keep changes small.\n")
+	design := filepath.Join(filepath.Dir(p.clone), "design.md")
+	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
+	var handed wire.HandInResponse
+	must(t, json.Unmarshal([]byte(successful(t, p.root, "handin", string(p.added.Project.ID), design, "--json")), &handed))
+	return handed
+}
+
+func TestAddingAProjectRunsNoRoleTurns(t *testing.T) {
+	serveWithProject(t)
 	launches.mu.Lock()
 	ran := slices.Clone(launches.turns)
 	launches.mu.Unlock()
 	if len(ran) != 0 {
 		t.Fatalf("adding a project ran turns %v", ran)
 	}
+}
 
-	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
-	design := filepath.Join(filepath.Dir(clone), "design.md")
-	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
-	var handed wire.HandInResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(added.Project.ID), design, "--json")), &handed))
+func TestHandInStartsTheFirstDraftTurn(t *testing.T) {
+	p := serveWithProject(t)
+	p.handIn(t)
+	launches.await(t, "draft-1-1")
+}
+
+func TestOwnerMessageRunsOneOrdinaryTurnToCompletion(t *testing.T) {
+	p := serveWithProject(t)
+	handed := p.handIn(t)
 	launches.await(t, "draft-1-1")
 
 	var sent wire.ConversationEntry
-	must(t, json.Unmarshal([]byte(successful(t, root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
-	c := service.NewClient(filepath.Join(root, "osmia.sock"))
-	defer c.Close()
-	diagnostics := func() { chiefDispatchDiagnostics(t, c, root, added.Project.ID, handed.Workstream) }
-	chief(t, launches.await(t, sent.Turn, diagnostics), root, string(added.Project.ID), string(handed.Workstream))
-	// The live controller must finish this exact ordinary owner turn,
-	// not just enter the fake engine before a later boundary fails.
-	deadline := time.Now().Add(time.Minute)
-	for {
-		conversation, err := c.Conversation(context.Background(), handed.Workstream)
+	must(t, json.Unmarshal([]byte(successful(t, p.root, "send", string(handed.Workstream), "Start with uploads.", "--json")), &sent))
+	diagnostics := func() { chiefDispatchDiagnostics(t, p.client, p.root, p.added.Project.ID, handed.Workstream) }
+	t.Cleanup(func() {
+		if t.Failed() {
+			diagnostics()
+		}
+	})
+	chief(t, launches.await(t, sent.Turn, diagnostics), p.root, string(p.added.Project.ID), string(handed.Workstream))
+	var conversation wire.ConversationResponse
+	var messages, responses []wire.ConversationEntry
+	eventually(t, time.Minute, func() (bool, string) {
+		var err error
+		conversation, err = p.client.Conversation(context.Background(), handed.Workstream)
 		must(t, err)
-		var messages, responses []wire.ConversationEntry
+		messages, responses = nil, nil
 		for _, entry := range conversation.Entries {
 			if entry.Turn != sent.Turn {
 				continue
@@ -221,23 +232,13 @@ func TestServeRunsRoleTurns(t *testing.T) {
 				responses = append(responses, entry)
 			}
 		}
-		if len(responses) > 0 {
-			if len(messages) != 1 || len(responses) != 1 || messages[0].State != wire.TurnDone || responses[0].State != wire.TurnDone || responses[0].Text != "Noted" {
-				diagnostics()
-				t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			diagnostics()
-			t.Fatalf("ordinary owner turn %s did not complete: %+v", sent.Turn, conversation)
-		}
-		time.Sleep(20 * time.Millisecond)
+		return len(responses) > 0, fmt.Sprintf("ordinary owner turn %s did not complete: %+v", sent.Turn, conversation)
+	})
+	if len(messages) != 1 || len(responses) != 1 || messages[0].State != wire.TurnDone || responses[0].State != wire.TurnDone || responses[0].Text != "Noted" {
+		t.Fatalf("ordinary owner turn did not complete exactly once: %+v", conversation)
 	}
 }
 
-// chiefDispatchDiagnostics reads the live API and the durable queue without
-// taking the service's trace lock or driving an extra scheduling pass.
 func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, project config.ProjectID, stream config.WorkstreamID) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -258,10 +259,6 @@ func chiefDispatchDiagnostics(t *testing.T, c *service.Client, root string, proj
 	}
 }
 
-// chief checks the boundary serve gives a chief-of-staff thread turn: its
-// session directory under the thread's, an empty working directory of its
-// own, the workstream's documents staged for its read-only view, and only
-// file_read with its status, priority and question tools.
 func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream string) {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(root)
@@ -309,37 +306,59 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	}
 }
 
-// Without an injected fake, serve runs its turns through core's enforcers,
-// with the root's skill cache, and MCP host.
-func TestServeBuildsCoreEnforcement(t *testing.T) {
+func productionFixture(t *testing.T) (config.Root, service.Enforcement) {
+	t.Helper()
 	root, err := config.ResolveRoot(t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := production(root)
-	cache := filepath.Join(root.String(), "skills")
-	if e.Skills == nil || e.Skills.Dir != cache {
+	must(t, err)
+	return root, production(root)
+}
+
+func TestProductionCachesSkillsUnderTheRoot(t *testing.T) {
+	root, e := productionFixture(t)
+	if e.Skills == nil || e.Skills.Dir != filepath.Join(root.String(), "skills") {
 		t.Fatalf("skills %#v", e.Skills)
 	}
+}
+
+func TestProductionEngineMountsTheSkillCache(t *testing.T) {
+	root, e := productionFixture(t)
+	cache := filepath.Join(root.String(), "skills")
 	engine, ok := e.Engine.(coreadapter.CoreEngine)
 	if !ok || engine.Runner.Skills != e.Skills || !slices.Equal(engine.Runner.SkillMountDirs, []string{cache}) || !slices.Equal(engine.SkillDirs(), []string{cache}) {
+		t.Fatalf("engine %#v", e.Engine)
+	}
+}
+
+func TestProductionEngineHoldsNothingBesidesTheSkills(t *testing.T) {
+	_, e := productionFixture(t)
+	engine, ok := e.Engine.(coreadapter.CoreEngine)
+	if !ok {
 		t.Fatalf("engine %#v", e.Engine)
 	}
 	engine.Runner.Skills, engine.Runner.SkillMountDirs = nil, nil
 	if !reflect.DeepEqual(engine, coreadapter.CoreEngine{}) {
 		t.Fatalf("engine %#v", e.Engine)
 	}
+}
+
+func TestProductionHostsUseTheCoreTransportAndContainer(t *testing.T) {
+	_, e := productionFixture(t)
 	host, ok := e.Hosts.(*coreadapter.MCPHost)
 	if !ok || !reflect.DeepEqual(host.Transport, coreadapter.CoreTransport{}) || host.Container == nil || !reflect.DeepEqual(host.Sbx, coreadapter.SbxTransport()) {
 		t.Fatalf("hosts %#v", e.Hosts)
 	}
+}
+
+func TestEnforceGivesTheArchitectAndCommitteeTheProductionEngineAndHosts(t *testing.T) {
+	_, e := productionFixture(t)
 	opts := service.Enforce(service.Options{}, e)
 	if opts.Threads == nil || opts.Architect == nil || opts.Committee == nil {
 		t.Fatalf("options %+v", opts)
 	}
-	for _, role := range []any{*opts.Architect, *opts.Committee} {
-		if !reflect.DeepEqual(role, service.Architect{Engine: e.Engine, Hosts: e.Hosts}) && !reflect.DeepEqual(role, service.Committee{Engine: e.Engine, Hosts: e.Hosts}) {
-			t.Fatalf("role enforcement %#v", role)
-		}
+	if !reflect.DeepEqual(*opts.Architect, service.Architect{Engine: e.Engine, Hosts: e.Hosts}) {
+		t.Fatalf("architect enforcement %#v", *opts.Architect)
+	}
+	if !reflect.DeepEqual(*opts.Committee, service.Committee{Engine: e.Engine, Hosts: e.Hosts}) {
+		t.Fatalf("committee enforcement %#v", *opts.Committee)
 	}
 }

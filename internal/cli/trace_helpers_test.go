@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// setCharter records text as the project's next charter revision through
-// osmia edit.
 func setCharter(t *testing.T, root string, project config.ProjectID, text string) {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "charter.md")
@@ -20,7 +18,6 @@ func setCharter(t *testing.T, root string, project config.ProjectID, text string
 	successful(t, root, "edit", "charter", string(project), "--from", file)
 }
 
-// projectDatabase is the project's trace database under root.
 func projectDatabase(t *testing.T, root string, project config.ProjectID) string {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
@@ -30,7 +27,6 @@ func projectDatabase(t *testing.T, root string, project config.ProjectID) string
 	return trace.TraceDatabase(dir)
 }
 
-// workstreamDatabase is the workstream's trace database under root.
 func workstreamDatabase(t *testing.T, root string, project config.ProjectID, stream string) string {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
@@ -40,9 +36,6 @@ func workstreamDatabase(t *testing.T, root string, project config.ProjectID, str
 	return trace.TraceDatabase(dir)
 }
 
-// traceBodies reads, without taking the trace's lock, the bodies of the
-// records stored at the logical path name of the trace database db, in
-// order.
 func traceBodies(t *testing.T, db, name string) []string {
 	t.Helper()
 	conn, err := sql.Open("sqlite", "file:"+db+"?mode=ro&_pragma=busy_timeout(5000)")
@@ -61,8 +54,6 @@ func traceBodies(t *testing.T, db, name string) []string {
 	return bodies
 }
 
-// traceDocuments reads the document revisions of the trace database db at
-// the logical documents log name, by record ID, in order.
 func traceDocuments(t *testing.T, db, name string) map[string][]trace.Document {
 	t.Helper()
 	docs := map[string][]trace.Document{}
@@ -74,8 +65,6 @@ func traceDocuments(t *testing.T, db, name string) map[string][]trace.Document {
 	return docs
 }
 
-// latestDocument returns the latest revision of the document at path among
-// the documents log name of db.
 func latestDocument(t *testing.T, db, name, path string) trace.Document {
 	t.Helper()
 	var latest trace.Document
@@ -93,7 +82,6 @@ func latestDocument(t *testing.T, db, name, path string) trace.Document {
 	return latest
 }
 
-// commitCount reads how many commits the trace database db holds.
 func commitCount(t *testing.T, db string) int {
 	t.Helper()
 	conn, err := sql.Open("sqlite", "file:"+db+"?mode=ro&_pragma=busy_timeout(5000)")

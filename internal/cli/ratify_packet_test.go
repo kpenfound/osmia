@@ -22,8 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// packetWorkgroup seeds two real members at their decision point without
-// running any model or delivery operation.
 func packetWorkgroup(t *testing.T) (service.Options, *config.Config, trace.Workgroup) {
 	t.Helper()
 	opts := fixture(t)
@@ -81,109 +79,193 @@ func packetRatifyCommand(t *testing.T, text string) []string {
 	return nil
 }
 
-func TestPacketReadBindsCLIRatificationAcrossOtherMemberRefresh(t *testing.T) {
+type packetRoot struct {
+	root        string
+	cfg         *config.Config
+	group       trace.Workgroup
+	service     *service.Service
+	stopped     bool
+	first       string
+	old         wire.PacketResponse
+	oldCommand  []string
+	updatedSpec string
+	refreshed   wire.PacketResponse
+}
+
+func startPacketRoot(t *testing.T) *packetRoot {
+	t.Helper()
 	opts, cfg, group := packetWorkgroup(t)
-	ctx := context.Background()
-	s, err := service.Start(ctx, opts)
+	s, err := service.Start(t.Context(), opts)
 	must(t, err)
-	defer func() { s.Close() }()
-	root := opts.Config.Root
-	first := successful(t, root, "packet", stream)
-	for _, displayed := range []string{"Workgroup spec revision 1", "Uploads resume across the service and client.", "Contract resume: Persist the acknowledged offset.", "contract criteria [1]", shedSpec, shedPlan} {
-		if !strings.Contains(first, displayed) {
-			t.Fatalf("packet omitted %q: %s", displayed, first)
-		}
+	p := &packetRoot{root: opts.Config.Root, cfg: cfg, group: group, service: s}
+	t.Cleanup(p.stop)
+	p.first = successful(t, p.root, "packet", stream)
+	p.oldCommand = packetRatifyCommand(t, p.first)
+	must(t, json.Unmarshal([]byte(successful(t, p.root, "packet", stream, "--json")), &p.old))
+	return p
+}
+
+func (p *packetRoot) stop() {
+	if !p.stopped {
+		p.stopped = true
+		p.service.Close()
 	}
-	oldCommand := packetRatifyCommand(t, first)
-	var old wire.PacketResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "packet", stream, "--json")), &old))
-	if old.ProjectSpecRevision != 1 || old.Packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) {
-		t.Fatalf("first packet: %+v", old)
-	}
-	// Only B changes; A's spec and plan pins remain the ones the owner read.
-	edit := filepath.Join(root, "edited-spec.md")
-	updatedSpec := strings.Replace(shedSpec, "# Uploads", "# Uploads\n\nReport progress while resuming.", 1)
-	must(t, os.WriteFile(edit, []byte(updatedSpec), 0600))
-	successful(t, root, "edit", "spec", string(group.Members[2]), "--from", edit)
-	c := service.NewClient(filepath.Join(root, "osmia.sock"))
+}
+
+func (p *packetRoot) refreshFromAnotherMember(t *testing.T) {
+	t.Helper()
+	edit := filepath.Join(p.root, "edited-spec.md")
+	p.updatedSpec = strings.Replace(shedSpec, "# Uploads", "# Uploads\n\nReport progress while resuming.", 1)
+	must(t, os.WriteFile(edit, []byte(p.updatedSpec), 0600))
+	successful(t, p.root, "edit", "spec", string(p.group.Members[2]), "--from", edit)
+	c := service.NewClient(filepath.Join(p.root, "osmia.sock"))
 	defer c.Close()
-	deadline := time.Now().Add(30 * time.Second)
-	var refreshed wire.PacketResponse
-	for {
-		refreshed, err = c.Packet(ctx, stream)
+	eventually(t, 30*time.Second, func() (bool, string) {
+		var err error
+		p.refreshed, err = c.Packet(t.Context(), stream)
 		must(t, err)
-		if refreshed.ProjectSpecRevision == 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("refresh did not land: %+v", refreshed)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if refreshed.Packet.Revision != old.Packet.Revision {
-		t.Fatal("editing B changed A's pins")
-	}
-	for _, command := range [][]string{oldCommand, {"ratify", stream}} {
-		code, out, diag := invoke(t, root, command...)
+		return p.refreshed.ProjectSpecRevision == 2, fmt.Sprintf("refresh did not land: %+v", p.refreshed)
+	})
+}
+
+func (p *packetRoot) refuseStaleRatifications(t *testing.T) {
+	t.Helper()
+	for _, command := range [][]string{p.oldCommand, {"ratify", stream}} {
+		code, out, diag := invoke(t, p.root, command...)
 		if code != 5 || out != "" || !strings.Contains(strings.ToLower(diag), "read the packet again") {
 			t.Fatalf("stale or missing project revision approved: %v: %d %q %q", command, code, out, diag)
 		}
 	}
-	must(t, s.Close())
-	wt, err := trace.OpenWorkgroupAuthority(cfg.Root, group.ID)
+}
+
+func (p *packetRoot) ratifyRereadPacket(t *testing.T) string {
+	t.Helper()
+	return successful(t, p.root, packetRatifyCommand(t, successful(t, p.root, "packet", stream))...)
+}
+
+func (p *packetRoot) groupApproval(t *testing.T) trace.GroupApproval {
+	t.Helper()
+	p.stop()
+	wt, err := trace.OpenWorkgroupAuthority(p.cfg.Root, p.group.ID)
 	must(t, err)
-	_, _, found, err := trace.ReadGroupApproval(wt, group.Members[0])
+	defer wt.Close()
+	approval, _, found, err := trace.ReadGroupApproval(wt, p.group.Members[0])
+	must(t, err)
+	if !found {
+		t.Fatal("no group approval was recorded")
+	}
+	return approval
+}
+
+func TestPacketShowsTheWorkgroupSpecAndEveryMembersDocuments(t *testing.T) {
+	p := startPacketRoot(t)
+	for _, displayed := range []string{"Workgroup spec revision 1", "Uploads resume across the service and client.", "Contract resume: Persist the acknowledged offset.", "contract criteria [1]", shedSpec, shedPlan} {
+		if !strings.Contains(p.first, displayed) {
+			t.Fatalf("packet omitted %q: %s", displayed, p.first)
+		}
+	}
+}
+
+func TestPacketJSONPinsTheProjectSpecAndMemberRevisions(t *testing.T) {
+	p := startPacketRoot(t)
+	if p.old.ProjectSpecRevision != 1 || p.old.Packet.Revision != (shed.Pin{Spec: 1, Plan: 1}) {
+		t.Fatalf("first packet: %+v", p.old)
+	}
+}
+
+func TestAnotherMembersRefreshLeavesThisMembersPinsAlone(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	if p.refreshed.Packet.Revision != p.old.Packet.Revision {
+		t.Fatalf("editing another member changed this member's pins: %+v", p.refreshed.Packet.Revision)
+	}
+}
+
+func TestRatifyRefusesAProjectRevisionThatIsStaleOrMissing(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	p.refuseStaleRatifications(t)
+}
+
+func TestRefusedRatificationRecordsNoApprovalRatificationOrSeal(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	p.refuseStaleRatifications(t)
+	p.stop()
+	wt, err := trace.OpenWorkgroupAuthority(p.cfg.Root, p.group.ID)
+	must(t, err)
+	_, _, found, err := trace.ReadGroupApproval(wt, p.group.Members[0])
 	must(t, err)
 	if found {
 		t.Fatal("refused CLI decisions recorded a group approval")
 	}
 	must(t, wt.Close())
-	for i, p := range cfg.Projects {
-		repo, err := trace.Open(cfg.Root, p)
+	for i, project := range p.cfg.Projects {
+		repo, err := trace.Open(p.cfg.Root, project)
 		must(t, err)
-		docs, err := trace.Read[trace.Document](repo, group.Members[i+1])
+		docs, err := trace.Read[trace.Document](repo, p.group.Members[i+1])
 		must(t, err)
 		for _, doc := range docs {
 			if doc.Path == shed.RatificationPath(1) || doc.Path == seal.Path {
 				t.Fatalf("refused CLI decisions recorded %s", doc.Path)
 			}
 		}
-		_, _, found, err = seal.PreparedLatest(repo, group.Members[i+1])
+		_, _, found, err = seal.PreparedLatest(repo, p.group.Members[i+1])
 		must(t, err)
 		if found {
 			t.Fatal("refused CLI decisions prepared a seal")
 		}
 		must(t, repo.Close())
 	}
-	// An explicit reread supplies P2 and succeeds, including across a restart.
-	s, err = service.Start(ctx, opts)
-	must(t, err)
-	second := successful(t, root, "packet", stream)
-	if !strings.Contains(second, "Workgroup spec revision 2") || !strings.Contains(second, updatedSpec) {
+}
+
+func TestRereadPacketShowsTheRefreshedSlice(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	second := successful(t, p.root, "packet", stream)
+	if !strings.Contains(second, "Workgroup spec revision 2") || !strings.Contains(second, p.updatedSpec) {
 		t.Fatalf("reread did not show the refreshed slice: %s", second)
 	}
-	command := packetRatifyCommand(t, second)
-	if !reflect.DeepEqual(command, []string{"ratify", stream, "--project-spec-revision", strconv.Itoa(refreshed.ProjectSpecRevision), "--spec-revision", "1", "--plan-revision", "1"}) {
+}
+
+func TestRereadPacketNamesTheCommandThatPinsTheDisplayedRevisions(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	command := packetRatifyCommand(t, successful(t, p.root, "packet", stream))
+	if !reflect.DeepEqual(command, []string{"ratify", stream, "--project-spec-revision", strconv.Itoa(p.refreshed.ProjectSpecRevision), "--spec-revision", "1", "--plan-revision", "1"}) {
 		t.Fatalf("reread command: %v", command)
 	}
-	if out := successful(t, root, command...); !strings.Contains(out, "Workgroup spec revision 2 approved.") {
+}
+
+func TestRatifyWithTheRereadCommandNamesTheApprovedProjectRevision(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	if out := p.ratifyRereadPacket(t); !strings.Contains(out, "Workgroup spec revision 2 approved.") {
 		t.Fatalf("ratify omitted the approved project revision: %s", out)
 	}
-	must(t, s.Close())
-	wt, err = trace.OpenWorkgroupAuthority(cfg.Root, group.ID)
-	must(t, err)
-	defer wt.Close()
-	approval, _, found, err := trace.ReadGroupApproval(wt, group.Members[0])
-	must(t, err)
-	if !found || approval.ProjectSpecRevision != 2 || !reflect.DeepEqual(approval.ProjectSpec, *refreshed.ProjectSpec) {
+}
+
+func TestGroupApprovalPinsTheRereadProjectSpec(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	p.ratifyRereadPacket(t)
+	approval := p.groupApproval(t)
+	if approval.ProjectSpecRevision != 2 || !reflect.DeepEqual(approval.ProjectSpec, *p.refreshed.ProjectSpec) {
 		t.Fatalf("approval did not pin the reread project spec: %+v", approval)
 	}
+}
+
+func TestGroupApprovalPinsTheDisplayedMemberRevisions(t *testing.T) {
+	p := startPacketRoot(t)
+	p.refreshFromAnotherMember(t)
+	p.ratifyRereadPacket(t)
+	approval := p.groupApproval(t)
 	if len(approval.Members) != 2 {
 		t.Fatalf("approval lost members: %+v", approval)
 	}
 	for _, member := range approval.Members {
 		wantSpec := 1
-		if member.Workstream == group.Members[2] {
+		if member.Workstream == p.group.Members[2] {
 			wantSpec = 2
 		}
 		if member.Spec != wantSpec || member.Plan != 1 {

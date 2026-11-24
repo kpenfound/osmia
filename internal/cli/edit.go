@@ -15,10 +15,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// editFiles names the file each editable document is edited in.
 var editFiles = map[string]string{"charter": "charter.md", "spec": "spec.md", "plan": "plan.json"}
 
-// editor returns the owner's editor command: VISUAL, or else EDITOR.
 func editor() string {
 	if v := os.Getenv("VISUAL"); v != "" {
 		return v
@@ -26,10 +24,6 @@ func editor() string {
 	return os.Getenv("EDITOR")
 }
 
-// runEdit edits the latest revision of a project's charter or a
-// workstream's spec or plan, in the owner's editor or from the file from,
-// and records the result as the next revision. A failed save keeps the
-// edited file and names it, so the edit can be retried with --from.
 func runEdit(ctx context.Context, c *service.Client, kind, target, from string, stdin io.Reader, stdout, stderr io.Writer) int {
 	invalid := func() int { fmt.Fprintln(stderr, "invalid arguments; use osmia --help"); return 2 }
 	command := editor()
@@ -128,7 +122,6 @@ func runEdit(ctx context.Context, c *service.Client, kind, target, from string, 
 	return 0
 }
 
-// editFailure reports a failed read or save of an edited document.
 func editFailure(stderr io.Writer, err error) int {
 	var api *wire.APIError
 	if errors.As(err, &api) && api.Message == "" {

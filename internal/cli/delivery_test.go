@@ -48,15 +48,6 @@ func TestApproveSendsThePresentedDescriptionAndMessages(t *testing.T) {
 	}
 }
 
-func TestApproveRefusesTheRemovedMessageFlags(t *testing.T) {
-	opts := fixture(t)
-	for _, flag := range []string{"--message-file", "--messages-file"} {
-		if code, _, _ := invoke(t, opts.Config.Root, "approve", stream, flag, "messages.txt"); code == 0 {
-			t.Fatalf("approve accepted %s", flag)
-		}
-	}
-}
-
 func TestDeliveryShowsTheCheckResult(t *testing.T) {
 	opts := fixture(t)
 	root := opts.Config.Root
@@ -74,44 +65,67 @@ func TestDeliveryShowsTheCheckResult(t *testing.T) {
 	}
 }
 
-func TestLandApprovesAndLandsTheWorkstreamAsPresented(t *testing.T) {
+type landServer struct {
+	root string
+	sent chan wire.DeliveryLandDecision
+	path *string
+}
+
+func startLandServer(t *testing.T) landServer {
+	t.Helper()
 	opts := fixture(t)
 	root := opts.Config.Root
 	ln, err := net.Listen("unix", filepath.Join(root, "fake.sock"))
 	must(t, err)
-	sent := make(chan wire.DeliveryLandDecision, 1)
-	var path string
+	l := landServer{root: root, sent: make(chan wire.DeliveryLandDecision, 1), path: new(string)}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(wire.DeliveryPresentation{Report: wire.FinalReport{Review: 1, Commit: "abc"}, ReviewRevision: 2, DraftHash: "hash", CanLand: true, Recommendation: "land"})
 			return
 		}
-		path = r.URL.Path
+		*l.path = r.URL.Path
 		var decision wire.DeliveryLandDecision
 		if err := json.NewDecoder(r.Body).Decode(&decision); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		sent <- decision
+		l.sent <- decision
 		json.NewEncoder(w).Encode(wire.DeliveryLandResponse{Outcome: wire.LandOutcomeLanded, Commit: "abc"})
 	})}
 	go server.Serve(ln)
 	t.Cleanup(func() { server.Close() })
+	return l
+}
 
-	code, out, diag := invoke(t, root, "delivery", stream, "--socket", "fake.sock")
+func TestDeliveryNamesTheLandCommandAndTheRecommendation(t *testing.T) {
+	l := startLandServer(t)
+	code, out, diag := invoke(t, l.root, "delivery", stream, "--socket", "fake.sock")
 	if code != 0 || !strings.Contains(out, "osmia land "+stream) || !strings.Contains(out, "Jev recommends: land\n") {
 		t.Fatalf("delivery: %d %q %s", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "land", stream, "--accept", "--socket", "fake.sock")
+}
+
+func TestLandAcceptReportsTheLandedCommit(t *testing.T) {
+	l := startLandServer(t)
+	code, out, diag := invoke(t, l.root, "land", stream, "--accept", "--socket", "fake.sock")
 	if code != 0 || !strings.Contains(out, "Landed workstream "+stream) || !strings.Contains(out, "abc") || diag != "" {
 		t.Fatalf("land: %d %q %s", code, out, diag)
 	}
-	decision := <-sent
-	if want := (wire.DeliveryLandDecision{Review: 1, ReviewRevision: 2, Commit: "abc", DraftHash: "hash", AcceptBlocking: true}); decision != want || path != "/v1/delivery/"+stream+"/land" {
-		t.Fatalf("the decision %+v sent to %s, want %+v", decision, path, want)
+}
+
+func TestLandSendsTheDecisionAsPresented(t *testing.T) {
+	l := startLandServer(t)
+	successful(t, l.root, "land", stream, "--accept", "--socket", "fake.sock")
+	decision := <-l.sent
+	if want := (wire.DeliveryLandDecision{Review: 1, ReviewRevision: 2, Commit: "abc", DraftHash: "hash", AcceptBlocking: true}); decision != want || *l.path != "/v1/delivery/"+stream+"/land" {
+		t.Fatalf("the decision %+v sent to %s, want %+v", decision, *l.path, want)
 	}
-	code, out, _ = invoke(t, root, "land", stream, "--json", "--socket", "fake.sock")
+}
+
+func TestLandJSONReportsTheOutcome(t *testing.T) {
+	l := startLandServer(t)
+	code, out, _ := invoke(t, l.root, "land", stream, "--json", "--socket", "fake.sock")
 	if code != 0 || !strings.Contains(out, `"outcome":"landed"`) {
 		t.Fatalf("land --json: %d %q", code, out)
 	}

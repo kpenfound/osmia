@@ -19,21 +19,16 @@ type decisionRequest struct {
 }
 
 type decisionButtonFixture struct {
-	api      *fakeAPI
-	p        *page
-	action   fakeAction
-	mu       sync.Mutex
-	requests []decisionRequest
-	packet   string
-	// delivery is the JSON of the /delivery/<stream> presentation, and
-	// deliveryReads counts the reads of it.
+	api           *fakeAPI
+	p             *page
+	action        fakeAction
+	mu            sync.Mutex
+	requests      []decisionRequest
+	packet        string
 	delivery      string
 	deliveryReads int
 }
 
-// newDecisionButtonFixture opens the page on a fake API whose inbox holds
-// entry. A delivery entry needs the presentation the page reads for it, given
-// as delivery.
 func newDecisionButtonFixture(t *testing.T, entry string, delivery ...string) *decisionButtonFixture {
 	t.Helper()
 	f := &decisionButtonFixture{api: newFakeAPI(1), packet: `{"packet":{"revision":{"spec":1,"plan":1},"dissent":[]}}`}
@@ -51,15 +46,11 @@ func newDecisionButtonFixture(t *testing.T, entry string, delivery ...string) *d
 			f.mu.Lock()
 			f.requests = append(f.requests, decisionRequest{Path: r.URL.Path, Method: r.Method, Body: body})
 			f.mu.Unlock()
-			// The reply carries the fields of every answer the card kinds take,
-			// among them an approved recovery move's.
 			ok := `{"detail":"Decision recorded.","upstream":{"remote":"upstream","branch":"main"},"workstream":"w_000","occurrence":"unit-index@4/unit.stalled/stalled-1","subject":"unit-index","unit":"index","from":"checking","target":"checking"}`
 			if strings.HasPrefix(r.URL.Path, "/v1/delivery/") {
-				// An approved delivery answers with the final review it published.
 				ok = fmt.Sprintf(`{"review":%d,"commit":%q}`, testPins.review, testPins.commit)
 			}
 			if strings.HasSuffix(r.URL.Path, "/land") {
-				// Approve and land answers with what landing did.
 				ok = fmt.Sprintf(`{"approval":{"review":%d,"commit":%q},"outcome":"landed","commit":%q}`, testPins.review, testPins.commit, testPins.commit)
 			}
 			f.action.serve(w, r, ok)
@@ -100,8 +91,6 @@ func assertDecisionButtons(p *page, card string, labels map[string]string) {
 	if !reflect.DeepEqual(got, labels) {
 		p.t.Fatalf("buttons: %v, want %v", got, labels)
 	}
-	// The card's own buttons sit below the note; an objection's buttons sit
-	// in that objection and name it.
 	var valid bool
 	p.eval(`(() => {
   const card = document.querySelector(`+quote(card)+`);
@@ -117,8 +106,6 @@ func assertDecisionButtons(p *page, card string, labels map[string]string) {
 	}
 }
 
-// assertButtonStyles checks which choices are primary buttons and that every
-// other one is secondary.
 func assertButtonStyles(p *page, card string, primary ...string) {
 	p.t.Helper()
 	var got struct {
@@ -215,8 +202,6 @@ func TestBrowserRatificationButtonsValidateAndSendRedraft(t *testing.T) {
 	assertDecisionRequest(t, f, "/v1/shed/redraft/w_000", map[string]any{"note": "Split the unit."})
 }
 
-// Each objection carries its own Sustain and Overrule buttons, and a button
-// acts on the objection it sits under, whichever objection that is.
 func TestBrowserRatificationObjectionButtonsSendDispositions(t *testing.T) {
 	t.Parallel()
 	for _, objection := range []string{"objection-1", "objection-2"} {
@@ -271,7 +256,6 @@ func TestBrowserDecisionButtonsBlockDuringRequestAndKeepNoteOnFailure(t *testing
 	t.Cleanup(release)
 	f.action.failNext("The packet changed.")
 	f.p.typeInto(card+`[name=note]`, "Keep my note.")
-	// Save references so the test can try every button after terminal dismissal.
 	f.p.eval(`window.decisionButtons = [...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)]`, nil)
 	f.p.click(card + `[data-decision-choice="ratify"]`)
 	f.p.awaitGone("the pending ratification", card)
@@ -318,9 +302,6 @@ func TestBrowserDecisionButtonsRefreshWhilePendingPreservesNoteAndBlocksNewChoic
 	assertDecisionRequest(t, f, "/v1/shed/redraft/w_000", map[string]any{"note": "Keep this draft."})
 }
 
-// A creation that cannot finish waits on the project pane, from a start or
-// not, and offers only a retry, which sends the creation's identity to the
-// create route.
 func TestBrowserStuckProjectCreationOffersOnlyRetry(t *testing.T) {
 	t.Parallel()
 	const id = "p_0123456789abcdef0123456789abcdef"
@@ -341,8 +322,6 @@ func TestBrowserStuckProjectCreationOffersOnlyRetry(t *testing.T) {
 	}
 }
 
-// deliveryPins is the identity a delivery inbox entry pins and the
-// presentation it is shown with must match.
 type deliveryPins struct {
 	review, revision int
 	commit, hash     string
@@ -350,8 +329,6 @@ type deliveryPins struct {
 
 var testPins = deliveryPins{review: 1, revision: 2, commit: "abc123def456", hash: "hash-one"}
 
-// deliveryEntryJSON is a delivery inbox entry pinning pins, accepting the
-// blocking findings when accept is set.
 func deliveryEntryJSON(pins deliveryPins, accept bool) string {
 	body := fmt.Sprintf(`{"review":%d,"review_revision":%d,"commit":%q,"draft_hash":%q`, pins.review, pins.revision, pins.commit, pins.hash)
 	if accept {
@@ -361,9 +338,6 @@ func deliveryEntryJSON(pins deliveryPins, accept bool) string {
 	return `{"kind":"delivery","project":"p_fake","workstream":"w_000","number":0,"revision":1,"question":"Deliver X?","options":["approve"],"opened_at":"2026-01-01T00:00:00Z","asked":[],"answer":{"method":"POST","path":"/v1/delivery/w_000","body":` + body + `}}`
 }
 
-// deliveryPresentationJSON is the /delivery/<stream> presentation of pins
-// with the draft text and, when approval is non-empty, a recorded approval's
-// description with one commit message; extra is more members of the object.
 func deliveryPresentationJSON(pins deliveryPins, draft, approval, extra string) string {
 	message := func(text string) string {
 		return fmt.Sprintf(`[{"commit":%q,"message":%s}]`, pins.commit, mustJSON(text))
@@ -389,13 +363,11 @@ func mustJSON(v any) string {
 
 const deliveryCard = `[data-decision][data-kind="delivery"] `
 
-// newDeliveryFixture serves a delivery entry and its presentation.
 func newDeliveryFixture(t *testing.T, accept bool, presentation string) *decisionButtonFixture {
 	t.Helper()
 	return newDecisionButtonFixture(t, deliveryEntryJSON(testPins, accept), presentation)
 }
 
-// setDelivery replaces the presentation served for reads of the delivery.
 func (f *decisionButtonFixture) setDelivery(presentation string) {
 	f.mu.Lock()
 	f.delivery = presentation
@@ -408,36 +380,49 @@ func (f *decisionButtonFixture) reads() int {
 	return f.deliveryReads
 }
 
-// A delivery card has no editor: the preview and the label are all it
-// offers besides the button, and the label says what approving does.
-func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
+var deliveryCardCases = []struct {
+	name, extra string
+	accept      bool
+	label       string
+}{
+	{"ready", "", false, "Mark ready for review"},
+	{"draft", `"draft_pull_request":true`, false, "Mark ready for review"},
+	{"update", `"maintenance":true`, false, "Update pull request"},
+	{"update wins over draft", `"maintenance":true,"draft_pull_request":true`, false, "Update pull request"},
+	{"accept ready", "", true, "Accept findings and mark ready for review"},
+	{"accept draft", `"draft_pull_request":true`, true, "Accept findings and mark ready for review"},
+	{"accept update", `"maintenance":true`, true, "Accept findings and update pull request"},
+}
+
+func awaitDeliverySubmit(f *decisionButtonFixture, label string) string {
+	submit := deliveryCard + "button[type=submit]"
+	f.p.await("the label "+label, `document.querySelector(`+quote(submit)+`)?.textContent === `+quote(label)+` && !document.querySelector(`+quote(submit)+`).disabled`)
+	return submit
+}
+
+func TestBrowserDeliveryCardLabelsItsSubmitButton(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name, extra string
-		accept      bool
-		label       string
-	}{
-		{"ready", "", false, "Mark ready for review"},
-		{"draft", `"draft_pull_request":true`, false, "Mark ready for review"},
-		{"update", `"maintenance":true`, false, "Update pull request"},
-		{"update wins over draft", `"maintenance":true,"draft_pull_request":true`, false, "Update pull request"},
-		{"accept ready", "", true, "Accept findings and mark ready for review"},
-		{"accept draft", `"draft_pull_request":true`, true, "Accept findings and mark ready for review"},
-		{"accept update", `"maintenance":true`, true, "Accept findings and update pull request"},
-	} {
+	for _, tc := range deliveryCardCases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDeliveryFixture(t, tc.accept, deliveryPresentationJSON(testPins, "one", "", tc.extra))
-			submit := deliveryCard + "button[type=submit]"
-			f.p.await("the label "+tc.label, `document.querySelector(`+quote(submit)+`)?.textContent === `+quote(tc.label)+` && !document.querySelector(`+quote(submit)+`).disabled`)
-			var shown struct {
-				Editors  int
-				Preview  string
-				Open     bool
-				Title    string
-				Note     bool
-				SameForm bool
-			}
-			f.p.eval(`(() => {
+			awaitDeliverySubmit(f, tc.label)
+		})
+	}
+}
+
+func TestBrowserDeliveryCardShowsTheTitleAndAClosedPreviewWithoutEditors(t *testing.T) {
+	t.Parallel()
+	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
+	awaitDeliverySubmit(f, "Mark ready for review")
+	var shown struct {
+		Editors  int
+		Preview  string
+		Open     bool
+		Title    string
+		Note     bool
+		SameForm bool
+	}
+	f.p.eval(`(() => {
   const card = document.querySelector(`+quote(deliveryCard)+`);
   const preview = card.querySelector('[data-field=preview]');
   return {
@@ -450,11 +435,17 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
       card.querySelector('form').contains(card.querySelector('[data-field=authorization]')),
   };
 })()`, &shown)
-			if shown.Editors != 0 || shown.Preview != "What will be published" || shown.Open || shown.Title != "Pull request title: Resumable uploads" || !shown.Note || !shown.SameForm {
-				t.Fatalf("the delivery card: %+v", shown)
-			}
-			f.p.eval(`window.confirms = 0; window.confirm = () => { window.confirms++; return true; }; window.alert = window.confirm`, nil)
-			f.p.click(submit)
+	if shown.Editors != 0 || shown.Preview != "What will be published" || shown.Open || shown.Title != "Pull request title: Resumable uploads" || !shown.Note || !shown.SameForm {
+		t.Fatalf("the delivery card: %+v", shown)
+	}
+}
+
+func TestBrowserDeliveryCardSendsOnlyThePinnedIdentity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range deliveryCardCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDeliveryFixture(t, tc.accept, deliveryPresentationJSON(testPins, "one", "", tc.extra))
+			f.p.click(awaitDeliverySubmit(f, tc.label))
 			f.p.awaitGone("the approved delivery", deliveryCard)
 			f.p.awaitOutcome("Approved marking final review 1")
 			body := map[string]any{"review": float64(1), "review_revision": float64(2), "commit": testPins.commit, "draft_hash": testPins.hash}
@@ -462,18 +453,24 @@ func TestBrowserDeliveryCardLabelsAndSendsOnlyThePinnedIdentity(t *testing.T) {
 				body["accept_blocking"] = true
 			}
 			assertDecisionRequest(t, f, "/v1/delivery/w_000", body)
-			var confirms int
-			f.p.eval(`window.confirms`, &confirms)
-			if confirms != 0 {
-				t.Fatalf("the approval asked for confirmation %d times", confirms)
-			}
 		})
 	}
 }
 
-// The preview shows the text ApproveDelivery publishes when no text is sent:
-// the earlier approval's when the presentation carries one, even when it
-// differs from the draft, and the draft otherwise. It is plain text.
+func TestBrowserDeliveryApprovalAsksForNoConfirmation(t *testing.T) {
+	t.Parallel()
+	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
+	submit := awaitDeliverySubmit(f, "Mark ready for review")
+	f.p.eval(`window.confirms = 0; window.confirm = () => { window.confirms++; return true; }; window.alert = window.confirm`, nil)
+	f.p.click(submit)
+	f.p.awaitGone("the approved delivery", deliveryCard)
+	var confirms int
+	f.p.eval(`window.confirms`, &confirms)
+	if confirms != 0 {
+		t.Fatalf("the approval asked for confirmation %d times", confirms)
+	}
+}
+
 func TestBrowserDeliveryPreviewShowsTheApprovalTextOverTheDraft(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -513,9 +510,6 @@ func TestBrowserDeliveryPreviewShowsTheApprovalTextOverTheDraft(t *testing.T) {
 	}
 }
 
-// The button stays locked from the click until the answer, across the
-// repaints a refreshed inbox causes, and the card is restored with the
-// button available when the service refuses.
 func TestBrowserDeliveryButtonStaysLockedWhileTheApprovalIsPending(t *testing.T) {
 	t.Parallel()
 	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
@@ -540,8 +534,6 @@ func TestBrowserDeliveryButtonStaysLockedWhileTheApprovalIsPending(t *testing.T)
 	}
 }
 
-// A refusal because the draft changed makes the card read the presentation
-// again, and the card then shows the new draft, pinned by the new entry.
 func TestBrowserDeliveryStaleDraftConflictReadsThePresentationAgain(t *testing.T) {
 	t.Parallel()
 	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
@@ -569,9 +561,6 @@ func TestBrowserDeliveryStaleDraftConflictReadsThePresentationAgain(t *testing.T
 	}
 }
 
-// The delivery card names the pull request being marked ready, shows the
-// recorded check result and says when a merge-order dependency keeps the
-// pull request a draft after approval.
 func TestBrowserDeliveryCardShowsTheCheckResultAndThePullRequest(t *testing.T) {
 	t.Parallel()
 	extra := `"checks":{"state":"failed","summary":"Checks failed: go-test"},` +

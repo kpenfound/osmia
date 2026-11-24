@@ -6,20 +6,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
 )
 
-// jsonString is s as a JSON string literal.
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
 
-// feedAt is the time of the nth entry of a test feed.
 func feedAt(n int) string {
 	return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(n) * time.Minute).Format(time.RFC3339)
 }
@@ -70,8 +67,6 @@ func finalReviewEntry(n, review int, state string) string {
 		jsonString(feedAt(n)), review, jsonString(state), n, failure)
 }
 
-// feedPage serves a fake API whose workstream w_000 reads entries as its
-// feed, and opens the page on it at a laptop width.
 type feedPage struct {
 	*page
 	url string
@@ -95,9 +90,6 @@ func openFeedPage(t *testing.T, workstreams int, hash string, feeds map[string][
 	return &feedPage{page: p, url: server.URL}
 }
 
-// conversationFeed is a workstream's history with every kind of entry: the
-// conversation, three statuses, state changes of the workstream, and the
-// sessions, unit changes and check runs, failed ones too, of two units.
 func conversationFeed() []string {
 	return []string{
 		chatEntry("message", 1, "Start the upload work."),
@@ -124,44 +116,75 @@ func conversationFeed() []string {
 	}
 }
 
-// Opening a workstream shows Conversation, labelled so, with no Feed tab.
-// It holds the conversation, the milestones and the latest chief status
-// alone, and none of the sessions, unit changes and check runs, failed or not.
-func TestBrowserConversationIsDefaultAndHoldsOnlyWhatTheOwnerReads(t *testing.T) {
-	t.Parallel()
-	f := openFeedPage(t, 1, "", map[string][]string{"w_000": conversationFeed()})
-	p := f.page
-	var tabs []string
-	p.eval(`[...document.querySelectorAll('[role=tab]')].map(t => t.textContent)`, &tabs)
-	if strings.Join(tabs, ",") != "Conversation,Activity,Documents,Trace" {
-		t.Fatalf("the tabs are %q", tabs)
-	}
-	p.await("Conversation selected", `document.querySelector('[data-tab=conversation]').getAttribute('aria-selected') === 'true' && !document.querySelector('[data-panel=conversation]').hidden && document.querySelector('[data-panel=activity]').hidden`)
-	p.awaitFeedKinds("message,response,milestone,milestone,milestone,milestone,action,status,milestone")
+func openConversationPage(t *testing.T) *page {
+	t.Helper()
+	return openFeedPage(t, 1, "", map[string][]string{"w_000": conversationFeed()}).page
+}
 
-	var shown struct{ Milestones, Statuses, Latest, Machine string }
+type conversationShown struct{ Milestones, Statuses, Latest, Machine string }
+
+func readConversationShown(p *page) conversationShown {
+	var shown conversationShown
 	p.eval(`({
   milestones: [...document.querySelectorAll('#workstreams [data-kind=milestone]')].map(n => n.dataset.milestone).join(','),
   statuses: String(document.querySelectorAll('#workstreams [data-kind=status]').length),
   latest: document.querySelector('#workstreams [data-kind=status] [data-field=note]').textContent,
   machine: String(document.querySelectorAll('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks], #workstreams [data-kind=final_checks], #workstreams [data-kind=session_checks], #workstreams [data-kind=final_review]').length),
  })`, &shown)
-	if shown.Milestones != "ratified,building,assembled,final_review,delivered" {
-		t.Fatalf("milestones = %q", shown.Milestones)
+	return shown
+}
+
+func TestBrowserTabsAreConversationActivityDocumentsAndTrace(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
+	var tabs []string
+	p.eval(`[...document.querySelectorAll('[role=tab]')].map(t => t.textContent)`, &tabs)
+	if strings.Join(tabs, ",") != "Conversation,Activity,Documents,Trace" {
+		t.Fatalf("the tabs are %q", tabs)
 	}
-	if shown.Statuses != "1" || shown.Latest != "Waiting for the final review." {
+}
+
+func TestBrowserConversationIsTheDefaultTab(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
+	p.await("Conversation selected", `document.querySelector('[data-tab=conversation]').getAttribute('aria-selected') === 'true' && !document.querySelector('[data-panel=conversation]').hidden && document.querySelector('[data-panel=activity]').hidden`)
+}
+
+func TestBrowserConversationHoldsMessagesRepliesMilestonesActionsAndOneStatus(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
+	p.awaitFeedKinds("message,response,milestone,milestone,milestone,milestone,action,status,milestone")
+	if shown := readConversationShown(p); shown.Statuses != "1" || shown.Latest != "Waiting for the final review." {
 		t.Fatalf("Conversation shows %s statuses, the latest %q", shown.Statuses, shown.Latest)
 	}
-	if shown.Machine != "0" {
+}
+
+func TestBrowserConversationShowsTheMilestonesInOrder(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
+	p.awaitFeedKinds("message,response,milestone,milestone,milestone,milestone,action,status,milestone")
+	if shown := readConversationShown(p); shown.Milestones != "ratified,building,assembled,final_review,delivered" {
+		t.Fatalf("milestones = %q", shown.Milestones)
+	}
+}
+
+func TestBrowserConversationShowsNoMachineEvents(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
+	p.awaitFeedKinds("message,response,milestone,milestone,milestone,milestone,action,status,milestone")
+	if shown := readConversationShown(p); shown.Machine != "0" {
 		t.Fatalf("Conversation shows %s machine events", shown.Machine)
 	}
+}
+
+func TestBrowserConversationMilestonesDescribeTheirEvents(t *testing.T) {
+	t.Parallel()
+	p := openConversationPage(t)
 	p.awaitText(`#workstreams [data-milestone=final_review]`, "Final review 1")
 	p.awaitText(`#workstreams [data-milestone=final_review]`, "1 blocking findings, 2 uncovered criteria")
 	p.awaitText(`#workstreams [data-milestone=delivered]`, "Workstream")
 }
 
-// A failed final review is a result and is noted; a failed session or check
-// run is not.
 func TestBrowserConversationNotesFinalReviewFailuresButNotFailedChecksOrSessions(t *testing.T) {
 	t.Parallel()
 	f := openFeedPage(t, 1, "", map[string][]string{"w_000": {
@@ -175,8 +198,6 @@ func TestBrowserConversationNotesFinalReviewFailuresButNotFailedChecksOrSessions
 	f.awaitText(`#workstreams [data-milestone=final_review]`, "the reader did not produce a report")
 }
 
-// A milestone opens Activity at the entry it comes from, scrolled into view
-// and highlighted, and the location names it.
 func TestBrowserMilestoneOpensActivityAtItsEntry(t *testing.T) {
 	t.Parallel()
 	entries := []string{featureTransitionEntry(1, "building", "building"), finalReviewEntry(2, 1, "reviewed")}
@@ -201,26 +222,29 @@ func TestBrowserMilestoneOpensActivityAtItsEntry(t *testing.T) {
 	if !strings.HasPrefix(hash, "#workstream=w_000&tab=activity&entry=") {
 		t.Fatalf("the location is %q", hash)
 	}
-	// Back returns to Conversation, Forward to the highlighted entry.
 	p.eval(`history.back()`, nil)
 	p.await("Conversation again", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === '#workstream=w_000'`)
 	p.eval(`history.forward()`, nil)
 	p.await("Activity at the entry again", `!document.querySelector('[data-panel=activity]').hidden && document.querySelector('#workstream-activity [data-kind=final_review]')?.dataset.focus === 'true'`)
 }
 
-// Activity shows every event of the feed with its reasons and details,
-// folds consecutive routine events into an "N events" line that opens in
-// place, and filters by unit only.
-func TestBrowserActivityShowsEveryEventFoldsRunsAndFiltersByUnit(t *testing.T) {
-	t.Parallel()
+func openActivityPage(t *testing.T) *page {
+	t.Helper()
 	f := openFeedPage(t, 1, "", map[string][]string{"w_000": conversationFeed()})
 	p := f.page
 	p.eval(`window.sameDocument = true`, nil)
 	p.click(`[data-tab=activity]`)
 	p.await("Activity shown", `!document.querySelector('[data-panel=activity]').hidden && document.querySelector('#workstream-activity .activity-log > ol')`)
+	return p
+}
 
-	// Runs of routine events fold; milestones, final reviews and statuses
-	// stand between them.
+func openEveryActivityFold(p *page) {
+	p.eval(`document.querySelectorAll('#workstream-activity .fold:not([open])').forEach(f => { f.open = true; })`, nil)
+}
+
+func TestBrowserActivityFoldsRunsOfEventsIntoClosedGroups(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
 	var folds []struct {
 		Count string
 		Open  bool
@@ -233,41 +257,72 @@ func TestBrowserActivityShowsEveryEventFoldsRunsAndFiltersByUnit(t *testing.T) {
 	if !strings.Contains(folds[0].Text, "3 sessions, 2 state changes, 2 check runs") || !strings.Contains(folds[1].Text, "1 session, 1 state change, 1 check run") {
 		t.Fatalf("the folds read %q and %q", folds[0].Text, folds[1].Text)
 	}
-	p.await("the unit session hidden inside its fold", `(() => { const s = document.querySelector('#workstream-activity [data-kind=session][data-turn=s7]'); return s && !s.checkVisibility() && !s.closest('.fold').open; })()`)
+}
 
-	// Opening a fold shows its events in place, without a reload.
+func TestBrowserActivityHidesFoldedEventsUntilTheFoldOpens(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
+	p.await("the unit session hidden inside its fold", `(() => { const s = document.querySelector('#workstream-activity [data-kind=session][data-turn=s7]'); return s && !s.checkVisibility() && !s.closest('.fold').open; })()`)
+}
+
+func TestBrowserActivityOpensAFoldInPlace(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
 	p.click(`#workstream-activity .fold summary`)
 	p.await("the fold open in place", `(() => {
   const s = document.querySelector('#workstream-activity [data-kind=session][data-turn=s7]');
   return window.sameDocument === true && s.checkVisibility() && document.querySelector('#workstream-activity .fold').open;
  })()`)
-	p.eval(`document.querySelectorAll('#workstream-activity .fold:not([open])').forEach(f => { f.open = true; })`, nil)
+}
 
-	// Every kind of event is there with its detail.
+func TestBrowserActivityShowsEveryEventKind(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
+	openEveryActivityFold(p)
 	p.await("every event kind", `(() => {
   const has = (selector) => document.querySelector('#workstream-activity ' + selector) !== null;
   return has('[data-kind=session][data-state=failed]') && has('[data-kind=session][data-state=done]') && has('[data-kind=unit_checks][data-state=failed]') &&
    has('[data-kind=unit_checks][data-state=passed]') && has('[data-kind=final_review][data-state=reviewed]') && has('[data-kind=status][data-latest=true]') &&
    document.querySelectorAll('#workstream-activity [data-kind=status]').length === 3 && document.querySelectorAll('#workstream-activity [data-kind=transition]').length === 7;
  })()`)
+}
+
+func TestBrowserActivityEventsCarryTheirDetails(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
+	openEveryActivityFold(p)
 	p.awaitText(`#workstream-activity [data-kind=transition][data-to=merged] [data-field=reason]`, "checks passed")
 	p.awaitText(`#workstream-activity [data-kind=transition][data-to=ratified] [data-field=reason]`, "the owner ratified revision 1")
 	p.awaitText(`#workstream-activity [data-kind=session][data-state=failed]`, "the sandbox could not start")
 	p.awaitText(`#workstream-activity [data-kind=unit_checks][data-state=failed] [data-field=failed]`, "dag://go/test")
 	p.awaitText(`#workstream-activity [data-kind=final_review] [data-field=findings]`, "1 blocking findings")
 	p.awaitText(`#workstream-activity [data-kind=session][data-state=done] [data-field=summary]`, "Built the upload unit.")
+}
 
-	// The one filter is the unit; there are no event-type filters.
+func TestBrowserActivityOffersOnlyAUnitFilter(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
 	var controls []string
 	p.eval(`[...document.querySelectorAll('#workstream-activity .activity-bar select, #workstream-activity .activity-bar input, #workstream-activity .activity-bar button')].map(c => c.tagName.toLowerCase() + ':' + (c.getAttribute('aria-label') || c.name))`, &controls)
 	if strings.Join(controls, ",") != "select:Filter by unit" {
 		t.Fatalf("the Activity controls are %q", controls)
 	}
+}
+
+func TestBrowserActivityUnitFilterListsTheUnitsOfTheEvents(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
 	var units []string
 	p.eval(`[...document.querySelectorAll('#workstream-activity select[name=unit] option')].map(o => o.value)`, &units)
 	if strings.Join(units, ",") != ",dedupe,upload" {
 		t.Fatalf("the unit filter offers %q", units)
 	}
+}
+
+func TestBrowserActivityUnitFilterNarrowsTheEventsWithoutReloading(t *testing.T) {
+	t.Parallel()
+	p := openActivityPage(t)
+	openEveryActivityFold(p)
 	p.eval(`(() => { const s = document.querySelector('#workstream-activity select[name=unit]'); s.value = 'dedupe'; s.dispatchEvent(new Event('change', {bubbles: true})); })()`, nil)
 	p.await("only the dedupe unit's events", `(() => {
   const entries = [...document.querySelectorAll('#workstream-activity [data-entry]')];
@@ -277,11 +332,9 @@ func TestBrowserActivityShowsEveryEventFoldsRunsAndFiltersByUnit(t *testing.T) {
 	p.await("the same document", `window.sameDocument === true`)
 }
 
-// The tab, the unit filter and the opened entries live in the location, and
-// loading the location in a fresh page restores the same view.
-func TestBrowserActivityLocationRestoresTabFilterAndOpenedEntry(t *testing.T) {
-	t.Parallel()
-	f := openFeedPage(t, 1, "", map[string][]string{"w_000": conversationFeed()})
+func openActivityLocation(t *testing.T) (f *feedPage, hash string) {
+	t.Helper()
+	f = openFeedPage(t, 1, "", map[string][]string{"w_000": conversationFeed()})
 	p := f.page
 	p.click(`[data-tab=activity]`)
 	p.await("Activity shown", `document.querySelector('#workstream-activity .activity-log > ol')`)
@@ -291,34 +344,59 @@ func TestBrowserActivityLocationRestoresTabFilterAndOpenedEntry(t *testing.T) {
 	p.await("the fold open", `document.querySelector('#workstream-activity .fold').open`)
 	p.click(`#workstream-activity [data-kind=session][data-turn=s10] summary`)
 	p.await("the report open", `document.querySelector('#workstream-activity [data-kind=session][data-turn=s10] details').open && location.hash.includes('turn-s10')`)
-	var hash string
 	p.eval(`location.hash`, &hash)
+	return f, hash
+}
+
+func TestBrowserActivityLocationNamesTheTabFilterAndOpenedEntry(t *testing.T) {
+	t.Parallel()
+	_, hash := openActivityLocation(t)
 	if !strings.HasPrefix(hash, "#workstream=w_000&tab=activity&unit=upload&open=") {
 		t.Fatalf("the location is %q", hash)
 	}
+}
 
-	var restoredOther bool
-	fresh := openBrowser(t)
+func openRestoredActivity(t *testing.T) (fresh *page, hash string) {
+	t.Helper()
+	f, hash := openActivityLocation(t)
+	fresh = openBrowser(t)
 	fresh.run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate(f.url+"/"+hash))
 	fresh.await("the live connection", `document.body.dataset.connection === 'live'`)
 	fresh.await("Activity drawn", `document.querySelector('#workstream-activity [data-kind=session][data-turn=s10]')`)
+	return fresh, hash
+}
+
+func TestBrowserActivityLocationRestoresTheTabFilterAndOpenedEntry(t *testing.T) {
+	t.Parallel()
+	fresh, _ := openRestoredActivity(t)
 	var view struct {
-		Panel, Tab, Filter, Details, Open, Visible, Hash string
+		Panel, Tab, Filter, Details, Open, Visible string
 	}
 	fresh.eval(`(() => {
   const s = document.querySelector('#workstream-activity [data-kind=session][data-turn=s10] details');
   return {
    panel: String(!document.querySelector('[data-panel=activity]').hidden), tab: document.querySelector('[data-tab=activity]').getAttribute('aria-selected'),
-   filter: document.querySelector('#workstream-activity select[name=unit]').value, details: String(!!s), open: String(s?.open), visible: String(s?.checkVisibility()), hash: location.hash,
+   filter: document.querySelector('#workstream-activity select[name=unit]').value, details: String(!!s), open: String(s?.open), visible: String(s?.checkVisibility()),
   };
  })()`, &view)
 	if view.Panel != "true" || view.Tab != "true" || view.Filter != "upload" || view.Details != "true" || view.Open != "true" || view.Visible != "true" {
 		t.Fatalf("the restored view is %+v", view)
 	}
+}
+
+func TestBrowserRestoredActivityHidesOtherUnitsEvents(t *testing.T) {
+	t.Parallel()
+	fresh, _ := openRestoredActivity(t)
+	var restoredOther bool
 	fresh.eval(`!!document.querySelector('#workstream-activity [data-turn=s13]')`, &restoredOther)
 	if restoredOther {
 		t.Fatal("the restored view shows another unit's events")
 	}
+}
+
+func TestBrowserRestoredActivityKeepsTheLocation(t *testing.T) {
+	t.Parallel()
+	fresh, hash := openRestoredActivity(t)
 	var restored string
 	fresh.eval(`location.hash`, &restored)
 	if restored != hash {
@@ -326,17 +404,23 @@ func TestBrowserActivityLocationRestoresTabFilterAndOpenedEntry(t *testing.T) {
 	}
 }
 
-// Unread markers follow Conversation entries. A session, a unit change or a
-// check run, which only Activity shows, never marks a workstream.
-func TestBrowserUnreadMarkersCountConversationEntriesOnly(t *testing.T) {
-	t.Parallel()
+type unreadPage struct {
+	p        *page
+	api      *fakeAPI
+	reads    *counter
+	baseFeed []string
+	row      string
+}
+
+func openUnreadPage(t *testing.T) *unreadPage {
+	t.Helper()
 	api := newFakeAPI(2)
 	api.setFeed("w_001", featureTransitionEntry(1, "building", "building"))
-	var reads atomic.Int32
+	reads := &counter{}
 	base := api.handler()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/feed/w_001" {
-			reads.Add(1)
+			reads.add()
 		}
 		base.ServeHTTP(w, r)
 	}))
@@ -347,31 +431,40 @@ func TestBrowserUnreadMarkersCountConversationEntriesOnly(t *testing.T) {
 	p.click(`[data-select="w_000"]`)
 	p.awaitFeedKinds("")
 	p.awaitNoUnread()
-	row := `[data-select="w_001"] [data-field=unread]`
-	soon(t, "the page never read the feed of w_001", func() bool { return reads.Load() > 0 })
+	reads.await(t, "the page never read the feed of w_001", func(n int) bool { return n > 0 })
 	p.settle()
+	return &unreadPage{p: p, api: api, reads: reads, baseFeed: []string{featureTransitionEntry(1, "building", "building")}, row: `[data-select="w_001"] [data-field=unread]`}
+}
 
-	read := func(what string, entries ...string) {
-		t.Helper()
-		before := reads.Load()
-		api.setFeed("w_001", entries...)
-		api.pushEvent("resync")
-		soon(t, "the page never read the feed after "+what, func() bool { return reads.Load() > before })
-		p.settle()
-	}
-	activityOnly := []string{featureTransitionEntry(1, "building", "building")}
+func (u *unreadPage) read(t *testing.T, what string, entries ...string) {
+	t.Helper()
+	before := u.reads.load()
+	u.api.setFeed("w_001", entries...)
+	u.api.pushEvent("resync")
+	u.reads.await(t, "the page never read the feed after "+what, func(n int) bool { return n > before })
+	u.p.settle()
+}
+
+func TestBrowserUnreadMarkersIgnoreActivityOnlyEntries(t *testing.T) {
+	t.Parallel()
+	u := openUnreadPage(t)
+	entries := u.baseFeed
 	for n, extra := range []string{
 		sessionEntry(2, "upload", "running", ""),
 		unitTransitionEntry(3, "upload", "ready", "implementing", "a mason started"),
 		unitChecksEntry(4, "upload", 1, "failed"),
 		sessionEntry(5, "upload", "failed", "no sandbox"),
 	} {
-		activityOnly = append(activityOnly, extra)
-		read(fmt.Sprintf("activity-only event %d", n+1), activityOnly...)
-		p.awaitNoUnread()
+		entries = append(entries, extra)
+		u.read(t, fmt.Sprintf("activity-only event %d", n+1), entries...)
+		u.p.awaitNoUnread()
 	}
+}
 
-	// A message, a milestone and a new chief status each mark it.
+func TestBrowserUnreadMarkersCountConversationEntries(t *testing.T) {
+	t.Parallel()
+	u := openUnreadPage(t)
+	entries := u.baseFeed
 	for _, step := range []struct {
 		what  string
 		extra string
@@ -380,16 +473,15 @@ func TestBrowserUnreadMarkersCountConversationEntriesOnly(t *testing.T) {
 		{"a milestone", featureTransitionEntry(7, "assembled", "every unit merged")},
 		{"a final review", finalReviewEntry(8, 1, "reviewed")},
 	} {
-		p.click(`[data-select="w_001"]`)
-		p.awaitNoUnread()
-		p.click(`[data-select="w_000"]`)
-		activityOnly = append(activityOnly, step.extra)
-		read(step.what, activityOnly...)
-		p.await("the workstream marked after "+step.what, `document.querySelector(`+quote(row)+`) !== null`)
+		u.p.click(`[data-select="w_001"]`)
+		u.p.awaitNoUnread()
+		u.p.click(`[data-select="w_000"]`)
+		entries = append(entries, step.extra)
+		u.read(t, step.what, entries...)
+		u.p.await("the workstream marked after "+step.what, `document.querySelector(`+quote(u.row)+`) !== null`)
 	}
 }
 
-// In Activity the latest chief status is current, and older ones recede.
 func TestBrowserOlderStatusesRecedeInActivity(t *testing.T) {
 	t.Parallel()
 	f := openFeedPage(t, 1, "", map[string][]string{"w_000": {
@@ -425,10 +517,14 @@ func TestBrowserOlderStatusesRecedeInActivity(t *testing.T) {
 	}
 }
 
-// Prose stops at about 70ch while tables and code run wider, all in the one
-// mono.
-func TestBrowserProseHoldsReadingWidthWhileTablesAndCodeRunWider(t *testing.T) {
-	t.Parallel()
+type proseMetrics struct {
+	Cap, Paragraph, Pre, Table, Column float64
+	PreFont, TableFont, CodeFont, Mono string
+	Tabular                            string
+}
+
+func readProseMetrics(t *testing.T) proseMetrics {
+	t.Helper()
 	prose := strings.Repeat("The uploads resume where they stopped, and every chunk is checked. ", 12)
 	table := "| Chunk | Offset | Checksum | Acknowledged by the store | Retried after a lost connection |\n| --- | --- | --- | --- | --- |\n| 0001 | 0 | 9f2c41aa | yes | no |\n| 0002 | 4194304 | 03be77d1 | yes | yes |"
 	code := "```go\nfunc resume(ctx context.Context, upload Upload, offset int64) (int64, error) { return upload.Acknowledged(ctx, offset, checksum(upload.Chunk(offset))) }\n```"
@@ -436,11 +532,7 @@ func TestBrowserProseHoldsReadingWidthWhileTablesAndCodeRunWider(t *testing.T) {
 	f := openFeedPage(t, 1, "", map[string][]string{"w_000": {chatEntry("response", 1, text)}})
 	p := f.page
 	p.await("the reply drawn", `document.querySelector('#workstreams [data-kind=response] .markdown pre')`)
-	var m struct {
-		Cap, Paragraph, Pre, Table, Column float64
-		PreFont, TableFont, CodeFont, Mono string
-		Tabular                            string
-	}
+	var m proseMetrics
 	p.eval(`(() => {
   const reply = document.querySelector('#workstreams [data-kind=response] .markdown');
   const probe = document.createElement('div');
@@ -457,15 +549,36 @@ func TestBrowserProseHoldsReadingWidthWhileTablesAndCodeRunWider(t *testing.T) {
    mono: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim(), tabular: getComputedStyle(box).fontVariantNumeric,
   };
  })()`, &m)
+	return m
+}
+
+func TestBrowserProseHoldsTheReadingWidth(t *testing.T) {
+	t.Parallel()
+	m := readProseMetrics(t)
 	if m.Paragraph > m.Cap+1 || m.Paragraph < .9*m.Cap {
 		t.Fatalf("a long paragraph is %.0fpx wide, want the reading width %.0fpx", m.Paragraph, m.Cap)
 	}
+}
+
+func TestBrowserTablesAndCodeRunWiderThanProse(t *testing.T) {
+	t.Parallel()
+	m := readProseMetrics(t)
 	if m.Pre <= m.Cap+100 || m.Table <= m.Cap+100 {
 		t.Fatalf("code is %.0fpx and the table box %.0fpx wide, want them to run past %.0fpx", m.Pre, m.Table, m.Cap)
 	}
+}
+
+func TestBrowserTablesAndCodeUseTheOneMonoFace(t *testing.T) {
+	t.Parallel()
+	m := readProseMetrics(t)
 	if m.PreFont != m.Mono || m.TableFont != m.Mono || m.CodeFont != m.Mono {
 		t.Fatalf("code uses %q, the table %q and inline code %q, want the one mono %q", m.PreFont, m.TableFont, m.CodeFont, m.Mono)
 	}
+}
+
+func TestBrowserTablesUseTabularFigures(t *testing.T) {
+	t.Parallel()
+	m := readProseMetrics(t)
 	if !strings.Contains(m.Tabular, "tabular-nums") {
 		t.Fatalf("the table's numbers are %q, want tabular figures", m.Tabular)
 	}

@@ -11,8 +11,6 @@ import (
 	wire "github.com/kpenfound/osmia/internal/api"
 )
 
-// The trace names a decision Jev made, and leaves the owner's and the chief
-// of staff's decisions as they were.
 func TestTraceLabelsDecisionsJevMade(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
