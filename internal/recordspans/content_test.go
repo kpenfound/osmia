@@ -41,7 +41,7 @@ func TestNoContentReachesAnySpan(t *testing.T) {
 	noisy := []string{marker + "/a", marker + "/b"}
 	h.document("unit-u1-checks-1", "units/u1/checks-1.json", minute(30), checks, "u1", execution.UnitCheckRun{Unit: "u1", Run: 1, Status: "failed", Output: "output " + marker, Error: "error " + marker, Command: noisy, Failed: noisy, Flaky: noisy,
 		Selection: &execution.CheckSelection{Mode: "selected", Links: noisy, Detail: "detail " + marker, Reason: marker}, StartedAt: minute(25), FinishedAt: minute(30)})
-	h.document("final-checks-1", "final/checks-1.json", minute(50), checks, "", delivery.FinalCheckRun{Review: 1, Status: "failed", Output: "output " + marker, Error: marker, Failed: noisy, StartedAt: minute(45), FinishedAt: minute(50)})
+	h.document("final-checks-1", "final/checks-1.json", minute(50), checks, "", delivery.FinalCheckRun{Review: 1, Status: "failed", Error: marker, Failed: noisy, StartedAt: minute(45), FinishedAt: minute(50)})
 	h.document("session-checks-1", "session-checks/checks-1.json", minute(60), owner, "", api.SessionCheckRun{Run: 1, Kind: "smart", Status: "incomplete", Output: "output " + marker, Error: marker, Checks: noisy, StartedAt: minute(55), FinishedAt: minute(60)})
 	h.document("spec-title", "spec.md", minute(5), owner, "", "# Title "+marker)
 	Recorder{Sink: h.sink}.Ended(h.repo, stream, minute(500), Archived)

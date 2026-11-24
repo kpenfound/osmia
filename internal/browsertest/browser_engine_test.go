@@ -13,7 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-func engineWebFixture(t *testing.T, mode string) (*Service, fixturekit.EngineCLIs) {
+func engineWebFixture(t *testing.T, mode string) (*service.Service, fixturekit.EngineCLIs) {
 	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
 	must(t, os.WriteFile(fake.Version, []byte("v0.19.0"), 0600))
@@ -28,7 +28,7 @@ func engineWebFixture(t *testing.T, mode string) (*Service, fixturekit.EngineCLI
 	return s, fake
 }
 
-func openEngineMenu(t *testing.T, s *Service) *page {
+func openEngineMenu(t *testing.T, s *service.Service) *page {
 	t.Helper()
 	p := openOutcomePage(t, s)
 	p.OpenView("engine")

@@ -2,8 +2,6 @@ package lifecycle_test
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,24 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func rewriteLegacyResolutionArchive(t *testing.T, f *productionDesignFixture, member config.WorkstreamID) {
-	t.Helper()
-	path := filepath.Join(f.opts.Config.Root, "runtime.json")
-	data, err := os.ReadFile(path)
-	fixturekit.Must(t, err)
-	var state map[string]any
-	fixturekit.Must(t, json.Unmarshal(data, &state))
-	for _, raw := range state["archived"].([]any) {
-		a := raw.(map[string]any)
-		if a["workstream"] == string(member) {
-			a["resolved"] = true
-			delete(a, "resolution_evidence")
-		}
-	}
-	data, err = json.Marshal(state)
-	fixturekit.Must(t, err)
-	fixturekit.Must(t, os.WriteFile(path, data, 0600))
-}
 func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"ready-unmerged", "owner-merged", "own-pr-merged"} {
@@ -80,12 +60,6 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 				}
 			}
 			checkArchive("retained")
-			if !merged {
-				f.stop(t)
-				rewriteLegacyResolutionArchive(t, f, f.stream1)
-				f.start(t)
-				checkArchive("legacy retained re-derived")
-			}
 			if merged {
 				awaitMemberMergeResolution(t, f)
 			}
@@ -122,7 +96,7 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 						t.Fatal("merged archived member did not resolve once")
 					}
 				} else if len(ids) != 0 || rev != 0 || !active {
-					t.Fatal("retirement or legacy boolean granted resolution")
+					t.Fatal("retirement granted resolution")
 				}
 				gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
 				fixturekit.Must(t, err)
@@ -132,9 +106,6 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 			}
 			checkDeleted()
 			f.stop(t)
-			if !merged {
-				rewriteLegacyResolutionArchive(t, f, f.stream1)
-			}
 			f.start(t)
 			checkDeleted()
 		})

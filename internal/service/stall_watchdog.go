@@ -540,7 +540,7 @@ func turnActivity(q trace.QueuedTurn) time.Time {
 
 func cardHoldsUnits(kind string) bool {
 	switch kind {
-	case InboxRatification, InboxDrift, InboxBase, InboxLoop, "project-selection":
+	case InboxRatification, InboxDrift, InboxBase, InboxLoop:
 		return true
 	}
 	return false

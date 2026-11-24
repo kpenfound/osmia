@@ -39,7 +39,7 @@ func TestServiceFixtureOpensTheWebListenerAndRunsSchedulerPasses(t *testing.T) {
 func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	f := NewProject(t)
-	graph := `{"version":1,"units":[{"id":"resume","title":"Resume uploads","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":[]}]}`
+	graph := `{"version":2,"units":[{"id":"resume","title":"Resume uploads","task":"Resume uploads", "acceptance":["spec#1 holds, shown by TestResume (new-test)"], "criteria":["spec#1"],"depends_on":[],"footprint":[]}]}`
 	streams := f.SeedBuildingPaused(t, runtime.Target{Scope: "factory"}, graph, "live")
 	assertBuild := func(repo *trace.Repository, id config.WorkstreamID) {
 		t.Helper()

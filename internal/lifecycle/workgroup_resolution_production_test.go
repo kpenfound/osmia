@@ -124,7 +124,7 @@ func resolutionGroupState(t *testing.T, f *productionDesignFixture, wantResolved
 		t.Fatalf("premature resolution=%v revision=%d active=%v", ids, revision, active)
 	}
 	for _, m := range resolutionMembers(f) {
-		if _, archived := f.s.archivedWorkstream(string(m.stream)); archived {
+		if _, archived := f.s.lifecycle().ArchivedWorkstream(string(m.stream)); archived {
 			continue
 		}
 		for _, role := range []string{intake.MasonRole, trace.ChiefOfStaff} {

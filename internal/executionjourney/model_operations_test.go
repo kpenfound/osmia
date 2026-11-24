@@ -72,8 +72,8 @@ func TestModelOperationsUseWorkflowOrderingBesideThePass(t *testing.T) {
 	for _, action := range []string{service.DraftAction, intake.ReplyAction, service.RedraftAction, intake.AmendmentDraftAction, intake.AmendmentReplyAction, delivery.FinalReviewAction, deliveryReviewAction} {
 		t.Run(action, func(t *testing.T) {
 			op := coreadapter.Operation{Boundary: coreadapter.RunnerBoundary, Action: action}
-			if !service.TestConcurrentOperation(op) || service.TestOperationClass(op) != trace.WorkflowOperation {
-				t.Fatalf("operation admission: concurrent=%v class=%v", service.TestConcurrentOperation(op), service.TestOperationClass(op))
+			if !service.ConcurrentOperation(op) || service.TestOperationClass(op) != trace.WorkflowOperation {
+				t.Fatalf("operation admission: concurrent=%v class=%v", service.ConcurrentOperation(op), service.TestOperationClass(op))
 			}
 		})
 	}
@@ -112,7 +112,7 @@ func TestFinalReviewWaitsForClaimedCommitteeRoundWithoutBlockingPass(t *testing.
 	c, err := reconcile.New(repo, reconcile.Options{Worker: "committee-capacity-fixture", Now: f.s.now,
 		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: reviewer, coreadapter.RepositoryBoundary: fixturekit.CompletedEffect{}},
 		Schedule: func(context.Context) error { passes++; return nil }, Priority: service.TestStagePriority,
-		Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).ModelOperationLimit(repo, nil)})
+		Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).ModelOperationLimit(repo, nil)})
 	fixturekit.Must(t, err)
 	defer func() { cancel(); c.Wait() }()
 	for range 2 {

@@ -273,8 +273,6 @@ type briefReview struct {
 
 type chiefThreadFunc = func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error)
 
-// newBriefReview records the second final review of a delivery and leaves the
-// controller with no chief thread to read.
 func newBriefReview(t *testing.T) *briefReview {
 	t.Helper()
 	f, stream, repository, report := deliveryFixture(t)
@@ -288,8 +286,6 @@ func chiefThreadOf(turns ...trace.QueuedTurn) chiefThreadFunc {
 	}
 }
 
-// state checks the brief the delivery presents and whether its entry is open
-// with the fallback text that names no brief.
 func (r *briefReview) state(want string, listed bool, fallback bool) {
 	r.t.Helper()
 	ctx := context.Background()
@@ -310,8 +306,6 @@ func (r *briefReview) state(want string, listed bool, fallback bool) {
 	}
 }
 
-// claimReviewNotice claims the outbox notice of review 2 for a turn and
-// returns that turn as running.
 func (r *briefReview) claimReviewNotice() trace.QueuedTurn {
 	r.t.Helper()
 	ctx := context.Background()

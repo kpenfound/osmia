@@ -52,7 +52,7 @@ func TestLiveWorkgroupLeaderHandlesRetiredMembersAndErrors(t *testing.T) {
 	t.Cleanup(func() { fixturekit.Must(t, store.Close()) })
 	s := &Service{cfg: cfg, store: store}
 	g := trace.Workgroup{ID: group, Members: []config.WorkstreamID{fixturekit.Stream, b, a}}
-	leader, err := s.liveWorkgroupLeader(g)
+	leader, err := s.lifecycle().LiveWorkgroupLeader(g)
 	fixturekit.Must(t, err)
 	if leader != a {
 		t.Fatalf("leader %s", leader)
@@ -60,18 +60,18 @@ func TestLiveWorkgroupLeaderHandlesRetiredMembersAndErrors(t *testing.T) {
 	for _, member := range []config.WorkstreamID{a, b} {
 		fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: member, Workgroup: group, ArchivedAt: clock.Now()}))
 	}
-	leader, err = s.liveWorkgroupLeader(g)
+	leader, err = s.lifecycle().LiveWorkgroupLeader(g)
 	fixturekit.Must(t, err)
 	if leader != "" {
 		t.Fatalf("retired leader %s", leader)
 	}
 	g.ID = "g_00000000000000000000000000000002"
-	if leader, err = s.liveWorkgroupLeader(g); err == nil || leader != "" {
+	if leader, err = s.lifecycle().LiveWorkgroupLeader(g); err == nil || leader != "" {
 		t.Fatalf("invalid retirement leader=%s err=%v", leader, err)
 	}
 	for _, members := range [][]config.WorkstreamID{nil, {fixturekit.Stream}} {
 		g.Members = members
-		if leader, err = s.liveWorkgroupLeader(g); err == nil || leader != "" {
+		if leader, err = s.lifecycle().LiveWorkgroupLeader(g); err == nil || leader != "" {
 			t.Fatalf("invalid membership leader=%s err=%v", leader, err)
 		}
 	}
@@ -168,7 +168,7 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	deliverResolutionMembers(t, f)
 	repo, err := f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	authority, host, _, release, err := f.s.chiefRepository(ctx, repo, f.stream1)
+	authority, host, _, release, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 	fixturekit.Must(t, err)
@@ -193,7 +193,7 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	}
 	unlock := func() {}
 	if pending {
-		change, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retirement-decision", Kind: "cancel", Scope: "workgroup", Change: "Retain the owner's project decision across retirement."})
+		change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retirement-decision", Kind: "cancel", Scope: "workgroup", Change: "Retain the owner's project decision across retirement."})
 		if apiFault != nil {
 			t.Fatal(apiFault)
 		}
@@ -209,11 +209,11 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 			}
 			return false
 		})
-		lock := f.s.changeApplicationLock(approval.Workgroup)
+		lock := f.s.lifecycle().ChangeApplicationLock(approval.Workgroup)
 		lock.RLock()
 		unlock = sync.OnceFunc(lock.RUnlock)
 		defer unlock()
-		decided, apiFault := f.s.decideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
+		decided, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
 		if apiFault != nil {
 			t.Fatal(apiFault)
 		}
@@ -245,12 +245,8 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		fixturekit.Must(t, err)
 	}
 	unlock()
-	var retainedEvents []trace.OutboxEntry
-	fixturekit.Must(t, repo.Serialize(func() error {
-		var err error
-		retainedEvents, err = repo.Outbox(f.origin)
-		return err
-	}))
+	retainedEvents, err := repo.Outbox(f.origin)
+	fixturekit.Must(t, err)
 	releaseEvents()
 	lifecycleAwait(t, f, "all members cleaned", func() bool {
 		for _, m := range resolutionMembers(f) {
@@ -315,12 +311,12 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		groups, _, err := trace.Workgroups(wt)
 		fixturekit.Must(t, err)
 		starting := &Service{cfg: f.s.current(), store: f.s.store}
-		retired, err := starting.workgroupFullyRetired(ctx, groups[0])
+		retired, err := starting.lifecycle().WorkgroupFullyRetired(ctx, groups[0])
 		fixturekit.Must(t, err)
 		if !retired {
 			t.Fatal("retirement proof required a member runtime")
 		}
-		leader, err := f.s.liveWorkgroupLeader(groups[0])
+		leader, err := f.s.lifecycle().LiveWorkgroupLeader(groups[0])
 		fixturekit.Must(t, err)
 		if leader != "" {
 			t.Fatal("retired group has a live leader")

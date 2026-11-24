@@ -6,6 +6,7 @@ import (
 	errors "errors"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -507,7 +508,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		if err != nil {
 			return nil, err
 		}
-		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 		turns.Grants = maps.Clone(turns.Grants)
 		turns.Grants[designWorkerRole] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
 
@@ -681,7 +682,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		prompt := ownPrompt(req.Prompt)
+		prompt := intakefixture.OwnPrompt(req.Prompt)
 		if strings.Contains(prompt, intake.HandoffTitleOpening) && !strings.Contains(prompt, "asked by the mason: "+question) {
 			return intakefixture.QuestionResult(req, "session-chief", "Titled."), nil
 		}
@@ -690,15 +691,15 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)
-		want := slices.Clone(service.TestChiefOrdinaryTools)
+		want := slices.Clone(service.ChiefOrdinaryTools)
 		slices.Sort(want)
 		if err != nil || !slices.Equal(names, want) {
 			problem("ordinary chief tools: %v %v, want %v", names, err, want)
 		}
-		if out, err := fixturekit.CallTool(ctx, tools, service.TestProjectContextTool, map[string]any{"path": "charter.md"}); err != nil || !strings.Contains(out, "Keep state in files under the root.") {
+		if out, err := fixturekit.CallTool(ctx, tools, service.ProjectContextTool, map[string]any{"path": "charter.md"}); err != nil || !strings.Contains(out, "Keep state in files under the root.") {
 			problem("project context through production enforcement: %s %v", out, err)
 		}
-		if out, err := fixturekit.CallTool(ctx, tools, service.TestProjectContextTool, map[string]any{"path": "tools/design-brief.json"}); err == nil || !strings.Contains(err.Error(), "project document revision not found") {
+		if out, err := fixturekit.CallTool(ctx, tools, service.ProjectContextTool, map[string]any{"path": "tools/design-brief.json"}); err == nil || !strings.Contains(err.Error(), "project document revision not found") {
 			problem("project context did not refuse private workstream records: %s %v", out, err)
 		}
 		if out, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": statusGoal, "note": "Looking into the rename.", "agents": []string{"Scoping the rename."}}); err != nil || !strings.Contains(out, `"stored":true`) {

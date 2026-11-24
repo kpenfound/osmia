@@ -70,7 +70,7 @@ func TestSessionOpenRecordsWorkstreamAndWorktree(t *testing.T) {
 	if read.Session != session {
 		t.Fatalf("read %+v, want %+v", read.Session, session)
 	}
-	worktree := filepath.Join(s.cfg.Root.String(), service.TestSessionsDirectory, string(project), string(session.Workstream))
+	worktree := filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project), string(session.Workstream))
 	info, err := os.Stat(worktree)
 	fixturekit.Must(t, err)
 	if !info.IsDir() {
@@ -110,7 +110,7 @@ func TestSessionOpenRefusesUnknownOrMissingProfile(t *testing.T) {
 	if len(sessions.Sessions) != 0 {
 		t.Fatalf("an invalid profile left a session: %+v", sessions)
 	}
-	if entries, err := os.ReadDir(filepath.Join(s.cfg.Root.String(), service.TestSessionsDirectory, string(project))); err == nil && len(entries) != 0 {
+	if entries, err := os.ReadDir(filepath.Join(s.cfg.Root.String(), service.SessionsDirectory, string(project))); err == nil && len(entries) != 0 {
 		t.Fatalf("an invalid profile left a worktree: %+v", entries)
 	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 				}
 				journalPath := filepath.Join(root, "session-open.json")
 				data, jerr := os.ReadFile(journalPath)
-				var journal service.TestPendingSession
+				var journal service.PendingSession
 				if step == "session-journal-removed" {
 					if !os.IsNotExist(jerr) {
 						t.Fatalf("journal after the final step: %v", jerr)
@@ -191,7 +191,7 @@ func TestSessionOpenRecoversAtEachStep(t *testing.T) {
 				if len(sessions.Sessions) != 1 || sessions.Sessions[0].Workstream != id {
 					t.Fatalf("recovery left %+v, want exactly one session %s", sessions.Sessions, id)
 				}
-				worktree := filepath.Join(root, service.TestSessionsDirectory, string(project), string(id))
+				worktree := filepath.Join(root, service.SessionsDirectory, string(project), string(id))
 				if info, err := os.Stat(worktree); err != nil || !info.IsDir() {
 					t.Fatalf("session worktree missing after recovery: %v", err)
 				}
@@ -282,7 +282,7 @@ func createTestSession(t *testing.T, repository *trace.Repository) config.Workst
 	t.Helper()
 	id, err := config.NewWorkstreamID()
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.CreateSessionWorkstream(context.Background(), id, "default", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", service.TestSessionBranch(id), "", fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repository.CreateSessionWorkstream(context.Background(), id, "default", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", service.SessionBranch(id), "", fixturekit.DemoStart, service.SessionActor))
 	return id
 }
 
@@ -322,18 +322,18 @@ func drivenPass(t *testing.T, s *Service, repository *trace.Repository, pass fun
 	if active := s.sole(); active != nil {
 		fixturekit.Must(t, s.halt(active))
 	}
-	fixturekit.Must(t, repository.Serialize(pass))
+	fixturekit.Must(t, pass())
 }
 
 func sessionHeader(id string, ws config.WorkstreamID, at time.Time) trace.Header {
-	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: ws, At: at, Actor: service.TestSessionActor, Cause: "fixture"}
+	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: ws, At: at, Actor: service.SessionActor, Cause: "fixture"}
 }
 
 func TestArchitectPassSkipsASessionAlongsideAHandedWorkstream(t *testing.T) {
 	t.Parallel()
 	cfg, repo := newExclusionFixture(t, "")
 	ctx := context.Background()
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	_, err := repo.SetFeatureState(ctx, sessionHeader("handed", fixturekit.Stream, fixturekit.DemoStart), intake.HandedState, "fixture hand-in")
 	fixturekit.Must(t, err)
 	session := createTestSession(t, repo)
@@ -355,10 +355,10 @@ func TestShedPassSkipsASessionAlongsideASketchedWorkstream(t *testing.T) {
 	t.Parallel()
 	cfg, repo := newExclusionFixture(t, "[capacity]\ncommittee = 1\n")
 	ctx := context.Background()
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{
-		{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "fixture"}, Path: plan.SpecPath, Content: fixturekit.ValidSpec},
-		{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "fixture"}, Path: plan.PlanPath, Content: fixturekit.ValidPlan},
+		{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "fixture"}, Path: plan.SpecPath, Content: fixturekit.ValidSpec},
+		{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.PlanDocument, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "fixture"}, Path: plan.PlanPath, Content: fixturekit.ValidPlan},
 	}))
 	_, err := repo.SetFeatureState(ctx, sessionHeader("sketched", fixturekit.Stream, fixturekit.DemoStart), intake.SketchedState, "fixture draft accepted")
 	fixturekit.Must(t, err)
@@ -437,8 +437,8 @@ func TestBaseRefreshPassSkipsASessionAlongsideADependentWorkstream(t *testing.T)
 	t.Parallel()
 	cfg, repo := newExclusionFixture(t, "")
 	ctx := context.Background()
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, fixturekit.DemoStart, service.TestSessionActor))
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, fixturekit.DemoStart, service.SessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	_, err := repo.SetWorkstreamBase(ctx, fixturekit.Stream, fixturekit.Quiet, 0, fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	sealFixtureStream(t, repo, fixturekit.Stream)
@@ -463,7 +463,7 @@ func baseRefreshOperationCount2(t *testing.T, repo *trace.Repository, ws config.
 	fixturekit.Must(t, err)
 	n := 0
 	for _, o := range ops {
-		if o.Operation.Action == service.TestBaseRefreshAction {
+		if o.Operation.Action == lifecycle.BaseRefreshAction {
 			n++
 		}
 	}
@@ -476,7 +476,7 @@ func sealFixtureStream(t *testing.T, repo *trace.Repository, ws config.Workstrea
 		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "upstream-sha"}, Branch: intake.FeatureBranch(ws), Workspace: "/owned/feature"}
 	data, err := seal.Encode(sealed)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: 1, Project: fixturekit.Project, Workstream: ws, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "seal"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: 1, Project: fixturekit.Project, Workstream: ws, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "seal"}
 	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: seal.Path, Content: string(data)}}))
 }
 
@@ -484,7 +484,7 @@ func TestDriftPassSkipsASessionAlongsideABuildingWorkstream(t *testing.T) {
 	t.Parallel()
 	cfg, repo := newExclusionFixture(t, "")
 	ctx := context.Background()
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	_, err := repo.SetFeatureState(ctx, sessionHeader("building", fixturekit.Stream, fixturekit.DemoStart), intake.BuildingState, "fixture sealed")
 	fixturekit.Must(t, err)
 	sealFixtureStream(t, repo, fixturekit.Stream)
@@ -564,16 +564,16 @@ func approveSessionDelivery(t *testing.T, f *shedFixture, repository *trace.Repo
 	t.Helper()
 	ctx := context.Background()
 
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assembled", Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assembled", Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "fixture"}
 	_, err := repository.SetFeatureState(ctx, h, intake.AssembledState, "fixture assembled")
 	fixturekit.Must(t, err)
 	report := api.FinalReport{Review: approval.Review, Outcome: delivery.FinalReviewed, Branch: intake.FeatureBranch(session), Commit: approval.Commit, Seal: approval.Seal, SpecHash: approval.SpecHash, Spec: approval.Spec, Plan: approval.Plan, Charter: approval.Charter, Summary: "session delivery"}
 	content, err := json.Marshal(report)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
 	data, err := json.Marshal(approval)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.DeliveryDocument, Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.TestSessionActor, Cause: "delivery-approval"}, Path: delivery.DeliveryPath, Content: string(data)}}))
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.DeliveryDocument, Revision: 1, Project: repository.Project(), Workstream: session, At: fixturekit.DemoStart, Actor: service.SessionActor, Cause: "delivery-approval"}, Path: delivery.DeliveryPath, Content: string(data)}}))
 }
 
 func TestPublisherPassSkipsASessionAlongsideAnApprovedWorkstream(t *testing.T) {
@@ -602,10 +602,10 @@ func TestEnsureChiefsOfStaffSkipsASessionAlongsideAnOrdinaryWorkstream(t *testin
 	t.Parallel()
 	_, repo := newExclusionFixture(t, "")
 	ctx := context.Background()
-	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.TestSessionActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, service.SessionActor))
 	session := createTestSession(t, repo)
 	before := captureSessionSnapshot(t, repo, session)
-	fixturekit.Must(t, service.TestEnsureChiefsOfStaff(ctx, repo, fixturekit.DemoStart.Add(time.Hour)))
+	fixturekit.Must(t, service.EnsureChiefsOfStaff(ctx, repo, fixturekit.DemoStart.Add(time.Hour)))
 	if _, err := repo.ChiefOfStaffThread(fixturekit.Stream); err != nil {
 		t.Fatalf("the ordinary workstream's chief-of-staff thread: %v", err)
 	}

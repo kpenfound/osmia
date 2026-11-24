@@ -90,7 +90,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "lifecycle-read-ask", "second-read-origin")
 			rightRepo, err := f.s.repository(f.project2)
 			fixturekit.Must(t, err)
-			target, host, _, releaseTarget, err := f.s.chiefRepository(ctx, rightRepo, f.stream2)
+			target, host, _, releaseTarget, err := f.s.lifecycle().ChiefRepository(ctx, rightRepo, f.stream2)
 			fixturekit.Must(t, err)
 			defer releaseTarget()
 			var original trace.InboxEntry

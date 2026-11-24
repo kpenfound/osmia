@@ -6,7 +6,6 @@ import (
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -51,7 +50,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 		Blocked: "The upload unit.", Recommendation: "Keep it in files."}, at)
 	fixturekit.Must(t, err)
 	plantReport(t, live, fixturekit.Stream, "index", at)
-	move(trace.UnitSubject("index"), "index-reviewing", intake.UnitReviewing, service.TestForemanActor)
+	move(trace.UnitSubject("index"), "index-reviewing", intake.UnitReviewing, execution.ForemanActor)
 	move(trace.UnitSubject("index"), "index-contested-1", intake.UnitContested, execution.ReviewerActor)
 	journey.RaiseFixtureContest(t, live, fixturekit.Stream, "index")
 	sealed, sealDoc, _, err := seal.Latest(live, fixturekit.Stream)

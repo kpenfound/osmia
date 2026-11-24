@@ -57,11 +57,11 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				t.Fatal("delivered branch was polled")
 			}
 			if tc.projectRequest {
-				out, apiFault := p.s.rebaseProject(ctx, api.ProjectRebaseRequest{Project: p.project})
+				out, apiFault := p.s.lifecycle().RebaseProject(ctx, api.ProjectRebaseRequest{Project: p.project})
 				if apiFault != nil || len(out.Covered) != 1 {
 					t.Fatalf("project rebase: %+v %v", out, apiFault)
 				}
-			} else if _, apiFault := p.s.rebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
+			} else if _, apiFault := p.s.lifecycle().RebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
 			passDrifts(t, fm)
@@ -74,12 +74,12 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "its mason's resolution of resume.go")
 				w := resolutionWorkspace(t, p.shedFixture, p.stream)
 				fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "resume.go"), []byte("package demo\n// Upstream resume and feature resume.\n"), 0600))
-				completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftMasonAgent, resolvedDone("Combined resume behavior"))
+				completeDriftTurn(t, p.shedFixture, p.repository, p.stream, intake.DriftMasonAgent, resolvedDone("Combined resume behavior"))
 				awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "review 1 of candidate")
 				if tip, _ := p.forkBranch(t); tip != before {
 					t.Fatal("conflict resolution pushed without approval")
 				}
-				completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+				completeDriftTurn(t, p.shedFixture, p.repository, p.stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 			}
 			result = settleOperation(t, p.s, p.repository, p.stream, ops[0].Operation, drifter{fm})
 			if result.Outcome != "succeeded" {
@@ -142,7 +142,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				t.Fatal("publication did not finish maintenance")
 			}
 			fm = cadenceForeman(p.shedFixture, p.repository, "1m")
-			if _, apiFault := p.s.rebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
+			if _, apiFault := p.s.lifecycle().RebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
 			passDrifts(t, fm)
@@ -177,7 +177,7 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	fm := cadenceForeman(p.shedFixture, p.repository, "1m")
 	moveFeature(t, p.shedFixture, p.stream, map[string]string{"shared.go": "package demo\n// Feature shared helper.\n"})
 	advanceUpstream(t, p.shedFixture, map[string]string{"DRIFT.md": "new upstream content\n", "shared.go": "package demo\n// Upstream shared helper.\n"})
-	if _, apiFault := p.s.rebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().RebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	passDrifts(t, fm)
@@ -189,12 +189,12 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "its mason's resolution of shared.go")
 	w := resolutionWorkspace(t, p.shedFixture, p.stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "shared.go"), []byte("package demo\n// Upstream and feature shared helper.\n"), 0600))
-	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftMasonAgent, resolvedDone("Combined shared helper"))
+	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, intake.DriftMasonAgent, resolvedDone("Combined shared helper"))
 	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "review 1 of candidate")
 	if tip, _ := p.forkBranch(t); tip != before {
 		t.Fatal("conflict resolution pushed without approval")
 	}
-	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	result = settleOperation(t, p.s, p.repository, p.stream, ops[0].Operation, d)
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
@@ -253,7 +253,7 @@ func TestDeliveredDriftClosedPRStopsBeforeRebase(t *testing.T) {
 			p.pulls.Prs[0].State = "closed"
 			p.pulls.Prs[0].Merged = outcome == "merged"
 			fm := cadenceForeman(p.shedFixture, p.repository, "1m")
-			_, apiFault := p.s.rebaseWorkstream(context.Background(), string(p.stream))
+			_, apiFault := p.s.lifecycle().RebaseWorkstream(context.Background(), string(p.stream))
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
@@ -268,7 +268,7 @@ func TestDeliveredDriftClosedPRStopsBeforeRebase(t *testing.T) {
 			if tip := featureTip(t, p.shedFixture, p.stream); tip != before {
 				t.Fatal("closed PR was rebased")
 			}
-			if _, apiFault := p.s.rebaseWorkstream(context.Background(), string(p.stream)); apiFault == nil {
+			if _, apiFault := p.s.lifecycle().RebaseWorkstream(context.Background(), string(p.stream)); apiFault == nil {
 				t.Fatal("closed PR accepted another drift")
 			}
 		})

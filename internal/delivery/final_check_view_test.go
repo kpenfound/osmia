@@ -41,10 +41,9 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 		return run
 	}
 	cases := []struct {
-		name   string
-		run    FinalCheckRun
-		output string
-		files  []string
+		name  string
+		run   FinalCheckRun
+		files []string
 	}{
 		{name: "pull request passed", run: with(func(r *FinalCheckRun) { r.Status = "passed" }), files: []string{"final/checks-1.json"}},
 		{name: "pull request failed", run: with(func(r *FinalCheckRun) {
@@ -57,8 +56,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 			r.Status, r.Error = ChecksIncomplete, "the completed run is not a pass: the run reports no checks"
 		}), files: []string{"final/checks-1.json"}},
 		{name: "pull request continued", run: with(func(r *FinalCheckRun) { r.Status, r.Counts, r.StatusURL = ChecksContinued, nil, "" }), files: []string{"final/checks-1.json"}},
-		{name: "local run with an output file", run: FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, Status: "failed", ExitCode: 1, Output: "FAIL internal/trace", OutputPath: "final/checks-1-output.txt", OutputRevision: 1, Truncated: true}, output: "FAIL internal/trace\nthe whole captured output\n",
-			files: []string{"final/checks-1-output.txt", "final/checks-1.json"}},
 		{name: "maintenance review", run: FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, ExitCode: -1, Error: "a review of a delivered workstream pushes nothing, so no pull request checks ran for it"}},
 	}
 	for _, c := range cases {
@@ -70,9 +67,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 				data, err := json.MarshalIndent(c.run, "", "  ")
 				fixturekit.Must(t, err)
 				docs = append(docs, trace.Document{Header: checkRecordHeader(repo, FinalChecksDocument(1), 1), Path: FinalChecksPath(1), Content: string(data) + "\n"})
-			}
-			if c.output != "" {
-				docs = append(docs, trace.Document{Header: checkRecordHeader(repo, FinalChecksDocument(1)+"-output", 1), Path: c.run.OutputPath, Content: c.output})
 			}
 			if len(docs) > 0 {
 				fixturekit.Must(t, repo.RecordDocuments(context.Background(), docs))
@@ -153,10 +147,6 @@ func TestFinalPromptCarriesTheCheckResultBeforeTheCriteria(t *testing.T) {
 	}
 	if !strings.Contains(prompt, run.StatusURL) {
 		t.Fatalf("the prompt lacks the status link:\n%s", prompt)
-	}
-	local := FinalCheckRun{Review: 2, Commit: reviewedCommit, Status: "passed", OutputPath: "final/checks-2-output.txt", OutputRevision: 1}
-	if list := FinalPrompt(report, local, nil, coverage, FinalReport{}); !strings.Contains(list, "- final/checks-2-output.txt:") {
-		t.Fatalf("the output file is not listed:\n%s", list)
 	}
 	maintenance := FinalCheckRun{Review: 2, Commit: reviewedCommit, ExitCode: -1, Error: "a review of a delivered workstream pushes nothing, so no pull request checks ran for it"}
 	if list := FinalPrompt(report, maintenance, nil, coverage, FinalReport{}); strings.Contains(list, "final/checks") {

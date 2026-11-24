@@ -87,15 +87,9 @@ var dependentBaseChanged = lifecycle.DependentBaseChanged
 
 var baseWaiting = lifecycle.BaseWaiting
 
-var errDriftAwaits = lifecycle.ErrDriftAwaits
-
 var driftWorkspaces = lifecycle.DriftWorkspaces
 
-var driftResolveTurnID = lifecycle.DriftResolveTurnID
-
 type resolutions = lifecycle.Resolutions
-
-var driftDiffTool = lifecycle.DriftDiffTool
 
 func (s *Service) contractGuardRefusal(wt *trace.Repository, g trace.Workgroup, spec trace.ProjectSpec) (string, error) {
 	return s.lifecycle().ContractGuardRefusal(wt, g, spec)
@@ -173,8 +167,6 @@ func (s *Service) crossRepoMemberRepos(ctx context.Context, g trace.Workgroup) (
 
 const moveWorkstreamTool = lifecycle.MoveWorkstreamTool
 
-var turnDirectories = lifecycle.TurnDirectories
-
 type workspaceCleanup = lifecycle.WorkspaceCleanup
 
 var edgeWaiting = lifecycle.EdgeWaiting
@@ -196,8 +188,6 @@ const baseWaitSubject = lifecycle.BaseWaitSubject
 const DriftAction = lifecycle.DriftAction
 
 const driftSubject = lifecycle.DriftSubject
-
-const driftDocument = lifecycle.DriftDocument
 
 const driftReplayed = lifecycle.DriftReplayed
 

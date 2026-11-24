@@ -4,8 +4,8 @@ import (
 	context "context"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
@@ -30,7 +30,7 @@ func TestAmendmentDemonstration(t *testing.T) {
 	f.Script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
 	f.Script("amend-1-reply-1", nil, nil)
 	for _, unit := range []string{"upload", "audit"} {
-		masons.Play[service.TestMasonTurnID(unit)] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[execution.MasonTurnID(unit)] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 			recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Proof recorded"})
 			if err != nil || !recorded {
 				return fmt.Errorf("%s done: %s: %v", unit, reason, err)
@@ -39,7 +39,7 @@ func TestAmendmentDemonstration(t *testing.T) {
 		}
 	}
 	masons.Chief.Route("1", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
-	masons.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable. Should the spec say a durable checkpoint?"})
 		return err
 	}

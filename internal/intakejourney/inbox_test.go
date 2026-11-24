@@ -5,6 +5,7 @@ import (
 	json "encoding/json"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -561,10 +562,10 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	_, err = repository.SetFeatureState(ctx, header(contesting, "osmia.trace.transition", "building", tick(3), intake.OwnerActor), intake.BuildingState, "sealed")
 	fixturekit.Must(t, err)
 	plantReport(t, repository, contesting, "resume", tick(3))
-	move(contesting, trace.UnitSubject("resume"), "resume-reviewing", intake.UnitReviewing, tick(3), service.TestForemanActor)
+	move(contesting, trace.UnitSubject("resume"), "resume-reviewing", intake.UnitReviewing, tick(3), execution.ForemanActor)
 	move(contesting, trace.UnitSubject("resume"), "resume-contested", intake.UnitContested, tick(3), execution.ReviewerActor)
 	journey.RaiseFixtureContest(t, repository, contesting, "resume")
-	move(contesting, trace.UnitSubject("index"), "index-implementing", intake.UnitImplementing, tick(4), service.TestForemanActor)
+	move(contesting, trace.UnitSubject("index"), "index-implementing", intake.UnitImplementing, tick(4), execution.ForemanActor)
 	move(contesting, trace.UnitSubject("index"), "index-contested", intake.UnitContested, tick(4), intake.MasonActor)
 	journey.RaiseFixtureContest(t, repository, contesting, "index")
 
@@ -590,8 +591,8 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	answer := func(path string, kv ...any) api.InboxAnswer {
 		return api.InboxAnswer{Method: "POST", Path: "/v1/" + path, Body: body(kv...)}
 	}
-	reviewed := intakefixture.StreamDocuments(t, repository, assembled, service.TestFinalReportDocument)[0]
-	delivery := api.InboxEntry{Kind: api.InboxDelivery, Workstream: assembled, Revision: 1, OpenedAt: reviewed.At, Options: []string{"approve"}, Asked: []api.InboxQuestion{},
+	reviewed := intakefixture.StreamDocuments(t, repository, assembled, delivery.FinalReportDocument)[0]
+	deliveryEntry := api.InboxEntry{Kind: api.InboxDelivery, Workstream: assembled, Revision: 1, OpenedAt: reviewed.At, Options: []string{"approve"}, Asked: []api.InboxQuestion{},
 		Question: fmt.Sprintf("Mark ready for review: Resumable uploads? Final review 1 of commit %s found nothing blocking. No check result is recorded for this review. No brief was recorded for this review.", report.Commit), Blocked: "Marking the pull request ready for review.",
 		Answer: answer("delivery/"+string(assembled), "review", 1, "review_revision", 1, "commit", report.Commit, "draft_hash", presented.DraftHash)}
 	escalation := api.InboxEntry{Kind: api.InboxEscalation, Workstream: escalating, Number: 1, Batch: "escalation_1", Question: "Where should state live?", Blocked: "The unit.", Options: []string{"Files", "A database"},
@@ -638,16 +639,16 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 	if _, apiErr := f.S.DecideAmendment(ctx, string(assembled), "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentReject, Packet: 1}); apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	expect("amendment rejected", delivery, ratification, skipped, gaveUp)
+	expect("amendment rejected", deliveryEntry, ratification, skipped, gaveUp)
 	if _, apiErr := f.S.ApproveDelivery(ctx, string(assembled), api.DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	expect("delivery approved", ratification, skipped, gaveUp)
 
-	if _, err := (&journey.Publisher{S: f.S, Repository: repository}).Refuse(ctx, assembled, service.TestPublishInput{Approval: 1}, "the fork is gone"); err != nil {
+	if _, err := (&journey.Publisher{S: f.S, Repository: repository}).Refuse(ctx, assembled, delivery.PublishInput{Approval: 1}, "the fork is gone"); err != nil {
 		t.Fatal(err)
 	}
-	expect("publication refused", delivery, ratification, skipped, gaveUp)
+	expect("publication refused", deliveryEntry, ratification, skipped, gaveUp)
 	if _, apiErr := f.S.ApproveDelivery(ctx, string(assembled), api.DeliveryDecision{Review: 1, ReviewRevision: 1, Commit: report.Commit, DraftHash: presented.DraftHash}); apiErr != nil {
 		t.Fatal(apiErr)
 	}
@@ -657,21 +658,21 @@ func TestInboxListsEveryOpenDecision(t *testing.T) {
 		t.Helper()
 		content, err := json.Marshal(report)
 		fixturekit.Must(t, err)
-		h := header(assembled, "osmia.trace.document", service.TestFinalReportDocument, when, service.TestFinalReviewActor)
+		h := header(assembled, "osmia.trace.document", delivery.FinalReportDocument, when, delivery.FinalReviewActor)
 		h.Revision, h.Cause = revision, "final-review"
-		fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: service.TestFinalReportPath, Content: string(content)}}))
+		fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(content)}}))
 	}
 	recordReport(2, tick(6))
-	delivery.Revision, delivery.OpenedAt = 2, tick(6)
-	delivery.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 2, "commit", report.Commit, "draft_hash", presented.DraftHash)
-	expect("final report revised", ratification, skipped, gaveUp, delivery)
+	deliveryEntry.Revision, deliveryEntry.OpenedAt = 2, tick(6)
+	deliveryEntry.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 2, "commit", report.Commit, "draft_hash", presented.DraftHash)
+	expect("final report revised", ratification, skipped, gaveUp, deliveryEntry)
 
 	report.Criteria[1].Evidence, report.Criteria[1].Gap = "", "No duplicate test"
 	recordReport(3, tick(6))
-	delivery.Revision = 3
-	delivery.Question = fmt.Sprintf("Mark ready for review: Resumable uploads as it is? Final review 1 of commit %s has blocking findings: spec#2: No duplicate test. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows. No check result is recorded for this review. No brief was recorded for this review.", report.Commit)
-	delivery.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 3, "commit", report.Commit, "draft_hash", presented.DraftHash, "accept_blocking", true)
-	expect("final report with something blocking", ratification, skipped, gaveUp, delivery)
+	deliveryEntry.Revision = 3
+	deliveryEntry.Question = fmt.Sprintf("Mark ready for review: Resumable uploads as it is? Final review 1 of commit %s has blocking findings: spec#2: No duplicate test. Approving accepts them as they are; otherwise the work that resolves them goes through a plan revision, and a new final review follows. No check result is recorded for this review. No brief was recorded for this review.", report.Commit)
+	deliveryEntry.Answer = answer("delivery/"+string(assembled), "review", 1, "review_revision", 3, "commit", report.Commit, "draft_hash", presented.DraftHash, "accept_blocking", true)
+	expect("final report with something blocking", ratification, skipped, gaveUp, deliveryEntry)
 	if _, apiErr := f.S.ApproveDelivery(ctx, string(assembled), api.DeliveryDecision{Review: 1, ReviewRevision: 3, Commit: report.Commit, DraftHash: presented.DraftHash, AcceptBlocking: true}); apiErr != nil {
 		t.Fatal(apiErr)
 	}

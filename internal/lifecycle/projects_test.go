@@ -404,7 +404,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if len(names) > 1 {
 					t.Fatal(names)
 				}
-				var journal service.TestPendingProject
+				var journal service.PendingProject
 				data, jerr := os.ReadFile(filepath.Join(root, "project-add.json"))
 				if step == "journal-removed" {
 					if !os.IsNotExist(jerr) || len(names) != 1 {
@@ -516,7 +516,7 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	fixturekit.Must(t, s.Close())
 	data, err := os.ReadFile(filepath.Join(root, "project-add.json"))
 	fixturekit.Must(t, err)
-	var journal service.TestPendingProject
+	var journal service.PendingProject
 	fixturekit.Must(t, json.Unmarshal(data, &journal))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "projects"), []byte("blocked"), 0600))
 	s, c = start(t, opts)
@@ -553,7 +553,7 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 	fixturekit.Must(t, err)
 	active := added.Project.ID
 	stale := config.Project{ID: "p_ffffffffffffffffffffffffffffffff", Version: 1, Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: added.Project.Clone, BaseBranch: "main", Landing: "commit-per-unit"}
-	data, err := json.Marshal(service.TestPendingProject{Version: 1, Project: stale})
+	data, err := json.Marshal(service.PendingProject{Version: 1, Project: stale})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "project-add.json"), data, 0600))
 	before, err := os.ReadFile(filepath.Join(root, "config.toml"))

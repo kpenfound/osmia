@@ -112,10 +112,10 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			}
 			memberRepo, err := f.s.repository(survivorProject)
 			fixturekit.Must(t, err)
-			first, host, _, closeFirst, err := f.s.chiefRepository(ctx, memberRepo, survivor)
+			first, host, _, closeFirst, err := f.s.lifecycle().ChiefRepository(ctx, memberRepo, survivor)
 			fixturekit.Must(t, err)
 			defer func() { closeFirst() }()
-			second, _, _, closeSecond, err := f.s.chiefRepository(ctx, memberRepo, survivor)
+			second, _, _, closeSecond, err := f.s.lifecycle().ChiefRepository(ctx, memberRepo, survivor)
 			fixturekit.Must(t, err)
 			defer func() { closeSecond() }()
 			if first != second {
@@ -309,7 +309,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				t.Helper()
 				repo, err := f.s.repository(survivorProject)
 				fixturekit.Must(t, err)
-				target, currentHost, _, release, err := f.s.chiefRepository(ctx, repo, survivor)
+				target, currentHost, _, release, err := f.s.lifecycle().ChiefRepository(ctx, repo, survivor)
 				fixturekit.Must(t, err)
 				defer release()
 				inbox, err := f.c.Inbox(ctx)
@@ -574,7 +574,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	}
 	repo, err := f.s.repository(f.project2)
 	fixturekit.Must(t, err)
-	authority, _, _, release, err := f.s.chiefRepository(ctx, repo, f.stream2)
+	authority, _, _, release, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream2)
 	fixturekit.Must(t, err)
 	defer release()
 	path, err := f.s.current().Root.WorkstreamTrace(f.project, f.stream1)
@@ -633,7 +633,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 		fixturekit.Must(t, err)
 		incomplete := groups[0]
 		incomplete.Members = slices.Clone(incomplete.Members[:2])
-		members, err := f.s.crossRepoMemberRepos(ctx, incomplete)
+		members, err := f.s.lifecycle().CrossRepoMemberRepos(ctx, incomplete)
 		if err == nil {
 			t.Fatalf("incomplete membership accepted: %+v", members)
 		}
@@ -686,7 +686,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			fixturekit.Must(t, err)
 			id, err := repo.CrossRepoWorkgroupOf(f.stream1)
 			fixturekit.Must(t, err)
-			authority, host, _, release, err := f.s.chiefRepository(ctx, repo, f.stream1)
+			authority, host, _, release, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 			fixturekit.Must(t, err)
 			approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 			fixturekit.Must(t, err)
@@ -742,7 +742,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			})
 			survivor, err := f.s.repository(f.project2)
 			fixturekit.Must(t, err)
-			target, actualHost, _, closeTarget, err := f.s.chiefRepository(ctx, survivor, f.stream2)
+			target, actualHost, _, closeTarget, err := f.s.lifecycle().ChiefRepository(ctx, survivor, f.stream2)
 			fixturekit.Must(t, err)
 			got, doc, found, err := trace.ReadGroupApproval(target, actualHost)
 			fixturekit.Must(t, err)
@@ -780,15 +780,15 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 	fixturekit.Must(t, err)
 	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
 	fixturekit.Must(t, err)
-	change, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-unapproved", Kind: "cancel", Scope: "workgroup", Change: "Cancel the whole workgroup before ratification"})
+	change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-unapproved", Kind: "cancel", Scope: "workgroup", Change: "Cancel the whole workgroup before ratification"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	wt, g, _, closeGroup, err := f.s.changeContext(ctx, string(f.origin))
+	wt, g, _, closeGroup, err := f.s.lifecycle().ChangeContext(ctx, string(f.origin))
 	fixturekit.Must(t, err)
 	current := func(state string) func() bool {
 		return func() bool {
-			fixturekit.Must(t, f.s.advanceChanges(ctx, wt, g))
+			fixturekit.Must(t, f.s.lifecycle().AdvanceChanges(ctx, wt, g))
 			changes, err := lifecycle.ReadChanges(wt, g.Members[0])
 			fixturekit.Must(t, err)
 			for _, recorded := range changes {
@@ -800,7 +800,7 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 		}
 	}
 	lifecycleAwait(t, f, "cancellation presented", current("presented"))
-	change, apiFault = f.s.decideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "close"})
+	change, apiFault = f.s.lifecycle().DecideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "close"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -823,7 +823,7 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 		if !found {
 			t.Fatal("the workgroup trace is missing")
 		}
-		members, err := f.s.crossRepoMemberRepos(ctx, g)
+		members, err := f.s.lifecycle().CrossRepoMemberRepos(ctx, g)
 		fixturekit.Must(t, err)
 		if len(members) != 2 || !slices.ContainsFunc(members, func(m trace.CrossRepoMember) bool {
 			return m.Workstream == f.stream1 && m.Project.Project() == f.project

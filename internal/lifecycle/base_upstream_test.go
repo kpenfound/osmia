@@ -41,26 +41,26 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
 			fixturekit.Must(t, err)
 
-			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+			if _, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
 				t.Fatalf("an unparked workstream moved onto upstream: %v", apiFault)
 			}
 			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
 			fixturekit.Must(t, err)
-			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 			entry := parkedBaseEntry(t, repo, stream)
 			if entry.Kind != api.InboxBase || !slices.Equal(entry.Options, []string{api.BaseDecisionUpstream}) || entry.Answer.Path != api.Prefix+"/base/"+string(stream)+"/upstream" || entry.Answer.Body["base"] != string(base) {
 				t.Fatalf("the parked base's inbox entry %+v", entry)
 			}
 
-			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, stream); apiFault == nil || apiFault.Code != api.Conflict {
+			if _, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, stream); apiFault == nil || apiFault.Code != api.Conflict {
 				t.Fatalf("moved onto upstream for another base: %v", apiFault)
 			}
-			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+			if _, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
 				t.Fatalf("moved onto upstream lacking the base's changes: %v", apiFault)
 			}
 			advanceUpstream(t, f, map[string]string{"base.go": "upstream's own\n"})
-			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+			if _, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
 				t.Fatalf("moved onto upstream conflicting with the base's changes: %v", apiFault)
 			}
 			if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
@@ -68,7 +68,7 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			}
 
 			upstream := advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
-			out, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base)
+			out, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, base)
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
@@ -86,7 +86,7 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			if observed, _, err := lifecycle.BaseObservationAt(repo, stream); err != nil || observed.Base != want || observed.Unavailable {
 				t.Fatalf("the base observation %+v: %v", observed, err)
 			}
-			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 			if state, err := repo.Workflow(stream, lifecycle.BaseWaitSubject); err != nil || state.Value != "available" || state.Version != 2 {
 				t.Fatalf("the base wait after its next pass %+v: %v", state, err)
 			}

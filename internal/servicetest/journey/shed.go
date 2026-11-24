@@ -9,6 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
@@ -596,7 +597,7 @@ func LandingReason(t *testing.T, lands *Foreman, repository *trace.Repository, s
 	return intakefixture.LandingReason(t, stream, unit, approval.Approval,
 		func(result service.UnitReviewResult) service.UnitReviewIdentity { return result.Identity },
 		func(ctx context.Context, stream config.WorkstreamID, in intakefixture.LandingApproval, result service.UnitReviewResult) (string, error) {
-			return lands.Current(ctx, stream, service.TestLandInput{Unit: in.Unit, Review: in.Review, Candidate: in.Candidate, Base: in.Base}, result)
+			return lands.Current(ctx, stream, execution.LandInput{Unit: in.Unit, Review: in.Review, Candidate: in.Candidate, Base: in.Base}, result)
 		})
 }
 

@@ -145,12 +145,12 @@ func TestUpstreamReadErrorsWithoutCleanupEvidence(t *testing.T) {
 			s.store = store
 			deliverWithPullRequest(t, repo, cfg, 42)
 			if archived {
-				if _, apiFault := s.archive(string(fixturekit.Stream)); apiFault != nil {
+				if _, apiFault := s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
 					t.Fatal(apiFault)
 				}
 			}
 			fixturekit.TraceExec(t, fixturekit.WorkstreamTraceDirectory(t, cfg.Root, cfg.Project.ID, fixturekit.Stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'corrupt', 1, 'corrupt history')", "workstreams/"+string(fixturekit.Stream)+"/documents.jsonl")
-			status, err := s.upstreamMergeStatus(context.Background(), repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
+			status, err := s.lifecycle().UpstreamMergeStatus(context.Background(), repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
 			if err == nil || status.Merged {
 				t.Fatalf("unexplained corrupt upstream lost its error: %+v %v", status, err)
 			}
@@ -168,11 +168,11 @@ func TestArchivedUpstreamGoneTraceUsesOnlyPinnedPublication(t *testing.T) {
 			s := refresh.s
 			s.store = store
 			p := deliverWithPullRequest(t, repo, cfg, 42)
-			if _, apiFault := s.archive(string(fixturekit.Stream)); apiFault != nil {
+			if _, apiFault := s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
 			if name == "no publication" {
-				a, _ := s.archivedWorkstream(string(fixturekit.Stream))
+				a, _ := s.lifecycle().ArchivedWorkstream(string(fixturekit.Stream))
 				a.Publication = runtime.ArchivePublication{}
 				fixturekit.Must(t, store.ClearArchived(fixturekit.Stream))
 				fixturekit.Must(t, store.SetArchived(a))
@@ -187,7 +187,7 @@ func TestArchivedUpstreamGoneTraceUsesOnlyPinnedPublication(t *testing.T) {
 			if name == "lookup failure" {
 				host.FindErr = errors.New("provider unavailable")
 			}
-			status, err := s.upstreamMergeStatus(context.Background(), repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
+			status, err := s.lifecycle().UpstreamMergeStatus(context.Background(), repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
 			if name == "lookup failure" {
 				if err == nil || status.Merged {
 					t.Fatalf("failed lookup released dependency: %+v %v", status, err)

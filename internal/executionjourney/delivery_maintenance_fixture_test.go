@@ -2,6 +2,7 @@ package executionjourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
 	"testing"
 
@@ -29,7 +30,7 @@ func maintenanceFixture(t *testing.T) *publicationFixture {
 			p.s.options.PullRequests = fixturekit.RepositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
 			refresh := &baseRefresher{s: p.s, repository: p.repository}
 			fixturekit.Must(t, refresh.Pass(context.Background()))
-			op := fixturekit.ActionOperation(t, p.repository, p.stream, service.TestBaseRefreshAction)
+			op := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.BaseRefreshAction)
 			return settleOperation(t, p.s, p.repository, p.stream, op, refresh)
 		},
 		Observation: func(r *trace.Repository, w config.WorkstreamID) (seal.Base, bool, int, error) {

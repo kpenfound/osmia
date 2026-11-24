@@ -115,7 +115,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, g.Release(ctx, workspace.Worktree(w)))
 			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", "-D", intake.FeatureBranch(streams[0]))
-			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)
@@ -126,7 +126,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			firstSeal, _, _, err := seal.Latest(repo, streams[0])
 			fixturekit.Must(t, err)
 			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", firstSeal.Branch, firstSeal.Base.Commit)
-			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)
@@ -137,7 +137,7 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: streams[0], At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Owner abandoned the base")
 			fixturekit.Must(t, err)
-			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
 				waiting, err := lifecycle.BaseWaiting(repo, stream)
 				fixturekit.Must(t, err)

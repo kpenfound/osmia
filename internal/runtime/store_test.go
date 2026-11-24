@@ -127,19 +127,6 @@ func TestPauseAttributionAndClearing(t *testing.T) {
 	}
 }
 
-func TestOperatorPauseSourceOpensAsOwner(t *testing.T) {
-	in := fixture(t)
-	must(t, os.WriteFile(filepath.Join(in.Config.Root.String(), "runtime.json"), []byte(`{"version":1,"pauses":[{"target":{"scope":"factory"},"mode":"soft","source":"operator"}]}`), 0600))
-	s := open(t, in)
-	state, _ := s.Snapshot()
-	if len(state.Pauses) != 1 || state.Pauses[0].Source != PauseOwner || state.Pauses[0].Reason == "" || state.Pauses[0].SetAt.IsZero() {
-		t.Fatal(state)
-	}
-	if !bytes.Contains(disk(t, in), []byte(`"source": "owner"`)) {
-		t.Fatal("operator pause was not persisted as owner")
-	}
-}
-
 func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)

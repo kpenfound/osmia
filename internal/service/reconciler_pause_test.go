@@ -382,7 +382,7 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 	_, op := assembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	turn := finalTurnID(1, committeeAgent(1), 1)
+	turn := delivery.FinalTurnID(1, committeeAgent(1), 1)
 	entered := blockTurn(f.architectFixture, turn, func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := fixturekit.CallTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "findings": []any{}})
 		return err

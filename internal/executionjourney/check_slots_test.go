@@ -197,7 +197,7 @@ func TestUnitCheckSlotsReleaseEveryOutcome(t *testing.T) {
 				awaitCheckSlots(t, f.s, 1, 1)
 				state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
 				fixturekit.Must(t, err)
-				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "supersede-waiter", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.s.now(), Actor: service.TestForemanActor, Cause: execution.ReportDocument("resume")}
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "supersede-waiter", Revision: 1, Project: repo.Project(), Workstream: stream, Unit: "resume", At: f.s.now(), Actor: execution.ForemanActor, Cause: execution.ReportDocument("resume")}
 				_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject("resume"), From: execution.UnitChecking, To: intake.UnitImplementing, Reason: "candidate replaced while waiting"}})
 				fixturekit.Must(t, err)
 				holder()
@@ -341,7 +341,7 @@ func TestSessionCheckSlotWaitRespectsRequestCancellation(t *testing.T) {
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	runs, err := service.TestSessionCheckRuns(repo, stream)
+	runs, err := service.SessionCheckRuns(repo, stream)
 	fixturekit.Must(t, err)
 	if len(runs) != 0 {
 		t.Fatalf("waiting request recorded check runs: %+v", runs)

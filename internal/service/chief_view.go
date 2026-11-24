@@ -17,7 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func stageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
+func StageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 				if err != nil {
 					return nil, err
 				}
-				a.Contest = &api.ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: contestOptions(contest, unit, mason), ChiefRulingsLeft: left}
+				a.Contest = &api.ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: ContestOptions(contest, unit, mason), ChiefRulingsLeft: left}
 				_, decisions, err := execution.ChiefDecisions(r, stream, unit)
 				if err != nil {
 					return nil, err

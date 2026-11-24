@@ -155,7 +155,7 @@ func TestOperationPublicationRecovery(t *testing.T) {
 	}
 }
 
-func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
+func TestAnOpenAttemptLetsOtherOperationsBeClaimed(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
 	tx := transaction("operations", 0, "", "pending", 3)
@@ -175,60 +175,30 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 		})
 		return claimed, err
 	}
-	claimed := make(chan struct{})
 	err := withWorkerOperation(r, ctx, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
-		if err := Relock(ctx, func() error { return nil }); err != nil {
-			return err
-		}
-		a.Unlocked(ctx, func(ctx context.Context) {
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				if claimed, err := claim(first); err != nil || claimed {
-					t.Errorf("the open attempt's operation was claimed again: %v %v", claimed, err)
-				}
-				if claimed, err := claim(second); err != nil || !claimed {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if claimed, err := claim(first); err != nil || claimed {
+				t.Errorf("the open attempt's operation was claimed again: %v %v", claimed, err)
+			}
+			for _, event := range []string{second, third} {
+				if claimed, err := claim(event); err != nil || !claimed {
 					t.Errorf("another operation was not claimed: %v %v", claimed, err)
 				}
-			}()
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				t.Error("Unlocked kept the operation lock")
-				return
 			}
-			err := Relock(ctx, func() error {
-				go func() {
-					defer close(claimed)
-					if ok, err := claim(third); err != nil || !ok {
-						t.Errorf("an operation was not claimed after the attempt: %v %v", ok, err)
-					}
-				}()
-				return nil
-			})
-			if err == nil {
-				err = Relock(ctx, func() error { return nil })
-			}
-			if err != nil {
-				t.Error(err)
-			}
-			select {
-			case <-claimed:
-			case <-time.After(10 * time.Second):
-				t.Error("Relock blocked an independent worker claim")
-			}
-		})
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("an open attempt kept the operation lock")
+		}
 		action := a.Action("observe", at)
 		action.Observation = &coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "nothing ran"}
 		return a.Record(ctx, action)
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	select {
-	case <-claimed:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the operation was never claimed after the attempt")
 	}
 	if claimed, err := claim(first); err != nil || !claimed {
 		t.Fatalf("a closed attempt's operation was not claimed: %v %v", claimed, err)
@@ -249,67 +219,6 @@ func TestUnlockedWorkLetsOtherOperationsRun(t *testing.T) {
 		if fmt.Sprint(kinds) != want {
 			t.Fatalf("operation %s history %v, want %s", record.EventID, kinds, want)
 		}
-	}
-}
-
-func TestBesideWorkLeavesTheLockReleased(t *testing.T) {
-	r, _, _ := create(t)
-	ctx := context.Background()
-	tx := transaction("operations", 0, "", "pending", 3)
-	for i := range tx.Events {
-		e := &tx.Events[i]
-		e.Operation = &coreadapter.Operation{ID: OperationID(projectID, streamID, e.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
-	}
-	transact(t, r, tx)
-	first, second, third := tx.Events[0].ID, tx.Events[1].ID, tx.Events[2].ID
-	actor := Actor{Kind: "service", ID: "test"}
-	now := func() time.Time { return at }
-	claim := func(event string) <-chan bool {
-		out := make(chan bool, 1)
-		go func() {
-			claimed := false
-			err := withWorkerOperation(r, ctx, event, actor, now, func(*OperationAttempt, OperationRecord) error {
-				claimed = true
-				return nil
-			})
-			if err != nil {
-				t.Error(err)
-			}
-			out <- claimed
-		}()
-		return out
-	}
-	err := withWorkerOperation(r, ctx, first, actor, now, func(a *OperationAttempt, _ OperationRecord) error {
-		a.Unlocked(ctx, func(ctx context.Context) {
-			if err := Relock(Beside(ctx), func() error { return nil }); err != nil {
-				t.Error(err)
-			}
-			select {
-			case claimed := <-claim(second):
-				if !claimed {
-					t.Error("another operation was not claimed")
-				}
-			case <-time.After(10 * time.Second):
-				t.Error("Relock with a context from Beside took the lock back")
-				return
-			}
-			if err := Relock(ctx, func() error { return nil }); err != nil {
-				t.Error(err)
-			}
-			held := claim(third)
-			select {
-			case claimed := <-held:
-				if !claimed {
-					t.Error("independent worker was not claimed")
-				}
-			case <-time.After(10 * time.Second):
-				t.Error("Relock blocked an independent worker claim")
-			}
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

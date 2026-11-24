@@ -2,8 +2,8 @@ package executionjourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
@@ -77,7 +77,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 				t.Fatalf("late enqueue duplicated the request: %+v", th)
 			}
 			q := th.Turns[0]
-			if q.Request.TurnID != service.TestMasonTurnID(unit) || q.CompletedAt.IsZero() || q.Response == nil || !q.Response.Result.Cancelled || q.Response.Actor != intake.AbandonActor || q.Response.Failure != intake.CancelReason || len(q.Attempts) != 0 || th.Active != "" {
+			if q.Request.TurnID != execution.MasonTurnID(unit) || q.CompletedAt.IsZero() || q.Response == nil || !q.Response.Result.Cancelled || q.Response.Actor != intake.AbandonActor || q.Response.Failure != intake.CancelReason || len(q.Attempts) != 0 || th.Active != "" {
 				t.Fatalf("late request did not settle as cancelled in the same session: %+v", th)
 			}
 			responses, err := trace.Read[trace.TurnResponse](repo, address)

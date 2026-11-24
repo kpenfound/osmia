@@ -82,41 +82,6 @@ func newTwoProjectFixture(t *testing.T) *twoProjectFixture {
 	return &twoProjectFixture{opts: f.Options, cfg: f.Config, streams: f.Streams}
 }
 
-const AbandonedState = service.AbandonedState
-const DeliveredState = service.DeliveredState
-const ActivityCheck = service.ActivityCheck
-
-type CharterEdit = service.CharterEdit
-type FinalReport = service.FinalReport
-type CheckSelection = service.CheckSelection
-
-const Prefix = service.Prefix
-
-type HandInRequest = service.HandInRequest
-type ProjectAddRequest = service.ProjectAddRequest
-type RuntimeResponse = service.RuntimeResponse
-type PauseRequest = service.PauseRequest
-type ClearPauseRequest = service.ClearPauseRequest
-type SessionOpenRequest = service.SessionOpenRequest
-
-const InboxEscalation = service.InboxEscalation
-const TurnQueued = service.TurnQueued
-const TurnDone = service.TurnDone
-
-type ConversationResponse = service.ConversationResponse
-type Client = service.Client
-type Enforcement = service.Enforcement
-type FinalCheckRun = service.FinalCheckRun
-type FinalCheckAttempt = service.FinalCheckAttempt
-type Options = service.Options
-type Service = service.Service
-
-const ChecksPassed = service.ChecksPassed
-const ChecksIncomplete = service.ChecksIncomplete
-const ChecksSuperseded = service.ChecksSuperseded
-
-type UnitCheckRun = service.UnitCheckRun
-
 var recordActivity = fixturekit.RecordActivity
 
 const validSpec = fixturekit.ValidSpec
@@ -132,11 +97,11 @@ var claimTurn = fixturekit.ClaimTurn
 const project = fixturekit.Project
 const stream = fixturekit.Stream
 
-func entriesOf(t *testing.T, c *Client, kind string) []InboxEntry {
+func entriesOf(t *testing.T, c *service.Client, kind string) []api.InboxEntry {
 	t.Helper()
 	inbox, err := c.Inbox(context.Background())
 	must(t, err)
-	var out []InboxEntry
+	var out []api.InboxEntry
 	for _, e := range inbox.Entries {
 		if e.Kind == kind {
 			out = append(out, e)
@@ -145,13 +110,12 @@ func entriesOf(t *testing.T, c *Client, kind string) []InboxEntry {
 	return out
 }
 
-func decisionCard(e InboxEntry) string {
+func decisionCard(e api.InboxEntry) string {
 	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
 }
 
 var pauseOf = fixturekit.PauseOf
 
-type InboxEntry = api.InboxEntry
 type completedRunner = fixturekit.CompletedRunner
 
 var sessionBranch = service.SessionBranchForTest

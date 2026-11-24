@@ -53,7 +53,7 @@ func routedFixture(t *testing.T) *trace.Repository {
 func TestFeedCarriesTheRoutingAndMarksOnlyDepartures(t *testing.T) {
 	t.Parallel()
 	repo := routedFixture(t)
-	entries, err := feedEntries(repo, repo, fixturekit.Stream)
+	entries, err := FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	type view struct {
 		decidedBy, judgment, defaultTo string

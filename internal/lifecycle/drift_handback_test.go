@@ -17,7 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -26,9 +25,9 @@ func holdDrift(t *testing.T, f *shedFixture, d drifter, stream config.Workstream
 	t.Helper()
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	fixturekit.Must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(owners), 0600))
-	completeDriftTurn(t, f, d.repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+	completeDriftTurn(t, f, d.repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 	awaitResolution(t, f.s, d, stream, op, "review 1")
-	completeDriftTurn(t, f, d.repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))
+	completeDriftTurn(t, f, d.repository, stream, intake.DriftReviewerAgent, driftVerdict(t, rejectedResolution))
 	if result, err := attemptOperation(t, f.s, d.repository, stream, op, d); err != nil || !strings.Contains(result.Evidence, "is held for the owner") {
 		t.Fatalf("the drift rebase was not held: %+v %v", result, err)
 	}
@@ -53,7 +52,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	tool := controls.handBackDrift(repository, chiefTurn(t, f, repository, stream, "events_1"), f.clock.Now)
+	tool := controls.lifecycle().HandBackDrift(repository, chiefTurn(t, f, repository, stream, "events_1"), f.clock.Now)
 	handBack := func(input string) string {
 		t.Helper()
 		out, err := tool.Handle(ctx, json.RawMessage(input))
@@ -83,7 +82,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 
 	op = requestDrift(t, d, stream)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
+	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	if resolve := th.Turns[len(th.Turns)-1]; resolve.Request.TurnID != lifecycle.DriftResolveTurnID(2, 1) || !strings.Contains(resolve.Request.Prompt, "Drift rebase 1 was held for the owner, and the chief of staff handed it back with this note, which this drift rebase answers: "+note) {
 		t.Fatalf("the resolve turn %s:\n%s", resolve.Request.TurnID, resolve.Request.Prompt)

@@ -109,8 +109,6 @@ type limitRoute struct {
 	transitions int
 }
 
-// routeWhileJevAnswers routes a unit's send-back exit while a limit is
-// reached during Jev's answer, which Jev gives in the way the name says.
 func routeWhileJevAnswers(t *testing.T, limit, way string) *limitRoute {
 	t.Helper()
 	ways := map[string]func(reach func() error) *jevfixture.Transitions{
@@ -230,9 +228,6 @@ type limitedRecoveryApproval struct {
 	fail        *APIError
 }
 
-// approveRecoveryWhileLimited puts a unit in contest, has the chief propose a
-// move that waits as a recovery card, reaches the limit the name gives and
-// approves the card.
 func approveRecoveryWhileLimited(t *testing.T, limit string) *limitedRecoveryApproval {
 	t.Helper()
 	l := exhausted[limit]

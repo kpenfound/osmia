@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
@@ -27,7 +28,7 @@ func TestFinalReviewNamesAnApprovedDriftRebasesConflictedPathsAndApproval(t *tes
 		Review: 1, Verdict: &service.UnitVerdict{Decision: "satisfactory", Summary: "Resolution kept both sides."}}
 	content, err := json.MarshalIndent(rebase, "", "  ")
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: service.TestDriftDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "test"}, Path: lifecycle.DriftPath, Content: string(content) + "\n"}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.DriftDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "test"}, Path: lifecycle.DriftPath, Content: string(content) + "\n"}
 	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{doc}))
 
 	_, op := assembleBoth(t, f, repository, a, stream,

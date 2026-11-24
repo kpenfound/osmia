@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -88,9 +89,9 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				f.s.options.PullRequests = host
 				ctx := context.Background()
 				if previous {
-					fixturekit.Must(t, f.s.edgeResolverPass(ctx, f.repository))
+					fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, f.repository))
 					clock.Advance(10*time.Minute - time.Nanosecond)
-					fixturekit.Must(t, f.s.edgeResolverPass(ctx, f.repository))
+					fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, f.repository))
 					if host.Finds != 1 {
 						t.Fatal("open edge polled before interval")
 					}
@@ -100,7 +101,7 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				fixturekit.Must(t, err)
 				failure := errors.New("upstream unavailable")
 				host.FindErr = failure
-				err = f.s.edgeResolverPass(ctx, f.repository)
+				err = f.s.lifecycle().EdgeResolverPass(ctx, f.repository)
 				if !errors.Is(err, failure) {
 					t.Fatalf("provider error changed: %v", err)
 				}
@@ -110,7 +111,7 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				if rev != afterRev || !reflect.DeepEqual(before, after) {
 					t.Fatal("failed attempt wrote merge evidence")
 				}
-				fixturekit.Must(t, f.s.edgeWaitPass(ctx, f.repository))
+				fixturekit.Must(t, f.s.lifecycle().EdgeWaitPass(ctx, f.repository))
 				if kind == trace.EdgeHardBlock {
 					waiting, err := lifecycle.EdgeWaitDisplay(f.repository, f.downstream)
 					fixturekit.Must(t, err)
@@ -126,13 +127,13 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				}
 				for _, advance := range []time.Duration{0, time.Minute, 9*time.Minute - time.Nanosecond} {
 					clock.Advance(advance)
-					fixturekit.Must(t, f.s.edgeResolverPass(ctx, f.repository))
+					fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, f.repository))
 					if host.Finds != calls {
 						t.Fatal("failed attempt retried before interval")
 					}
 				}
 				clock.Advance(time.Nanosecond)
-				if err := f.s.edgeResolverPass(ctx, f.repository); !errors.Is(err, failure) {
+				if err := f.s.lifecycle().EdgeResolverPass(ctx, f.repository); !errors.Is(err, failure) {
 					t.Fatalf("retry error: %v", err)
 				}
 				if host.Finds != calls+1 {
@@ -258,7 +259,7 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 			ctx := context.Background()
 			pass := func() {
 				fixturekit.Must(t, refresh.Pass(ctx))
-				fixturekit.Must(t, f.s.edgeResolverPass(ctx, f.repository))
+				fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, f.repository))
 				for _, member := range []config.WorkstreamID{f.upstream, f.downstream} {
 					_, err := refresh.Apply(ctx, latestBaseRefreshOperation(t, f.repository, member))
 					fixturekit.Must(t, err)
@@ -267,11 +268,11 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 			pass()
 			before := host.Finds
 			if projectRequest {
-				out, apiFault := f.s.rebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
+				out, apiFault := f.s.lifecycle().RebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
 				if apiFault != nil || len(out.Covered) != 2 {
 					t.Fatalf("project rebase: %+v %v", out, apiFault)
 				}
-			} else if _, apiFault := f.s.rebaseWorkstream(ctx, string(f.downstream)); apiFault != nil {
+			} else if _, apiFault := f.s.lifecycle().RebaseWorkstream(ctx, string(f.downstream)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
 			pass()
@@ -495,15 +496,15 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 			fixturekit.Must(t, err)
 			defer store.Close()
 			f.s.store = store
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: repo.Project(), Workstream: dependent, At: clock.Now(), Actor: service.TestForemanActor, Cause: "fixture"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: repo.Project(), Workstream: dependent, At: clock.Now(), Actor: execution.ForemanActor, Cause: "fixture"}
 			_, err = repo.SetFeatureState(ctx, h, intake.BuildingState, "ready for drift")
 			fixturekit.Must(t, err)
 			if projectRequest {
-				out, apiFault := f.s.rebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
+				out, apiFault := f.s.lifecycle().RebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
 				if apiFault != nil || len(out.Covered) != 2 {
 					t.Fatalf("project request: %+v %v", out, apiFault)
 				}
-			} else if _, apiFault := f.s.rebaseWorkstream(ctx, string(dependent)); apiFault != nil {
+			} else if _, apiFault := f.s.lifecycle().RebaseWorkstream(ctx, string(dependent)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
 			fixturekit.Must(t, refresh.Pass(ctx))

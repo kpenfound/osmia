@@ -240,12 +240,6 @@ func run(c Config, log string, stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
-// Selected interprets an OR of addresses over Leaves, using URL query values
-// as OR within each dimension and AND between dimensions.
-func Selected(links []string) []string {
-	return selectedFrom(links, Leaves)
-}
-
 func selectedFrom(links, leaves []string) []string {
 	var selected []string
 	for _, leaf := range leaves {

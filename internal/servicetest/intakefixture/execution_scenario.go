@@ -71,6 +71,26 @@ func CheckPauseStop(t *testing.T, q trace.QueuedTurn, scope, reason string) {
 	}
 }
 
+func AssertAcceptanceDraftInstructions(t *testing.T, prompt string) {
+	t.Helper()
+	for _, want := range []string{"Acceptance states observable behaviours", "tests the unit adds as evidence", "Never require a whole-suite check pass or run", "no need to list existing tests to keep passing", "service-owned check gate catches regressions", "factory runs and selects checks itself", "smart-check selection"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("draft instructions lack %q: %s", want, prompt)
+		}
+	}
+}
+
+// OwnPrompt is the part of a turn prompt that is not the replayed log of an earlier session.
+func OwnPrompt(prompt string) string {
+	if !strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
+		return prompt
+	}
+	if _, own, ok := strings.Cut(prompt, "\n\n"); ok {
+		return own
+	}
+	return ""
+}
+
 func AssertCheckGateReviewInstructions(t *testing.T, prompt string) {
 	t.Helper()
 	for _, want := range []string{"Test passing is decided by the service-owned check gate", "When the gate passed", "whole-suite, scoped or named", "satisfied as to passing", "evidence that required tests ran and passed", "Never raise a finding by itself", "only a smart-check selection ran", "cannot see that a named test was selected", "cannot run tests yourself", "tests the unit was asked to add exist and exercise the stated behaviour"} {

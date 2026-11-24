@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -33,7 +34,7 @@ func ApproveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	r := &Reviewers{Masons: NewMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.PrepareUnitReview, func(identity service.UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: ReviewSummary}})
-	}, service.TestReviewTurnID, service.TestReviewDocument, r.One, intake.UnitApproved)
+	}, execution.ReviewTurnID, execution.ReviewDocument, r.One, intake.UnitApproved)
 }
 
 // AssembleBoth merges both units of intakefixture.ValidPlan, checking that the workstream
@@ -51,7 +52,7 @@ func AssembleBoth(t *testing.T, f *ShedFixture, repository *trace.Repository, a 
 // fails records a retry and no result, so the operation stays pending.
 func AttemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
 	t.Helper()
-	return intakefixture.AttemptOperation(t, s.Now(), service.TestForemanActor, repository, stream, op, r)
+	return intakefixture.AttemptOperation(t, s.Now(), execution.ForemanActor, repository, stream, op, r)
 }
 
 // AwaitMasonRan waits until the unit's first mason turn completed.
@@ -120,7 +121,7 @@ func DeliveryFixtureWith(t *testing.T, extra string) (*ShedFixture, config.Works
 	}, a.Pass, func(ctx context.Context) (api.FinalReport, error) {
 		in, sealed, err := a.Governing(ctx, stream)
 		return api.FinalReport{Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base}, err
-	}, service.TestFinalReviewActor, service.TestFinalReportDocument, service.TestFinalReportPath, service.TestFinalReviewed)
+	}, delivery.FinalReviewActor, delivery.FinalReportDocument, delivery.FinalReportPath, delivery.FinalReviewed)
 	f.S.SetSole(&ActiveProject{Repository: repository})
 	return f, stream, repository, report
 }
@@ -133,7 +134,7 @@ func FinalOperations(t *testing.T, repository *trace.Repository, stream config.W
 
 // FinalTurn installs the fake committee member's turn of final review k.
 func (f *ShedFixture) FinalTurn(k, attempt int, run func(context.Context, *mcp.ClientSession) error) string {
-	return intakefixture.FinalTurn(f.Engine, service.TestFinalTurnID(k, intake.CommitteeAgent(1), attempt), run)
+	return intakefixture.FinalTurn(f.Engine, delivery.FinalTurnID(k, intake.CommitteeAgent(1), attempt), run)
 }
 
 // LandOperations returns the workstream's landing operations.
@@ -157,7 +158,7 @@ const MasonRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"contain
 // and records the unit merged, as a landing does, and returns the new tip.
 func MergeDirectly(t *testing.T, f *ShedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, files map[string]string) string {
 	t.Helper()
-	return intakefixture.MergeDirectly(t, repository, stream, unit, MoveFeature(t, f, stream, files), service.TestForemanActor, intake.UnitMerged)
+	return intakefixture.MergeDirectly(t, repository, stream, unit, MoveFeature(t, f, stream, files), execution.ForemanActor, intake.UnitMerged)
 }
 
 // MoveFeature commits files onto the workstream's feature branch, as a
@@ -253,7 +254,7 @@ func NewMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepar
 	})
 	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: drafted}, nil)
 	f.Upstream(t)
-	return f, intakefixture.ScriptMasons(f.Engine, service.TestMasonTurnID)
+	return f, intakefixture.ScriptMasons(f.Engine, execution.MasonTurnID)
 }
 
 // NewParallelMasonFixture is a mason fixture with capacity.masons set to
@@ -270,18 +271,18 @@ func NewParallelMasonFixture(t *testing.T, masons, perWorkstream int, drafted st
 func NewParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstream int, drafted string) (*ShedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	f, fake := NewMasonFixtureOn(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted)
-	intakefixture.ExtendParallelMasons(t, f.Clone, f.Repository(), f.Clock.Now(), f.Engine, fake, service.TestMasonTurnID, intake.OwnerActor)
+	intakefixture.ExtendParallelMasons(t, f.Clone, f.Repository(), f.Clock.Now(), f.Engine, fake, execution.MasonTurnID, intake.OwnerActor)
 	return f, fake
 }
 
 // ParallelPlan has resume and dedupe in internal.trace, and upload and audit
 // in internal.upload and internal.audit, disjoint from it and from each other.
 // No unit depends on another.
-const ParallelPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "upload", "title": "Send chunks", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUpload"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.audit"]}
+const ParallelPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]}
 ]}
 `
 
@@ -289,7 +290,7 @@ const ParallelPlan = `{"version": 1, "units": [
 func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()
 	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
-		c, found, err := service.TestUnitContest(r, stream, unit)
+		c, found, err := execution.UnitContest(r, stream, unit)
 		return c.Header, found, err
 	}, intake.ChiefActor, execution.EscalateContest, execution.ChiefContestPath)
 }
@@ -418,7 +419,7 @@ func NewConfiguredProductionDesignFixture(t *testing.T, configuration Production
 		return intakefixture.ProductionDesignStart[*ProductionDesignFixture]{
 			Fixture: f, Scenario: f.SharedDesign(), Threads: opts.Threads, Hooks: &f.Hook,
 			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
-				return turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+				return turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 			},
 			Bind: func(threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error), boundary func(context.Context, string) error) {
 				af.Opts.Threads, af.Opts.Boundary = threads, boundary
@@ -492,16 +493,16 @@ func (f *ProductionDesignFixture) SharedDesign() *intakefixture.ProductionDesign
 			_, ok, err := (&Masons{S: f.S, Repository: r}).Read(w)
 			return ok, err
 		},
-		Holds: func(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-			return f.S.Holds(p, w, r, c)
+		Holds: func(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+			return f.S.Holds(p, r, c)
 		},
-		EdgeWaiting: service.TestEdgeWaiting,
+		EdgeWaiting: lifecycle.EdgeWaiting,
 		Builder: func(r *trace.Repository) coreadapter.Reconciler {
 			return &intake.Builder{S: f.S.Intake().BuilderDependencies(), Repository: r}
 		},
 		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
 			_, event := execution.LandIDs("accept", 1)
-			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&Foreman{Masons: &Masons{S: f.S, Repository: r}}).Apply)
+			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, execution.LandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&Foreman{Masons: &Masons{S: f.S, Repository: r}}).Apply)
 		},
 		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
@@ -516,7 +517,7 @@ func (f *ArchitectFixture) SharedTurns() *intakefixture.TurnScenario {
 		Root: func() config.Root { return f.S.Current().Root }, Project: f.Project,
 		Now: f.Clock.Now, Repository: f.Repository,
 		Changes: func(t *testing.T) (func(), func()) { return ServiceChanges(t, f.S) },
-		Done:    func() <-chan struct{} { return f.S.Done }, WaitError: f.S.Wait, ForemanActor: service.TestForemanActor,
+		Done:    func() <-chan struct{} { return f.S.Done }, WaitError: f.S.Wait, ForemanActor: execution.ForemanActor,
 	}
 }
 

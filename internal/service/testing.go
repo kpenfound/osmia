@@ -196,7 +196,7 @@ func (a TestAccess) SetProviderLimit(limit runtime.ProviderLimit) error {
 }
 
 // SessionBranchForTest returns the production branch identity of a session.
-func SessionBranchForTest(id config.WorkstreamID) string { return sessionBranch(id) }
+func SessionBranchForTest(id config.WorkstreamID) string { return SessionBranch(id) }
 
 // SessionTurnRunning reports whether a session turn is still completing.
 func (a TestAccess) SessionTurnRunning(stream config.WorkstreamID) bool {
@@ -207,7 +207,7 @@ func (a TestAccess) SessionTurnRunning(stream config.WorkstreamID) bool {
 
 // SessionGit returns the service's session workspace provider for assertions.
 func (a TestAccess) SessionGit(project config.ProjectID) *workspace.Git {
-	return sessionGit(a.s.current().For(project))
+	return SessionGit(a.s.current().For(project))
 }
 
 // Intake exposes the composed owner-gate dependencies to controller fixtures.
@@ -257,9 +257,6 @@ func (c *Client) SetTimeoutForTest(d time.Duration) { c.defaultTimeout = d }
 func (a TestAccess) Feed(raw string) (FeedResponse, *APIError) { return a.s.feedList(raw) }
 func (a TestAccess) Delivery(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return a.s.deliveryPresentation(ctx, raw)
-}
-func (a TestAccess) ApproveAndLand(ctx context.Context, raw string, r DeliveryLandDecision) (DeliveryLandResponse, *APIError) {
-	return a.s.approveAndLand(ctx, raw, r)
 }
 func (a TestAccess) ApproveDelivery(ctx context.Context, raw string, r DeliveryDecision) (DeliveryApproval, *APIError) {
 	return a.s.approveDelivery(ctx, raw, r)

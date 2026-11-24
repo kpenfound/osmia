@@ -24,7 +24,7 @@ import (
 
 func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
 	t.Helper()
-	return intakefixture.AttemptOperation(t, s.now(), service.TestForemanActor, repository, stream, op, r)
+	return intakefixture.AttemptOperation(t, s.now(), execution.ForemanActor, repository, stream, op, r)
 }
 
 func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, ready func() bool) {
@@ -47,7 +47,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		return intakefixture.ProductionDesignStart[*productionDesignFixture]{
 			Fixture: f, Scenario: f.sharedDesign(), Threads: opts.Threads, Hooks: &f.hook,
 			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
-				return turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+				return turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 			},
 			Bind: func(threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error), boundary func(context.Context, string) error) {
 				af.opts.Threads, af.opts.boundary = threads, boundary
@@ -67,7 +67,7 @@ type productionDesignConfiguration struct {
 func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()
 	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
-		c, found, err := service.TestUnitContest(r, stream, unit)
+		c, found, err := execution.UnitContest(r, stream, unit)
 		return c.Header, found, err
 	}, intake.ChiefActor, execution.EscalateContest, execution.ChiefContestPath)
 }
@@ -191,16 +191,16 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			_, ok, err := (&masons{s: f.s, repository: r}).read(w)
 			return ok, err
 		},
-		Holds: func(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-			return f.s.holds(p, w, r, c)
+		Holds: func(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+			return f.s.holds(p, r, c)
 		},
-		EdgeWaiting: service.TestEdgeWaiting,
+		EdgeWaiting: lifecycle.EdgeWaiting,
 		Builder: func(r *trace.Repository) coreadapter.Reconciler {
 			return &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: r}
 		},
 		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
 			_, event := execution.LandIDs("accept", 1)
-			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
+			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, execution.LandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
 		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
@@ -215,7 +215,7 @@ func (f *architectFixture) sharedTurns() *intakefixture.TurnScenario {
 		Root: func() config.Root { return f.s.current().Root }, Project: f.project,
 		Now: f.clock.Now, Repository: f.repository,
 		Changes: func(t *testing.T) (func(), func()) { return serviceChanges(t, f.s) },
-		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: service.TestForemanActor,
+		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: execution.ForemanActor,
 	}
 }
 

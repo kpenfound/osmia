@@ -244,8 +244,6 @@ type openedFlakeFix struct {
 	text   string
 }
 
-// startUnnoticedFlakeFix starts a service whose unit check run holds a flaky
-// test the chief of staff has not yet been told of.
 func startUnnoticedFlakeFix(t *testing.T) (*flakeFixLive, *intakefixture.Faults, flakes.Occurrence) {
 	t.Helper()
 	l := startFlakeFixLive(t, "flake-fix-e2e", flakyOutcome(flakyTraceTest))
@@ -254,8 +252,6 @@ func startUnnoticedFlakeFix(t *testing.T) (*flakeFixLive, *intakefixture.Faults,
 	return l, faults, l.occurrence(t, l.stream, flakeFixUnitRun)
 }
 
-// openFlakeFix has the chief of staff open a flake-fix workstream for the
-// occurrence of the unit check run.
 func openFlakeFix(t *testing.T) *openedFlakeFix {
 	t.Helper()
 	l, faults, occ := startUnnoticedFlakeFix(t)

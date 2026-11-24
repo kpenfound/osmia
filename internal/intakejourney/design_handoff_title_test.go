@@ -28,16 +28,6 @@ const handoffTitleGoal = "Resumable uploads across the server and the client"
 
 const handoffEventWindows = "[events]\nwindow = \"1h\"\nprogress_window = \"2h\"\n"
 
-func ownPrompt(prompt string) string {
-	if !strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
-		return prompt
-	}
-	if _, own, ok := strings.Cut(prompt, "\n\n"); ok {
-		return own
-	}
-	return ""
-}
-
 func handoffTitleTurns(th trace.Thread) []trace.QueuedTurn {
 	return slices.DeleteFunc(slices.Clone(th.Turns), func(q trace.QueuedTurn) bool {
 		return !strings.Contains(q.Request.Prompt, intake.HandoffTitleOpening)
@@ -67,7 +57,7 @@ func newHandoffTitleFixture(t *testing.T) *handoffTitleFixture {
 	journey.WriteCharter(t, c, f.other, "1. Keep changes small.\n")
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		prompt := ownPrompt(req.Prompt)
+		prompt := intakefixture.OwnPrompt(req.Prompt)
 		if !strings.Contains(prompt, intake.HandoffTitleOpening) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do."), nil
 		}

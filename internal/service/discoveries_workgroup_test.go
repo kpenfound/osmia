@@ -25,9 +25,6 @@ type memberDiscovery struct {
 	now   func() time.Time
 }
 
-// openMemberDiscovery opens a workgroup of two members, records an open
-// discovery in the second member's trace and claims a turn of the shared chief
-// of staff.
 func openMemberDiscovery(t *testing.T) *memberDiscovery {
 	t.Helper()
 	ctx := context.Background()

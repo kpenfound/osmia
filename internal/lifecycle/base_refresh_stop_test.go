@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/execution"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func baseRefreshOperationCount(t *testing.T, repo *trace.Repository, stream conf
 
 func recordIntegration(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, commit string) {
 	t.Helper()
-	fixturekit.RecordBaseIntegration(t, repo, stream, at, commit, service.TestForemanActor)
+	fixturekit.RecordBaseIntegration(t, repo, stream, at, commit, execution.ForemanActor)
 }
 
 func TestDependentDeliveryMaintenanceCompletesAfterARestartFollowingIntegration(t *testing.T) {

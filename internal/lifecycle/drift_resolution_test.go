@@ -31,7 +31,7 @@ import (
 
 func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
 	t.Helper()
-	return intakefixture.AttemptOperation(t, s.now(), service.TestForemanActor, repository, stream, op, r)
+	return intakefixture.AttemptOperation(t, s.now(), execution.ForemanActor, repository, stream, op, r)
 }
 
 func awaitResolution(t *testing.T, s *Service, d drifter, stream config.WorkstreamID, op coreadapter.Operation, want string) {
@@ -69,7 +69,7 @@ var (
 
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
-	return intakefixture.Workspace(t, intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, backendOf(t, f, stream)), stream)
+	return intakefixture.Workspace(t, intake.Workspaces(f.s.cfg, intake.DriftsDirectory, backendOf(t, f, stream)), stream)
 }
 
 func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
@@ -124,10 +124,10 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if !strings.Contains(string(data), "<<<<<<< ") || !strings.Contains(string(data), "@upstream") || !strings.Contains(string(data), "@feature") {
 		t.Fatalf("the resolution workspace's CODEOWNERS holds %q", data)
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
-	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
+	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	if th.Identity.Role != intake.MasonRole {
 		t.Fatalf("the drift mason's role is %s", th.Identity.Role)
@@ -139,12 +139,12 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	}
 
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); len(ids) != 1 {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); len(ids) != 1 {
 		t.Fatalf("drift mason turns %v", ids)
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	records := driftRecords(t, repository, stream)
 	candidate := records[len(records)-1].Candidate
@@ -156,7 +156,7 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if tip := featureTip(t, f, stream); tip != before {
 		t.Fatalf("the feature branch moved to %s before review", tip)
 	}
-	review, err := repository.Thread(stream, service.TestDriftReviewerAgent)
+	review, err := repository.Thread(stream, intake.DriftReviewerAgent)
 	fixturekit.Must(t, err)
 	if review.Identity.Role != intake.ReviewerRole || len(review.Turns) != 1 || review.Turns[0].Request.TurnID != lifecycle.DriftReviewTurnID(1, 1) {
 		t.Fatalf("the drift reviewer's thread %+v", review)
@@ -170,7 +170,7 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 		t.Fatalf("the reviewer reads the resolution %q through its prompt or not at all", resolution)
 	}
 
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	result, err := attemptOperation(t, f.s, repository, stream, op, d)
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
@@ -193,7 +193,7 @@ func TestDriftConflictIsResolvedByAMasonAndMovesTheBranchOnApproval(t *testing.T
 	if done := intakefixture.TransitionByID(t, repository, stream, "drift-1-rebased"); done.From != "conflicted-1" || done.To != "rebased-1" {
 		t.Fatalf("the outcome %+v", done)
 	}
-	if _, found, err := intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := intake.Workspaces(f.s.cfg, intake.DriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 	if seen, err := d.Inspect(ctx, op); err != nil || seen.State != coreadapter.EffectCompleted {
@@ -210,23 +210,23 @@ func TestRejectedDriftResolutionReturnsToTheMasonAndKeepsTheBranch(t *testing.T)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
 
-	done := completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+	done := completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	remind := fmt.Sprintf("%s-markers-%d", service.TestDriftMasonAgent, done.Sequence)
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), remind}) {
+	remind := fmt.Sprintf("%s-markers-%d", intake.DriftMasonAgent, done.Sequence)
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), remind}) {
 		t.Fatalf("drift mason turns after a done with markers %v", ids)
 	}
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); len(ids) != 2 {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); len(ids) != 2 {
 		t.Fatalf("the reminder was queued again: %v", ids)
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept the feature owner"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept the feature owner"))
 	awaitResolution(t, f.s, d, stream, op, "review 1")
 	first := driftRecords(t, repository, stream)
 	candidate := first[len(first)-1].Candidate
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, rejectedResolution))
 	awaitResolution(t, f.s, d, stream, op, "its mason's answer to review 1")
 	records := driftRecords(t, repository, stream)
 	rejected := records[len(records)-1]
@@ -239,7 +239,7 @@ func TestRejectedDriftResolutionReturnsToTheMasonAndKeepsTheBranch(t *testing.T)
 	if after := intakefixture.StreamDocuments(t, repository, stream, seal.DocumentID); !reflect.DeepEqual(after, sealed) {
 		t.Fatalf("a rejected resolution changed the seal: %+v", after)
 	}
-	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
+	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	fix := th.Turns[len(th.Turns)-1]
 	if fix.Request.TurnID != lifecycle.DriftFixTurnID(1, 1) || !strings.Contains(fix.Request.Prompt, "Keep @upstream beside @feature.") || !strings.Contains(fix.Request.Prompt, "## Sealed spec: spec.md") {
@@ -247,21 +247,21 @@ func TestRejectedDriftResolutionReturnsToTheMasonAndKeepsTheBranch(t *testing.T)
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 2")
 	records = driftRecords(t, repository, stream)
 	second := records[len(records)-1]
 	if second.Outcome != intake.DriftResolved || second.Review != 2 || second.Candidate == candidate || second.Verdict != nil || fileAt(t, f, second.Candidate, "CODEOWNERS") != "/internal/ @upstream @feature\n" {
 		t.Fatalf("the second candidate %+v", second)
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftReviewerAgent); !slices.Equal(ids, []string{lifecycle.DriftReviewTurnID(1, 1), lifecycle.DriftReviewTurnID(1, 2)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftReviewerAgent); !slices.Equal(ids, []string{lifecycle.DriftReviewTurnID(1, 1), lifecycle.DriftReviewTurnID(1, 2)}) {
 		t.Fatalf("drift reviewer turns %v", ids)
 	}
 	if tip := featureTip(t, f, stream); tip != before {
 		t.Fatalf("the feature branch moved to %s before the second review", tip)
 	}
 
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	if result, err := attemptOperation(t, f.s, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
 	}
@@ -310,7 +310,7 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 
 	restart()
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
 		t.Fatalf("drift mason turns after a restart %v", ids)
 	}
 	if n := len(driftRecords(t, repository, stream)); n != records {
@@ -323,26 +323,26 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 	turn := lifecycle.DriftResolveTurnID(1, 1)
 	paths, err := execution.ViewPaths(w.Path)
 	fixturekit.Must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), service.TestDriftMasonAgent, turn)
+	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.DriftMasonAgent, turn)
 	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	_, err = repository.ClaimTurn(ctx, stream, service.TestDriftMasonAgent, "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), service.TestDriftMasonAgent, turn), f.clock.Now())
+	_, err = repository.ClaimTurn(ctx, stream, intake.DriftMasonAgent, "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.DriftMasonAgent, turn), f.clock.Now())
 	fixturekit.Must(t, err)
 	restart()
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	recover := fmt.Sprintf("%s-recover-1", service.TestDriftMasonAgent)
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{turn, recover}) {
+	recover := fmt.Sprintf("%s-recover-1", intake.DriftMasonAgent)
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{turn, recover}) {
 		t.Fatalf("drift mason turns after an interrupted turn %v", ids)
 	}
 	if data, err := os.ReadFile(filepath.Join(w.Path, "CODEOWNERS")); err != nil || string(data) != "/internal/ @upstream @feature\n" {
 		t.Fatalf("the interrupted turn's view was not copied back: %q %v", data, err)
 	}
 
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	for _, point := range []string{"drift-staging"} {
 		f.s.boundary = func(name string) error {
 			if name == point {
@@ -357,7 +357,7 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 		restart()
 	}
 	awaitResolution(t, f.s, d, stream, op, "review 1")
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	f.s.boundary = func(name string) error {
 		if name == "drift-approved" {
 			return errors.New("the service stopped")
@@ -380,10 +380,10 @@ func TestRestartDuringDriftResolutionResumesWithoutDuplicates(t *testing.T) {
 	if tip := featureTip(t, f, stream); tip != candidate || fileAt(t, f, tip, "CODEOWNERS") != "/internal/ @upstream @feature\n" {
 		t.Fatalf("the feature branch is at %s, not %s", tip, candidate)
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftReviewerAgent); len(ids) != 1 {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftReviewerAgent); len(ids) != 1 {
 		t.Fatalf("drift reviewer turns %v", ids)
 	}
-	if _, found, err := intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := intake.Workspaces(f.s.cfg, intake.DriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 	var outcomes []string
@@ -405,7 +405,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
 	drifts := resolutions{lifecycle.DriftWorkspaces(f.s.cfg, repository)}
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: service.TestDriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1), Role: intake.MasonRole}
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: intake.DriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1), Role: intake.MasonRole}
 
 	lease, err := threadWorkspaces{units: newUnitWorkspaces(f.s.cfg, repository), drifts: drifts}.Acquire(ctx, coreadapter.WorkspaceRequest{Scope: scope, Access: coreadapter.ReadWrite})
 	fixturekit.Must(t, err)
@@ -458,7 +458,7 @@ func TestDriftMasonTurnWorksInTheResolutionWorkspace(t *testing.T) {
 func driftResolutionDiff(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) string {
 	t.Helper()
 	return intakefixture.DriftResolutionDiff(t, func() (coreadapter.Tool, error) {
-		return lifecycle.DriftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: service.TestDriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1), Role: intake.ReviewerRole})
+		return lifecycle.DriftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: intake.DriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1), Role: intake.ReviewerRole})
 	})
 }
 
@@ -475,9 +475,9 @@ func TestDriftResolutionIsHeldForTheOwnerAtMaxBounces(t *testing.T) {
 	w := resolutionWorkspace(t, f, stream)
 	for review := 1; review <= 2; review++ {
 		fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte(fmt.Sprintf("/internal/ @feature%d\n", review)), 0600))
-		completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+		completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 		awaitResolution(t, f.s, d, stream, op, fmt.Sprintf("review %d", review))
-		completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))
+		completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, rejectedResolution))
 		if review == 1 {
 			awaitResolution(t, f.s, d, stream, op, "its mason's answer to review 1")
 		}
@@ -486,7 +486,7 @@ func TestDriftResolutionIsHeldForTheOwnerAtMaxBounces(t *testing.T) {
 	if err != nil || result.Outcome != "succeeded" || !strings.Contains(result.Evidence, "drift rebase 1 is held for the owner: review sent its resolution of the conflicts in CODEOWNERS back 2 times, reaching shed.max_bounces") {
 		t.Fatalf("the drift rebase at max_bounces %+v %v", result, err)
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), lifecycle.DriftFixTurnID(1, 1)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), lifecycle.DriftFixTurnID(1, 1)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
 	if state, err := repository.Workflow(stream, lifecycle.DriftSubject); err != nil || state.Value != lifecycle.DriftHeld+"-1" {
@@ -498,7 +498,7 @@ func TestDriftResolutionIsHeldForTheOwnerAtMaxBounces(t *testing.T) {
 	if after := intakefixture.StreamDocuments(t, repository, stream, seal.DocumentID); !reflect.DeepEqual(after, sealed) {
 		t.Fatalf("a held drift rebase changed the seal: %+v", after)
 	}
-	if _, found, err := intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, backendOf(t, f, stream)).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := intake.Workspaces(f.s.cfg, intake.DriftsDirectory, backendOf(t, f, stream)).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the held drift rebase kept its resolution workspace: %v %v", found, err)
 	}
 	if again, err := d.Apply(ctx, op); err != nil || again.Outcome != result.Outcome || again.Evidence != result.Evidence {
@@ -544,18 +544,18 @@ func TestDriftMarkerRemindersAreBoundedByCleanTurns(t *testing.T) {
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	before, _, op := conflictedDrift(t, f, d, stream)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	done := completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+	done := completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	remind := fmt.Sprintf("%s-markers-%d", service.TestDriftMasonAgent, done.Sequence)
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), remind}) {
+	remind := fmt.Sprintf("%s-markers-%d", intake.DriftMasonAgent, done.Sequence)
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), remind}) {
 		t.Fatalf("drift mason turns after a done with markers %v", ids)
 	}
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved again"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved again"))
 	result, err := attemptOperation(t, f.s, repository, stream, op, d)
 	if err != nil || result.Outcome != "succeeded" || !strings.Contains(result.Evidence, "drift rebase 1 is held for the owner: its mason left conflict markers in CODEOWNERS after 1 reminders, exhausting mason.max_clean_turns") {
 		t.Fatalf("the drift rebase after a second done with markers %+v %v", result, err)
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); len(ids) != 2 {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); len(ids) != 2 {
 		t.Fatalf("the drift mason was reminded again: %v", ids)
 	}
 	if state, err := repository.Workflow(stream, lifecycle.DriftSubject); err != nil || state.Value != lifecycle.DriftHeld+"-1" {

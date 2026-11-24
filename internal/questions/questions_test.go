@@ -65,7 +65,7 @@ func setup(t *testing.T) fixture {
 	}
 	if err := repo.RecordDocuments(ctx, []trace.Document{
 		document("spec", "spec.md", "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n2. Progress is reported.\n"),
-		document("plan", "plan.json", `{"version":1,"units":[{"id":"resume","addresses":[{"criterion":"spec#1","proof":{"kind":"test","name":"TestResume"}}],"depends_on":[],"footprint":[]}]}`),
+		document("plan", "plan.json", `{"version":2,"units":[{"id":"resume","task":"Make spec#1 hold.", "acceptance":["spec#1 holds, shown by TestResume (test)"], "criteria":["spec#1"],"depends_on":[],"footprint":[]}]}`),
 	}); err != nil {
 		t.Fatal(err)
 	}

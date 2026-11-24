@@ -61,7 +61,7 @@ func TestBrowserOpenSessionThroughFormListsItAsASessionAndOpensItsView(t *testin
 func TestBrowserSessionSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.T) {
 	t.Parallel()
 	s, c, projectID, engine, _ := sessionWebFixture(t)
-	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: projectID, Profile: "default"})
+	resp, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: projectID, Profile: "default"})
 	must(t, err)
 	id := resp.Session.Workstream
 
@@ -123,7 +123,7 @@ func TestBrowserSessionSendAndReplyAppearWithoutReloadAndBusyRefusal(t *testing.
 func TestBrowserSessionViewShowsControlsAndNoWorkstreamPanels(t *testing.T) {
 	t.Parallel()
 	s, c, projectID, _, clone := sessionWebFixture(t)
-	resp, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: projectID, Profile: "default"})
+	resp, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: projectID, Profile: "default"})
 	must(t, err)
 	id := resp.Session.Workstream
 

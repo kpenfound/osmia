@@ -11,14 +11,9 @@ import (
 )
 
 type tomlStatement struct {
-	header bool
-	// table is the header's own table path, or for an assignment the path of
-	// the table it sits in. key is the assignment's key path inside it.
-	table, key []string
-	// start is the offset of the first byte of the statement's first line and
-	// end the offset after its last line, newline included.
-	start, end int
-	// valueStart and valueEnd bound an assignment's value.
+	header               bool
+	table, key           []string
+	start, end           int
 	valueStart, valueEnd int
 }
 

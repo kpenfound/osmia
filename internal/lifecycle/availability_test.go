@@ -24,9 +24,9 @@ func TestAvailabilityPassesPreserveTraceErrors(t *testing.T) {
 			fixturekit.Must(t, f.repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: "{"}}))
 			var err error
 			if subject == "base" {
-				err = f.s.baseWaitPass(context.Background(), f.repository)
+				err = f.s.lifecycle().BaseWaitPass(context.Background(), f.repository)
 			} else {
-				err = f.s.edgeWaitPass(context.Background(), f.repository)
+				err = f.s.lifecycle().EdgeWaitPass(context.Background(), f.repository)
 			}
 			if err == nil {
 				t.Fatal("corrupt live trace did not fail the scheduling pass")

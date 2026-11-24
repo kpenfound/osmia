@@ -15,9 +15,9 @@ import (
 )
 
 const sessionRole = "session"
-const sessionAgentID = sessionRole
+const SessionAgentID = sessionRole
 
-const sessionRolePrompt = "You are in a direct session with the owner, working in a dedicated worktree of their project. " +
+const SessionRolePrompt = "You are in a direct session with the owner, working in a dedicated worktree of their project. " +
 	"There is no factory around you: no spec, no plan, no units, no reviewer and no chief of staff. " +
 	"The owner reviews your changes, commits them, runs checks on the committed work and pushes the branch themselves; you never commit, check or push. " +
 	"Read, write and run commands in the worktree; use show_image(path) to attach a PNG or JPEG from your current worktree to the chat. " +
@@ -64,7 +64,7 @@ func (w sessionWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspac
 		return coreadapter.WorkspaceLease{}, errors.New("a session workspace is lent to a session turn alone")
 	}
 	stream := config.WorkstreamID(req.Scope.Workstream)
-	g := workspaces(w.cfg, sessionsDirectory, config.WorkspacesGit)
+	g := workspaces(w.cfg, SessionsDirectory, config.WorkspacesGit)
 	wt, found, err := g.Workspace(ctx, string(stream))
 	if err != nil {
 		return coreadapter.WorkspaceLease{}, err
@@ -77,7 +77,7 @@ func (w sessionWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspac
 
 func sessionSelection(ctx context.Context, cfg *config.Config, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	stream := config.WorkstreamID(scope.Workstream)
-	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
+	g := workspaces(cfg, SessionsDirectory, config.WorkspacesGit)
 	wt, found, err := g.Workspace(ctx, string(stream))
 	if err != nil {
 		return isolation.Selection{}, err
@@ -91,7 +91,7 @@ func sessionSelection(ctx context.Context, cfg *config.Config, scope coreadapter
 
 func (w sessionWorkspaces) capture(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) error {
 	stream := config.WorkstreamID(scope.Workstream)
-	g := workspaces(w.cfg, sessionsDirectory, config.WorkspacesGit)
+	g := workspaces(w.cfg, SessionsDirectory, config.WorkspacesGit)
 	wt, found, err := g.Workspace(ctx, string(stream))
 	if err != nil {
 		return err
@@ -102,18 +102,18 @@ func (w sessionWorkspaces) capture(ctx context.Context, scope coreadapter.Scope,
 	return mirror(view.Workspace().Directory, wt.Path)
 }
 
-func sessionRelay(ctx context.Context, repository *trace.Repository, now func() time.Time, th trace.Thread, q trace.QueuedTurn) error {
+func SessionRelay(ctx context.Context, repository *trace.Repository, now func() time.Time, th trace.Thread, q trace.QueuedTurn) error {
 	stream := config.WorkstreamID(q.Request.Workstream)
 	project := repository.Project()
 	at := now()
 	if len(q.Attempts) > 0 {
 		last := q.Attempts[len(q.Attempts)-1]
 		if last.Path == "replay" && last.SourceSession.ID != "" {
-			if err := recordSessionEntry(ctx, repository, project, stream, "context-rebuilt-"+q.Request.TurnID, at,
+			if err := RecordSessionEntry(ctx, repository, project, stream, "context-rebuilt-"+q.Request.TurnID, at,
 				"Your earlier model session could not be resumed, so this turn's context was rebuilt from the thread's history."); err != nil {
 				return err
 			}
 		}
 	}
-	return setSessionState(ctx, repository, project, stream, at, "session-idle-"+q.Request.TurnID, "session-turn-completed", trace.SessionIdle)
+	return SetSessionState(ctx, repository, project, stream, at, "session-idle-"+q.Request.TurnID, "session-turn-completed", trace.SessionIdle)
 }

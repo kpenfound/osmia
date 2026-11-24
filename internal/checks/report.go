@@ -226,12 +226,6 @@ func OutputEvidence(output, path string, revision int, truncated bool) string {
 	return outputEvidence(output, path, truncated, fmt.Sprintf("\nCaptured check output: %s (revision %d). Read it with factory_context using that revision, start/lines and offset/next_offset for large lines.", path, revision))
 }
 
-// ViewOutputEvidence is OutputEvidence for a reader whose read-only view holds
-// the complete captured output at path.
-func ViewOutputEvidence(output, path string, truncated bool) string {
-	return outputEvidence(output, path, truncated, fmt.Sprintf("\nCaptured check output: %s, in your view.", path))
-}
-
 func outputEvidence(output, path string, truncated bool, pointer string) string {
 	out := ""
 	if path != "" {

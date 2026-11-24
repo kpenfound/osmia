@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/execution"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,7 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -43,13 +43,13 @@ func (f *edgeGraphFixture) resolvePasses(t *testing.T) {
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	fixturekit.Must(t, f.s.edgeResolverPass(context.Background(), f.repository))
-	fixturekit.Must(t, f.s.edgeWaitPass(context.Background(), f.repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(context.Background(), f.repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeWaitPass(context.Background(), f.repository))
 }
 
 func (f *edgeGraphFixture) holdsMason(t *testing.T, stream config.WorkstreamID) bool {
 	t.Helper()
-	held, err := f.s.holds(f.project, intake.LibrarianWorkstream(f.project), f.repository, scheduler.Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
+	held, err := f.s.holds(f.project, f.repository, scheduler.Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
 	fixturekit.Must(t, err)
 	return held
 }
@@ -126,7 +126,7 @@ func TestHardBlockEdgeHoldsNoUnitUntilRecordedMergeNeverOnAgentOutcome(t *testin
 		t.Fatalf("wait message = %q, %v; want %q", wait, err, lifecycle.EdgeWaitMessage(string(f.upstream)))
 	}
 
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assemble", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assemble", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}
 	_, err := f.repository.SetFeatureState(ctx, h, intake.AssembledState, "fixture assembly")
 	fixturekit.Must(t, err)
 	f.resolvePasses(t)
@@ -191,9 +191,9 @@ func TestEdgeResolverPassPollsGitHubAndNeverResolvesOnAnAgentOutcome(t *testing.
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/dagger", Fork: "owner/dagger-fork", Branch: intake.FeatureBranch(f.upstream), Commit: "c1d2e3f4a5b6c1d2e3f4a5b6c1d2e3f4a5b6c1d2", PullRequest: 42, URL: "https://example.invalid/pull/42"}
 	data, err := json.Marshal(publication)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}
 	fixturekit.Must(t, f.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
-	deliver := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
+	deliver := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}
 	_, err = f.repository.SetFeatureState(ctx, deliver, intake.DeliveredState, "fixture delivery")
 	fixturekit.Must(t, err)
 

@@ -44,7 +44,7 @@ func TestAWaitingMemberNamesTheMemberWhoseDraftingStopped(t *testing.T) {
 		return scripted(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
-	if _, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
+	if _, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	allowed.Store(f.stream1)

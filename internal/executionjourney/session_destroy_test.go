@@ -57,7 +57,7 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 	if !gone {
 		t.Fatal("trace remains")
 	}
-	for _, kind := range append(slices.Clone(service.TestTurnDirectories), "design", service.TestSessionsDirectory, "session-models") {
+	for _, kind := range append(slices.Clone(lifecycle.TurnDirectories), "design", service.SessionsDirectory, "session-models") {
 		fixturekit.AssertGone(t, filepath.Join(root.String(), kind, string(project), string(stream)))
 	}
 	intents, err := trace.PendingSessionDestroys(root, project)
@@ -75,7 +75,7 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 		t.Fatal("workgroup still names the session")
 	}
 	cfg := s.current().For(project)
-	_, exists, err := service.TestSessionGit(cfg).Branch(ctx, service.TestSessionBranch(stream))
+	_, exists, err := service.SessionGit(cfg).Branch(ctx, service.SessionBranch(stream))
 	fixturekit.Must(t, err)
 	if exists {
 		t.Fatal("local session branch remains")
@@ -109,7 +109,7 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 		}
 	}
 	fixturekit.Must(t, (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: repository}).Pass(ctx))
-	fixturekit.Must(t, repository.Serialize(func() error { return service.InspectForTest(s.core()).Schedule(ctx, repository) }))
+	fixturekit.Must(t, service.InspectForTest(s.core()).Schedule(ctx, repository))
 }
 
 func seedSessionState(t *testing.T, s *Service, project config.ProjectID, stream config.WorkstreamID) {
@@ -117,7 +117,7 @@ func seedSessionState(t *testing.T, s *Service, project config.ProjectID, stream
 	fixturekit.Must(t, s.refreshRuntime())
 	s.StartActivity("historical-session-failure", api.ActivityAgentTurn, project, stream, "previous turn").Finish(errors.New("old failure"))
 	service.InspectForTest(s.core()).StatusCache().Set(s.statusList())
-	for _, kind := range append(slices.Clone(service.TestTurnDirectories), "design", "session-models") {
+	for _, kind := range append(slices.Clone(lifecycle.TurnDirectories), "design", "session-models") {
 		dir := filepath.Join(s.current().Root.String(), kind, string(project), string(stream))
 		fixturekit.Must(t, os.MkdirAll(dir, 0700))
 		fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "state"), []byte("private history"), 0600))
@@ -249,7 +249,7 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 					view, err := c.Session(ctx, stream)
 					fixturekit.Must(t, err)
 					v := view.Session
-					fixturekit.Must(t, service.InspectForTest(s.core()).WritePendingSession(service.TestPendingSession{Version: 1, Project: project, Workstream: stream, Profile: v.Profile, Base: v.Base, Branch: v.Branch}))
+					fixturekit.Must(t, service.InspectForTest(s.core()).WritePendingSession(service.PendingSession{Version: 1, Project: project, Workstream: stream, Profile: v.Profile, Base: v.Base, Branch: v.Branch}))
 				}
 				interrupt.Store(true)
 				if design {
@@ -350,7 +350,7 @@ func TestDestroySessionFencesInterruptedOpen(t *testing.T) {
 	fixturekit.Must(t, err)
 
 	_, err = service.InspectForTest(s.core()).CompleteSessionOpen(ctx, *pending)
-	if !errors.Is(err, service.TestErrSessionDiscarded) {
+	if !errors.Is(err, service.ErrSessionDiscarded) {
 		t.Fatalf("stale open replay was not refused: %v", err)
 	}
 	journal, err := s.current().Root.PendingSessionOpen()
@@ -409,7 +409,7 @@ func TestDestroySessionRefusesInFlightCheckAndPush(t *testing.T) {
 			fixturekit.AssertCode(t, err, api.Conflict)
 			_, err = c.Session(context.Background(), stream)
 			fixturekit.Must(t, err)
-			if _, found, err := service.TestSessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
+			if _, found, err := service.SessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
 				t.Fatalf("worktree changed: %v", err)
 			}
 			close(release)
@@ -691,7 +691,7 @@ func TestDestroySessionRefusesRunningTurn(t *testing.T) {
 	fixturekit.AssertCode(t, err, api.Conflict)
 	_, err = c.Session(context.Background(), stream)
 	fixturekit.Must(t, err)
-	if _, found, err := service.TestSessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
+	if _, found, err := service.SessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
 		t.Fatalf("worktree changed: %v", err)
 	}
 	close(release)

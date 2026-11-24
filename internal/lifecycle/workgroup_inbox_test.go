@@ -275,7 +275,7 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 			inspect(p.repository, stream)
 		}
 	}
-	target, host, _, close, err := s.chiefRepository(context.Background(), projects[0].repository, f.stream1)
+	target, host, _, close, err := s.lifecycle().ChiefRepository(context.Background(), projects[0].repository, f.stream1)
 	if err != nil {
 		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	c := NewClient(s.Socket())
 	defer c.Close()
 
-	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -604,7 +604,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
-		target, host, _, close, err := s.chiefRepository(ctx, repo1, f.stream1)
+		target, host, _, close, err := s.lifecycle().ChiefRepository(ctx, repo1, f.stream1)
 		fixturekit.Must(t, err)
 		defer close()
 		th, err := target.ChiefOfStaffThread(host)

@@ -19,10 +19,10 @@ func tickWorkgroupPasses(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	for _, project := range []config.ProjectID{f.project, f.project2} {
 		repo := mustRepo(t, f.s, project)
-		fixturekit.Must(t, f.s.changePass(context.Background(), repo))
+		fixturekit.Must(t, f.s.lifecycle().ChangePass(context.Background(), repo))
 		fixturekit.Must(t, (&workgroupResolver{s: f.s, repository: repo}).Pass(context.Background()))
-		fixturekit.Must(t, f.s.projectSpecDraftPass(context.Background(), repo))
-		fixturekit.Must(t, f.s.projectSpecRefreshPass(context.Background(), repo))
+		fixturekit.Must(t, f.s.lifecycle().ProjectSpecDraftPass(context.Background(), repo))
+		fixturekit.Must(t, f.s.lifecycle().ProjectSpecRefreshPass(context.Background(), repo))
 	}
 }
 
@@ -161,12 +161,12 @@ func TestApprovedChangeReactivatesResolvedWorkgroupWithoutRestart(t *testing.T) 
 	after := spec
 	after.Behavior += "\nClarify the approved shared intent."
 	c := lifecycle.WorkgroupChange{ID: "clarification", Workgroup: g.ID, Host: g.Members[0], Origin: f.stream2, Request: lifecycle.ChangeRequest{Key: "clarification", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared prose"}, Before: spec, After: after, State: "presented"}
-	fixturekit.Must(t, f.s.saveChange(ctx, wt, &c))
-	c, apiFault := f.s.decideChange(ctx, string(f.stream2), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
+	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, wt, &c))
+	c, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.stream2), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	fixturekit.Must(t, f.s.applyChange(ctx, wt, g, &c))
+	fixturekit.Must(t, f.s.lifecycle().ApplyChange(ctx, wt, g, &c))
 	if c.State != "applied" || trace.WorkgroupResolutionCurrent(g.ID) {
 		t.Fatalf("approved change did not reopen: %+v", c)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,7 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -150,7 +150,7 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	revision, err := intake.NextRevision(repository, stream, delivery.FinalRebaseDocument)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalRebaseDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: finalAt, Actor: service.TestForemanActor, Cause: "planted-final-review"},
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalRebaseDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: finalAt, Actor: execution.ForemanActor, Cause: "planted-final-review"},
 		Path: delivery.FinalRebasePath, Content: string(content) + "\n"}}))
 	setClock(f, second.At.Add(time.Hour))
 	passDrifts(t, fm)

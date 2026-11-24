@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,7 +28,7 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 	p.Eval(`window.notReloaded = true`, nil)
 	p.OpenPauses()
 
-	runtimeView := func() RuntimeResponse {
+	runtimeView := func() service.RuntimeResponse {
 		t.Helper()
 		rt, err := c.Runtime(ctx)
 		must(t, err)

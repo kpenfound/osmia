@@ -215,7 +215,7 @@ func (s *Service) runtimes() (*config.Config, []*activeProject) {
 func (s *Service) feedList(raw string) (api.FeedResponse, *api.APIError) {
 	return service.InspectForTest(s.core()).Feed(raw)
 }
-func (s *Service) holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+func (s *Service) holds(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
 	return service.InspectForTest(s.core()).Holds(p, r, c)
 }
 func InspectForTest(s *Service) service.TestAccess { return service.InspectForTest(s.core()) }

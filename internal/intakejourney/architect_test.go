@@ -65,7 +65,7 @@ func checkArchitectBoundary(ctx context.Context, req agent.Request, verified *ag
 			fail("context.md lacks %q:\n%s", want, context)
 		}
 	}
-	entities, err := fixturekit.CallTool(ctx, tools, service.TestProjectContextTool, map[string]any{"path": "kb/entities.json"})
+	entities, err := fixturekit.CallTool(ctx, tools, service.ProjectContextTool, map[string]any{"path": "kb/entities.json"})
 	if err != nil || !strings.Contains(entities, "internal.trace") {
 		fail("retrieving entities: %s: %v", entities, err)
 	}

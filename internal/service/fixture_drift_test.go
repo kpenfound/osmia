@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 
 func driftRecords(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []DriftRebase {
 	t.Helper()
-	return intakefixture.DriftRecords[DriftRebase](t, repository, stream, driftDocument)
+	return intakefixture.DriftRecords[DriftRebase](t, repository, stream, lifecycle.DriftDocument)
 }
 
 func testDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

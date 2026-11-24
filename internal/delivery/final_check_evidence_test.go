@@ -125,14 +125,6 @@ func TestPullRequestRunWithoutRecordedEvidenceConvertsFromItsFailuresAndReruns(t
 	}
 }
 
-func TestLocalRunWithoutRecordedEvidenceConvertsFromItsSelectionAndOutput(t *testing.T) {
-	t.Parallel()
-	local := FinalCheckRun{Review: 1, Status: "passed", Flaky: []string{"dag://y"}, Selection: &CheckSelection{Links: []string{"dag://y", "dag://z"}}, OutputPath: "final/checks-1-output.txt", OutputRevision: 1}.FlakeEvidence()
-	if local.Engine != api.CheckEngineLocal || !slices.Equal(local.CoRun, []string{"dag://y", "dag://z"}) || local.OutputPath == "" || len(local.Unavailable) == 0 || local.Unavailable[0].Where != FinalChecksPath(1) {
-		t.Fatalf("local %+v", local)
-	}
-}
-
 func TestAFinalCheckRecordWithCancelledCountsRendersAsEvidence(t *testing.T) {
 	t.Parallel()
 	recorded := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"incomplete","exit_code":-1,` +

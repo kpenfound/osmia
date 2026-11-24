@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/execution"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	r := &reviewers{masons: newMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity service.UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	}, service.TestReviewTurnID, service.TestReviewDocument, r.one, intake.UnitApproved)
+	}, execution.ReviewTurnID, execution.ReviewDocument, r.one, intake.UnitApproved)
 }
 func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()

@@ -4,6 +4,7 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	os "os"
 	filepath "path/filepath"
 	strings "strings"
@@ -22,6 +23,7 @@ import (
 	questions "github.com/kpenfound/osmia/internal/questions"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	status "github.com/kpenfound/osmia/internal/status"
@@ -31,7 +33,9 @@ import (
 
 func TestBrowserProjectPaneStatesAndSingleMemberDrilldown(t *testing.T) {
 	t.Parallel()
-	opts, repo := sidebarFixture(t)
+	serviceOptions, _, repo := servicetest.ActivityFixture(t)
+	servicetest.WithWeb(t, serviceOptions, "127.0.0.1:0")
+	opts := Options{Options: serviceOptions}
 	ctx := context.Background()
 	states := []string{intake.HandedState, intake.RatifiedState, intake.BuildingState, intake.BuildingState, intake.DeliveredState, intake.DeliveredState, intake.AbandonedState}
 	labels := []string{"planning", "ready", "building", "paused", "PR open", "delivered (merged)", "cancelled"}
@@ -56,7 +60,7 @@ func TestBrowserProjectPaneStatesAndSingleMemberDrilldown(t *testing.T) {
 	}
 	fixturekit.Must(t, repo.Close())
 	s, _ := start(t, opts)
-	fixturekit.Must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: ids[3]}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Owner review", SetAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, service.InspectForTest(s.core()).SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: ids[3]}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Owner review", SetAt: fixturekit.DemoStart}))
 	p := browsertest.OpenBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the project pane as the entry point", `!document.querySelector('[data-view="project-pane"]').hidden`)
@@ -212,7 +216,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: intake.FeatureBranch(f.stream1), PullRequest: 123, URL: "https://example.invalid/dagger/dagger/pull/123"}
 	data, err := json.Marshal(publication)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.project, Workstream: f.stream1, At: f.clock.Now(), Actor: service.TestForemanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.project, Workstream: f.stream1, At: f.clock.Now(), Actor: execution.ForemanActor, Cause: "fixture"}
 	fixturekit.Must(t, upstream.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
 	h.Schema, h.ID = "osmia.trace.transition", "pane-upstream-published"
 	_, err = upstream.SetFeatureState(context.Background(), h, intake.DeliveredState, "Published fixture PR")

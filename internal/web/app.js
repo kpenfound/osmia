@@ -4268,11 +4268,6 @@
         (out) => 'Answered inbox entry ' + out.number + '.', undefined, decisionKey(entry));
       return;
     }
-    if (entry.kind === 'project-selection') {
-      body.projects = d.text.value.split(/[\s,]+/).filter(Boolean);
-      submit(d.form, d.submit, entry.answer.method, endpoint(entry), body, () => 'Projects selected. The start will continue.', undefined, decisionKey(entry));
-      return;
-    }
     if (entry.kind === 'delivery') {
       // The body is the entry's pinned identity alone: the service then
       // puts the text the card previews on the pull request.
@@ -4389,9 +4384,6 @@
       d.accept = el('button', { type: 'button', 'data-field': 'accept' });
       d.accept.addEventListener('click', () => accept(d));
       fields.push(d.text);
-    } else if (entry.kind === 'project-selection') {
-      d.text = el('textarea', { name: 'projects', rows: '2', required: true });
-      fields.push(el('label', {}, 'Project IDs in order, separated by spaces or commas', d.text));
     } else if (entry.kind === 'delivery') {
       // The preview is one node kept across renders, so it stays open or
       // collapsed as the owner left it.
@@ -4661,9 +4653,6 @@
         d.accept.className = 'primary';
         d.submit.className = entry.quick_reply ? 'secondary' : 'primary';
         place(d.actions, entry.quick_reply ? [d.accept, d.submit] : [d.submit]);
-        break;
-      case 'project-selection':
-        place(d.actions, [d.submit]);
         break;
       case 'delivery':
         renderDelivery(d, name);

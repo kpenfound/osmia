@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
@@ -98,7 +99,7 @@ func TestWorkstreamLandingsRunConcurrently(t *testing.T) {
 			}
 			first, second := add(a), add(b)
 			controller, err := reconcile.New(repo, reconcile.Options{Worker: "landing-fixture", Schedule: lands.Pass,
-				Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
 				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: gate},
 				Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != service.LandAction },
 			})
@@ -176,7 +177,7 @@ func queueGitFixtureOperation(t *testing.T, repo *trace.Repository, stream confi
 	event := trace.EventID(id, "run")
 	op := coreadapter.Operation{ID: trace.OperationID(repo.Project(), stream, event), Boundary: boundary, Action: action, Input: data}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "fixture"},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "fixture"},
 		Subject: id, To: "requested", Reason: "fixture requests an operation"}, Events: []trace.Event{{ID: event, Kind: action, Body: "Run fixture operation", Operation: &op}}})
 	fixturekit.Must(t, err)
 	return op
@@ -234,7 +235,7 @@ func TestGitOperationLimitLeavesExcessPendingAndAdmitsModelWork(t *testing.T) {
 			defer releaseOnce.Do(func() { close(release) })
 			effects := &capacityGitEffects{entered: make(chan string, 8), release: release}
 			controller, err := reconcile.New(repo, reconcile.Options{Worker: "capacity-fixture", Workstreams: func() ([]config.WorkstreamID, error) { return streams, nil },
-				Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+				Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
 				Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: effects, coreadapter.RunnerBoundary: fixturekit.CompletedEffect{}}})
 			fixturekit.Must(t, err)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -366,7 +367,7 @@ func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 	queueGitFixtureOperation(t, repo, stream, service.BuildAction, coreadapter.RepositoryBoundary, map[string]string{})
 	ops, err := repo.Operations(stream)
 	fixturekit.Must(t, err)
-	attempt, _, err := repo.BeginOperation(context.Background(), stream, ops[0].EventID, trace.WorkflowOperation, service.TestForemanActor, f.s.now)
+	attempt, _, err := repo.BeginOperation(context.Background(), stream, ops[0].EventID, trace.WorkflowOperation, execution.ForemanActor, f.s.now)
 	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("fixture did not reserve its workstream")
@@ -374,7 +375,7 @@ func TestBusyGitWorkstreamDoesNotWakeItself(t *testing.T) {
 	defer attempt.Close()
 	controller, err := reconcile.New(repo, reconcile.Options{Worker: "busy-git-fixture",
 		Workstreams: func() ([]config.WorkstreamID, error) { return []config.WorkstreamID{stream}, nil },
-		Concurrent:  service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+		Concurrent:  service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
 		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: fixturekit.CompletedEffect{}},
 	})
 	fixturekit.Must(t, err)
@@ -426,7 +427,7 @@ func TestGitWorkflowAdmissionHonorsPauseAndBaseWait(t *testing.T) {
 		}
 	}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-base-wait", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-base-wait", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"},
 		Subject: lifecycle.BaseWaitSubject, To: "waiting", Reason: "the base is unavailable",
 	}})
 	fixturekit.Must(t, err)

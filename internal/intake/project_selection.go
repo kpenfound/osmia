@@ -103,90 +103,19 @@ func (s *Controller) RecordOwnerProjects(ctx context.Context, r *trace.Repositor
 	return nil
 }
 
-// ChooseDesignProjects records the owner's project selection for a handed design start that has none.
-func (s *Controller) ChooseDesignProjects(ctx context.Context, raw string, projects []config.ProjectID) (DesignStartResponse, *APIError) {
-	project, stream, r, api := s.ConversationTrace(raw)
+// ChooseDesignProjects refuses to change the projects of a design start: a
+// start always pins its projects when it is made.
+func (s *Controller) ChooseDesignProjects(_ context.Context, raw string, _ []config.ProjectID) (DesignStartResponse, *APIError) {
+	_, stream, r, api := s.ConversationTrace(raw)
 	if api != nil {
 		return DesignStartResponse{}, api
 	}
-	lock := DesignLock(r, stream)
-	lock.Lock()
-	defer lock.Unlock()
-	_, found, err := DesignSelectionOf(r, stream)
-	if err != nil {
+	if _, found, err := DesignSelectionOf(r, stream); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	if found {
+	} else if found {
 		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this start already has its owner-selected projects"}
 	}
-	if _, pinned, err := DesignStartIntentOf(r, stream); err != nil || pinned {
-		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this start already has its pinned projects"}
-	}
-	feature, err := r.Workflow(stream, trace.FeatureSubject)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	if feature.Value != "" && feature.Value != HandedState {
-		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this design start is no longer awaiting projects"}
-	}
-	docs, err := trace.Read[trace.Document](r, stream)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	var handed trace.Document
-	for _, d := range docs {
-		if d.ID == HandedDocument && d.Source == "design:"+string(stream) {
-			handed = d
-		}
-	}
-	if handed.Revision == 0 {
-		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this is not an unselected handed design start"}
-	}
-	base, err := r.WorkstreamBase(stream)
-	if err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	if base.Base != "" && !slices.Contains(projects, project) {
-		return DesignStartResponse{}, &APIError{Code: Validation, Message: "select the project containing the design's base"}
-	}
-	if api := s.RecordOwnerProjects(ctx, r, stream, projects, base.Base); api != nil {
-		return DesignStartResponse{}, api
-	}
-	if err := s.ResumeHandedDesign(ctx, r, stream, handed); err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	if err := s.ReconcileDesignStart(ctx, r, stream); err != nil {
-		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
-	}
-	return DesignStartResponse{Project: project, Workstream: stream, State: HandedState, Handed: handed.Path, Source: handed.Source}, nil
-}
-
-// LegacyProjectsEntry exposes an owner decision for a handed, unselected design.
-func (s *Controller) LegacyProjectsEntry(r *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
-	if _, found, err := DesignSelectionOf(r, stream); err != nil || found {
-		return InboxEntry{}, false, err
-	}
-	docs, err := trace.Read[trace.Document](r, stream)
-	if err != nil {
-		return InboxEntry{}, false, err
-	}
-	if slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == DesignStartIntentDocument }) {
-		return InboxEntry{}, false, nil
-	}
-	feature, err := r.Workflow(stream, trace.FeatureSubject)
-	if err != nil || feature.Value == AbandonedState {
-		return InboxEntry{}, false, err
-	}
-	for _, d := range docs {
-		if d.ID != HandedDocument || d.Source != "design:"+string(stream) {
-			continue
-		}
-		e := Decision("project-selection", stream, d.At, "/design/"+string(stream)+"/projects", map[string]any{"projects": []config.ProjectID{}})
-		e.Question = "Choose the projects for this handed design start. The first project is home for the members; the design conversation stays here."
-		e.Blocked = "Allocating and drafting the workgroup."
-		return e, true, nil
-	}
-	return InboxEntry{}, false, nil
+	return DesignStartResponse{}, &APIError{Code: Conflict, Message: "this start already has its pinned projects"}
 }
 
 // SelectionJoiningMember holds individual abandonment during allocation and

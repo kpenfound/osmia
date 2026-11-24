@@ -18,8 +18,8 @@ const ownerTables = "\n[capacity]\n# Keep this low.\ngit_operations = 3\n"
 
 type settingsFixture struct {
 	t       *testing.T
-	s       *Service
-	c       *Client
+	s       *service.Service
+	c       *service.Client
 	p       *page
 	project config.ProjectID
 	root    config.Root

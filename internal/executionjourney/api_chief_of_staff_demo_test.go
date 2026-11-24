@@ -6,6 +6,7 @@ import (
 	errors "errors"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	maps "maps"
@@ -94,7 +95,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		}
 		lives <- r
 
-		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 		turns.Grants = maps.Clone(turns.Grants)
 		for _, role := range []string{"mason", "reviewer"} {
 			turns.Grants[role] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}

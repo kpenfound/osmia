@@ -85,7 +85,7 @@ func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
 	must(t, err)
 	_, err = f.repo.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
 	must(t, err)
-	entries := entriesOf(t, f.c, InboxEscalation)
+	entries := entriesOf(t, f.c, service.InboxEscalation)
 	for _, e := range entries {
 		if e.Question == fmt.Sprintf("Shared decision %d?", n) {
 			return e
@@ -246,7 +246,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	answered := fmt.Sprintf("Answered inbox entry %d.", second.Number)
 	assertFeedOutcomes(p, "#workgroup-content", answered)
 	assertOutcome(p, "#inbox-result", "", "")
-	if got := entriesOf(t, f.c, InboxEscalation); len(got) != 0 {
+	if got := entriesOf(t, f.c, service.InboxEscalation); len(got) != 0 {
 		t.Fatalf("shared answers did not settle: %+v", got)
 	}
 	p.Await("one dispatch per recorded shared answer", `outcomeRequests[`+quote(first.Answer.Path)+`] === 1 && outcomeRequests[`+quote(second.Answer.Path)+`] === 1`)
@@ -389,7 +389,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 	}
 	f.opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, f.opts)
-	entries := entriesOf(t, c, InboxEscalation)
+	entries := entriesOf(t, c, service.InboxEscalation)
 	if len(entries) != 1 || entries[0].Workgroup != g.ID || entries[0].Project != synthetic {
 		t.Fatalf("shared decision identity: %+v", entries)
 	}
@@ -422,7 +422,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 	releaseOutcome(p, e.Answer.Path)
 	assertFeedOutcomes(p, "#workgroup-content", fmt.Sprintf("Answered inbox entry %d.", e.Number))
 	assertOutcome(p, "#inbox-result", "", "")
-	if remaining := entriesOf(t, c, InboxEscalation); len(remaining) != 0 {
+	if remaining := entriesOf(t, c, service.InboxEscalation); len(remaining) != 0 {
 		t.Fatalf("shared answer did not settle: %+v", remaining)
 	}
 }

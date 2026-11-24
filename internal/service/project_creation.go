@@ -207,8 +207,8 @@ func (s *Service) CreateProject(ctx context.Context, req ProjectCreateRequest) (
 	return s.finishCreation(ctx, plan)
 }
 
-func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*pendingProject, *APIError) {
-	invalid := func(format string, args ...any) (*pendingProject, *APIError) {
+func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*PendingProject, *APIError) {
+	invalid := func(format string, args ...any) (*PendingProject, *APIError) {
 		return nil, &APIError{Code: Validation, Message: fmt.Sprintf(format, args...)}
 	}
 	cfg := s.current()
@@ -280,7 +280,7 @@ func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*
 	if err != nil {
 		return nil, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
 	}
-	return &pendingProject{
+	return &PendingProject{
 		Version: 1,
 		Project: config.Project{Version: 1, ID: id, Name: name, Upstream: creation.RepoOwner + "/" + req.Repo, Clone: clone, BaseBranch: "main", Landing: "commit-per-unit"},
 		Creation: &projectCreation{
@@ -294,7 +294,7 @@ func validRepoName(owner, name string) bool {
 	return repoName.MatchString(name) && name != "." && name != ".." && !strings.HasSuffix(name, ".git") && config.ValidRepository(owner+"/"+name)
 }
 
-func samePlan(pending pendingProject, req ProjectCreateRequest) *APIError {
+func samePlan(pending PendingProject, req ProjectCreateRequest) *APIError {
 	c := pending.Creation
 	if req.Name == "" && req.Repo == "" && req.Description == "" && req.Visibility == "" && req.Charter == "" {
 		return nil
@@ -309,7 +309,7 @@ func samePlan(pending pendingProject, req ProjectCreateRequest) *APIError {
 	return nil
 }
 
-func pendingRegistrationError(pending pendingProject) *APIError {
+func pendingRegistrationError(pending PendingProject) *APIError {
 	id := pending.Project.ID
 	if c := pending.Creation; c != nil {
 		message := fmt.Sprintf("project creation %s for %s is pending at step %s; finish it with osmia project create --id %s before registering or creating another project", id, c.repository(), c.Step, id)
@@ -321,7 +321,7 @@ func pendingRegistrationError(pending pendingProject) *APIError {
 	return &APIError{Code: Conflict, Message: fmt.Sprintf("registration of project %s is pending; finish it with osmia project add before creating a project", id)}
 }
 
-func (s *Service) finishCreation(ctx context.Context, pending *pendingProject) (ProjectResponse, *APIError) {
+func (s *Service) finishCreation(ctx context.Context, pending *PendingProject) (ProjectResponse, *APIError) {
 	p, err := s.runCreation(ctx, pending, true)
 	if err != nil {
 		return ProjectResponse{}, creationIncomplete(pending.Project.ID, err)
@@ -337,7 +337,7 @@ func creationIncomplete(id config.ProjectID, err error) *APIError {
 	return &APIError{Code: Internal, Message: fmt.Sprintf("project creation %s is incomplete (%v); run osmia project create --id %s to finish it", id, err, id)}
 }
 
-func (s *Service) runCreation(ctx context.Context, pending *pendingProject, activate bool) (config.Project, error) {
+func (s *Service) runCreation(ctx context.Context, pending *PendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	if err := s.advanceCreation(ctx, pending); err != nil {
 		var blocked *creationStuck
@@ -353,7 +353,7 @@ func (s *Service) runCreation(ctx context.Context, pending *pendingProject, acti
 	return s.complete(ctx, *pending, activate)
 }
 
-func (s *Service) advanceCreation(ctx context.Context, pending *pendingProject) error {
+func (s *Service) advanceCreation(ctx context.Context, pending *PendingProject) error {
 	if pending.Creation.Stuck != nil {
 		pending.Creation.Stuck = nil
 		if err := s.writePending(*pending); err != nil {
@@ -369,7 +369,7 @@ func (s *Service) advanceCreation(ctx context.Context, pending *pendingProject) 
 	return s.ensureMainBranch(ctx, pending)
 }
 
-func (s *Service) advance(pending *pendingProject, step string) error {
+func (s *Service) advance(pending *PendingProject, step string) error {
 	order := []string{api.CreationPlanned, api.CreationRepository, api.CreationCloned, api.CreationMain}
 	index := func(name string) int {
 		for i, n := range order {
@@ -386,7 +386,7 @@ func (s *Service) advance(pending *pendingProject, step string) error {
 	return s.writePending(*pending)
 }
 
-func (s *Service) ensureRepository(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureRepository(ctx context.Context, pending *PendingProject) error {
 	c := pending.Creation
 	repos := s.repositories()
 	name := c.repository()
@@ -447,7 +447,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (s *Service) ensureClone(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureClone(ctx context.Context, pending *PendingProject) error {
 	c, clone := pending.Creation, pending.Project.Clone
 	if _, err := os.Lstat(clone); err == nil {
 		origin, oerr := creationGit(ctx, clone, "config", "--get", "remote.origin.url")
@@ -479,7 +479,7 @@ func (s *Service) ensureClone(ctx context.Context, pending *pendingProject) erro
 	return s.step("repository-cloned")
 }
 
-func (s *Service) ensureMainBranch(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureMainBranch(ctx context.Context, pending *PendingProject) error {
 	c, clone := pending.Creation, pending.Project.Clone
 	branch := func(err error, what string) error {
 		return stuck(api.StuckBranch, "cannot %s in %s: %v", what, c.repository(), err)

@@ -3,6 +3,7 @@ package browsertest
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("client\n"), 0600))
 	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "README.md")
 	demoGit(t, filepath.Dir(clone), "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
+	added, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	other := added.Project.ID
 	writeCharter(t, c, other, "1. Keep the client compatible.\n")

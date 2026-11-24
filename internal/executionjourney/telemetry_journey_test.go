@@ -92,7 +92,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
 	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, service.TestMasonTurnID, intake.OwnerActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, execution.MasonTurnID, intake.OwnerActor)
 	defer f.stop(t)
 	j := &telemetryJourney{f: f}
 
@@ -105,8 +105,8 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	masons.Response = map[string]string{}
 	units := []string{"resume", "upload", "audit"}
 	for _, unit := range units {
-		masons.Play[service.TestMasonTurnID(unit)] = intakefixture.ReportDone(journeyReport)
-		masons.Response[service.TestMasonTurnID(unit)] = journeyReply
+		masons.Play[execution.MasonTurnID(unit)] = intakefixture.ReportDone(journeyReport)
+		masons.Response[execution.MasonTurnID(unit)] = journeyReply
 	}
 	masonGate, reviewGate := make(chan struct{}), make(chan struct{})
 	entered := make(chan string, 16)
@@ -126,9 +126,9 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	var resumeReviews atomic.Int32
 	f.engine.Mu.Lock()
 	chief := f.engine.Turns["*"]
-	f.engine.Turns[service.TestMasonTurnID("resume")] = gated
-	f.engine.Turns[service.TestMasonTurnID("upload")] = gated
-	f.engine.Turns[service.TestMasonTurnID("audit")] = gated
+	f.engine.Turns[execution.MasonTurnID("resume")] = gated
+	f.engine.Turns[execution.MasonTurnID("upload")] = gated
+	f.engine.Turns[execution.MasonTurnID("audit")] = gated
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, intake.MasonAgent("resume")+"-revise-"):

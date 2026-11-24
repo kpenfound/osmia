@@ -359,7 +359,7 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				records[i], waiting[i], failures[i] = a.Member(trace.Beside(ctx), trace.Beside(running), cfg, stream, op.ID, in, member)
+				records[i], waiting[i], failures[i] = a.Member(ctx, running, cfg, stream, op.ID, in, member)
 			}()
 		}
 		wg.Wait()
@@ -386,15 +386,15 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 			}
 			docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("amendment_%s_round_%d_%s", id, n, r.Member), Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "agent", ID: r.Member}, Cause: op.ID, Depth: 1}, Path: AmendmentRoundPath(id, n, r.Member), Content: string(data)})
 		}
-		if err := trace.Relock(ctx, func() error { return a.Repository.RecordDocuments(ctx, docs) }); err != nil {
+		if err := a.Repository.RecordDocuments(ctx, docs); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 	}
 	var result coreadapter.OperationResult
-	err = trace.Relock(ctx, func() error {
+	err = func() error {
 		result, err = a.Heard(ctx, op, stream, id, n, members, records, all)
 		return err
-	})
+	}()
 	return result, err
 }
 

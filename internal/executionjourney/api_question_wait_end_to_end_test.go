@@ -152,8 +152,8 @@ func TestReviewerQuestionOwnerRulingReachesFinalReview(t *testing.T) {
 				opts.ShutdownTimeout = 10 * time.Second
 			})
 			defer func() { stopQuestionJourney(t, f) }()
-			masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Resume uploads")
-			masons.Play[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+			masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Resume uploads")
+			masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n"), 0600); err != nil {
 					return err
 				}

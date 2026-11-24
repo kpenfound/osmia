@@ -127,8 +127,6 @@ type identityRows struct {
 	archived, session, design, cleaned config.WorkstreamID
 }
 
-// startWithEachKindOfWorkstream starts a service over a root holding an
-// ordinary, an archived, a session, a design and a cleaned workstream.
 func startWithEachKindOfWorkstream(t *testing.T) *identityRows {
 	t.Helper()
 	ctx := context.Background()

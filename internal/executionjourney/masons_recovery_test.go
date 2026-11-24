@@ -51,7 +51,7 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	}
 	fixturekit.Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, fixturekit.MasonWrote)), 0700))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n"), 0600))
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	q, err := repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "completed", directory, f.clock.Now())
 	fixturekit.Must(t, err)
 	content, err := json.Marshal(service.MasonReport{Outcome: "Built"})
@@ -115,7 +115,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	}
 	paths, err := units.paths(w)
 	fixturekit.Must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
 	fixturekit.Must(t, err)
@@ -125,7 +125,7 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(w.Path, fixturekit.MasonWrote)); !os.IsNotExist(err) {
 		t.Fatalf("edit reached workspace before recovery: %v", err)
 	}
-	_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), f.clock.Now())
+	_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume")), f.clock.Now())
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.s.cfg.Project.ID: []config.WorkstreamID{stream}}})
@@ -226,7 +226,7 @@ func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 		for _, req := range implementationRuns(masons, stream) {
 			ran = append(ran, req.Name)
 		}
-		if slices.Sort(ran); !slices.Equal(ran, []string{service.TestMasonTurnID("resume"), service.TestMasonTurnID("upload")}) {
+		if slices.Sort(ran); !slices.Equal(ran, []string{execution.MasonTurnID("resume"), execution.MasonTurnID("upload")}) {
 			t.Fatalf("after restart %d, mason turns ran %v", restart+1, ran)
 		}
 		f.checkUnits(t, stream, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, {Unit: "upload", State: intake.UnitImplementing}, f.deferred(t, stream, "audit", slotless(2))})

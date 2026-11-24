@@ -207,7 +207,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	}
 	defer closeTarget()
 	entries, err := readview.Consistent(func() ([]ConversationEntry, error) {
-		entries, err := conversationEntries(target, thread)
+		entries, err := ConversationEntries(target, thread)
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +219,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 		for _, a := range archives {
 			actions = append(actions, a.ConversationEntry)
 		}
-		return withActions(entries, actions), nil
+		return WithActions(entries, actions), nil
 	}, target.Generation, s.storeGeneration)
 	if err != nil {
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
@@ -245,7 +245,7 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 	return target, stream, closeTarget, err
 }
 
-func conversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	out := []ConversationEntry{}
 	t, err := repository.ChiefOfStaffThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
@@ -267,11 +267,11 @@ func conversationEntries(repository *trace.Repository, stream config.WorkstreamI
 		}
 		out = append(out, entries...)
 	}
-	actions, err := chiefActions(repository, stream)
+	actions, err := ChiefActions(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	return withActions(out, actions), nil
+	return WithActions(out, actions), nil
 }
 
 type archiveAction struct {
@@ -315,7 +315,7 @@ func chiefArchiveActionsOf(archives []runtime.Archive, shared func(runtime.Archi
 	return out
 }
 
-func withActions(entries, actions []ConversationEntry) []ConversationEntry {
+func WithActions(entries, actions []ConversationEntry) []ConversationEntry {
 	actions = slices.Clone(actions)
 	sort.SliceStable(actions, func(i, j int) bool { return actions[i].At.Before(actions[j].At) })
 	merged := make([]ConversationEntry, 0, len(entries)+len(actions))
@@ -328,7 +328,7 @@ func withActions(entries, actions []ConversationEntry) []ConversationEntry {
 	return append(merged, actions...)
 }
 
-func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+func ChiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	return chiefActionsWithIdentity(repository, stream, nil)
 }
 

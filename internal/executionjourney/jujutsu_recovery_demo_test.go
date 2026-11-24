@@ -30,10 +30,10 @@ import (
 
 const driftCarrying = "carrying"
 
-const recoveryPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": ["resume"], "footprint": ["internal.audit"]}
+const recoveryPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": ["resume"], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": ["resume"], "footprint": ["internal.audit"]}
 ]}
 `
 
@@ -236,13 +236,13 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	)
 	resolutions := map[string]string{"dedupe": resolvedDedupe, "audit": resolvedAudit}
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = demo.interrupted
+	f.engine.Turns[execution.MasonTurnID("resume")] = demo.interrupted
 	f.engine.Turns[intake.MasonAgent("resume")+"-recover-1"] = demo.continued
 	for unit, resolved := range resolutions {
-		f.engine.Turns[service.TestMasonTurnID(unit)] = demo.build(unit)
+		f.engine.Turns[execution.MasonTurnID(unit)] = demo.build(unit)
 		f.engine.Turns[execution.ResolveTurnID(unit, 1)] = demo.resolve(recoveryFiles[unit], resolved, true, map[string]any{"outcome": "Kept upstream's file beside " + unit})
 	}
-	f.engine.Turns[service.TestDriftResolveTurnID(1, 1)] = demo.resolve(intakefixture.TrackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
+	f.engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve(intakefixture.TrackedFile, resolvedGit, false, map[string]any{"outcome": "Kept resume's change on upstream's"})
 	f.engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = reviewDrift
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -287,7 +287,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	}
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), "workstream", "Stop the mason")
+	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume")), "workstream", "Stop the mason")
 	intakefixture.AwaitFurtherPasses(t, &passed, 2)
 	if !holdsEdits(inDirectory(filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(stream), "resume"))) {
 		t.Fatal("the stopped turn's edits are not in resume's workspace")
@@ -346,7 +346,7 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 
 	intakefixture.Eventually(t, "the drift rebase never set out to carry the units over", func() bool {
 		return slices.ContainsFunc(driftRecords(t, f.repository(), stream), func(r service.DriftRebase) bool {
-			return r.Outcome == driftCarrying || r.Outcome == service.TestDriftRebased
+			return r.Outcome == driftCarrying || r.Outcome == lifecycle.DriftRebased
 		})
 	})
 	close(demo.carrying)
@@ -364,14 +364,14 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 	if conflicted := intakefixture.TransitionByID(t, repository, stream, "drift-1-conflicted"); !strings.Contains(conflicted.Reason, intakefixture.TrackedFile+" conflicted") {
 		t.Fatalf("the feature branch's conflict %+v", conflicted)
 	}
-	for turn, path := range map[string]string{service.TestDriftResolveTurnID(1, 1): intakefixture.TrackedFile, execution.ResolveTurnID("dedupe", 1): recoveryFiles["dedupe"], execution.ResolveTurnID("audit", 1): recoveryFiles["audit"]} {
+	for turn, path := range map[string]string{lifecycle.DriftResolveTurnID(1, 1): intakefixture.TrackedFile, execution.ResolveTurnID("dedupe", 1): recoveryFiles["dedupe"], execution.ResolveTurnID("audit", 1): recoveryFiles["audit"]} {
 		if !strings.Contains(marked[turn], "<<<<<<< ") || !strings.Contains(marked[turn], ">>>>>>> ") {
 			t.Fatalf("turn %s found %s as %q", turn, path, marked[turn])
 		}
 	}
 	var resolved string
 	for _, r := range driftRecords(t, repository, stream) {
-		if r.Outcome == service.TestDriftRebased {
+		if r.Outcome == lifecycle.DriftRebased {
 			resolved = r.Commit
 		}
 	}
@@ -421,12 +421,12 @@ func TestJujutsuRecoveryDemonstration(t *testing.T) {
 				t.Fatalf("the walk of unit %s's commit %s records %+v", unit, commit, walked.(api.CommitTrace).Records)
 			}
 		}
-		walk(rebases[0].Snapshot, service.TestCommitChange)
+		walk(rebases[0].Snapshot, service.CommitChange)
 		for _, r := range rebases {
 			if got, err := g.ChangeOf(ctx, r.Commit); err != nil || got != change {
 				t.Fatalf("unit %s's rebase %d made %s of change %q, %v; want %s", unit, r.Rebase, r.Commit, got, err, change)
 			}
-			walk(r.Commit, service.TestCommitChange)
+			walk(r.Commit, service.CommitChange)
 		}
 		for _, reviewed := range reviews {
 			walk(reviewed.Candidate.Revision, "")

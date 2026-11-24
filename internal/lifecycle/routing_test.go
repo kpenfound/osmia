@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
@@ -209,7 +210,7 @@ func parkAndRelease(t *testing.T, f *shedFixture) (*trace.Repository, config.Wor
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	parked := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if parked.To != "waiting" || parked.DefaultTo != "waiting" || parked.DecidedBy != trace.DecidedByCode {
 		t.Fatalf("parking the dependent %+v", parked)
@@ -219,7 +220,7 @@ func parkAndRelease(t *testing.T, f *shedFixture) (*trace.Repository, config.Wor
 	fixturekit.Must(t, err)
 	_, revision, err := lifecycle.BaseObservationAt(repo, stream)
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "base-observation", Revision: revision + 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}, Path: "base-observation.json", Content: string(data)}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "base-observation", Revision: revision + 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}, Path: "base-observation.json", Content: string(data)}
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
 	return repo, stream
 }
@@ -231,7 +232,7 @@ func TestABaseWaitThatClearsFollowsItsDefault(t *testing.T) {
 	routeJev(f.s, p)
 	repo, stream := parkAndRelease(t, f)
 
-	fixturekit.Must(t, f.s.baseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(context.Background(), repo))
 	cleared := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if cleared.To != "available" || cleared.DefaultTo != "available" || cleared.DecidedBy != trace.DecidedByCode || cleared.Departed() || cleared.Cause != "base-availability" {
 		t.Fatalf("the wait clearing %+v", cleared)
@@ -253,7 +254,7 @@ func TestAScriptedDepartureKeepsABaseWaitParked(t *testing.T) {
 	repo, stream := parkAndRelease(t, f)
 	ctx := context.Background()
 
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	kept := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if kept.From != "waiting" || kept.To != "waiting" || kept.DefaultTo != "available" || kept.DecidedBy != trace.DecidedByJev || kept.Judgment == "" || !kept.Departed() {
 		t.Fatalf("the departure %+v", kept)
@@ -261,7 +262,7 @@ func TestAScriptedDepartureKeepsABaseWaitParked(t *testing.T) {
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
 		t.Fatalf("the dependent is not parked after Jev kept the wait: %v %v", waiting, err)
 	}
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times for one observation", n)
 	}
@@ -286,13 +287,13 @@ func TestMovingOntoUpstreamIsAPinnedOwnerMove(t *testing.T) {
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
 	cfg := f.s.about(repo)
 	g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
 	fixturekit.Must(t, err)
 
-	if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault != nil {
+	if _, apiFault := f.s.lifecycle().MoveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	released := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
@@ -318,9 +319,9 @@ func heldDrift(t *testing.T, key string) (*shedFixture, drifter, config.Workstre
 	w := resolutionWorkspace(t, f, stream)
 	for review := 1; review <= 2; review++ {
 		fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte(fmt.Sprintf("/internal/ @feature%d\n", review)), 0600))
-		completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+		completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 		awaitResolution(t, f.s, d, stream, op, fmt.Sprintf("review %d", review))
-		completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))
+		completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, rejectedResolution))
 		if review == 1 {
 			awaitResolution(t, f.s, d, stream, op, "its mason's answer to review 1")
 		}

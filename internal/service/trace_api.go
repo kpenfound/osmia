@@ -66,12 +66,12 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 			out = v
 		}
 	case "unit":
-		out, err = traceUnit(repository, stream, selector)
+		out, err = TraceUnit(repository, stream, selector)
 	case "criterion":
 		if _, ok := plan.ParseCitation(selector); !ok {
 			return nil, &APIError{Code: Validation, Message: "criterion must be cited as spec#<n>"}
 		}
-		out, err = traceCriterion(repository, stream, selector)
+		out, err = WalkCriterion(repository, stream, selector)
 	case "commit":
 		if !commitPattern.MatchString(selector) {
 			return nil, &APIError{Code: Validation, Message: "commit must be a full lowercase commit ID"}
@@ -90,11 +90,11 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 			}
 			cancel()
 		}
-		out, err = traceCommit(repository, stream, selector, message, change)
+		out, err = TraceCommit(repository, stream, selector, message, change)
 	default:
 		return nil, &APIError{Code: Validation, Message: "trace selector must be unit, criterion or commit"}
 	}
-	if errors.Is(err, errTraceNotFound) {
+	if errors.Is(err, ErrTraceNotFound) {
 		return nil, &APIError{Code: NotFound, Message: fmt.Sprintf("%s %s is not in the workstream trace", kind, selector)}
 	}
 	if err != nil {

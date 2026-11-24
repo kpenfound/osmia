@@ -22,7 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-var errTraceNotFound = errors.New("not in the workstream trace")
+var ErrTraceNotFound = errors.New("not in the workstream trace")
 
 // The states of a link a trace walk could not follow. LinkUnavailable is a
 // link the trace should hold by now, or one a record names, that it does not
@@ -36,22 +36,22 @@ const (
 )
 
 const (
-	rulingRatification = "ratification"
+	RulingRatification = "ratification"
 	rulingContested    = "contested"
 	rulingQuestion     = "question"
 )
 
 const (
-	unitFromPlan     = "plan"
+	UnitFromPlan     = "plan"
 	unitFromFollowup = "followup"
 )
 
 const (
 	commitLanding      = "landing"
-	commitCandidate    = "candidate"
+	CommitCandidate    = "candidate"
 	commitBase         = "base"
 	commitRebase       = "unit-rebase"
-	commitChange       = "unit-change"
+	CommitChange       = "unit-change"
 	commitSealBase     = "seal-base"
 	commitFinalRebase  = "final-rebase"
 	commitFinalReview  = "final-review"
@@ -176,7 +176,7 @@ func (w *traceWalk) loadSeal() {
 			w.gaps = append(w.gaps, unreadable(d, "", err))
 		}
 		for _, u := range p.Units {
-			w.units = append(w.units, walkUnit{unit: u, source: unitFromPlan, def: d})
+			w.units = append(w.units, walkUnit{unit: u, source: UnitFromPlan, def: d})
 		}
 	}
 	for _, d := range w.docs {
@@ -339,14 +339,14 @@ func (w *traceWalk) unitProgress(unit string) int {
 	return 0
 }
 
-func traceUnit(repository *trace.Repository, stream config.WorkstreamID, unit string) (UnitTrace, error) {
+func TraceUnit(repository *trace.Repository, stream config.WorkstreamID, unit string) (UnitTrace, error) {
 	w, err := loadTraceWalk(repository, stream)
 	if err != nil {
 		return UnitTrace{}, err
 	}
 	u, ok := w.unit(unit, "")
 	if !ok {
-		return UnitTrace{}, fmt.Errorf("unit %s: %w", unit, errTraceNotFound)
+		return UnitTrace{}, fmt.Errorf("unit %s: %w", unit, ErrTraceNotFound)
 	}
 	u.Gaps = append(slices.Clone(w.gaps), u.Gaps...)
 	u.Complete = len(u.Gaps) == 0
@@ -621,7 +621,7 @@ func (w *traceWalk) approval(unit, name string) (TraceReview, bool) {
 	return review, ok && err == nil && review.Decision == "satisfactory"
 }
 
-func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, criterion string) (CriterionTrace, error) {
+func WalkCriterion(repository *trace.Repository, stream config.WorkstreamID, criterion string) (CriterionTrace, error) {
 	if _, ok := plan.ParseCitation(criterion); !ok {
 		return CriterionTrace{}, fmt.Errorf("criterion %q is not cited as spec#<n>", criterion)
 	}
@@ -637,7 +637,7 @@ func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, cr
 	if w.specDoc != nil {
 		text, ok := criterionText(w.spec, criterion)
 		if !ok {
-			return CriterionTrace{}, fmt.Errorf("criterion %s of spec.md revision %d: %w", criterion, w.specDoc.Revision, errTraceNotFound)
+			return CriterionTrace{}, fmt.Errorf("criterion %s of spec.md revision %d: %w", criterion, w.specDoc.Revision, ErrTraceNotFound)
 		}
 		ref := refOf(*w.specDoc)
 		t.Text, t.Spec = text, &ref
@@ -694,7 +694,7 @@ func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 		if err != nil || r.Revision != w.sealed.Revision {
 			break
 		}
-		return TraceRuling{Kind: rulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
+		return TraceRuling{Kind: RulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
 	}
 	return TraceRuling{}, &TraceGap{Link: path, State: LinkUnavailable, Reason: fmt.Sprintf("seal %d names round %d and the trace holds no ratification of spec.md revision %d and plan.json revision %d there", w.sealed.Seal, w.sealed.Round, w.sealed.Revision.Spec, w.sealed.Revision.Plan)}
 }
@@ -780,7 +780,7 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message, change string) (CommitTrace, error) {
+func TraceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message, change string) (CommitTrace, error) {
 	if !commitPattern.MatchString(commit) {
 		return CommitTrace{}, fmt.Errorf("commit %q is not a full commit ID", commit)
 	}
@@ -788,7 +788,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 	if err != nil {
 		return CommitTrace{}, err
 	}
-	t := CommitTrace{Project: w.project, Workstream: stream, Feature: w.feature, Commit: commit, Operation: operationTrailer(message), Records: []CommitRecord{}, Landings: []CommitLanding{}, Gaps: []TraceGap{}}
+	t := CommitTrace{Project: w.project, Workstream: stream, Feature: w.feature, Commit: commit, Operation: OperationTrailer(message), Records: []CommitRecord{}, Landings: []CommitLanding{}, Gaps: []TraceGap{}}
 	record := func(role, unit string, d trace.Document) {
 		t.Records = append(t.Records, CommitRecord{Role: role, Unit: unit, Ref: refOf(d)})
 	}
@@ -838,7 +838,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			var r UnitReport
 			if json.Unmarshal([]byte(d.Content), &r) == nil {
 				if r.Candidate == commit {
-					record(commitCandidate, d.Unit, d)
+					record(CommitCandidate, d.Unit, d)
 				} else if r.Base == commit {
 					record(commitBase, d.Unit, d)
 				}
@@ -846,7 +846,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 		case reviewDocument(d.Unit):
 			if r, ok, _ := reviewOf(d); ok {
 				if r.Candidate.Revision == commit {
-					record(commitCandidate, d.Unit, d)
+					record(CommitCandidate, d.Unit, d)
 				} else if r.Candidate.BaseRevision == commit {
 					record(commitBase, d.Unit, d)
 				}
@@ -859,7 +859,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 		case execution.ChangeDocument(d.Unit):
 			var c execution.UnitChange
 			if change != "" && json.Unmarshal([]byte(d.Content), &c) == nil && c.Change == change {
-				record(commitChange, d.Unit, d)
+				record(CommitChange, d.Unit, d)
 			}
 		case landingDocument(d.Unit):
 			l, err := landingOf(d)
@@ -872,21 +872,21 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 				t.Landings = append(t.Landings, w.commitLanding(l, &t.Gaps))
 				landed[d.Unit+"/"+strconv.Itoa(d.Revision)] = true
 			case l.Candidate == commit:
-				record(commitCandidate, d.Unit, d)
+				record(CommitCandidate, d.Unit, d)
 			case l.Base == commit:
 				record(commitBase, d.Unit, d)
 			}
 		}
 	}
 	if len(t.Records) == 0 {
-		return CommitTrace{}, fmt.Errorf("commit %s: %w", commit, errTraceNotFound)
+		return CommitTrace{}, fmt.Errorf("commit %s: %w", commit, ErrTraceNotFound)
 	}
 	followed := map[string]bool{}
 	for _, l := range t.Landings {
 		followed[l.Unit] = true
 	}
 	for _, r := range t.Records {
-		if r.Role != commitCandidate || followed[r.Unit] {
+		if r.Role != CommitCandidate || followed[r.Unit] {
 			continue
 		}
 		followed[r.Unit] = true
@@ -932,7 +932,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 	return t, nil
 }
 
-func operationTrailer(message string) string {
+func OperationTrailer(message string) string {
 	for line := range strings.SplitSeq(message, "\n") {
 		if value, ok := strings.CutPrefix(line, execution.LandingTrailer+": "); ok {
 			return strings.TrimSpace(value)

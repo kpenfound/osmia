@@ -162,14 +162,11 @@ func (f *flakeRecorder) collect() ([]flakeRun, error) {
 			return nil, err
 		}
 		for _, r := range finals {
-			links := flakes.CheckLinks(slices.Concat(r.Failed, r.Flaky)...)
-			if r.Selection != nil {
-				links = flakes.CheckLinks(slices.Concat(r.Selection.Links, links)...)
-			}
 			if len(r.Flaky) == 0 {
 				continue
 			}
-			runs = append(runs, flakeRun{stream: stream, path: delivery.FinalChecksPath(r.Review), source: flakes.Source{Workstream: stream, FinalReview: true}, flaky: r.Flaky, known: links, evidence: flakeEvidence(r.FlakeEvidence(), r.Output)})
+			links := flakes.CheckLinks(slices.Concat(r.Failed, r.Flaky)...)
+			runs = append(runs, flakeRun{stream: stream, path: delivery.FinalChecksPath(r.Review), source: flakes.Source{Workstream: stream, FinalReview: true}, flaky: r.Flaky, known: links, evidence: flakeEvidence(r.FlakeEvidence(), "")})
 		}
 	}
 	known = flakes.CheckLinks(known...)

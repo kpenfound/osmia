@@ -148,7 +148,7 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	}
 	recordFinalReport(t, repo, base.Base, f.s.now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
 
-	fixturekit.Must(t, f.s.baseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(context.Background(), repo))
 	requests := p.TransitionRequests()
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))

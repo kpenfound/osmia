@@ -21,7 +21,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repository, report, upstreamRepo, upstream := newCrossRepoEdgeDependent(t)
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	provider := f.s.Context()
 	assertBuildReference := func(want, reference string) {
 		t.Helper()
@@ -61,7 +61,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	assertBuildReference(publication.Fork+"@"+publication.Commit, "owner/other#77")
 
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}

@@ -15,8 +15,6 @@ import (
 
 var chiefViewOutcomes = []string{"cancelled", "owner merged", "current merge", "ready", "closed", "stale merge"}
 
-// stageChiefViewAfter stages a chief of staff's documents before and after a
-// member ends as mode names and returns the staged workspace and the trace.
 func stageChiefViewAfter(t *testing.T, mode string) (workspace string, repo *trace.Repository) {
 	t.Helper()
 	ctx := context.Background()
@@ -31,7 +29,7 @@ func stageChiefViewAfter(t *testing.T, mode string) (workspace string, repo *tra
 		fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.id, Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}, Path: doc.path, Content: doc.content}}))
 	}
 	workspace = filepath.Join(t.TempDir(), "view")
-	_, err = stageChiefDocuments(repo, fixturekit.Stream, workspace)
+	_, err = StageChiefDocuments(repo, fixturekit.Stream, workspace)
 	fixturekit.Must(t, err)
 	state := DeliveredState
 	if mode == "cancelled" {
@@ -56,7 +54,7 @@ func stageChiefViewAfter(t *testing.T, mode string) (workspace string, repo *tra
 			resolutionDocument(t, repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 42, Outcome: outcome})
 		}
 	}
-	_, err = stageChiefDocuments(repo, fixturekit.Stream, workspace)
+	_, err = StageChiefDocuments(repo, fixturekit.Stream, workspace)
 	fixturekit.Must(t, err)
 	return workspace, repo
 }

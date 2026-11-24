@@ -23,7 +23,7 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
-	fake.Play[service.TestMasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrCrashTurn }
+	fake.Play[execution.MasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrCrashTurn }
 	owner := intake.MasonAgent("resume") + "-owner-revise-1"
 	fake.Play[owner] = intakefixture.ReportDone("Owner revision")
 	f.engine.Mu.Lock()
@@ -32,19 +32,19 @@ func TestMasonInfrastructureFailureContestsUnitAndStreakResets(t *testing.T) {
 	stream := f.seedBuilding(t, "crashing-mason", fixturekit.ValidPlan)
 	f.awaitUnit(t, stream, "resume", intake.UnitContested)
 
-	q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+	q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	checkExhausted(t, q)
 	ran := 0
 	for _, req := range fake.Requests(stream) {
-		if req.Name == service.TestMasonTurnID("resume") {
+		if req.Name == execution.MasonTurnID("resume") {
 			ran++
 		}
 	}
-	if ran != service.TestTurnRetries+1 {
+	if ran != service.TurnRetries+1 {
 		t.Fatalf("the crashing mason turn ran %d times", ran)
 	}
 	checkFailureContest(t, f, stream, "resume", intake.UnitImplementing, q)
-	if s, ok := f.streak(t, intake.MasonRole); !ok || s.Profile != "default" || s.Consecutive != service.TestTurnRetries+1 || s.LastFailure != q.Attempts[service.TestTurnRetries].Failure || !s.LastAt.Equal(q.Attempts[service.TestTurnRetries].At) {
+	if s, ok := f.streak(t, intake.MasonRole); !ok || s.Profile != "default" || s.Consecutive != service.TurnRetries+1 || s.LastFailure != q.Attempts[service.TurnRetries].Failure || !s.LastAt.Equal(q.Attempts[service.TurnRetries].At) {
 		t.Fatalf("mason streak %+v %t", s, ok)
 	}
 
@@ -65,14 +65,14 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
-	fake.Play[service.TestMasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn }
+	fake.Play[execution.MasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn }
 	continued := intake.MasonAgent("resume") + "-continue-1"
 	fake.Play[continued] = intakefixture.ReportDone("Built")
 	f.engine.Mu.Lock()
 	f.engine.Turns[continued] = fake.Turn
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "misreporting-mason", fixturekit.ValidPlan)
-	q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+	q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Behavioural || len(q.Attempts) != 1 {
 		t.Fatalf("turn ended %s with %+v after %d attempts", q.Status(), q.Response, len(q.Attempts))
 	}
@@ -82,7 +82,7 @@ func TestMasonBehaviouralFailureIsNotRetried(t *testing.T) {
 	for _, req := range fake.Requests(stream) {
 		ran[req.Name]++
 	}
-	if ran[service.TestMasonTurnID("resume")] != 1 || ran[continued] != 1 || len(ran) != 2 {
+	if ran[execution.MasonTurnID("resume")] != 1 || ran[continued] != 1 || len(ran) != 2 {
 		t.Fatalf("mason turns %v", ran)
 	}
 	if th := f.thread(t, stream, intake.MasonAgent("resume")); len(th.Turns) != 2 || th.Turns[1].Request.TurnID != continued {
@@ -98,7 +98,7 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
-	fake.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Built")
+	fake.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	var mu sync.Mutex
 	crash, reviews := true, map[string]int{}
@@ -128,12 +128,12 @@ func TestReviewerInfrastructureFailureContestsUnit(t *testing.T) {
 	checkExhausted(t, q)
 	checkFailureContest(t, f, stream, "resume", intake.UnitReviewing, q)
 	mu.Lock()
-	if reviews[q.Request.TurnID] != service.TestTurnRetries+1 {
+	if reviews[q.Request.TurnID] != service.TurnRetries+1 {
 		t.Fatalf("review attempts %v", reviews)
 	}
 	crash = false
 	mu.Unlock()
-	if s, ok := f.streak(t, intake.ReviewerRole); !ok || s.Consecutive != service.TestTurnRetries+1 {
+	if s, ok := f.streak(t, intake.ReviewerRole); !ok || s.Consecutive != service.TurnRetries+1 {
 		t.Fatalf("reviewer streak %+v %t", s, ok)
 	}
 
@@ -196,7 +196,7 @@ func (f *shedFixture) streak(t *testing.T, role string) (api.FailureStreak, bool
 
 func checkExhausted(t *testing.T, q trace.QueuedTurn) {
 	t.Helper()
-	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Infrastructure || len(q.Attempts) != service.TestTurnRetries+1 {
+	if q.Status() != "failed" || q.Response.FailureClass != coreadapter.Infrastructure || len(q.Attempts) != service.TurnRetries+1 {
 		t.Fatalf("turn %s ended %s with %+v after %d attempts", q.Request.TurnID, q.Status(), q.Response, len(q.Attempts))
 	}
 	for _, a := range q.Attempts {
@@ -221,7 +221,7 @@ func checkFailureContest(t *testing.T, f *shedFixture, stream config.WorkstreamI
 			t.Fatal("engineering failure automatically required owner attention")
 		}
 	}
-	for _, want := range []string{"failed on every retry and fallback profile", q.Request.TurnID, fmt.Sprintf("%d on profile default: infrastructure failure", service.TestTurnRetries+1)} {
+	for _, want := range []string{"failed on every retry and fallback profile", q.Request.TurnID, fmt.Sprintf("%d on profile default: infrastructure failure", service.TurnRetries+1)} {
 		if !strings.Contains(reason, want) {
 			t.Fatalf("contested status %+v lacks %q", status.Units, want)
 		}

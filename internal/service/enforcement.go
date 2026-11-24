@@ -52,13 +52,13 @@ func CoreEnforcement(root config.Root) Enforcement {
 	}
 }
 
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), ProjectContextTool)}
 
-var chiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+var ChiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
 	return name == draftBriefToolName || name == designReadRepoToolName || name == designTitleToolName
 })
 
-var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: chiefOrdinaryTools, Web: true}
+var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: ChiefOrdinaryTools, Web: true}
 
 var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}
 
@@ -75,7 +75,7 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
 		}
 	}
-	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), projectContext(r, scope))), err
+	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), ProjectContext(r, scope))), err
 }
 
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, execution.DoneTool}, WriteFiles: true, Execute: true}
@@ -165,7 +165,7 @@ func Enforce(opts Options, e Enforcement) Options {
 							Narrow: &designNarrow}, nil
 					}
 					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
-					paths, err := stageChiefDocuments(r, stream, workspace)
+					paths, err := StageChiefDocuments(r, stream, workspace)
 					if err != nil {
 						return isolation.Selection{}, err
 					}
@@ -184,7 +184,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return nil, err
 					}
-					diff, err := driftDiffTool(ctx, cfg, r, scope)
+					diff, err := lifecycle.DriftDiffTool(ctx, cfg, r, scope)
 					if err != nil {
 						return nil, err
 					}
@@ -250,14 +250,14 @@ func Enforce(opts Options, e Enforcement) Options {
 		return thread.Dispatcher{Runner: runner,
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
-				if in.Agent == sessionAgentID {
+				if in.Agent == SessionAgentID {
 					directory = filepath.Join(runtime.ModelSessionDirectory(root, r.Project(), in.Workstream), in.Turn)
 				}
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 			},
 			Relay: func(ctx context.Context, t trace.Thread, q trace.QueuedTurn) error {
 				if t.Identity.Role == sessionRole {
-					return sessionRelay(ctx, r, now, t, q)
+					return SessionRelay(ctx, r, now, t, q)
 				}
 				return nil
 			}}, nil

@@ -441,7 +441,7 @@ func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
-	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
+	if checkOutputName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
@@ -457,14 +457,6 @@ func finalPath(parts []string) bool {
 func checkSelectionName(name string) bool {
 	n := strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-selection.json")
 	return strings.HasPrefix(name, "checks-") && strings.HasSuffix(name, "-selection.json") && shedRound.MatchString("round-"+n)
-}
-
-func finalCheckAttemptName(name string) bool {
-	if !strings.HasPrefix(name, "checks-") || !strings.HasSuffix(name, "-started.json") {
-		return false
-	}
-	review, attempt, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-started.json"), "-attempt-")
-	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+attempt)
 }
 
 func finalCheckRerunName(name string) bool {

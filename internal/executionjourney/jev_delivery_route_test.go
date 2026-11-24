@@ -3,7 +3,7 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
@@ -357,7 +357,7 @@ func (d *draftFixture) busy(t *testing.T) {
 	state, err := d.repository.Workflow(d.stream, "fixture-busy")
 	fixturekit.Must(t, err)
 	_, err = d.repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
-		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-busy", Revision: 1, Project: d.repository.Project(), Workstream: d.stream, At: time.Now(), Actor: service.TestForemanActor, Cause: "fixture"}, Subject: "fixture-busy", From: state.Value, To: "requested", Reason: "fixture"},
+		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-busy", Revision: 1, Project: d.repository.Project(), Workstream: d.stream, At: time.Now(), Actor: execution.ForemanActor, Cause: "fixture"}, Subject: "fixture-busy", From: state.Value, To: "requested", Reason: "fixture"},
 		Events:     []trace.Event{{ID: event, Kind: delivery.FinalReviewAction, Body: "a final review", Operation: &op}}})
 	fixturekit.Must(t, err)
 }
@@ -366,7 +366,7 @@ func (d *draftFixture) finishBusy(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	event := trace.EventID("fixture-busy", "run")
-	a, _, err := d.repository.BeginOperation(ctx, d.stream, event, trace.WorkerOperation, service.TestForemanActor, time.Now)
+	a, _, err := d.repository.BeginOperation(ctx, d.stream, event, trace.WorkerOperation, execution.ForemanActor, time.Now)
 	fixturekit.Must(t, err)
 	if a == nil {
 		t.Fatal("the busy operation cannot be claimed")

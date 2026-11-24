@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/execution"
 	"path/filepath"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Base: "main", Upstream: p.s.cfg.Project.Upstream, Fork: p.s.cfg.Project.Fork, Branch: sealed.Branch, Commit: sealed.Base.Commit, PullRequest: 7}
 	data, err := json.Marshal(publication)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: delivery.PublicationDocument, Revision: 1, Project: repo.Project(), Workstream: parent, At: p.s.now(), Actor: service.TestForemanActor, Cause: "delivery"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: delivery.PublicationDocument, Revision: 1, Project: repo.Project(), Workstream: parent, At: p.s.now(), Actor: execution.ForemanActor, Cause: "delivery"}
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
 	host := p.s.options.PullRequests.(fixturekit.RepositoryPulls)[p.s.cfg.Project.Upstream]
 	host.Prs = []pulls.PullRequest{{Number: 7, Merged: true, Base: "main", Head: sealed.Branch, HeadRepository: p.s.cfg.Project.Fork, HeadCommit: sealed.Base.Commit}}
@@ -213,7 +214,7 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	fixturekit.Must(t, err)
 	h.Workstream, h.ID = child, shed.RatificationDocumentID(1)
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: shed.RatificationPath(1), Content: string(ratified)}}))
-	fixturekit.Must(t, p.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, p.s.lifecycle().BaseWaitPass(ctx, repo))
 	waiting, err := lifecycle.BaseWaiting(repo, child)
 	fixturekit.Must(t, err)
 	if !waiting {
@@ -226,7 +227,7 @@ func TestBaseIntegrationReleasesUnsealedDependentAfterParentBranchRemoval(t *tes
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	fixturekit.Must(t, p.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, p.s.lifecycle().BaseWaitPass(ctx, repo))
 	waiting, err = lifecycle.BaseWaiting(repo, child)
 	fixturekit.Must(t, err)
 	if waiting {

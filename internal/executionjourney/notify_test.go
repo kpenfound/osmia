@@ -30,9 +30,9 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 	s, _ := startNotifying(t, opts, inbox)
 	intakefixture.Soon(t, "the open entry recorded as skipped", func() bool {
 		l := readLedger(t, opts)
-		return l.Enabled && l.Notifications[service.TestNotificationKey(fixturekit.Project, old)] != nil
+		return l.Enabled && l.Notifications[service.NotificationKey(fixturekit.Project, old)] != nil
 	})
-	if got := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, old)].State; got != service.TestNotificationSkipped {
+	if got := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, old)].State; got != service.NotificationSkipped {
 		t.Fatalf("entry open before the webhook: %s", got)
 	}
 	kinds := []string{api.InboxEscalation, api.InboxRatification, api.InboxContested, api.InboxAmendment, api.InboxDelivery}
@@ -55,7 +55,7 @@ func TestNotifyPostsEveryNewInboxEntryOnce(t *testing.T) {
 
 	intakefixture.Soon(t, "every post recorded as sent", func() bool {
 		for key, rec := range readLedger(t, opts).Notifications {
-			if key != service.TestNotificationKey(fixturekit.Project, old) && rec.State != service.TestNotificationSent {
+			if key != service.NotificationKey(fixturekit.Project, old) && rec.State != service.NotificationSent {
 				return false
 			}
 		}
@@ -81,9 +81,9 @@ func TestNotifyRestartSendsPendingAndNeverResendsSent(t *testing.T) {
 	hook.records(opts)
 	pending, sent := fixturekit.NotificationEntry(api.InboxRatification, 1), fixturekit.NotificationEntry(api.InboxDelivery, 2)
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	ledger := service.TestNotifyLedger{Enabled: true, Notifications: map[string]*service.TestNotification{
-		service.TestNotificationKey(fixturekit.Project, pending): {State: service.TestNotificationPending, Kind: pending.Kind, Workstream: string(fixturekit.Stream), Body: "the pending body\n", Recorded: at},
-		service.TestNotificationKey(fixturekit.Project, sent):    {State: service.TestNotificationSent, Kind: sent.Kind, Workstream: string(fixturekit.Stream), Recorded: at, Settled: at},
+	ledger := service.TestNotifyLedger{Enabled: true, Notifications: map[string]*service.Notification{
+		service.NotificationKey(fixturekit.Project, pending): {State: service.TestNotificationPending, Kind: pending.Kind, Workstream: string(fixturekit.Stream), Body: "the pending body\n", Recorded: at},
+		service.NotificationKey(fixturekit.Project, sent):    {State: service.NotificationSent, Kind: sent.Kind, Workstream: string(fixturekit.Stream), Recorded: at, Settled: at},
 	}}
 	data, err := json.Marshal(ledger)
 	fixturekit.Must(t, err)
@@ -100,7 +100,7 @@ func TestNotifyRestartSendsPendingAndNeverResendsSent(t *testing.T) {
 	if got := hook.received(); len(got) != 2 || !strings.Contains(got[1], "Decide escalation 3?") {
 		t.Fatalf("posts %q", got)
 	}
-	if l := readLedger(t, opts); l.Notifications[service.TestNotificationKey(fixturekit.Project, pending)].State != service.TestNotificationSent || l.Notifications[service.TestNotificationKey(fixturekit.Project, sent)].State != service.TestNotificationSent {
+	if l := readLedger(t, opts); l.Notifications[service.NotificationKey(fixturekit.Project, pending)].State != service.NotificationSent || l.Notifications[service.NotificationKey(fixturekit.Project, sent)].State != service.NotificationSent {
 		t.Fatalf("ledger %+v", l.Notifications)
 	}
 }
@@ -131,14 +131,14 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 
 	intakefixture.Soon(t, "the open entry recorded as skipped", func() bool {
 		l := readLedger(t, opts)
-		return l.Enabled && l.Notifications[service.TestNotificationKey(fixturekit.Project, e1)] != nil
+		return l.Enabled && l.Notifications[service.NotificationKey(fixturekit.Project, e1)] != nil
 	})
 	e2 := fixturekit.NotificationEntry(api.InboxAmendment, 2)
 	inbox.set(e1, e2)
 	if got := first.await(t, 1); len(got) != 1 || !strings.Contains(got[0], "Kind: amendment") {
 		t.Fatalf("posts after setting the webhook: %q", got)
 	}
-	if got := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, e1)]; got == nil || got.State != service.TestNotificationSkipped {
+	if got := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, e1)]; got == nil || got.State != service.NotificationSkipped {
 		t.Fatalf("entry open before the webhook was set: %+v", got)
 	}
 
@@ -159,7 +159,7 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	_, err = c.Reload(ctx)
 	fixturekit.Must(t, err)
 	intakefixture.Soon(t, "notifications turned off", func() bool { return !readLedger(t, opts).Enabled })
-	if rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, e3b)]; rec.State != service.TestNotificationDropped || rec.Attempts != 1 {
+	if rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, e3b)]; rec.State != service.NotificationDropped || rec.Attempts != 1 {
 		t.Fatalf("pending when the webhook was removed: %+v", rec)
 	}
 	second.respond(http.StatusOK)
@@ -171,7 +171,7 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	fixturekit.Must(t, err)
 	e5 := fixturekit.NotificationEntry(api.InboxRatification, 5)
 	intakefixture.Soon(t, "the entry opened while unset recorded", func() bool {
-		return readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, e4)] != nil
+		return readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, e4)] != nil
 	})
 	inbox.set(e1, e2, e3, e3b, e4, e5)
 	second.await(t, 3)
@@ -179,7 +179,7 @@ func TestNotifyReloadTurnsNotificationsOnAndOff(t *testing.T) {
 	if got := second.received(); len(got) != 3 || !strings.Contains(got[2], "Kind: ratification") || len(first.received()) != 1 {
 		t.Fatalf("posts after turning notifications back on: %q and %q", first.received(), got)
 	}
-	if rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, e4)]; rec.State != service.TestNotificationSkipped {
+	if rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, e4)]; rec.State != service.NotificationSkipped {
 		t.Fatalf("entry opened while unset: %+v", rec)
 	}
 }
@@ -201,9 +201,9 @@ func TestNotifyFailingWebhookRetriesThenGivesUp(t *testing.T) {
 		return len(st) == 1 && len(cf) == 1 && strings.Contains(st[0].Message, "; retrying")
 	})
 	start := time.Now()
-	hook.await(t, service.TestNotifyAttempts)
+	hook.await(t, service.NotifyAttempts)
 	if elapsed := time.Since(start); elapsed < 600*time.Millisecond {
-		t.Fatalf("retries without backoff: %d attempts in %s", service.TestNotifyAttempts, elapsed)
+		t.Fatalf("retries without backoff: %d attempts in %s", service.NotifyAttempts, elapsed)
 	}
 	want := api.Diagnostic{Field: "notify", Code: api.Unavailable, Message: ""}
 	intakefixture.Soon(t, "a gave-up diagnostic", func() bool {
@@ -215,22 +215,22 @@ func TestNotifyFailingWebhookRetriesThenGivesUp(t *testing.T) {
 		t.Fatalf("diagnostic %+v", st[0])
 	}
 	intakefixture.Settled(t, func() int { return len(hook.received()) })
-	if n := len(hook.received()); n != service.TestNotifyAttempts {
+	if n := len(hook.received()); n != service.NotifyAttempts {
 		t.Fatalf("%d posts after giving up", n)
 	}
-	if rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, failing)]; rec.State != service.TestNotificationGaveUp || rec.Attempts != service.TestNotifyAttempts {
+	if rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, failing)]; rec.State != service.NotificationGaveUp || rec.Attempts != service.NotifyAttempts {
 		t.Fatalf("gave up: %+v", rec)
 	}
 
 	decided := fixturekit.NotificationEntry(api.InboxDelivery, 2)
 	inbox.set(failing, decided)
-	hook.await(t, service.TestNotifyAttempts+1)
+	hook.await(t, service.NotifyAttempts+1)
 	inbox.set(failing)
 	intakefixture.Soon(t, "the decided entry dropped", func() bool {
-		rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, decided)]
-		return rec != nil && rec.State == service.TestNotificationDropped
+		rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, decided)]
+		return rec != nil && rec.State == service.NotificationDropped
 	})
-	if rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, decided)]; rec.Attempts >= service.TestNotifyAttempts || rec.Body != "" {
+	if rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, decided)]; rec.Attempts >= service.NotifyAttempts || rec.Body != "" {
 		t.Fatalf("dropped: %+v", rec)
 	}
 
@@ -291,7 +291,7 @@ func TestNotifyFaultsSendNothingUntilCleared(t *testing.T) {
 	fixturekit.Must(t, os.Remove(ledger))
 	inbox.set(e1)
 	cleared("the ledger readable again")
-	if rec := readLedger(t, opts).Notifications[service.TestNotificationKey(fixturekit.Project, e1)]; rec == nil || rec.State != service.TestNotificationSkipped {
+	if rec := readLedger(t, opts).Notifications[service.NotificationKey(fixturekit.Project, e1)]; rec == nil || rec.State != service.NotificationSkipped {
 		t.Fatalf("entry open while the ledger was unreadable: %+v", rec)
 	}
 

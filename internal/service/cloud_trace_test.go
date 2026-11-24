@@ -235,7 +235,7 @@ func TestFetchCloudTraceIsGrantedOnlyToItsRoles(t *testing.T) {
 	if !callTrace(t, granted, `{"trace_id":"t1"}`).Fetched || calls() != 1 {
 		t.Fatalf("the chief of staff's fetch ran %d times", calls())
 	}
-	if !slices.Contains(chiefOrdinaryTools, checks.TraceToolName) || !slices.Contains(chiefGrant.Tools, checks.TraceToolName) {
+	if !slices.Contains(ChiefOrdinaryTools, checks.TraceToolName) || !slices.Contains(chiefGrant.Tools, checks.TraceToolName) {
 		t.Fatalf("the chief of staff's grant lacks %s: %v", checks.TraceToolName, chiefGrant.Tools)
 	}
 	if slices.Contains(designOnlyTools, checks.TraceToolName) || slices.Contains(masonGrant.Tools, checks.TraceToolName) || slices.Contains(reviewerGrant.Tools, checks.TraceToolName) {

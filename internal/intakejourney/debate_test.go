@@ -28,10 +28,10 @@ import (
 )
 
 const (
-	splitPlan = `{"version": 1, "units": [
-  {"id": "resume-read", "title": "Find the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestLastChunk"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "resume-write", "title": "Resume from it", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": ["resume-read"], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "new-test", "name": "TestNoChunkTwice"}}], "depends_on": ["resume-write"], "footprint": ["internal.trace"]}
+	splitPlan = `{"version": 2, "units": [
+  {"id": "resume-read", "title": "Find the last chunk", "task": "Find the last chunk", "acceptance": ["spec#1 holds, shown by TestLastChunk (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "resume-write", "title": "Resume from it", "task": "Resume from it", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": ["resume-read"], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by TestNoChunkTwice (new-test)"], "criteria": ["spec#2"], "depends_on": ["resume-write"], "footprint": ["internal.trace"]}
 ]}
 `
 	cycleProblem = `unit "dedupe": dependency cycle dedupe -> resume -> dedupe`
@@ -711,7 +711,7 @@ func TestReplyToolsAreBoundToTheReplyTurn(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 	}
-	if want := []string{shed.ReplyTool, intake.DraftTool, questions.AskTool, service.TestProjectContextTool}; !slices.Equal(names, want) {
+	if want := []string{shed.ReplyTool, intake.DraftTool, questions.AskTool, service.ProjectContextTool}; !slices.Equal(names, want) {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
 	for name, mutate := range map[string]func(*coreadapter.Scope){

@@ -5,7 +5,7 @@ import (
 	json "encoding/json"
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	filepath "path/filepath"
@@ -51,7 +51,7 @@ func recordAmendmentSealRevision(t *testing.T, f *journey.ShedFixture, repositor
 	}
 	doc.Revision++
 	doc.At = f.Clock.Now()
-	doc.Actor = service.TestForemanActor
+	doc.Actor = execution.ForemanActor
 	doc.Cause = "fixture-drift"
 	doc.Content = string(content)
 	docs = append(docs, doc)

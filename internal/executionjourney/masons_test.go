@@ -78,7 +78,7 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepar
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
-	return f, intakefixture.ScriptMasons(f.engine, service.TestMasonTurnID)
+	return f, intakefixture.ScriptMasons(f.engine, execution.MasonTurnID)
 }
 
 func masonTransitions(t *testing.T, f *shedFixture, stream config.WorkstreamID) []intakefixture.TransitionMove {
@@ -157,7 +157,7 @@ func TestMasonStartsTheFirstOfTwoEntangledUnits(t *testing.T) {
 		t.Fatalf("mason thread %+v", th)
 	}
 	req := th.Turns[0].Request
-	if req.TurnID != service.TestMasonTurnID("resume") || req.Unit != "resume" || req.Cause != execution.MasonTransitionID("resume") || req.Actor != intake.MasonActor {
+	if req.TurnID != execution.MasonTurnID("resume") || req.Unit != "resume" || req.Cause != execution.MasonTransitionID("resume") || req.Actor != intake.MasonActor {
 		t.Fatalf("mason turn request %+v", req)
 	}
 	runs := masons.Requests(stream)

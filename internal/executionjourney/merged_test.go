@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -21,7 +22,7 @@ import (
 
 func assembleForTest(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID) {
 	t.Helper()
-	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: intake.AssembledState, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: intake.AssembledState, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "test"}
 	_, err := repo.SetFeatureState(context.Background(), h, intake.AssembledState, "every unit merged")
 	fixturekit.Must(t, err)
 }
@@ -31,7 +32,7 @@ func requestPublication(t *testing.T, f *shedFixture, repo *trace.Repository, st
 	subject, err := repo.Workflow(stream, delivery.PublicationSubject)
 	fixturekit.Must(t, err)
 	transition, _ := delivery.PublishIDs(k)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: transition, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: transition, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "test"}
 	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: delivery.PublicationSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", k), Reason: "the owner approved delivery"}})
 	fixturekit.Must(t, err)

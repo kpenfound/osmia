@@ -7,7 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
@@ -30,7 +29,7 @@ func TestSequentialImplementation(t *testing.T) {
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = fake.Asking(p, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = fake.Asking(p, "", "1")
 	f.engine.Mu.Unlock()
 	stream := f.builtPaused(t, factory, "sequential")[0]
 	f.awaitDispatches(t, stream, "resume", 1)

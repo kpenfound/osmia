@@ -16,8 +16,6 @@ const BuildingState = intake.BuildingState
 
 type CheckResult = api.CheckResult
 
-type CheckSelection = api.CheckSelection
-
 const ChecksIncomplete = execution.ChecksIncomplete
 
 const Conflict = api.Conflict
@@ -143,8 +141,6 @@ var ownerActor = intake.OwnerActor
 var ownerHeader = intake.OwnerHeader
 
 const publicationEscalation = intake.PublicationEscalation
-
-var quoteLinks = execution.QuoteLinks
 
 var refuseReport = intake.RefuseReport
 

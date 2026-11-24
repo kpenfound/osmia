@@ -35,7 +35,7 @@ func browserImageEntry(feed string, v trace.Image) string {
 func assertBrowserThumbnail(p *page, feed string, v trace.Image) {
 	p.T.Helper()
 	entry := browserImageEntry(feed, v)
-	url := Prefix + "/images/" + string(v.Workstream) + "/" + v.ID
+	url := service.Prefix + "/images/" + string(v.Workstream) + "/" + v.ID
 	p.Await("a loaded thumbnail from the image endpoint", `(() => {
  const entry = document.querySelector(`+quote(entry)+`);
  const img = entry?.querySelector('[data-field=image]');
@@ -59,7 +59,7 @@ func openBrowserFullImage(p *page, feed string, v trace.Image) {
 	defer cancel()
 	var origin string
 	p.Eval("location.origin", &origin)
-	url := origin + Prefix + "/images/" + string(v.Workstream) + "/" + v.ID
+	url := origin + service.Prefix + "/images/" + string(v.Workstream) + "/" + v.ID
 	next := chromedp.WaitNewTarget(ctx, func(info *target.Info) bool { return info.URL == url })
 	p.Click(browserImageEntry(feed, v) + ` [data-field=image-link]`)
 	select {
@@ -140,7 +140,7 @@ func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
 	fresh.AwaitText(entry+` [data-field=placeholder]`, "image removed when "+string(quiet)+" was archived")
 	rereadFeed(fresh)
 	for _, path := range fresh.Paths() {
-		if strings.HasPrefix(path, Prefix+"/images/") {
+		if strings.HasPrefix(path, service.Prefix+"/images/") {
 			t.Fatalf("archived placeholder requested %s", path)
 		}
 	}
@@ -152,7 +152,7 @@ func TestBrowserSessionImages(t *testing.T) {
 	engine.Turn = func(context.Context, agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "session", ResultText: strings.Repeat(scrollReply, 45)}, nil
 	}
-	opened, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default"})
+	opened, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	id := opened.Session.Workstream
 	p := openFeedScrollPage(t, s, "#workstream="+string(id), "")

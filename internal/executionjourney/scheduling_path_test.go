@@ -9,6 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"log/slog"
 	"os"
@@ -103,10 +104,10 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 	fixturekit.Must(t, err)
 	profile, err := cfg.NamedProfile("default")
 	fixturekit.Must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_crashed", Project: cfg.Project.ID, Workstream: session, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: service.TestSessionAgentID, ThreadID: service.TestSessionAgentID, TurnID: "crashed", Profile: profile, Prompt: "Continue"})
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_crashed", Project: cfg.Project.ID, Workstream: session, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: service.SessionAgentID, ThreadID: service.SessionAgentID, TurnID: "crashed", Profile: profile, Prompt: "Continue"})
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, service.TestSetSessionState(ctx, repo, cfg.Project.ID, session, fixturekit.DemoStart, "session-working-crashed", "session-turn-started", trace.SessionWorking))
-	_, err = repo.ClaimTurn(ctx, session, service.TestSessionAgentID, "previous-service", "previous-session", fixturekit.DemoStart)
+	fixturekit.Must(t, service.SetSessionState(ctx, repo, cfg.Project.ID, session, fixturekit.DemoStart, "session-working-crashed", "session-turn-started", trace.SessionWorking))
+	_, err = repo.ClaimTurn(ctx, session, service.SessionAgentID, "previous-service", "previous-session", fixturekit.DemoStart)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 	backend, scan := newPathGate(t), newPathGate(t)
@@ -138,7 +139,7 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 		})}, Prepare: func(context.Context, thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: t.TempDir()}, nil
 		}, Relay: func(ctx context.Context, th trace.Thread, q trace.QueuedTurn) error {
-			return service.TestSessionRelay(ctx, r, opts.Reconciliation.Now, th, q)
+			return service.SessionRelay(ctx, r, opts.Reconciliation.Now, th, q)
 		}}, nil
 	}
 	s, _ := start(t, opts)
@@ -162,7 +163,7 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 	if state.Value != trace.SessionIdle || calls.Load() != 1 {
 		t.Fatalf("recovery state=%s backend calls=%d", state.Value, calls.Load())
 	}
-	th, err := repo.Thread(session, service.TestSessionAgentID)
+	th, err := repo.Thread(session, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].CompletedAt.IsZero() || th.Turns[1].Status() != "idle" {
 		t.Fatalf("recovery turns: %+v", th.Turns)
@@ -241,7 +242,7 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	for _, q := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session.Session.Workstream, service.TestSessionAgentID, messaged.Turn}} {
+	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session.Session.Workstream, service.SessionAgentID, messaged.Turn}} {
 		pathAwait(t, f.s, "conversation waited for landing or scheduling", func() bool { return pathTurnDone(f.repository(), q.stream, q.agent, q.turn) })
 	}
 	select {
@@ -354,7 +355,7 @@ func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 	var active, peak atomic.Int32
 	f.engine.Mu.Lock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.Turns[service.TestMasonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Turns[execution.MasonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 			n := active.Add(1)
 			defer active.Add(-1)
 			for old := peak.Load(); n > old; old = peak.Load() {
@@ -776,7 +777,7 @@ func TestServiceDriftEffectSurvivesRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	defer repo.Close()
 	records := driftRecords(t, repo, stream)
-	if len(records) != 2 || records[0].Outcome != service.TestDriftReplayed || records[1].Outcome != service.TestDriftRebased || replays.Load() != 1 {
+	if len(records) != 2 || records[0].Outcome != service.TestDriftReplayed || records[1].Outcome != lifecycle.DriftRebased || replays.Load() != 1 {
 		t.Fatalf("drift effects=%+v replays=%d", records, replays.Load())
 	}
 	if tip := featureTip(t, f, stream); tip == before || parentOf(t, f, tip) != upstream {

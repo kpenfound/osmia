@@ -26,15 +26,9 @@ type finalReviewInput = delivery.FinalReviewInput
 
 const FindingBlocking = delivery.FindingBlocking
 
-var finalTurnID = delivery.FinalTurnID
-
 var latestFinalReport = delivery.LatestFinalReport
 
 type FinalCheckRun = delivery.FinalCheckRun
-
-type FinalCheckAttempt = delivery.FinalCheckAttempt
-
-var finalCheckAttemptDocument = delivery.FinalCheckAttemptDocument
 
 const deliveryPath = delivery.DeliveryPath
 
@@ -65,8 +59,6 @@ const publicationPath = delivery.PublicationPath
 const publicationDocument = delivery.PublicationDocument
 
 const publicationOpened = delivery.PublicationOpened
-
-type publishInput = delivery.PublishInput
 
 const mergePath = delivery.MergePath
 

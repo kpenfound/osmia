@@ -244,15 +244,6 @@ func request(t *testing.T, p *jevfixture.Transitions, n int) (state map[string]a
 	return state, options
 }
 
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 type atomicInt = atomic.Int32
 
 func refused(t *testing.T, f *fx) []jev.Record {

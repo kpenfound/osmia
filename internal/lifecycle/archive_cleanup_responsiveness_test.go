@@ -80,7 +80,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 		return trace.FinishWorkstreamTraceDeletion(root, p, w)
 	}}
 
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	select {
 	case <-started:
 	case <-time.After(10 * time.Second):

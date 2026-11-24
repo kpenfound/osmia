@@ -37,7 +37,7 @@ func haltGuardControllers(t *testing.T, f *crossRepoRatifyFixture) {
 func runGuardDraft(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	for _, project := range []config.ProjectID{f.project, f.project2} {
-		err := f.s.projectSpecDraftPass(context.Background(), mustRepo(t, f.s, project))
+		err := f.s.lifecycle().ProjectSpecDraftPass(context.Background(), mustRepo(t, f.s, project))
 		fixturekit.Must(t, err)
 	}
 	id, err := mustRepo(t, f.s, f.project).CrossRepoWorkgroupOf(f.stream1)
@@ -187,7 +187,7 @@ func unpinnedProjectSpecDraftFixture(t *testing.T) (*crossRepoRatifyFixture, con
 		})
 	}
 	haltGuardControllers(t, f)
-	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -203,10 +203,10 @@ func unpinnedProjectSpecDraftFixture(t *testing.T) (*crossRepoRatifyFixture, con
 	}})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, wt.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: intake.ArchitectAgent, Revision: 1, Project: wt.Project(), Workstream: host, At: f.s.now(), Actor: lifecycle.ProjectSpecDraftActor, Cause: "project-spec-draft"}, Role: intake.ArchitectRole, ThreadID: intake.ArchitectThread}))
-	fixturekit.Must(t, f.s.enqueueProjectSpecDraft(ctx, wt, g, host, []trace.CrossRepoMember{
+	fixturekit.Must(t, f.s.lifecycle().EnqueueProjectSpecDraft(ctx, wt, g, host, []trace.CrossRepoMember{
 		{Workstream: f.stream1, Project: mustRepo(t, f.s, f.project)},
 		{Workstream: f.stream2, Project: mustRepo(t, f.s, f.project2)},
-	}, "project-spec-draft-1"))
+	}, lifecycle.ProjectSpecDraftInput{Turn: "project-spec-draft-1"}))
 	fixturekit.Must(t, wt.Close())
 	return f, id, g
 }
@@ -249,7 +249,7 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 		t.Fatal("guard mechanically refreshed the contract")
 	}
 
-	fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	wt, err = trace.OpenWorkgroupAuthority(f.s.current().Root, id)
 	fixturekit.Must(t, err)
 	state, err := wt.Workflow(host, lifecycle.ProjectSpecDraftSubject)
@@ -270,7 +270,7 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 		return nil
 	}
 	for range 2 {
-		if err := f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id); !errors.Is(err, stop) {
+		if err := f.s.lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id); !errors.Is(err, stop) {
 			t.Fatalf("redraft request: %v", err)
 		}
 	}
@@ -326,7 +326,7 @@ func TestProjectSpecDraftSupersedesUnpinnedOutput(t *testing.T) {
 				{Workstream: f.stream2, ContractCriteria: []int{1}},
 			}})
 			fixturekit.Must(t, err)
-			output := filepath.Join(f.s.projectSpecTurnDirectoryFor(host), "project-spec-draft-1", "output")
+			output := filepath.Join(f.s.lifecycle().ProjectSpecTurnDirectoryFor(host), "project-spec-draft-1", "output")
 			fixturekit.Must(t, os.MkdirAll(output, 0700))
 			fixturekit.Must(t, os.WriteFile(filepath.Join(output, "project-spec.json"), data, 0600))
 			spec := strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
@@ -344,7 +344,7 @@ func TestProjectSpecDraftSupersedesUnpinnedOutput(t *testing.T) {
 			f.start(t)
 			haltGuardControllers(t, f)
 			for range 2 {
-				if err := f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id); !errors.Is(err, stop) {
+				if err := f.s.lifecycle().DraftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id); !errors.Is(err, stop) {
 					t.Fatalf("pinned replacement request: %v", err)
 				}
 			}
@@ -416,7 +416,7 @@ func TestProjectSpecContractGuardPinsMidRedraftEdits(t *testing.T) {
 				return nil
 			}
 			repo := mustRepo(t, f.s, f.project)
-			err := f.s.draftProjectSpecIfReady(context.Background(), repo, id)
+			err := f.s.lifecycle().DraftProjectSpecIfReady(context.Background(), repo, id)
 			if interruption == "none" {
 				fixturekit.Must(t, err)
 			} else if !errors.Is(err, stop) {
@@ -438,7 +438,7 @@ func TestProjectSpecContractGuardPinsMidRedraftEdits(t *testing.T) {
 				haltGuardControllers(t, f)
 				f.s.clearBoundary()
 				if interruption != "recorded" {
-					fixturekit.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
+					fixturekit.Must(t, f.s.lifecycle().DraftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
 				}
 			}
 			packet, err := f.c.Packet(context.Background(), f.stream1)
@@ -497,7 +497,7 @@ func TestProjectSpecContractGuardFailureAndRetry(t *testing.T) {
 		return &agent.Result{ClaudeID: "empty-redraft", ResultText: "No delivery", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.Mu.Unlock()
-	fixturekit.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.lifecycle().DraftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
 	assertGuardRefusal(t, f, id, 2, "ended without delivering")
 	runRefresh(t, f)
 	if !reflect.DeepEqual(refreshDocument(t, f, id), old) {
@@ -529,7 +529,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 	}
 	repo := mustRepo(t, f.s, f.project)
 	for range lifecycle.ProjectSpecDraftAttempts + 2 {
-		fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+		fixturekit.Must(t, f.s.lifecycle().DraftProjectSpecIfReady(ctx, repo, id))
 	}
 	if refused.Load() != lifecycle.ProjectSpecDraftAttempts || !reflect.DeepEqual(refreshDocument(t, f, id), old) {
 		t.Fatalf("guarded redraft did not stop after %d refusals: calls=%d", lifecycle.ProjectSpecDraftAttempts, refused.Load())
@@ -568,7 +568,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 		t.Fatalf("chief's request not taken: %+v", out)
 	}
 	for range 2 {
-		fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+		fixturekit.Must(t, f.s.lifecycle().DraftProjectSpecIfReady(ctx, repo, id))
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("requested redraft ran %d times", calls.Load())

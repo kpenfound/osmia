@@ -42,15 +42,11 @@ func gateJevConfig(key string) string {
 	return fmt.Sprintf("[jev]\napi_key_env = %q\ntimeout = \"20s\"\n", key)
 }
 
-// gateScans counts the scans after which the gate worker had no gate in
-// flight, the passes a test waits for to show that Jev is not asked again.
 func gateScans() (*atomic.Int64, func(*Options)) {
 	scans := &atomic.Int64{}
 	return scans, func(o *Options) { o.gateScanned = func() { scans.Add(1) } }
 }
 
-// awaitGateScans waits for two more idle scans, one of which began after the
-// call.
 func awaitGateScans(t *testing.T, scans *atomic.Int64) {
 	t.Helper()
 	intakefixture.AwaitFurtherPasses(t, scans, 2)

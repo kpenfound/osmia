@@ -53,7 +53,7 @@ func (c *contestFixture) contest(t *testing.T) trace.Transition {
 	t.Helper()
 	return intakefixture.MissingVerdictContest(t, c.state, func(ctx context.Context, state trace.WorkflowState) error {
 		return c.r.one(ctx, c.stream, "resume", state, false)
-	}, func() { captureTurn(t, c.f, c.repo, c.stream, intake.ReviewerAgent("resume"), nil) }, func() (trace.Transition, bool, error) { return service.TestUnitContest(c.repo, c.stream, "resume") })
+	}, func() { captureTurn(t, c.f, c.repo, c.stream, intake.ReviewerAgent("resume"), nil) }, func() (trace.Transition, bool, error) { return execution.UnitContest(c.repo, c.stream, "resume") })
 }
 
 func (c *contestFixture) resolve(t *testing.T, input string) string {
@@ -63,7 +63,7 @@ func (c *contestFixture) resolve(t *testing.T, input string) string {
 }
 
 func decideContest(repo *trace.Repository, stream config.WorkstreamID, unit string) {
-	contest, contested, err := service.TestUnitContest(repo, stream, unit)
+	contest, contested, err := execution.UnitContest(repo, stream, unit)
 	if err != nil || !contested {
 		return
 	}
@@ -110,10 +110,10 @@ func TestChiefOfStaffResolvesAContestOnTheOwnersBehalf(t *testing.T) {
 	fixturekit.Must(t, c.r.one(context.Background(), c.stream, "resume", state, false))
 	th, err := c.repo.Thread(c.stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
-	if prompt := th.Turns[len(th.Turns)-1].Request.Prompt; th.Turns[len(th.Turns)-1].Request.TurnID != service.TestReviewTurnID("resume", state.Version) || !strings.Contains(prompt, note) || !strings.Contains(prompt, "chief of staff ruled review") {
+	if prompt := th.Turns[len(th.Turns)-1].Request.Prompt; th.Turns[len(th.Turns)-1].Request.TurnID != execution.ReviewTurnID("resume", state.Version) || !strings.Contains(prompt, note) || !strings.Contains(prompt, "chief of staff ruled review") {
 		t.Fatalf("the resumed review lacks the ruling:\n%s", prompt)
 	}
-	actions, err := service.TestChiefActions(c.repo, c.stream)
+	actions, err := service.ChiefActions(c.repo, c.stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 1 || actions[0].Kind != "action" || actions[0].Turn != "events_1" || actions[0].Text != "Resolved contested unit resume: its reviewer reviews the candidate again. "+note {
 		t.Fatalf("conversation actions %+v", actions)
@@ -150,7 +150,7 @@ func TestChiefOfStaffRaisesWhatItCannotResolve(t *testing.T) {
 	if left, err := execution.ChiefRulingsLeft(c.repo, c.stream, "resume"); err != nil || left != execution.ChiefContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
-	actions, err := service.TestChiefActions(c.repo, c.stream)
+	actions, err := service.ChiefActions(c.repo, c.stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 4 || actions[3].Text != "Raised contested unit resume to you: "+escalation {
 		t.Fatalf("conversation actions %+v", actions)
@@ -172,7 +172,7 @@ func TestChiefViewShowsWhyAUnitIsStuck(t *testing.T) {
 	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "tools/tool-refused-1.json", Content: string(data)}}))
 
 	dir := t.TempDir()
-	paths, err := service.TestStageChiefDocuments(c.repo, c.stream, dir)
+	paths, err := service.StageChiefDocuments(c.repo, c.stream, dir)
 	fixturekit.Must(t, err)
 	raw, err := os.ReadFile(filepath.Join(dir, "units", "resume", "activity.json"))
 	fixturekit.Must(t, err)
@@ -207,7 +207,7 @@ func TestConversationPlacesActionsBetweenTurns(t *testing.T) {
 	}
 	actions := []api.ConversationEntry{{Turn: "e2", Kind: "action", At: at(6)}, {Turn: "e1", Kind: "action", At: at(3)}}
 	var got []string
-	for _, e := range service.TestWithActions(entries, actions) {
+	for _, e := range service.WithActions(entries, actions) {
 		got = append(got, e.Turn+":"+e.Kind)
 	}
 	if want := "m1:message,m2:message,m1:response,e1:action,m2:response,e2:action"; strings.Join(got, ",") != want {

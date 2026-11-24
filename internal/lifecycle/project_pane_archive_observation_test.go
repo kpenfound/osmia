@@ -212,7 +212,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				if graph != "single" {
 					authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
 					fixturekit.Must(t, err)
-					entries, err := service.TestConversationEntries(authority, f.origin)
+					entries, err := service.ConversationEntries(authority, f.origin)
 					fixturekit.Must(t, err)
 					fixturekit.Must(t, authority.Close())
 					if len(entries) < len(conversation.Entries) || !slices.Equal(entries[:len(conversation.Entries)], conversation.Entries) {

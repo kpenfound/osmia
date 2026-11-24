@@ -83,7 +83,7 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 		}
 	})
 	t.Cleanup(func() { f.stop(t) })
-	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}

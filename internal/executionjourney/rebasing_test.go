@@ -8,7 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
@@ -101,13 +100,13 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	}
 	paths, err := units.paths(w)
 	fixturekit.Must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("dedupe"), service.TestMasonTurnID("dedupe"))
+	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe"))
 	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
 	fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "DEDUPE.md"), []byte("dedupe\n"), 0600))
-	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("dedupe"), service.TestMasonTurnID("dedupe")), f.clock.Now())
+	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("dedupe"), execution.MasonTurnID("dedupe")), f.clock.Now())
 	fixturekit.Must(t, err)
 	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 
@@ -331,7 +330,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 		t.Fatalf("the conflicted unit is %s", state.Value)
 	}
 	moved := slices.IndexFunc(intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
-		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == intake.UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == service.TestForemanActor
+		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == intake.UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == execution.ForemanActor
 	})
 	if moved < 0 {
 		t.Fatal("the unit's return to implementing is not recorded")

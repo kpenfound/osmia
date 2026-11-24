@@ -16,7 +16,7 @@ import (
 
 const (
 	shedSpec = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n"
-	shedPlan = `{"version":1,"units":[{"id":"resume","title":"Resume","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":["internal.store"]}]}`
+	shedPlan = `{"version":2,"units":[{"id":"resume","title":"Resume","task":"Resume", "acceptance":["spec#1 holds, shown by TestResume (new-test)"], "criteria":["spec#1"],"depends_on":[],"footprint":["internal.store"]}]}`
 	member   = "agent_committee_1"
 )
 

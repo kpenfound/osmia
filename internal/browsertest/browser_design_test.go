@@ -3,6 +3,7 @@ package browsertest
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +150,7 @@ func TestBrowserDesignReadinessAssumptionsAndStartWorkgroup(t *testing.T) {
 	}
 }
 
-func awaitBrowserDesignBrief(t *testing.T, p *page, c *Client, stream config.WorkstreamID) {
+func awaitBrowserDesignBrief(t *testing.T, p *page, c *service.Client, stream config.WorkstreamID) {
 	t.Helper()
 	brief, err := c.Design(context.Background(), stream)
 	must(t, err)
@@ -159,7 +160,7 @@ func awaitBrowserDesignBrief(t *testing.T, p *page, c *Client, stream config.Wor
 	}
 }
 
-func assertBrowserDesignSelection(t *testing.T, p *page, c *Client, stream config.WorkstreamID, started bool) {
+func assertBrowserDesignSelection(t *testing.T, p *page, c *service.Client, stream config.WorkstreamID, started bool) {
 	t.Helper()
 	w, err := c.Status(context.Background(), stream)
 	must(t, err)

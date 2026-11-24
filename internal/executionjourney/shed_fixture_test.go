@@ -75,9 +75,9 @@ func (f *shedFixture) inboxEntries(t *testing.T, stream config.WorkstreamID, kin
 	return f.scenario().InboxEntries(t, stream, kind)
 }
 
-const independentPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.trace"]}
+const independentPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]}
 ]}
 `
 
@@ -104,7 +104,7 @@ func landingReason(t *testing.T, lands *foreman, repository *trace.Repository, s
 	return intakefixture.LandingReason(t, stream, unit, approval.approval,
 		func(result service.UnitReviewResult) service.UnitReviewIdentity { return result.Identity },
 		func(ctx context.Context, stream config.WorkstreamID, in intakefixture.LandingApproval, result service.UnitReviewResult) (string, error) {
-			return lands.current(ctx, stream, service.TestLandInput{Unit: in.Unit, Review: in.Review, Candidate: in.Candidate, Base: in.Base}, result)
+			return lands.current(ctx, stream, execution.LandInput{Unit: in.Unit, Review: in.Review, Candidate: in.Candidate, Base: in.Base}, result)
 		})
 }
 
@@ -179,7 +179,7 @@ func (f *shedFixture) seedBuildingPaused(t *testing.T, target runtime.Target, gr
 
 func moveUnitNow(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit, to string) {
 	t.Helper()
-	intakefixture.MoveUnitNow(t, f.clock.Now(), service.TestForemanActor, repository, stream, unit, to)
+	intakefixture.MoveUnitNow(t, f.clock.Now(), execution.ForemanActor, repository, stream, unit, to)
 }
 
 func reloadFails(t *testing.T, c *Client, path, field string) {

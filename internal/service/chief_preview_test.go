@@ -237,8 +237,6 @@ func TestChiefPreviewEnvironmentInheritsNoCredentials(t *testing.T) {
 	}
 }
 
-// restarted previews both sources, restarts the trace, restores the images
-// into a new view and previews the unit candidate again.
 func (p *previewSource) restarted(t *testing.T) (view *isolation.FileView, result previewResult, runsBefore, runsAfter []byte) {
 	t.Helper()
 	for _, tc := range p.cases() {
@@ -354,16 +352,14 @@ func seedPreviewOperation(t *testing.T, repo *trace.Repository, scope coreadapte
 }
 
 type sharedPreview struct {
-	fake   fixturekit.PreviewCLIs
-	chief  *trace.Repository
-	target *trace.Repository
-	host   config.WorkstreamID
-	member config.WorkstreamID
-	key    string
-	image  trace.Image
-	op     previewOperation
-	// results holds what each of the resumed previews returned, with the
-	// bytes the view held and the number of images copied into it.
+	fake    fixturekit.PreviewCLIs
+	chief   *trace.Repository
+	target  *trace.Repository
+	host    config.WorkstreamID
+	member  config.WorkstreamID
+	key     string
+	image   trace.Image
+	op      previewOperation
 	results []sharedPreviewResult
 }
 
@@ -379,9 +375,6 @@ func sharedPreviewVariants(t *testing.T, check func(t *testing.T, p *sharedPrevi
 	}
 }
 
-// resumeSharedPreview records a member's preview receipt through a chief of
-// staff, abandons the chief's turn, reopens the traces and previews the same
-// call three times in the continuation turn.
 func resumeSharedPreview(t *testing.T, cross bool) *sharedPreview {
 	t.Helper()
 	fake := fixturekit.InstallPreviewCLIs(t, attachmentPNG(t))
@@ -788,8 +781,6 @@ type symlinkPreview struct {
 	commit   string
 }
 
-// newSymlinkPreview builds a feature workspace holding symlinks that leave it,
-// symlinks that stay inside it and links whose names look like options.
 func newSymlinkPreview(t *testing.T, backend string) *symlinkPreview {
 	t.Helper()
 	fake := fixturekit.InstallPreviewCLIs(t, attachmentPNG(t))

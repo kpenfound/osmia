@@ -28,7 +28,7 @@ func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 	intakefixture.Await(t, "admitted unit turn", entered)
 	wait, closeWait := serviceChanges(t, s)
 	defer closeWait()
-	requested, apiFault := s.requestChange(ctx, string(fixturekit.Stream), lifecycle.ChangeRequest{Key: "boundary-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel after this whole unit boundary."})
+	requested, apiFault := s.lifecycle().RequestChange(ctx, string(fixturekit.Stream), lifecycle.ChangeRequest{Key: "boundary-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel after this whole unit boundary."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -40,7 +40,7 @@ func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 		wait()
 		requested = currentChange(t, s, fixturekit.Stream, requested.ID)
 	}
-	approved, apiFault := s.decideChange(ctx, string(fixturekit.Stream), requested.ID, lifecycle.ChangeDecision{Revision: requested.Revision, Decision: "approve", PullRequests: "draft"})
+	approved, apiFault := s.lifecycle().DecideChange(ctx, string(fixturekit.Stream), requested.ID, lifecycle.ChangeDecision{Revision: requested.Revision, Decision: "approve", PullRequests: "draft"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}

@@ -44,7 +44,7 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	dh.ID = "kb-sources"
 	docs = append(docs, trace.Document{Header: dh, Path: "kb/sources.json", Content: "[\"old-prose-secret\"]\n"})
 	fixturekit.Must(t, repo.RecordDocuments(ctx, docs))
-	tool := service.TestProjectContext(repo, scope)
+	tool := service.ProjectContext(repo, scope)
 	call := func(in string) map[string]any {
 		t.Helper()
 		raw, err := tool.Handle(ctx, json.RawMessage(in))
@@ -101,7 +101,7 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	}
 	bad := scope
 	bad.Turn = "not-active"
-	if _, err := service.TestProjectContext(repo, bad).Handle(ctx, json.RawMessage(`{}`)); err == nil {
+	if _, err := service.ProjectContext(repo, bad).Handle(ctx, json.RawMessage(`{}`)); err == nil {
 		t.Fatal("inactive turn read project context")
 	}
 }

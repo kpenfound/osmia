@@ -31,10 +31,7 @@ import (
 // incomplete run reported no result, and Error says why. A record with status
 // "continued" holds no result at all: the final read of the push started
 // because the owner chose to continue without check results (ContinuedBy),
-// in the choice record's revision Choice. Records written by
-// local check runs have no Source; they carry the selection, command, exit
-// status, captured output and engines of that run, and Attempt links the
-// result to its start evidence.
+// in the choice record's revision Choice.
 //
 // Evidence is what a Dagger Cloud result shows about how it ran: the engine,
 // every check the statuses report for the commit, the traces of the failed
@@ -42,57 +39,42 @@ import (
 // text and parallelism, which Cloud does not report, as unavailable.
 // FlakeEvidence returns it for any record, including one written without it.
 type FinalCheckRun struct {
-	Review             int                   `json:"review"`
-	Attempt            int                   `json:"attempt,omitempty"`
-	Operation          string                `json:"operation"`
-	Commit             string                `json:"commit"`
-	Source             string                `json:"source,omitempty"`
-	PullRequest        int                   `json:"pull_request,omitempty"`
-	Push               int                   `json:"push,omitempty"`
-	PushedCommit       string                `json:"pushed_commit,omitempty"`
-	PushedAt           time.Time             `json:"pushed_at,omitzero"`
-	Status             string                `json:"status"`
-	Command            []string              `json:"command,omitempty"`
-	Selection          *CheckSelection       `json:"selection,omitempty"`
-	ExitCode           int                   `json:"exit_code"`
-	Output             string                `json:"output,omitempty"`
-	OutputRevision     int                   `json:"output_revision,omitempty"`
-	OutputPath         string                `json:"output_path,omitempty"`
-	Truncated          bool                  `json:"truncated,omitempty"`
-	Run                *api.CheckStatusRef   `json:"run,omitempty"`
-	StatusURL          string                `json:"status_url,omitempty"`
-	Counts             *api.CheckCounts      `json:"counts,omitempty"`
-	FailedChecks       []api.CheckFailure    `json:"failed_checks,omitempty"`
-	Reruns             []api.CheckRerun      `json:"reruns,omitempty"`
-	ContinuedBy        string                `json:"continued_by,omitempty"`
-	Choice             int                   `json:"choice,omitempty"`
-	Failed             []string              `json:"failed,omitempty"`
-	Flaky              []string              `json:"flaky,omitempty"`
-	TraceURL           string                `json:"trace_url,omitempty"`
-	CIIdentityFallback string                `json:"ci_identity_fallback,omitempty"`
-	Engines            *api.CheckAttribution `json:"engines,omitempty"`
-	Evidence           *api.CheckEvidence    `json:"evidence,omitempty"`
-	Error              string                `json:"error,omitempty"`
-	StartedAt          time.Time             `json:"started_at"`
-	FinishedAt         time.Time             `json:"finished_at"`
+	Review             int                 `json:"review"`
+	Operation          string              `json:"operation"`
+	Commit             string              `json:"commit"`
+	Source             string              `json:"source,omitempty"`
+	PullRequest        int                 `json:"pull_request,omitempty"`
+	Push               int                 `json:"push,omitempty"`
+	PushedCommit       string              `json:"pushed_commit,omitempty"`
+	PushedAt           time.Time           `json:"pushed_at,omitzero"`
+	Status             string              `json:"status"`
+	ExitCode           int                 `json:"exit_code"`
+	Run                *api.CheckStatusRef `json:"run,omitempty"`
+	StatusURL          string              `json:"status_url,omitempty"`
+	Counts             *api.CheckCounts    `json:"counts,omitempty"`
+	FailedChecks       []api.CheckFailure  `json:"failed_checks,omitempty"`
+	Reruns             []api.CheckRerun    `json:"reruns,omitempty"`
+	ContinuedBy        string              `json:"continued_by,omitempty"`
+	Choice             int                 `json:"choice,omitempty"`
+	Failed             []string            `json:"failed,omitempty"`
+	Flaky              []string            `json:"flaky,omitempty"`
+	TraceURL           string              `json:"trace_url,omitempty"`
+	CIIdentityFallback string              `json:"ci_identity_fallback,omitempty"`
+	Evidence           *api.CheckEvidence  `json:"evidence,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	StartedAt          time.Time           `json:"started_at"`
+	FinishedAt         time.Time           `json:"finished_at"`
 }
 
 // FlakeEvidence converts the record to the neutral evidence of its run, with
-// the run's flaky checks. A pull request record written without evidence yields
-// what its failed checks, reruns and status URL hold; a local record yields
-// what its selection, engines and output hold.
+// the run's flaky checks. A record written without evidence yields what its
+// failed checks, reruns and status URL hold.
 func (r FinalCheckRun) FlakeEvidence() api.CheckEvidence {
 	var evidence api.CheckEvidence
-	switch {
-	case r.Evidence != nil:
+	if r.Evidence != nil {
 		evidence = *r.Evidence
-	case r.Source == api.CheckSourcePullRequest:
+	} else {
 		evidence = checkrun.CloudEvidence(checkrun.CloudResult{StatusURL: r.StatusURL}, r.failedBeforeRerun(), r.Flaky)
-	default:
-		evidence = checkrun.RecordedEvidence(checkrun.RecordedLocalRun{Selection: r.Selection, Engines: r.Engines, Output: r.Output, OutputPath: r.OutputPath, OutputRevision: r.OutputRevision, TraceURL: r.TraceURL, Record: FinalChecksPath(r.Review)}, r.Flaky)
-	}
-	if r.Source != api.CheckSourcePullRequest {
-		evidence.Engines = r.Engines
 	}
 	evidence.Flaky = slices.Clone(r.Flaky)
 	return evidence
@@ -114,29 +96,6 @@ func (r FinalCheckRun) failedBeforeRerun() []api.CheckFailure {
 func FinalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k) }
 
 func FinalChecksPath(k int) string { return fmt.Sprintf("final/checks-%d.json", k) }
-
-// FinalCheckAttempt is the start record of a local check run on the rebased,
-// exported commit.
-type FinalCheckAttempt struct {
-	Review    int             `json:"review"`
-	Attempt   int             `json:"attempt"`
-	Operation string          `json:"operation"`
-	Commit    string          `json:"commit"`
-	Selection *CheckSelection `json:"selection,omitempty"`
-	StartedAt time.Time       `json:"started_at"`
-
-	// TraceURL is the Dagger Cloud trace link the attempt printed, when the
-	// start record carries one.
-	TraceURL string `json:"trace_url,omitempty"`
-}
-
-func FinalCheckAttemptDocument(review, attempt int) string {
-	return fmt.Sprintf("final-checks-%d-attempt-%d-started", review, attempt)
-}
-
-func FinalCheckAttemptPath(review, attempt int) string {
-	return fmt.Sprintf("final/checks-%d-attempt-%d-started.json", review, attempt)
-}
 
 // FinalCheckRerunRecord is the document final/checks-<k>-push-<n>-rerun.json:
 // the one rerun of the failed checks of push n, recorded before the rerun is
@@ -272,10 +231,7 @@ func (a *FinalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 		return FinalCheckRun{}, err
 	}
 	if incomplete == 0 && latest.Commit == report.Commit && latest.Status != "" {
-		switch {
-		case latest.Source == "":
-			return latest, nil
-		case found && latest.Push == push.Number && latest.PushedCommit == push.Commit:
+		if found && latest.Push == push.Number && latest.PushedCommit == push.Commit {
 			return latest, nil
 		}
 	}
@@ -649,11 +605,7 @@ func (w *finalWatch) noticeLoadMissing(ctx context.Context) error {
 // IncompleteChecksError is the error a final review's operation retries on
 // while its checks have not completed.
 func IncompleteChecksError(latest FinalCheckRun, n int, next time.Time) error {
-	because := latest.Error
-	if cloud := checkrun.DescribeAttribution(latest.Engines); cloud != "" {
-		because += "; " + strings.TrimSuffix(cloud, ".")
-	}
-	return fmt.Errorf("final review %d waits for its checks: %d runs in a row on %s did not complete, the latest because %s; the statuses are read again at %s", latest.Review, n, latest.Commit, because, next.UTC().Format(time.RFC3339))
+	return fmt.Errorf("final review %d waits for its checks: %d runs in a row on %s did not complete, the latest because %s; the statuses are read again at %s", latest.Review, n, latest.Commit, latest.Error, next.UTC().Format(time.RFC3339))
 }
 
 // IncompleteChecks returns how many of final review k's latest recorded
@@ -697,37 +649,17 @@ func FinalCheckPaths(run FinalCheckRun) []string {
 	if run.Status == "" {
 		return nil
 	}
-	paths := []string{FinalChecksPath(run.Review)}
-	if run.OutputPath != "" {
-		paths = append(paths, run.OutputPath)
-	}
-	return paths
+	return []string{FinalChecksPath(run.Review)}
 }
 
 // FinalCheckEvidence is how the final reader's prompt carries the check
 // result of the commit it reads. Every file it mentions is one of
 // FinalCheckPaths, which the reader's view holds.
 func FinalCheckEvidence(run FinalCheckRun) string {
-	if run.Source == api.CheckSourcePullRequest {
-		return pullRequestEvidence(run)
-	}
 	if run.Status == "" {
 		return "No check results exist for this commit: " + run.Error + ". You do not run checks."
 	}
-	out := fmt.Sprintf("The service ran checks on this exact commit before your read, recorded in %s; you do not run them. The run %s.", FinalChecksPath(run.Review), run.Status)
-	if run.Selection != nil {
-		out += "\n" + checkrun.DescribeSelectionRun(*run.Selection, run.Engines) + "."
-	}
-	if len(run.Command) > 0 {
-		out += "\nCommand: " + checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048)
-	}
-	if len(run.Failed) > 0 {
-		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
-	}
-	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
-		out += "\n" + flaky
-	}
-	return out + checkrun.ViewOutputEvidence(run.Output, run.OutputPath, run.Truncated)
+	return pullRequestEvidence(run)
 }
 
 // FailedChecksNotice is what the chief of staff hears of a final review whose

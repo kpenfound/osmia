@@ -6,14 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 )
 
-// Version is the current plan.json schema version. Parse also reads version 1
-// plans, whose units named a proof per criterion, as Version.
+// Version is the plan.json schema version Parse reads and Encode writes.
 const Version = 2
-
-const versionCriterionProofs = 1
 
 // ErrUnsupportedVersion reports a plan.json whose version is missing or not
 // one Parse reads.
@@ -91,9 +87,6 @@ func Parse(data []byte) (Plan, error) {
 	if head.Version == nil {
 		return Plan{}, fmt.Errorf("plan: %w: version is missing", ErrUnsupportedVersion)
 	}
-	if *head.Version == versionCriterionProofs {
-		return parseCriterionProofs(data)
-	}
 	if *head.Version != Version {
 		return Plan{}, fmt.Errorf("plan: %w %d", ErrUnsupportedVersion, *head.Version)
 	}
@@ -135,41 +128,4 @@ func normalize(p Plan) Plan {
 		out.Units = append(out.Units, u)
 	}
 	return out
-}
-
-func parseCriterionProofs(data []byte) (Plan, error) {
-	var old struct {
-		Version int `json:"version"`
-		Units   []struct {
-			ID        string `json:"id"`
-			Title     string `json:"title,omitempty"`
-			Addresses []struct {
-				Criterion string `json:"criterion"`
-				Proof     struct {
-					Kind string `json:"kind"`
-					Name string `json:"name"`
-				} `json:"proof"`
-			} `json:"addresses"`
-			DependsOn []string `json:"depends_on"`
-			Footprint []string `json:"footprint"`
-		} `json:"units"`
-	}
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&old); err != nil {
-		return Plan{}, fmt.Errorf("plan: %w", err)
-	}
-	p := Plan{Version: Version}
-	for _, o := range old.Units {
-		u := Unit{ID: o.ID, Title: o.Title, Task: o.Title, DependsOn: o.DependsOn, Footprint: o.Footprint}
-		for _, a := range o.Addresses {
-			u.Criteria = append(u.Criteria, a.Criterion)
-			u.Acceptance = append(u.Acceptance, fmt.Sprintf("%s holds, shown by %s (%s)", a.Criterion, a.Proof.Name, a.Proof.Kind))
-		}
-		if u.Task == "" && len(u.Criteria) > 0 {
-			u.Task = "Make " + strings.Join(u.Criteria, ", ") + " hold."
-		}
-		p.Units = append(p.Units, u)
-	}
-	return normalize(p), nil
 }

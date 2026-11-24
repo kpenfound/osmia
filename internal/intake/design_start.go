@@ -169,7 +169,7 @@ func DesignSelectionOf(r *trace.Repository, stream config.WorkstreamID) (DesignS
 }
 
 // DesignStartPending holds an allocation until its durable join is complete.
-// A handed design without a selection waits for the owner to choose its projects.
+// A pinned design start without a selection is still allocating it.
 func (s *Controller) DesignStartPending(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	selected, found, err := DesignSelectionOf(r, stream)
 	if err != nil {
@@ -189,9 +189,7 @@ func (s *Controller) DesignStartPending(r *trace.Repository, stream config.Works
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(docs, func(d trace.Document) bool {
-		return d.ID == DesignStartIntentDocument || (d.ID == HandedDocument && d.Source == "design:"+string(stream))
-	}), nil
+	return slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == DesignStartIntentDocument }), nil
 }
 
 // DesignStartPass reconciles the owner's handed design before any member can
@@ -224,9 +222,7 @@ func (s *Controller) DesignStartPass(ctx context.Context, r *trace.Repository) e
 			if err != nil {
 				return err
 			}
-			if !slices.ContainsFunc(docs, func(d trace.Document) bool {
-				return d.ID == DesignStartIntentDocument || (d.ID == HandedDocument && d.Source == "design:"+string(stream))
-			}) {
+			if !slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == DesignStartIntentDocument }) {
 				continue
 			}
 		}
@@ -285,7 +281,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		return err
 	}
 	if !found {
-		return s.DesignStartState(ctx, r, stream, "awaiting-projects")
+		return nil
 	}
 
 	d := &Drafter{S: s.DrafterDependencies(), Repository: r}

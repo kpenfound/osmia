@@ -32,7 +32,7 @@ func browserDesignBrief(t *testing.T, conflict bool) {
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("client\n"), 0600))
 	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "README.md")
 	demoGit(t, filepath.Dir(clone), "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
+	added, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	other := added.Project.ID
 	writeCharter(t, c, other, "1. Keep the client compatible.\n")
@@ -58,7 +58,9 @@ func browserDesignBrief(t *testing.T, conflict bool) {
 	id := opened.Design.Workstream
 	_, err = c.DesignMessage(ctx, id, "Draft the initial brief.")
 	must(t, err)
-	awaitDesignConversation(t, s, c, id, func(r ConversationResponse) bool { return len(r.Entries) == 2 && r.Entries[1].State == TurnDone })
+	awaitDesignConversation(t, s, c, id, func(r service.ConversationResponse) bool {
+		return len(r.Entries) == 2 && r.Entries[1].State == service.TurnDone
+	})
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/#workstream="+string(id)))
 	p.Await("live", `document.body.dataset.connection === 'live'`)
 	p.SelectDesign(id)
@@ -89,7 +91,9 @@ func browserDesignBrief(t *testing.T, conflict bool) {
 	p.Await("snapshot ready", `window.snapshotReady`)
 	_, err = c.DesignMessage(ctx, id, "Add Client and update the brief.")
 	must(t, err)
-	awaitDesignConversation(t, s, c, id, func(r ConversationResponse) bool { return len(r.Entries) == 4 && r.Entries[3].State == TurnDone })
+	awaitDesignConversation(t, s, c, id, func(r service.ConversationResponse) bool {
+		return len(r.Entries) == 4 && r.Entries[3].State == service.TurnDone
+	})
 	if conflict {
 		p.AwaitText("#design-feed", "Recorded brief 2.")
 		p.AwaitText("#design-brief", "Brief revision: 1")

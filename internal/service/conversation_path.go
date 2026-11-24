@@ -347,7 +347,7 @@ func (p *conversationPath) holds(repository *trace.Repository, stream config.Wor
 				return true
 			}
 			if th.Identity.Role == sessionRole {
-				mu := sessionLock(repository, stream)
+				mu := SessionLock(repository, stream)
 				if !mu.TryLock() {
 					return true
 				}
@@ -493,7 +493,7 @@ func (p *conversationPath) streams(repository *trace.Repository) ([]config.Works
 
 func (p *conversationPath) publish(ctx context.Context, repository *trace.Repository, c scheduler.Candidate) error {
 	if c.Thread.Identity.Role == sessionRole {
-		mu := sessionLock(repository, c.Workstream)
+		mu := SessionLock(repository, c.Workstream)
 		if !mu.TryLock() {
 			return nil
 		}
@@ -509,7 +509,7 @@ func (p *conversationPath) publish(ctx context.Context, repository *trace.Reposi
 				return nil
 			}
 		}
-		if err := setSessionState(ctx, repository, repository.Project(), c.Workstream, p.s.now(), "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
+		if err := SetSessionState(ctx, repository, repository.Project(), c.Workstream, p.s.now(), "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
 			return err
 		}
 	}

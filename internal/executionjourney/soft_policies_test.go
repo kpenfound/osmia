@@ -64,7 +64,7 @@ func TestTheReviewSendBackCountSetsTheDefaultOfARejectedReview(t *testing.T) {
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
 	fixturekit.Must(t, err)
 	findings := []api.ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}
-	result := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
+	result := service.UnitReviewResult{Identity: identity, Turn: execution.ReviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
 
 	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, result))
 

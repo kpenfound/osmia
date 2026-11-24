@@ -25,10 +25,10 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const landingPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
+const landingPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": ["resume"], "footprint": ["internal.trace"]}
 ]}
 `
 
@@ -69,7 +69,7 @@ func TestLandingDemonstration(t *testing.T) {
 	defer f.stop(t)
 
 	for unit, u := range landingUnits {
-		masons.Play[service.TestMasonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[execution.MasonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if u.file != "" {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), u.file), []byte("package trace\n// "+unit+"\n"), 0644); err != nil {
 					return err
@@ -84,7 +84,7 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 	demo := &landingDemo{reviews: map[string][]service.UnitReviewIdentity{}}
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("audit")] = masons.Turn
+	f.engine.Turns[execution.MasonTurnID("audit")] = masons.Turn
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range landingUnits {

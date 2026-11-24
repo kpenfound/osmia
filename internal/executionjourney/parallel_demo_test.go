@@ -6,7 +6,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
@@ -25,11 +24,11 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const demoPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "upload", "title": "Send chunks", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUpload"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.audit"]}
+const demoPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]}
 ]}
 `
 
@@ -40,7 +39,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	f, masons, passed := newParallelMasonFixtureCounting(t, 2, 4, demoPlan)
 	defer func() { f.stop(t) }()
 	recovered := intake.MasonAgent("dedupe") + "-recover-1"
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
 	masons.Play[recovered] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
@@ -81,7 +80,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	dedupeTurns := 0
 	entered := make(chan struct{})
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if intakefixture.SessionStream(req) != string(hi) {
 			return masons.Turn(ctx, req, turn, tools)
 		}
@@ -148,7 +147,7 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 	}
 	mu.Unlock()
 	th := f.thread(t, hi, intake.MasonAgent("dedupe"))
-	if len(th.Turns) != 2 || th.Turns[0].Request.TurnID != service.TestMasonTurnID("dedupe") || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != recovered || th.Turns[1].Status() != "idle" {
+	if len(th.Turns) != 2 || th.Turns[0].Request.TurnID != execution.MasonTurnID("dedupe") || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != recovered || th.Turns[1].Status() != "idle" {
 		t.Fatalf("dedupe's mason thread %+v", th.Turns)
 	}
 	workspace := filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(hi), "dedupe")
@@ -166,8 +165,8 @@ func TestParallelUnitsDemonstration(t *testing.T) {
 		t.Fatalf("dedupe of %s finished, resume of %s started and finished, audit of %s started at %v", hi, lo, hi, order)
 	}
 	for stream, ran := range map[config.WorkstreamID][]string{
-		hi: {service.TestMasonTurnID("audit"), recovered, service.TestMasonTurnID("resume"), service.TestMasonTurnID("upload")},
-		lo: {service.TestMasonTurnID("resume")},
+		hi: {execution.MasonTurnID("audit"), recovered, execution.MasonTurnID("resume"), execution.MasonTurnID("upload")},
+		lo: {execution.MasonTurnID("resume")},
 	} {
 		var got []string
 		for _, req := range masons.Requests(stream) {

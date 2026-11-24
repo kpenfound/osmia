@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/execution"
 	"reflect"
 	"testing"
 	"time"
@@ -13,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -57,7 +57,7 @@ func (f *autoArchiveFixture) mustPass() {
 
 func (f *autoArchiveFixture) deliver(pr int) api.DeliveryPublication {
 	f.t.Helper()
-	return fixturekit.RecordDeliveredPublication(f.t, f.repo, f.cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, service.TestForemanActor)
+	return fixturekit.RecordDeliveredPublication(f.t, f.repo, f.cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, execution.ForemanActor)
 }
 
 func (f *autoArchiveFixture) outcome(pr int, outcome string) {
@@ -74,7 +74,7 @@ func (f *autoArchiveFixture) publish(p api.DeliveryPublication, pr int) {
 
 func (f *autoArchiveFixture) setState(id, state string) {
 	f.t.Helper()
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: execution.ForemanActor, Cause: "fixture"}
 	_, err := f.repo.SetFeatureState(context.Background(), h, state, "fixture moves the workstream")
 	fixturekit.Must(f.t, err)
 }
@@ -109,7 +109,7 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 		f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 	}
 	auto.mustPass()
-	if resp, apiFault := owner.s.archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
+	if resp, apiFault := owner.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
 		t.Fatalf("owner archive: %+v %v", resp, apiFault)
 	}
 	chief, ok := auto.archive()
@@ -134,7 +134,7 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 	if auto.host.Finds != 0 {
 		t.Fatalf("the automatic archive looked up pull requests %d times", auto.host.Finds)
 	}
-	if resp, apiFault := auto.s.archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
+	if resp, apiFault := auto.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
 		t.Fatalf("repeated owner archive reports %+v %v", resp, apiFault)
 	}
 }
@@ -199,7 +199,7 @@ func TestAutoArchiveSkipsASession(t *testing.T) {
 	t.Parallel()
 	f := newAutoArchiveFixture(t, "auto-archive-session-")
 	session := config.WorkstreamID("w_00000000000000000000000000000b01")
-	fixturekit.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, service.TestForemanActor))
+	fixturekit.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, execution.ForemanActor))
 	f.mustPass()
 	if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(session)); apiFault == nil || f.archives() != 0 {
 		t.Fatalf("session archive: %v archives=%d", apiFault, f.archives())
@@ -223,7 +223,7 @@ func TestAutoArchiveRepeatedPassesAndOwnerArchiveFirst(t *testing.T) {
 	owner := newAutoArchiveFixture(t, "auto-archive-owner-first-")
 	owner.deliver(autoArchivePullRequest)
 	owner.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
-	if _, apiFault := owner.s.archive(string(fixturekit.Stream)); apiFault != nil {
+	if _, apiFault := owner.s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	recorded, _ := owner.archive()

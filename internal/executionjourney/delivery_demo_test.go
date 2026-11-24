@@ -30,8 +30,8 @@ func TestDeliveryDemonstration(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Resume uploads")
-	masons.Play[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Resume uploads")
+	masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}

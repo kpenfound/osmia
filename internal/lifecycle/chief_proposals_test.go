@@ -22,7 +22,7 @@ func TestAChiefMoveReturnsAReopenedWorkstreamToDelivered(t *testing.T) {
 		t.Fatalf("the first publication %+v", result)
 	}
 	p.pulls.SyncHead = true
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Repair it on this pull request."}); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Repair it on this pull request."}); apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}

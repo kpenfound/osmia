@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,7 +96,7 @@ func TestTheRequestCarriesTheNarrowQuestions(t *testing.T) {
 		t.Fatalf("pick orders %v and %v are not two orders of the same options", a, b)
 	}
 	for _, banned := range []string{"approved", "abandoned"} {
-		if contains(a, banned) {
+		if slices.Contains(a, banned) {
 			t.Fatalf("%s is offered on an exit without its authority: %v", banned, a)
 		}
 	}
@@ -275,7 +276,7 @@ func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	_, options := request(t, f.provider, 0)
-	if len(options) != 3 || contains(options, "review") || !contains(options, "revise") || !contains(options, "planned") || !contains(options, "ready") {
+	if len(options) != 3 || slices.Contains(options, "review") || !slices.Contains(options, "revise") || !slices.Contains(options, "planned") || !slices.Contains(options, "ready") {
 		t.Fatalf("options = %v", options)
 	}
 	g := newFx(t, &jevfixture.Transitions{})
@@ -284,7 +285,7 @@ func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	y.Prereq.Candidate = nil
 	route(t, g, y)
 	_, options = request(t, g.provider, 0)
-	if contains(options, "checking") {
+	if slices.Contains(options, "checking") {
 		t.Fatalf("options = %v", options)
 	}
 }
@@ -307,7 +308,7 @@ func TestTargetsFailingAPrerequisiteAreNotOffered(t *testing.T) {
 	}
 	route(t, f, x)
 	_, options := request(t, f.provider, 0)
-	if contains(options, "contested") || contains(options, "redrafted") || len(options) != 2 {
+	if slices.Contains(options, "contested") || slices.Contains(options, "redrafted") || len(options) != 2 {
 		t.Fatalf("options = %v", options)
 	}
 }
@@ -345,7 +346,7 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 		t.Fatalf("record = %+v", rec)
 	}
 	_, options := request(t, f.provider, 0)
-	if !contains(options, "approved") {
+	if !slices.Contains(options, "approved") {
 		t.Fatalf("approved is not offered with a verdict: %v", options)
 	}
 
@@ -378,7 +379,7 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 	if !res.Committed || res.State != "implementing" || res.Outcome != "fallback" || k.ran("approved") != 0 {
 		t.Fatalf("result = %+v", res)
 	}
-	if _, options := request(t, k.provider, 0); contains(options, "approved") {
+	if _, options := request(t, k.provider, 0); slices.Contains(options, "approved") {
 		t.Fatalf("approved is offered without authority: %v", options)
 	}
 }
@@ -392,7 +393,7 @@ func TestOwnerGatesOpenOnlyOnAnOwnerOrGateDecision(t *testing.T) {
 	proposal.Actor = trace.Actor{Kind: "agent", ID: "chief-of-staff"}
 	route(t, f, proposal)
 	_, options := request(t, f.provider, 0)
-	if contains(options, "abandoned") || contains(options, "approved") {
+	if slices.Contains(options, "abandoned") || slices.Contains(options, "approved") {
 		t.Fatalf("a proposal was offered a reserved target: %v", options)
 	}
 
@@ -901,7 +902,7 @@ func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 		x.Trigger = "unit.move_proposal"
 		route(t, f, x)
 		_, options := request(t, f.provider, 0)
-		if contains(options, "implementing") || contains(options, "checking") || !contains(options, "contested") {
+		if slices.Contains(options, "implementing") || slices.Contains(options, "checking") || !slices.Contains(options, "contested") {
 			t.Fatalf("options = %v", options)
 		}
 	})

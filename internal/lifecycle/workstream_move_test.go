@@ -39,7 +39,7 @@ func chiefMoveTool(t *testing.T, f *shedFixture, repo *trace.Repository, stream 
 	})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	return controls.moveWorkstream(repo, scope)
+	return controls.lifecycle().MoveWorkstream(repo, scope)
 }
 func callMove(t *testing.T, tool coreadapter.Tool, input string) string {
 	t.Helper()
@@ -80,7 +80,7 @@ func TestMoveToAssembledRerunsAFailedFinalReview(t *testing.T) {
 	}
 
 	note := "The reader stopped without a report; read the branch again."
-	out, apiFault := f.s.ownerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.AssembledState, Note: note})
+	out, apiFault := f.s.lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.AssembledState, Note: note})
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
@@ -167,7 +167,7 @@ func TestChiefOfStaffMovesAWorkstreamAndRelaysOwnerGates(t *testing.T) {
 	if in, err := delivery.DecodeFinalReview(ops[1].Operation); err != nil || in.Move != 2 {
 		t.Fatalf("the review asked for after the moves %+v %v", in, err)
 	}
-	actions, err := service.TestChiefActions(repository, stream)
+	actions, err := service.ChiefActions(repository, stream)
 	fixturekit.Must(t, err)
 	var texts []string
 	for _, action := range actions {
@@ -219,7 +219,7 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 	p.pulls.SyncHead = true
 	before, _ := p.forkBranch(t)
 
-	out, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Upstream broke resume; repair it on this pull request."})
+	out, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Upstream broke resume; repair it on this pull request."})
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
@@ -231,21 +231,21 @@ func TestReopenedDeliveredPullRequestIsRepairedOnTheSamePullRequest(t *testing.T
 	if p.feature(t) != intake.BuildingState {
 		t.Fatalf("the reopened workstream is %s", p.feature(t))
 	}
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.DeliveredState, Note: "Nothing to repair."}); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.DeliveredState, Note: "Nothing to repair."}); apiFault != nil {
 		t.Fatalf("an unchanged reopened branch did not return to delivered: %s", apiFault.Message)
 	}
 	if p.feature(t) != intake.DeliveredState {
 		t.Fatalf("the workstream is %s", p.feature(t))
 	}
 
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Repair it after all."}); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Repair it after all."}); apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	moveFeature(t, p.shedFixture, p.stream, map[string]string{"resume.go": "package demo\n// Resume after the upstream change.\n"})
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.DeliveredState, Note: "Done."}); apiFault == nil || apiFault.Code != api.Conflict || !strings.Contains(apiFault.Message, "since pull request #100 was published") {
+	if _, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.DeliveredState, Note: "Done."}); apiFault == nil || apiFault.Code != api.Conflict || !strings.Contains(apiFault.Message, "since pull request #100 was published") {
 		t.Fatalf("a changed branch returned to delivered without review: %v", apiFault)
 	}
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.AssembledState, Note: "The repair landed; review the branch."}); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.AssembledState, Note: "The repair landed; review the branch."}); apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	fixturekit.Must(t, reviewer.Pass(ctx))
@@ -281,7 +281,7 @@ func TestWorkstreamMoveRefusals(t *testing.T) {
 	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	ctx := context.Background()
 	move := func(to, note string) *api.APIError {
-		_, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: to, Note: note})
+		_, apiFault := p.s.lifecycle().OwnerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: to, Note: note})
 		return apiFault
 	}
 	if apiFault := move("merged", "x"); apiFault == nil || apiFault.Code != api.Validation {
@@ -305,7 +305,7 @@ func TestWorkstreamMoveRefusals(t *testing.T) {
 	}
 	p.pulls.Prs[0].State = "closed"
 	fm := cadenceForeman(p.shedFixture, p.repository, "1m")
-	if _, apiFault := p.s.rebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
+	if _, apiFault := p.s.lifecycle().RebaseWorkstream(ctx, string(p.stream)); apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	passDrifts(t, fm)
@@ -346,15 +346,15 @@ func TestDriftResolutionStuckTurnsHoldTheDriftRebase(t *testing.T) {
 	}{
 		{name: "mason", want: "its mason's turn " + lifecycle.DriftResolveTurnID(1, 1) + " failed: the backend crashed",
 			stick: func(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, _ drifter, _ coreadapter.Operation) {
-				failedDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent)
+				failedDriftTurn(t, f, repository, stream, intake.DriftMasonAgent)
 			}},
 		{name: "reviewer", want: "its reviewer's turn " + lifecycle.DriftReviewTurnID(1, 1) + " ended without recording a verdict",
 			stick: func(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, d drifter, op coreadapter.Operation) {
 				w := resolutionWorkspace(t, f, stream)
 				fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-				completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
+				completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Resolved"))
 				awaitResolution(t, f.s, d, stream, op, "review 1")
-				completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, nil)
+				completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, nil)
 			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -375,7 +375,7 @@ func TestDriftResolutionStuckTurnsHoldTheDriftRebase(t *testing.T) {
 			if tip := featureTip(t, f, stream); tip != before {
 				t.Fatalf("a held drift rebase moved the feature branch to %s", tip)
 			}
-			if k, apiFault := f.s.handBackDrift(context.Background(), repository, stream, "Keep both owners.", intake.ChiefActor, "", f.s.now()); apiFault != nil || k != 2 {
+			if k, apiFault := f.s.lifecycle().HandBackDrift(context.Background(), repository, stream, "Keep both owners.", intake.ChiefActor, "", f.s.now()); apiFault != nil || k != 2 {
 				t.Fatalf("the handback of the stuck drift rebase %d %v", k, apiFault)
 			}
 		})
@@ -401,7 +401,7 @@ func TestReviewersTreatRebaseChangesAsInScope(t *testing.T) {
 	}
 	content, err := json.Marshal(api.UnitRebase{Unit: "resume", Rebase: 1, Onto: "tip", Conflicts: []string{"CODEOWNERS"}})
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: execution.RebaseDocument("resume"), Revision: 1, Project: f.project, Workstream: stream, Unit: "resume", At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "rebase"}, Path: "units/resume/rebase.json", Content: string(content)}}))
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: execution.RebaseDocument("resume"), Revision: 1, Project: f.project, Workstream: stream, Unit: "resume", At: fixturekit.DemoStart, Actor: execution.ForemanActor, Cause: "rebase"}, Path: "units/resume/rebase.json", Content: string(content)}}))
 	if conflicts, err := lifecycle.UnitRebaseConflicts(repository, stream, "resume", "tip"); err != nil || !slices.Equal(conflicts, []string{"CODEOWNERS"}) {
 		t.Fatalf("conflicts of the rebase onto the candidate's base %v %v", conflicts, err)
 	}

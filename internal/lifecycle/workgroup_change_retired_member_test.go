@@ -93,7 +93,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	})
 
 	changeArchived.Store(true)
-	refused, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "frozen-slice", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests in every member."})
+	refused, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "frozen-slice", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests in every member."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -107,7 +107,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	assertFrozenSliceRefusal(t, f, survivor, refused.ID, archived)
 
 	changeArchived.Store(false)
-	c, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "survivor-repair", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
+	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "survivor-repair", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -129,7 +129,7 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 	if after, _ := trace.SliceFor(c.After, archived); !intakefixture.EqualJSONTest(before, after) {
 		t.Fatal("presented proposal changed the archived member's slice")
 	}
-	if _, apiFault := f.s.decideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault != nil {
+	if _, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"}); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	lifecycleAwait(t, f, "survivor amendment applied", func() bool {
@@ -170,10 +170,10 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 	ctx := context.Background()
 	f, archived, survivor := archivedMemberFixture(t)
 	defer f.stop(t)
-	if _, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-archived", Kind: "cancel", Scope: "workstream", Workstream: archived, Change: "Cancel the archived member."}); apiFault == nil || !strings.Contains(apiFault.Message, "archived and already terminal") {
+	if _, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-archived", Kind: "cancel", Scope: "workstream", Workstream: archived, Change: "Cancel the archived member."}); apiFault == nil || !strings.Contains(apiFault.Message, "archived and already terminal") {
 		t.Fatalf("cancelling an archived member: %v", apiFault)
 	}
-	c, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-survivor", Kind: "cancel", Scope: "workstream", Workstream: survivor, Change: "Cancel the open member."})
+	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-survivor", Kind: "cancel", Scope: "workstream", Workstream: survivor, Change: "Cancel the open member."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -188,7 +188,7 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 		c = currentChange(t, f.s, f.origin, c.ID)
 		return c.State == "presented"
 	})
-	if _, apiFault := f.s.decideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "draft"}); apiFault != nil {
+	if _, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "draft"}); apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	lifecycleAwait(t, f, "survivor cancellation applied", func() bool {
@@ -254,7 +254,7 @@ func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
 		}
 	})
 	changeArchived.Store(true)
-	c, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retried", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
+	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retried", Kind: "amend", Scope: "workgroup", Change: "Refuse invalid diagnostic requests."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -264,7 +264,7 @@ func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
 	first := drafts.Load()
 
 	changeArchived.Store(false)
-	retried, apiFault := f.s.retryChange(ctx, f.origin, c.ID)
+	retried, apiFault := f.s.lifecycle().RetryChange(ctx, f.origin, c.ID)
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
@@ -278,7 +278,7 @@ func TestAFailedChangeIsRetriedAndDraftsAgain(t *testing.T) {
 	if drafts.Load() <= first {
 		t.Fatalf("the retry drafted nothing: %d drafts before, %d after", first, drafts.Load())
 	}
-	if _, apiFault := f.s.retryChange(ctx, f.origin, c.ID); apiFault == nil || !strings.Contains(apiFault.Message, "only a change still drafting or debating") {
+	if _, apiFault := f.s.lifecycle().RetryChange(ctx, f.origin, c.ID); apiFault == nil || !strings.Contains(apiFault.Message, "only a change still drafting or debating") {
 		t.Fatalf("a presented change was retried: %v", apiFault)
 	}
 }

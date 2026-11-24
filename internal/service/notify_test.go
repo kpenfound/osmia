@@ -193,7 +193,7 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 	for _, rec := range n.ledger.Notifications {
 		states[rec.State]++
 	}
-	if states[notificationSent] != 1 || states[notificationDropped] != 1 || len(n.ledger.Notifications) != 2 {
+	if states[NotificationSent] != 1 || states[NotificationDropped] != 1 || len(n.ledger.Notifications) != 2 {
 		t.Fatalf("ledger %+v", n.ledger.Notifications)
 	}
 }
@@ -214,7 +214,7 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 		t.Fatalf("posts for a pause open before the webhook: %q", got)
 	}
 	for _, rec := range n.ledger.Notifications {
-		if rec.State != notificationSkipped {
+		if rec.State != NotificationSkipped {
 			t.Fatalf("pause open before the webhook: %+v", rec)
 		}
 	}
@@ -238,18 +238,18 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	if got := hook.received(); len(got) != 1 {
 		t.Fatalf("posts with no daily budget configured: %q", got)
 	}
-	if rec := n.ledger.Notifications[notificationKey(fixturekit.Project, e)]; rec == nil || rec.State != notificationPending {
+	if rec := n.ledger.Notifications[NotificationKey(fixturekit.Project, e)]; rec == nil || rec.State != notificationPending {
 		t.Fatalf("the decided entry with no daily budget configured: %+v", rec)
 	}
 	if d := n.diagnostics(); !slices.ContainsFunc(d, func(d Diagnostic) bool {
-		return d.Message == "no daily budget is configured; the budget pause notification waits until one is"
+		return d.Message == "no daily budget is configured; the budget pause Notification waits until one is"
 	}) {
 		t.Fatalf("diagnostics %+v", d)
 	}
 
 	fixturekit.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
 	n.pass(ctx)
-	if rec := n.ledger.Notifications[notificationKey(fixturekit.Project, e)]; rec.State != notificationDropped {
+	if rec := n.ledger.Notifications[NotificationKey(fixturekit.Project, e)]; rec.State != NotificationDropped {
 		t.Fatalf("the decided entry after the pause cleared: %+v", rec)
 	}
 }

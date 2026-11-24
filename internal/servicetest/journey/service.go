@@ -6,6 +6,8 @@ import (
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -267,15 +269,11 @@ func (f *Foreman) Apply(ctx context.Context, o coreadapter.Operation) (coreadapt
 	return f.Driver().Apply(ctx, o)
 }
 
-func (f *Foreman) Inspect(ctx context.Context, o coreadapter.Operation) (coreadapter.Observation, error) {
-	return f.Driver().Inspect(ctx, o)
-}
-
 func (f *Foreman) Approval(w config.WorkstreamID, u string, v int) (trace.Document, service.UnitReviewResult, bool, error) {
 	return f.Driver().Approval(w, u, v)
 }
 
-func (f *Foreman) Current(ctx context.Context, w config.WorkstreamID, in service.TestLandInput, r service.UnitReviewResult) (string, error) {
+func (f *Foreman) Current(ctx context.Context, w config.WorkstreamID, in execution.LandInput, r service.UnitReviewResult) (string, error) {
 	return f.Driver().Current(ctx, w, in, r)
 }
 
@@ -335,7 +333,7 @@ type Publisher struct {
 	Repository *trace.Repository
 }
 
-func (p *Publisher) Refuse(ctx context.Context, w config.WorkstreamID, in service.TestPublishInput, reason string) (coreadapter.OperationResult, error) {
+func (p *Publisher) Refuse(ctx context.Context, w config.WorkstreamID, in delivery.PublishInput, reason string) (coreadapter.OperationResult, error) {
 	return service.RefusePublicationForTest(ctx, p.S.Core(), p.Repository, w, in, reason)
 }
 
@@ -412,7 +410,7 @@ func (s *Service) DispatchHolds(c *config.Config, r *trace.Repository) func(sche
 	return service.InspectForTest(s.Core()).DispatchHolds(c, r)
 }
 
-func (s *Service) Holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+func (s *Service) Holds(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
 	return service.InspectForTest(s.Core()).Holds(p, r, c)
 }
 

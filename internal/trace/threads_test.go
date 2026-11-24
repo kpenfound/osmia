@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
@@ -49,13 +50,32 @@ func claimTurn(t *testing.T, r *Repository, token string) QueuedTurn {
 	}
 	return q
 }
-func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
-	ctx := context.Background()
+func newThread(t *testing.T) (*Repository, config.Root, config.Project, Agent) {
+	t.Helper()
 	r, root, p := create(t)
 	a := threadAgent()
-	if err := r.CreateThread(ctx, a); err != nil {
+	if err := r.CreateThread(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
+	return r, root, p, a
+}
+
+func capturedThread(t *testing.T) (*Repository, config.Root, config.Project, Agent, QueuedTurn, TurnResponse) {
+	t.Helper()
+	r, root, p, a := newThread(t)
+	enqueue(t, r, "one")
+	enqueue(t, r, "two")
+	q := claimTurn(t, r, "claim1")
+	res := threadResponse(q)
+	if err := r.CaptureTurn(context.Background(), "claim1", res); err != nil {
+		t.Fatal(err)
+	}
+	return r, root, p, a, q, res
+}
+
+func TestCreateThreadTwiceChangesNothingAndARebindConflicts(t *testing.T) {
+	r, _, _, a := newThread(t)
+	ctx := context.Background()
 	if err := r.CreateThread(ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +84,10 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	if err := r.CreateThread(ctx, changed); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rebind: %v", err)
 	}
+}
+
+func TestEnqueueTwiceKeepsTheSequenceAndAChangedRequestConflicts(t *testing.T) {
+	r, _, _, _ := newThread(t)
 	enqueue(t, r, "one")
 	enqueue(t, r, "two")
 	if q := enqueue(t, r, "one"); q.Sequence != 1 {
@@ -71,17 +95,29 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	}
 	req := threadRequest("one")
 	req.Prompt = "replacement"
-	if _, err := r.EnqueueTurn(ctx, req); !errors.Is(err, ErrConflict) {
+	if _, err := r.EnqueueTurn(context.Background(), req); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed enqueue: %v", err)
 	}
+}
+
+func TestClaimRetryReturnsTheSameClaimAndAnActiveClaimRefusesAnother(t *testing.T) {
+	r, _, _, _ := newThread(t)
+	enqueue(t, r, "one")
+	enqueue(t, r, "two")
 	q := claimTurn(t, r, "claim1")
 	if again := claimTurn(t, r, "claim1"); !reflect.DeepEqual(q, again) {
 		t.Fatalf("claim retry: %#v", again)
 	}
-	if _, err := r.ClaimTurn(ctx, streamID, "mason", "claim2", "/session", at); !errors.Is(err, ErrClaimed) {
+	if _, err := r.ClaimTurn(context.Background(), streamID, "mason", "claim2", "/session", at); !errors.Is(err, ErrClaimed) {
 		t.Fatalf("active claim: %v", err)
 	}
-	enqueue(t, r, "three")
+}
+
+func TestCaptureTurnIsIdempotentAndRefusesAForeignOrChangedResult(t *testing.T) {
+	r, _, _, _ := newThread(t)
+	ctx := context.Background()
+	enqueue(t, r, "one")
+	q := claimTurn(t, r, "claim1")
 	if err := r.CompleteTurn(ctx, streamID, "mason", "one", "claim1", at); !errors.Is(err, ErrClaim) {
 		t.Fatalf("uncaptured completion: %v", err)
 	}
@@ -100,11 +136,19 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	if err := r.CaptureTurn(ctx, "claim1", changedRes); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed result: %v", err)
 	}
+}
+
+func TestThreadRecordsCannotBeAppendedDirectly(t *testing.T) {
+	r, _, _, a, q, res := capturedThread(t)
 	for _, rec := range []Record{a, q.Request, res} {
-		if err := r.Append(ctx, rec); !errors.Is(err, ErrConflict) {
+		if err := r.Append(context.Background(), rec); !errors.Is(err, ErrConflict) {
 			t.Fatalf("unmanaged append: %v", err)
 		}
 	}
+}
+
+func TestCapturedThreadStateSurvivesReopen(t *testing.T) {
+	r, root, p, _, _, res := capturedThread(t)
 	before := mustThread(t, r)
 	if before.Status != "captured" || before.Active != "one" || before.Session.ID != "continued" {
 		t.Fatalf("captured state: %#v", before)
@@ -118,9 +162,15 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	if got := mustThread(t, r); !reflect.DeepEqual(got, before) {
 		t.Fatalf("reopen: %#v", got)
 	}
-	if err := r.CaptureTurn(ctx, "claim1", res); err != nil {
+	if err := r.CaptureTurn(context.Background(), "claim1", res); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCompleteTurnTwiceFreesTheThreadForTheNextTurn(t *testing.T) {
+	r, _, _, _, q, _ := capturedThread(t)
+	ctx := context.Background()
+	enqueue(t, r, "three")
 	for range 2 {
 		if err := r.CompleteTurn(ctx, streamID, "mason", "one", "claim1", at.Add(2*time.Second)); err != nil {
 			t.Fatal(err)
@@ -137,6 +187,11 @@ func TestThreadRoundTripAndDuplicateCalls(t *testing.T) {
 	if next := claimTurn(t, r, "claim2"); next.Request.TurnID != "two" {
 		t.Fatalf("next request: %#v", next)
 	}
+}
+
+func TestThreadRecordsAreReadBackByTheirOwner(t *testing.T) {
+	r, _, _, _, _, res := capturedThread(t)
+	enqueue(t, r, "three")
 	requests, err := Read[TurnRequest](r, streamID)
 	if err != nil || len(requests) != 3 {
 		t.Fatalf("owned requests: %v %v", requests, err)

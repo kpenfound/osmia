@@ -21,7 +21,7 @@ import (
 
 func driftRecords(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []service.DriftRebase {
 	t.Helper()
-	return intakefixture.DriftRecords[service.DriftRebase](t, repository, stream, service.TestDriftDocument)
+	return intakefixture.DriftRecords[service.DriftRebase](t, repository, stream, lifecycle.DriftDocument)
 }
 
 func fileAt(t *testing.T, f *shedFixture, commit, path string) string {
@@ -36,7 +36,7 @@ func parentOf(t *testing.T, f *shedFixture, commit string) string {
 
 func settleOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) coreadapter.OperationResult {
 	t.Helper()
-	return intakefixture.SettleOperation(t, s.now(), service.TestForemanActor, repository, stream, op, r)
+	return intakefixture.SettleOperation(t, s.now(), execution.ForemanActor, repository, stream, op, r)
 }
 
 func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapter.Operation {
@@ -52,7 +52,7 @@ var (
 
 func awaitResolution(t *testing.T, s *Service, d drifter, stream config.WorkstreamID, op coreadapter.Operation, want string) {
 	t.Helper()
-	if result, err := attemptOperation(t, s, d.repository, stream, op, d); !errors.Is(err, service.TestErrDriftAwaits) || !strings.Contains(err.Error(), want) {
+	if result, err := attemptOperation(t, s, d.repository, stream, op, d); !errors.Is(err, lifecycle.ErrDriftAwaits) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("the drift rebase did not await %q: %+v %v", want, result, err)
 	}
 }
@@ -72,7 +72,7 @@ func conflictedDrift(t *testing.T, f *shedFixture, d drifter, stream config.Work
 func driftResolutionDiff(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) string {
 	t.Helper()
 	return intakefixture.DriftResolutionDiff(t, func() (coreadapter.Tool, error) {
-		return service.TestDriftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: service.TestDriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1), Role: intake.ReviewerRole})
+		return lifecycle.DriftDiffTool(context.Background(), f.s.cfg, repository, coreadapter.Scope{Workstream: string(stream), Thread: intake.DriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1), Role: intake.ReviewerRole})
 	})
 }
 
@@ -90,7 +90,7 @@ func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string
 
 func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
-	return intakefixture.Workspace(t, intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, backendOf(t, f, stream)), stream)
+	return intakefixture.Workspace(t, intake.Workspaces(f.s.cfg, intake.DriftsDirectory, backendOf(t, f, stream)), stream)
 }
 
 func resolvedDone(outcome string) *coreadapter.Outcome {

@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -116,7 +117,7 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	if saved.Content != content || saved.Revision != read.Revision+1 {
 		t.Fatalf("charter saved through management: %+v", saved)
 	}
-	p.Await("charter save used the revision read", `managementWrites.some(r => r.method === 'PUT' && r.path === `+quote(Prefix+"/projects/charter/"+string(project))+` && r.body.revision === `+strconv.Itoa(read.Revision)+`)`)
+	p.Await("charter save used the revision read", `managementWrites.some(r => r.method === 'PUT' && r.path === `+quote(service.Prefix+"/projects/charter/"+string(project))+` && r.body.revision === `+strconv.Itoa(read.Revision)+`)`)
 	p.AwaitText("#charter-state", "2 rules")
 
 	p.Await("no knowledge extraction is offered", `document.querySelector(`+quote(row+` [data-field=extraction]`)+`) === null && document.querySelector(`+quote(row+` [data-action=extract]`)+`) === null`)
@@ -174,7 +175,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	must(t, err)
 	p.Eval(`managementConfigEvents.length = 0`, nil)
 	const external = "1. Follow the latest owner rule.\n"
-	next, err := c.EditCharter(ctx, project, CharterEdit{Revision: initial.Revision, Content: external})
+	next, err := c.EditCharter(ctx, project, service.CharterEdit{Revision: initial.Revision, Content: external})
 	must(t, err)
 	p.Await("external charter save announced on the event stream", `managementConfigEvents.some(e => e.project === `+quote(string(project))+`)`)
 	p.Await("untouched editor follows API save and its pin", `document.querySelector('#project-edit [name=content]').value === `+quote(external)+` && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(next.Revision)))
@@ -192,7 +193,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	const draft = "1. My unsaved draft must survive.\n"
 	p.SetValue("#project-edit [name=content]", draft)
 	const remote = "1. Another client's decision wins until reread.\n"
-	other, err := c.EditCharter(ctx, project, CharterEdit{Revision: read.Revision, Content: remote})
+	other, err := c.EditCharter(ctx, project, service.CharterEdit{Revision: read.Revision, Content: remote})
 	must(t, err)
 	p.Await("dirty editor keeps draft and original pin", `!document.querySelector('#charter-changed').hidden && document.querySelector('#project-edit [name=content]').value === `+quote(draft)+` && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(read.Revision)))
 	p.Click("#project-edit [type=submit]")
@@ -204,7 +205,7 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	if got.Content != remote || got.Revision != other.Revision {
 		t.Fatalf("stale draft overwrote the other client: %+v", got)
 	}
-	latest, err := c.EditCharter(ctx, project, CharterEdit{Revision: other.Revision, Content: "1. The next external decision.\n"})
+	latest, err := c.EditCharter(ctx, project, service.CharterEdit{Revision: other.Revision, Content: "1. The next external decision.\n"})
 	must(t, err)
 	p.AwaitText("#charter-state", "revision "+strconv.Itoa(latest.Revision))
 	p.Await("draft and refusal survive refresh", `document.querySelector('#project-edit [name=content]').value === `+quote(draft)+` && document.querySelector('#project-edit .result').dataset.outcome === 'error' && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(read.Revision)))
@@ -232,7 +233,7 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	recordManagementWrites(p)
 	second := filepath.Join(t.TempDir(), "second")
 	demoGit(t, filepath.Dir(second), "init", "-q", second)
-	repos, err := c.AddProject(ctx, ProjectAddRequest{Name: "second", Upstream: "owner/second", Clone: second})
+	repos, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "second", Upstream: "owner/second", Clone: second})
 	must(t, err)
 	var repoID config.ProjectID
 	for _, repo := range repos.Project.Repos {
@@ -250,7 +251,7 @@ func TestBrowserProjectManagementFollowsExternalProjectAndRepoChanges(t *testing
 	p.Await("the chosen repo's settings", `document.querySelector('#project-config [name=upstream]')?.value === 'owner/second'`)
 	third := filepath.Join(t.TempDir(), "third")
 	demoGit(t, filepath.Dir(third), "init", "-q", third)
-	another, err := c.AddProject(ctx, ProjectAddRequest{Name: "Third", Upstream: "owner/third", Clone: third})
+	another, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "Third", Upstream: "owner/third", Clone: third})
 	must(t, err)
 	projectChoicesInclude(p, project, repoID, true, 3)
 	p.Await("API-created project in pane", `document.querySelector('#project-pane [data-project="`+string(another.Project.ID)+`"]') !== null`)

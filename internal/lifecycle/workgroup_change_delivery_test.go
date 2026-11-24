@@ -26,7 +26,7 @@ func presentDeliveryDelta(t *testing.T, p *publicationFixture) lifecycle.Workgro
 	fixturekit.Must(t, err)
 	_, err = p.repository.EnsureChiefOfStaff(ctx, p.stream, p.s.now(), intake.ServiceActor)
 	fixturekit.Must(t, err)
-	c, apiFault := p.s.requestChange(ctx, string(p.stream), lifecycle.ChangeRequest{Key: "checkpoint", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	c, apiFault := p.s.lifecycle().RequestChange(ctx, string(p.stream), lifecycle.ChangeRequest{Key: "checkpoint", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -36,8 +36,8 @@ func presentDeliveryDelta(t *testing.T, p *publicationFixture) lifecycle.Workgro
 	c.Impact, err = amendment.ClassifyImpact(c.ID, c.Before, c.After, c.Members)
 	fixturekit.Must(t, err)
 	c.State = "presented"
-	fixturekit.Must(t, p.s.saveChange(ctx, p.repository, &c))
-	c, apiFault = p.s.decideChange(ctx, string(p.stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
+	fixturekit.Must(t, p.s.lifecycle().SaveChange(ctx, p.repository, &c))
+	c, apiFault = p.s.lifecycle().DecideChange(ctx, string(p.stream), c.ID, lifecycle.ChangeDecision{Revision: c.Revision, Decision: "approve"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -65,9 +65,9 @@ func testAmendOpenPullRequest(t *testing.T, changeDescription bool) {
 	if c.Impact.Streams[0].Action != amendment.Rework {
 		t.Fatal("open PR was not classified for rework")
 	}
-	wt, g, _, close, err := p.s.changeContext(ctx, string(p.stream))
+	wt, g, _, close, err := p.s.lifecycle().ChangeContext(ctx, string(p.stream))
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, p.s.applyChange(ctx, wt, g, &c))
+	fixturekit.Must(t, p.s.lifecycle().ApplyChange(ctx, wt, g, &c))
 	close()
 	if p.feature(t) != intake.BuildingState {
 		t.Fatal("open PR did not return to the build loop")
@@ -161,10 +161,10 @@ func TestAmendMergedWorkCreatesOneFollowupAndKeepsMerge(t *testing.T) {
 	if c.Impact.Streams[0].Action != amendment.FollowUp {
 		t.Fatal("merged work was reopened")
 	}
-	wt, g, _, close, err := p.s.changeContext(ctx, string(p.stream))
+	wt, g, _, close, err := p.s.lifecycle().ChangeContext(ctx, string(p.stream))
 	fixturekit.Must(t, err)
 	defer close()
-	fixturekit.Must(t, p.s.applyChange(ctx, wt, g, &c))
+	fixturekit.Must(t, p.s.lifecycle().ApplyChange(ctx, wt, g, &c))
 	id := c.Followups[p.stream]
 	if id == "" || c.State == "applied" {
 		t.Fatal("follow-up must wait for its seal")
@@ -183,7 +183,7 @@ func TestAmendMergedWorkCreatesOneFollowupAndKeepsMerge(t *testing.T) {
 			t.Fatalf("follow-up seal: %+v", result)
 		}
 	}
-	fixturekit.Must(t, p.s.applyChange(ctx, wt, g, &c))
+	fixturekit.Must(t, p.s.lifecycle().ApplyChange(ctx, wt, g, &c))
 	if c.State != "applied" {
 		t.Fatal("follow-up did not become ready")
 	}
@@ -195,7 +195,7 @@ func TestAmendMergedWorkCreatesOneFollowupAndKeepsMerge(t *testing.T) {
 	}
 	close()
 	p.reopen(t)
-	wt, g, _, close, err = p.s.changeContext(ctx, string(id))
+	wt, g, _, close, err = p.s.lifecycle().ChangeContext(ctx, string(id))
 	fixturekit.Must(t, err)
 	defer close()
 	c = currentChange(t, p.s, id, c.ID)

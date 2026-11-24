@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
@@ -222,7 +223,7 @@ func plantUnit(t *testing.T, repository *trace.Repository, stream config.Workstr
 	subject := trace.UnitSubject(unit)
 	state, err := repository.Workflow(stream, subject)
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject + "-planted-" + to, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "test"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject + "-planted-" + to, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "test"}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: to, Reason: "the test moves it"}})
 	fixturekit.Must(t, err)
@@ -240,7 +241,7 @@ func plantDocument(t *testing.T, repository *trace.Repository, stream config.Wor
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	fixturekit.Must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "test"},
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "test"},
 		Path: path, Content: string(content) + "\n"}
 	fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{doc}))
 	return doc
@@ -279,7 +280,7 @@ func TestJujutsuCandidateHoldingAConflictIsNeitherReviewedNorLanded(t *testing.T
 		t.Fatal("the refused review is not recorded")
 	}
 
-	review := plantDocument(t, repository, stream, "audit", service.TestReviewDocument("audit"), "units/audit/review.json", service.UnitReviewResult{
+	review := plantDocument(t, repository, stream, "audit", execution.ReviewDocument("audit"), "units/audit/review.json", service.UnitReviewResult{
 		Identity: service.UnitReviewIdentity{Subject: string(stream) + "/audit", Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: landed, SpecRevision: fmt.Sprint(latest.Revision.Spec), PlanRevision: fmt.Sprint(latest.Revision.Plan)}, Report: fmt.Sprintf("%s revision %d", report.Path, report.Revision), Seal: latest.Seal},
 		Turn:     "test", Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
 	plantUnit(t, repository, stream, "audit", intake.UnitApproved)
@@ -315,7 +316,7 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
 	w := resolutionWorkspace(t, f, stream)
-	g := intakefixture.ProviderOf(t, service.TestDriftWorkspaces(f.s.cfg, repository), stream)
+	g := intakefixture.ProviderOf(t, lifecycle.DriftWorkspaces(f.s.cfg, repository), stream)
 	if _, ok := g.(*workspace.Jujutsu); !ok {
 		t.Fatalf("the drift workspaces are %T", g)
 	}
@@ -329,7 +330,7 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 			t.Fatalf("the resolution workspace's CODEOWNERS lacks %q:\n%s", want, data)
 		}
 	}
-	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
+	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	for _, want := range []string{"- CODEOWNERS\n", `the lines between "<<<<<<<" and "|||||||" are the branch as rebased onto upstream so far`, `those between "=======" and ">>>>>>>" are the commit being replayed`} {
 		if !strings.Contains(th.Turns[0].Request.Prompt, want) {
@@ -337,24 +338,24 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 		}
 	}
 
-	left := completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Left it"))
+	left := completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Left it"))
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{service.TestDriftResolveTurnID(1, 1), fmt.Sprintf("%s-markers-%d", service.TestDriftMasonAgent, left.Sequence)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), fmt.Sprintf("%s-markers-%d", intake.DriftMasonAgent, left.Sequence)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
-	if _, err := repository.Thread(stream, service.TestDriftReviewerAgent); !errors.Is(err, os.ErrNotExist) {
+	if _, err := repository.Thread(stream, intake.DriftReviewerAgent); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a resolution holding its conflict went to review: %v", err)
 	}
 
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	records := driftRecords(t, repository, stream)
 	candidate := records[len(records)-1].Candidate
 	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || parentOf(t, f, candidate) != upstream {
 		t.Fatalf("the resolved candidate %s stores %v: %v", candidate, stored, err)
 	}
-	review, err := repository.Thread(stream, service.TestDriftReviewerAgent)
+	review, err := repository.Thread(stream, intake.DriftReviewerAgent)
 	fixturekit.Must(t, err)
 	prompt := review.Turns[0].Request.Prompt + driftResolutionDiff(t, f, repository, stream)
 	if strings.Contains(prompt, "<<<<<<<") || strings.Contains(prompt, ">>>>>>>") || strings.Contains(prompt, "jjconflict") || !strings.Contains(prompt, "+/internal/ @upstream @feature") {
@@ -364,7 +365,7 @@ func TestJujutsuDriftConflictIsResolvedInItsWorkspaceBeforeReview(t *testing.T) 
 		t.Fatalf("the feature branch moved to %s before review", tip)
 	}
 
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	if result, err := attemptOperation(t, f.s, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
 	}
@@ -636,7 +637,7 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 	}
 	c, err := g.Commit(ctx, rebase.Commit)
 	fixturekit.Must(t, err)
-	if service.TestOperationTrailer(c.Message) != rebases[0].Operation.ID || !slices.Equal(c.Parents, landed) {
+	if service.OperationTrailer(c.Message) != rebases[0].Operation.ID || !slices.Equal(c.Parents, landed) {
 		t.Fatalf("dedupe's rebased commit %+v", c)
 	}
 	_, report := latestReport(t, f.repository(), stream, "dedupe")
@@ -663,8 +664,8 @@ func TestJujutsuRebasedUnitKeepsItsChangeAndReturnsToReview(t *testing.T) {
 		}
 		walk := result.(api.CommitTrace)
 		if !slices.ContainsFunc(walk.Records, func(r api.CommitRecord) bool {
-			return r.Role == service.TestCommitChange && r.Unit == "dedupe" && r.Ref.Path == "units/dedupe/change.json"
-		}) || slices.ContainsFunc(walk.Records, func(r api.CommitRecord) bool { return r.Role == service.TestCommitChange && r.Unit != "dedupe" }) {
+			return r.Role == service.CommitChange && r.Unit == "dedupe" && r.Ref.Path == "units/dedupe/change.json"
+		}) || slices.ContainsFunc(walk.Records, func(r api.CommitRecord) bool { return r.Role == service.CommitChange && r.Unit != "dedupe" }) {
 			t.Fatalf("the walk of %s records %+v", commit, walk.Records)
 		}
 		data, err := json.Marshal(walk)

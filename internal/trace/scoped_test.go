@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
+func TestScopedFirstOpenFailureReturnsAnError(t *testing.T) {
 	r, _, _ := create(t)
 	other := config.WorkstreamID("w_00000000000000000000000000000002")
 	dir, err := r.root.WorkstreamTrace(r.project, other)
@@ -24,10 +24,8 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- r.Serialize(func() error {
-			_, err := r.scoped(other)
-			return err
-		})
+		_, err := r.scoped(other)
+		done <- err
 	}()
 	select {
 	case err := <-done:
@@ -35,12 +33,9 @@ func TestScopedFirstOpenFailureInsideSerializeReturnsAnError(t *testing.T) {
 			t.Fatal("scoped on a broken, not-yet-opened workstream succeeded")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("a failed first-time open inside Serialize did not return within the bound; it deadlocked")
+		t.Fatal("a failed first-time open did not return within the bound; it deadlocked")
 	}
 
-	if err := r.Serialize(func() error { return nil }); err != nil {
-		t.Fatalf("Serialize after the failed open: %v", err)
-	}
 	if _, err := r.scoped(streamID); err != nil {
 		t.Fatalf("scoped on the existing workstream after the failed open: %v", err)
 	}

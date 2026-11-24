@@ -11,9 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// telemetryDoc is docs/telemetry.md itself. The Go check's container carries
-// only Go sources, testdata and embedded files, so the test embeds the page.
-//
 //go:embed telemetry.md
 var telemetryDoc string
 

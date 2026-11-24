@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/execution"
 	"strings"
 	"testing"
 
@@ -64,7 +65,7 @@ func hostBranches(t *testing.T, f *shedFixture) (string, *fixturekit.FakePulls) 
 
 func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, files map[string]string) string {
 	t.Helper()
-	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), service.TestForemanActor, intake.UnitMerged)
+	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), execution.ForemanActor, intake.UnitMerged)
 }
 
 func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {

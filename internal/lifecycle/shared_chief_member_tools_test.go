@@ -125,7 +125,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		t.Fatalf("inspect_code did not read the member's clone at %s: %s", tip, results[4])
 	}
 
-	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, f.stream2)
+	authority, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream2)
 	fixturekit.Must(t, err)
 	hosted, err := trace.Read[trace.Document](authority, host)
 	closeAuthority()

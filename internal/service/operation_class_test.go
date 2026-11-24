@@ -23,10 +23,10 @@ func TestOperationClassKeepsWorkflowOrderSeparateFromWorkers(t *testing.T) {
 			t.Fatalf("%s class=%s", action, got)
 		}
 	}
-	for _, agent := range []string{trace.ChiefOfStaff, sessionAgentID, "mason", "reviewer", "committee"} {
+	for _, agent := range []string{trace.ChiefOfStaff, SessionAgentID, "mason", "reviewer", "committee"} {
 		input, _ := json.Marshal(thread.TurnInput{Workstream: config.WorkstreamID("w_0123456789abcdef0123456789abcdef"), Agent: agent, Turn: "turn"})
 		want := trace.WorkerOperation
-		if agent == trace.ChiefOfStaff || agent == sessionAgentID {
+		if agent == trace.ChiefOfStaff || agent == SessionAgentID {
 			want = trace.ConversationOperation
 		}
 		if got := operationClass(coreadapter.Operation{Action: thread.TurnAction, Boundary: coreadapter.RunnerBoundary, Input: input}); got != want {

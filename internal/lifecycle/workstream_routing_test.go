@@ -74,7 +74,7 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 	assembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	out, apiFault := f.s.ownerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it."})
+	out, apiFault := f.s.lifecycle().OwnerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it."})
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}

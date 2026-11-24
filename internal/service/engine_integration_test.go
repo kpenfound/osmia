@@ -53,9 +53,6 @@ type engineUnitRun struct {
 	logs      *fixturekit.SyncBuffer
 }
 
-// runEngineUnitCheck runs the checks of a unit on the engine tc configures and
-// returns the record of the run and the output the check captured. It fails
-// when a trace document carries the Cloud token.
 func runEngineUnitCheck(t *testing.T, tc engineUnitCase) engineUnitRun {
 	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
@@ -213,18 +210,15 @@ func appendEngineConfig(t *testing.T, o *Options, text string) {
 }
 
 type engineReload struct {
-	fake  fixturekit.EngineCLIs
-	files reloadFiles
-	top   string
-	next  string
-	s     *Service
-	c     *Client
-	// releaseWork ends the unit check and the engine turn that keep the engine busy.
+	fake        fixturekit.EngineCLIs
+	files       reloadFiles
+	top         string
+	next        string
+	s           *Service
+	c           *Client
 	releaseWork func()
 }
 
-// startManagedEngine starts a service whose managed engine is created at
-// v0.20.5 with a sandboxed mason role.
 func startManagedEngine(t *testing.T) *engineReload {
 	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
@@ -239,8 +233,6 @@ func startManagedEngine(t *testing.T) *engineReload {
 	return &engineReload{fake: fake, files: files, top: top, s: s, c: c}
 }
 
-// reloadedWhileBusy holds a unit check and an engine turn, then reloads a
-// configuration that expects v0.21.0.
 func (e *engineReload) reloadedWhileBusy(t *testing.T) {
 	t.Helper()
 	fixturekit.Must(t, os.WriteFile(e.fake.DockerCommands, nil, 0600))

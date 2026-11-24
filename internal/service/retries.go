@@ -10,7 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const turnRetries = 2
+const TurnRetries = 2
 
 func threadRunner(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner {
 	fallbacks := map[string]coreadapter.Profile{}
@@ -22,7 +22,7 @@ func threadRunner(cfg *config.Config, store *trace.Repository, turns coreadapter
 			fallbacks[name] = fallback
 		}
 	}
-	return thread.Runner{Store: store, Turns: turns, Now: now, Fallbacks: fallbacks, MaxRetries: turnRetries}
+	return thread.Runner{Store: store, Turns: turns, Now: now, Fallbacks: fallbacks, MaxRetries: TurnRetries}
 }
 
 func (s *Service) threadRunner(cfg *config.Config, store *trace.Repository, turns coreadapter.Turns, now func() time.Time) thread.Runner {

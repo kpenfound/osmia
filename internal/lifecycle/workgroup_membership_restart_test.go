@@ -43,7 +43,7 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	sharedID, err := repo.CrossRepoWorkgroupOf(f.stream1)
 	fixturekit.Must(t, err)
-	target, host, _, closeTarget, err := f.s.chiefRepository(ctx, repo, f.stream1)
+	target, host, _, closeTarget, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	chief, err := target.ChiefOfStaffThread(host)
 	closeTarget()

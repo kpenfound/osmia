@@ -490,7 +490,7 @@ func TestCrossRepoWorkgroupResolutionFiresOnlyAfterEveryMemberIsResolved(t *test
 	fixturekit.Must(t, active1.repository.CreateWorkstream(ctx, first, s.now(), intake.RegistrationActor))
 	fixturekit.Must(t, active2.repository.CreateWorkstream(ctx, second, s.now(), intake.RegistrationActor))
 
-	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{first, second})
+	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{first, second})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}

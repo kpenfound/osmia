@@ -227,28 +227,6 @@ func Open(in Inputs) (*Store, []Diagnostic, error) {
 				err = fmt.Errorf("runtime.json: trailing JSON")
 			}
 		}
-		migrated := false
-		if err == nil {
-			for i := range s.state.Pauses {
-				p := &s.state.Pauses[i]
-				if p.Source != "operator" {
-					continue
-				}
-				migrated = true
-				p.Source = PauseOwner
-				if strings.TrimSpace(p.Reason) == "" {
-					p.Reason = "Owner requested pause"
-				}
-				if p.SetAt.IsZero() {
-					info, statErr := root.Stat("runtime.json")
-					if statErr != nil {
-						err = statErr
-						break
-					}
-					p.SetAt = info.ModTime().UTC()
-				}
-			}
-		}
 		if err == nil {
 			err = validate(s.state)
 		}
@@ -257,19 +235,6 @@ func Open(in Inputs) (*Store, []Diagnostic, error) {
 			return nil, nil, fmt.Errorf("runtime.json: %w", err)
 		}
 		s.disk = bytes.Clone(data)
-		if migrated {
-			updated, encodeErr := s.ops.encode(s.state)
-			if encodeErr != nil {
-				root.Close()
-				return nil, nil, encodeErr
-			}
-			updated = append(updated, '\n')
-			if err := s.persist(updated); err != nil {
-				root.Close()
-				return nil, nil, err
-			}
-			s.disk = updated
-		}
 	}
 	_, diagnostics := resolve(s.state, s.input)
 	return s, diagnostics, nil
@@ -601,6 +566,9 @@ func validate(st State) error {
 		}
 		switch a.ResolutionEvidence {
 		case "":
+			if a.Resolved {
+				return fmt.Errorf("resolved archive needs resolution evidence")
+			}
 		case "unresolved":
 			if a.Resolved {
 				return fmt.Errorf("unresolved archive cannot grant resolution")
@@ -924,7 +892,7 @@ func (s *Store) UpdateArchive(a Archive) error {
 				if old.Workgroup != "" && a.Workgroup != old.Workgroup {
 					return fmt.Errorf("archive workgroup identity cannot change")
 				}
-				if old.ResolutionEvidence != "" && old.Resolved && (!a.Resolved || a.ResolutionEvidence != old.ResolutionEvidence) {
+				if old.Resolved && (!a.Resolved || a.ResolutionEvidence != old.ResolutionEvidence) {
 					return fmt.Errorf("archive resolution cannot change")
 				}
 				if old.Publication != (ArchivePublication{}) && a.Publication != old.Publication {

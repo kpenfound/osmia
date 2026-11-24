@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"testing"
 
 	"github.com/chromedp/chromedp"
@@ -33,7 +34,7 @@ func splitLayout(p *page, feed string, side ...string) (wide, stacked bool) {
 func TestBrowserSessionViewIsTwoColumnsOnWideScreens(t *testing.T) {
 	t.Parallel()
 	s, c, project, _, _ := sessionWebFixture(t)
-	opened, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default", Title: "Explore the layout"})
+	opened, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default", Title: "Explore the layout"})
 	must(t, err)
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))

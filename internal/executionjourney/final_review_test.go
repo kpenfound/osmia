@@ -76,7 +76,7 @@ func hostRunningService(t *testing.T, f *shedFixture, stream func() config.Works
 
 func mergeDirectly(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, files map[string]string) string {
 	t.Helper()
-	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), service.TestForemanActor, intake.UnitMerged)
+	return intakefixture.MergeDirectly(t, repository, stream, unit, moveFeature(t, f, stream, files), execution.ForemanActor, intake.UnitMerged)
 }
 
 func finalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
@@ -104,7 +104,7 @@ func TestFinalReviewReadsTheRebasedBranchAsAWhole(t *testing.T) {
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 	assembled := intakefixture.TransitionByID(t, repository, stream, intake.AssembledState)
 	wantAssembled := fmt.Sprintf("every unit of the sealed plan has merged onto %s: resume, dedupe; the feature branch is rebased onto upstream and read against the sealed spec and the charter next", intake.FeatureBranch(stream))
-	if assembled.From != intake.BuildingState || assembled.To != intake.AssembledState || assembled.Actor != service.TestForemanActor || assembled.Cause != "unit-dedupe-merged" || assembled.Reason != wantAssembled {
+	if assembled.From != intake.BuildingState || assembled.To != intake.AssembledState || assembled.Actor != execution.ForemanActor || assembled.Cause != "unit-dedupe-merged" || assembled.Reason != wantAssembled {
 		t.Fatalf("the move to assembled %+v", assembled)
 	}
 	if body := intakefixture.NoticeOf(t, repository, stream, intake.AssembledState); body != "Workstream state changed from building to assembled: "+wantAssembled {
@@ -585,9 +585,9 @@ func TestInterruptedFinalRebaseIsReconciled(t *testing.T) {
 	}
 }
 
-func TestFinalChecksRecordedWithoutAnAttemptCountTowardTheRetryDelay(t *testing.T) {
+func TestIncompleteFinalChecksCountTowardTheRetryDelay(t *testing.T) {
 	t.Parallel()
-	f, stream, repo, a := newFinalFixture(t, "final-checks-without-attempt")
+	f, stream, repo, a := newFinalFixture(t, "final-checks-retry-delay")
 	at := f.clock.Now()
 
 	for revision := 1; revision <= 2; revision++ {
@@ -596,7 +596,7 @@ func TestFinalChecksRecordedWithoutAnAttemptCountTowardTheRetryDelay(t *testing.
 	}
 	n, latest, err := a.incompleteChecks(stream, 1, "candidate")
 	fixturekit.Must(t, err)
-	if n != 2 || latest.Selection != nil || latest.Attempt != 0 || delivery.FinalCheckDelay(n) != 2*execution.CheckRetryDelay {
+	if n != 2 || delivery.FinalCheckDelay(n) != 2*execution.CheckRetryDelay {
 		t.Fatalf("incomplete count %d: %+v", n, latest)
 	}
 

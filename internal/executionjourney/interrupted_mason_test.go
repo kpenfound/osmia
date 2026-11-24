@@ -5,7 +5,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
@@ -98,7 +97,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			var sawEdits bool
 			f.engine.Mu.Lock()
 			f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-			f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				if err := writeEdits(req.Workspace.Directory()); err != nil {
 					return nil, err
 				}
@@ -128,7 +127,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 			}
 			target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 			mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-			stopped := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+			stopped := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 			intakefixture.CheckPauseStop(t, stopped, "workstream", "Stop the mason")
 			intakefixture.AwaitFurtherPasses(t, &passed, 2)
 			workspace := filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(stream), "resume")
@@ -146,7 +145,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 					continue
 				}
 				switch in.Turn {
-				case service.TestMasonTurnID("resume"):
+				case execution.MasonTurnID("resume"):
 					intakefixture.CheckNoRetry(t, op, "interrupted")
 				case recoverTurn:
 					t.Fatal("the continuation was dispatched under the hard pause")
@@ -192,7 +191,7 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 			var prompts []string
 			var sawEdits bool
 			f.engine.Mu.Lock()
-			f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				mu.Lock()
 				prompts = append(prompts, req.Prompt)
 				first := len(prompts) == 1
@@ -218,7 +217,7 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 				t.Fatalf("the workstream is on %s", got)
 			}
 			checkReviewedEdits(t, f, stream, "resume")
-			q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+			q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 			if len(q.Attempts) != 2 || q.Attempts[0].Result == nil || !q.Attempts[0].Result.TimedOut || q.Attempts[0].FailureClass != coreadapter.Infrastructure {
 				t.Fatalf("the turn's attempts %+v", q.Attempts)
 			}
@@ -261,7 +260,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			}
 
 			units := newUnitWorkspaces(f.s.cfg, repo)
-			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: intake.MasonAgent("resume"), Turn: service.TestMasonTurnID("resume"), Role: intake.MasonRole}
+			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: intake.MasonAgent("resume"), Turn: execution.MasonTurnID("resume"), Role: intake.MasonRole}
 			selection, err := units.selection(ctx, scope, coreadapter.ExecutionSettings{})
 			fixturekit.Must(t, err)
 			w, _, found, err := units.find(ctx, stream, "resume")
@@ -269,7 +268,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			if !found {
 				t.Fatal("unit workspace missing")
 			}
-			viewRoot := execution.TurnViews(f.s.cfg, f.project, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+			viewRoot := execution.TurnViews(f.s.cfg, f.project, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 			fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 
 			view, err := (isolation.Views{Directory: viewRoot}).CreateFor(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, selection.Paths, coreadapter.ExecutionSettings{Dagger: &agent.Dagger{}})
@@ -279,7 +278,7 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			const leftInRepository = "left in the view's repository"
 			fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "left-by-the-turn"), []byte(leftInRepository), 0600))
 			fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "hooks-left-by-the-turn"), []byte(leftInRepository), 0600))
-			_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), f.clock.Now())
+			_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume")), f.clock.Now())
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, repo.Close())
 
@@ -323,7 +322,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	defer func() { f.stop(t) }()
 	entered := make(chan struct{})
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if err := writeEdits(req.Workspace.Directory()); err != nil {
 			return nil, err
 		}
@@ -340,7 +339,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	}
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
 	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), "workstream", "Stop the mason")
+	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume")), "workstream", "Stop the mason")
 	intakefixture.AwaitFurtherPasses(t, &passed, 2)
 	f.stop(t)
 

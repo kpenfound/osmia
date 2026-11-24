@@ -53,7 +53,7 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: intake.FeatureBranch(f.stream1), Commit: "feature-head", PullRequest: 71, URL: "https://example.invalid/pull/71"}
 			recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, publication)
 			if tc.edge == trace.EdgeHardBlock {
-				held, err := f.s.holds(f.project2, f.stream2, down, scheduler.Candidate{Workstream: f.stream2, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
+				held, err := f.s.holds(f.project2, down, scheduler.Candidate{Workstream: f.stream2, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
 				fixturekit.Must(t, err)
 				if !held {
 					t.Fatal("hard block admitted a mason before merge")
@@ -178,10 +178,10 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 			if tc.stale {
 				resolutionDocument(t, repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 41, Outcome: delivery.OwnPullRequestOutcomeMerged, MergeCommit: "old-merge"})
 			}
-			if _, apiFault := s.archive(string(fixturekit.Stream)); apiFault != nil {
+			if _, apiFault := s.lifecycle().Archive(string(fixturekit.Stream)); apiFault != nil {
 				t.Fatal(apiFault)
 			}
-			a, ok := s.archivedWorkstream(string(fixturekit.Stream))
+			a, ok := s.lifecycle().ArchivedWorkstream(string(fixturekit.Stream))
 			if !ok {
 				t.Fatal("archive missing")
 			}
@@ -208,7 +208,7 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 			if tc.failed {
 				host.FindErr = errors.New("lookup unavailable")
 			}
-			status, err := s.upstreamMergeStatus(ctx, repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
+			status, err := s.lifecycle().UpstreamMergeStatus(ctx, repo, trace.Edge{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeHardBlock})
 			if tc.failed {
 				if err == nil || status.Merged {
 					t.Fatalf("failed lookup released dependency: %+v %v", status, err)

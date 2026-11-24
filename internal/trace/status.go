@@ -347,12 +347,10 @@ func ownerGates(records []Record, stream config.WorkstreamID, view *workflowView
 				}
 			}
 			raised := contest.Actor.Kind == "owner" || strings.HasPrefix(contest.ID, subject+"-move-")
-			decisionPath := "units/" + subject + "/chief-"
-			legacyPath := decisionPath + contest.ID + ".json"
-			boundedPath := decisionPath + EventID(contest.ID, "chief") + ".json"
+			decisionPath := "units/" + subject + "/chief-" + EventID(contest.ID, "chief") + ".json"
 			for _, rec := range records {
 				d, ok := rec.(Document)
-				if !ok || d.Workstream != stream || (d.Path != legacyPath && d.Path != boundedPath) {
+				if !ok || d.Workstream != stream || d.Path != decisionPath {
 					continue
 				}
 				var decision struct {

@@ -33,7 +33,7 @@ func enforcedIsolation(t *testing.T, f *shedFixture, repository *trace.Repositor
 	if !ok {
 		t.Fatalf("threads reconciler %T", bound)
 	}
-	return dispatcher.Runner.Turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+	return dispatcher.Runner.Turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 }
 
 func claimOldestTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string) trace.QueuedTurn {
@@ -61,7 +61,7 @@ func TestDriftMasonGrantNamesEveryDriftMasonTool(t *testing.T) {
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 
 	turns := enforcedIsolation(t, f, repository)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: service.TestDriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: intake.DriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
 	selection, err := turns.Select(ctx, scope)
 	fixturekit.Must(t, err)
 	if selection.Narrow != nil {
@@ -91,13 +91,13 @@ func TestDriftReviewerGrantNamesEveryDriftReviewerToolAndReadOnlyCandidateView(t
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	records := driftRecords(t, repository, stream)
 	candidate := records[len(records)-1].Candidate
 
 	turns := enforcedIsolation(t, f, repository)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: service.TestDriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1)}
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: intake.DriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1)}
 	selection, err := turns.Select(ctx, scope)
 	fixturekit.Must(t, err)
 	if selection.Narrow != nil {
@@ -145,8 +145,8 @@ func TestDriftMasonAskRecordsAChiefOfStaffQuestionNamingTheDriftRebaseAndDeliver
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 
 	turns := enforcedIsolation(t, f, repository)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: service.TestDriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
-	q := claimOldestTurn(t, f, repository, stream, service.TestDriftMasonAgent)
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: intake.DriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
+	q := claimOldestTurn(t, f, repository, stream, intake.DriftMasonAgent)
 	scoped, err := turns.Scoped(ctx, scope)
 	fixturekit.Must(t, err)
 	ask := intakefixture.AskTool(t, scoped, questions.AskTool)
@@ -155,11 +155,11 @@ func TestDriftMasonAskRecordsAChiefOfStaffQuestionNamingTheDriftRebaseAndDeliver
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the drift mason's ask: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftMasonAgent, q, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
+	completeClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, q, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
 
 	asked, err := repository.Questions(stream)
 	fixturekit.Must(t, err)
-	if len(asked) != 1 || asked[0].Asked.AskedBy.ID != service.TestDriftMasonAgent || asked[0].Asked.Thread != service.TestDriftMasonAgent || asked[0].State != trace.QuestionOpen {
+	if len(asked) != 1 || asked[0].Asked.AskedBy.ID != intake.DriftMasonAgent || asked[0].Asked.Thread != intake.DriftMasonAgent || asked[0].State != trace.QuestionOpen {
 		t.Fatalf("the drift mason's question %+v", asked)
 	}
 	if !strings.Contains(asked[0].Asked.Question, "drift rebase 1") {
@@ -167,7 +167,7 @@ func TestDriftMasonAskRecordsAChiefOfStaffQuestionNamingTheDriftRebaseAndDeliver
 	}
 
 	chiefAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
-	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
+	th, err := repository.Thread(stream, intake.DriftMasonAgent)
 	fixturekit.Must(t, err)
 	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != questions.TurnID("1") {
 		t.Fatalf("the answer did not reach the drift-mason thread: %+v", th.Turns)
@@ -196,8 +196,8 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	w := resolutionWorkspace(t, f, stream)
 
 	turns := enforcedIsolation(t, f, repository)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: service.TestDriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
-	q := claimOldestTurn(t, f, repository, stream, service.TestDriftMasonAgent)
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: intake.DriftMasonAgent, Turn: lifecycle.DriftResolveTurnID(1, 1)}
+	q := claimOldestTurn(t, f, repository, stream, intake.DriftMasonAgent)
 	scoped, err := turns.Scoped(ctx, scope)
 	fixturekit.Must(t, err)
 	out, err := intakefixture.AskTool(t, scoped, questions.AskTool).Handle(ctx, json.RawMessage(`{"question":"For drift rebase 1, should the resolved CODEOWNERS keep both owners on one line, or two?"}`))
@@ -205,7 +205,7 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the drift mason's ask: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftMasonAgent, q, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
+	completeClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, q, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
 
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	chiefAnswers(t, f, repository, stream, "1", "Keep both owners on one line.", "spec#1")
@@ -213,8 +213,8 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	repository = restartRepository(t, f, repository)
 	d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	turns = enforcedIsolation(t, f, repository)
-	answerScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: service.TestDriftMasonAgent, Turn: questions.TurnID("1")}
-	answer := claimOldestTurn(t, f, repository, stream, service.TestDriftMasonAgent)
+	answerScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.MasonRole, Thread: intake.DriftMasonAgent, Turn: questions.TurnID("1")}
+	answer := claimOldestTurn(t, f, repository, stream, intake.DriftMasonAgent)
 	if answer.Request.TurnID != questions.TurnID("1") {
 		t.Fatalf("the oldest unfinished drift-mason turn is %s, not the answer turn", answer.Request.TurnID)
 	}
@@ -231,10 +231,10 @@ func TestDriftMasonAnswerContinuationResumesTheResolutionWorkspaceThroughDoneAcr
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the answer turn's done call: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftMasonAgent, answer, resolvedDone("Kept both owners on one line, as the chief of staff answered"))
+	completeClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, answer, resolvedDone("Kept both owners on one line, as the chief of staff answered"))
 
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), questions.TurnID("1")}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), questions.TurnID("1")}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
 }
@@ -249,14 +249,14 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	records := driftRecords(t, repository, stream)
 	candidate := records[len(records)-1].Candidate
 
 	turns := enforcedIsolation(t, f, repository)
-	reviewScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: service.TestDriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1)}
-	review := claimOldestTurn(t, f, repository, stream, service.TestDriftReviewerAgent)
+	reviewScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: intake.DriftReviewerAgent, Turn: lifecycle.DriftReviewTurnID(1, 1)}
+	review := claimOldestTurn(t, f, repository, stream, intake.DriftReviewerAgent)
 	scoped, err := turns.Scoped(ctx, reviewScope)
 	fixturekit.Must(t, err)
 	out, err := intakefixture.AskTool(t, scoped, questions.AskTool).Handle(ctx, json.RawMessage(`{"question":"Is the CODEOWNERS line format fixed for drift rebase 1?"}`))
@@ -264,13 +264,13 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the drift reviewer's ask: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftReviewerAgent, review, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
+	completeClaimedTurn(t, f, repository, stream, intake.DriftReviewerAgent, review, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 1"})
 
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	chiefAnswers(t, f, repository, stream, "1", "Yes, one line.", "spec#1")
 
-	answer1Scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: service.TestDriftReviewerAgent, Turn: questions.TurnID("1")}
-	answer1 := claimOldestTurn(t, f, repository, stream, service.TestDriftReviewerAgent)
+	answer1Scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: intake.DriftReviewerAgent, Turn: questions.TurnID("1")}
+	answer1 := claimOldestTurn(t, f, repository, stream, intake.DriftReviewerAgent)
 	if answer1.Request.TurnID != questions.TurnID("1") {
 		t.Fatalf("the oldest unfinished drift-reviewer turn is %s, not the first answer turn", answer1.Request.TurnID)
 	}
@@ -281,21 +281,21 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the answer turn's second ask: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftReviewerAgent, answer1, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 2"})
+	completeClaimedTurn(t, f, repository, stream, intake.DriftReviewerAgent, answer1, &coreadapter.Outcome{Status: questions.Waiting, Report: "Asked question 2"})
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	chiefAnswers(t, f, repository, stream, "2", "No, only CODEOWNERS.", "spec#1")
 
 	asked, err := repository.Questions(stream)
 	fixturekit.Must(t, err)
-	if len(asked) != 2 || asked[1].Asked.Thread != service.TestDriftReviewerAgent || asked[1].Asked.Turn != questions.TurnID("1") {
+	if len(asked) != 2 || asked[1].Asked.Thread != intake.DriftReviewerAgent || asked[1].Asked.Turn != questions.TurnID("1") {
 		t.Fatalf("the second ask did not chain back to the first answer turn: %+v", asked)
 	}
 
 	repository = restartRepository(t, f, repository)
 	d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	turns = enforcedIsolation(t, f, repository)
-	answer2Scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: service.TestDriftReviewerAgent, Turn: questions.TurnID("2")}
-	answer2 := claimOldestTurn(t, f, repository, stream, service.TestDriftReviewerAgent)
+	answer2Scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: intake.ReviewerRole, Thread: intake.DriftReviewerAgent, Turn: questions.TurnID("2")}
+	answer2 := claimOldestTurn(t, f, repository, stream, intake.DriftReviewerAgent)
 	if answer2.Request.TurnID != questions.TurnID("2") {
 		t.Fatalf("the oldest unfinished drift-reviewer turn is %s, not the second answer turn", answer2.Request.TurnID)
 	}
@@ -327,7 +327,7 @@ func TestDriftReviewerAnswerContinuationSeesCandidateAndDiffsAndCompletesTheRevi
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the second answer turn's verdict: %s", out)
 	}
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftReviewerAgent, answer2, driftVerdict(t, approvedResolution))
+	completeClaimedTurn(t, f, repository, stream, intake.DriftReviewerAgent, answer2, driftVerdict(t, approvedResolution))
 
 	if tip := featureTip(t, f, stream); tip != before {
 		t.Fatalf("the feature branch moved to %s before the approval was applied", tip)
@@ -362,7 +362,7 @@ func TestDriftPromptsAndSystemPromptsStateTheScopeRule(t *testing.T) {
 
 	w := resolutionWorkspace(t, f, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Kept both owners"))
+	completeDriftTurn(t, f, repository, stream, intake.DriftMasonAgent, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	resolved := driftRecords(t, repository, stream)[len(driftRecords(t, repository, stream))-1]
 

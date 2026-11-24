@@ -88,9 +88,6 @@ func (u unitWorkspaces) behind(ctx context.Context, stream config.WorkstreamID, 
 	return u.driver().Behind(ctx, stream, unit)
 }
 
-func (u unitWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
-	return u.driver().Acquire(ctx, req)
-}
 func (u unitWorkspaces) paths(w workspace.Worktree) ([]string, error) { return u.driver().Paths(w) }
 func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
 	return u.driver().Selection(ctx, scope, execution)
@@ -158,7 +155,7 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	return f.driver().Apply(ctx, op)
 }
 
-func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in service.TestLandInput, result service.UnitReviewResult) (string, error) {
+func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in execution.LandInput, result service.UnitReviewResult) (string, error) {
 	return f.driver().Current(ctx, stream, in, result)
 }
 
@@ -191,7 +188,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	return m.driver().CandidateEvidence(ctx, stream, unit)
 }
 
-func (f *foreman) message(w config.WorkstreamID, in service.TestLandInput, review trace.Document, result service.UnitReviewResult, op string) (string, error) {
+func (f *foreman) message(w config.WorkstreamID, in execution.LandInput, review trace.Document, result service.UnitReviewResult, op string) (string, error) {
 	return f.driver().Message(w, in, review, result, op)
 }
 func (f *foreman) requestedAt(w config.WorkstreamID, op string) (time.Time, error) {

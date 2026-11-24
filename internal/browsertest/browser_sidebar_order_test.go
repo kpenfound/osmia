@@ -13,7 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func sidebarFixture(t *testing.T) (Options, *trace.Repository) {
+func sidebarFixture(t *testing.T) (service.Options, *trace.Repository) {
 	t.Helper()
 	opts, _, repo := activityFixture(t)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)

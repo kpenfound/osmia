@@ -188,7 +188,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		if targetStream != w.Workstream {
 			continue
 		}
-		view := statusView(active.id, mode, w, design)
+		view := WorkstreamStatusView(active.id, mode, w, design)
 		if held := s.intake().HeldGates(active.repository, w); len(held) > 0 {
 			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool {
 				return slices.ContainsFunc(held, func(h trace.OwnerGate) bool { return h.Kind == g.Kind && h.Reference == g.Reference })
@@ -510,7 +510,7 @@ func (s *Service) designStatusAddress(repo *trace.Repository, stream config.Work
 	return stream, nil
 }
 
-func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus, design bool) WorkstreamStatus {
+func WorkstreamStatusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus, design bool) WorkstreamStatus {
 	kind := w.Kind
 	if kind == "" && design {
 		kind = "design"

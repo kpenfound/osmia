@@ -121,7 +121,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return q, errors.Join(runErr, persistErr)
 	}
 	cleanup := context.WithoutCancel(ctx)
-	err = trace.Relock(cleanup, func() error {
+	err = func() error {
 		if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
 			return err
 		}
@@ -131,6 +131,6 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		completed := r.Now()
 		q.CompletedAt = completed
 		return r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed)
-	})
+	}()
 	return q, errors.Join(runErr, err)
 }

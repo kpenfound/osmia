@@ -50,7 +50,7 @@ func confirmDestroy(p *page, selector string, accept bool) {
 
 func assertDestroyRequests(p *page, route string, id config.WorkstreamID, want int) {
 	p.T.Helper()
-	path := Prefix + "/" + route + "/" + string(id) + "/destroy"
+	path := service.Prefix + "/" + route + "/" + string(id) + "/destroy"
 	got := 0
 	for _, requested := range p.Paths() {
 		if requested == path {
@@ -62,7 +62,7 @@ func assertDestroyRequests(p *page, route string, id config.WorkstreamID, want i
 	}
 }
 
-func awaitDestroyTurn(t *testing.T, s *Service, project config.ProjectID, id config.WorkstreamID) {
+func awaitDestroyTurn(t *testing.T, s *service.Service, project config.ProjectID, id config.WorkstreamID) {
 	t.Helper()
 	repository, err := service.InspectForTest(s).Repository(project)
 	must(t, err)
@@ -74,7 +74,7 @@ func awaitDestroyTurn(t *testing.T, s *Service, project config.ProjectID, id con
 	awaitCondition(t, "the completed turn ending", func() bool { return !service.InspectForTest(s).SessionTurnRunning(id) })
 }
 
-func assertBrowserDestroyed(p *page, s *Service, c *Client, project config.ProjectID, id config.WorkstreamID, route string) {
+func assertBrowserDestroyed(p *page, s *service.Service, c *service.Client, project config.ProjectID, id config.WorkstreamID, route string) {
 	p.T.Helper()
 	p.Await("destroy leaves the conversation and sidebar", fmt.Sprintf(`
       !document.querySelector('[data-view=project-pane]').hidden &&
@@ -194,7 +194,7 @@ func TestBrowserDestroySessionConfirmsRefusesBusyAndRemovesCommittedBranch(t *te
 		}
 		return &agent.Result{ClaudeID: "session", ResultText: "Exploration preserved."}, nil
 	}
-	opened, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default", Title: "Explore deletion"})
+	opened, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default", Title: "Explore deletion"})
 	must(t, err)
 	id := opened.Session.Workstream
 	p := openBrowser(t)

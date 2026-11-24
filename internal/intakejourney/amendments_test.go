@@ -2,8 +2,8 @@ package intakejourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	strings "strings"
@@ -20,7 +20,7 @@ func TestRoutedAmendmentFreesSlotForAnotherUnit(t *testing.T) {
 	f, masons := journey.NewParallelMasonFixture(t, 1, 1, journey.ParallelPlan)
 	defer f.Stop(t)
 	masons.Chief.Route("1", []string{"spec#1", "plan#resume"}, "Clarify restart state", "The task needs another state")
-	masons.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		listed, err := tools.ListTools(ctx, nil)
 		if err != nil {
 			return err

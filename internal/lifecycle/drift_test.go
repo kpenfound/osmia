@@ -20,7 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -45,7 +44,7 @@ func requestDrift(t *testing.T, d drifter, stream config.WorkstreamID) coreadapt
 
 func settleOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) coreadapter.OperationResult {
 	t.Helper()
-	return intakefixture.SettleOperation(t, s.now(), service.TestForemanActor, repository, stream, op, r)
+	return intakefixture.SettleOperation(t, s.now(), execution.ForemanActor, repository, stream, op, r)
 }
 
 func parentOf(t *testing.T, f *shedFixture, commit string) string {
@@ -72,7 +71,7 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 
 	op := requestDrift(t, d, stream)
 	requested := intakefixture.TransitionByID(t, repository, stream, "drift-1")
-	if requested.Subject != lifecycle.DriftSubject || requested.To != "requested-1" || requested.Actor != service.TestForemanActor || requested.Cause != "seal-1" {
+	if requested.Subject != lifecycle.DriftSubject || requested.To != "requested-1" || requested.Actor != execution.ForemanActor || requested.Cause != "seal-1" {
 		t.Fatalf("the request %+v", requested)
 	}
 	if seen, err := d.Inspect(ctx, op); err != nil || seen.State != coreadapter.EffectAbsent {
@@ -95,7 +94,7 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	if len(after) != 2 || !reflect.DeepEqual(after[1], moved) {
 		t.Fatalf("seals after the drift rebase %+v, want the first with base %s", after, upstream)
 	}
-	if doc := intakefixture.StreamDocuments(t, repository, stream, seal.DocumentID)[1]; doc.Actor != service.TestForemanActor || doc.Cause != op.ID {
+	if doc := intakefixture.StreamDocuments(t, repository, stream, seal.DocumentID)[1]; doc.Actor != execution.ForemanActor || doc.Cause != op.ID {
 		t.Fatalf("the moved seal's header %+v", doc.Header)
 	}
 	records := driftRecords(t, repository, stream)

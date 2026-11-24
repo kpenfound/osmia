@@ -66,7 +66,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 	faults := &intakefixture.Faults{}
 	rulingTurn := intake.AmendmentRulingTurn("1")
 	masons.Mu.Lock()
-	masons.Response = map[string]string{service.TestMasonTurnID("dedupe"): "I cannot complete this work."}
+	masons.Response = map[string]string{execution.MasonTurnID("dedupe"): "I cannot complete this work."}
 	masons.Play[rulingTurn] = intakefixture.ReportDone("Uploads resume")
 	for i := 1; i <= 3; i++ {
 		masons.Play[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
@@ -89,7 +89,7 @@ func TestBrowserOwnerWorkflowDemonstration(t *testing.T) {
 
 	f.engine.Mu.Lock()
 
-	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(faults, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(faults, "", "1")
 	f.engine.Turns[rulingTurn] = masons.Turn
 	for i := 1; i <= 3; i++ {
 		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn

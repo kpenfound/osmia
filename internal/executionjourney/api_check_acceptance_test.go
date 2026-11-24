@@ -22,31 +22,22 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {
-	t.Helper()
-	for _, want := range []string{"Acceptance states observable behaviours", "tests the unit adds as evidence", "Never require a whole-suite check pass or run", "no need to list existing tests to keep passing", "service-owned check gate catches regressions", "factory runs and selects checks itself", "smart-check selection"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("draft instructions lack %q: %s", want, prompt)
-		}
-	}
-}
-
 func TestAcceptanceFactoryInstructions(t *testing.T) {
 	t.Parallel()
-	assertAcceptanceDraftInstructions(t, intake.ArchitectPrompt("handed/stdin", 1, "", false, "", nil))
+	intakefixture.AssertAcceptanceDraftInstructions(t, intake.ArchitectPrompt("handed/stdin", 1, "", false, "", nil))
 	for _, role := range []string{intake.ArchitectRole, intake.CommitteeRole} {
-		policy := service.TestFactoryInstructions(coreadapter.Scope{Role: role})
+		policy := service.FactoryInstructions(coreadapter.Scope{Role: role})
 		for _, want := range []string{"whole check suite to pass or run", "asking a reviewer to show which tests ran", "engineering defect to correct", "service-owned check gate already runs checks with smart-check selection"} {
 			if !strings.Contains(policy, want) {
 				t.Errorf("%s policy lacks %q: %s", role, want, policy)
 			}
 		}
 	}
-	intakefixture.AssertCheckGateReviewInstructions(t, service.TestFactoryInstructions(coreadapter.Scope{Role: intake.ReviewerRole}))
-	intakefixture.AssertCheckGateReviewInstructions(t, service.TestFactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole}))
+	intakefixture.AssertCheckGateReviewInstructions(t, service.FactoryInstructions(coreadapter.Scope{Role: intake.ReviewerRole}))
+	intakefixture.AssertCheckGateReviewInstructions(t, service.FactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole}))
 	assertFinalCheckReviewInstructions(t, delivery.FinalSystemPrompt(config.Project{}))
 
-	assertFinalCheckReviewInstructions(t, delivery.FinalSystemPrompt(config.Project{})+service.TestFactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole, Turn: "final-3-committee-1-1"}))
+	assertFinalCheckReviewInstructions(t, delivery.FinalSystemPrompt(config.Project{})+service.FactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole, Turn: "final-3-committee-1-1"}))
 }
 
 func assertFinalCheckReviewInstructions(t *testing.T, prompt string) {
@@ -204,7 +195,7 @@ func TestAmendmentCheckAcceptance(t *testing.T) {
 	fixturekit.Must(t, a.Enqueue(context.Background(), f.s.current(), stream, "guidance", 1, "fixture", nil))
 	thread, err := repo.Thread(stream, intake.ArchitectAgent)
 	fixturekit.Must(t, err)
-	assertAcceptanceDraftInstructions(t, thread.Turns[len(thread.Turns)-1].Request.Prompt)
+	intakefixture.AssertAcceptanceDraftInstructions(t, thread.Turns[len(thread.Turns)-1].Request.Prompt)
 }
 
 func TestDeliverDeltaCheckAcceptance(t *testing.T) {

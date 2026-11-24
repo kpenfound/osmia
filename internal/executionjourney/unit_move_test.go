@@ -129,7 +129,7 @@ func TestMoveIntoReviewingRestartsTheReviewWithTheNote(t *testing.T) {
 	state := workflowOf(t, repo, stream, "resume")
 	fixturekit.Must(t, r.one(ctx, stream, "resume", state, false))
 	turn := lastTurn(t, repo, stream, intake.ReviewerAgent("resume"))
-	if turn.Request.TurnID == first.Request.TurnID || turn.Request.TurnID != service.TestReviewTurnID("resume", state.Version) || !strings.Contains(turn.Request.Prompt, note) {
+	if turn.Request.TurnID == first.Request.TurnID || turn.Request.TurnID != execution.ReviewTurnID("resume", state.Version) || !strings.Contains(turn.Request.Prompt, note) {
 		t.Fatalf("review turn %s after the move: %s", turn.Request.TurnID, turn.Request.Prompt)
 	}
 }
@@ -229,7 +229,7 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if out := m.moveUnit(t, `{"unit":"resume","to":"contested","note":"`+hold+`"}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("move to contested: %s", out)
 	}
-	contest, contested, err := service.TestUnitContest(m.repo, m.stream, "resume")
+	contest, contested, err := execution.UnitContest(m.repo, m.stream, "resume")
 	fixturekit.Must(t, err)
 	if raised, note := m.raised(t, contest); !contested || !raised || note != hold {
 		t.Fatalf("held unit raised %t with %q", raised, note)
@@ -256,7 +256,7 @@ func TestChiefOfStaffRecoversUnitsWithoutAnOwnerRetryGate(t *testing.T) {
 	if left, err := execution.ChiefRulingsLeft(m.repo, m.stream, "resume"); err != nil || left != execution.ChiefContestLimit {
 		t.Fatalf("rulings left after the owner's ruling: %d %v", left, err)
 	}
-	actions, err := service.TestChiefActions(m.repo, m.stream)
+	actions, err := service.ChiefActions(m.repo, m.stream)
 	fixturekit.Must(t, err)
 	if len(actions) != 4 || actions[0].Text != "Moved unit resume from reviewing to checking. Run the checks again." || actions[3].Text != "Held unit resume for you, from implementing: "+hold || actions[3].Turn != "events_1" {
 		t.Fatalf("conversation actions %+v", actions)

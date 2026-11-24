@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"io"
 	"mime"
 	"net/http"
@@ -88,7 +89,7 @@ func (f *fakeWhisper) seen() []whisperRequest {
 	return append([]whisperRequest(nil), f.requests...)
 }
 
-func dictationPage(t *testing.T, prefix, transcribe string) (*page, string, *Client) {
+func dictationPage(t *testing.T, prefix, transcribe string) (*page, string, *service.Client) {
 	t.Helper()
 	opts, _ := servicetest.ConversationFixture(t, prefix)
 	withWeb(t, opts, "127.0.0.1:0")

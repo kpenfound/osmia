@@ -49,7 +49,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 			logUnsettledLifecycleOperations(t, origin, f.stream1, f.s)
 		}
 	}()
-	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, origin, f.stream1)
+	authority, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, origin, f.stream1)
 	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 	closeAuthority()
@@ -153,7 +153,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 		}
 		live, err := f.s.repository(f.project2)
 		fixturekit.Must(t, err)
-		target, _, _, release, err := f.s.chiefRepository(ctx, live, f.stream2)
+		target, _, _, release, err := f.s.lifecycle().ChiefRepository(ctx, live, f.stream2)
 		fixturekit.Must(t, err)
 		defer release()
 		saved, err := trace.Get[trace.Document](target, host, "member-questions-"+string(f.stream1), 1)

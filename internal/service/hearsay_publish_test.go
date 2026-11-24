@@ -162,7 +162,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 				t.Errorf("%s %s write tools: %v", role, class.role, names[class.role])
 			}
 		}
-		if slices.Contains(names[sessionRole], projectContextTool) {
+		if slices.Contains(names[sessionRole], ProjectContextTool) {
 			t.Errorf("%s session: %v", role, names[sessionRole])
 		}
 	}

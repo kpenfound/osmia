@@ -280,7 +280,7 @@ func TestAmendmentRoundsOfTwoWorkstreamsRunAtTheSameTime(t *testing.T) {
 		Hold: func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action != intake.AmendmentRoundAction
 		},
-		Concurrent: service.TestConcurrentOperation})
+		Concurrent: service.ConcurrentOperation})
 	fixturekit.Must(t, err)
 	passed := make(chan error, 1)
 	go func() { passed <- c.Pass(context.Background()) }()
@@ -306,13 +306,6 @@ func TestAmendmentRoundsOfTwoWorkstreamsRunAtTheSameTime(t *testing.T) {
 		default:
 		}
 		fixturekit.Must(t, wake())
-	}
-	free := make(chan struct{})
-	go func() { repo.Serialize(func() error { close(free); return nil }) }()
-	select {
-	case <-free:
-	case <-time.After(10 * time.Second):
-		stop("a round's ended member took the operation lock back while its other member runs")
 	}
 	releaseOnce()
 	fixturekit.Must(t, <-passed)

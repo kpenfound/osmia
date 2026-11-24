@@ -76,7 +76,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 		}
 	})
 	queued.Armed.Store(true)
-	c, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retired-dispatch", Kind: "amend", Scope: "workgroup", Change: "Revise the shared acknowledgment contract."})
+	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retired-dispatch", Kind: "amend", Scope: "workgroup", Change: "Revise the shared acknowledgment contract."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -269,7 +269,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}
 	f.engine.Mu.Unlock()
 	queued.Armed.Store(true)
-	c, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Revise the acknowledgment contract."})
+	c, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: key, Kind: "amend", Scope: "workgroup", Change: "Revise the acknowledgment contract."})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -501,7 +501,7 @@ func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor
 	}
 	repo, err := f.s.repository(project)
 	fixturekit.Must(t, err)
-	wt, host, _, closeAuthority, err := f.s.chiefRepository(context.Background(), repo, survivor)
+	wt, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(context.Background(), repo, survivor)
 	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err := wt.Thread(host, intake.ArchitectAgent)

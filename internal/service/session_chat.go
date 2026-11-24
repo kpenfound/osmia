@@ -65,7 +65,7 @@ type sessionGate struct {
 
 var sessionLocks sync.Map
 
-func sessionLock(repository *trace.Repository, stream config.WorkstreamID) *sessionGate {
+func SessionLock(repository *trace.Repository, stream config.WorkstreamID) *sessionGate {
 	v, _ := sessionLocks.LoadOrStore(sessionLockKey{repository, stream}, &sessionGate{})
 	return v.(*sessionGate)
 }
@@ -78,21 +78,21 @@ func lastSessionRequestAt(th trace.Thread) time.Time {
 }
 
 func ensureSessionThread(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time) (trace.Thread, error) {
-	if th, err := repository.Thread(stream, sessionAgentID); err == nil {
+	if th, err := repository.Thread(stream, SessionAgentID); err == nil {
 		return th, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return trace.Thread{}, err
 	}
 	agent := trace.Agent{
-		Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: sessionAgentID, Revision: 1,
+		Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: SessionAgentID, Revision: 1,
 			Project: project, Workstream: stream, At: at, Actor: sessionServiceActor, Cause: "session-thread-create"},
 		Role:     sessionRole,
-		ThreadID: sessionAgentID,
+		ThreadID: SessionAgentID,
 	}
 	if err := repository.CreateThread(ctx, agent); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return trace.Thread{}, err
 	}
-	return repository.Thread(stream, sessionAgentID)
+	return repository.Thread(stream, SessionAgentID)
 }
 
 // SessionEntry is one service entry appended to a session's thread: a
@@ -106,7 +106,7 @@ type SessionEntry struct {
 
 const sessionEntryPrefix = "session-entries/"
 
-func recordSessionEntry(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, id string, at time.Time, text string) error {
+func RecordSessionEntry(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, id string, at time.Time, text string) error {
 	data, err := json.Marshal(SessionEntry{ID: id, Text: text, At: at})
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func recordSessionEntry(ctx context.Context, repository *trace.Repository, proje
 	return nil
 }
 
-func sessionEntriesSince(repository *trace.Repository, stream config.WorkstreamID, cutoff time.Time) ([]SessionEntry, error) {
+func SessionEntriesSince(repository *trace.Repository, stream config.WorkstreamID, cutoff time.Time) ([]SessionEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func sessionPrompt(entries []SessionEntry, text string) string {
 	return b.String()
 }
 
-func setSessionState(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time, id, cause, to string) error {
+func SetSessionState(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time, id, cause, to string) error {
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	if err != nil {
 		return err
@@ -218,7 +218,7 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Validation, Message: fmt.Sprintf("profile %q is not one the service can run; open a new session: %v", view.Profile, err)}
 	}
-	mu := sessionLock(repository, stream)
+	mu := SessionLock(repository, stream)
 	if !mu.TryLock() {
 		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 	}
@@ -239,7 +239,7 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if unfinishedSessionTurn(th) || view.State == trace.SessionWorking {
 		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this session; try again once it finishes"}
 	}
-	entries, err := sessionEntriesSince(repository, stream, lastSessionRequestAt(th))
+	entries, err := SessionEntriesSince(repository, stream, lastSessionRequestAt(th))
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the service entries of session %s; check the trace repository", stream)}
 	}
@@ -251,14 +251,14 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	treq := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1,
 			Project: project, Workstream: stream, At: at, Actor: ownerActor, Cause: "owner-message"},
-		AgentID: sessionAgentID, ThreadID: sessionAgentID, TurnID: "message_" + id,
-		Profile: profile, SystemPrompt: sessionRolePrompt, Prompt: sessionPrompt(entries, text),
+		AgentID: SessionAgentID, ThreadID: SessionAgentID, TurnID: "message_" + id,
+		Profile: profile, SystemPrompt: SessionRolePrompt, Prompt: sessionPrompt(entries, text),
 	}
 	q, err := repository.EnqueueTurn(ctx, treq)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for session %s; check the trace repository", stream)}
 	}
-	if err := setSessionState(ctx, repository, project, stream, at, "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
+	if err := SetSessionState(ctx, repository, project, stream, at, "session-working-"+q.Request.TurnID, "session-turn-started", trace.SessionWorking); err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record session %s as working; check the trace repository", stream)}
 	}
 	if err := dispatchSessionTurn(ctx, repository, project, stream, q.Request.TurnID, at); err != nil {

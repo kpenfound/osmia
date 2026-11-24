@@ -98,7 +98,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	var id config.WorkgroupID
 	go func() {
 		var apiFault *api.APIError
-		id, apiFault = f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+		id, apiFault = f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 		done <- apiFault
 	}()
 	joining.Await(t)
@@ -178,7 +178,7 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		if _, ok := trace.WorkgroupOf(groups, member.stream); ok {
 			t.Fatal("startup added replacement local group")
 		}
-		target, _, _, close, err := f.s.chiefRepository(context.Background(), r, member.stream)
+		target, _, _, close, err := f.s.lifecycle().ChiefRepository(context.Background(), r, member.stream)
 		fixturekit.Must(t, err)
 		chief, err := target.ChiefOfStaffThread(member.stream)
 		close()
@@ -202,13 +202,13 @@ func TestChangeContextFollowsTransferredMemberRoute(t *testing.T) {
 	defer f.stop(t)
 	gate.Armed.Store(true)
 	gate.Await(t)
-	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	gate.Release()
 	f.awaitProjectSpec(t)
-	repo, g, _, close, err := f.s.changeContext(context.Background(), string(f.stream1))
+	repo, g, _, close, err := f.s.lifecycle().ChangeContext(context.Background(), string(f.stream1))
 	fixturekit.Must(t, err)
 	close()
 	if g.ID != id || repo.Project() == f.project {
@@ -240,7 +240,7 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	fixturekit.Must(t, repo1.RetractWorkgroup(ctx, f.stream1, f.clock.Now(), intake.OwnerActor, "draft-workgroup"))
 	gate.Release()
 	observe(t)
-	if _, _, _, close, err := f.s.changeContext(ctx, string(f.stream1)); !errors.Is(err, intake.ErrWorkgroupJoining) {
+	if _, _, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(f.stream1)); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		close()
 		t.Fatalf("unauthenticated missing-group result: %v", err)
 	} else {
@@ -255,11 +255,11 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	if _, ok := trace.WorkgroupOf(groups, f.stream1); ok {
 		t.Fatal("startup replaced the pending join with a solitary group")
 	}
-	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil || id != g.ID {
 		t.Fatalf("retry replaced join: %s %v", id, apiFault)
 	}
-	target, _, _, close, err := f.s.chiefRepository(ctx, repo1, f.stream1)
+	target, _, _, close, err := f.s.lifecycle().ChiefRepository(ctx, repo1, f.stream1)
 	fixturekit.Must(t, err)
 	chief, err := target.ChiefOfStaffThread(f.stream1)
 	close()
@@ -270,7 +270,7 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	f.awaitProjectSpec(t)
 	bare := config.WorkstreamID("w_00000000000000000000000000000129")
 	fixturekit.Must(t, repo1.CreateWorkstream(ctx, bare, f.clock.Now(), intake.OwnerActor))
-	if _, _, _, close, err := f.s.changeContext(ctx, string(bare)); err == nil || errors.Is(err, intake.ErrWorkgroupJoining) {
+	if _, _, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(bare)); err == nil || errors.Is(err, intake.ErrWorkgroupJoining) {
 		close()
 		t.Fatalf("unexplained missing group was hidden: %v", err)
 	} else {
@@ -292,7 +292,7 @@ func TestDraftWorkgroupInterruptsAfterLastLocatorBeforeLocalRemoval(t *testing.T
 	defer f.stop(t)
 	awaitJoinDrafts(t, f)
 	armed.Store(true)
-	if _, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2}); apiFault == nil {
+	if _, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2}); apiFault == nil {
 		t.Fatal("join did not interrupt before last local removal")
 	}
 	repo, err := f.s.repository(f.project)
@@ -301,21 +301,21 @@ func TestDraftWorkgroupInterruptsAfterLastLocatorBeforeLocalRemoval(t *testing.T
 	fixturekit.Must(t, err)
 	_, g, _, err := repo.CrossRepoProjectSpec(id)
 	fixturekit.Must(t, err)
-	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
+	if _, err := f.s.lifecycle().CrossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		t.Fatalf("all locators admitted an unfinished transfer: %v", err)
 	}
 	f.stop(t)
 	f.start(t)
 	_, err = f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
+	if _, err := f.s.lifecycle().CrossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		t.Fatalf("startup admitted unfinished local removal: %v", err)
 	}
-	got, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	got, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil || got != id {
 		t.Fatalf("retry replaced join: %s %v", got, apiFault)
 	}
-	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); err != nil {
+	if _, err := f.s.lifecycle().CrossRepoMemberRepos(context.Background(), g); err != nil {
 		t.Fatalf("completed transfer remained held: %v", err)
 	}
 	f.awaitProjectSpec(t)

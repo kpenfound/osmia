@@ -37,7 +37,7 @@ func ledgerModTime(t *testing.T, path string) time.Time {
 
 func notifiedKind(body string) string {
 	if strings.HasPrefix(body, "Osmia paused dispatch: the daily budget is reached.\n") {
-		return service.TestNotifyBudgetPause
+		return service.NotifyBudgetPause
 	}
 	for line := range strings.SplitSeq(body, "\n") {
 		if kind, ok := strings.CutPrefix(line, "Kind: "); ok {
@@ -84,7 +84,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	p := &intakefixture.Faults{}
 	rulingTurn := intake.AmendmentRulingTurn("1")
 	masons.Mu.Lock()
-	masons.Response = map[string]string{service.TestMasonTurnID("dedupe"): "I cannot complete this work."}
+	masons.Response = map[string]string{execution.MasonTurnID("dedupe"): "I cannot complete this work."}
 	masons.Play[rulingTurn] = intakefixture.ReportDone("Uploads resume")
 	for i := 1; i <= 3; i++ {
 		masons.Play[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
@@ -107,7 +107,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 
 	f.engine.Mu.Lock()
 
-	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
@@ -172,8 +172,8 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	names(notified(api.InboxEscalation), api.InboxEscalation)
 
 	intakefixture.Eventually(t, "the escalation notification was never recorded as sent", func() bool {
-		return slices.ContainsFunc(slices.Collect(maps.Values(readLedger(t, f.opts).Notifications)), func(rec *service.TestNotification) bool {
-			return rec.Kind == api.InboxEscalation && rec.State == service.TestNotificationSent
+		return slices.ContainsFunc(slices.Collect(maps.Values(readLedger(t, f.opts).Notifications)), func(rec *service.Notification) bool {
+			return rec.Kind == api.InboxEscalation && rec.State == service.NotificationSent
 		})
 	})
 	f.stop(t)
@@ -203,7 +203,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		pause, ok := factoryPauseOf(t, f.c)
 		return ok && pause.Source == runtime.PauseDailyBudget
 	})
-	if body := notified(service.TestNotifyBudgetPause); !strings.Contains(body, "\nProject: "+string(f.project)+"\n") || !strings.Contains(body, "\nSpend: USD 1.25 or more\nLimit: USD 1.00\n") {
+	if body := notified(service.NotifyBudgetPause); !strings.Contains(body, "\nProject: "+string(f.project)+"\n") || !strings.Contains(body, "\nSpend: USD 1.25 or more\nLimit: USD 1.00\n") {
 		t.Fatalf("budget pause notification:\n%s", body)
 	}
 	mutation(t, f.c, "DELETE", "pause", api.ClearPauseRequest(factoryTarget))
@@ -217,7 +217,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	})
 	f.stop(t)
 	before := len(hook.received())
-	var pending []*service.TestNotification
+	var pending []*service.Notification
 	for _, rec := range readLedger(t, f.opts).Notifications {
 		if rec.State == service.TestNotificationPending {
 			pending = append(pending, rec)
@@ -253,7 +253,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	}
 	prs.Mu.Unlock()
 
-	kinds := []string{api.InboxRatification, api.InboxEscalation, api.InboxAmendment, service.TestNotifyBudgetPause, api.InboxContested, api.InboxDelivery}
+	kinds := []string{api.InboxRatification, api.InboxEscalation, api.InboxAmendment, service.NotifyBudgetPause, api.InboxContested, api.InboxDelivery}
 	var got []string
 	for _, b := range hook.accepted() {
 		got = append(got, notifiedKind(b))
@@ -267,7 +267,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		}
 	}
 	for key, rec := range readLedger(t, f.opts).Notifications {
-		if rec.State != service.TestNotificationSent {
+		if rec.State != service.NotificationSent {
 			t.Fatalf("notification %s is %s", key, rec.State)
 		}
 	}

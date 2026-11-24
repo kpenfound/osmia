@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// imageWorktree is a worktree holding image.png, and the PNG bytes it holds.
 func imageWorktree(t *testing.T) (directory string, data []byte) {
 	t.Helper()
 	directory = t.TempDir()

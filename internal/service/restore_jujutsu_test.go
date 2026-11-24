@@ -159,7 +159,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	if stored, err := g.StoredConflicts(ctx, candidate); err != nil || len(stored) != 0 || parentOf(t, f, candidate) != upstream || fileAt(t, f, candidate, "CODEOWNERS") != resolved {
 		t.Fatalf("the resolved candidate %s stores %v: %v", candidate, stored, err)
 	}
-	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{driftResolveTurnID(1, 1)}) {
+	if ids := turnIDs(t, repository, stream, driftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1)}) {
 		t.Fatalf("drift mason turns %v", ids)
 	}
 	if ids := turnIDs(t, repository, stream, driftReviewerAgent); len(ids) != 1 {

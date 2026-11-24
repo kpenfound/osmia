@@ -172,18 +172,11 @@ func TestRoutingIsRecordedOnEveryCommitPath(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
 	code := func(to string) Routing { return Routing{DecidedBy: DecidedByCode, DefaultTo: to} }
-	jev := Routing{DecidedBy: DecidedByJev, Judgment: testJudgment, DefaultTo: "ratified"}
 
 	if _, err := r.SetFeatureStateRouted(ctx, header("transition", "f1"), "handed", "handed in", code("handed")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.MoveFeatureStateRouted(ctx, header("transition", "f2"), "handed", "sketched", "drafted", code("sketched")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.MoveFeatureStateRouted(ctx, header("transition", "f3"), "sketched", "in-shed", "debating", jev, routedUnit("u1", "u1", 0, "", "planned", code("planned"))); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.SetFeatureStateUnlessRouted(ctx, header("transition", "f4"), "abandoned", "ended", Routing{DecidedBy: DecidedByOwner, DefaultTo: "in-shed"}, "delivered"); err != nil {
+	if _, err := r.MoveFeatureStateWith(ctx, header("transition", "f3"), "handed", "in-shed", "debating", routedUnit("u1", "u1", 0, "", "planned", code("planned"))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.SetFeatureStateRouted(ctx, header("transition", "f1"), "handed", "handed in", code("sketched")); !errors.Is(err, ErrConflict) {
@@ -204,7 +197,7 @@ func TestRoutingIsRecordedOnEveryCommitPath(t *testing.T) {
 	for _, tr := range got {
 		by[tr.ID] = tr
 	}
-	for id, want := range map[string]Routing{"f1": code("handed"), "f2": code("sketched"), "f3": jev, "u1": code("planned"), "f4": {DecidedBy: DecidedByOwner, DefaultTo: "in-shed"}, "u2": code("ready")} {
+	for id, want := range map[string]Routing{"f1": code("handed"), "f3": {}, "u1": code("planned"), "u2": code("ready")} {
 		if by[id].Routing() != want {
 			t.Errorf("%s recorded %+v, want %+v", id, by[id].Routing(), want)
 		}

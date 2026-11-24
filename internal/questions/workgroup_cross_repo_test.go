@@ -121,7 +121,7 @@ func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) 
 	seal := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "seal", Revision: 1, Project: crossProject2, Workstream: crossMember2, At: start, Actor: owner, Cause: "test"}, Path: "seal.json", Content: `{"seal":1,"spec_hash":"sha256:test"}`}
 	if err := f.r2.RecordDocuments(ctx, []trace.Document{
 		document("spec", "spec.md", "# Retries\n\n## Acceptance criteria\n\n1. Retries use a bounded window.\n"),
-		document("plan", "plan.json", `{"version":1,"units":[{"id":"resume","addresses":[{"criterion":"spec#1","proof":{"kind":"test","name":"TestResume"}}],"depends_on":[],"footprint":[]}]}`),
+		document("plan", "plan.json", `{"version":2,"units":[{"id":"resume","task":"Make spec#1 hold.", "acceptance":["spec#1 holds, shown by TestResume (test)"], "criteria":["spec#1"],"depends_on":[],"footprint":[]}]}`),
 		seal,
 	}); err != nil {
 		t.Fatal(err)

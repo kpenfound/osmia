@@ -54,8 +54,6 @@ type UnitReviewResult = execution.UnitReviewResult
 
 type verdictTurns = execution.VerdictTurns
 
-var reviewTurnID = execution.ReviewTurnID
-
 var masonContest = execution.MasonContest
 
 var rulerName = execution.RulerName

@@ -30,9 +30,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const driftPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
+const driftPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": ["resume"], "footprint": ["internal.trace"]}
 ]}
 `
 
@@ -356,8 +356,8 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	ctx := context.Background()
 	f, masons := newMasonFixture(t, 1, driftPlan)
 	defer func() { f.stop(t) }()
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
-	masons.Play[service.TestMasonTurnID("audit")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
+	masons.Play[execution.MasonTurnID("audit")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal", "trace", "audit.go"), []byte("package trace\n// audit\n"), 0644); err != nil {
 			return err
 		}
@@ -369,9 +369,9 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	}
 	demo := &driftDemo{units: &landingDemo{reviews: map[string][]service.UnitReviewIdentity{}}, owner: f.c, project: f.project, clone: f.clone, resolving: make(chan struct{})}
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("audit")] = masons.Turn
+	f.engine.Turns[execution.MasonTurnID("audit")] = masons.Turn
 	f.engine.Turns[lifecycle.DriftResolveTurnID(1, 1)] = demo.resolve
-	f.engine.Turns[service.TestDriftMasonAgent+"-recover-1"] = demo.recover
+	f.engine.Turns[intake.DriftMasonAgent+"-recover-1"] = demo.recover
 	f.engine.Turns[lifecycle.DriftReviewTurnID(1, 1)] = demo.reviewDrift
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -429,7 +429,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if !strings.Contains(marked, "<<<<<<< ") || !strings.Contains(marked, "// upstream reserves") {
 		t.Fatalf("the drift mason's view holds %q", marked)
 	}
-	th := f.thread(t, stream, service.TestDriftMasonAgent)
+	th := f.thread(t, stream, intake.DriftMasonAgent)
 	for _, want := range []string{"- " + fixturekit.MasonWrote + "\n", "conflict markers", "## Sealed spec: spec.md"} {
 		if !strings.Contains(th.Turns[0].Request.Prompt, want) {
 			t.Fatalf("the resolve turn lacks %q:\n%s", want, th.Turns[0].Request.Prompt)
@@ -454,11 +454,11 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if resolves != 1 || recovered != resolvedWrote {
 		t.Fatalf("the resolve turn ran %d times; its continuation found %q", resolves, recovered)
 	}
-	th = f.thread(t, stream, service.TestDriftMasonAgent)
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), service.TestDriftMasonAgent + "-recover-1"}) || th.Turns[0].Status() != "interrupted" {
+	th = f.thread(t, stream, intake.DriftMasonAgent)
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftMasonAgent); !slices.Equal(ids, []string{lifecycle.DriftResolveTurnID(1, 1), intake.DriftMasonAgent + "-recover-1"}) || th.Turns[0].Status() != "interrupted" {
 		t.Fatalf("drift mason turns %v, the first %s", ids, th.Turns[0].Status())
 	}
-	if ids := intakefixture.TurnIDs(t, repository, stream, service.TestDriftReviewerAgent); !slices.Equal(ids, []string{lifecycle.DriftReviewTurnID(1, 1)}) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.DriftReviewerAgent); !slices.Equal(ids, []string{lifecycle.DriftReviewTurnID(1, 1)}) {
 		t.Fatalf("drift reviewer turns %v", ids)
 	}
 	records := driftRecords(t, repository, stream)
@@ -480,7 +480,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if all := intakefixture.Seals(t, repository, stream); len(all) != 2 || all[0].Base.Commit != from || all[1].Base.Commit != upstream {
 		t.Fatalf("seals %+v", all)
 	}
-	if _, found, err := intake.Workspaces(f.s.cfg, service.TestDriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
+	if _, found, err := intake.Workspaces(f.s.cfg, intake.DriftsDirectory, config.WorkspacesGit).Workspace(ctx, string(stream)); err != nil || found {
 		t.Fatalf("the resolution workspace outlived the drift rebase: %t %v", found, err)
 	}
 

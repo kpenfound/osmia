@@ -18,7 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type pendingProject struct {
+type PendingProject struct {
 	Version  int              `json:"version"`
 	Project  config.Project   `json:"project"`
 	Creation *projectCreation `json:"creation,omitempty"`
@@ -148,7 +148,7 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	if err := s.step("journal-written"); err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
 	}
-	p, err = s.complete(ctx, pendingProject{Version: 1, Project: p}, true)
+	p, err = s.complete(ctx, PendingProject{Version: 1, Project: p}, true)
 	if err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
 	}
@@ -190,12 +190,12 @@ func (s *Service) reserve(p *config.Project) error {
 			continue
 		}
 		p.ID = id
-		return s.writePending(pendingProject{Version: 1, Project: *p})
+		return s.writePending(PendingProject{Version: 1, Project: *p})
 	}
 	return errors.New("no free project identity")
 }
 
-func (s *Service) writePending(p pendingProject) error {
+func (s *Service) writePending(p PendingProject) error {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func (s *Service) writePending(p pendingProject) error {
 	return syncDirectory(filepath.Dir(path))
 }
 
-func (s *Service) readPending() (*pendingProject, error) {
+func (s *Service) readPending() (*PendingProject, error) {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {
 		return nil, err
@@ -222,7 +222,7 @@ func (s *Service) readPending() (*pendingProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	var p pendingProject
+	var p PendingProject
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&p); err != nil {
@@ -255,7 +255,7 @@ func discardUnpublished(directory string) error {
 	return nil
 }
 
-func (s *Service) complete(ctx context.Context, pending pendingProject, activate bool) (config.Project, error) {
+func (s *Service) complete(ctx context.Context, pending PendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	root := s.current().Root
 	directory, err := root.ProjectTrace(p.ID)

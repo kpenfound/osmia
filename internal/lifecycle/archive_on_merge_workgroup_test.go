@@ -357,7 +357,7 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 	fixturekit.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(g.member)
 	fixturekit.Must(t, err)
-	lock := g.s.changeApplicationLock(id)
+	lock := g.s.lifecycle().ChangeApplicationLock(id)
 	lock.Lock()
 	var released atomic.Bool
 	release := func() {

@@ -96,7 +96,7 @@ func (f *walkFixture) move(subject, unit, to string) {
 	state, err := f.repo.Workflow(fixturekit.Stream, subject)
 	fixturekit.Must(f.t, err)
 	id := fmt.Sprintf("%s-%s-%d", subject, to, state.Version)
-	_, err = f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: f.header("transition", id, unit, 1, service.TestForemanActor), Subject: subject, From: state.Value, To: to, Reason: "walk test"}})
+	_, err = f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: f.header("transition", id, unit, 1, execution.ForemanActor), Subject: subject, From: state.Value, To: to, Reason: "walk test"}})
 	fixturekit.Must(f.t, err)
 }
 
@@ -140,12 +140,12 @@ func (f *walkFixture) report(unit, candidate, base string) {
 func (f *walkFixture) review(unit string, report int, candidate, base, decision string, bounces int) {
 	identity := service.UnitReviewIdentity{Subject: string(fixturekit.Stream) + "/" + unit, Candidate: coreadapter.Candidate{Revision: candidate, BaseRevision: base, SpecRevision: "1", PlanRevision: "1"}, DiffSHA256: "digest-" + candidate[:4], Report: fmt.Sprintf("units/%s/report.json revision %d", unit, report), Seal: 1}
 	path := fmt.Sprintf("units/%s/review.json", unit)
-	f.doc(service.TestReviewDocument(unit), path, unit, identity)
+	f.doc(execution.ReviewDocument(unit), path, unit, identity)
 	verdict := service.UnitVerdict{Decision: decision, Summary: "reviewed " + candidate, Findings: []api.ReviewFinding{}}
 	if decision == "material_findings" {
 		verdict.Findings = append(verdict.Findings, api.ReviewFinding{Severity: "major", Evidence: "missing case", Action: "add it"})
 	}
-	f.doc(service.TestReviewDocument(unit), path, unit, service.UnitReviewResult{Identity: identity, Turn: fmt.Sprintf("review-%s-%d", unit, report), Verdict: verdict, Bounces: bounces})
+	f.doc(execution.ReviewDocument(unit), path, unit, service.UnitReviewResult{Identity: identity, Turn: fmt.Sprintf("review-%s-%d", unit, report), Verdict: verdict, Bounces: bounces})
 }
 
 func (f *walkFixture) land(unit string, review int, candidate, base, commit string, criteria ...string) {
@@ -221,7 +221,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	f.deliver()
 	before := f.snapshot()
 
-	c, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if !c.Complete || len(c.Gaps) != 0 {
 		t.Fatalf("criterion gaps %+v", c.Gaps)
@@ -230,7 +230,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("criterion %+v", c)
 	}
 
-	if len(c.Rulings) != 1 || c.Rulings[0].Kind != service.TestRulingRatification || c.Rulings[0].Ref.Path != shed.RatificationPath(1) {
+	if len(c.Rulings) != 1 || c.Rulings[0].Kind != service.RulingRatification || c.Rulings[0].Ref.Path != shed.RatificationPath(1) {
 		t.Fatalf("criterion rulings %+v", c.Rulings)
 	}
 	if len(c.Units) != 1 || c.Units[0].Unit != "a" {
@@ -256,7 +256,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("unit a turns %+v cost %v", a.Turns, a.CostUSD)
 	}
 
-	two, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#2")
+	two, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#2")
 	fixturekit.Must(t, err)
 	b := two.Units[0]
 	if len(b.Criteria) != 1 || b.Criteria[0].Criterion != "spec#2" || len(b.Acceptance) != 2 || len(b.Reports) != 1 || len(b.Reviews) != 1 || b.Reviews[0].Summary != "reviewed "+sha('3') {
@@ -270,9 +270,9 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("delivery %+v", d)
 	}
 
-	u, err := service.TestTraceUnit(f.repo, fixturekit.Stream, "a")
+	u, err := service.TraceUnit(f.repo, fixturekit.Stream, "a")
 	fixturekit.Must(t, err)
-	if !u.Complete || u.State != intake.UnitMerged || u.Source != service.TestUnitFromPlan || u.Definition.ID != plan.PlanDocument {
+	if !u.Complete || u.State != intake.UnitMerged || u.Source != service.UnitFromPlan || u.Definition.ID != plan.PlanDocument {
 		t.Fatalf("unit %+v", u)
 	}
 	if !slices.IsSortedFunc(u.History, func(x, y api.TraceEvent) int { return x.At.Compare(y.At) }) {
@@ -281,7 +281,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	var reviews []int
 	var states []string
 	for _, e := range u.History {
-		if e.Ref.Kind == "document" && e.Ref.ID == service.TestReviewDocument("a") {
+		if e.Ref.Kind == "document" && e.Ref.ID == execution.ReviewDocument("a") {
 			reviews = append(reviews, e.Ref.Revision)
 		}
 		if _, moved, ok := strings.Cut(e.Summary, trace.UnitSubject("a")+": "); ok && e.Ref.Kind == "transition" {
@@ -297,7 +297,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("unit states in history %v", states)
 	}
 
-	landing, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('a'), "", "")
+	landing, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('a'), "", "")
 	fixturekit.Must(t, err)
 	if !landing.Complete || len(landing.Landings) != 1 {
 		t.Fatalf("landing commit %+v", landing)
@@ -307,7 +307,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("landing %+v", l)
 	}
 
-	published, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('d'), "", "")
+	published, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('d'), "", "")
 	fixturekit.Must(t, err)
 	var units []string
 	for _, l := range published.Landings {
@@ -317,25 +317,25 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 		t.Fatalf("published commit %+v", published)
 	}
 
-	rebased, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('e'), "Land a\n\nOsmia-Operation: op-land-a\n", "")
+	rebased, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('e'), "Land a\n\nOsmia-Operation: op-land-a\n", "")
 	fixturekit.Must(t, err)
 	if rebased.Operation != "op-land-a" || len(rebased.Landings) != 1 || rebased.Landings[0].Unit != "a" {
 		t.Fatalf("rebased commit %+v", rebased)
 	}
 
-	approved, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('2'), "", "")
+	approved, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('2'), "", "")
 	fixturekit.Must(t, err)
 	if !approved.Complete || len(approved.Landings) != 1 || approved.Landings[0].Landing.Commit != sha('a') {
 		t.Fatalf("approved candidate %+v", approved)
 	}
 
-	sentBack, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('1'), "", "")
+	sentBack, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('1'), "", "")
 	fixturekit.Must(t, err)
-	if !sentBack.Complete || len(sentBack.Landings) != 0 || len(sentBack.Records) != 2 || sentBack.Records[0].Role != service.TestCommitCandidate || sentBack.Records[0].Unit != "a" {
+	if !sentBack.Complete || len(sentBack.Landings) != 0 || len(sentBack.Records) != 2 || sentBack.Records[0].Role != service.CommitCandidate || sentBack.Records[0].Unit != "a" {
 		t.Fatalf("sent-back candidate %+v", sentBack)
 	}
 
-	again, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	again, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	first, _ := json.Marshal(c)
 	second, _ := json.Marshal(again)
@@ -347,7 +347,7 @@ func TestTraceWalkCompleteChain(t *testing.T) {
 	}
 
 	f.doc(delivery.DeliveryDocument, delivery.DeliveryPath, "", api.DeliveryApproval{Review: 1, ReviewRevision: 1, Commit: sha('f'), Seal: 1, Spec: 1, Plan: 1, Charter: 1, Description: "Edited", DescriptionHash: delivery.DescriptionHash("Edited"), At: f.at})
-	c, err = service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err = service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if c.Delivery.Approval.Revision != 1 {
 		t.Fatalf("delivery follows approval revision %d", c.Delivery.Approval.Revision)
@@ -361,7 +361,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	f.buildA()
 	f.unit("b", intake.UnitImplementing)
 
-	c, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#2")
+	c, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#2")
 	fixturekit.Must(t, err)
 	if c.Complete || c.Delivery != nil || c.Final != nil {
 		t.Fatalf("criterion %+v", c)
@@ -375,7 +375,7 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 	}
 
 	f.unit("b", intake.UnitWaiting)
-	u, err := service.TestTraceUnit(f.repo, fixturekit.Stream, "b")
+	u, err := service.TraceUnit(f.repo, fixturekit.Stream, "b")
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"units/b/report.json": service.LinkUnfinished}) {
 		t.Fatalf("waiting unit gaps %+v", u.Gaps)
@@ -384,20 +384,20 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 
 	f.report("b", sha('3'), sha('a'))
 	f.unit("b", intake.UnitReviewing)
-	u, err = service.TestTraceUnit(f.repo, fixturekit.Stream, "b")
+	u, err = service.TraceUnit(f.repo, fixturekit.Stream, "b")
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"verdict on units/b/report.json revision 1": service.LinkUnfinished}) {
 		t.Fatalf("reviewing gaps %+v", u.Gaps)
 	}
 	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0)
 	f.unit("b", intake.UnitApproved)
-	u, err = service.TestTraceUnit(f.repo, fixturekit.Stream, "b")
+	u, err = service.TraceUnit(f.repo, fixturekit.Stream, "b")
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(gapStates(u.Gaps), map[string]string{"landing of units/b/review.json revision 2": service.LinkUnfinished}) {
 		t.Fatalf("approved gaps %+v", u.Gaps)
 	}
 
-	candidate, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('3'), "", "")
+	candidate, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('3'), "", "")
 	fixturekit.Must(t, err)
 	if candidate.Complete || len(candidate.Landings) != 0 || gapStates(candidate.Gaps)["landing of candidate "+sha('3')] != service.LinkUnfinished {
 		t.Fatalf("candidate %+v", candidate)
@@ -405,12 +405,12 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 
 	f.land("b", 9, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
 	f.unit("b", intake.UnitMerged)
-	u, err = service.TestTraceUnit(f.repo, fixturekit.Stream, "b")
+	u, err = service.TraceUnit(f.repo, fixturekit.Stream, "b")
 	fixturekit.Must(t, err)
 	if got := gapStates(u.Gaps); got["units/b/review.json revision 9"] != service.LinkUnavailable || got["landing of units/b/review.json revision 2"] != service.LinkUnavailable {
 		t.Fatalf("merged gaps %v", got)
 	}
-	landed, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('b'), "", "")
+	landed, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('b'), "", "")
 	fixturekit.Must(t, err)
 	if landed.Complete || landed.Landings[0].Review != nil || gapStates(landed.Gaps)["units/b/review.json revision 9"] != service.LinkUnavailable {
 		t.Fatalf("landed commit %+v", landed)
@@ -418,13 +418,13 @@ func TestTraceWalkIncompleteChain(t *testing.T) {
 
 	for _, err := range []error{
 		func() error {
-			_, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('7'), "", "")
+			_, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('7'), "", "")
 			return err
 		}(),
-		func() error { _, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#4"); return err }(),
-		func() error { _, err := service.TestTraceUnit(f.repo, fixturekit.Stream, "z"); return err }(),
+		func() error { _, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#4"); return err }(),
+		func() error { _, err := service.TraceUnit(f.repo, fixturekit.Stream, "z"); return err }(),
 	} {
-		if !errors.Is(err, service.TestErrTraceNotFound) {
+		if !errors.Is(err, service.ErrTraceNotFound) {
 			t.Fatalf("unknown walk: %v", err)
 		}
 	}
@@ -438,7 +438,7 @@ func TestTraceWalkKeepsRevisions(t *testing.T) {
 	revised := strings.Replace(walkSpec, "Specs parse.", "Specs parse strictly.", 1)
 	f.doc(plan.SpecDocument, plan.SpecPath, "", revised)
 
-	c, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if c.Text != "Specs parse." || c.Spec.Revision != 1 || c.Units[0].Criteria[0].Text != "Specs parse." {
 		t.Fatalf("criterion after an unsealed revision %+v", c)
@@ -451,7 +451,7 @@ func TestTraceWalkKeepsRevisions(t *testing.T) {
 	fixturekit.Must(t, err)
 	f.doc(seal.DocumentID, seal.Path, "", string(s))
 
-	c, err = service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err = service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if c.Text != "Specs parse strictly." || c.Spec.Revision != 2 || c.Seal.Seal != 2 || c.Rulings[0].Ref.Path != shed.RatificationPath(2) {
 		t.Fatalf("criterion after resealing %+v", c)
@@ -460,7 +460,7 @@ func TestTraceWalkKeepsRevisions(t *testing.T) {
 	if a.Reports[1].Seal != 1 || a.Reviews[1].Candidate.SpecRevision != "1" || a.Landings[0].Spec != "1" {
 		t.Fatalf("unit evidence lost its recorded revisions %+v", a)
 	}
-	landing, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('a'), "", "")
+	landing, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('a'), "", "")
 	fixturekit.Must(t, err)
 	l := landing.Landings[0]
 	if l.Spec.Revision != 1 || l.Seal.Seal != 1 || l.Criteria[0].Text != "Specs parse." {
@@ -476,7 +476,7 @@ func TestTraceWalkAbandoned(t *testing.T) {
 	f.unit("b", intake.UnitImplementing)
 	f.move(trace.FeatureSubject, "", intake.AbandonedState)
 
-	c, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#2")
+	c, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#2")
 	fixturekit.Must(t, err)
 	if c.Feature != intake.AbandonedState || c.Complete {
 		t.Fatalf("criterion %+v", c)
@@ -489,12 +489,12 @@ func TestTraceWalkAbandoned(t *testing.T) {
 			t.Fatalf("abandoned gap %s is %s", link, state)
 		}
 	}
-	a, err := service.TestTraceUnit(f.repo, fixturekit.Stream, "a")
+	a, err := service.TraceUnit(f.repo, fixturekit.Stream, "a")
 	fixturekit.Must(t, err)
 	if !a.Complete || a.State != intake.UnitMerged {
 		t.Fatalf("merged unit of an abandoned workstream %+v", a)
 	}
-	if _, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('a'), "", ""); err != nil {
+	if _, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('a'), "", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -504,18 +504,18 @@ func TestTraceWalkBeforeSeal(t *testing.T) {
 	f := newWalkFixture(t)
 	f.doc(plan.SpecDocument, plan.SpecPath, "", walkSpec)
 	f.move(trace.FeatureSubject, "", intake.InShedState)
-	c, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err := service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if c.Complete || c.Text != "" || c.Spec != nil || !reflect.DeepEqual(gapStates(c.Gaps), map[string]string{seal.Path: service.LinkNotCreated}) {
 		t.Fatalf("criterion before the seal %+v", c)
 	}
 	f.move(trace.FeatureSubject, "", intake.RatifiedState)
-	c, err = service.TestTraceCriterion(f.repo, fixturekit.Stream, "spec#1")
+	c, err = service.WalkCriterion(f.repo, fixturekit.Stream, "spec#1")
 	fixturekit.Must(t, err)
 	if gapStates(c.Gaps)[seal.Path] != service.LinkUnfinished {
 		t.Fatalf("criterion while sealing %+v", c.Gaps)
 	}
-	if _, err := service.TestTraceCriterion(f.repo, fixturekit.Stream, "1"); err == nil || errors.Is(err, service.TestErrTraceNotFound) {
+	if _, err := service.WalkCriterion(f.repo, fixturekit.Stream, "1"); err == nil || errors.Is(err, service.ErrTraceNotFound) {
 		t.Fatalf("uncited criterion: %v", err)
 	}
 }
@@ -526,13 +526,13 @@ func TestTraceWalkFindsAUnitsCommitByItsChange(t *testing.T) {
 	change := strings.Repeat("k", 32)
 	f.doc(execution.ChangeDocument("a"), "units/a/change.json", "a", execution.UnitChange{Unit: "a", Branch: execution.UnitBranch(fixturekit.Stream, "a"), Change: change})
 	f.doc(execution.ChangeDocument("b"), "units/b/change.json", "b", execution.UnitChange{Unit: "b", Branch: execution.UnitBranch(fixturekit.Stream, "b"), Change: strings.Repeat("z", 32)})
-	walk, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('9'), "", change)
+	walk, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('9'), "", change)
 	fixturekit.Must(t, err)
-	if len(walk.Records) != 1 || walk.Records[0].Role != service.TestCommitChange || walk.Records[0].Unit != "a" || walk.Records[0].Ref.Path != "units/a/change.json" || walk.Records[0].Ref.Revision != 1 {
+	if len(walk.Records) != 1 || walk.Records[0].Role != service.CommitChange || walk.Records[0].Unit != "a" || walk.Records[0].Ref.Path != "units/a/change.json" || walk.Records[0].Ref.Revision != 1 {
 		t.Fatalf("the walk by change %+v", walk.Records)
 	}
 	for _, other := range []string{"", strings.Repeat("l", 32)} {
-		if _, err := service.TestTraceCommit(f.repo, fixturekit.Stream, sha('9'), "", other); !errors.Is(err, service.TestErrTraceNotFound) {
+		if _, err := service.TraceCommit(f.repo, fixturekit.Stream, sha('9'), "", other); !errors.Is(err, service.ErrTraceNotFound) {
 			t.Fatalf("a commit carrying change %q: %v", other, err)
 		}
 	}

@@ -79,29 +79,6 @@ func TestParseAndEncode(t *testing.T) {
 	}
 }
 
-func TestParseReadsCriterionProofPlans(t *testing.T) {
-	p, err := Parse([]byte(`{
-  "version": 1,
-  "units": [
-    {"id": "parser", "title": "Parse the spec", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestParseSpec"}}], "depends_on": [], "footprint": ["trace"]},
-    {"id": "validator", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "errors name their unit"}}], "depends_on": ["parser"], "footprint": ["internal.kb"]}
-  ]
-}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := Plan{Version: Version, Units: []Unit{
-		{ID: "parser", Title: "Parse the spec", Task: "Parse the spec", Acceptance: []string{"spec#1 holds, shown by TestParseSpec (new-test)"}, Criteria: []string{"spec#1"}, DependsOn: []string{}, Footprint: []string{"trace"}},
-		{ID: "validator", Task: "Make spec#2 hold.", Acceptance: []string{"spec#2 holds, shown by errors name their unit (reviewer-judgement)"}, Criteria: []string{"spec#2"}, DependsOn: []string{"parser"}, Footprint: []string{"internal.kb"}},
-	}}
-	if !reflect.DeepEqual(p, want) {
-		t.Fatalf("got %#v", p)
-	}
-	if _, err := Parse([]byte(`{"version": 1, "units": [{"id": "a", "task": "t"}]}`)); err == nil || errors.Is(err, ErrUnsupportedVersion) {
-		t.Fatalf("version 1 with a task field: %v", err)
-	}
-}
-
 func TestParseRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

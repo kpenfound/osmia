@@ -71,7 +71,7 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 				}
 			}
 			names := slices.Clone(got.MCP)
-			want := slices.Clone(chiefOrdinaryTools)
+			want := slices.Clone(ChiefOrdinaryTools)
 			slices.Sort(names)
 			slices.Sort(want)
 			if !slices.Equal(names, want) {

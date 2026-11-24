@@ -98,7 +98,7 @@ func TestDesignProductionSharedChiefAssumptionsReachMemberDraftsAcrossRestart(t 
 	before := check()
 	repo, err := f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, f.stream1)
+	authority, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	doc, err := trace.Get[trace.Document](authority, host, trace.AssumptionsDocument, 2)
 	closeAuthority()

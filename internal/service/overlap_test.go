@@ -99,7 +99,7 @@ func (p *overlapPlanted) plant(repo *trace.Repository, stream config.WorkstreamI
 	t.Helper()
 	footprint, err := json.Marshal(names)
 	fixturekit.Must(t, err)
-	graph := fmt.Sprintf(`{"version": 1, "units": [{"id": "work", "title": "Do the work", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestWork"}}], "depends_on": [], "footprint": %s}]}`+"\n", footprint)
+	graph := fmt.Sprintf(`{"version": 2, "units": [{"id": "work", "title": "Do the work", "task": "Do the work", "acceptance": ["spec#1 holds, shown by TestWork (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": %s}]}`+"\n", footprint)
 	parsed, err := plan.Parse([]byte(graph))
 	fixturekit.Must(t, err)
 	m, err := kb.Load(repo)

@@ -59,8 +59,6 @@ type tailnetHTTPS struct {
 	status *TailnetStatus
 }
 
-// eachTailnetHTTPSSetting starts a service that serves HTTPS on the tailnet
-// both by default and when tailnet_https is set, and checks each.
 func eachTailnetHTTPSSetting(t *testing.T, check func(t *testing.T, h *tailnetHTTPS)) {
 	for _, setting := range []string{"", "tailnet_https = true\n"} {
 		t.Run(setting, func(t *testing.T) {

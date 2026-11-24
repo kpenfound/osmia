@@ -26,12 +26,12 @@ func SeedPage(t *testing.T, cfg *config.Config) time.Time {
 	Must(t, err)
 	units := []struct{ id, state string }{{"resume", "merged"}, {"upload", "implementing"}, {"audit", "ready"}, {"index", "planned"}}
 	var graph strings.Builder
-	graph.WriteString(`{"version": 1, "units": [`)
+	graph.WriteString(`{"version": 2, "units": [`)
 	for i, u := range units {
 		if i > 0 {
 			graph.WriteString(", ")
 		}
-		fmt.Fprintf(&graph, `{"id": %q, "title": "Build %s", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestWork"}}], "depends_on": [], "footprint": []}`, u.id, u.id)
+		fmt.Fprintf(&graph, `{"id": %q, "title": "Build %s", "task": "Build %s", "acceptance": ["spec#1 holds, shown by TestWork (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": []}`, u.id, u.id, u.id)
 	}
 	graph.WriteString("]}\n")
 	_, err = plan.Parse([]byte(graph.String()))

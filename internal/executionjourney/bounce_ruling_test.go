@@ -8,7 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
@@ -48,7 +47,7 @@ func newBounceFixture(t *testing.T, history string, configure ...func(*Options))
 
 func prepareBounceFixture(t *testing.T, history string, build bool, configure ...func(*Options)) *bounceFixture {
 	t.Helper()
-	graph := `{"version":1,"units":[{"id":"` + bounceUnit + `","title":"Prove the retry","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestRetry"}},{"criterion":"spec#2","proof":{"kind":"reviewer-judgement","name":"no duplicates"}}],"depends_on":[],"footprint":["internal.trace"]}]}`
+	graph := `{"version":2,"units":[{"id":"` + bounceUnit + `","title":"Prove the retry","task":"Prove the retry", "acceptance":["spec#1 holds, shown by TestRetry (new-test)", "spec#2 holds, shown by no duplicates (reviewer-judgement)"], "criteria":["spec#1", "spec#2"],"depends_on":[],"footprint":["internal.trace"]}]}`
 	outcomes := fixturekit.Passing()
 	failed := fixturekit.CheckOutcome{Result: api.CheckResult{ExitCode: 1, Output: fixturekit.FailedReport(bounceCheck)}}
 	if history == "checks" {
@@ -267,7 +266,7 @@ func TestBounceRulingsReachTheNextRole(t *testing.T) {
 					t.Parallel()
 					b := newBounceFixture(t, history)
 					defer b.stop(t)
-					contest, _, err := service.TestUnitContest(b.f.repository(), b.stream, bounceUnit)
+					contest, _, err := execution.UnitContest(b.f.repository(), b.stream, bounceUnit)
 					fixturekit.Must(t, err)
 					b.rule(t, decision, entry)
 					ruling, found, err := execution.LatestContestedRuling(b.f.repository(), b.stream, bounceUnit, 3)
@@ -331,7 +330,7 @@ func TestBounceChiefDecisionValidation(t *testing.T) {
 			b := newBounceFixture(t, history)
 			defer b.stop(t)
 			repo := b.f.repository()
-			contest, held, err := service.TestUnitContest(repo, b.stream, bounceUnit)
+			contest, held, err := execution.UnitContest(repo, b.stream, bounceUnit)
 			fixturekit.Must(t, err)
 			if !held || !execution.BounceContest(contest, bounceUnit) {
 				t.Fatalf("send-back contest: %+v", contest)
@@ -405,7 +404,7 @@ func TestSavedBounceRulingsRecoverAndDeliverOnce(t *testing.T) {
 
 				ruling := api.ContestedRuling{Decision: decision, Note: bounceNote, Bounces: result.Bounces, Candidate: result.Identity.Candidate.Revision}
 				data, _ := json.Marshal(ruling)
-				doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(bounceUnit), result.Bounces), Revision: 1, Project: repo.Project(), Workstream: b.stream, Unit: bounceUnit, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: service.TestReviewDocument(bounceUnit)}, Path: execution.ContestedRulingPath(bounceUnit, result.Bounces), Content: string(data)}
+				doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("%s-ruling-%d", trace.UnitSubject(bounceUnit), result.Bounces), Revision: 1, Project: repo.Project(), Workstream: b.stream, Unit: bounceUnit, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: execution.ReviewDocument(bounceUnit)}, Path: execution.ContestedRulingPath(bounceUnit, result.Bounces), Content: string(data)}
 				fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 				if retry {
 					other := "review"
@@ -521,7 +520,7 @@ func TestBounceRulingFailureLeavesTheContestAvailable(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-concurrent-1", Revision: 1, Project: repo.Project(), Workstream: b.stream, At: fixturekit.DemoStart, Actor: execution.ReviewerActor, Cause: service.TestReviewDocument(bounceUnit), Unit: bounceUnit}
+					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-concurrent-1", Revision: 1, Project: repo.Project(), Workstream: b.stream, At: fixturekit.DemoStart, Actor: execution.ReviewerActor, Cause: execution.ReviewDocument(bounceUnit), Unit: bounceUnit}
 					_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(bounceUnit), From: intake.UnitContested, To: intake.UnitContested, Reason: "concurrent contest update"}})
 					return err
 				}

@@ -88,7 +88,7 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	s, err := Start(ctx, f.opts)
 	fixturekit.Must(t, err)
 	defer func() { fixturekit.Must(t, s.Close()) }()
-	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -225,7 +225,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	}()
 	repo1, repo2 := f.repositories(t, s)
 
-	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -393,7 +393,7 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 	t.Cleanup(func() { c.Close() })
 	f.repositories(t, s)
 
-	if _, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
+	if _, apiFault := s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 
@@ -447,7 +447,7 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	fixturekit.DemoGit(t, home, "-C", clone2, "remote", "add", "upstream", bare2)
 	main2 := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare2, "rev-parse", "refs/heads/main"))
 
-	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}

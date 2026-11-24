@@ -110,11 +110,11 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		if !slices.Contains(chiefGrant.Tools, tool.Name) {
 			t.Errorf("chief-of-staff tool %s is not in the chief's grant", tool.Name)
 		}
-		if tool.Name == projectContextTool && tool.Effect != coreadapter.ToolRead {
+		if tool.Name == ProjectContextTool && tool.Effect != coreadapter.ToolRead {
 			t.Errorf("project context effect %v, want read", tool.Effect)
 		}
 	}
-	want := slices.DeleteFunc(slices.Clone(chiefOrdinaryTools), func(name string) bool { return name == "file_read" })
+	want := slices.DeleteFunc(slices.Clone(ChiefOrdinaryTools), func(name string) bool { return name == "file_read" })
 	slices.Sort(want)
 	registered := slices.Clone(names)
 	slices.Sort(registered)
@@ -141,14 +141,14 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 	}
 	count := 0
 	for _, name := range turns.Grants[trace.ChiefOfStaff].Tools {
-		if name == projectContextTool {
+		if name == ProjectContextTool {
 			count++
 		}
 	}
 	if count != 1 {
 		t.Errorf("production chief project context grants: %d, want one", count)
 	}
-	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, projectContextTool} {
+	for _, name := range []string{moveUnitTool, handBackDriftTool, resolveContestedTool, ProjectContextTool} {
 		if !slices.Contains(names, name) {
 			t.Errorf("a chief-of-staff turn is not given %s: %v", name, names)
 		}

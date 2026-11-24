@@ -7,7 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	strconv "strconv"
-	"strings"
 	testing "testing"
 
 	chromedp "github.com/chromedp/chromedp"
@@ -47,32 +46,12 @@ func TestBrowserFeedCheckHistoryPreservesResultsAndSelectionsWithoutAListedTotal
 
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 1, at,
 		delivery.FinalCheckRun{Review: 1, Status: checkrun.ChecksIncomplete, Error: "engine unavailable", FinishedAt: at})
-	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalCheckAttemptDocument(1, 2), delivery.FinalCheckAttemptPath(1, 2), 1, at,
-		delivery.FinalCheckAttempt{Review: 1, Attempt: 2, StartedAt: at})
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalReportDocument, delivery.FinalReportPath, 1, at,
 		api.FinalReport{Review: 1, Outcome: delivery.FinalFailed, Failure: "reader did not produce a report"})
 	p.AwaitText(`[data-kind=final_checks][data-attempt=""] [data-field=state]`, "not completed")
 	p.AwaitText(`[data-kind=final_checks][data-attempt=""] [data-field=error]`, "engine unavailable")
-	p.AwaitText(`[data-kind=final_checks][data-attempt="2"] [data-field=state]`, "running")
 	p.AwaitText(`[data-kind=final_review] [data-field=failure]`, "reader did not produce a report")
-	listed := 214
-	selected := &api.CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://go/check"}, Candidates: 37, Listed: &listed, Judgment: "judgment_final"}
-	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalCheckAttemptDocument(2, 1), delivery.FinalCheckAttemptPath(2, 1), 1, at,
-		delivery.FinalCheckAttempt{Review: 2, Attempt: 1, Selection: selected, StartedAt: at})
-	const finalEntry = `[data-kind=final_checks][data-review="2"][data-attempt="1"]`
-	p.AwaitText(finalEntry+` [data-field=selection]`, "checking 1 of 37")
-	p.AwaitText(finalEntry+` [data-field=listed]`, "narrowed from 214 listed")
-	p.AwaitText(finalEntry+` [data-field=selection-description]`, "Jev selected 1 of 37 check links for the changed files in judgment judgment_final")
-	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalChecksDocument(2), delivery.FinalChecksPath(2), 1, at,
-		delivery.FinalCheckRun{Review: 2, Attempt: 1, Selection: selected, Status: checkrun.ChecksPassed, StartedAt: at, FinishedAt: at})
-	p.AwaitText(finalEntry+` [data-field=state]`, "passed")
-	p.AwaitText(finalEntry+` [data-field=selection-description]`, checkrun.DescribeSelection(*selected))
-	var selectedText string
-	p.Eval(`document.querySelector(`+browsertest.Quote(finalEntry)+`).textContent`, &selectedText)
-	if strings.Contains(selectedText, "every check") {
-		t.Fatalf("selected final entry claims full run: %s", selectedText)
-	}
-	assertFeedAnnotations(t, p, `[data-kind=unit_checks], [data-kind=final_checks], [data-kind=final_review]`, 7)
+	assertFeedAnnotations(t, p, `[data-kind=unit_checks], [data-kind=final_checks], [data-kind=final_review]`, 5)
 }
 
 func checkStateLabel(state string) string {

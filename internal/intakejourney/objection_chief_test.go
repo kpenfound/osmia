@@ -104,7 +104,7 @@ func TestChiefOfStaffDecidesObjectionsBeforeTheOwnerSeesThem(t *testing.T) {
 	if len(docs) != 2 || docs[1].Path != shed.ChiefPath(1) || docs[1].Actor != intake.ChiefActor {
 		t.Fatalf("the chief of staff's decision documents %+v", docs)
 	}
-	actions, err := service.TestChiefActions(f.Repository(), stream)
+	actions, err := service.ChiefActions(f.Repository(), stream)
 	fixturekit.Must(t, err)
 	var texts []string
 	for _, a := range actions {

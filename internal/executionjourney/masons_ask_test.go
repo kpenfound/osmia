@@ -6,7 +6,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
@@ -109,7 +108,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	var answered []agent.Request
 	var during []string
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(p, asking, "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, asking, "1")
 	f.engine.Mu.Unlock()
 	f.answer("1", func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		state, err := f.unitState(asking, "resume")
@@ -150,7 +149,7 @@ func TestMasonQuestionParksTheUnitUntilTheAnswerArrives(t *testing.T) {
 	f.checkUnits(t, other, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, f.deferred(t, other, "dedupe", overlapping("resume"))})
 	f.checkUnits(t, third, []api.UnitStatus{f.deferred(t, third, "resume", slotless(1)), f.deferred(t, third, "dedupe", slotless(1))})
 	q := f.question(t, asking, "1")
-	if q.Asked.AskedBy.ID != intake.MasonAgent("resume") || q.Asked.Thread != intake.MasonAgent("resume") || q.Asked.Turn != service.TestMasonTurnID("resume") || q.Asked.Unit != "resume" || q.Asked.Question != intakefixture.AskedQuestion {
+	if q.Asked.AskedBy.ID != intake.MasonAgent("resume") || q.Asked.Thread != intake.MasonAgent("resume") || q.Asked.Turn != execution.MasonTurnID("resume") || q.Asked.Unit != "resume" || q.Asked.Question != intakefixture.AskedQuestion {
 		t.Fatalf("question %+v", q.Asked)
 	}
 	workspace := filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(asking), "resume")
@@ -224,7 +223,7 @@ func TestMasonAsksAgainInItsAnswerTurn(t *testing.T) {
 	c.Release("1")
 	c.Release("2")
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = fakes.Asking(p, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = fakes.Asking(p, "", "1")
 	f.engine.Mu.Unlock()
 	f.answer("1", intakefixture.Asks(p, "2"))
 	f.answer("2", func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })

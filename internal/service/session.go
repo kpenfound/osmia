@@ -15,13 +15,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const sessionsDirectory = "sessions"
+const SessionsDirectory = "sessions"
 
-var sessionActor = trace.Actor{Kind: "owner", ID: "local"}
+var SessionActor = trace.Actor{Kind: "owner", ID: "local"}
 
-func sessionBranch(stream config.WorkstreamID) string { return "osmia/session/" + string(stream) }
+func SessionBranch(stream config.WorkstreamID) string { return "osmia/session/" + string(stream) }
 
-type pendingSession struct {
+type PendingSession struct {
 	Version    int                 `json:"version"`
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -32,7 +32,7 @@ type pendingSession struct {
 	Branch     string              `json:"branch"`
 }
 
-func (s *Service) writePendingSession(p pendingSession) error {
+func (s *Service) writePendingSession(p PendingSession) error {
 	path, err := s.current().Root.PendingSessionOpen()
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func (s *Service) writePendingSession(p pendingSession) error {
 	return writeFileSynced(path, append(data, '\n'))
 }
 
-func (s *Service) readPendingSession() (*pendingSession, error) {
+func (s *Service) readPendingSession() (*PendingSession, error) {
 	path, err := s.current().Root.PendingSessionOpen()
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (s *Service) readPendingSession() (*pendingSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	var p pendingSession
+	var p PendingSession
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&p); err != nil {
@@ -68,7 +68,7 @@ func (s *Service) readPendingSession() (*pendingSession, error) {
 	return &p, nil
 }
 
-var errSessionDiscarded = errors.New("the session open was discarded")
+var ErrSessionDiscarded = errors.New("the session open was discarded")
 
 func sessionIncomplete(id config.WorkstreamID, err error) *APIError {
 	reason := "storage failure"
@@ -81,7 +81,7 @@ func sessionIncomplete(id config.WorkstreamID, err error) *APIError {
 	return &APIError{Code: Internal, Message: fmt.Sprintf("opening session %s is incomplete (%s); restart the service to finish or discard it", id, reason)}
 }
 
-func sameSession(p pendingSession, project config.ProjectID, req SessionOpenRequest) bool {
+func sameSession(p PendingSession, project config.ProjectID, req SessionOpenRequest) bool {
 	return p.Project == project && p.Profile == req.Profile && p.Title == strings.TrimSpace(req.Title)
 }
 
@@ -94,7 +94,7 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	}
 	if pending != nil {
 		view, err := s.completeSessionOpen(ctx, *pending)
-		if errors.Is(err, errSessionDiscarded) {
+		if errors.Is(err, ErrSessionDiscarded) {
 			return SessionView{}, &APIError{Code: Conflict, Message: fmt.Sprintf("an earlier session open for project %s could not be finished and was discarded; retry", pending.Project)}
 		}
 		if err != nil {
@@ -125,7 +125,7 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	if err != nil {
 		return SessionView{}, &APIError{Code: Internal, Message: "cannot generate a session identity"}
 	}
-	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
+	g := workspaces(cfg, SessionsDirectory, config.WorkspacesGit)
 	remote, err := g.Remote(ctx, cfg.Project.Upstream)
 	if err != nil {
 		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s; check the clone's remotes: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
@@ -134,7 +134,7 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	if err != nil {
 		return SessionView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot fetch %s from %s: %v", cfg.Project.BaseBranch, cfg.Project.Upstream, err)}
 	}
-	p := pendingSession{Version: 1, Project: project, Workstream: stream, Profile: req.Profile, Title: strings.TrimSpace(req.Title), BaseBranch: cfg.Project.BaseBranch, Base: base, Branch: sessionBranch(stream)}
+	p := PendingSession{Version: 1, Project: project, Workstream: stream, Profile: req.Profile, Title: strings.TrimSpace(req.Title), BaseBranch: cfg.Project.BaseBranch, Base: base, Branch: SessionBranch(stream)}
 	if err := s.writePendingSession(p); err != nil {
 		return SessionView{}, &APIError{Code: Internal, Message: "cannot write the session open journal"}
 	}
@@ -148,7 +148,7 @@ func (s *Service) openSession(ctx context.Context, req SessionOpenRequest) (Sess
 	return view, nil
 }
 
-func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (SessionView, error) {
+func (s *Service) completeSessionOpen(ctx context.Context, p PendingSession) (SessionView, error) {
 	cfg := s.current().For(p.Project)
 	if !cfg.HasProject() {
 		return SessionView{}, s.discardPendingSession(ctx, p)
@@ -157,7 +157,7 @@ func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (Se
 	if err != nil {
 		return SessionView{}, s.discardPendingSession(ctx, p)
 	}
-	gate := sessionLock(repository, p.Workstream)
+	gate := SessionLock(repository, p.Workstream)
 	gate.Lock()
 	defer gate.Unlock()
 	pending, err := s.readPendingSession()
@@ -165,14 +165,14 @@ func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (Se
 		return SessionView{}, err
 	}
 	if pending == nil || pending.Project != p.Project || pending.Workstream != p.Workstream {
-		return SessionView{}, errSessionDiscarded
+		return SessionView{}, ErrSessionDiscarded
 	}
 	if destroying, err := trace.SessionDestroyPending(cfg.Root, p.Project, p.Workstream); err != nil {
 		return SessionView{}, err
 	} else if destroying {
-		return SessionView{}, errSessionDiscarded
+		return SessionView{}, ErrSessionDiscarded
 	}
-	g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
+	g := workspaces(cfg, SessionsDirectory, config.WorkspacesGit)
 	if _, err := g.Acquire(ctx, vcs.Request{Name: string(p.Workstream), Ref: p.Base, Branch: p.Branch}); err != nil {
 		return SessionView{}, err
 	}
@@ -184,7 +184,7 @@ func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (Se
 		return SessionView{}, err
 	}
 	if !slices.Contains(streams, p.Workstream) {
-		if err := repository.CreateSessionWorkstream(ctx, p.Workstream, p.Profile, p.Base, p.Branch, p.Title, s.now(), sessionActor); err != nil {
+		if err := repository.CreateSessionWorkstream(ctx, p.Workstream, p.Profile, p.Base, p.Branch, p.Title, s.now(), SessionActor); err != nil {
 			return SessionView{}, err
 		}
 	}
@@ -208,11 +208,11 @@ func (s *Service) completeSessionOpen(ctx context.Context, p pendingSession) (Se
 	return view, nil
 }
 
-func (s *Service) discardPendingSession(ctx context.Context, p pendingSession) error {
+func (s *Service) discardPendingSession(ctx context.Context, p PendingSession) error {
 	root := s.current().Root
 	cfg := s.current().For(p.Project)
 	if cfg.HasProject() {
-		g := workspaces(cfg, sessionsDirectory, config.WorkspacesGit)
+		g := workspaces(cfg, SessionsDirectory, config.WorkspacesGit)
 		if w, found, err := g.Workspace(ctx, string(p.Workstream)); err != nil {
 			return err
 		} else if found {
@@ -221,7 +221,7 @@ func (s *Service) discardPendingSession(ctx context.Context, p pendingSession) e
 			}
 		}
 	} else {
-		dir := filepath.Join(root.String(), sessionsDirectory, string(p.Project), string(p.Workstream))
+		dir := filepath.Join(root.String(), SessionsDirectory, string(p.Project), string(p.Workstream))
 		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}
@@ -233,7 +233,7 @@ func (s *Service) discardPendingSession(ctx context.Context, p pendingSession) e
 	if err := os.Remove(journal); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return errSessionDiscarded
+	return ErrSessionDiscarded
 }
 
 func (s *Service) recoverSessionOpen(ctx context.Context) error {
@@ -244,7 +244,7 @@ func (s *Service) recoverSessionOpen(ctx context.Context) error {
 		return err
 	}
 	_, err = s.completeSessionOpen(ctx, *pending)
-	if errors.Is(err, errSessionDiscarded) {
+	if errors.Is(err, ErrSessionDiscarded) {
 		return nil
 	}
 	return err

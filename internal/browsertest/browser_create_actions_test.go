@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,7 +26,7 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	clone := filepath.Join(t.TempDir(), "client")
 	demoGit(t, filepath.Dir(clone), "init", "-q", clone)
 	s, c := start(t, f.opts)
-	_, err := c.AddProject(context.Background(), ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: clone})
+	_, err := c.AddProject(context.Background(), service.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	cfg, err := c.Configuration(context.Background())
 	must(t, err)
@@ -104,7 +105,7 @@ func TestBrowserExploratorySessionUsesProjectNameAcrossSurfaces(t *testing.T) {
 	must(t, os.MkdirAll(filepath.Dir(upstream), 0700))
 	demoGit(t, filepath.Dir(clone), "clone", "-q", "--bare", "--no-hardlinks", second, upstream)
 	demoGit(t, filepath.Dir(clone), "-C", second, "remote", "add", "upstream", upstream)
-	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
+	added, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
 	must(t, err)
 	var repoID config.ProjectID
 	for _, repo := range added.Project.Repos {
@@ -138,7 +139,7 @@ func TestBrowserExploratorySessionUsesProjectNameAcrossSurfaces(t *testing.T) {
 	p.AwaitText("#session-meta [data-field=project]", label)
 	p.Click("#project-home")
 	p.AwaitText(card+` [data-sessions=session] [data-pane-workstream="`+string(id)+`"] [data-field=repo]`, label)
-	operation := s.StartActivity("repo-label", ActivityCheck, repoID, id, "checking the client")
+	operation := s.StartActivity("repo-label", service.ActivityCheck, repoID, id, "checking the client")
 	t.Cleanup(func() { operation.Finish(nil) })
 	p.Click("#activity-button")
 	p.AwaitText(`[data-activity="repo-label"] [data-field=where]`, label)

@@ -106,7 +106,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		must(t, repo.Close())
 	}
 	s, c := start(t, f.opts)
-	entries := entriesOf(t, c, InboxEscalation)
+	entries := entriesOf(t, c, service.InboxEscalation)
 	if len(entries) != 2 || entries[0].Number != entries[1].Number || entries[0].Project == entries[1].Project {
 		t.Fatalf("expected separate project decisions with equal numbers: %+v", entries)
 	}
@@ -140,7 +140,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		if texts := p.OutcomeTexts("#workstreams"); len(texts) != 1 || texts[0] != fmt.Sprintf("Answered inbox entry %d.", entry.Number) {
 			t.Fatalf("project decision outcome entries: %q", texts)
 		}
-		remaining := entriesOf(t, c, InboxEscalation)
+		remaining := entriesOf(t, c, service.InboxEscalation)
 		if len(remaining) != 1-i || i == 0 && remaining[0].Project != entries[1].Project {
 			t.Fatalf("answer affected another project: %+v", remaining)
 		}

@@ -30,16 +30,6 @@ const briefDirective = "BRIEFCALL "
 
 var briefNoticed = regexp.MustCompile(`naming review (\d+) and review_revision (\d+)`)
 
-func ownPrompt(prompt string) string {
-	if !strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
-		return prompt
-	}
-	if _, own, ok := strings.Cut(prompt, "\n\n"); ok {
-		return own
-	}
-	return ""
-}
-
 type briefCall struct {
 	Tool  string         `json:"tool"`
 	Input map[string]any `json:"input"`
@@ -137,7 +127,7 @@ func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall
 }
 
 func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	prompt := ownPrompt(req.Prompt)
+	prompt := intakefixture.OwnPrompt(req.Prompt)
 	c.mu.Lock()
 	c.heard = append(c.heard, prompt)
 	c.mu.Unlock()
@@ -298,7 +288,7 @@ func (j *briefJourney) reassemble(t *testing.T, files map[string]string) api.Fin
 	ctx := context.Background()
 	move := func(to, note string) {
 		t.Helper()
-		if _, apiFault := j.s.ownerMoveWorkstream(ctx, string(j.stream), api.WorkstreamMoveRequest{To: to, Note: note}); apiFault != nil {
+		if _, apiFault := j.s.lifecycle().OwnerMoveWorkstream(ctx, string(j.stream), api.WorkstreamMoveRequest{To: to, Note: note}); apiFault != nil {
 			t.Fatalf("move to %s: %s", to, apiFault.Message)
 		}
 	}

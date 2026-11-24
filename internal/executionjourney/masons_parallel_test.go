@@ -6,7 +6,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	slices "slices"
 	strings "strings"
@@ -21,18 +20,18 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const parallelPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "upload", "title": "Send chunks", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUpload"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.audit"]}
+const parallelPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]}
 ]}
 `
 
-const disjointPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "upload", "title": "Send chunks", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUpload"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.audit"]}
+const disjointPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]}
 ]}
 `
 
@@ -49,7 +48,7 @@ func newParallelMasonFixtureOn(t *testing.T, backend string, masons, perWorkstre
 func newParallelMasonFixturePrepared(t *testing.T, backend string, masons, perWorkstream int, drafted string, prepare func(*Options)) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	f, fake := newMasonFixtureWith(t, backend, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, service.TestMasonTurnID, intake.OwnerActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, execution.MasonTurnID, intake.OwnerActor)
 	return f, fake
 }
 
@@ -82,7 +81,7 @@ func TestWaitingUnitLeavesItsSlotToADisjointUnit(t *testing.T) {
 	chief := &intakefixture.Chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	f.engine.Turns["*"] = chief.Turn
-	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Mu.Unlock()
 	stream := f.seedBuilding(t, "waiting", parallelPlan)
 	f.awaitMasonRan(t, stream, "audit")
@@ -103,7 +102,7 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 	t.Parallel()
 	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
 	defer f.stop(t)
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Built")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 	var mu sync.Mutex
 	started := map[string]bool{}
 	both, release := make(chan struct{}), make(chan struct{})
@@ -126,13 +125,13 @@ func TestMasonSessionsWithinCapacityRunAtOnce(t *testing.T) {
 	}
 	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
 			return nil, err
 		}
 		return masons.Turn(ctx, req, verified, tools)
 	}
-	f.engine.Turns[service.TestMasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if err := overlap(ctx, req); err != nil {
 			return nil, err
 		}

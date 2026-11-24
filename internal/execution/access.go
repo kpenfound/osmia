@@ -39,8 +39,6 @@ func (u unitWorkspaces) Capture(ctx context.Context, scope coreadapter.Scope, vi
 
 type RetriedTurns = retriedTurns
 
-var Prune = prune
-
 type CheckInput = checkInput
 
 func (c *checkers) One(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, runs []UnitCheckRun, ops []checkOperation, hold bool) (bool, error) {
@@ -57,10 +55,6 @@ func (c *checkers) Block(ctx context.Context, stream config.WorkstreamID, unit, 
 func (c *checkers) Record(ctx context.Context, in checkInput, run UnitCheckRun, captured string) (coreadapter.OperationResult, error) {
 	return c.record(ctx, in, run, captured)
 }
-
-var CheckResult = checkResult
-
-var CheckEvidence = checkEvidence
 
 type ReviewerReports = reviewerReports
 

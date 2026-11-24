@@ -43,7 +43,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 		return ids
 	}
 	for k, want := range []string{"assembled-2", "assembled-3"} {
-		if _, apiFault := f.s.ownerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
+		if _, apiFault := f.s.lifecycle().OwnerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
 			t.Fatalf("reopen %d: %s", k+1, apiFault.Message)
 		}
 		fixturekit.Must(t, a.Pass(ctx))

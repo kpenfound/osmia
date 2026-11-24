@@ -128,7 +128,7 @@ type Options struct {
 	// each further failure up to 15 minutes. It defaults to 30 seconds.
 	TailnetHTTPSRetry time.Duration
 	// NotifyRetry is how long the service waits before it posts a
-	// notification the webhook refused again, doubled after each further
+	// Notification the webhook refused again, doubled after each further
 	// failure. It defaults to 30 seconds.
 	NotifyRetry time.Duration
 	// ErrorReporter tunes the error reporter, which runs when [error_reports]
@@ -731,15 +731,6 @@ func projectList(ids []config.ProjectID) string {
 	return strings.Join(out, ", ")
 }
 
-// Run serves in the foreground until cancellation, including full cleanup.
-func Run(ctx context.Context, opts Options) error {
-	s, err := Start(ctx, opts)
-	if err != nil {
-		return err
-	}
-	return s.Wait()
-}
-
 func removeStaleSocket(path string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -811,7 +802,7 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if err != nil || repository == nil {
 		return nil, err
 	}
-	if err := ensureChiefsOfStaff(context.Background(), repository, time.Now().UTC()); err != nil {
+	if err := EnsureChiefsOfStaff(context.Background(), repository, time.Now().UTC()); err != nil {
 		repository.Close()
 		return nil, err
 	}
@@ -919,7 +910,7 @@ func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile
 	return name, profile, err
 }
 
-func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
+func EnsureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
 		return err
@@ -1129,7 +1120,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		return conversationOperation(op) || hold(stream, op)
 	}
 	if options.Concurrent == nil {
-		options.Concurrent = concurrentOperation
+		options.Concurrent = ConcurrentOperation
 	}
 	if options.Class == nil {
 		options.Class = operationClass
@@ -1207,7 +1198,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish, landings: landing}}, nil
 }
 
-func concurrentOperation(op coreadapter.Operation) bool {
+func ConcurrentOperation(op coreadapter.Operation) bool {
 	if gitOperation(op) || networkOperation(op) || modelOperationRole(op) != "" {
 		return true
 	}
@@ -1229,7 +1220,7 @@ func operationClass(op coreadapter.Operation) trace.OperationClass {
 		switch op.Action {
 		case thread.TurnAction:
 			in, err := thread.DecodeTurn(op)
-			if err == nil && (in.Agent == trace.ChiefOfStaff || in.Agent == sessionAgentID) {
+			if err == nil && (in.Agent == trace.ChiefOfStaff || in.Agent == SessionAgentID) {
 				return trace.ConversationOperation
 			}
 			return trace.WorkerOperation

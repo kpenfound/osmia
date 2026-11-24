@@ -18,7 +18,6 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	seal "github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	status "github.com/kpenfound/osmia/internal/status"
@@ -39,7 +38,7 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 	defer closeWait()
 	repo, err := f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	chief, host, _, closeChief, err := f.s.chiefRepository(context.Background(), repo, f.origin)
+	chief, host, _, closeChief, err := f.s.lifecycle().ChiefRepository(context.Background(), repo, f.origin)
 	fixturekit.Must(t, err)
 	defer closeChief()
 	type memberTrace struct {
@@ -55,7 +54,7 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 		member, err := f.s.repository(project)
 		fixturekit.Must(t, err)
 		members = append(members, memberTrace{member, address})
-		target, routedHost, _, release, err := f.s.chiefRepository(context.Background(), member, address)
+		target, routedHost, _, release, err := f.s.lifecycle().ChiefRepository(context.Background(), member, address)
 		fixturekit.Must(t, err)
 		same := target == chief && routedHost == host
 		t.Logf("owner address=%s project=%s authoritative-project=%s host=%s shared-handle=%v", address, project, target.Project(), routedHost, same)
@@ -682,7 +681,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	f.awaitOwnerTurnRunning(t, sent, reached)
 	repo, err := f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	chief, host, _, close, err := f.s.chiefRepository(ctx, repo, f.stream1)
+	chief, host, _, close, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	before, err := chief.Thread(host, trace.ChiefOfStaff)
 	close()
@@ -712,14 +711,14 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	f.wait(t, "pending owner turn replay", func() bool { return replayed.Load() })
 	repo, err = f.s.repository(f.project)
 	fixturekit.Must(t, err)
-	chief, host, _, close, err = f.s.chiefRepository(ctx, repo, f.stream1)
+	chief, host, _, close, err = f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	defer close()
 	f.wait(t, "recovery turn completion", func() bool {
 		recovered, err := chief.Thread(host, trace.ChiefOfStaff)
 		fixturekit.Must(t, err)
 		return recovered.Active == "" && slices.ContainsFunc(recovered.Turns, func(q trace.QueuedTurn) bool {
-			return q.Request.Actor == service.TestRecoveryActor && strings.Contains(q.Request.Prompt, message) && q.Response != nil && !q.CompletedAt.IsZero()
+			return q.Request.Actor == intake.RecoveryActor && strings.Contains(q.Request.Prompt, message) && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
 	recovered, err := chief.Thread(host, trace.ChiefOfStaff)
@@ -730,7 +729,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	}
 	followups := 0
 	for _, turn := range recovered.Turns {
-		if turn.Request.Actor == service.TestRecoveryActor && strings.Contains(turn.Request.Prompt, message) {
+		if turn.Request.Actor == intake.RecoveryActor && strings.Contains(turn.Request.Prompt, message) {
 			followups++
 		}
 	}

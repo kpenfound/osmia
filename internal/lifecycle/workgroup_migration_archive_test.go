@@ -161,7 +161,7 @@ func TestWorkgroupMigrationExcludesPinnedArchivesAndRetainedSessions(t *testing.
 		{Project: added.Project.ID, Workstream: "w_00000000000000000000000000000083", Workgroup: "g_00000000000000000000000000000083"},
 		{Project: "p_00000000000000000000000000000084", Workstream: "w_00000000000000000000000000000084"},
 	}
-	fixturekit.Must(t, s.ensureWorkgroups(ctx, s.current(), []*activeProject{p}, archives))
+	fixturekit.Must(t, s.lifecycle().EnsureWorkgroups(ctx, s.current(), []*lifecycle.Project{{ID: p.id, Repository: p.repository}}, archives))
 	groups, revision, err := trace.Workgroups(p.repository)
 	fixturekit.Must(t, err)
 	if revision != 1 || len(groups) != 1 || !reflect.DeepEqual(groups[0].Members, []config.WorkstreamID{feature}) {
@@ -170,7 +170,7 @@ func TestWorkgroupMigrationExcludesPinnedArchivesAndRetainedSessions(t *testing.
 }
 func TestCleanedArchiveWorkgroupResolutionRequiresExactEvidence(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"merged", "cancelled", "legacy resolved flag", "no archive", "no cleanup", "different project", "different workstream"} {
+	for _, name := range []string{"merged", "cancelled", "no archive", "no cleanup", "different project", "different workstream"} {
 		t.Run(name, func(t *testing.T) {
 			opts, cfg := conversationFixture(t, "archive-resolution-")
 			ctx := context.Background()
@@ -180,11 +180,11 @@ func TestCleanedArchiveWorkgroupResolutionRequiresExactEvidence(t *testing.T) {
 			t.Cleanup(func() { repo.Close() })
 			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{missing}, fixturekit.DemoStart, lifecycle.MigrationActor, "migrate-workgroups")
 			fixturekit.Must(t, err)
-			a := runtime.Archive{Project: cfg.Project.ID, Workstream: missing, ArchivedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart.Add(time.Minute), State: intake.DeliveredState, Title: "Archived request", Resolved: true}
+			a := runtime.Archive{Project: cfg.Project.ID, Workstream: missing, ArchivedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart.Add(time.Minute), State: intake.DeliveredState, Title: "Archived request", Resolved: true, ResolutionEvidence: "merged"}
 			wantResolved, wantError := false, false
 			switch name {
 			case "merged":
-				a.ResolutionEvidence, wantResolved = "merged", true
+				wantResolved = true
 			case "cancelled":
 				a.State, a.ResolutionEvidence, wantResolved = intake.AbandonedState, "cancelled", true
 			case "no archive":

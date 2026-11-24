@@ -28,7 +28,7 @@ func newLandingFixture(t *testing.T, drafted string) (*shedFixture, *intakefixtu
 	t.Helper()
 	f, masons := newMasonFixture(t, 1, drafted)
 	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
-	intakefixture.ScriptLanding(f.engine, masons, service.TestMasonTurnID, chief.Turn)
+	intakefixture.ScriptLanding(f.engine, masons, execution.MasonTurnID, chief.Turn)
 	return f, masons
 }
 
@@ -99,7 +99,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 			landings = append(landings, d)
 		}
 	}
-	if len(landings) != 1 || landings[0].Path != "units/resume/landing.json" || landings[0].Cause != op || landings[0].Actor != service.TestForemanActor {
+	if len(landings) != 1 || landings[0].Path != "units/resume/landing.json" || landings[0].Cause != op || landings[0].Actor != execution.ForemanActor {
 		t.Fatalf("landing documents %+v", landings)
 	}
 	var landing api.UnitLanding
@@ -117,7 +117,7 @@ func TestApprovedUnitLandsAndReadiesItsDependent(t *testing.T) {
 	}
 	m, r := transitions[merged], transitions[ready]
 	wantReason := fmt.Sprintf("unit resume landed as %s on %s: %s approved candidate %s from %s, spec %s, plan %s, seal 1; criteria spec#1", commit, intake.FeatureBranch(stream), approval, candidate, base, want.Spec, want.Plan)
-	if m.From != intake.UnitApproved || m.To != intake.UnitMerged || m.Actor != service.TestForemanActor || m.Cause != op || m.Reason != wantReason {
+	if m.From != intake.UnitApproved || m.To != intake.UnitMerged || m.Actor != execution.ForemanActor || m.Cause != op || m.Reason != wantReason {
 		t.Fatalf("merged transition %+v", m)
 	}
 	if r.From != intake.UnitPlanned || r.To != intake.UnitReady || r.Cause != op || r.Reason != "unit dedupe is ready: every unit it depends on has merged: resume" {
@@ -134,7 +134,7 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	r := &reviewers{masons: newMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity service.UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	}, service.TestReviewTurnID, service.TestReviewDocument, r.one, intake.UnitApproved)
+	}, execution.ReviewTurnID, execution.ReviewDocument, r.one, intake.UnitApproved)
 }
 
 func newApprovedFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
@@ -207,7 +207,7 @@ func TestLandingIsSerialAndARebasedApprovalReturnsToReview(t *testing.T) {
 		t.Fatalf("the unit branch is on %s, rebase.json names %s", parent, rebase.Commit)
 	}
 	doc, report := latestReport(t, f.repository(), stream, "dedupe")
-	if report.Base != landed || report.Candidate != rebase.Commit || doc.Revision != rebase.Report || doc.Cause != rebases[0].Operation.ID || doc.Actor != service.TestForemanActor {
+	if report.Base != landed || report.Candidate != rebase.Commit || doc.Revision != rebase.Report || doc.Cause != rebases[0].Operation.ID || doc.Actor != execution.ForemanActor {
 		t.Fatalf("the rebased report %+v %+v", doc.Header, report)
 	}
 	id := trace.UnitSubject("dedupe") + "-checking-rebase-1"
@@ -231,7 +231,7 @@ func TestStaleApprovalCannotLand(t *testing.T) {
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	ctx := context.Background()
 	review, result := approvedReview(t, repository, stream, "resume")
-	in := service.TestLandInput{Unit: "resume", Review: review.Revision, Candidate: result.Identity.Candidate.Revision, Base: result.Identity.Candidate.BaseRevision}
+	in := execution.LandInput{Unit: "resume", Review: review.Revision, Candidate: result.Identity.Candidate.Revision, Base: result.Identity.Candidate.BaseRevision}
 	check := func(want string) {
 		t.Helper()
 		got, err := lands.current(ctx, stream, in, result)
@@ -251,7 +251,7 @@ func TestStaleApprovalCannotLand(t *testing.T) {
 	}
 	move(execution.UnitBranch(stream, "resume"), in.Base, in.Candidate, "stale approval: stale candidate revision; review the current candidate again")
 	move(intake.FeatureBranch(stream), in.Candidate, in.Base, "stale approval: stale base revision; review the current candidate again")
-	stale := service.TestLandInput{Unit: "resume", Review: review.Revision - 1, Candidate: in.Candidate, Base: in.Base}
+	stale := execution.LandInput{Unit: "resume", Review: review.Revision - 1, Candidate: in.Candidate, Base: in.Base}
 	if got, err := lands.current(ctx, stream, stale, result); err != nil || got != fmt.Sprintf("units/resume/review.json revision %d replaced the approval", review.Revision) {
 		t.Fatalf("an earlier review revision: %q %v", got, err)
 	}

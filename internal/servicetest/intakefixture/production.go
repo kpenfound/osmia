@@ -103,7 +103,7 @@ type ProductionDesign struct {
 	ScriptDrafts             func(*testing.T)
 	Workspaces               func(*config.Config, string, string) workspace.Provider
 	ReadBuilding             func(*trace.Repository, config.WorkstreamID) (bool, error)
-	Holds                    func(config.ProjectID, config.WorkstreamID, *trace.Repository, scheduler.Candidate) (bool, error)
+	Holds                    func(config.ProjectID, *trace.Repository, scheduler.Candidate) (bool, error)
 	EdgeWaiting              func(*trace.Repository, config.WorkstreamID) (bool, error)
 	Builder                  func(*trace.Repository) coreadapter.Reconciler
 	Land                     func(context.Context, *trace.Repository, config.WorkstreamID) (coreadapter.OperationResult, error)
@@ -615,7 +615,7 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 		if ok, err := f.ReadBuilding(repo, m); err != nil || ok {
 			t.Fatalf("unit admission bypasses approval: %v %v", ok, err)
 		}
-		held, err := f.Holds(p, m, repo, scheduler.Candidate{Workstream: m, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}, Turn: trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Unit: "accept"}}}})
+		held, err := f.Holds(p, repo, scheduler.Candidate{Workstream: m, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}, Turn: trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Unit: "accept"}}}})
 		fixturekit.Must(t, err)
 		if !held {
 			t.Fatal("scheduler bypasses group barrier")

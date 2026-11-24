@@ -143,7 +143,7 @@ func TestDesignProductionLifecycleInterruptedRulingAndRelay(t *testing.T) {
 				t.Helper()
 				repo, err := f.s.repository(f.project2)
 				fixturekit.Must(t, err)
-				target, host, _, release, err := f.s.chiefRepository(ctx, repo, f.stream2)
+				target, host, _, release, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream2)
 				fixturekit.Must(t, err)
 				defer release()
 				inbox, err := target.Inbox()

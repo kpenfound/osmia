@@ -68,7 +68,7 @@ func TestRefusedVerdictReviewsTheCandidateAgain(t *testing.T) {
 	fixturekit.Must(t, r.one(ctx, stream, "resume", refreshed, false))
 	th, err = repo.Thread(stream, intake.ReviewerAgent("resume"))
 	fixturekit.Must(t, err)
-	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != service.TestReviewTurnID("resume", refreshed.Version) {
+	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != execution.ReviewTurnID("resume", refreshed.Version) {
 		t.Fatalf("review turns after refusal: %+v", th.Turns)
 	}
 	if prompt := th.Turns[1].Request.Prompt; !strings.Contains(prompt, "was refused: summary is required: say how you verified the unit's acceptance") {
@@ -88,7 +88,7 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn := service.TestReviewTurnID("resume", state.Version)
+	turn := execution.ReviewTurnID("resume", state.Version)
 	result := service.UnitReviewResult{Identity: identity, Turn: turn, Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	data, _ := json.Marshal(result)
 	docs, err := trace.Read[trace.Document](repo, stream)
@@ -97,7 +97,7 @@ func TestReviewResultReconcilesAfterRestart(t *testing.T) {
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == service.TestReviewDocument("resume") {
+		if d.ID == execution.ReviewDocument("resume") {
 			latest = d
 		}
 	}
@@ -152,7 +152,7 @@ func TestStaleCandidateReturnsUnitToReview(t *testing.T) {
 		if tc.name == "plan" {
 			verdict.Summary = ""
 		}
-		result := service.UnitReviewResult{Identity: reviewed, Turn: service.TestReviewTurnID("resume", state.Version), Verdict: verdict}
+		result := service.UnitReviewResult{Identity: reviewed, Turn: execution.ReviewTurnID("resume", state.Version), Verdict: verdict}
 		if err := r.applyReview(context.Background(), stream, "resume", state, result); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -182,7 +182,7 @@ func TestInterruptedReviewQueuesOneContinuation(t *testing.T) {
 			f.stop(t)
 		}
 	}()
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Built")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 	entered := make(chan struct{})
 	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
@@ -235,7 +235,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 			p := &intakefixture.Faults{}
 			f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
 			defer f.stop(t)
-			masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Built")
+			masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 			var reviews atomic.Int32
 			started, release := make(chan struct{}), make(chan struct{})
 			defer func() {
@@ -294,7 +294,7 @@ func TestReviewerQuestionResumesSameCandidateAfterOwnerAnswer(t *testing.T) {
 			fixturekit.Must(t, err)
 			var before service.UnitReviewIdentity
 			for _, d := range docs {
-				if d.ID == service.TestReviewDocument("resume") {
+				if d.ID == execution.ReviewDocument("resume") {
 					_ = json.Unmarshal([]byte(d.Content), &before)
 				}
 			}
@@ -344,7 +344,7 @@ func TestContestedReviewRulingSurvivesRestart(t *testing.T) {
 	f, masons := newMasonFixture(t, 1, independentPlan)
 	defer f.stop(t)
 	f.s.cfg.Shed.MaxBounces = 1
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Built")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Built")
 	chief := &intakefixture.Chief{P: &intakefixture.Faults{}, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
 	f.engine.Mu.Lock()
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -489,7 +489,7 @@ func TestRepeatedlyRefusedReviewsContestTheUnit(t *testing.T) {
 	if contest.Subject != subject || !execution.FailedReview(contest, "resume") || !strings.Contains(contest.Reason, fmt.Sprintf("refused %d reviews of unit resume in a row", execution.MaxReviewRefreshes)) {
 		t.Fatalf("the contest %+v", contest)
 	}
-	if opts := service.TestContestOptions(contest, "resume", false); !slices.Equal(opts, []string{"review"}) {
+	if opts := service.ContestOptions(contest, "resume", false); !slices.Equal(opts, []string{"review"}) {
 		t.Fatalf("the contest offers %v", opts)
 	}
 }

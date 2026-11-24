@@ -33,9 +33,9 @@ func TestFeedUnitCheckRunShowsTheSelectionThatRanAfterARefusal(t *testing.T) {
 	full := checkrun.FullSelection(checkrun.SelectionRefused, "no checks matched pattern")
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckSelectionDocument("upload", 1), execution.CheckSelectionPath("upload", 1), 1, started, execution.UnitCheckSelection{Unit: "upload", Run: 1, Selection: selected, StartedAt: started})
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckDocumentID("upload", 1), "units/upload/checks-1.json", 1, finished, execution.UnitCheckRun{Unit: "upload", Run: 1, Status: checkrun.ChecksPassed, Selection: &full, StartedAt: started, FinishedAt: finished})
-	entries, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+	entries, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
-	if len(entries) != 1 || !reflect.DeepEqual(entries[0].UnitChecks.Selection, service.TestFeedSelection(&full)) {
+	if len(entries) != 1 || !reflect.DeepEqual(entries[0].UnitChecks.Selection, service.FeedSelection(&full)) {
 		t.Fatalf("entries: %+v", entries)
 	}
 }
@@ -57,7 +57,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 			fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckSelectionDocument("upload", 1), execution.CheckSelectionPath("upload", 1), 1, chosen, execution.UnitCheckSelection{Unit: "upload", Run: 1, Selection: selection, StartedAt: started})
 			read := func() []api.FeedEntry {
 				t.Helper()
-				entries, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+				entries, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 				fixturekit.Must(t, err)
 				return entries
 			}
@@ -65,7 +65,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 			if status != checkrun.ChecksSuperseded && (before[0].UnitChecks.Selection.FallbackPicks != 3 || !strings.Contains(before[0].UnitChecks.Selection.Description, "highest-scored checks ran")) {
 				t.Fatalf("picks feed: %+v", before[0].UnitChecks.Selection)
 			}
-			if len(before) != 1 || before[0].At != chosen || before[0].UnitChecks.State != "running" || before[0].UnitChecks.FinishedAt != nil || !reflect.DeepEqual(before[0].UnitChecks.Selection, service.TestFeedSelection(&selection)) {
+			if len(before) != 1 || before[0].At != chosen || before[0].UnitChecks.State != "running" || before[0].UnitChecks.FinishedAt != nil || !reflect.DeepEqual(before[0].UnitChecks.Selection, service.FeedSelection(&selection)) {
 				t.Fatalf("running: %+v", before)
 			}
 			fixturekit.Must(t, repo.Close())
@@ -88,7 +88,7 @@ func TestFeedUnitCheckRunsKeepSelectionAndRecordedResultsAcrossRestart(t *testin
 				run.Error = "candidate replaced"
 			}
 			fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckDocumentID("upload", 1), "units/upload/checks-1.json", 1, finished, run)
-			want := api.FeedEntry{Kind: "unit_checks", At: chosen, UnitChecks: &api.FeedUnitChecks{Unit: "upload", Run: 1, State: status, Selection: service.TestFeedSelection(&selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, StartedAt: started, FinishedAt: &finished}}
+			want := api.FeedEntry{Kind: "unit_checks", At: chosen, UnitChecks: &api.FeedUnitChecks{Unit: "upload", Run: 1, State: status, Selection: service.FeedSelection(&selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, StartedAt: started, FinishedAt: &finished}}
 			if after := read(); !reflect.DeepEqual(after, []api.FeedEntry{want}) {
 				t.Fatalf("finished: %s; want %+v", describeFeed(after), want.UnitChecks)
 			}
@@ -111,7 +111,7 @@ func TestFeedUnitCheckSelectionWithoutAListedTotalShowsNone(t *testing.T) {
 	selection := api.CheckSelection{Mode: checkrun.SelectionSelected, Links: []string{"dag://a"}, Candidates: 113}
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckDocumentID("upload", 1), "units/upload/checks-1.json", 1, fixturekit.DemoStart, execution.UnitCheckRun{Unit: "upload", Run: 1, Status: checkrun.ChecksPassed, Selection: &selection, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckDocumentID("upload", 2), "units/upload/checks-2.json", 1, fixturekit.DemoStart.Add(time.Minute), execution.UnitCheckRun{Unit: "upload", Run: 2, Status: checkrun.ChecksFailed, Failed: []string{"dag://b"}, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart.Add(time.Minute)})
-	entries, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+	entries, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if len(entries) != 2 {
 		t.Fatalf("entries: %+v", entries)
@@ -127,87 +127,60 @@ func TestFeedUnitCheckSelectionWithoutAListedTotalShowsNone(t *testing.T) {
 	}
 }
 
-func TestFeedFinalChecksShowEachStartedAttemptAndAResultWithoutOne(t *testing.T) {
+func TestFeedFinalChecksShowEachRecordedResult(t *testing.T) {
 	t.Parallel()
 	_, cfg := conversationFixture(t, "ffc-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	defer func() { repo.Close() }()
 	at := func(n int) time.Time { return fixturekit.DemoStart.Add(time.Duration(n) * time.Minute) }
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "final-request", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at(0), Actor: intake.ServiceActor, Cause: "feed-test"}
-	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: delivery.FinalReviewSubject, To: "requested-1", Reason: "assembled"}})
-	fixturekit.Must(t, err)
 	read := func() []api.FeedEntry {
 		t.Helper()
-		entries, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+		entries, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 		fixturekit.Must(t, err)
 		return slices.DeleteFunc(entries, func(e api.FeedEntry) bool { return e.Kind != "final_checks" })
 	}
 	if entries := read(); len(entries) != 0 {
-		t.Fatal("request alone produced a check attempt")
+		t.Fatal("a repository without a check record produced a final check entry")
 	}
-	start := func(review, attempt, minute int) {
+	result := func(review, revision, minute int, state, reason string) {
 		t.Helper()
-		fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalCheckAttemptDocument(review, attempt), delivery.FinalCheckAttemptPath(review, attempt), 1, at(minute), delivery.FinalCheckAttempt{Review: review, Attempt: attempt, StartedAt: at(minute)})
-	}
-	result := func(review, attempt, revision, minute int, state, reason string) {
-		t.Helper()
-		run := delivery.FinalCheckRun{Review: review, Attempt: attempt, Status: state, Error: reason, StartedAt: at(minute - 1), FinishedAt: at(minute), Output: "output stays in trace"}
+		run := delivery.FinalCheckRun{Review: review, Status: state, Error: reason, StartedAt: at(minute - 1), FinishedAt: at(minute)}
 		if state == checkrun.ChecksFailed {
 			run.Failed = []string{"dag://failed"}
 			run.Flaky = []string{"dag://flaky"}
 		}
 		fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalChecksDocument(review), delivery.FinalChecksPath(review), revision, at(minute), run)
 	}
-	start(1, 1, 1)
-	if entries := read(); len(entries) != 1 || entries[0].FinalChecks.State != "running" {
-		t.Fatalf("start: %+v", entries)
-	}
-	result(1, 1, 1, 2, checkrun.ChecksIncomplete, "engine unavailable")
-	if entries := read(); len(entries) != 1 || entries[0].FinalChecks.State != checkrun.ChecksIncomplete {
-		t.Fatalf("waiting for retry: %+v", entries)
-	}
-	start(1, 2, 12)
+	result(1, 1, 2, checkrun.ChecksIncomplete, "engine unavailable")
+	result(1, 2, 13, checkrun.ChecksPassed, "")
 	before := read()
-	if len(before) != 2 || before[0].FinalChecks.State != checkrun.ChecksIncomplete || before[0].FinalChecks.Error != "engine unavailable" || before[1].FinalChecks.State != "running" {
+	if len(before) != 2 || before[0].FinalChecks.State != checkrun.ChecksIncomplete || before[0].FinalChecks.Error != "engine unavailable" || before[1].FinalChecks.State != checkrun.ChecksPassed {
 		t.Fatalf("retry: %+v", before)
 	}
 	fixturekit.Must(t, repo.Close())
 	repo, err = trace.Open(cfg.Root, cfg.Project)
 	fixturekit.Must(t, err)
 	if entries := read(); !reflect.DeepEqual(entries, before) {
-		t.Fatalf("restart changed attempts: %+v", entries)
+		t.Fatalf("restart changed the entries: %+v", entries)
 	}
-	result(1, 2, 2, 13, checkrun.ChecksPassed, "")
-
-	result(2, 0, 1, 14, checkrun.ChecksIncomplete, "export failed")
-	result(2, 0, 2, 15, checkrun.ChecksFailed, "")
-	start(3, 1, 16)
-	start(3, 2, 17)
-	result(3, 2, 1, 18, checkrun.ChecksFailed, "")
+	result(2, 1, 14, checkrun.ChecksIncomplete, "export failed")
+	result(2, 2, 15, checkrun.ChecksFailed, "")
 	got := read()
 	states := []string{}
 	for _, e := range got {
 		states = append(states, e.FinalChecks.State)
 	}
-	if !reflect.DeepEqual(states, []string{checkrun.ChecksIncomplete, checkrun.ChecksPassed, checkrun.ChecksIncomplete, checkrun.ChecksFailed, "running", checkrun.ChecksFailed}) {
-		t.Fatalf("attempt states: %v", states)
+	if !reflect.DeepEqual(states, []string{checkrun.ChecksIncomplete, checkrun.ChecksPassed, checkrun.ChecksIncomplete, checkrun.ChecksFailed}) {
+		t.Fatalf("result states: %v", states)
 	}
-	if got[0].At != at(1) || got[1].At != at(12) || got[1].FinalChecks.Attempt != 2 || got[1].FinalChecks.FinishedAt == nil {
-		t.Fatalf("attempt identity: %+v", got)
-	}
-	for _, i := range []int{2, 3} {
-		if got[i].FinalChecks.Attempt != 0 || got[i].FinalChecks.StartedAt != nil {
-			t.Fatalf("invented start: %+v", got[i].FinalChecks)
+	for _, e := range got {
+		if e.FinalChecks.Attempt != 0 || e.FinalChecks.StartedAt != nil {
+			t.Fatalf("invented start: %+v", e.FinalChecks)
 		}
 	}
 	if !reflect.DeepEqual(got[3].FinalChecks.Failed, []string{"dag://failed"}) || !reflect.DeepEqual(got[3].FinalChecks.Flaky, []string{"dag://flaky"}) {
 		t.Fatalf("failed and flaky links: %+v", got[3])
-	}
-	data, err := json.Marshal(got)
-	fixturekit.Must(t, err)
-	if strings.Contains(string(data), "output stays") {
-		t.Fatal("feed contains captured output")
 	}
 }
 
@@ -237,12 +210,12 @@ func feedWithEveryClaimedRoleAndTwoFinalReports(t *testing.T) claimedRolesFeed {
 	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "token_chief", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart)
 	fixturekit.Must(t, err)
-	before, err := service.TestConversationEntries(repo, fixturekit.Stream)
+	before, err := service.ConversationEntries(repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	reviewed := api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Reader: "agent_feed_1", Turn: "agent_feed_1-turn", Findings: []api.FinalFinding{{Severity: delivery.FindingBlocking}, {Severity: delivery.FindingAdvisory}, {Severity: delivery.FindingBlocking}}, Criteria: []api.FinalCriterion{{Criterion: "spec#1", Gap: "uncovered"}, {Criterion: "spec#2", Evidence: "upload"}}}
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalReportDocument, delivery.FinalReportPath, 1, fixturekit.DemoStart.Add(time.Minute), reviewed)
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalReportDocument, delivery.FinalReportPath, 2, fixturekit.DemoStart.Add(2*time.Minute), api.FinalReport{Review: 2, Outcome: delivery.FinalFailed, Failure: "rebase failed"})
-	entries, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+	entries, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	conversation := []api.ConversationEntry{}
 	for _, e := range entries {
@@ -315,10 +288,8 @@ func TestEventStreamAnnouncesFeedCheckAndReviewRecords(t *testing.T) {
 	}{
 		{execution.CheckSelectionDocument("upload", 1), execution.CheckSelectionPath("upload", 1), 1, execution.UnitCheckSelection{Unit: "upload", Run: 1, Selection: checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set"), StartedAt: at}},
 		{execution.CheckDocumentID("upload", 1), "units/upload/checks-1.json", 1, execution.UnitCheckRun{Unit: "upload", Run: 1, Status: checkrun.ChecksPassed, StartedAt: at, FinishedAt: at}},
-		{delivery.FinalCheckAttemptDocument(1, 1), delivery.FinalCheckAttemptPath(1, 1), 1, delivery.FinalCheckAttempt{Review: 1, Attempt: 1, StartedAt: at}},
-		{delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 1, delivery.FinalCheckRun{Review: 1, Attempt: 1, Status: checkrun.ChecksIncomplete, Error: "timeout", StartedAt: at, FinishedAt: at}},
-		{delivery.FinalCheckAttemptDocument(1, 2), delivery.FinalCheckAttemptPath(1, 2), 1, delivery.FinalCheckAttempt{Review: 1, Attempt: 2, StartedAt: at}},
-		{delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 2, delivery.FinalCheckRun{Review: 1, Attempt: 2, Status: checkrun.ChecksPassed, StartedAt: at, FinishedAt: at}},
+		{delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 1, delivery.FinalCheckRun{Review: 1, Status: checkrun.ChecksIncomplete, Error: "timeout", StartedAt: at, FinishedAt: at}},
+		{delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 2, delivery.FinalCheckRun{Review: 1, Status: checkrun.ChecksPassed, StartedAt: at, FinishedAt: at}},
 		{delivery.FinalReportDocument, delivery.FinalReportPath, 1, api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed}},
 	} {
 		fixturekit.FeedDocument(t, repo, fixturekit.Stream, record.id, record.path, record.revision, at, record.value)
@@ -352,7 +323,7 @@ func TestFeedIncludesEveryWorkflowSubject(t *testing.T) {
 			want = append(want, api.FeedEntry{Kind: "transition", At: at, Transition: &api.FeedTransition{Subject: subject, Unit: unit, From: state.Value, To: to, Actor: "service:osmia", Reason: reason}})
 		}
 	}
-	got, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+	got, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("feed: %s; want: %s", describeFeed(got), describeFeed(want))

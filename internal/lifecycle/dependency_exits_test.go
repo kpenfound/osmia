@@ -519,7 +519,7 @@ func parkOnAbandonedBase(t *testing.T, f *shedFixture) (*trace.Repository, confi
 	base, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 	endStream(t, repo, f.s.now(), base)
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
 		t.Fatalf("the dependent is not parked: %v %v", waiting, err)
 	}
@@ -535,7 +535,7 @@ func TestAnAbandonedBaseMergedByHandRaisesAnExitAndTheDependentGoesOn(t *testing
 	ctx := context.Background()
 	upstream := advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
 
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
 	records := routeFor(t, repo, stream, lifecycle.TriggerBaseIntegrated)
 	if len(records) != 1 || records[0].State != router.StateCommitted || records[0].Default != lifecycle.DependencyAdopted || records[0].Outcome != router.OutcomeFollowed {
 		t.Fatalf("route %+v", records)
@@ -553,7 +553,7 @@ func TestAnAbandonedBaseMergedByHandRaisesAnExitAndTheDependentGoesOn(t *testing
 	if waivers, _, err := lifecycle.EdgeWaiversAt(repo, stream); err != nil || len(waivers.Waivers) != 0 {
 		t.Fatalf("going on because the base is integrated wrote a waiver: %+v %v", waivers, err)
 	}
-	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
 	if state, err := repo.Workflow(stream, lifecycle.BaseWaitSubject); err != nil || state.Value != "available" {
 		t.Fatalf("the base wait after its next pass %+v: %v", state, err)
 	}
@@ -568,7 +568,7 @@ func TestJevDropsAnAbandonedBaseWhoseChangesAreNotInUpstream(t *testing.T) {
 	ctx := context.Background()
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repo))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
 	records := routeFor(t, repo, stream, lifecycle.TriggerBaseUnavailable)
 	if len(records) != 1 || records[0].Outcome != router.OutcomeDeparted || records[0].Target != lifecycle.DependencyWaived {
 		t.Fatalf("route %+v", records)
@@ -589,8 +589,8 @@ func TestJevDropsAnAbandonedBaseWhoseChangesAreNotInUpstream(t *testing.T) {
 		t.Fatalf("the base observation %+v: %v", observed, err)
 	}
 	for i := 0; i < 3; i++ {
-		fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
-		fixturekit.Must(t, f.s.edgeResolverPass(ctx, repo))
+		fixturekit.Must(t, f.s.lifecycle().BaseWaitPass(ctx, repo))
+		fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repo))
 	}
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || waiting {
 		t.Fatalf("the dependent was parked again: %v %v", waiting, err)
@@ -623,7 +623,7 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	pull.Mu.Lock()
 	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: upstreamPullRequest.PullRequest, URL: upstreamPullRequest.URL, State: "open", HeadRepository: upstreamPullRequest.Fork, Head: upstreamPullRequest.Branch, HeadCommit: upstreamPullRequest.Commit, Base: "main"})
 	pull.Mu.Unlock()
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
 	pub.publishDraft(t)
@@ -645,13 +645,13 @@ func TestAWaivedMergeOrderEdgeLetsTheDraftBeMarkedReadyAfterAFreshApproval(t *te
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	if waived, err := lifecycle.EdgeWaived(repository, stream, upstream, trace.EdgeMergeOrder); err != nil || !waived {
 		t.Fatalf("the edge is not waived: %v %v", waived, err)
 	}
 	for i := 0; i < 2; i++ {
-		fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
-		fixturekit.Must(t, f.s.edgeWaitPass(ctx, repository))
+		fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
+		fixturekit.Must(t, f.s.lifecycle().EdgeWaitPass(ctx, repository))
 	}
 	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || !pending {
 		t.Fatalf("the waived draft is not pending a fresh review and approval: %v %v", pending, err)
@@ -720,7 +720,7 @@ func TestTheChiefOfStaffDropsADependency(t *testing.T) {
 	f.resolvePasses(t)
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
-	tool := controls.dropDependency(f.repository, scope)
+	tool := controls.lifecycle().DropDependency(f.repository, scope)
 	out := callMove(t, tool, fmt.Sprintf(`{"upstream":%q,"reason":"The dependent works without it.","workstream":%q}`, f.upstream, f.downstream))
 	if !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("the chief's drop: %s", out)

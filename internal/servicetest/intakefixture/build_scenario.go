@@ -608,7 +608,7 @@ func DrivePass(t *testing.T, repo *trace.Repository, halt func() error, pass fun
 	if err := halt(); err != nil {
 		t.Fatalf("idle the controller: %v", err)
 	}
-	if err := repo.Serialize(pass); err != nil {
+	if err := pass(); err != nil {
 		t.Fatalf("drive the pass: %v", err)
 	}
 }

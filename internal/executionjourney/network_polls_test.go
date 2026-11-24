@@ -90,7 +90,7 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			for _, want := range []struct {
 				stream      config.WorkstreamID
 				agent, turn string
-			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.TestSessionAgentID, messaged.Turn}} {
+			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.SessionAgentID, messaged.Turn}} {
 				fixturekit.ConversationAwait(t, func() bool {
 					th, err := repo.Thread(want.stream, want.agent)
 					if err != nil {
@@ -162,7 +162,7 @@ func TestBaseRefreshBypassesOwnWorkflow(t *testing.T) {
 	p := deliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "merged-tip", Head: p.Branch, HeadRepository: p.Fork}}
 	fixturekit.Must(t, refresh.Pass(ctx))
-	controller, err := reconcile.New(repo, reconcile.Options{Worker: "poll-test", Now: refresh.s.now, Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(refresh.s).GitOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: refresh}})
+	controller, err := reconcile.New(repo, reconcile.Options{Worker: "poll-test", Now: refresh.s.now, Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(refresh.s).GitOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: refresh}})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, controller.Pass(ctx))
 	fixturekit.Must(t, controller.Wait())

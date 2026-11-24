@@ -93,7 +93,7 @@ func newSkillReviewFixture(t *testing.T, key string) (*shedFixture, config.Works
 	})
 	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: independentPlan}, nil)
 	f.upstream(t)
-	intakefixture.ScriptMasons(f.engine, service.TestMasonTurnID)
+	intakefixture.ScriptMasons(f.engine, execution.MasonTurnID)
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
 	seedReview(t, f, repository, stream, "resume", resumeReport)

@@ -70,7 +70,7 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	p.Await("the view closed", `!document.querySelector('.view[data-view="workstream"]').hidden`)
 	p.SelectWorkstream(ws)
 	parentText := "A prerequisite"
-	parent, err := c.HandIn(context.Background(), HandInRequest{Project: id, Key: "browser-parent", Stdin: &parentText})
+	parent, err := c.HandIn(context.Background(), service.HandInRequest{Project: id, Key: "browser-parent", Stdin: &parentText})
 	must(t, err)
 	p.Click("[data-tab=documents]")
 	p.Await("the documents tab", `!document.querySelector('[data-panel=documents]').hidden`)

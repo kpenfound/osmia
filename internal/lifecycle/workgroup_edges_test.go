@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +44,7 @@ func newCrossRepoEdgeDependent(t *testing.T) (f *shedFixture, stream config.Work
 
 func recordUpstreamOwnPullRequest(t *testing.T, s *Service, repo2 *trace.Repository, upstream config.WorkstreamID, publication api.DeliveryPublication) {
 	t.Helper()
-	fixturekit.UpstreamOwnPullRequest(t, repo2, upstream, publication, s.now(), service.TestForemanActor, delivery.PublicationDocument, delivery.PublicationPath)
+	fixturekit.UpstreamOwnPullRequest(t, repo2, upstream, publication, s.now(), execution.ForemanActor, delivery.PublicationDocument, delivery.PublicationPath)
 }
 
 func TestCrossRepoMergeOrderEdgeDraftThenReadyAfterMergeAndFreshApproval(t *testing.T) {
@@ -87,7 +88,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: upstreamPullRequest.PullRequest, URL: upstreamPullRequest.URL, State: "open", HeadRepository: upstreamPullRequest.Fork, Head: upstreamPullRequest.Branch, HeadCommit: upstreamPullRequest.Commit, Base: "main"})
 	pull.Mu.Unlock()
 
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	provider := f.s.Context()
 	assertContext := func(merged bool) {
 		t.Helper()
@@ -112,7 +113,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 		if !merged && view.Dependencies[0].BuildBranch == "" {
 			t.Fatal("dependent has no upstream branch or commit to build against")
 		}
-		chief, _, bundleStream, closeChief, err := f.s.chiefRepository(ctx, repository, stream)
+		chief, _, bundleStream, closeChief, err := f.s.lifecycle().ChiefRepository(ctx, repository, stream)
 		fixturekit.Must(t, err)
 		context, err := service.TestChiefContext(ctx, provider, chief, closeChief, repository.Project(), bundleStream)
 		fixturekit.Must(t, err)
@@ -157,7 +158,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	if pending, err := lifecycle.UpstreamDeliveryPending(repository, f.s.about(repository), stream); err != nil || !pending {
 		t.Fatalf("the upstream merge was not recognised as pending maintenance: %v %v", pending, err)
 	}
@@ -176,7 +177,7 @@ func exerciseCrossRepoMergeOrder(t *testing.T, repair, baseMaintenance bool) {
 	if len(updates) != 1 || !strings.Contains(updates[0].Unit.Task, pull.Prs[0].MergeCommit) {
 		t.Fatalf("merged dependency update units: %+v", updates)
 	}
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	retried, err := followup.Read(repository, stream)
 	fixturekit.Must(t, err)
 	if len(retried) != 1 {
@@ -291,7 +292,7 @@ func seedEdgeDependentBase(t *testing.T, f *shedFixture, repo *trace.Repository,
 	parentDoc := doc
 	parentDoc.Workstream, parentDoc.Content, parentDoc.Revision = parent, string(data), 1
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{parentDoc}))
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "parent-delivered", Revision: 1, Project: repo.Project(), Workstream: parent, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "parent-delivered", Revision: 1, Project: repo.Project(), Workstream: parent, At: f.s.now(), Actor: execution.ForemanActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "Same-repo base delivered before integration")
 	fixturekit.Must(t, err)
 	base := trace.WorkstreamBase{Workstream: stream, Base: parent, Revision: 1}
@@ -383,7 +384,7 @@ func exerciseReadyDependentBaseGap(t *testing.T, p *publicationFixture, parent c
 		t.Fatalf("ready workgroup dependent admitted implementation: %v, %v", admitted, err)
 	}
 	land := &foreman{masons: build}
-	if reason, err := land.current(ctx, stream, service.TestLandInput{}, service.UnitReviewResult{}); err != nil || !strings.Contains(reason, "not building or assembled") {
+	if reason, err := land.current(ctx, stream, execution.LandInput{}, service.UnitReviewResult{}); err != nil || !strings.Contains(reason, "not building or assembled") {
 		t.Fatalf("later maintenance admitted landing: %q, %v", reason, err)
 	}
 	presented, apiFault := p.s.deliveryPresentation(ctx, string(stream))
@@ -415,7 +416,7 @@ func TestWorkgroupDependentPostMergeGapRepairsInScopeNeverBlocksLikeSameRepoMain
 	mergeData, err := json.Marshal(mergeRecord)
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo2.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.MergeDocument, Revision: 1, Project: repo2.Project(), Workstream: upstream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: delivery.MergePath, Content: string(mergeData)}}))
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 
 	in, sealed, err := a.governing(ctx, stream)
 	fixturekit.Must(t, err)

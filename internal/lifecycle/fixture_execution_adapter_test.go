@@ -69,9 +69,6 @@ func (u unitWorkspaces) open(ctx context.Context, stream config.WorkstreamID, un
 func (u unitWorkspaces) find(ctx context.Context, stream config.WorkstreamID, unit string) (workspace.Worktree, string, bool, error) {
 	return u.driver().Find(ctx, stream, unit)
 }
-func (u unitWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
-	return u.driver().Acquire(ctx, req)
-}
 
 func (c *checkers) Pass(ctx context.Context) error { return c.driver().Pass(ctx) }
 
@@ -97,7 +94,7 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return f.driver().Apply(ctx, op)
 }
-func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in service.TestLandInput, result service.UnitReviewResult) (string, error) {
+func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in execution.LandInput, result service.UnitReviewResult) (string, error) {
 	return f.driver().Current(ctx, stream, in, result)
 }
 

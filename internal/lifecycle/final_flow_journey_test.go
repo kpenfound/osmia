@@ -118,9 +118,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		!run.Reruns[0].RequestedAt.After(failedRun.CreatedAt) || run.Reruns[0].RequestedAt.After(requested) || len(run.Reruns[0].Flakes) != 1 || run.Reruns[0].Flakes[0] != "test:resume" {
 		t.Fatalf("the check result %+v (original failure %+v, check %+v)", run, failedRun, failedCheck)
 	}
-	if run.Selection != nil || run.Attempt != 0 || len(run.Command) != 0 || run.Engines != nil {
-		t.Fatalf("the check result carries a local run: %+v", run)
-	}
 
 	report := j.awaitReport(t, 1)
 	if report.Commit != first.Reviewed || len(report.Findings) != 1 {
@@ -178,7 +175,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	j.clock.Advance(second.At.Add(delivery.FinalChecksWait + 5*time.Second).Sub(j.clock.Peek()))
 	run = j.awaitCheckRun(t, 2)
-	if run.Status != "passed" || run.Push != 2 || run.PushedCommit != secondCommit || run.PullRequest != pr.Number || len(run.Reruns) != 0 || len(run.Flaky) != 0 || run.Selection != nil {
+	if run.Status != "passed" || run.Push != 2 || run.PushedCommit != secondCommit || run.PullRequest != pr.Number || len(run.Reruns) != 0 || len(run.Flaky) != 0 {
 		t.Fatalf("the second check result %+v", run)
 	}
 	if j.host.readCount(firstCommit) != oldReads || len(j.rerunCalls(t)) != 1 {
@@ -228,12 +225,9 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	for _, review := range []int{1, 2} {
 		for _, run := range j.checkRuns(t, review) {
-			if run.Selection != nil || run.Attempt != 0 || len(run.Command) != 0 || run.Engines != nil || run.Source != "pull_request" {
-				t.Fatalf("final review %d recorded a local check: %+v", review, run)
+			if run.Source != "pull_request" {
+				t.Fatalf("final review %d recorded a check that did not come from its pull request: %+v", review, run)
 			}
-		}
-		for _, d := range intakefixture.StreamDocuments(t, j.live(), stream, delivery.FinalCheckAttemptDocument(review, 1)) {
-			t.Fatalf("final review %d recorded a local attempt: %+v", review, d)
 		}
 	}
 	if got := j.loadMissingNotices(t, 2, 2); got != 0 {

@@ -44,7 +44,7 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.Await("an emptied message field", `document.querySelector(`+quote(send+"textarea")+`).value === ''`)
 	list, err = f.c.Conversation(ctx, quiet)
 	must(t, err)
-	if len(list.Entries) != 1 || list.Entries[0].Kind != "message" || list.Entries[0].Text != "Pick the uploads back up on Friday." || list.Entries[0].State != TurnQueued {
+	if len(list.Entries) != 1 || list.Entries[0].Kind != "message" || list.Entries[0].Text != "Pick the uploads back up on Friday." || list.Entries[0].State != service.TurnQueued {
 		t.Fatalf("conversation after sending: %+v", list.Entries)
 	}
 	turn := list.Entries[0].Turn
@@ -77,7 +77,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	f := newPageFixture(t)
 	p := openBrowser(t)
 	ctx := context.Background()
-	runtimeView := func() RuntimeResponse {
+	runtimeView := func() service.RuntimeResponse {
 		t.Helper()
 		rt, err := f.c.Runtime(ctx)
 		must(t, err)
@@ -103,7 +103,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.Click("#settings-menu [data-close]")
 	p.SelectWorkstream(quiet)
 	p.TypeInto(draft, "Half a thought")
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
 	p.AwaitText(`[data-pause="factory:"] [data-field=reason]`, "Lunch")
 	var kept struct {
 		Draft, Profile string
@@ -113,7 +113,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	if kept.Draft != "Half a thought" || kept.Profile != "other" || !kept.Focused {
 		t.Fatalf("after a runtime change the page holds %+v", kept)
 	}
-	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	mutation(t, f.c, "DELETE", "pause", service.ClearPauseRequest{Scope: "factory"})
 	p.Await("the factory resumed", `document.querySelector('[data-pause="factory:"]') === null`)
 
 	p.OpenPauses()
@@ -362,7 +362,7 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	p.AwaitText("#archived-count", "1")
 	p.Await("quiet no longer a pause target", `![...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(quiet))+`)`)
 	archived(true)
-	if st, _ := f.c.Status(ctx, quiet); st.State == nil || *st.State != AbandonedState {
+	if st, _ := f.c.Status(ctx, quiet); st.State == nil || *st.State != service.AbandonedState {
 		t.Fatalf("quiet was not abandoned: %+v", st)
 	}
 

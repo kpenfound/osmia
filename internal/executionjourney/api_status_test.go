@@ -304,7 +304,7 @@ func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	at := fixturekit.DemoStart
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
-	got := service.TestStatusView(fixturekit.Project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: fixturekit.Stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored}, false)
+	got := service.WorkstreamStatusView(fixturekit.Project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: fixturekit.Stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored}, false)
 	want := api.WorkstreamStatus{Workstream: fixturekit.Stream, Project: fixturekit.Project, State: &state, Units: []api.UnitStatus{}, Advisories: []api.OverlapAdvisory{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file", Workspaces: config.WorkspacesJujutsu,
 		Status: &api.StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {

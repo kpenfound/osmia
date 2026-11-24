@@ -72,7 +72,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	}{
 		{map[string]any{"outcome": " "}, "outcome is required: say what the unit's work now does and how you checked its acceptance"},
 	}
-	masons.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		for _, r := range refused {
 			recorded, reason, err := intakefixture.Done(ctx, tools, r.args)
 			if err != nil || recorded || reason != r.reason {
@@ -99,7 +99,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		}
 		return nil
 	}
-	masons.Play[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Built"}); err != nil || !recorded {
 			return fmt.Errorf("complete report: reason %q (%v)", reason, err)
 		}
@@ -135,7 +135,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	var report execution.UnitReport
 	fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &report))
 	f.checkCandidate(t, stream, report)
-	want := execution.UnitReport{Unit: "resume", Turn: service.TestMasonTurnID("resume"), Seal: 1, Outcome: "approved", Card: &intakefixture.ExampleCard, Branch: execution.UnitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
+	want := execution.UnitReport{Unit: "resume", Turn: execution.MasonTurnID("resume"), Seal: 1, Outcome: "approved", Card: &intakefixture.ExampleCard, Branch: execution.UnitBranch(stream, "resume"), Base: report.Base, Candidate: report.Candidate}
 	if !reflect.DeepEqual(report, want) {
 		t.Fatalf("report %+v, want %+v", report, want)
 	}
@@ -153,7 +153,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("report file %q %v", data, err)
 	}
 
-	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", service.TestMasonTurnID("resume"), report.Candidate, execution.UnitBranch(stream, "resume"), intake.FeatureBranch(stream), report.Base)
+	reason := fmt.Sprintf("the mason of unit resume reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is units/resume/report.json revision 1", execution.MasonTurnID("resume"), report.Candidate, execution.UnitBranch(stream, "resume"), intake.FeatureBranch(stream), report.Base)
 	checking := intakefixture.TransitionMove{ID: execution.CheckingTransitionID("resume", 1), Subject: trace.UnitSubject("resume"), From: intake.UnitImplementing, To: execution.UnitChecking, Cause: turn.Response.ID, Reason: reason}
 	f.awaitUnit(t, stream, "dedupe", intake.UnitReviewing)
 	dedupeChecking := masonTransitions(t, f, stream)[3]
@@ -164,7 +164,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 		t.Fatalf("mason transitions %+v, want %+v", got, want)
 	}
 
-	reviewNotice := fmt.Sprintf("Unit resume is checking: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", service.TestMasonTurnID("resume"))
+	reviewNotice := fmt.Sprintf("Unit resume is checking: its mason reported done on turn %s; its report is units/resume/report.json revision 1. Headline: Uploads resume; Needs you: Review the candidate.", execution.MasonTurnID("resume"))
 	if body := f.notice(t, stream, execution.CheckingTransitionID("resume", 1)); body != reviewNotice {
 		t.Fatalf("the checking notice %q, want %q", body, reviewNotice)
 	}
@@ -223,7 +223,7 @@ func TestUnitCandidateFailureKeepsItImplementing(t *testing.T) {
 	built := f.seedBuildingPaused(t, factory, independentPlan, "first", "second")
 	blocked, other := intakefixture.LowHigh(built[0], built[1])
 	var lock string
-	masons.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if intakefixture.SessionStream(req) != string(blocked) {
 			return nil
 		}

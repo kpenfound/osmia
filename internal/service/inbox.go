@@ -80,7 +80,7 @@ func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEnt
 	return e, true, nil
 }
 
-func contestOptions(contest trace.Transition, unit string, mason bool) []string {
+func ContestOptions(contest trace.Transition, unit string, mason bool) []string {
 	switch {
 	case failedReview(contest, unit):
 		return []string{"review"}
@@ -103,7 +103,7 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	if err != nil || !raised {
 		return InboxEntry{}, false, err
 	}
-	options := contestOptions(contest, unit, mason)
+	options := ContestOptions(contest, unit, mason)
 	switch {
 	case failedReview(contest, unit), mason, moveContest(contest, unit), execution.ChecksContest(contest, unit), execution.RebaseContest(contest, unit):
 	default:

@@ -202,7 +202,7 @@ func (s *Service) ruleContested(ctx context.Context, w, u string, r api.Conteste
 	return service.InspectForTest(s.core()).RuleContested(ctx, w, u, r)
 }
 
-func (s *Service) holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+func (s *Service) holds(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
 	return service.InspectForTest(s.core()).Holds(p, r, c)
 }
 
@@ -350,7 +350,7 @@ func (s *Service) decideChange(ctx context.Context, raw, id string, d service.Ch
 }
 func recordUpstreamOwnPullRequest(t *testing.T, s *Service, repo *trace.Repository, stream config.WorkstreamID, p api.DeliveryPublication) {
 	t.Helper()
-	fixturekit.UpstreamOwnPullRequest(t, repo, stream, p, s.now(), service.TestForemanActor, delivery.PublicationDocument, delivery.PublicationPath)
+	fixturekit.UpstreamOwnPullRequest(t, repo, stream, p, s.now(), execution.ForemanActor, delivery.PublicationDocument, delivery.PublicationPath)
 }
 func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest execution.UnitCheckRun, runs []execution.UnitCheckRun) (int, error) {
 	return c.driver().IncompleteSinceEntry(stream, unit, latest, runs)

@@ -26,7 +26,7 @@ func projectSliceRefreshFixture(t *testing.T) (*crossRepoRatifyFixture, config.W
 	t.Helper()
 	f := newCrossRepoRatifyFixture(t)
 	t.Cleanup(func() { f.stop(t) })
-	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -60,7 +60,7 @@ func reviseRefreshMember(t *testing.T, f *crossRepoRatifyFixture, member config.
 func runRefresh(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	for _, project := range []config.ProjectID{f.project, f.project2} {
-		fixturekit.Must(t, f.s.projectSpecRefreshPass(context.Background(), mustRepo(t, f.s, project)))
+		fixturekit.Must(t, f.s.lifecycle().ProjectSpecRefreshPass(context.Background(), mustRepo(t, f.s, project)))
 	}
 }
 func refreshDocument(t *testing.T, f *crossRepoRatifyFixture, id config.WorkgroupID) trace.Document {
@@ -187,7 +187,7 @@ func TestProjectSpecRefreshDefersHeldMembersAndTrace(t *testing.T) {
 				cancel()
 			}
 			for _, project := range []config.ProjectID{f.project, f.project2} {
-				err := f.s.projectSpecRefreshPass(ctx, mustRepo(t, f.s, project))
+				err := f.s.lifecycle().ProjectSpecRefreshPass(ctx, mustRepo(t, f.s, project))
 				if hold == "canceled" {
 					if !errors.Is(err, context.Canceled) {
 						t.Fatalf("cancellation: %v", err)
@@ -294,7 +294,7 @@ func TestProjectSpecRefreshRetriesInterruptedAppend(t *testing.T) {
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	err := f.s.projectSpecRefreshPass(context.Background(), repo)
+	err := f.s.lifecycle().ProjectSpecRefreshPass(context.Background(), repo)
 	if !errors.Is(err, interrupted) {
 		t.Fatalf("read boundary: %v", err)
 	}

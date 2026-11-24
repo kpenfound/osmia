@@ -37,7 +37,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			}
 			awaitMemberMergeResolution(t, f)
 
-			change, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retirement-observer", Kind: "cancel", Scope: "workgroup", Change: "Keep the approved decision held when every member retires."})
+			change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "retirement-observer", Kind: "cancel", Scope: "workgroup", Change: "Keep the approved decision held when every member retires."})
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}
@@ -45,12 +45,12 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 				change = currentChange(t, f.s, f.origin, change.ID)
 				return change.State == "presented"
 			})
-			lock := f.s.changeApplicationLock(change.Workgroup)
+			lock := f.s.lifecycle().ChangeApplicationLock(change.Workgroup)
 			lock.RLock()
 			unlock := sync.OnceFunc(lock.RUnlock)
 			defer unlock()
 			gate.Armed.Store(true)
-			decided, apiFault := f.s.decideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
+			decided, apiFault := f.s.lifecycle().DecideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "draft"})
 			if apiFault != nil {
 				t.Fatal(apiFault)
 			}

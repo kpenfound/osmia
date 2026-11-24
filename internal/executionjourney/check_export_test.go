@@ -160,7 +160,7 @@ fi`, 1)), 0700))
 			fixturekit.Must(t, err)
 			fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "candidate.txt"), []byte("unchecked working files\n"), 0600))
 			cfg := s.current().For(project)
-			checker := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: committed.Commit, Branch: service.TestSessionBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: clone}}
+			checker := &candidateExportChecks{t: t, mode: mode, identity: checkrun.Identity{Candidate: committed.Commit, Branch: service.SessionBranch(stream), Remote: "https://github.com/" + cfg.Project.Upstream, Repository: clone}}
 			service.InspectForTest(s.core()).SetReviewChecks(checker)
 			enableListing(s)
 			run, err := client.SessionCheck(context.Background(), stream)

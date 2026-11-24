@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,8 +23,8 @@ func TestBrowserProjectPaneGroupsCleanedArchivesAcrossRestart(t *testing.T) {
 	must(t, repo.CreateWorkstream(ctx, stream, demoStart, ownerActor))
 	must(t, repo.Close())
 	archives := []runtime.Archive{
-		{Project: project, Workstream: "w_000000000000000000000000000000a1", Title: "Published legacy request", State: DeliveredState, DeliveryLink: "https://example.invalid/pull/42"},
-		{Project: project, Workstream: "w_000000000000000000000000000000a2", Title: "Cancelled legacy request", State: AbandonedState},
+		{Project: project, Workstream: "w_000000000000000000000000000000a1", Title: "Published legacy request", State: service.DeliveredState, DeliveryLink: "https://example.invalid/pull/42"},
+		{Project: project, Workstream: "w_000000000000000000000000000000a2", Title: "Cancelled legacy request", State: service.AbandonedState},
 	}
 	for i := range archives {
 		archives[i].ArchivedAt = demoStart

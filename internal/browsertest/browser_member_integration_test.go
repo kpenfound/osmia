@@ -47,7 +47,7 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 
 func (f *workgroupPageFixture) runChief(t *testing.T) {
 	t.Helper()
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
 	f.c.Close()
 	must(t, f.s.Close())
 	path := filepath.Join(f.opts.Config.Root, "config.toml")

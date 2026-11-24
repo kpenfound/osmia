@@ -33,7 +33,7 @@ func newParallelMasonFixtureCounting(t *testing.T, masons, perWorkstream int, dr
 	t.Helper()
 	passed, prepare := countingSchedule()
 	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream), drafted, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, service.TestMasonTurnID, intake.OwnerActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, fake, execution.MasonTurnID, intake.OwnerActor)
 	return f, fake, passed
 }
 
@@ -126,8 +126,8 @@ func TestReliabilityDemonstration(t *testing.T) {
 	)
 	auditEntered, clarifyEntered, releaseClarify := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	masons.Mu.Lock()
-	masons.Response = map[string]string{service.TestMasonTurnID("dedupe"): "Half of dedupe is built"}
-	masons.Play[service.TestMasonTurnID("upload")] = intakefixture.ReportDone("Chunks are sent")
+	masons.Response = map[string]string{execution.MasonTurnID("dedupe"): "Half of dedupe is built"}
+	masons.Play[execution.MasonTurnID("upload")] = intakefixture.ReportDone("Chunks are sent")
 	masons.Play[auditRecovered] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if _, err := os.Stat(filepath.Join(req.Workspace.Directory(), auditFile)); err != nil {
 			return fmt.Errorf("the continuation lost the stopped turn's file: %v", err)
@@ -143,13 +143,13 @@ func TestReliabilityDemonstration(t *testing.T) {
 		}
 		return nil
 	}
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Uploads resume")
 	masons.Mu.Unlock()
 
 	f.engine.Mu.Lock()
 	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
-	f.engine.Turns[service.TestMasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
 			result.CostUSD, result.CostKnown = 1.25, true
@@ -157,7 +157,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return result, err
 	}
 
-	f.engine.Turns[service.TestMasonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("audit")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		path := filepath.Join(req.Workspace.Directory(), auditFile)
 		if err := errors.Join(os.MkdirAll(filepath.Dir(path), 0755), os.WriteFile(path, []byte("package audit\n"), 0644)); err != nil {
 			return nil, err
@@ -173,7 +173,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return masons.Turn(ctx, req, verified, tools)
 	}
 
-	f.engine.Turns[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
 		dedupeBackends = append(dedupeBackends, req.Profile.Agent)
 		mu.Unlock()
@@ -198,7 +198,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 		return masons.Turn(ctx, req, verified, tools)
 	}
 
-	f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[execution.MasonTurnID("resume")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		backend := req.Profile.Agent
 		mu.Lock()
 		resumeAttempts = append(resumeAttempts, req)
@@ -464,7 +464,7 @@ func TestReliabilityDemonstration(t *testing.T) {
 	for _, req := range masons.Requests(stream) {
 		ran = append(ran, req.Name)
 	}
-	if want := []string{service.TestMasonTurnID("upload"), auditRecovered, service.TestMasonTurnID("dedupe"), dedupeClarified, service.TestMasonTurnID("resume")}; !slices.Equal(ran, want) {
+	if want := []string{execution.MasonTurnID("upload"), auditRecovered, execution.MasonTurnID("dedupe"), dedupeClarified, execution.MasonTurnID("resume")}; !slices.Equal(ran, want) {
 		t.Fatalf("fake mason sessions %v, want %v", ran, want)
 	}
 }

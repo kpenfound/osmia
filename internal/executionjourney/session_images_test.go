@@ -49,7 +49,7 @@ func showSessionImage(t *testing.T) shownImage {
 	engine.Turn = func(ctx context.Context, req agent.Request) (*agent.Result, error) {
 		active := req.Workspace.Directory()
 		fixturekit.Must(t, os.WriteFile(filepath.Join(active, "fresh.png"), data, 0600))
-		persistent := filepath.Join(s.current().Root.String(), service.TestSessionsDirectory, string(project), string(stream), "fresh.png")
+		persistent := filepath.Join(s.current().Root.String(), service.SessionsDirectory, string(project), string(stream), "fresh.png")
 		if _, err := os.Stat(persistent); !os.IsNotExist(err) {
 			t.Error("workspace captured before tool call")
 		}

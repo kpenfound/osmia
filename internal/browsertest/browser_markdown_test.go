@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"strconv"
 	"strings"
 	"testing"
@@ -103,7 +104,7 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	engine.Turn = func(context.Context, agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "markdown-session", ResultText: browserMarkdown}, nil
 	}
-	opened, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	opened, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	ps := openBrowser(t)
 	watchMarkdownEvents(ps)

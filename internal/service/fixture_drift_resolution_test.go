@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, st
 
 func awaitResolution(t *testing.T, s *Service, d drifter, stream config.WorkstreamID, op coreadapter.Operation, want string) {
 	t.Helper()
-	if result, err := attemptOperation(t, s, d.repository, stream, op, d); !errors.Is(err, errDriftAwaits) || !strings.Contains(err.Error(), want) {
+	if result, err := attemptOperation(t, s, d.repository, stream, op, d); !errors.Is(err, lifecycle.ErrDriftAwaits) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("the drift rebase did not await %q: %+v %v", want, result, err)
 	}
 }

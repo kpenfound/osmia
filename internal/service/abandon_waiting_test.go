@@ -79,14 +79,14 @@ func TestAbandonRunningTurnReturningWaitingSettlesOperation(t *testing.T) {
 		removed <- err
 		return err
 	}}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	select {
 	case err := <-removed:
 		fixturekit.Must(t, err)
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("eligible archive cleanup did not finish")
 	}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	archived, found := archiveRecord(t, s.store, fixturekit.Stream)
 	if !found || archived.CleanedAt.IsZero() {
 		t.Fatalf("waiting operation blocked same-session cleanup: %+v", archived)

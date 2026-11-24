@@ -34,7 +34,7 @@ func TestChiefOfStaffViewStagesLatestDocuments(t *testing.T) {
 	}
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{
 		document(plan.SpecDocument, 1, plan.SpecPath, "# First draft\n"),
-		document(plan.PlanDocument, 1, plan.PlanPath, `{"version":1}`),
+		document(plan.PlanDocument, 1, plan.PlanPath, `{"version":2}`),
 		document("tool-call", 1, "tools/tool-call.json", `{"secret":"call"}`),
 		document("inspection-1", 1, "inspections/inspection-1.json", `{"secret":"inspection"}`),
 	}))
@@ -42,12 +42,12 @@ func TestChiefOfStaffViewStagesLatestDocuments(t *testing.T) {
 
 	workspace := filepath.Join(home, "staged")
 	fixturekit.Must(t, os.MkdirAll(filepath.Join(workspace, "stale"), 0700))
-	paths, err := stageChiefDocuments(repo, fixturekit.Stream, workspace)
+	paths, err := StageChiefDocuments(repo, fixturekit.Stream, workspace)
 	fixturekit.Must(t, err)
 	if !slices.Equal(paths, []string{plan.PlanPath, plan.SpecPath}) {
 		t.Fatalf("paths: %v", paths)
 	}
-	for name, want := range map[string]string{plan.SpecPath: "# Second draft\n", plan.PlanPath: `{"version":1}`} {
+	for name, want := range map[string]string{plan.SpecPath: "# Second draft\n", plan.PlanPath: `{"version":2}`} {
 		if data, err := os.ReadFile(filepath.Join(workspace, name)); err != nil || string(data) != want {
 			t.Fatalf("%s: %q %v", name, data, err)
 		}

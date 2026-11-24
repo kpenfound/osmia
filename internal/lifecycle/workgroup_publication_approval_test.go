@@ -20,7 +20,7 @@ func TestWorkgroupPublicationRequiresItsOwnDeliveryApproval(t *testing.T) {
 	recordUpstreamOwnPullRequest(t, f.s, upstreamRepository, upstream, upstreamPublication)
 	client := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: upstreamPublication.PullRequest, URL: upstreamPublication.URL, State: "open", HeadRepository: upstreamPublication.Fork, Head: upstreamPublication.Branch, HeadCommit: upstreamPublication.Commit, Base: "main"}}}
 	f.s.options.PullRequests = client
-	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.lifecycle().EdgeResolverPass(ctx, repository))
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, pulls: client}
 
 	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, "Depends on owner/other#77."); err != nil || reason != "the owner has not marked the pull request ready for review" {

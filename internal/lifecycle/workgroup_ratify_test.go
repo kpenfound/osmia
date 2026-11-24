@@ -282,7 +282,7 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
-	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -345,7 +345,7 @@ func TestRatifyWorkgroupRefusesAnInvalidGraphWithNothingRecorded(t *testing.T) {
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
-	_, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	_, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -377,7 +377,7 @@ func TestRatifyWorkgroupRefusesWhenAMemberHasNoSlice(t *testing.T) {
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
-	_, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	_, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}
@@ -451,7 +451,7 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 		t.Fatalf("send: %v", err)
 	}
 
-	if _, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault == nil {
+	if _, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault == nil {
 		t.Fatal("draft workgroup with a member that already has chief-of-staff turns was not refused")
 	}
 
@@ -504,7 +504,7 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 		}
 		return nil
 	}
-	_, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	_, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault == nil {
 		t.Fatal("join did not stop at the injected crash")
 	}
@@ -519,7 +519,7 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 	if entries, apiFault := f.s.workgroupInbox(ctx, repo1, joinedID); apiFault != nil || len(entries) != 0 {
 		t.Fatalf("half-joined workgroup inbox: %+v %v", entries, apiFault)
 	}
-	if _, err := f.s.crossRepoMemberRepos(ctx, g); !errors.Is(err, intake.ErrWorkgroupJoining) {
+	if _, err := f.s.lifecycle().CrossRepoMemberRepos(ctx, g); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		t.Fatalf("half-joined workgroup became dispatchable: %v", err)
 	}
 	if ids, err := f.s.crossRepoWorkgroupIDs(ctx, repo1); err != nil || len(ids) != 0 {
@@ -529,7 +529,7 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 		t.Fatalf("member2 was already joined before the retry: id=%q err=%v", id, err)
 	}
 
-	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("retry: %v", apiFault)
 	}
@@ -567,7 +567,7 @@ func TestDraftWorkgroupRetryAfterCreationBeforeAnyMemberJoins(t *testing.T) {
 		return nil
 	}
 	members := []config.WorkstreamID{f.stream1, f.stream2}
-	if _, apiFault := f.s.DraftWorkgroup(context.Background(), members); apiFault == nil {
+	if _, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), members); apiFault == nil {
 		t.Fatal("expected interruption")
 	}
 	f.s.clearBoundary()
@@ -576,7 +576,7 @@ func TestDraftWorkgroupRetryAfterCreationBeforeAnyMemberJoins(t *testing.T) {
 	if len(before) != 1 {
 		t.Fatalf("workgroup traces: %v", before)
 	}
-	id, apiFault := f.s.DraftWorkgroup(context.Background(), members)
+	id, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), members)
 	if apiFault != nil || string(id) != before[0].Name() {
 		t.Fatalf("retry did not reuse the pending trace: %s %v", id, apiFault)
 	}
@@ -587,7 +587,7 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
-	_, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	_, apiFault := f.s.lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatalf("draft workgroup: %v", apiFault)
 	}

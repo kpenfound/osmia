@@ -24,19 +24,19 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 )
 
-const notifyAttempts = 5
+const NotifyAttempts = 5
 
 const notifyPoll = time.Minute
 
 const (
 	notificationPending = "pending"
-	notificationSent    = "sent"
-	notificationSkipped = "skipped"
-	notificationDropped = "dropped"
-	notificationGaveUp  = "gave_up"
+	NotificationSent    = "sent"
+	NotificationSkipped = "skipped"
+	NotificationDropped = "dropped"
+	NotificationGaveUp  = "gave_up"
 )
 
-type notification struct {
+type Notification struct {
 	State      string    `json:"state"`
 	Kind       string    `json:"kind"`
 	Workstream string    `json:"workstream"`
@@ -59,7 +59,7 @@ type notifyFailure struct {
 
 type notifyLedger struct {
 	Enabled       bool                     `json:"enabled"`
-	Notifications map[string]*notification `json:"notifications"`
+	Notifications map[string]*Notification `json:"notifications"`
 	Failure       *notifyFailure           `json:"failure,omitempty"`
 }
 
@@ -124,7 +124,7 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 	cfg := n.s.current()
 	path, err := cfg.Root.Notifications()
 	if err != nil {
-		n.fail("cannot resolve the notification ledger under the root; nothing is sent")
+		n.fail("cannot resolve the Notification ledger under the root; nothing is sent")
 		return time.Time{}
 	}
 	ledger, err := n.load(path)
@@ -142,7 +142,7 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 		ledger.Enabled, ledger.Failure = false, nil
 		for _, rec := range ledger.Notifications {
 			if rec.State == notificationPending {
-				rec.settle(notificationDropped, n.s.now())
+				rec.settle(NotificationDropped, n.s.now())
 			}
 		}
 		n.mu.Unlock()
@@ -160,7 +160,7 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 	link := n.link(ctx, cfg)
 	occurrences := make([]occurrence, 0, len(inbox.Entries)+1)
 	for _, e := range inbox.Entries {
-		occurrences = append(occurrences, occurrence{key: notificationKey(cfg.Project.ID, e), kind: e.Kind, workstream: string(e.Workstream), body: notificationBody(cfg.Project.ID, e, link)})
+		occurrences = append(occurrences, occurrence{key: NotificationKey(cfg.Project.ID, e), kind: e.Kind, workstream: string(e.Workstream), body: notificationBody(cfg.Project.ID, e, link)})
 	}
 	pause, fault := n.budgetPause(cfg, link)
 	if pause != nil {
@@ -179,9 +179,9 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 		if _, seen := ledger.Notifications[o.key]; seen {
 			continue
 		}
-		rec := &notification{State: notificationPending, Kind: o.kind, Workstream: o.workstream, Recorded: now}
+		rec := &Notification{State: notificationPending, Kind: o.kind, Workstream: o.workstream, Recorded: now}
 		if !ledger.Enabled {
-			rec.settle(notificationSkipped, now)
+			rec.settle(NotificationSkipped, now)
 		} else {
 			rec.Body = o.body
 		}
@@ -189,7 +189,7 @@ func (n *notifier) pass(ctx context.Context) time.Time {
 	}
 	for key, rec := range ledger.Notifications {
 		if rec.State == notificationPending && !open[key] && fault == "" {
-			rec.settle(notificationDropped, now)
+			rec.settle(NotificationDropped, now)
 		}
 	}
 	ledger.Enabled = true
@@ -220,7 +220,7 @@ func (n *notifier) budgetPause(cfg *config.Config, link string) (pause *occurren
 		}
 		status := n.s.dailyBudgetStatus()
 		if status == nil {
-			return nil, "no daily budget is configured; the budget pause notification waits until one is"
+			return nil, "no daily budget is configured; the budget pause Notification waits until one is"
 		}
 		key := strings.Join([]string{string(cfg.Project.ID), NotifyBudgetPause, p.SetAt.UTC().Format(time.RFC3339Nano)}, "/")
 		return &occurrence{key: key, kind: NotifyBudgetPause, body: budgetPauseBody(cfg.Project.ID, status, day.end, link)}, ""
@@ -228,10 +228,10 @@ func (n *notifier) budgetPause(cfg *config.Config, link string) (pause *occurren
 	return nil, ""
 }
 
-// NotifyBudgetPause is the kind of the notification for a daily budget pause.
+// NotifyBudgetPause is the kind of the Notification for a daily budget pause.
 const NotifyBudgetPause = "budget_pause"
 
-// NotifyLanded is the kind of the notification for a workstream the service
+// NotifyLanded is the kind of the Notification for a workstream the service
 // landed on its base branch.
 const NotifyLanded = "landed"
 
@@ -320,15 +320,15 @@ func (n *notifier) send(ctx context.Context, path, webhook string, open map[stri
 		var attempts int
 		var gaveUp bool
 		if err == nil {
-			rec.settle(notificationSent, now)
+			rec.settle(NotificationSent, now)
 			n.ledger.Failure = nil
 		} else {
 			rec.Attempts++
 			rec.LastError = err.Error()
 			attempts = rec.Attempts
 			failure := &notifyFailure{Kind: rec.Kind, Workstream: rec.Workstream, Reason: rec.LastError, Attempts: rec.Attempts, At: now}
-			if rec.Attempts >= notifyAttempts {
-				rec.settle(notificationGaveUp, now)
+			if rec.Attempts >= NotifyAttempts {
+				rec.settle(NotificationGaveUp, now)
 				failure.GaveUp, gaveUp = true, true
 			} else {
 				rec.Next = time.Now().Add(n.retry << (rec.Attempts - 1))
@@ -344,9 +344,9 @@ func (n *notifier) send(ctx context.Context, path, webhook string, open map[stri
 			if gaveUp {
 				level = slog.LevelError
 			}
-			n.s.log().Log(ctx, level, "notification post attempt failed", "kind", kind, "workstream", workstream, "attempts", attempts, "gave_up", gaveUp, "duration", time.Since(attemptStart).String(), "error", err.Error())
+			n.s.log().Log(ctx, level, "Notification post attempt failed", "kind", kind, "workstream", workstream, "attempts", attempts, "gave_up", gaveUp, "duration", time.Since(attemptStart).String(), "error", err.Error())
 		} else {
-			n.s.log().Info("notification post attempt succeeded", "kind", kind, "workstream", workstream, "duration", time.Since(attemptStart).String())
+			n.s.log().Info("Notification post attempt succeeded", "kind", kind, "workstream", workstream, "duration", time.Since(attemptStart).String())
 		}
 		if !n.save(path) {
 			return time.Time{}
@@ -377,11 +377,11 @@ func (n *notifier) post(ctx context.Context, webhook, body string) error {
 	return nil
 }
 
-func (rec *notification) settle(state string, at time.Time) {
+func (rec *Notification) settle(state string, at time.Time) {
 	rec.State, rec.Body, rec.Next, rec.Settled = state, "", time.Time{}, at
 }
 
-func notificationKey(project config.ProjectID, e InboxEntry) string {
+func NotificationKey(project config.ProjectID, e InboxEntry) string {
 	return strings.Join([]string{string(project), e.Kind, string(e.Workstream), fmt.Sprint(e.Number), e.Unit, e.Amendment, fmt.Sprint(e.Revision), e.OpenedAt.UTC().Format(time.RFC3339Nano)}, "/")
 }
 
@@ -446,7 +446,7 @@ func (n *notifier) load(path string) (*notifyLedger, error) {
 		}
 	}
 	if ledger.Notifications == nil {
-		ledger.Notifications = map[string]*notification{}
+		ledger.Notifications = map[string]*Notification{}
 	}
 	n.ledger = ledger
 	return ledger, nil
@@ -522,7 +522,7 @@ func (n *notifier) diagnostics() []Diagnostic {
 	case NotifyLanded:
 		what = "the landing of workstream " + f.Workstream
 	}
-	message := fmt.Sprintf("notifying the owner of %s failed at %s (attempt %d of %d): %s; retrying", what, f.At.Format(time.RFC3339), f.Attempts, notifyAttempts, f.Reason)
+	message := fmt.Sprintf("notifying the owner of %s failed at %s (attempt %d of %d): %s; retrying", what, f.At.Format(time.RFC3339), f.Attempts, NotifyAttempts, f.Reason)
 	if f.GaveUp {
 		message = fmt.Sprintf("gave up notifying the owner of %s at %s after %d attempts: %s", what, f.At.Format(time.RFC3339), f.Attempts, f.Reason)
 	}

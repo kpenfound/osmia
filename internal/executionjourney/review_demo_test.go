@@ -30,7 +30,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 	p := &intakefixture.Faults{}
 	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
 	defer f.stop(t)
-	masons.Play[service.TestMasonTurnID("resume")] = intakefixture.ReportDone("Initial candidate")
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Initial candidate")
 
 	f.engine.Mu.Lock()
 	for i := 1; i <= 8; i++ {
@@ -145,7 +145,7 @@ func TestExactReviewDemonstration(t *testing.T) {
 	docs, err := trace.Read[trace.Document](f.repository(), stream)
 	fixturekit.Must(t, err)
 	for _, d := range docs {
-		if d.ID == service.TestReviewDocument("resume") {
+		if d.ID == execution.ReviewDocument("resume") {
 			var result service.UnitReviewResult
 			if json.Unmarshal([]byte(d.Content), &result) == nil && result.Turn != "" {
 				results = append(results, result)

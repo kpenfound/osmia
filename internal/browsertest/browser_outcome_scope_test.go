@@ -19,7 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func openOutcomePage(t *testing.T, s *Service, scripts ...string) *page {
+func openOutcomePage(t *testing.T, s *service.Service, scripts ...string) *page {
 	t.Helper()
 	p := openBrowser(t)
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
@@ -201,9 +201,9 @@ func TestBrowserSessionOutcomesBelongToTheirSession(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session", ResultText: "Session reply."}, nil
 	}
-	a, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default"})
+	a, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
-	b, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default"})
+	b, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	p := openOutcomePage(t, s)
 	exerciseHeldSends(p, a.Session.Workstream, b.Session.Workstream, "sessions", "#session-form", "#session-result", "Sent; the agent answers in its next turn (", func(p *page, id config.WorkstreamID) { p.SelectSession(id) })
@@ -255,7 +255,7 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	must(t, err)
 	_, err = live.EscalateQuestions(context.Background(), trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: "Which outcome belongs here?", Blocked: "The unit", Recommendation: "Keep it local."}, at)
 	must(t, err)
-	entries := entriesOf(t, f.c, InboxEscalation)
+	entries := entriesOf(t, f.c, service.InboxEscalation)
 	if len(entries) != 1 {
 		t.Fatalf("inbox: %+v", entries)
 	}

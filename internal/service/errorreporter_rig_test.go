@@ -145,9 +145,6 @@ func (r *reporterRig) awaitComments(repository string, issue, n int) []fixtureki
 	return r.gh.Comments(repository, issue)
 }
 
-// awaitPasses waits for n more passes of the reporter's worker to finish. A
-// pass may be running already, so two passes include one that began after the
-// call.
 func (r *reporterRig) awaitPasses(n int64) {
 	r.t.Helper()
 	intakefixture.AwaitFurtherPasses(r.t, &r.passes, n)

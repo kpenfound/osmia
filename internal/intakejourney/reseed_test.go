@@ -392,14 +392,14 @@ func TestRegisteringAProjectRecordsTheSeededEntityMapOnceAndTheArchitectReadsIt(
 		if !strings.Contains(text, "source: kb/entities.json (record kb-entities revision ") {
 			fail("context.md lacks the entity map:\n%s", text)
 		}
-		listed, err := fixturekit.CallTool(ctx, tools, service.TestProjectContextTool, map[string]any{"prefix": "kb/"})
+		listed, err := fixturekit.CallTool(ctx, tools, service.ProjectContextTool, map[string]any{"prefix": "kb/"})
 		var records struct {
 			Records []struct{ Path string } `json:"records"`
 		}
 		if err != nil || json.Unmarshal([]byte(listed), &records) != nil || !slices.ContainsFunc(records.Records, func(r struct{ Path string }) bool { return r.Path == "kb/entities.json" }) {
 			fail("project_context lists kb/ as %s: %v", listed, err)
 		}
-		if entities, err := fixturekit.CallTool(ctx, tools, service.TestProjectContextTool, map[string]any{"path": "kb/entities.json"}); err != nil || !strings.Contains(entities, "internal.trace") {
+		if entities, err := fixturekit.CallTool(ctx, tools, service.ProjectContextTool, map[string]any{"path": "kb/entities.json"}); err != nil || !strings.Contains(entities, "internal.trace") {
 			fail("project_context entity map: %s: %v", entities, err)
 		}
 		return nil

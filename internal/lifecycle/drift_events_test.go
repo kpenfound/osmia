@@ -48,7 +48,7 @@ func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, m
 func chiefDeliverer(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
 	t.Helper()
 	if _, err := repository.ChiefOfStaffThread(stream); errors.Is(err, os.ErrNotExist) {
-		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
+		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: execution.ForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
 	} else {
 		fixturekit.Must(t, err)
 	}
@@ -93,11 +93,11 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("the conflict was delivered in %d turns", n)
 	}
 
-	threads := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), service.TestDriftMasonAgent)
+	threads := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.DriftMasonAgent)
 	turn := lifecycle.DriftResolveTurnID(1, 1)
-	_, err := repository.ClaimTurn(ctx, stream, service.TestDriftMasonAgent, "resolving", filepath.Join(threads, turn), f.clock.Now())
+	_, err := repository.ClaimTurn(ctx, stream, intake.DriftMasonAgent, "resolving", filepath.Join(threads, turn), f.clock.Now())
 	fixturekit.Must(t, err)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: service.TestDriftMasonAgent, Turn: turn, Role: intake.MasonRole}
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: intake.DriftMasonAgent, Turn: turn, Role: intake.MasonRole}
 	tools, err := service.TestDriftMasonTools(repository, scope, f.s.now)
 	fixturekit.Must(t, err)
 	if len(tools) != 2 {
@@ -110,7 +110,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	requests, err := trace.Read[trace.Amendment](repository, stream)
 	fixturekit.Must(t, err)
-	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "" || requests[0].Requester.ID != service.TestDriftMasonAgent {
+	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "" || requests[0].Requester.ID != intake.DriftMasonAgent {
 		t.Fatalf("the drift mason's amendment %+v", requests)
 	}
 	if state, err := repository.Workflow(stream, intake.AmendmentSubject("1")); err != nil || state.Value != "filed" {
@@ -140,9 +140,9 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	defer func() { repository.Close() }()
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	recovered, err := repository.ClaimTurn(ctx, stream, service.TestDriftMasonAgent, "recovering", filepath.Join(threads, "recover"), f.clock.Now())
+	recovered, err := repository.ClaimTurn(ctx, stream, intake.DriftMasonAgent, "recovering", filepath.Join(threads, "recover"), f.clock.Now())
 	fixturekit.Must(t, err)
-	if recovered.Request.TurnID != service.TestDriftMasonAgent+"-recover-1" {
+	if recovered.Request.TurnID != intake.DriftMasonAgent+"-recover-1" {
 		t.Fatalf("the recovering turn is %s", recovered.Request.TurnID)
 	}
 	scope.Turn = recovered.Request.TurnID
@@ -175,9 +175,9 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 
 	w := resolutionWorkspace(t, f, stream)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeClaimedTurn(t, f, repository, stream, service.TestDriftMasonAgent, recovered, resolvedDone("Kept both owners"))
+	completeClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, recovered, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1")
-	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
+	completeDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, driftVerdict(t, approvedResolution))
 	if result, err := attemptOperation(t, f.s, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
 	}

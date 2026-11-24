@@ -183,8 +183,6 @@ func eachGroupKind(t *testing.T, check func(t *testing.T, cross bool)) {
 	}
 }
 
-// newGroupImage records an image of a workgroup member and publishes a
-// reference to it, twice, in the shared chief of staff's trace.
 func newGroupImage(t *testing.T, cross bool) *groupImage {
 	t.Helper()
 	s, chief, g := workgroupFeedFixture(t, cross, 2)
@@ -205,7 +203,6 @@ func newGroupImage(t *testing.T, cross bool) *groupImage {
 	return &groupImage{s: s, chief: chief, g: g, repo: repo, member: member, host: host, header: h, image: v, data: data}
 }
 
-// feedImages returns the image entries of the workgroup feed.
 func (i *groupImage) feedImages(t *testing.T) []FeedEntry {
 	t.Helper()
 	feed, apiErr := i.s.workgroupFeed(context.Background(), string(i.g.ID))
@@ -221,7 +218,6 @@ func (i *groupImage) feedImages(t *testing.T) []FeedEntry {
 	return out
 }
 
-// archiveMember archives the member and deletes its trace.
 func (i *groupImage) archiveMember(t *testing.T, cross bool) runtime.Archive {
 	t.Helper()
 	ctx := context.Background()

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
@@ -88,7 +87,7 @@ func TestAConfidentDecidePickBindsTheChiefsContestedRuling(t *testing.T) {
 	defer b.stop(t)
 	ctx := context.Background()
 
-	contest, contested, err := service.TestUnitContest(b.f.repository(), b.stream, bounceUnit)
+	contest, contested, err := execution.UnitContest(b.f.repository(), b.stream, bounceUnit)
 	fixturekit.Must(t, err)
 	if !contested {
 		t.Fatal("the unit is not contested")

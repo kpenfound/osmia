@@ -32,26 +32,6 @@ func TestArchiveLifecycleEvidenceSurvivesRestartWithoutChangingIdentity(t *testi
 	}
 }
 
-func TestArchiveCorrectedToUnresolvedStaysUnresolvedAcrossRestart(t *testing.T) {
-	in := fixture(t)
-	store := open(t, in)
-	a := Archive{Project: pid, Workstream: w1, Resolved: true, State: "delivered", Title: "Ready PR", ArchivedAt: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)}
-	must(t, store.SetArchived(a))
-	store = open(t, in)
-	a.Resolved = false
-	a.ResolutionEvidence = "unresolved"
-	must(t, store.UpdateArchive(a))
-	store = open(t, in)
-	st, _ := store.Snapshot()
-	if len(st.Archived) != 1 || st.Archived[0] != a {
-		t.Fatalf("correction lost on restart: %+v", st.Archived)
-	}
-	a.Resolved = true
-	if err := store.UpdateArchive(a); err == nil {
-		t.Fatal("unresolved evidence accepted as resolution")
-	}
-}
-
 func TestArchiveResolutionEvidenceValidation(t *testing.T) {
 	for _, tc := range []struct {
 		evidence, state string
@@ -73,7 +53,7 @@ func TestArchiveResolutionEvidenceValidation(t *testing.T) {
 		evidence, state string
 		resolved        bool
 	}{
-		{"merged", "abandoned", true}, {"merged", "delivered", false}, {"cancelled", "delivered", true}, {"unknown", "delivered", true}, {"unresolved", "delivered", true},
+		{"merged", "abandoned", true}, {"merged", "delivered", false}, {"cancelled", "delivered", true}, {"unknown", "delivered", true}, {"unresolved", "delivered", true}, {"", "delivered", true},
 	} {
 		in := fixture(t)
 		store := open(t, in)

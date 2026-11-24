@@ -28,8 +28,8 @@ const (
 
 	specOne = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n2. Progress is reported.\n"
 	specTwo = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n"
-	planOne = `{"version":1,"units":[{"id":"resume","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":["internal.store"]}]}`
-	planTwo = `{"version":1,"units":[{"id":"restart","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":["internal.store"]}]}`
+	planOne = `{"version":2,"units":[{"id":"resume","task":"Make spec#1 hold.", "acceptance":["spec#1 holds, shown by TestResume (new-test)"], "criteria":["spec#1"],"depends_on":[],"footprint":["internal.store"]}]}`
+	planTwo = `{"version":2,"units":[{"id":"restart","task":"Make spec#1 hold.", "acceptance":["spec#1 holds, shown by TestResume (new-test)"], "criteria":["spec#1"],"depends_on":[],"footprint":["internal.store"]}]}`
 )
 
 var (

@@ -892,19 +892,14 @@ func (d *Debate) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			records[i], waiting[i], failures[i] = d.Member(trace.Beside(ctx), trace.Beside(running), cfg, stream, op.ID, in, member)
+			records[i], waiting[i], failures[i] = d.Member(ctx, running, cfg, stream, op.ID, in, member)
 		}()
 	}
 	wg.Wait()
 	if err := errors.Join(failures...); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	var result coreadapter.OperationResult
-	err = trace.Relock(ctx, func() error {
-		result, err = d.Hear(ctx, op, stream, in, members, records, waiting)
-		return err
-	})
-	return result, err
+	return d.Hear(ctx, op, stream, in, members, records, waiting)
 }
 
 // Hear ends the round once every member's turn has ended: it fails the round

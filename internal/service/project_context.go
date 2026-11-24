@@ -13,10 +13,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const projectContextTool = "project_context"
+const ProjectContextTool = "project_context"
 
-func projectContext(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: projectContextTool, Effect: coreadapter.ToolRead,
+func ProjectContext(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	return coreadapter.Tool{Name: ProjectContextTool, Effect: coreadapter.ToolRead,
 		Description: "List, search or read this project's charter, entity map (kb/entities.json) and informational notices. No path lists up to 20 current records; query filters path/content and prefix narrows the namespace (kb/ or notices/). Listing offset is a record index. With path, offset is a byte offset and content is limited to 16 KiB; reuse the returned revision for consistent continuation. next_offset continues either operation; -1 means complete. revision retrieves historical evidence. Notices are informational, not owner rulings. Use factory_context for your workstream's records.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"prefix":{"type":"string"},"query":{"type":"string","maxLength":256},"revision":{"type":"integer","minimum":1},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {

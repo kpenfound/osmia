@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/execution"
 	"strings"
 	"testing"
 
@@ -21,7 +22,7 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 	r := &reviewers{masons: newMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	}, reviewTurnID, reviewDocument, r.one, UnitApproved)
+	}, execution.ReviewTurnID, reviewDocument, r.one, UnitApproved)
 }
 
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {

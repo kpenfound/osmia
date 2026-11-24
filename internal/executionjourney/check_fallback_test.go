@@ -94,7 +94,7 @@ func TestServiceSessionChecksFallBackToTheConfiguredCloudRunner(t *testing.T) {
 	if run.Status != checks.ChecksPassed || len(local.Runs()) != 1 || len(cloud.Runs()) != 1 {
 		t.Fatalf("run %+v, local %q cloud %q", run, local.Runs(), cloud.Runs())
 	}
-	entries, err := service.TestSessionEntriesSince(s.sole().repository, stream, time.Time{})
+	entries, err := service.SessionEntriesSince(s.sole().repository, stream, time.Time{})
 	fixturekit.Must(t, err)
 	if len(entries) != 1 || !strings.Contains(entries[0].Text, "the Dagger Cloud engine ran every check") {
 		t.Fatalf("session entries %+v", entries)

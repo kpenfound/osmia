@@ -2,11 +2,8 @@ package lifecycle_test
 
 import (
 	"context"
-	"sync"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/amendment"
-	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -15,157 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
 )
-
-func (s *Service) ensureWorkgroups(ctx context.Context, cfg *config.Config, projects []*activeProject, archives []runtime.Archive) error {
-	var ps []*lifecycle.Project
-	for _, p := range projects {
-		ps = append(ps, &lifecycle.Project{ID: p.id, Repository: p.repository})
-	}
-	return s.lifecycle().EnsureWorkgroups(ctx, cfg, ps, archives)
-}
-
-func (s *Service) baseWaitPass(ctx context.Context, repo *trace.Repository) error {
-	return s.lifecycle().BaseWaitPass(ctx, repo)
-}
-
-func (s *Service) projectSpecRefreshPass(ctx context.Context, repository *trace.Repository) error {
-	return s.lifecycle().ProjectSpecRefreshPass(ctx, repository)
-}
-
-func (s *Service) saveChange(ctx context.Context, repo *trace.Repository, c *lifecycle.WorkgroupChange) error {
-	return s.lifecycle().SaveChange(ctx, repo, c)
-}
-func (s *Service) changeContext(ctx context.Context, raw string) (*trace.Repository, trace.Workgroup, config.WorkstreamID, func(), error) {
-	return s.lifecycle().ChangeContext(ctx, raw)
-}
-func (s *Service) changeApplicationLock(group config.WorkgroupID) *sync.RWMutex {
-	return s.lifecycle().ChangeApplicationLock(group)
-}
-func (s *Service) requestChange(ctx context.Context, raw string, req lifecycle.ChangeRequest) (lifecycle.WorkgroupChange, *api.APIError) {
-	return s.lifecycle().RequestChange(ctx, raw, req)
-}
-func (s *Service) decideChange(ctx context.Context, raw, id string, d lifecycle.ChangeDecision) (lifecycle.WorkgroupChange, *api.APIError) {
-	return s.lifecycle().DecideChange(ctx, raw, id, d)
-}
-func (s *Service) retryChange(ctx context.Context, host config.WorkstreamID, id string) (lifecycle.WorkgroupChange, *api.APIError) {
-	return s.lifecycle().RetryChange(ctx, host, id)
-}
-func (s *Service) endStalledChange(ctx context.Context, host config.WorkstreamID, id, state string, revision uint64, reason string) *api.APIError {
-	return s.lifecycle().EndStalledChange(ctx, host, id, state, revision, reason)
-}
-
-func (s *Service) changeBoundary(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, c lifecycle.WorkgroupChange, release bool) error {
-	return s.lifecycle().ChangeBoundary(ctx, repo, stream, c, release)
-}
-
-func (s *Service) changePass(ctx context.Context, repo *trace.Repository) error {
-	return s.lifecycle().ChangePass(ctx, repo)
-}
-func (s *Service) advanceChanges(ctx context.Context, wt *trace.Repository, g trace.Workgroup) error {
-	return s.lifecycle().AdvanceChanges(ctx, wt, g)
-}
-func (s *Service) deltaTool(wt *trace.Repository, c lifecycle.WorkgroupChange, agent, name string) coreadapter.Tool {
-	return s.lifecycle().DeltaTool(wt, c, agent, name)
-}
-func (s *Service) chiefRepository(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host, bundleStream config.WorkstreamID, close func(), err error) {
-	return s.lifecycle().ChiefRepository(ctx, repository, stream)
-}
-func (s *Service) archive(raw string) (api.ArchiveResponse, *api.APIError) {
-	return s.lifecycle().Archive(raw)
-}
-func (s *Service) unarchive(raw string) (api.ArchiveResponse, *api.APIError) {
-	return s.lifecycle().Unarchive(raw)
-}
-func (s *Service) archivedWorkstream(raw string) (runtime.Archive, bool) {
-	return s.lifecycle().ArchivedWorkstream(raw)
-}
-
-func (s *Service) liveWorkgroupLeader(g trace.Workgroup) (config.WorkstreamID, error) {
-	return s.lifecycle().LiveWorkgroupLeader(g)
-}
-func (s *Service) workgroupFullyRetired(ctx context.Context, g trace.Workgroup) (bool, error) {
-	return s.lifecycle().WorkgroupFullyRetired(ctx, g)
-}
-
-func (s *Service) DraftWorkgroup(ctx context.Context, members []config.WorkstreamID) (config.WorkgroupID, *api.APIError) {
-	return s.lifecycle().DraftWorkgroup(ctx, members)
-}
-func (s *Service) draftProjectSpecIfReady(ctx context.Context, known *trace.Repository, id config.WorkgroupID) error {
-	return s.lifecycle().DraftProjectSpecIfReady(ctx, known, id)
-}
-func (s *Service) projectSpecTurnDirectoryFor(host config.WorkstreamID) string {
-	return s.lifecycle().ProjectSpecTurnDirectoryFor(host)
-}
-func (s *Service) enqueueProjectSpecDraft(ctx context.Context, wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, members []trace.CrossRepoMember, turn string) error {
-	return s.lifecycle().EnqueueProjectSpecDraft(ctx, wt, g, host, members, lifecycle.ProjectSpecDraftInput{Turn: turn})
-}
-
-func (s *Service) projectSpecDraftPass(ctx context.Context, repository *trace.Repository) error {
-	return s.lifecycle().ProjectSpecDraftPass(ctx, repository)
-}
-
-func (s *Service) crossRepoMemberRepos(ctx context.Context, g trace.Workgroup) ([]trace.CrossRepoMember, error) {
-	return s.lifecycle().CrossRepoMemberRepos(ctx, g)
-}
-
-func (s *Service) ownerMoveWorkstream(ctx context.Context, raw string, req api.WorkstreamMoveRequest) (api.WorkstreamMoveResponse, *api.APIError) {
-	return s.lifecycle().OwnerMoveWorkstream(ctx, raw, req)
-}
-
-func (s *Service) upstreamMergeStatus(ctx context.Context, repo *trace.Repository, edge trace.Edge) (lifecycle.EdgeMergeStatus, error) {
-	return s.lifecycle().UpstreamMergeStatus(ctx, repo, edge)
-}
-func (s *Service) edgeResolverPass(ctx context.Context, repo *trace.Repository) error {
-	return s.lifecycle().EdgeResolverPass(ctx, repo)
-}
-func (s *Service) edgeWaitPass(ctx context.Context, repo *trace.Repository) error {
-	return s.lifecycle().EdgeWaitPass(ctx, repo)
-}
-
-func (s *Service) moveOntoUpstream(ctx context.Context, cfg *config.Config, repository *trace.Repository, g workspace.Provider, stream, base config.WorkstreamID) (api.BaseUpstreamResponse, *api.APIError) {
-	return s.lifecycle().MoveOntoUpstream(ctx, cfg, repository, g, stream, base)
-}
-
-func (s *Service) handBackDrift(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, note string, actor trace.Actor, turn string, at time.Time) (int, *api.APIError) {
-	return s.lifecycle().HandBackDrift(ctx, repo, stream, note, actor, turn, at)
-}
-
-func (s *Service) rebaseProject(ctx context.Context, req api.ProjectRebaseRequest) (api.ProjectRebaseResponse, *api.APIError) {
-	return s.lifecycle().RebaseProject(ctx, req)
-}
-func (s *Service) rebaseWorkstream(ctx context.Context, raw string) (api.WorkstreamRebaseResponse, *api.APIError) {
-	return s.lifecycle().RebaseWorkstream(ctx, raw)
-}
-
-func (s *Service) applyChange(ctx context.Context, wt *trace.Repository, g trace.Workgroup, c *lifecycle.WorkgroupChange) error {
-	return s.lifecycle().ApplyChange(ctx, wt, g, c)
-}
-func (s *Service) changeSealReady(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id string) (bool, error) {
-	return s.lifecycle().ChangeSealReady(ctx, repo, stream, id)
-}
-func (s *Service) cancelChangeMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, c lifecycle.WorkgroupChange) error {
-	return s.lifecycle().CancelChangeMember(ctx, repo, stream, c)
-}
-func (s *Service) settleChangeRequester(ctx context.Context, c lifecycle.WorkgroupChange) error {
-	return s.lifecycle().SettleChangeRequester(ctx, c)
-}
-func (s *Service) reworkChangeMember(ctx context.Context, repo *trace.Repository, row amendment.StreamImpact, c *lifecycle.WorkgroupChange) error {
-	return s.lifecycle().ReworkChangeMember(ctx, repo, row, c)
-}
-func (s *Service) planChangeMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, sl trace.Slice, id string) error {
-	return s.lifecycle().PlanChangeMember(ctx, repo, stream, sl, id)
-}
-func (c *runtimeControls) moveWorkstream(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return c.lifecycle().MoveWorkstream(r, scope)
-}
-func (c *runtimeControls) dropDependency(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return c.lifecycle().DropDependency(r, scope)
-}
-func (c *runtimeControls) handBackDrift(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	return c.lifecycle().HandBackDrift(r, scope, now)
-}
 
 type archiveCleanup struct {
 	s          *Service

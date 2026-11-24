@@ -1,6 +1,7 @@
 package browsertest
 
 import (
+	"github.com/kpenfound/osmia/internal/service"
 	"slices"
 	"strings"
 	"testing"
@@ -138,7 +139,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	link.Cut()
 	p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads with dedupe.", Note: "The ruling came; upload continues.", Agents: []string{"A mason builds upload."}})
-	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "workstream", Project: project, Workstream: quiet})
+	mutation(t, f.c, "DELETE", "pause", service.ClearPauseRequest{Scope: "workstream", Project: project, Workstream: quiet})
 	var stale string
 	p.Eval(textOf(latest+"[data-field=note]"), &stale)
 	if stale != "Upload waits for a ruling." {
@@ -152,7 +153,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.Await("no pause count", `document.getElementById('pause-count').textContent === ''`)
 	p.Await("the same document", `window.notReloaded === true`)
 
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Hold the uploads", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Hold the uploads", Source: runtime.PauseOwner})
 	livePause := `[data-pause="workstream:` + string(stream) + `"] `
 	p.AwaitText(livePause+"[data-field=reason]", "Hold the uploads")
 	p.AwaitText(livePause+"[data-field=source]", "the owner")
@@ -163,13 +164,13 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	for _, path := range p.Paths() {
 		switch {
 		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg" || strings.HasPrefix(path, "/fonts/") && strings.HasSuffix(path, ".woff2"):
-		case strings.HasPrefix(path, Prefix+"/"):
+		case strings.HasPrefix(path, service.Prefix+"/"):
 			views = append(views, path)
 		default:
 			t.Errorf("the page requested %s", path)
 		}
 	}
-	for _, want := range []string{Prefix + "/status", Prefix + "/runtime", Prefix + "/events"} {
+	for _, want := range []string{service.Prefix + "/status", service.Prefix + "/runtime", service.Prefix + "/events"} {
 		if !slices.Contains(views, want) {
 			t.Errorf("the page never requested %s: %v", want, views)
 		}

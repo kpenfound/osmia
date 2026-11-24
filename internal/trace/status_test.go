@@ -308,7 +308,7 @@ func TestInternalContestDoesNotRequireOwnerAttention(t *testing.T) {
 	if got := ownerGates(records, streamID, view); len(got) != 0 {
 		t.Fatalf("internal blocker required owner attention: %v", got)
 	}
-	records = append(records, Document{Header: Header{Workstream: streamID}, Path: "units/" + subject + "/chief-contest-1.json", Content: `{"contest":"contest-1","decision":"escalate"}`})
+	records = append(records, Document{Header: Header{Workstream: streamID}, Path: "units/" + subject + "/chief-" + EventID("contest-1", "chief") + ".json", Content: `{"contest":"contest-1","decision":"escalate"}`})
 	if got := ownerGates(records, streamID, view); len(got) != 1 || got[0].Reference != "resume" {
 		t.Fatalf("explicit escalation has no owner gate: %v", got)
 	}
@@ -325,17 +325,15 @@ func TestOwnerGateRecognizesChiefDecisions(t *testing.T) {
 			subject := UnitSubject(unit)
 			contest := Transition{Header: Header{Workstream: streamID, Unit: unit, ID: subject + "-contested-checks-7-12"}, Subject: subject, From: "checking", To: "contested"}
 			view := &workflowView{states: map[string]WorkflowState{subject: {Value: "contested"}}}
-			for _, key := range []string{contest.ID, EventID(contest.ID, "chief")} {
-				path := "units/" + subject + "/chief-" + key + ".json"
-				decision := Document{Header: Header{Workstream: streamID}, Path: path, Content: `{"contest":"` + contest.ID + `","decision":"escalate"}`}
-				got := ownerGates([]Record{contest, decision}, streamID, view)
-				if len(got) != 1 || got[0].Reference != unit {
-					t.Fatalf("%s escalation gate: %+v", path, got)
-				}
-				decision.Content = `{"contest":"another-contest","decision":"escalate"}`
-				if got := ownerGates([]Record{contest, decision}, streamID, view); len(got) != 0 {
-					t.Fatalf("%s unrelated decision raised contest: %+v", path, got)
-				}
+			path := "units/" + subject + "/chief-" + EventID(contest.ID, "chief") + ".json"
+			decision := Document{Header: Header{Workstream: streamID}, Path: path, Content: `{"contest":"` + contest.ID + `","decision":"escalate"}`}
+			got := ownerGates([]Record{contest, decision}, streamID, view)
+			if len(got) != 1 || got[0].Reference != unit {
+				t.Fatalf("%s escalation gate: %+v", path, got)
+			}
+			decision.Content = `{"contest":"another-contest","decision":"escalate"}`
+			if got := ownerGates([]Record{contest, decision}, streamID, view); len(got) != 0 {
+				t.Fatalf("%s unrelated decision raised contest: %+v", path, got)
 			}
 		})
 	}

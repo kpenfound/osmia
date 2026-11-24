@@ -1,7 +1,6 @@
 package recordspans
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -256,7 +255,7 @@ func TestCheckRunSpansCarryOutcomeAndCoveredCount(t *testing.T) {
 	h.document("unit-u1-checks-1", "units/u1/checks-1.json", finished, checks, "u1", execution.UnitCheckRun{Unit: "u1", Run: 1, Status: "passed", Selection: &execution.CheckSelection{Mode: "selected", Covered: &covered}, StartedAt: started, FinishedAt: finished})
 	h.document("unit-u1-checks-1-selection", "units/u1/checks-1-selection.json", started, checks, "u1", execution.UnitCheckSelection{Unit: "u1", Run: 1, Selection: execution.CheckSelection{Mode: "selected", Covered: &covered}, StartedAt: started})
 	h.document("unit-u1-checks-2", "units/u1/checks-2.json", minute(20), checks, "u1", execution.UnitCheckRun{Unit: "u1", Run: 2, Status: "failed", Selection: &execution.CheckSelection{Mode: "full", Reason: "disabled"}, StartedAt: minute(15), FinishedAt: minute(20)})
-	h.document("final-checks-1", "final/checks-1.json", minute(40), checks, "", delivery.FinalCheckRun{Review: 1, Status: "passed", Selection: &delivery.CheckSelection{Mode: "selected", Covered: &seven}, StartedAt: minute(30), FinishedAt: minute(40)})
+	h.document("final-checks-1", "final/checks-1.json", minute(40), checks, "", delivery.FinalCheckRun{Review: 1, Status: "passed", StartedAt: minute(30), FinishedAt: minute(40)})
 	h.document("session-checks-1", "session-checks/checks-1.json", minute(60), owner, "", api.SessionCheckRun{Run: 1, Kind: "smart", Status: "incomplete", StartedAt: minute(50), FinishedAt: minute(60), Selection: &api.CheckSelection{Mode: "selected", Covered: &seven}})
 	h.document("final-checks-1-output", "final/checks-1-output.txt", minute(40), checks, "", "output text")
 
@@ -272,7 +271,7 @@ func TestCheckRunSpansCarryOutcomeAndCoveredCount(t *testing.T) {
 	}{
 		{"unit", "passed", "12", "u1", started, finished, false},
 		{"unit", "failed", "", "u1", minute(15), minute(20), true},
-		{"final", "passed", "7", "", minute(30), minute(40), false},
+		{"final", "passed", "", "", minute(30), minute(40), false},
 		{"session", "incomplete", "7", "", minute(50), minute(60), true},
 	} {
 		s := runs[i]
@@ -285,23 +284,6 @@ func TestCheckRunSpansCarryOutcomeAndCoveredCount(t *testing.T) {
 	}
 	if _, ok := value(runs[1], "osmia.covered"); ok {
 		t.Errorf("a run whose selection holds no count carries one")
-	}
-}
-
-func TestCheckRunRecordWithoutCoveredCountStillReads(t *testing.T) {
-	h := newHarness(t)
-	old := `{"unit":"u1","run":1,"status":"passed","selection":{"mode":"selected","links":["dag://a"],"candidates":3,"listed":9},"started_at":"2026-09-15T12:05:00Z","finished_at":"2026-09-15T12:09:00Z"}`
-	h.document("unit-u1-checks-1", "units/u1/checks-1.json", minute(9), checks, "u1", json.RawMessage(old))
-	var run execution.UnitCheckRun
-	if err := json.Unmarshal([]byte(old), &run); err != nil || run.Selection == nil || run.Selection.Covered != nil || run.Selection.Listed == nil || *run.Selection.Listed != 9 {
-		t.Fatalf("older run record: %+v %v", run, err)
-	}
-	runs := named(h.spans(), "osmia.check.run")
-	if len(runs) != 1 || str(runs[0], "osmia.outcome") != "passed" {
-		t.Fatalf("spans for an older record: %v", runs)
-	}
-	if _, ok := value(runs[0], "osmia.covered"); ok {
-		t.Fatal("an older record has a covered count")
 	}
 }
 

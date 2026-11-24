@@ -4,8 +4,8 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
@@ -34,7 +34,7 @@ func TestMasonContestedRuling(t *testing.T) {
 			t.Parallel()
 			f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 			defer f.stop(t)
-			fake.Response = map[string]string{service.TestMasonTurnID("resume"): tc.response}
+			fake.Response = map[string]string{execution.MasonTurnID("resume"): tc.response}
 			ownerTurn := intake.MasonAgent("resume") + "-owner-revise-"
 			f.engine.Mu.Lock()
 			if tc.name == "bound" {
@@ -141,8 +141,8 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 			t.Parallel()
 			f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 			defer f.stop(t)
-			fake.Response = map[string]string{service.TestMasonTurnID("resume"): tc.response}
-			fake.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+			fake.Response = map[string]string{execution.MasonTurnID("resume"): tc.response}
+			fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 				_, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": fixturekit.MasonWrote})
 				return err
 			}
@@ -186,7 +186,7 @@ func TestMasonJevClassification(t *testing.T) {
 		fixturekit.Must(t, errors.Join(err, configFile.Close()))
 	})
 	defer f.stop(t)
-	fake.Response = map[string]string{service.TestMasonTurnID("resume"): "Wrote the store. The unit is ready for review."}
+	fake.Response = map[string]string{execution.MasonTurnID("resume"): "Wrote the store. The unit is ready for review."}
 	delete(fake.Play, intake.MasonAgent("resume")+"-clarify-1")
 	f.engine.Mu.Lock()
 	f.engine.Turns[intake.MasonAgent("resume")+"-clarify-1"] = fake.Turn
@@ -225,7 +225,7 @@ func TestMasonJevFallbackCountsTowardCleanTurnBound(t *testing.T) {
 	})
 	defer f.stop(t)
 	bound := f.s.cfg.Mason.MaxCleanTurns
-	fake.Response = map[string]string{service.TestMasonTurnID("resume"): "Work is ongoing."}
+	fake.Response = map[string]string{execution.MasonTurnID("resume"): "Work is ongoing."}
 	f.engine.Mu.Lock()
 	for i := 1; i < bound; i++ {
 		delete(fake.Play, fmt.Sprintf("%s-clarify-%d", intake.MasonAgent("resume"), i))

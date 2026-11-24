@@ -188,7 +188,7 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 	batch, err := chief.EscalateQuestions(ctx, trace.ChiefOfStaff, scope, trace.EscalationRequest{Questions: []string{string(member) + ":" + question.ID}, Rephrasing: "Which retry budget?", Blocked: "Upload retry", Recommendation: "Use three retries"}, fixturekit.DemoStart.Add(6*time.Minute))
 	fixturekit.Must(t, err)
 	fixturekit.FeedDocument(t, repo, member, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, fixturekit.DemoStart, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
-	fixturekit.FeedDocument(t, repo, member, "final-checks-1", "final/checks-1.json", 1, fixturekit.DemoStart, FinalCheckRun{Review: 1, Attempt: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
+	fixturekit.FeedDocument(t, repo, member, "final-checks-1", "final/checks-1.json", 1, fixturekit.DemoStart, FinalCheckRun{Review: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, member, finalReportDocument, finalReportPath, 1, fixturekit.DemoStart, FinalReport{Review: 1, Outcome: finalReviewed, Reader: "reader", Turn: "review"})
 	data, _ := json.Marshal(ChiefContestDecision{Decision: "revise", Note: "Retry the check", Turn: "contest-turn"})
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, ID: "contest", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: chiefActor, Cause: "test"}, Path: "units/unit-upload/chief-decision.json", Content: string(data)}}))
@@ -294,7 +294,7 @@ func TestAMemberConversationIsUnchangedByTheWorkgroupActivity(t *testing.T) {
 		if api != nil {
 			t.Fatal(api)
 		}
-		expected, err := conversationEntries(w.chief, w.member)
+		expected, err := ConversationEntries(w.chief, w.member)
 		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(before.Entries, expected) {
 			t.Fatal("member conversation changed")
@@ -394,9 +394,6 @@ func assertWorkgroupHandleReleased(t *testing.T, s *Service, g trace.Workgroup, 
 
 var workgroupEndpointScenarios = []string{"success", "read-error", "joining", "half-joined", "unpublished-membership", "retired", "locked"}
 
-// arrangeWorkgroupEndpoints sets up a two-project workgroup in the state the
-// scenario names and asks its feed and conversation endpoints for the status
-// of each.
 func arrangeWorkgroupEndpoints(t *testing.T, scenario string) (s *Service, chief *trace.Repository, g trace.Workgroup, feedStatus, sendStatus int) {
 	t.Helper()
 	s, chief, g = workgroupFeedFixture(t, true, 2, scenario == "joining")

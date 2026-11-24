@@ -41,7 +41,7 @@ func TestSessionSelectedLinksReachDagger(t *testing.T) {
 			cli.AssertRun(t, links)
 			repo, err := s.repository(project)
 			fixturekit.Must(t, err)
-			runs, err := service.TestSessionCheckRuns(repo, stream)
+			runs, err := service.SessionCheckRuns(repo, stream)
 			fixturekit.Must(t, err)
 			docs, err := trace.Read[trace.Document](repo, stream)
 			fixturekit.Must(t, err)

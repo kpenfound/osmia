@@ -905,6 +905,7 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)
 }
+
 const maxSocketPath = 103
 
 func validateSocket(path string) error {

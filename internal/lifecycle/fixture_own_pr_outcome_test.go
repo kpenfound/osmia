@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"github.com/kpenfound/osmia/internal/execution"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/api"
@@ -24,10 +25,10 @@ func ownPRFixture(t *testing.T) (*config.Config, *trace.Repository, *fixturekit.
 
 func sealStream(t *testing.T, repo *trace.Repository) {
 	t.Helper()
-	fixturekit.SealDependentStream(t, repo, fixturekit.Stream, fixturekit.Quiet, intake.FeatureBranch(fixturekit.Stream), service.TestForemanActor)
+	fixturekit.SealDependentStream(t, repo, fixturekit.Stream, fixturekit.Quiet, intake.FeatureBranch(fixturekit.Stream), execution.ForemanActor)
 }
 
 func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Config, pr int) api.DeliveryPublication {
 	t.Helper()
-	return fixturekit.RecordDeliveredPublication(t, repo, cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, service.TestForemanActor)
+	return fixturekit.RecordDeliveredPublication(t, repo, cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, execution.ForemanActor)
 }

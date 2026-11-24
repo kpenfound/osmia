@@ -7,7 +7,6 @@ import (
 	fmt "fmt"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	strings "strings"
@@ -62,7 +61,7 @@ func TestMasonDoneWithALongCardIsRecorded(t *testing.T) {
 	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
 	long := strings.Repeat("The storage client resumes uploads from the last chunk. ", 6)
-	fake.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Built", "happened": long})
 		if err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
@@ -101,7 +100,7 @@ func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 	})
 	defer f.stop(t)
 	var refused atomic.Pointer[string]
-	fake.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": " "})
 		if err != nil || recorded {
 			return fmt.Errorf("done was not refused: recorded %t, %v", recorded, err)
@@ -113,7 +112,7 @@ func TestMasonRefusedDoneGetsOneContinuationWithTheReason(t *testing.T) {
 	stream := f.seedBuilding(t, "refused-done", fixturekit.ValidPlan)
 	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
 
-	first := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+	first := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
 	refusal := *refused.Load()
 	if first.Response.Result.Refusal == "" || first.Response.Result.Refusal != refusal || first.Response.Classification != nil {
 		t.Fatalf("the refused turn recorded refusal %q and classification %+v, want refusal %q", first.Response.Result.Refusal, first.Response.Classification, refusal)
@@ -146,7 +145,7 @@ func TestMasonFailureWithoutDoneGetsAContinuation(t *testing.T) {
 	t.Parallel()
 	f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer f.stop(t)
-	fake.Play[service.TestMasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn }
+	fake.Play[execution.MasonTurnID("resume")] = func(context.Context, agent.Request, *mcp.ClientSession) error { return intakefixture.ErrFailTurn }
 	playContinuation(f, fake, continueTurn("resume", 1), intakefixture.ReportDone("Built"))
 	stream := f.seedBuilding(t, "failed-turn", fixturekit.ValidPlan)
 	f.awaitUnit(t, stream, "resume", intake.UnitReviewing)
@@ -182,7 +181,7 @@ func TestMasonAcceptedDoneBeatsTheFailureThatEndedTheTurn(t *testing.T) {
 			t.Parallel()
 			f, fake := newMasonFixture(t, 1, fixturekit.ValidPlan)
 			defer f.stop(t)
-			name := service.TestMasonTurnID("resume")
+			name := execution.MasonTurnID("resume")
 			fake.Play[name] = intakefixture.ReportDone("Built")
 			if tc.end == nil {
 				fake.Play[name] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
@@ -244,7 +243,7 @@ func TestMasonEndingsWithoutAReportContestTheUnitOnceTheBoundIsUsedUp(t *testing
 	defer f.stop(t)
 	bound := f.s.cfg.Mason.MaxCleanTurns
 
-	fake.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+	fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
 		if recorded, _, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": " "}); err != nil || recorded {
 			return fmt.Errorf("done was not refused: %t %v", recorded, err)
 		}

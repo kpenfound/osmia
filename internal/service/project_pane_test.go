@@ -42,7 +42,6 @@ func TestArchivedProjectPaneRequiresPinnedResolution(t *testing.T) {
 	}{
 		{name: "unresolved PR link", state: DeliveredState, evidence: "unresolved", link: "https://example.invalid/pull/42", want: "blocked"},
 		{name: "no publication", state: DeliveredState, evidence: "unresolved", want: "blocked"},
-		{name: "legacy ready flag", state: DeliveredState, resolved: true, link: "https://example.invalid/pull/42", want: "blocked"},
 		{name: "merged", state: DeliveredState, evidence: "merged", resolved: true, want: "delivered (merged)"},
 		{name: "cancelled", state: AbandonedState, evidence: "cancelled", resolved: true, want: "cancelled"},
 	} {

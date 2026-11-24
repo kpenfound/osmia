@@ -83,8 +83,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckSelectionDocument("upload", 1), execution.CheckSelectionPath("upload", 1), 1, at(15), execution.UnitCheckSelection{Unit: "upload", Run: 1, Selection: selection, StartedAt: at(15)})
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, execution.CheckDocumentID("upload", 1), "units/upload/checks-1.json", 1, at(16), execution.UnitCheckRun{Unit: "upload", Run: 1, Status: checkrun.ChecksPassed, Selection: &selection, StartedAt: at(15), FinishedAt: at(16)})
 	transition(delivery.FinalReviewSubject, "", "requested-1", 17)
-	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalCheckAttemptDocument(1, 1), delivery.FinalCheckAttemptPath(1, 1), 1, at(18), delivery.FinalCheckAttempt{Review: 1, Attempt: 1, StartedAt: at(18)})
-	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 1, at(19), delivery.FinalCheckRun{Review: 1, Attempt: 1, Status: checkrun.ChecksPassed, StartedAt: at(18), FinishedAt: at(19)})
+	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalChecksDocument(1), delivery.FinalChecksPath(1), 1, at(19), delivery.FinalCheckRun{Review: 1, Status: checkrun.ChecksPassed, StartedAt: at(18), FinishedAt: at(19)})
 	fixturekit.QueueRoleTurn(t, repo, fixturekit.Stream, "agent_final_reader", intake.CommitteeRole, "", at(19))
 	reader, err := repo.ClaimTurn(ctx, fixturekit.Stream, "agent_final_reader", "token_reader", filepath.Join(t.TempDir(), "reader"), at(20))
 	fixturekit.Must(t, err)
@@ -92,9 +91,9 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 	fixturekit.FeedDocument(t, repo, fixturekit.Stream, delivery.FinalReportDocument, delivery.FinalReportPath, 1, at(22), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Reader: "agent_final_reader", Turn: "agent_final_reader-turn"})
 	transition(delivery.FinalReviewSubject, "", "reviewed-1", 22)
 
-	got, err := service.TestFeedEntries(repo, repo, fixturekit.Stream)
+	got, err := service.FeedEntries(repo, repo, fixturekit.Stream)
 	fixturekit.Must(t, err)
-	chiefEnded, masonEnded, unitFinished, finalStarted, finalFinished, readerEnded := at(7), at(12), at(16), at(18), at(19), at(21)
+	chiefEnded, masonEnded, unitFinished, finalFinished, readerEnded := at(7), at(12), at(16), at(19), at(21)
 	want := []api.FeedEntry{
 		{Kind: "transition", At: at(1), Transition: &api.FeedTransition{Subject: trace.FeatureSubject, From: "", To: intake.BuildingState, Actor: "service:osmia", Reason: "because " + intake.BuildingState}},
 		{Kind: "transition", At: at(2), Transition: &api.FeedTransition{Subject: trace.UnitSubject("upload"), Unit: "upload", From: "", To: intake.UnitReady, Actor: "service:osmia", Reason: "because " + intake.UnitReady}},
@@ -108,7 +107,7 @@ func TestFeedOrdersEverythingThatHappened(t *testing.T) {
 		{Kind: "transition", At: at(14), Transition: &api.FeedTransition{Subject: execution.ChecksSubject("upload"), Unit: "upload", From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
 		{Kind: "unit_checks", At: at(15), UnitChecks: &api.FeedUnitChecks{Unit: "upload", Run: 1, State: checkrun.ChecksPassed, Selection: &api.FeedCheckSelection{Mode: checkrun.SelectionSelected, Selected: 1, Judged: 113, Description: "Jev selected 1 of 113 check links for the changed files in judgment judgment_feed"}, StartedAt: at(15), FinishedAt: &unitFinished}},
 		{Kind: "transition", At: at(17), Transition: &api.FeedTransition{Subject: delivery.FinalReviewSubject, From: "", To: "requested-1", Actor: "service:osmia", Reason: "because requested-1"}},
-		{Kind: "final_checks", At: at(18), FinalChecks: &api.FeedFinalChecks{Review: 1, Attempt: 1, State: checkrun.ChecksPassed, StartedAt: &finalStarted, FinishedAt: &finalFinished}},
+		{Kind: "final_checks", At: at(19), FinalChecks: &api.FeedFinalChecks{Review: 1, State: checkrun.ChecksPassed, FinishedAt: &finalFinished}},
 		{Kind: "session", At: at(20), Session: &api.FeedSession{Agent: "agent_final_reader", Role: intake.CommitteeRole, Turn: "agent_final_reader-turn", Profile: "default", State: "done", StartedAt: at(20), EndedAt: &readerEnded, Summary: "Reviewed the assembled branch."}},
 		{Kind: "transition", At: at(22), Transition: &api.FeedTransition{Subject: delivery.FinalReviewSubject, From: "requested-1", To: "reviewed-1", Actor: "service:osmia", Reason: "because reviewed-1"}},
 		{Kind: "final_review", At: at(22), FinalReview: &api.FeedFinalReview{Review: 1, State: delivery.FinalReviewed, Reader: "agent_final_reader", Turn: "agent_final_reader-turn"}},

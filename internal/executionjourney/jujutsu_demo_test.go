@@ -133,7 +133,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	answered := questions.TurnID("1")
 	masons.Mu.Lock()
 	masons.Play[answered] = intakefixture.ReportDone("Uploads resume")
-	masons.Play[service.TestMasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	}
 	masons.Mu.Unlock()
 	f.engine.Mu.Lock()
-	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Turns[answered] = masons.Turn
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {

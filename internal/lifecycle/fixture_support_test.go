@@ -37,7 +37,7 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 		return intakefixture.ProductionDesignStart[*productionDesignFixture]{
 			Fixture: f, Scenario: f.sharedDesign(), Threads: opts.Threads, Hooks: &f.hook,
 			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
-				return turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
+				return turns.(*questions.Turns).Turns.(*execution.VerdictTurns).Turns.(*execution.ReportingTurns).Turns.(*execution.RetriedTurns).Turns.(*isolation.Turns)
 			},
 			Bind: func(threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error), boundary func(context.Context, string) error) {
 				af.opts.Threads, af.opts.boundary = threads, boundary
@@ -137,7 +137,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 		Config:     func() *config.Config { return f.s.current() },
 		Repository: func(p config.ProjectID) (*trace.Repository, error) { return f.s.repository(p) },
 		ChiefRepository: func(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
-			return f.s.chiefRepository(ctx, r, w)
+			return f.s.lifecycle().ChiefRepository(ctx, r, w)
 		},
 		Feed:  func(w string) (api.FeedResponse, *api.APIError) { return f.s.feedList(w) },
 		Ready: func() bool { return f.s.ready.Load() }, Done: func() <-chan struct{} { return f.s.done },
@@ -153,8 +153,8 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			_, ok, err := (&masons{s: f.s, repository: r}).read(w)
 			return ok, err
 		},
-		Holds: func(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-			return f.s.holds(p, w, r, c)
+		Holds: func(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+			return f.s.holds(p, r, c)
 		},
 		EdgeWaiting: lifecycle.EdgeWaiting,
 		Builder: func(r *trace.Repository) coreadapter.Reconciler {
@@ -162,7 +162,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 		},
 		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
 			_, event := execution.LandIDs("accept", 1)
-			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
+			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, execution.LandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
 		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
@@ -179,6 +179,6 @@ func (f *architectFixture) sharedTurns() *intakefixture.TurnScenario {
 		Root: func() config.Root { return f.s.current().Root }, Project: f.project,
 		Now: f.clock.Now, Repository: f.repository,
 		Changes: func(t *testing.T) (func(), func()) { return serviceChanges(t, f.s) },
-		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: service.TestForemanActor,
+		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: execution.ForemanActor,
 	}
 }

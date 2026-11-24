@@ -501,8 +501,8 @@ const (
 	ExitAbandoned = "# Upload quotas\n\nEach owner has an upload quota.\n"
 
 	ExitSmallSpec = "# Upload error names the chunk\n\nA failed upload's error names the chunk it failed on.\n\n## Acceptance criteria\n\n1. The error of a failed upload names the chunk it failed on.\n"
-	ExitSmallPlan = `{"version": 1, "units": [
-  {"id": "message", "title": "Name the chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUploadErrorNamesTheChunk"}}], "depends_on": [], "footprint": ["internal.trace"]}
+	ExitSmallPlan = `{"version": 2, "units": [
+  {"id": "message", "title": "Name the chunk", "task": "Name the chunk", "acceptance": ["spec#1 holds, shown by TestUploadErrorNamesTheChunk (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]}
 ]}
 `
 	ExitCharter  = "1. Keep changes small.\n2. Every change has a test.\n"

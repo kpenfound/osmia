@@ -309,22 +309,6 @@ func (r *Repository) WithOperation(ctx context.Context, stream config.Workstream
 	return fn(a, record)
 }
 
-// Unlocked runs work within this attempt's lifetime. No bookkeeping lock is
-// held by an attempt's callback, inspection, or effect.
-func (a *OperationAttempt) Unlocked(ctx context.Context, fn func(context.Context)) { fn(ctx) }
-
-// Relock runs bookkeeping work. Each repository write takes its own short lock;
-// this callback never acquires a project-wide reconciliation lock.
-func Relock(ctx context.Context, fn func() error) error { return fn() }
-
-// Beside returns the context for work joined by the attempt's owner.
-func Beside(ctx context.Context) context.Context { return ctx }
-
-// Serialize runs a callback without a project-wide lock. Repository writes
-// provide their own bookkeeping exclusion. Callers must join before Close.
-// Deprecated: invoke the callback directly.
-func (r *Repository) Serialize(fn func() error) error { return fn() }
-
 // Action supplies the immutable provenance of this attempt for a boundary write.
 func (a *OperationAttempt) Action(kind string, at time.Time) OperationAction {
 	action := a.claim

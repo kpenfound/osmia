@@ -101,7 +101,7 @@ func recordUnitMerged(t *testing.T, repository *trace.Repository, stream config.
 	t.Helper()
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
 	fixturekit.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: trace.UnitSubject(unit) + "-" + intake.UnitMerged, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "landing-" + unit}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: trace.UnitSubject(unit) + "-" + intake.UnitMerged, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: execution.ForemanActor, Cause: "landing-" + unit}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: intake.UnitMerged, Reason: fmt.Sprintf("unit %s landed", unit)}})
 	fixturekit.Must(t, err)

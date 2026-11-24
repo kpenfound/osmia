@@ -136,14 +136,14 @@ func TestAbandonCompetingUnclaimedInvocationsPreserveRunningClaim(t *testing.T) 
 		removed <- err
 		return err
 	}}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	select {
 	case err := <-removed:
 		fixturekit.Must(t, err)
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("archive cleanup did not remove the cancelled turn's trace")
 	}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	archived, ok := archiveRecord(t, s.store, fixturekit.Stream)
 	if !ok || archived.CleanedAt.IsZero() {
 		t.Fatalf("archive cleanup did not complete in the same session: %+v", archived)
@@ -242,14 +242,14 @@ func TestAbandonBeforeFirstAttemptReleasesReturnedClaim(t *testing.T) {
 		removed <- err
 		return err
 	}}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	select {
 	case err := <-removed:
 		fixturekit.Must(t, err)
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("archive cleanup did not remove the cancelled turn's trace")
 	}
-	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	archived, ok := archiveRecord(t, s.store, fixturekit.Stream)
 	if !ok || archived.CleanedAt.IsZero() {
 		t.Fatalf("archive cleanup did not complete in the same session: %+v", archived)

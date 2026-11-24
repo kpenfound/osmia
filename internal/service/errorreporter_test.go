@@ -403,7 +403,7 @@ func TestErrorReporterKeepsItsIssuesAcrossARestart(t *testing.T) {
 	ledger, err := cfg.Root.Notifications()
 	fixturekit.Must(t, err)
 	if state != r.statePath() || filepath.Dir(state) != filepath.Dir(ledger) {
-		t.Fatalf("state %s is not beside the notification ledger %s", state, ledger)
+		t.Fatalf("state %s is not beside the Notification ledger %s", state, ledger)
 	}
 
 	r.restart()

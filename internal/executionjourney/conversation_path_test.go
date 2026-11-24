@@ -85,7 +85,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	for _, test := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{fixturekit.Stream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.TestSessionAgentID, sessionMessage.Turn}} {
+	}{{fixturekit.Stream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
 		fixturekit.ConversationAwait(t, func() bool {
 			th, err := repo.Thread(test.stream, test.agent)
 			if err != nil {
@@ -187,17 +187,17 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 				})}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 					return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Turn)}, nil
 				}, Relay: func(ctx context.Context, th trace.Thread, q trace.QueuedTurn) error {
-					if th.Identity.Role != service.TestSessionAgentID {
+					if th.Identity.Role != service.SessionAgentID {
 						return nil
 					}
 					q.Attempts = []trace.TurnAttempt{{Path: "replay", SourceSession: coreadapter.BackendSession{ID: "old", Backend: "fake"}}}
 					if relays.Add(1) == 1 {
-						if err := service.TestRecordSessionEntry(ctx, repo, repo.Project(), q.Request.Workstream, "context-rebuilt-"+q.Request.TurnID, clock.Now(), "Your earlier model session could not be resumed, so this turn's context was rebuilt from the thread's history."); err != nil {
+						if err := service.RecordSessionEntry(ctx, repo, repo.Project(), q.Request.Workstream, "context-rebuilt-"+q.Request.TurnID, clock.Now(), "Your earlier model session could not be resumed, so this turn's context was rebuilt from the thread's history."); err != nil {
 							return err
 						}
 						return errors.New("interrupted between relay effects")
 					}
-					return service.TestSessionRelay(ctx, repo, clock.Now, th, q)
+					return service.SessionRelay(ctx, repo, clock.Now, th, q)
 				}}, nil
 			}
 			s, client := start(t, opts)
@@ -215,7 +215,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 				}
 				return false
 			})
-			th, err := repo.Thread(session, service.TestSessionAgentID)
+			th, err := repo.Thread(session, service.SessionAgentID)
 			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() {
 				t.Fatal("hook failed before completion")
@@ -244,7 +244,7 @@ func TestConversationPathSettlesCompletionHookAfterFailureOrRestart(t *testing.T
 			if state.Value != trace.SessionIdle || calls.Load() != 1 || relays.Load() != 2 {
 				t.Fatalf("recovery state=%s calls=%d relays=%d", state.Value, calls.Load(), relays.Load())
 			}
-			entries, err := service.TestSessionEntriesSince(repo, session, time.Time{})
+			entries, err := service.SessionEntriesSince(repo, session, time.Time{})
 			fixturekit.Must(t, err)
 			if len(entries) != 1 || entries[0].ID != "context-rebuilt-"+sent.Turn {
 				t.Fatalf("relay effects: %+v", entries)
@@ -285,7 +285,7 @@ func TestConversationPathShutdownJoinsBeforeTraceClose(t *testing.T) {
 			<-ctx.Done()
 			close(stopping)
 			<-release
-			recorded <- service.TestRecordSessionEntry(context.Background(), repo, repo.Project(), config.WorkstreamID(p.Scope.Workstream), "drained", fixturekit.DemoStart, "Turn stopped before closing the trace.")
+			recorded <- service.RecordSessionEntry(context.Background(), repo, repo.Project(), config.WorkstreamID(p.Scope.Workstream), "drained", fixturekit.DemoStart, "Turn stopped before closing the trace.")
 			return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "stopped"}, FinalResponse: "Stopped", Cancelled: true}, nil
 		})}, Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Turn)}, nil
@@ -413,7 +413,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 			var relays atomic.Int32
 			relay := func(ctx context.Context, r *trace.Repository) error {
 				relays.Add(1)
-				return service.TestRecordSessionEntry(ctx, r, cfg.Project.ID, fixturekit.Stream, "hook-effect", fixturekit.DemoStart, "Hook settled")
+				return service.RecordSessionEntry(ctx, r, cfg.Project.ID, fixturekit.Stream, "hook-effect", fixturekit.DemoStart, "Hook settled")
 			}
 			if completed {
 				fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, at))
@@ -438,7 +438,7 @@ func TestConversationPathRestartReconcilesCapturedReplyAndSettledHook(t *testing
 			if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Response.Result.FinalResponse != result.FinalResponse || len(th.Turns[0].Attempts) != 1 {
 				t.Fatalf("recovered turn: %+v", th)
 			}
-			entries, err := service.TestSessionEntriesSince(repo, fixturekit.Stream, time.Time{})
+			entries, err := service.SessionEntriesSince(repo, fixturekit.Stream, time.Time{})
 			fixturekit.Must(t, err)
 			expectedRelays := int32(1)
 			if completed {
@@ -465,10 +465,10 @@ func TestSessionRelayRetryPreservesLaterTurnState(t *testing.T) {
 	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-relay", "Session", fixturekit.DemoStart, intake.OwnerActor))
 	at := opts.Reconciliation.Now
 	first := trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Project: cfg.Project.ID, Workstream: session}, TurnID: "first"}}
-	fixturekit.Must(t, service.TestSetSessionState(ctx, repo, cfg.Project.ID, session, at(), "session-working-first", "session-turn-started", trace.SessionWorking))
-	fixturekit.Must(t, service.TestSessionRelay(ctx, repo, at, trace.Thread{}, first))
-	fixturekit.Must(t, service.TestSetSessionState(ctx, repo, cfg.Project.ID, session, at(), "session-working-next", "session-turn-started", trace.SessionWorking))
-	fixturekit.Must(t, service.TestSessionRelay(ctx, repo, at, trace.Thread{}, first))
+	fixturekit.Must(t, service.SetSessionState(ctx, repo, cfg.Project.ID, session, at(), "session-working-first", "session-turn-started", trace.SessionWorking))
+	fixturekit.Must(t, service.SessionRelay(ctx, repo, at, trace.Thread{}, first))
+	fixturekit.Must(t, service.SetSessionState(ctx, repo, cfg.Project.ID, session, at(), "session-working-next", "session-turn-started", trace.SessionWorking))
+	fixturekit.Must(t, service.SessionRelay(ctx, repo, at, trace.Thread{}, first))
 	state, err := repo.Workflow(session, trace.SessionSubject)
 	fixturekit.Must(t, err)
 	if state.Value != trace.SessionWorking {

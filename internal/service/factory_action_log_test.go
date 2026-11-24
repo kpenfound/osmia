@@ -76,8 +76,6 @@ type factoryLogRun struct {
 	root    string
 }
 
-// runFactoryLogScenario starts a service that logs as JSON, exercises the
-// factory and one queued turn, stops the service and returns what it logged.
 func runFactoryLogScenario(t *testing.T) factoryLogRun {
 	t.Helper()
 	ctx := context.Background()
@@ -250,9 +248,9 @@ func TestFactoryActionLogRecordsNotificationAttemptWithoutTheWebhookURL(t *testi
 	intakefixture.Soon(t, "the ledger enabled", func() bool { return readLedger(t, opts).Enabled })
 	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
 	hook.await(t, 1)
-	intakefixture.Soon(t, "the notification recorded as sent", func() bool {
-		rec := readLedger(t, opts).Notifications[notificationKey(fixturekit.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
-		return rec != nil && rec.State == notificationSent
+	intakefixture.Soon(t, "the Notification recorded as sent", func() bool {
+		rec := readLedger(t, opts).Notifications[NotificationKey(fixturekit.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
+		return rec != nil && rec.State == NotificationSent
 	})
 	fixturekit.Must(t, s.Close())
 
@@ -261,7 +259,7 @@ func TestFactoryActionLogRecordsNotificationAttemptWithoutTheWebhookURL(t *testi
 		t.Fatalf("log output carries the webhook URL: %s", text)
 	}
 	records := decodeFactoryLog(t, buf.String())
-	requireFactoryLog(t, records, "notification post attempt succeeded", map[string]any{"kind": InboxEscalation, "workstream": string(fixturekit.Stream)})
+	requireFactoryLog(t, records, "Notification post attempt succeeded", map[string]any{"kind": InboxEscalation, "workstream": string(fixturekit.Stream)})
 }
 
 type failingWriter struct{}

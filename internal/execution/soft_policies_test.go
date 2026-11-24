@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,7 +106,7 @@ func TestTheSendBackCountSetsTheDefaultOfAFailedCheckRun(t *testing.T) {
 			}
 			requireDeparture(t, repo, stream, TriggerChecksFailed, tc)
 			rec := routeRecord(t, repo, stream, TriggerChecksFailed)
-			if !contains(rec.Offered, UnitImplementing) || !contains(rec.Offered, UnitChecking) || !contains(rec.Offered, UnitContested) {
+			if !slices.Contains(rec.Offered, UnitImplementing) || !slices.Contains(rec.Offered, UnitChecking) || !slices.Contains(rec.Offered, UnitContested) {
 				t.Fatalf("the limit left only %v on offer", rec.Offered)
 			}
 			if tc.departed {
@@ -115,15 +116,6 @@ func TestTheSendBackCountSetsTheDefaultOfAFailedCheckRun(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestTheCleanTurnLimitSetsTheDefaultOfAnEndingWithoutAReport(t *testing.T) {
@@ -164,7 +156,7 @@ func TestTheCleanTurnLimitSetsTheDefaultOfAnEndingWithoutAReport(t *testing.T) {
 			}
 			requireDeparture(t, f.repository, stream, TriggerMasonEndedClean, tc)
 			rec := routeRecord(t, f.repository, stream, TriggerMasonEndedClean)
-			if !contains(rec.Offered, UnitContested) || !contains(rec.Offered, UnitImplementing) {
+			if !slices.Contains(rec.Offered, UnitContested) || !slices.Contains(rec.Offered, UnitImplementing) {
 				t.Fatalf("the limit left only %v on offer", rec.Offered)
 			}
 			if tc.departed {

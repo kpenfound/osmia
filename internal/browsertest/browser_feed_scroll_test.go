@@ -233,7 +233,7 @@ func TestBrowserSessionFeedScroll(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session", ResultText: strings.Repeat(scrollReply, 45)}, nil
 	}
-	opened, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	opened, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	id := opened.Session.Workstream
 	p := openFeedScrollPage(t, s, "", "")
@@ -296,7 +296,9 @@ func TestBrowserDesignFeedScroll(t *testing.T) {
 	id := opened.Design.Workstream
 	_, err = c.DesignMessage(ctx, id, "Seed design history")
 	must(t, err)
-	awaitDesignConversation(t, s, c, id, func(r ConversationResponse) bool { return len(r.Entries) == 2 && r.Entries[1].State == TurnDone })
+	awaitDesignConversation(t, s, c, id, func(r service.ConversationResponse) bool {
+		return len(r.Entries) == 2 && r.Entries[1].State == service.TurnDone
+	})
 	path := "/v1/design/" + string(id) + "/conversation"
 	p := openFeedScrollPage(t, s, "#workstream="+string(id), path)
 	p.Await("the design view opened before its conversation", `!document.querySelector('[data-view=design]').hidden`)

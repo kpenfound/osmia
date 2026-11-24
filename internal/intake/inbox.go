@@ -264,9 +264,6 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 		}
 		return err
 	}
-	if err := add(s.LegacyProjectsEntry(repository, w.Workstream)); err != nil {
-		return nil, err
-	}
 	if err := add(s.ratificationCard(repository, w.Workstream, w.State)); err != nil {
 		return nil, err
 	}

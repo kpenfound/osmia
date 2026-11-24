@@ -152,11 +152,11 @@ func TestChangePassReportsLiveTraceErrorsAndCancellation(t *testing.T) {
 	s.setSole(runtimeFor(repo))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.changePass(ctx, repo); err != context.Canceled {
+	if err := s.lifecycle().ChangePass(ctx, repo); err != context.Canceled {
 		t.Fatalf("pass lost cancellation: %v", err)
 	}
 	fixturekit.Must(t, repo.Close())
-	if err := s.changePass(context.Background(), repo); err == nil {
+	if err := s.lifecycle().ChangePass(context.Background(), repo); err == nil {
 		t.Fatal("pass suppressed a live trace error without an archive record")
 	}
 }
@@ -231,7 +231,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			f.awaitApproved(t)
 			repo, err := f.s.repository(survivorProject)
 			fixturekit.Must(t, err)
-			wt, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, survivor)
+			wt, host, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, repo, survivor)
 			fixturekit.Must(t, err)
 			approval, approvalDoc, found, err := trace.ReadGroupApproval(wt, host)
 			fixturekit.Must(t, err)
@@ -489,7 +489,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					t.Fatal("archive checkpoint not reached")
 				}
 				unblock()
-				lock := f.s.changeApplicationLock(group)
+				lock := f.s.lifecycle().ChangeApplicationLock(group)
 				if lock.TryLock() {
 					lock.Unlock()
 					t.Fatal("archive snapshot did not exclude change effects")
@@ -674,7 +674,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			}
 			repo, err = f.s.repository(survivorProject)
 			fixturekit.Must(t, err)
-			authority, _, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, survivor)
+			authority, _, _, closeAuthority, err := f.s.lifecycle().ChiefRepository(ctx, repo, survivor)
 			fixturekit.Must(t, err)
 			chief, err := authority.Thread(host, trace.ChiefOfStaff)
 			closeAuthority()
@@ -801,7 +801,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 		if _, found := trace.WorkgroupOf(groups, m); found {
 			t.Fatal("member retains a one-workstream group")
 		}
-		target, host, _, close, err := f.s.chiefRepository(ctx, repo, m)
+		target, host, _, close, err := f.s.lifecycle().ChiefRepository(ctx, repo, m)
 		fixturekit.Must(t, err)
 		chief, err := target.Thread(host, trace.ChiefOfStaff)
 		close()
@@ -852,7 +852,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 	if !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.before.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
-	chief, _, _, closeChief, err := f.s.chiefRepository(ctx, repo, f.stream1)
+	chief, _, _, closeChief, err := f.s.lifecycle().ChiefRepository(ctx, repo, f.stream1)
 	fixturekit.Must(t, err)
 	defer closeChief()
 	matching, err := readview.Consistent(func() (bool, error) {

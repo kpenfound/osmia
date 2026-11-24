@@ -43,7 +43,7 @@ func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 		return original(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
-	_, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	_, apiFault := f.s.lifecycle().DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
@@ -97,13 +97,13 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	ctx := context.Background()
 	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
 	fixturekit.Must(t, err)
-	change, apiFault := f.s.requestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
+	change, apiFault := f.s.lifecycle().RequestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	change.State = "drafting"
-	fixturekit.Must(t, f.s.saveChange(ctx, repo, &change))
-	tool := f.s.deltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
+	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, repo, &change))
+	tool := f.s.lifecycle().DeltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, field := range []string{"behavior", "contract"} {
 		for _, citation := range []string{"charter#999", "p_missing/charter#1"} {
 			after := change.Before
@@ -152,14 +152,14 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	f.awaitApproved(t)
 	writeCharter(t, f.c, f.project, "1. Keep changes small.\n\n2. A alone has this rule.\n")
 	writeCharter(t, f.c, f.project2, "1. Keep changes small.\n\n3. B alone has this rule.\n")
-	change, apiFault := f.s.requestChange(ctx, string(f.stream2), lifecycle.ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
+	change, apiFault := f.s.lifecycle().RequestChange(ctx, string(f.stream2), lifecycle.ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	wt, _, _, close, err := f.s.changeContext(ctx, string(f.stream2))
+	wt, _, _, close, err := f.s.lifecycle().ChangeContext(ctx, string(f.stream2))
 	fixturekit.Must(t, err)
 	defer close()
-	tool := f.s.deltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
+	tool := f.s.lifecycle().DeltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, citation := range []string{"charter#2", string(f.project) + "/charter#3", "p_missing/charter#1"} {
 		after := change.Before
 		after.Behavior = "Follow " + citation

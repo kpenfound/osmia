@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,7 +37,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		if !slices.Contains(streams, id) {
 			continue
 		}
-		gate := sessionLock(p.repository, id)
+		gate := SessionLock(p.repository, id)
 		lock := &gate.Mutex
 		if design {
 			lock = intake.DesignLock(p.repository, id)
@@ -104,7 +105,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 			}
 		}
 
-		err = p.repository.Serialize(func() error {
+		err = func() error {
 			if err := p.repository.BeginSessionDestroy(intent); err != nil {
 				return err
 			}
@@ -113,7 +114,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 				return err
 			}
 			return s.finishSessionDestroy(context.WithoutCancel(ctx), cfg, p.repository, s.store, intent)
-		})
+		}()
 		if err != nil {
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("session destroy is pending recovery: %v", err)}
 		}
@@ -141,7 +142,7 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 			return err
 		}
 	} else {
-		g := sessionGit(&local)
+		g := SessionGit(&local)
 		if wt, found, err := g.Workspace(ctx, string(stream)); err != nil {
 			return err
 		} else if found {
@@ -154,11 +155,11 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 		return err
 	}
 	if intent.Kind == trace.SessionKind {
-		if err := sessionGit(&local).DeleteLocalBranch(ctx, sessionBranch(stream)); err != nil {
+		if err := SessionGit(&local).DeleteLocalBranch(ctx, SessionBranch(stream)); err != nil {
 			return err
 		}
 	}
-	dirs := append(slices.Clone(turnDirectories), "design", sessionsDirectory)
+	dirs := append(slices.Clone(lifecycle.TurnDirectories), "design", SessionsDirectory)
 	for _, dir := range dirs {
 		if err := os.RemoveAll(filepath.Join(cfg.Root.String(), dir, string(project), string(stream))); err != nil {
 			return err
@@ -204,7 +205,7 @@ func forgetDestroyedSessionOpen(root config.Root, project config.ProjectID, stre
 	if err != nil {
 		return err
 	}
-	var pending pendingSession
+	var pending PendingSession
 	if err := json.Unmarshal(data, &pending); err != nil {
 		return err
 	}

@@ -132,7 +132,7 @@ func TestASatisfactoryVerdictApprovesThroughTheRouter(t *testing.T) {
 	state := workflowOf(t, repo, stream, "resume")
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
 	fixturekit.Must(t, err)
-	result := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
+	result := service.UnitReviewResult{Identity: identity, Turn: execution.ReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	recordVerdict(t, repo, stream, result)
 
 	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, result))
@@ -145,7 +145,7 @@ func TestASatisfactoryVerdictApprovesThroughTheRouter(t *testing.T) {
 		t.Fatalf("the move to approved %+v", moved)
 	}
 	rec := routeOf(t, repo, stream, "unit.review_approved")
-	if rec.Authority != router.AuthorityReviewer || !strings.HasPrefix(rec.AuthorityRef, service.TestReviewDocument("resume")+" revision ") || rec.State != router.StateCommitted {
+	if rec.Authority != router.AuthorityReviewer || !strings.HasPrefix(rec.AuthorityRef, execution.ReviewDocument("resume")+" revision ") || rec.State != router.StateCommitted {
 		t.Fatalf("the approval's authority is not the reviewer's verdict: %+v", rec)
 	}
 	if _, _, ok, err := (&foreman{masons: r.masons}).approval(stream, "resume", 0); err != nil || !ok {
@@ -162,10 +162,10 @@ func TestAVerdictForASupersededCandidateDoesNotApprove(t *testing.T) {
 	state := workflowOf(t, repo, stream, "resume")
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
 	fixturekit.Must(t, err)
-	old := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
+	old := service.UnitReviewResult{Identity: identity, Turn: execution.ReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	recordVerdict(t, repo, stream, old)
 
-	newer := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version) + "-recover-1", Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary,
+	newer := service.UnitReviewResult{Identity: identity, Turn: execution.ReviewTurnID("resume", state.Version) + "-recover-1", Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary,
 		Findings: []api.ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}}, Bounces: 1}
 	recordVerdict(t, repo, stream, newer)
 
@@ -197,7 +197,7 @@ func recordVerdict(t *testing.T, repo *trace.Repository, stream config.Workstrea
 	fixturekit.Must(t, err)
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == service.TestReviewDocument("resume") {
+		if d.ID == execution.ReviewDocument("resume") {
 			latest = d
 		}
 	}
@@ -223,7 +223,7 @@ func TestAScriptedDepartureSendsTheWorkBackToTheMasonInsteadOfContesting(t *test
 	fixturekit.Must(t, err)
 	reported := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
 	findings := []api.ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}
-	result := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
+	result := service.UnitReviewResult{Identity: identity, Turn: execution.ReviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
 
 	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, result))
 

@@ -26,7 +26,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	}
 	defer closeChief()
 	entries, err := readview.Consistent(func() ([]FeedEntry, error) {
-		out, err := feedEntries(repository, chief, stream)
+		out, err := FeedEntries(repository, chief, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -44,7 +44,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	return FeedResponse{Workstream: stream, Entries: entries}, nil
 }
 
-func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	group, err := paneWorkgroup(repository, stream)
 	if err != nil {
 		return nil, err
@@ -128,7 +128,7 @@ func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]F
 }
 
 func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
-	conversation, err := conversationEntries(chief, stream)
+	conversation, err := ConversationEntries(chief, stream)
 	if err != nil {
 		return nil, err
 	}

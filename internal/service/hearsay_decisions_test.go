@@ -311,9 +311,6 @@ type scopePublication struct {
 	posts  []hooksPost
 }
 
-// publishScopeCalls records discoveries the chief of staff declined and
-// deferred, a blocking finding the owner accepted and follow-ups of a final
-// review and of an amendment, and runs one publishing pass.
 func publishScopeCalls(t *testing.T) *scopePublication {
 	t.Helper()
 	f := newPublisherFixture(t)

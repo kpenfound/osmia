@@ -15,10 +15,12 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
+const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
+
 func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
 	t.Helper()
 	st, _ := s.store.Effective()
-	return fixturekit.PauseOf(api.RuntimeResponse{Effective: st}, factoryTarget)
+	return fixturekit.PauseOf(api.RuntimeResponse{Effective: st}, runtime.Target{Scope: "factory"})
 }
 
 func documentRevisions(t *testing.T, s *Service, id string) []trace.Document {
@@ -49,7 +51,7 @@ func (s *Service) capacityStatus(list []api.WorkstreamStatus) *api.CapacityStatu
 
 func budgetStatus(t *testing.T, s *Service) api.DailyBudgetStatus {
 	t.Helper()
-	got := s.dailyBudgetStatus()
+	got := service.InspectForTest(s.core()).DailyBudget()
 	if got == nil {
 		t.Fatal("no daily budget status")
 	}

@@ -38,7 +38,7 @@ func (r refusingLanding) Apply(ctx context.Context, op coreadapter.Operation) (c
 func settleLandings(t *testing.T, f *shedFixture, repo *trace.Repository, adapter coreadapter.Reconciler) {
 	t.Helper()
 	controller, err := reconcile.New(repo, reconcile.Options{Worker: "landing-refused-fixture",
-		Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
+		Concurrent: service.ConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(f.s).GitOperationLimit(repo, nil),
 		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: adapter}})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, controller.Pass(context.Background()))

@@ -302,7 +302,8 @@ func TestResultRecordingBypassesScheduleAndOtherWorkstream(t *testing.T) {
 	relocked := make(chan struct{})
 	a.beforeApply = func(ctx context.Context, op coreadapter.Operation) error {
 		if op.Action == "record" {
-			return trace.Relock(ctx, func() error { close(relocked); return nil })
+			close(relocked)
+			return nil
 		}
 		return nil
 	}

@@ -150,12 +150,12 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		switch {
 		case q.Response != nil:
 			cleanup := context.WithoutCancel(ctx)
-			err := trace.Relock(cleanup, func() error {
+			err := func() error {
 				if err := r.costs(cleanup, t.Identity.Role, q); err != nil {
 					return err
 				}
 				return r.Store.CompleteTurn(cleanup, in.Workstream, in.Agent, in.Turn, q.Claim.Token, r.Now())
-			})
+			}()
 			if err != nil {
 				return coreadapter.OperationResult{}, err
 			}

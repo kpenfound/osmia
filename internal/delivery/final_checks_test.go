@@ -790,17 +790,17 @@ func TestFinalChecksNeverRerunWhenTheRerunRecordExistsWithoutItsResult(t *testin
 	}
 }
 
-func TestAnExistingLocalRecordOfTheReviewedCommitCompletesTheWatchWithoutAStatusRead(t *testing.T) {
+func TestAnExistingRecordOfTheReviewedCommitAndPushCompletesTheWatchWithoutAStatusRead(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
-	local := `{"review":1,"attempt":2,"operation":"review","commit":"` + reviewedCommit + `","status":"passed","command":["dagger","check"],"exit_code":0,"output":"ok","failed":["dag://?check=x"],"flaky":["dag://?check=y"],"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
-	content := []byte(local + "\n")
+	recorded := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"passed","exit_code":0,"failed":["dag://?check=x"],"flaky":["dag://?check=y"],"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
+	content := []byte(recorded + "\n")
 	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: FinalChecksDocument(1), Revision: 1, Project: f.repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: checksActor, Cause: "review"}, Path: FinalChecksPath(1), Content: string(content)}}))
 	run := f.mustComplete()
-	if run.Source != "" || run.Status != "passed" || run.Attempt != 2 || f.api.readCount() != 0 {
+	if run.Source != api.CheckSourcePullRequest || run.Status != "passed" || f.api.readCount() != 0 {
 		t.Fatalf("run %+v", run)
 	}
-	if evidence := FinalCheckEvidence(run); !strings.Contains(evidence, "The run passed") || !strings.Contains(evidence, "dag://?check=y") {
+	if evidence := FinalCheckEvidence(run); !strings.Contains(evidence, "The result is passed") {
 		t.Fatalf("evidence:\n%s", evidence)
 	}
 }
