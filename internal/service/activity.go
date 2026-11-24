@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/activity"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/reconcile"
 	"github.com/kpenfound/osmia/internal/thread"
 )
@@ -20,33 +22,20 @@ import (
 // finished or not. kind and phase are free text naming the operation and its
 // current step; project and stream name the trace and workstream it
 // concerns, when known.
-func (s *Service) StartActivity(key string, kind ActivityKind, project config.ProjectID, stream config.WorkstreamID, phase string) *ActivityHandle {
+func (s *Service) StartActivity(key string, kind ActivityKind, project config.ProjectID, stream config.WorkstreamID, phase string) *activity.Handle {
 	return s.activity.Start(key, kind, project, stream, phase)
 }
 
-// activityView answers GET /v1/activity: a snapshot of the activity record,
-// read without touching the trace mutex or operationMu.
 func (s *Service) activityView() ActivityResponse {
 	return ActivityResponse{Activity: s.activity.View()}
 }
 
-// healthView answers GET /v1/health: the API is available whenever this
-// response is built at all, since it touches neither the trace nor
-// anything that waits on it; Backend and Cause come from the activity
-// record alone.
 func (s *Service) healthView(ctx context.Context) HealthResponse {
 	backend, cause := s.backendStatus()
-	return HealthResponse{Ready: backend == BackendReady, API: true, Backend: backend, Cause: cause,
+	return HealthResponse{Ready: backend == api.BackendReady, API: true, Backend: backend, Cause: cause,
 		Service: "osmia", APIVersion: 1, Build: s.options.Build, Tailnet: s.tailnetStatus(ctx)}
 }
 
-// activityReconciler reports every call to Apply as one backend operation in
-// the activity record, keyed by the operation's own stable ID so a retried
-// attempt supersedes what an earlier one reported: started before the
-// wrapped reconciler runs, named after the operation's action and, for a
-// queued thread turn or a unit's checks, its workstream, and finished,
-// successfully or not, once Apply returns. project is the one trace this
-// adapter reconciles.
 type activityReconciler struct {
 	coreadapter.Reconciler
 	activity *activity.Registry
@@ -63,8 +52,6 @@ func (a activityReconciler) Apply(ctx context.Context, op coreadapter.Operation)
 
 var _ reconcile.Bounded = activityReconciler{}
 
-// Bound, Failing and GiveUp pass the operation's bounds on from the wrapped
-// reconciler when it has them.
 func (a activityReconciler) Bound(op coreadapter.Operation) bool {
 	b, ok := a.Reconciler.(reconcile.Bounded)
 	return ok && b.Bound(op)
@@ -84,9 +71,6 @@ func (a activityReconciler) GiveUp(ctx context.Context, op coreadapter.Operation
 	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }
 
-// activityOf classifies a reconciled operation for the activity record: its
-// kind, the workstream it names when the operation's input carries one, and
-// a phase describing it.
 func activityOf(op coreadapter.Operation) (ActivityKind, config.WorkstreamID, string) {
 	switch op.Action {
 	case thread.TurnAction:
@@ -96,7 +80,7 @@ func activityOf(op coreadapter.Operation) (ActivityKind, config.WorkstreamID, st
 		}
 		return ActivityAgentTurn, "", "agent turn"
 	case CheckAction:
-		var in checkInput
+		var in execution.CheckInput
 		if json.Unmarshal(op.Input, &in) == nil {
 			return ActivityCheck, in.Workstream, fmt.Sprintf("checking unit %s (run %d)", in.Unit, in.Run)
 		}
@@ -105,13 +89,7 @@ func activityOf(op coreadapter.Operation) (ActivityKind, config.WorkstreamID, st
 	if op.Boundary == coreadapter.RunnerBoundary {
 		return ActivityAgentTurn, "", op.Action
 	}
-	return ActivityGit, "", op.Action
+	return api.ActivityGit, "", op.Action
 }
 
-// backendStatus reports health from the activity registry alone.
 func (s *Service) backendStatus() (string, string) { return s.activity.Status() }
-
-type ActivityHandle = activity.Handle
-
-const ActivityStallThreshold = activity.ActivityStallThreshold
-const ActivityFailureExpiry = activity.ActivityFailureExpiry

@@ -8,11 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -77,7 +76,7 @@ func TestLoopGuardPausesAWorkstreamWithoutProgress(t *testing.T) {
 	intakefixture.Must(t, err)
 	recordSessions(t, f, repository, stream, 1)
 	r := &reviewers{masons: newMasonController(f.s, repository)}
-	intakefixture.Must(t, r.refreshReview(ctx, stream, "resume", state, "stale base revision; review the current candidate again"))
+	intakefixture.Must(t, r.driver().RefreshReview(ctx, stream, "resume", state, "stale base revision; review the current candidate again"))
 	recordSessions(t, f, repository, stream, 2)
 	intakefixture.Must(t, g.Pass(ctx))
 	pause, paused := loopPause(f, stream)

@@ -3,9 +3,6 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
@@ -16,6 +13,7 @@ import (
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )

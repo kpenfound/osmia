@@ -3,8 +3,6 @@ package intakejourney
 import (
 	"context"
 	"fmt"
-	agent "github.com/kpenfound/agentcore/agent"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -13,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	agent "github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -22,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func awaitNumberedAmendment(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id, want string) {

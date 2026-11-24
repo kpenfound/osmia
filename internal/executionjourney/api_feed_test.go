@@ -3,14 +3,15 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
-	checkrun "github.com/kpenfound/osmia/internal/checks"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	filepath "path/filepath"
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	checkrun "github.com/kpenfound/osmia/internal/checks"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // The feed merges conversation, statuses, every claimed turn and every

@@ -5,14 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/ghlog"
-	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/jev/jevfixture"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	"github.com/kpenfound/osmia/internal/trace"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,6 +12,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
@@ -32,7 +34,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)
 			defer f.stop(t)
 			requester := presentAmendment(t, f, stream, masonRole, tc.spec, amendedPlan)
-			out, api := f.s.recordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, chiefActor, "engineering-decision")
+			out, api := f.s.intake().RecordAmendmentDecision(context.Background(), f.project, stream, f.repository(), "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: 1, Note: "The revised verification preserves the approved upload outcome."}, chiefActor, "engineering-decision")
 			if tc.allowed {
 				if api != nil {
 					t.Fatal(api.Message)
@@ -111,7 +113,7 @@ func TestDiscoveryBlocksCompletionUntilAssignedWorkLands(t *testing.T) {
 	}
 	_, current, err := c.r.candidateEvidence(context.Background(), c.stream, "resume")
 	intakefixture.Must(t, err)
-	if why := staleReview(previous, current); !strings.Contains(why, "discovered work") {
+	if why := execution.StaleReview(previous, current); !strings.Contains(why, "discovered work") {
 		t.Fatalf("new work did not invalidate old review: %q", why)
 	}
 	assignment, err := assignmentContext(c.repo, coreadapter.Scope{Workstream: string(c.stream), Unit: "resume", Role: reviewerRole})
@@ -338,7 +340,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	c := newContestFixture(t, "check-output")
 	captured := "failure at start\n" + strings.Repeat("é", 70000) + "\nfailure at end\n"
 	path := "units/resume/checks-99-output.txt"
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: checksActor, Cause: "fixture"}, Path: path, Content: captured}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: execution.ChecksActor, Cause: "fixture"}, Path: path, Content: captured}
 	intakefixture.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)

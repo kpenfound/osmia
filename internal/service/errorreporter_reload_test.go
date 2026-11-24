@@ -1,13 +1,13 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/errorreport"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const (

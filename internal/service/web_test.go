@@ -5,10 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-
-	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"net"
 	"net/http"
 	"os"
@@ -17,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func withWeb(t *testing.T, opts Options, addr string) {

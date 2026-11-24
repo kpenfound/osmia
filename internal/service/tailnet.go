@@ -14,14 +14,9 @@ import (
 	"github.com/kpenfound/osmia/internal/tailnet"
 )
 
-// tailnetStatus is the state of the tailnet listener, or nil when
-// listen.tailnet is not configured.
 func (s *Service) tailnetStatus(ctx context.Context) *TailnetStatus { return s.tailnet.Status(ctx) }
 func (s *Service) tailnetNames(ctx context.Context) []string        { return s.tailnet.Names(ctx) }
 
-// superviseTailnet serves the tailnet listener until the service stops. When
-// the node cannot join or its listener fails, the service keeps running
-// without it and joins again after Options.TailnetRetry.
 func (s *Service) superviseTailnet(root config.Root, hostname string) {
 	defer close(s.tailnetDone)
 	for {
@@ -49,7 +44,6 @@ func (s *Service) superviseTailnet(root config.Root, hostname string) {
 			}
 			cancel()
 			<-httpsDone
-			// cleanupSocket leaves the node after HTTP requests have drained.
 			return
 		}
 		s.tailnet.Set(nil, fmt.Sprintf("the tailnet listener stopped: %v", err))
@@ -64,8 +58,6 @@ func (s *Service) superviseTailnet(root config.Root, hostname string) {
 	}
 }
 
-// tailnetWait waits out the retry delay and reports whether the service is
-// still running.
 func (s *Service) tailnetWait() bool {
 	timer := time.NewTimer(s.options.TailnetRetry)
 	defer timer.Stop()
@@ -78,18 +70,10 @@ func (s *Service) tailnetWait() bool {
 }
 
 const (
-	// tailnetHTTPSAttempt bounds one certificate request. A first issuance
-	// can take minutes while the certificate authority validates the node's
-	// name; the bound only recovers from a request that never returns.
-	tailnetHTTPSAttempt = 10 * time.Minute
-	// tailnetHTTPSMaxRetry caps the wait between certificate requests.
+	tailnetHTTPSAttempt  = 10 * time.Minute
 	tailnetHTTPSMaxRetry = 15 * time.Minute
 )
 
-// requestTailnetHTTPS requests the node's certificate and opens its TLS
-// listener, retrying after Options.TailnetHTTPSRetry, doubled after each
-// further failure, until it succeeds or ctx ends. The result is false only
-// when ctx ended first.
 func (s *Service) requestTailnetHTTPS(ctx context.Context, node tailnet.Listener) (net.Listener, string, bool) {
 	retry := s.options.TailnetHTTPSRetry
 	for {
@@ -117,14 +101,10 @@ func (s *Service) requestTailnetHTTPS(ctx context.Context, node tailnet.Listener
 	}
 }
 
-// serveTailnetHTTPS owns one node's TLS listener and its serving goroutine.
-// An HTTPS failure never replaces the node or interrupts its HTTP listener.
 func (s *Service) serveTailnetHTTPS(ctx context.Context, node tailnet.Listener) {
 	if !s.tailnet.HTTPSEnabled {
 		return
 	}
-	// A newly joined node can still be waiting for login. Wait for it without
-	// delaying HTTP, and stop waiting when this node is replaced.
 	for {
 		query, cancel := context.WithTimeout(ctx, time.Second)
 		state := node.State(query)
@@ -154,8 +134,6 @@ func (s *Service) serveTailnetHTTPS(ctx context.Context, node tailnet.Listener) 
 	if ctx.Err() != nil {
 		return
 	}
-	// Keep the TLS connection concrete so net/http performs its handshake and
-	// fills Request.TLS. The context carries the same tag as tailnet HTTP.
 	server := &http.Server{
 		Handler:           s.server.Handler,
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,

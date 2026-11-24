@@ -2,10 +2,11 @@ package service
 
 import (
 	"bytes"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 // imageWorktree is a worktree holding image.png, and the PNG bytes it holds.

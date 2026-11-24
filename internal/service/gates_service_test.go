@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -558,7 +559,7 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 			if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Actor: jev.") || !strings.Contains(turns[0].Request.Prompt, "jev_response") {
 				t.Fatalf("the requester's ruling: %+v", turns)
 			}
-			if entries := f.scenario().InboxEntries(t, stream, InboxAmendment); len(entries) != 0 {
+			if entries := f.scenario().InboxEntries(t, stream, api.InboxAmendment); len(entries) != 0 {
 				t.Fatalf("an amendment card remains: %+v", entries)
 			}
 		})

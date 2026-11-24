@@ -2,15 +2,13 @@ package service
 
 import (
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/trace"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {

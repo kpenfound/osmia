@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -110,7 +111,7 @@ func TestADeliveryPickBelowTheOwnerThresholdLeavesTheCardToTheOwner(t *testing.T
 	intakefixture.Must(t, err)
 	var found *InboxEntry
 	for i := range card {
-		if card[i].Kind == InboxDelivery {
+		if card[i].Kind == api.InboxDelivery {
 			found = &card[i]
 		}
 	}

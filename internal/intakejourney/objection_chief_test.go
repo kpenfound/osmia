@@ -2,9 +2,6 @@ package intakejourney
 
 import (
 	context "context"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	fmt "fmt"
 	slices "slices"
 	strings "strings"
@@ -19,6 +16,7 @@ import (
 	jev "github.com/kpenfound/osmia/internal/jev"
 	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
 	service "github.com/kpenfound/osmia/internal/service"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )

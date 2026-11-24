@@ -1,23 +1,16 @@
 package executionjourney
 
 import (
+	"context"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/execution"
-
-	"context"
-
-	"github.com/kpenfound/osmia/internal/intake"
-
-	"github.com/kpenfound/osmia/internal/workspace"
-
-	"github.com/kpenfound/osmia/internal/coreadapter"
-
 	"github.com/kpenfound/osmia/internal/config"
-
-	"github.com/kpenfound/osmia/internal/trace"
-
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 var masonTransitionID = execution.MasonTransitionID

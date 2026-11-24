@@ -10,19 +10,17 @@ import (
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
-
 	plan "github.com/kpenfound/osmia/internal/plan"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
 )
 
 const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"

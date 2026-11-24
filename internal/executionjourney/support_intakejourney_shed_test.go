@@ -1,9 +1,10 @@
 package executionjourney
 
 import (
+	testing "testing"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	testing "testing"
 )
 
 func newDebateFixtureWith(t *testing.T, members, rounds int, extra string, prepare func(*Options)) *shedFixture {

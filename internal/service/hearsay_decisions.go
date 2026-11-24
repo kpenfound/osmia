@@ -19,52 +19,37 @@ import (
 )
 
 const (
-	// decisionLimit bounds each prose field of a decision record.
 	decisionLimit = 16 << 10
-	// rejectedLimit bounds one rejected option, and maxRejected the count
-	// Hearsay accepts.
 	rejectedLimit = 1 << 10
 	maxRejected   = 32
 )
 
-// The deciders of Hearsay's decision record.
 const (
 	deciderOwner = "owner"
 	deciderChief = "chief_of_staff"
 )
 
-// decider is who made a decision Hearsay is told about.
 type decider int
 
 const (
-	// byChief is the zero value: the chief of staff's own decision.
 	byChief decider = iota
 	byOwner
 	byJev
 )
 
-// publishedDecision is one Hearsay decision before it is routed to a source. An owner
-// decision goes to the owner source with the owner as author. The chief of
-// staff's and Jev's go to the work source and name no author, and Jev's names
-// Jev and its judgment in its text. workstream is empty for a decision about
-// the project as a whole.
 type publishedDecision struct {
 	id         string
 	by         decider
 	judgment   string
 	workstream config.WorkstreamID
 
-	context, outcome, rationale string
-	rejected                    []string
-	// supersedes is the id of the earlier decision this one revisits.
+	context, outcome, rationale         string
+	rejected                            []string
 	supersedes                          string
 	specDocument, pullRequest, question string
 	created, updated                    time.Time
 }
 
-// decider is the value of the record's decider field. Hearsay accepts only
-// owner, chief_of_staff and committee and takes authority from the source, so a
-// decision Jev made is posted as the chief of staff's and names Jev in its text.
 func (d publishedDecision) decider() string {
 	if d.by == byOwner {
 		return deciderOwner
@@ -72,8 +57,6 @@ func (d publishedDecision) decider() string {
 	return deciderChief
 }
 
-// source is the Hearsay source that holds the decision: the owner source for
-// the owner's decisions and the work source for every other.
 func (d publishedDecision) source(in *publishInputs) string {
 	if d.by == byOwner {
 		return in.ownerSource
@@ -81,15 +64,10 @@ func (d publishedDecision) source(in *publishInputs) string {
 	return in.workSource
 }
 
-// jevDecider returns who decided a record that names its decider and the Jev
-// judgment it comes from. A record that names Jev without a judgment is not
-// one Jev made.
 func jevDecider(by, judgment string) bool {
 	return by == trace.DecidedByJev && trace.ValidDecider(by, judgment)
 }
 
-// jevNote opens a rationale with the statement that Jev decided and the
-// judgment it came from, so the decision is never read as the owner's.
 func jevNote(judgment, rest string) string {
 	note := fmt.Sprintf("Decided by Jev, the decision maker for the owner, with judgment %s; the owner did not decide it.", judgment)
 	if rest = strings.TrimSpace(rest); rest != "" {
@@ -98,16 +76,10 @@ func jevNote(judgment, rest string) string {
 	return note
 }
 
-// jevID is the id of a decision Jev made: the workstream, "jev", the kind and
-// the subject, so no owner or chief decision about the same subject can hold
-// it on another source.
 func jevID(workstream config.WorkstreamID, kind string, parts ...string) string {
 	return decisionID(append([]string{string(workstream), "jev", kind}, parts...)...)
 }
 
-// decisionID derives a decision's id from the Osmia ids it is about. The ids
-// are joined when they fit Hearsay's id grammar, and otherwise hashed, so the
-// same inputs always give the same id.
 func decisionID(parts ...string) string {
 	id := strings.Join(parts, "-")
 	if hearsay.ValidID(id) {
@@ -122,12 +94,6 @@ func shortHash(parts ...string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// decisionRecords posts the decisions made about the project: those of each
-// eligible workstream, the charter proposals the owner decided, and the
-// workgroup's amendments to its project spec. Owner decisions go to the owner
-// source; the chief of staff's go to the work source and stay inferred. A
-// decision that revisits an earlier one names it in supersedes, and is posted
-// after it.
 func decisionRecords(in *publishInputs) []hearsay.Record {
 	var all []publishedDecision
 	for _, st := range in.streams {
@@ -157,8 +123,6 @@ func decisionRecords(in *publishInputs) []hearsay.Record {
 	return out
 }
 
-// decisionRecord is the record of one decision. byID resolves the decision it
-// supersedes to the source that holds it.
 func (in *publishInputs) decisionRecord(d publishedDecision, byID map[string]publishedDecision) hearsay.Record {
 	source := d.source(in)
 	parent := in.projectRef()
@@ -193,9 +157,6 @@ func (in *publishInputs) decisionRecord(d publishedDecision, byID map[string]pub
 	return hearsay.Record{Source: source, Key: "decision/" + d.id, Tier: hearsay.TierRecord, After: after, Versions: []hearsay.Wire{w}}
 }
 
-// readDecisions reads the trace records a workstream's decisions are built
-// from. A workstream whose records cannot be read this pass posts no decision
-// in it, and its decisions are left for a later one.
 func (st *publishStream) readDecisions(repo *trace.Repository) error {
 	id := st.id()
 	var err error
@@ -218,8 +179,6 @@ func (st *publishStream) readDecisions(repo *trace.Repository) error {
 	return nil
 }
 
-// links are the document and pull request every decision of the workstream
-// links to, where they exist.
 func (st *publishStream) links(in *publishInputs) (spec, pullRequest string) {
 	if documents := st.sealedSpecs(in); len(documents) > 0 {
 		spec = documents[len(documents)-1].document
@@ -230,8 +189,6 @@ func (st *publishStream) links(in *publishInputs) (spec, pullRequest string) {
 	return spec, pullRequest
 }
 
-// decisions are the decisions made in one workstream, a chain of revisited
-// decisions in the order they were made.
 func (st *publishStream) decisions(in *publishInputs) []publishedDecision {
 	spec, pr := st.links(in)
 	var out []publishedDecision
@@ -252,19 +209,12 @@ func (st *publishStream) decisions(in *publishInputs) []publishedDecision {
 	return out
 }
 
-// departureDecisions are the departures Jev made from a default: a transition
-// Jev entered instead of the state the default would have entered. A default
-// that was followed, one committed when Jev could not answer, a move an owner
-// or a gate decision pinned, and a held exit are not decisions and are not
-// posted. The decision names the state the subject left, the one it entered and
-// the default, and Jev's judgment.
 func (st *publishStream) departureDecisions() []publishedDecision {
 	var out []publishedDecision
 	for _, t := range st.transitions {
 		if !t.Departed() || !jevDecider(t.DecidedBy, t.Judgment) {
 			continue
 		}
-		// A dropped dependency is posted as the waiver it recorded.
 		if t.To == lifecycle.DependencyWaived && strings.HasPrefix(t.Subject, "dependency-") {
 			continue
 		}
@@ -286,11 +236,6 @@ func (st *publishStream) departureDecisions() []publishedDecision {
 	return out
 }
 
-// waiverDecisions are the dependencies the workstream dropped: one decision
-// for each waiver in its own trace. A drop Jev decided is Jev's, with its
-// judgment; one the owner decided is the owner's. Neither says the upstream
-// merged: a waiver is no merge, and the decision says the dependent goes on
-// without the dependency.
 func (st *publishStream) waiverDecisions() []publishedDecision {
 	var waivers lifecycle.EdgeWaivers
 	for i := len(st.documents) - 1; i >= 0; i-- {
@@ -329,15 +274,8 @@ func (st *publishStream) waiverDecisions() []publishedDecision {
 	return out
 }
 
-// questionRef names a question across workstreams.
 func (st *publishStream) questionRef(id string) string { return string(st.id()) + ":" + id }
 
-// questionDecisions are the rulings on escalated questions and the chief of
-// staff's answers about intent or scope. The owner's ruling is the first
-// revision of the question's ruling, and a ruling Jev made is the first revision
-// too, written by Jev with its judgment. The chief's relay of either, a later
-// revision, is never posted as a ruling. An answer that cites a code inspection
-// is engineering and is not posted; one Jev bound is posted as Jev's.
 func (st *publishStream) questionDecisions() []publishedDecision {
 	var out []publishedDecision
 	for _, q := range st.questions {
@@ -374,14 +312,10 @@ func (st *publishStream) questionDecisions() []publishedDecision {
 	return out
 }
 
-// jevRuling reports whether Jev made the decision a ruling records. The trace
-// guarantees that Jev's ruling is written by the Jev actor and that the Jev
-// actor writes no other ruling, apart from the chief of staff's relay of it.
 func jevRuling(r trace.Ruling) bool {
 	return jevDecider(r.DecidedBy, r.Judgment) && r.Actor == trace.JevActor
 }
 
-// citesCode reports whether an answer rests on a recorded code inspection.
 func citesCode(r trace.Ruling) bool {
 	return slices.ContainsFunc(r.Citations, func(c string) bool { return strings.HasPrefix(c, "inspection#") })
 }
@@ -393,9 +327,6 @@ func citedFrom(citations []string) string {
 	return ", citing " + strings.Join(citations, ", ")
 }
 
-// ownerRuling is the decision the owner, or Jev for the owner, made on an
-// escalated question, with the question as the owner read it and the
-// escalation: the passage in tension, the conflict and the options.
 func (st *publishStream) ownerRuling(q trace.QuestionState, ruling trace.Ruling) publishedDecision {
 	jev := jevRuling(ruling)
 	question := strings.TrimSpace(q.Latest.SentToOwner)
@@ -435,9 +366,6 @@ func (st *publishStream) ownerRuling(q trace.QuestionState, ruling trace.Ruling)
 	return d
 }
 
-// assumptionDecisions are the judgment calls the chief of staff logged
-// instead of asking. One that affects several members of a workgroup is about
-// the project as a whole, and each member project posts it once.
 func (st *publishStream) assumptionDecisions() []publishedDecision {
 	var out []publishedDecision
 	for _, a := range st.assumptions {
@@ -457,18 +385,12 @@ func (st *publishStream) assumptionDecisions() []publishedDecision {
 	return out
 }
 
-// subject identifies what an amendment is about: the criteria it cites.
 func subject(citations []string) string {
 	c := slices.Clone(citations)
 	slices.Sort(c)
 	return strings.Join(slices.Compact(c), "\x00")
 }
 
-// amendmentDecisions are the final decisions on the workstream's amendments:
-// the owner's, Jev's, and the chief of staff's on plan-only revisions. A request
-// that is not yet decided, a debate round and a service retirement are not
-// decisions and are not posted. A later approved amendment about the same
-// criteria revisits the earlier decision.
 func (st *publishStream) amendmentDecisions() []publishedDecision {
 	requests := map[string]trace.Amendment{}
 	var order []string
@@ -551,11 +473,6 @@ func (st *publishStream) amendmentDecisions() []publishedDecision {
 	return out
 }
 
-// amendmentDecider is who made a final amendment decision, and whether it is
-// one the publisher posts: the owner's, Jev's or the chief of staff's. A
-// decision Jev made is written by the Jev actor and names Jev as its actor and
-// its judgment; a record whose header and content disagree, or that names Jev
-// without a judgment, is nobody's and is not posted.
 func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (decider, bool) {
 	if !trace.ValidDecisionActor(doc) {
 		return 0, false
@@ -571,16 +488,11 @@ func amendmentDecider(doc trace.Document, verdict intake.AmendmentDecision) (dec
 	return 0, false
 }
 
-// discovery is one revision of a discovered piece of work, as the chief of
-// staff or an agent recorded it.
 type discovery struct {
 	doc  trace.Document
 	work workDiscovery
 }
 
-// discoveryDecisions are the chief of staff's scope calls on discovered work:
-// declined, or kept as an optional suggestion rather than required work. A
-// discovery the chief of staff later assigns or reopens revisits that call.
 func (st *publishStream) discoveryDecisions() []publishedDecision {
 	byID := map[string][]discovery{}
 	var order []string
@@ -637,8 +549,6 @@ func (st *publishStream) discoveryDecisions() []publishedDecision {
 	return out
 }
 
-// acceptedFindings are the final-review findings the owner accepted as they
-// are by approving delivery, instead of having them fixed.
 func (st *publishStream) acceptedFindings() []publishedDecision {
 	type key struct {
 		review  int
@@ -691,9 +601,6 @@ func (st *publishStream) acceptedFindings() []publishedDecision {
 	return out
 }
 
-// followupDecisions are the chief of staff's scope calls on final-review
-// findings: the gap is repaired by a follow-up unit after the work it
-// concerns merged, rather than by reopening that work.
 func (st *publishStream) followupDecisions() []publishedDecision {
 	var out []publishedDecision
 	for _, u := range st.followups {
@@ -711,8 +618,6 @@ func (st *publishStream) followupDecisions() []publishedDecision {
 	return out
 }
 
-// followupAt is when the follow-up was recorded: the first revision of the
-// workstream's follow-up record that holds it.
 func (st *publishStream) followupAt(u followup.Unit) time.Time {
 	var at time.Time
 	for _, d := range st.documents {
@@ -733,9 +638,6 @@ func (st *publishStream) followupAt(u followup.Unit) time.Time {
 	return at
 }
 
-// charterDecisions are the charter proposals the owner decided: the rule the
-// chief of staff drew from the owner's ruling, whether the owner ratified or
-// declined it, and the owner's note. They are about the project's charter.
 func (st *publishStream) charterDecisions() []publishedDecision {
 	decided, err := trace.CharterDecisions(st.documents)
 	if err != nil {
@@ -785,9 +687,6 @@ func (st *publishStream) charterDecisions() []publishedDecision {
 	return out
 }
 
-// workgroupDecisions are the owner's rulings on amendments to a workgroup's
-// project spec. Every member project posts them once on its own project, under
-// the same ids.
 func (in *publishInputs) workgroupDecisions() []publishedDecision {
 	var out []publishedDecision
 	seen := map[config.WorkgroupID]bool{}

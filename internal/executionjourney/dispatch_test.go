@@ -3,18 +3,16 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	slices "slices"
 	testing "testing"
 	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	plan "github.com/kpenfound/osmia/internal/plan"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func (f *shedFixture) deferred(t *testing.T, stream config.WorkstreamID, unit string, d UnitDispatch) UnitStatus {

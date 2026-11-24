@@ -2,13 +2,14 @@ package executionjourney
 
 import (
 	context "context"
-	"github.com/kpenfound/osmia/internal/projectstore"
-	"github.com/kpenfound/osmia/internal/service"
 	http "net/http"
 	httptest "net/http/httptest"
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/service"
 )
 
 func traceService(t *testing.T, f *walkFixture) *Service {

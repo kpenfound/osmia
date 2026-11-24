@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"net"
 	"net/http"
 	"reflect"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const httpsNodeName = "osmia-1.tail0.ts.net"

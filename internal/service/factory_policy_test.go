@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,8 +9,10 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -87,7 +88,7 @@ func TestFactoryPolicyAdoptsInflightWorkOnceAcrossRestart(t *testing.T) {
 	freshEvents, err := repo.Outbox(fresh)
 	intakefixture.Must(t, err)
 	for _, e := range freshEvents {
-		if e.TransitionID == factoryPolicySubject+"-"+factoryPolicyVersion {
+		if e.TransitionID == factoryPolicySubject+"-"+intake.FactoryPolicyVersion {
 			t.Fatal("new workstream received an adoption notice")
 		}
 	}

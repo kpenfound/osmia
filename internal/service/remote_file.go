@@ -31,7 +31,6 @@ type remoteFile struct {
 	Content    string `json:"content"`
 }
 
-// githubFile retrieves text at a resolved commit without exposing host credentials to a role.
 func githubFile(ctx context.Context, client *http.Client, token string, f remoteFile) (remoteFile, error) {
 	u, err := url.Parse(f.Repository)
 	if err != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -56,7 +55,6 @@ func githubFile(ctx context.Context, client *http.Client, token string, f remote
 			if token != "" {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
-			// Redirects must never forward a credential to a different endpoint.
 			copyClient := *client
 			copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 			res, err := copyClient.Do(req)

@@ -28,7 +28,6 @@ func (s *Service) gitWorkgroupJoining(repository *trace.Repository, stream confi
 	return err != nil, err
 }
 
-// gitOperation identifies the workflow effects sharing repository capacity.
 func gitOperation(op coreadapter.Operation) bool {
 	if op.Boundary != coreadapter.RepositoryBoundary {
 		return false
@@ -50,8 +49,6 @@ func (s *Service) GiveUpLimit() reconcile.GiveUpLimit {
 	return reconcile.NewGiveUpLimit(s.giveUpWindow())
 }
 
-// giveUpWindow is the window of the give-up limit: the one a test's options set
-// explicitly, else the loaded configuration's.
 func (s *Service) giveUpWindow() time.Duration {
 	if w := s.options.Reconciliation.GiveUpWindow; w > 0 {
 		return w
@@ -66,8 +63,6 @@ func networkOperation(op coreadapter.Operation) bool {
 	return op.Boundary == coreadapter.RepositoryBoundary && op.Action == baseRefreshAction
 }
 
-// gitOperationPool shares permits between workflow effects and remote polls.
-// Counts survive stage reloads; a lower limit waits for existing work to drain.
 type gitOperationPool struct {
 	mu   sync.Mutex
 	used map[config.ProjectID]int
@@ -99,15 +94,11 @@ func (p *gitOperationPool) try(project config.ProjectID, limit int, wake func())
 	}), true
 }
 
-// tryGitOperation admits repository work without waiting. Background polls
-// use the same permits without taking a workstream workflow reservation.
 func (s *Service) tryGitOperation(repository *trace.Repository) (func(), bool) {
 	cfg := s.about(repository)
 	return s.gitOperations.try(repository.Project(), cfg.Project.Capacity.GitOperations, repository.WakeWorkflow)
 }
 
-// gitOperationLimit composes configured admission with the shared repository
-// limit. A rejected attempt returns every permit it acquired immediately.
 func (s *Service) gitOperationLimit(repository *trace.Repository, other func(coreadapter.Operation) (func(), bool)) func(coreadapter.Operation) (func(), bool) {
 	return func(op coreadapter.Operation) (func(), bool) {
 		var releaseOther func()
@@ -121,9 +112,6 @@ func (s *Service) gitOperationLimit(repository *trace.Repository, other func(cor
 		if !gitOperation(op) && !networkOperation(op) {
 			return releaseOther, true
 		}
-		// The controller wakes admission when an admitted attempt finishes.
-		// Returning a permit after a busy workstream refused admission must
-		// not wake the pass and repeatedly retry that same workstream.
 		cfg := s.about(repository)
 		release, admitted := s.gitOperations.try(repository.Project(), cfg.Project.Capacity.GitOperations, nil)
 		if !admitted {

@@ -8,20 +8,19 @@ import (
 	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
+	testing "testing"
+	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/kpenfound/osmia/internal/projectstore"
-	testing "testing"
-	time "time"
 )
 
 const (

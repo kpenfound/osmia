@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -39,9 +40,6 @@ func (s *Service) statuses() ([]WorkstreamStatus, map[config.WorkstreamID]Diagno
 	return snapshot.list, snapshot.unreadable, snapshot.api
 }
 
-// groupApprovalGeneration covers group authority independently of member
-// generations. A completion racing a multi-repo status read retries the whole
-// view, so one response cannot combine pending and approved group members.
 func (s *Service) groupApprovalGeneration() uint64 {
 	_, projects := s.runtimes()
 	decisions := map[config.WorkgroupID]string{}
@@ -61,9 +59,6 @@ func (s *Service) groupApprovalGeneration() uint64 {
 			if _, seen := decisions[id]; seen {
 				continue
 			}
-			// The approval document is immutable apart from its completion, and
-			// each recorded revision has its own stored sequence, so that
-			// sequence identifies the decision without reading the approval.
 			status, err := p.repository.GroupApprovalStatusOf(id)
 			if err != nil {
 				return 0
@@ -89,12 +84,6 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 		if !cfg.Active(active.id) {
 			continue
 		}
-		// state is read inside the retried attempt, alongside the trace, so
-		// a workstream's archived flag and the runtime-derived rows below
-		// never come from a different runtime generation than the rest of
-		// this project's trace-read rows: a racing archive, or any other
-		// runtime mutation, forces the whole attempt to retry rather than
-		// land in a response assembled from two different moments.
 		found, err := readview.Consistent(func() (projectStatusResult, error) {
 			state, _ := s.effective()
 			list, projectUnreadable, api := s.projectStatuses(active)
@@ -103,7 +92,7 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 			}
 			var rows []workstreamActivity
 			for i := range list {
-				list[i].status.Archived = archivedIn(state, list[i].status.Workstream)
+				list[i].status.Archived = lifecycle.ArchivedIn(state, list[i].status.Workstream)
 			}
 			for _, w := range list {
 				if !w.status.Archived {
@@ -168,28 +157,17 @@ func (s *Service) statusesSnapshot() ([]WorkstreamStatus, map[config.WorkstreamI
 	return statuses, unreadable, nil
 }
 
-// workstreamActivity pairs a reported status with the trace facts that order
-// the workstream list: last activity time, newest first, then creation time,
-// newest first, then workstream ID.
 type workstreamActivity struct {
 	status       WorkstreamStatus
 	lastActivity time.Time
 	createdAt    time.Time
 }
 
-// projectStatusResult is one consistent attempt of projectStatuses: the
-// workstream activity it found and the diagnostic of the first thing it
-// could not read, by workstream.
 type projectStatusResult struct {
 	list       []workstreamActivity
 	unreadable map[config.WorkstreamID]Diagnostic
 }
 
-// projectStatuses reports every workstream of one project, as statuses does,
-// unordered. Its own unreadable map holds only the diagnostics of this one
-// attempt, so a caller that retries the whole attempt through consistentRead
-// never carries a diagnostic from an earlier, discarded attempt into a later
-// one that read the workstream cleanly.
 func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, map[config.WorkstreamID]Diagnostic, *APIError) {
 	out := []workstreamActivity{}
 	unreadable := map[config.WorkstreamID]Diagnostic{}
@@ -198,11 +176,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", active.id)}
 	}
 	mode := s.Context().Mode(active.id)
-	librarian := librarianWorkstream(active.id)
 	for _, w := range list {
-		if w.Workstream == librarian {
-			continue
-		}
 		design, err := isDesignWorkstream(active.repository, w.Workstream)
 		if err != nil {
 			return nil, nil, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", w.Workstream)}
@@ -289,7 +263,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		} else {
 			view.Advisories = advisories
 		}
-		drift, err := latestDrift(active.repository, w.Workstream, w.Subjects)
+		drift, err := lifecycle.LatestDrift(active.repository, w.Workstream, w.Subjects)
 		if err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
 				unreadable[w.Workstream] = Diagnostic{Field: "drift", Code: Internal, Message: fmt.Sprintf("cannot read the drift rebases of workstream %s; check the trace repository", w.Workstream)}
@@ -297,7 +271,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 		} else {
 			view.Drift = drift
 		}
-		if wait, err := edgeWaitDisplay(active.repository, w.Workstream); err != nil {
+		if wait, err := lifecycle.EdgeWaitDisplay(active.repository, w.Workstream); err != nil {
 			if _, ok := unreadable[w.Workstream]; !ok {
 				unreadable[w.Workstream] = Diagnostic{Field: "edges", Code: Internal, Message: fmt.Sprintf("cannot read the workgroup edges of workstream %s; check the trace repository", w.Workstream)}
 			}
@@ -401,7 +375,6 @@ func (s *Service) statusList() StatusResponse {
 	if unread != nil {
 		diagnostics = append(diagnostics, *unread)
 	}
-	// A jj that hangs must not hold up status.
 	checking, cancel := context.WithTimeout(context.Background(), jjCheckTimeout)
 	workspaces, err := s.newWorkspaces(checking, s.current())
 	cancel()
@@ -424,9 +397,6 @@ func (s *Service) statusList() StatusResponse {
 	return StatusResponse{Workstreams: list, Profiles: profiles, ProviderLimits: state.ProviderLimits, DailyBudget: budget, Capacity: capacity, ProviderUsage: usage, FailureStreaks: streaks, Diagnostics: diagnostics, Workspaces: workspaces}
 }
 
-// failureStreaks returns the nonzero infrastructure failure streaks across
-// every active project, ordered by role and profile, or none when no project
-// is active.
 func (s *Service) failureStreaks() ([]FailureStreak, error) {
 	cfg, projects := s.runtimes()
 	type attempt struct {
@@ -450,8 +420,6 @@ func (s *Service) failureStreaks() ([]FailureStreak, error) {
 			for _, th := range threads {
 				for _, q := range th.Turns {
 					for _, a := range q.Attempts {
-						// An attempt still running, or one a stop or restart
-						// cancelled, says nothing about the plumbing.
 						if a.Result != nil && !a.Result.Cancelled {
 							attempts = append(attempts, attempt{th.Identity.Role, a})
 						}
@@ -478,7 +446,6 @@ func (s *Service) failureStreaks() ([]FailureStreak, error) {
 	return out, nil
 }
 
-// workstreamStatus reports one workstream of the active project.
 func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
@@ -491,12 +458,10 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	if api != nil {
 		return WorkstreamStatus{}, api
 	}
-	// Archive records and ordinary rows need no live conversation history.
-	// Only an address omitted from the list can be a continued design alias.
 	if !slices.ContainsFunc(list, func(w WorkstreamStatus) bool { return w.Workstream == id }) {
 		cfg, projects := s.runtimes()
 		for _, active := range projects {
-			if !cfg.Active(active.id) || id == librarianWorkstream(active.id) {
+			if !cfg.Active(active.id) {
 				continue
 			}
 			streams, err := active.repository.Workstreams()
@@ -523,9 +488,6 @@ func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
 	return WorkstreamStatus{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
-// designStatusAddress maps an adopted design host to its first live member,
-// or its historical first member once none remain live.
-// Status resolution reads membership without requiring live conversation history.
 func (s *Service) designStatusAddress(repo *trace.Repository, stream config.WorkstreamID) (config.WorkstreamID, error) {
 	id, err := repo.CrossRepoWorkgroupOf(stream)
 	if err != nil || id == "" {
@@ -551,12 +513,6 @@ func (s *Service) designStatusAddress(repo *trace.Repository, stream config.Work
 func statusView(project config.ProjectID, mode bundle.Mode, w trace.WorkstreamStatus, design bool) WorkstreamStatus {
 	kind := w.Kind
 	if kind == "" && design {
-		// design is isDesignWorkstream's own answer, read directly from the
-		// design-session marker openDesign records, never inferred here from
-		// an empty kind and an empty feature state: an ordinary workstream
-		// can legitimately have both and still not be a design session. The
-		// web page and CLI use this marker to show the design chat instead
-		// of the ordinary workstream view.
 		kind = "design"
 	}
 	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Workspaces: w.Workspaces, Kind: kind, Profile: w.Profile, Base: w.Base, Branch: w.Branch, Title: w.Title,

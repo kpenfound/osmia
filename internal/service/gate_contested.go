@@ -8,17 +8,12 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// contestedGate is the gate of a contested unit's open card, or nil when Jev
-// may not decide it: only a contest the chief of staff escalated is a gate, and
-// of the rulings its card offers Jev may give review alone, since a revise
-// ruling needs the owner's words on what to change. A card whose unit carries a
-// binding Jev judgment of the chief of staff's ruling that the service could
-// not carry out returns that judgment instead.
 func (s *Service) contestedGate(repository *trace.Repository, stream config.WorkstreamID, unit string) (*intake.Gate, *jev.Result, error) {
 	e, open, err := s.contestedEntry(repository, stream, unit)
 	if err != nil || !open {
@@ -28,7 +23,7 @@ func (s *Service) contestedGate(repository *trace.Repository, stream config.Work
 	if err != nil || !ok {
 		return nil, nil, err
 	}
-	_, escalated, err := contestEscalated(repository, stream, unit, contest)
+	_, escalated, err := execution.ContestEscalated(repository, stream, unit, contest)
 	if err != nil || !escalated {
 		return nil, nil, err
 	}

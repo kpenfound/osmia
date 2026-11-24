@@ -4,13 +4,14 @@ import (
 	context "context"
 	json "encoding/json"
 	errors "errors"
+	strings "strings"
+	testing "testing"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	workspace "github.com/kpenfound/osmia/internal/workspace"
-	strings "strings"
-	testing "testing"
 )
 
 var (

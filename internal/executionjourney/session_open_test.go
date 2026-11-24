@@ -5,6 +5,14 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	maps "maps"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	plan "github.com/kpenfound/osmia/internal/plan"
@@ -16,13 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	maps "maps"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
-	time "time"
 )
 
 // newSessionFixture starts a service with one registered, committed

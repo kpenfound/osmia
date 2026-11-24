@@ -25,7 +25,6 @@ import (
 
 const decideTool = "decide"
 
-// Bounds on what a decision's state shows Jev from the records.
 const (
 	decideSpec     = 24 << 10
 	decidePlan     = 16 << 10
@@ -34,9 +33,6 @@ const (
 	decideRulings  = 8
 )
 
-// decisionSubject is a subject the chief of staff may decide today, prepared
-// for Jev: the occurrence, the options Jev may pick and the state built from
-// the subject's records.
 type decisionSubject struct {
 	repository *trace.Repository
 	stream     config.WorkstreamID
@@ -44,8 +40,7 @@ type decisionSubject struct {
 	kind       jev.DecisionKind
 	key        string
 	options    []jev.DecisionOption
-	// state builds the state with the chief of staff's evidence summary.
-	state func(evidence string) (string, []jev.Source, error)
+	state      func(evidence string) (string, []jev.Source, error)
 }
 
 func decisionOptions(pairs ...string) []jev.DecisionOption {
@@ -56,12 +51,6 @@ func decisionOptions(pairs ...string) []jev.DecisionOption {
 	return out
 }
 
-// decide returns the decide tool of one claimed chief-of-staff turn. The chief
-// of staff names a subject it may decide and gives its evidence; the service
-// checks from the subject's records that the chief may decide it today, builds
-// the rest of the state and asks Jev. A subject that is the owner's is refused
-// as an ordinary result, with no request and no judgment. The chief's outcome
-// tool for the subject records its decision only after this result exists.
 func (c *runtimeControls) decide(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: decideTool, Effect: coreadapter.ToolMemory,
 		Description: "Ask Jev to decide a subject you may decide, after you investigated it. kind: question-routing (subject: a question's number; Jev picks answer, route_amendment or escalate), contested-ruling (subject: a contested unit's ID; Jev picks review, revise or escalate), objection (subject: a committee objection's ID; Jev picks dismiss or escalate), plan-amendment (subject: the number of a presented amendment that leaves the approved intent unchanged; Jev picks approve or reject), discovery-disposition (subject: a discovery's id; Jev picks assign, decline or retain) or final-review-triage (subject: <review>:<finding> of a blocking finding of the current final review, as its notice gives them; Jev picks code or owner, one decide per finding). " +
@@ -166,8 +155,6 @@ func limitEvidence(s string) string {
 	return s[:cut] + " [truncated]"
 }
 
-// decisionResult tells the chief of staff what Jev's decision is: a binding
-// pick with its confidence, or that the decision is the chief's.
 func decisionResult(sub decisionSubject, res jev.Result) (json.RawMessage, error) {
 	type result struct {
 		Decision   string  `json:"decision"`
@@ -188,7 +175,6 @@ func decisionResult(sub decisionSubject, res jev.Result) (json.RawMessage, error
 	return json.Marshal(result{Decision: "chief", Kind: string(sub.kind), Next: "Jev's decision is not binding here. The decision is yours: record any outcome the record supports."})
 }
 
-// stateSections builds the state a decision's request shows.
 type stateSections struct {
 	strings.Builder
 }
@@ -197,8 +183,6 @@ func (b *stateSections) add(name, text string, limit int) {
 	intake.GateSection(&b.Builder, name, text, limit)
 }
 
-// sealedText returns the sealed spec and plan documents of the workstream, when
-// it is sealed.
 func sealedText(repository *trace.Repository, stream config.WorkstreamID) (specText, planText string, sources []jev.Source) {
 	current, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
@@ -229,7 +213,6 @@ func (s *Service) charterSection(ctx context.Context, repository *trace.Reposito
 	return doc.Content
 }
 
-// unitSection states a sealed unit's assignment.
 func unitSection(repository *trace.Repository, stream config.WorkstreamID, unit string) string {
 	if unit == "" {
 		return ""
@@ -241,8 +224,6 @@ func unitSection(repository *trace.Repository, stream config.WorkstreamID, unit 
 	return fmt.Sprintf("%s: %s\nAcceptance:\n- %s", u.ID, u.Task, strings.Join(u.Acceptance, "\n- "))
 }
 
-// questionSubject prepares the open question id for routing, or says why the
-// chief of staff may not route it with Jev.
 func (s *Service) questionSubject(ctx context.Context, repository *trace.Repository, host config.WorkstreamID, id string) (decisionSubject, string, error) {
 	q, why, err := questions.RoutingSubjectOf(repository, host, id)
 	if err != nil || why != "" {
@@ -271,7 +252,6 @@ func (s *Service) questionSubject(ctx context.Context, repository *trace.Reposit
 		}}, "", nil
 }
 
-// ownerRulings lists the newest owner rulings on the workstream's questions.
 func ownerRulings(repository *trace.Repository, stream config.WorkstreamID) string {
 	all, err := repository.Questions(stream)
 	if err != nil {
@@ -289,9 +269,6 @@ func ownerRulings(repository *trace.Repository, stream config.WorkstreamID) stri
 	return strings.Join(lines, "\n")
 }
 
-// contestSubject prepares the contested unit for a ruling, or says why the
-// chief of staff may not rule on it with Jev: the unit is not contested, it was
-// moved there for the owner, or its contest was already decided.
 func (s *Service) contestSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, unit string) (decisionSubject, string, error) {
 	contest, contested, err := unitContest(repository, stream, unit)
 	if err != nil {
@@ -329,10 +306,6 @@ func (s *Service) contestSubject(ctx context.Context, repository *trace.Reposito
 		}}, "", nil
 }
 
-// objectionSubject prepares the committee objection for a decision, or says why
-// the chief of staff may not decide it with Jev: a conflict between member
-// charters and the owner's own objection are the owner's, and an objection must
-// stand at the ratification gate.
 func (s *Service) objectionSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, id string) (decisionSubject, string, error) {
 	entry, round, api := s.intake().ObjectionSubject(repository, stream, id)
 	if api != nil {
@@ -373,10 +346,6 @@ func (s *Service) objectionSubject(ctx context.Context, repository *trace.Reposi
 		}}, "", nil
 }
 
-// planAmendmentSubject prepares a presented amendment for the chief of staff's
-// decision, or says why the chief may not decide it with Jev: an amendment that
-// changes the approved intent is the owner's gate, as is one beyond the chief
-// of staff's authority, and a decision is made once.
 func (s *Service) planAmendmentSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, id string) (decisionSubject, string, error) {
 	why, err := s.intake().PlanAmendmentSubject(repository, stream, id)
 	if err != nil || why != "" {
@@ -418,10 +387,6 @@ func (s *Service) planAmendmentSubject(ctx context.Context, repository *trace.Re
 		}}, "", nil
 }
 
-// discoverySubject prepares an open discovery for its disposition, or says why
-// the chief of staff may not decide it with Jev: its workstream is finished,
-// its disposition is already recorded, or Jev's decision on it could not be
-// carried out and the owner has it.
 func (s *Service) discoverySubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, id string) (decisionSubject, string, error) {
 	all, err := discoveries(repository, stream)
 	if err != nil {
@@ -461,11 +426,6 @@ func (s *Service) discoverySubject(ctx context.Context, repository *trace.Reposi
 		}}, "", nil
 }
 
-// triageSubject prepares one blocking finding of the current final review for
-// its triage. The subject is "<review>:<finding>". It says why the chief of
-// staff may not triage the finding with Jev: it is not a blocking finding of
-// the current reviewed final review, it is triaged already, or it is the
-// owner's because final reviews found blocking problems too often.
 func (s *Service) triageSubject(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, subject string) (decisionSubject, string, error) {
 	number, finding, cut := strings.Cut(subject, ":")
 	review, convErr := strconv.Atoi(strings.TrimSpace(number))

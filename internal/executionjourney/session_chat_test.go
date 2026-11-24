@@ -2,6 +2,15 @@ package executionjourney
 
 import (
 	context "context"
+	os "os"
+	filepath "path/filepath"
+	regexp "regexp"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	enforcertest "github.com/kpenfound/agentcore/agent/agenttest/enforcertest"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -14,14 +23,6 @@ import (
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	os "os"
-	filepath "path/filepath"
-	regexp "regexp"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 // newSessionChatFixture registers a project with a real local upstream

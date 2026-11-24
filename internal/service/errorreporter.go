@@ -18,19 +18,12 @@ import (
 	"github.com/kpenfound/osmia/internal/redact"
 )
 
-// reportAttempts is how many times one write is tried, each time after
-// reconciling it, before the reporter gives up on it.
 const reportAttempts = 5
 
-// reportRetryDelay is the delay before the first retry of a failed write.
 const reportRetryDelay = 30 * time.Second
 
-// reportPoll is the longest the worker waits before it looks at its state
-// again.
 const reportPoll = 15 * time.Second
 
-// reportCheckInterval is the least time between reads of one saved issue's
-// state.
 const reportCheckInterval = time.Minute
 
 // ErrorReporterOptions tunes the error reporter. Zero values select the
@@ -61,8 +54,6 @@ type ErrorReporterOptions struct {
 	passed func()
 }
 
-// The kinds of reporter fault, so a success clears only the faults it can
-// have fixed.
 const (
 	faultState  = "state"
 	faultToken  = "token"
@@ -70,17 +61,12 @@ const (
 	faultScrub  = "scrub"
 )
 
-// errorReporter files the captured errors of the service as GitHub issues,
-// off the request path. Only its worker changes st and the retry state; mu
-// lets the status and configuration views read the faults meanwhile.
 type errorReporter struct {
 	s       *Service
 	capture *errorCapture
 	done    chan struct{}
 	rearm   atomic.Bool
-	// gen counts the applied configurations that changed [error_reports]; a
-	// pass files only while the generation it started with is current.
-	gen atomic.Uint64
+	gen     atomic.Uint64
 
 	mu      sync.Mutex
 	faults  map[string]string
@@ -92,28 +78,19 @@ type errorReporter struct {
 	retry  reportRetry
 }
 
-// reportRetry is the retry state of the unresolved write being reconciled.
 type reportRetry struct {
 	key      string
 	attempts int
-	// next is the real time of the next attempt, or when a given-up write may
-	// be tried again.
-	next   time.Time
-	gaveUp bool
+	next     time.Time
+	gaveUp   bool
 }
 
 func newErrorReporter(s *Service, capture *errorCapture) *errorReporter {
 	return &errorReporter{s: s, capture: capture, done: make(chan struct{}), faults: map[string]string{}}
 }
 
-// errSuperseded marks a write or a read the reporter dropped because the
-// configuration changed under it. It is neither a success nor a failure.
 var errSuperseded = errors.New("the error reports configuration changed")
 
-// configure applies the loaded [error_reports] section: it starts or stops
-// capturing at once, lets a given-up write be tried again, and, when the
-// section changed, supersedes the pass that is running so it sends no more
-// from the old configuration.
 func (r *errorReporter) configure(cfg *config.Config) {
 	if r == nil {
 		return
@@ -129,8 +106,6 @@ func (r *errorReporter) configure(cfg *config.Config) {
 	r.rearm.Store(true)
 }
 
-// superseded reports whether a configuration change has been applied since
-// the environment env was built.
 func (r *errorReporter) superseded(env reportEnv) bool { return r.gen.Load() != env.gen }
 
 func (r *errorReporter) opts() ErrorReporterOptions { return r.s.options.ErrorReporter }
@@ -171,9 +146,6 @@ func (r *errorReporter) token() string {
 	return getenv("GITHUB_TOKEN")
 }
 
-// run passes over the captured errors whenever one arrives or the
-// configuration changes, when a retry or a state check is due, and every
-// poll, until ctx ends.
 func (r *errorReporter) run(ctx context.Context) {
 	defer close(r.done)
 	timer := time.NewTimer(r.poll())
@@ -202,27 +174,19 @@ func (r *errorReporter) run(ctx context.Context) {
 	}
 }
 
-// reportEnv is what one pass files with.
 type reportEnv struct {
 	repo    string
 	cfg     errorreport.Config
 	filer   issues.Filer
 	scrub   *errorreport.Scrubber
 	sources config.ErrorReports
-	// gen is the configuration generation the environment was built from.
-	gen uint64
+	gen     uint64
 }
 
-// pass files what is due: it reconciles an unresolved write, resolves the
-// recurrences awaiting a state check and decides every queued error. It
-// returns how long to wait before the next pass is worth making, or zero.
 func (r *errorReporter) pass(ctx context.Context) time.Duration {
 	if r.rearm.Swap(false) {
 		r.retry = reportRetry{}
 	}
-	// The generation is read before the configuration: a reload stores its
-	// configuration before it bumps the generation, so an environment built
-	// from the old configuration never carries the new generation.
 	gen := r.gen.Load()
 	cfg := r.s.current()
 	e := cfg.ErrorReports
@@ -272,16 +236,11 @@ func (r *errorReporter) pass(ctx context.Context) time.Duration {
 	}
 	r.save()
 	if r.superseded(env) {
-		// A reload changed the configuration: start again with it.
 		return time.Millisecond
 	}
 	return wait
 }
 
-// settleOne decides the oldest queued error, or else the next recurrence
-// awaiting a check, reading issue states and reconciling an unresolved write
-// first as the decision asks. It reports whether something was decided; when
-// not, wait says when to try again.
 func (r *errorReporter) settleOne(ctx context.Context, env reportEnv) (progress bool, wait time.Duration) {
 	if r.superseded(env) {
 		return false, 0
@@ -361,8 +320,6 @@ func (r *errorReporter) settleOne(ctx context.Context, env reportEnv) (progress 
 	return false, 0
 }
 
-// until is how long after now the time at is, at least a millisecond, or zero
-// when at is zero.
 func (r *errorReporter) until(at, now time.Time) time.Duration {
 	if at.IsZero() {
 		return 0
@@ -370,8 +327,6 @@ func (r *errorReporter) until(at, now time.Time) time.Duration {
 	return max(at.Sub(now), time.Millisecond)
 }
 
-// renderCheck renders the intent's content, so a report that cannot be
-// rendered is never recorded as a write.
 func renderCheck(in errorreport.Intent) error {
 	if in.Kind == errorreport.IntentComment {
 		_, err := errorreport.RenderComment(in.Filing)
@@ -385,12 +340,6 @@ func intentKey(in errorreport.Intent) string {
 	return fmt.Sprintf("%s/%s/%s/%s", in.Kind, errorreport.RepoKey(in.Repository), in.Fingerprint, in.Day)
 }
 
-// reconcile tries the unresolved write: it looks for what the write may have
-// produced and adopts it, and only otherwise writes again. A failed attempt is
-// retried after a growing delay and given up after reportAttempts; a given-up
-// write is tried again when an error is waiting and the delay has passed, or
-// after a reload. It reports whether the write is resolved; when not, wait says
-// when to try again.
 func (r *errorReporter) reconcile(ctx context.Context, env reportEnv, in errorreport.Intent, haveHead bool) (bool, time.Duration) {
 	key := intentKey(in)
 	if r.retry.key != key {
@@ -411,9 +360,6 @@ func (r *errorReporter) reconcile(ctx context.Context, env reportEnv, in errorre
 	return r.try(ctx, env, in, false)
 }
 
-// try performs the write of an intent that is saved, directly when it was just
-// recorded or after reconciling it otherwise, and settles the retry state with
-// the outcome.
 func (r *errorReporter) try(ctx context.Context, env reportEnv, in errorreport.Intent, fresh bool) (bool, time.Duration) {
 	var err error
 	if fresh {
@@ -438,9 +384,6 @@ func (r *errorReporter) try(ctx context.Context, env reportEnv, in errorreport.I
 		return true, 0
 	}
 	if r.superseded(env) {
-		// A write sent before the reload failed: the intent counts the
-		// attempt and stays for reconciliation, but the failure is not the
-		// current configuration's to report.
 		r.st.NoteAttempt(in)
 		r.dirty = true
 		r.save()
@@ -467,8 +410,6 @@ func (r *errorReporter) try(ctx context.Context, env reportEnv, in errorreport.I
 	return false, delay
 }
 
-// settle reconciles the intent: it adopts the issue or comment the write may
-// already have produced, and writes only when none exists.
 func (r *errorReporter) settle(ctx context.Context, env reportEnv, in errorreport.Intent) error {
 	switch in.Kind {
 	case errorreport.IntentCreate:
@@ -497,11 +438,6 @@ func (r *errorReporter) settle(ctx context.Context, env reportEnv, in errorrepor
 	return r.write(ctx, env, in)
 }
 
-// findIssue looks in the intent's repository for the issue the intent's create
-// may have produced: one carrying the model's marker for the fingerprint,
-// created since the intent was recorded. It may try the issues carrying the
-// intent's labels first, but concludes there is none only after listing every
-// issue updated since, whatever its labels.
 func (r *errorReporter) findIssue(ctx context.Context, env reportEnv, in errorreport.Intent) (issues.Issue, bool, error) {
 	pick := func(list []issues.Issue) (issues.Issue, bool) {
 		var found issues.Issue
@@ -534,8 +470,6 @@ func (r *errorReporter) findIssue(ctx context.Context, env reportEnv, in errorre
 	return issue, ok, nil
 }
 
-// findComment looks through the comments of the intent's issue since the intent
-// was recorded for the one the intent's comment may have produced.
 func (r *errorReporter) findComment(ctx context.Context, env reportEnv, in errorreport.Intent) (bool, error) {
 	list, err := env.filer.ListComments(ctx, in.Repository, in.Issue, in.Since())
 	if err != nil {
@@ -549,7 +483,6 @@ func (r *errorReporter) findComment(ctx context.Context, env reportEnv, in error
 	return false, nil
 }
 
-// write renders the intent and posts it, and records the result.
 func (r *errorReporter) write(ctx context.Context, env reportEnv, in errorreport.Intent) error {
 	if r.superseded(env) {
 		return errSuperseded
@@ -598,8 +531,6 @@ func (r *errorReporter) completeComment(in errorreport.Intent, adopted bool) err
 	return nil
 }
 
-// readState reads whether the saved issue is open or closed. An issue GitHub no
-// longer has counts as closed, so the next report opens a new one.
 func (r *errorReporter) readState(ctx context.Context, env reportEnv, issue int) (errorreport.IssueState, error) {
 	state, err := env.filer.State(ctx, env.repo, issue)
 	if err != nil {
@@ -615,8 +546,6 @@ func (r *errorReporter) readState(ctx context.Context, env reportEnv, issue int)
 	return errorreport.IssueOpen, nil
 }
 
-// save writes the state if it changed. A failure is a fault and nothing is
-// written to GitHub until the state can be saved.
 func (r *errorReporter) save() bool {
 	if !r.dirty {
 		return true
@@ -672,7 +601,6 @@ func (r *errorReporter) failGitHubAttempt(what string, err error, attempt int, g
 	r.fail(faultGitHub, fmt.Sprintf("%s failed (attempt %d of %d): %s; retrying", what, attempt, reportAttempts, githubReason(err)))
 }
 
-// githubReason describes a failed GitHub call. It never holds the token.
 func githubReason(err error) string {
 	reason := redact.Secrets(err.Error(), redact.KnownSecrets()...)
 	var failed *issues.Error
@@ -682,7 +610,6 @@ func githubReason(err error) string {
 	return reason
 }
 
-// diagnostics reports why error reports are not being filed.
 func (r *errorReporter) diagnostics() []Diagnostic {
 	if r == nil {
 		return nil

@@ -1,12 +1,11 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"testing"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
-
-	"testing"
 )
 
 type moveFixture struct {

@@ -22,52 +22,25 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// flakeFixToolName is the chief of staff's tool that opens a flake-fix
-// workstream for a recorded flake occurrence, or declines it.
 const flakeFixToolName = "flake_fix"
 
-// flakeActor attributes the flake recorder's records.
 var flakeActor = trace.Actor{Kind: "service", ID: "flake-recorder"}
 
-// flakeRescan is how long the recorder trusts that nothing new was recorded
-// while the project's traces did not change.
 const flakeRescan = 5 * time.Minute
 
-// flakeRecorder turns the flaky checks of the unit and final-review check runs
-// recorded in a project's workstreams into flake occurrences in the project's
-// flake record, tells the originating workgroup's chief of staff once for each
-// run, and surfaces the run to the open flake-fix workstream of each group that
-// has one. Each pass also announces every decided occurrence at each destination
-// still owed, whoever decided it and whatever became of its source run.
-//
-// It works from the stored run records, not from the transaction that
-// recorded them, so it does not depend on the unit still checking or the final
-// review still being in progress, and it resumes after a restart. Every step
-// is marked in the flake record or keyed by a transition of the workstream it
-// writes to, so repeating a pass records, notifies and surfaces nothing twice.
-// Its pass never returns an error: a failing side effect is logged and tried
-// again on the next pass, and the flow that recorded the run never waits for
-// it.
 type flakeRecorder struct {
 	s          *Service
 	cfg        *config.Config
 	repository *trace.Repository
 
-	mu sync.Mutex
-	// done holds the runs whose processing finished. A restart forgets it and
-	// the recorder finds the same runs finished in the flake record.
-	done map[string]bool
-	// scanned is the trace generation and time of the last pass that finished
-	// every run, so a project whose traces did not change is not read again.
+	mu         sync.Mutex
+	done       map[string]bool
 	scanned    bool
 	generation uint64
 	at         time.Time
-	// logged remembers the last failure logged for a run, so a failure that
-	// persists is logged once.
-	logged map[string]string
+	logged     map[string]string
 }
 
-// flakeRun is one unit or final-review check run with flaky checks.
 type flakeRun struct {
 	stream   config.WorkstreamID
 	path     string
@@ -77,7 +50,6 @@ type flakeRun struct {
 	evidence flakes.Evidence
 }
 
-// located is an occurrence with its flake group's key.
 type located struct {
 	group string
 	flakes.Occurrence
@@ -92,8 +64,6 @@ func (r flakeRun) describe() string {
 	return fmt.Sprintf("unit %s of workstream %s", r.source.Unit, r.stream)
 }
 
-// Pass records, surfaces and notifies every unfinished flaky run. It is a
-// schedule step that always succeeds.
 func (f *flakeRecorder) Pass(ctx context.Context) error {
 	if f.cfg == nil || !f.cfg.Project.FlakeFixes {
 		return nil
@@ -106,7 +76,6 @@ func (f *flakeRecorder) Pass(ctx context.Context) error {
 	return nil
 }
 
-// report logs a failure once while it persists.
 func (f *flakeRecorder) report(run string, err error) {
 	if f.logged == nil {
 		f.logged = map[string]string{}
@@ -124,9 +93,6 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 	if f.scanned && generation == f.generation && now.Sub(f.at) < flakeRescan {
 		return nil
 	}
-	// Openings left partway are completed and finished workstreams closed
-	// before new runs are recorded, so a run never joins a workstream that is
-	// over.
 	finished := true
 	if err := f.settle(ctx); err != nil {
 		finished = false
@@ -154,8 +120,6 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 		f.done[run.key()] = true
 		delete(f.logged, run.key())
 	}
-	// Occurrences the runs just joined are announced now, not on the next
-	// pass.
 	if err := f.announce(ctx); err != nil {
 		finished = false
 		f.report("announce", err)
@@ -169,10 +133,6 @@ func (f *flakeRecorder) reconcile(ctx context.Context) error {
 	return nil
 }
 
-// collect reads the project's unit and final-review check runs that list a
-// flaky check. Sessions are not read: their check runs trigger nothing. Every
-// run's known checks include those of all the project's unit runs, which is
-// what ties a Dagger Cloud check name to its check.
 func (f *flakeRecorder) collect() ([]flakeRun, error) {
 	streams, err := intake.NonSessionWorkstreams(f.repository)
 	if err != nil {
@@ -219,8 +179,6 @@ func (f *flakeRecorder) collect() ([]flakeRun, error) {
 	return runs, nil
 }
 
-// finalCheckRuns returns the latest revision of each final-review check run
-// recorded in the workstream, in review order.
 func finalCheckRuns(repository *trace.Repository, stream config.WorkstreamID) ([]FinalCheckRun, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -244,9 +202,6 @@ func finalCheckRuns(repository *trace.Repository, stream config.WorkstreamID) ([
 	return out, nil
 }
 
-// flakeEvidence converts the evidence a check-run record holds to the value
-// the flake record keeps. output is the record's excerpt of the captured
-// output, empty when the engine reported none.
 func flakeEvidence(e api.CheckEvidence, output string) flakes.Evidence {
 	out := flakes.Evidence{Engine: e.Engine, Flaky: slices.Clone(e.Flaky), CoRun: slices.Clone(e.CoRun), Parallelism: e.Parallelism, Output: output, OutputPath: e.OutputPath}
 	for _, d := range e.Diagnostics {
@@ -276,11 +231,6 @@ func flakeEvidence(e api.CheckEvidence, output string) flakes.Evidence {
 	return out
 }
 
-// process takes one run through the steps the flake record marks: it records
-// the run's occurrences, then, unless the run is a flake-fix workstream's own,
-// marks those whose group has an open flake-fix workstream as joined and
-// surfaces them there, and sends the originating chief of staff the run's one
-// notice. A step already marked is not repeated.
 func (f *flakeRecorder) process(ctx context.Context, run flakeRun) error {
 	store := &flakes.Store{Repository: f.repository, Now: f.s.now}
 	fix, err := store.IsFlakeFix(run.stream)
@@ -306,8 +256,6 @@ func (f *flakeRecorder) process(ctx context.Context, run flakeRun) error {
 	}
 	noticed := slices.ContainsFunc(occurrences, func(o located) bool { return o.Noticed != nil })
 	if !noticed {
-		// Until the notice is out, an occurrence whose group has an open
-		// workstream joins it; afterwards the chief of staff decides.
 		for _, o := range occurrences {
 			if o.Decision.State != flakes.Pending {
 				continue
@@ -358,7 +306,6 @@ func (f *flakeRecorder) process(ctx context.Context, run flakeRun) error {
 	return nil
 }
 
-// occurrences reads the run's occurrences as the flake record holds them.
 func (f *flakeRecorder) occurrences(store *flakes.Store, run flakeRun, groups []flakes.GroupLinks) ([]located, error) {
 	var out []located
 	for _, g := range groups {
@@ -384,18 +331,12 @@ func flakeDigest(parts ...string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// flakeNoticeSubject is the workflow subject of the run's one notice.
 func flakeNoticeSubject(run string) string { return "flake-notice-" + flakeDigest("notice", run) }
 
-// flakeEvidenceSubject is the workflow subject, in the open workstream's
-// trace, of the run's one surfacing to that workstream.
 func flakeEvidenceSubject(run string, workstream config.WorkstreamID) string {
 	return "flake-evidence-" + flakeDigest("evidence", run, string(workstream))
 }
 
-// post records a notice for the chief of staff of stream as the one
-// transition of subject. A subject already recorded means the notice was sent:
-// a retry finds it and sends nothing, whatever its text would be now.
 func (f *flakeRecorder) post(ctx context.Context, stream config.WorkstreamID, unit, subject, cause, reason, body string) error {
 	state, err := f.repository.Workflow(stream, subject)
 	if err != nil {
@@ -414,8 +355,6 @@ func (f *flakeRecorder) post(ctx context.Context, stream config.WorkstreamID, un
 	return nil
 }
 
-// surface tells the chief of staff of the open workstream the occurrence
-// joined about the run's links in the group, once for the run, and marks it.
 func (f *flakeRecorder) surface(ctx context.Context, store *flakes.Store, run flakeRun, o located) error {
 	workstream := o.Decision.Workstream
 	group := o.group
@@ -436,8 +375,6 @@ func (f *flakeRecorder) surface(ctx context.Context, store *flakes.Store, run fl
 	return store.MarkSurfaced(ctx, group, o.Run, workstream)
 }
 
-// notice sends the originating workgroup's chief of staff the run's one
-// notice, listing every occurrence of the run.
 func (f *flakeRecorder) notice(ctx context.Context, run flakeRun, occurrences []located) error {
 	var pending, decided []located
 	for _, o := range occurrences {

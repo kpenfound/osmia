@@ -3,6 +3,11 @@ package executionjourney
 import (
 	context "context"
 	json "encoding/json"
+	os "os"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+
 	amendment "github.com/kpenfound/osmia/internal/amendment"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -10,10 +15,6 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	os "os"
-	slices "slices"
-	strings "strings"
-	testing "testing"
 )
 
 func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {

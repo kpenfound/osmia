@@ -21,14 +21,10 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// sessionGit is the Git provider of a session's worktrees. Sessions are
-// always on the Git backend (session.go), so this bypasses the Provider
-// interface for the methods only sessions need.
 func sessionGit(cfg *config.Config) *workspace.Git {
 	return workspaces(cfg, sessionsDirectory, config.WorkspacesGit).(*workspace.Git)
 }
 
-// sessionEnded reports whether the session has ended.
 func sessionEnded(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	state, err := repository.Workflow(stream, trace.SessionSubject)
 	if err != nil {
@@ -37,9 +33,6 @@ func sessionEnded(repository *trace.Repository, stream config.WorkstreamID) (boo
 	return state.Value == trace.SessionEnded, nil
 }
 
-// sessionThreadBusy reports whether the session's thread holds a turn with
-// no response and no completion, the same state unfinishedSessionTurn reads
-// to refuse a message.
 func sessionThreadBusy(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	th, err := repository.Thread(stream, sessionAgentID)
 	if errors.Is(err, os.ErrNotExist) {
@@ -52,10 +45,6 @@ func sessionThreadBusy(repository *trace.Repository, stream config.WorkstreamID)
 	return unfinishedSessionTurn(th) || state.Value == trace.SessionWorking, err
 }
 
-// sessionChanges reads a session's uncommitted worktree changes relative to
-// its head, and the commits on its branch relative to its base commit.
-// Once the session has ended and its worktree is released, Changes reads
-// empty, but Commits stays readable from the branch's own history.
 func (s *Service) sessionChanges(ctx context.Context, raw string) (SessionChangesResponse, *APIError) {
 	project, stream, _, api := s.sessionTrace(raw)
 	if api != nil {
@@ -95,20 +84,12 @@ func (s *Service) sessionChanges(ctx context.Context, raw string) (SessionChange
 	return SessionChangesResponse{Head: head, Changes: changes, Commits: commits}, nil
 }
 
-// sessionCommitTrailer names the request key a session commit's message
-// carries, so a retry with the same key, including across a restart, finds
-// the commit already made instead of making a second one, the way
-// landingTrailer does for a unit's landing commit (landing.go).
 const sessionCommitTrailer = "Osmia-Session-Request"
 
-// sessionCommitMessage appends the request key's trailer to the owner's
-// message.
 func sessionCommitMessage(message, key string) string {
 	return strings.TrimRight(message, "\n") + "\n\n" + sessionCommitTrailer + ": " + key + "\n"
 }
 
-// sessionCommitKey reads the request key a commit message's trailer
-// carries, or "" when it has none.
 func sessionCommitKey(message string) string {
 	for _, line := range strings.Split(message, "\n") {
 		if k, ok := strings.CutPrefix(line, sessionCommitTrailer+": "); ok {
@@ -118,10 +99,6 @@ func sessionCommitKey(message string) string {
 	return ""
 }
 
-// sessionChangesMessage strips a commit's own Osmia-Session-Request
-// trailer, and the blank line before it, for the owner-facing changes view
-// (spec#13). The commit's own message, read by sessionCommitKey for retry
-// detection, keeps the trailer; only this owner-facing copy loses it.
 func sessionChangesMessage(message string) string {
 	body, _, found := strings.Cut(message, "\n\n"+sessionCommitTrailer+": ")
 	if !found {
@@ -130,23 +107,13 @@ func sessionChangesMessage(message string) string {
 	return body
 }
 
-// sessionCommitLocks serializes commits of the same session, so two
-// concurrent commit requests cannot both stage and write the worktree's
-// real Git index at once.
-var sessionCommitLocks sync.Map // sessionLockKey -> *sync.Mutex
+var sessionCommitLocks sync.Map
 
 func sessionCommitLock(repository *trace.Repository, stream config.WorkstreamID) *sync.Mutex {
 	v, _ := sessionCommitLocks.LoadOrStore(sessionLockKey{repository, stream}, &sync.Mutex{})
 	return v.(*sync.Mutex)
 }
 
-// sessionCommit commits every current worktree change onto the session
-// branch under the owner's message, moves the session head and adds a
-// thread entry naming the commit. It is refused, recording nothing, while a
-// turn is running, when the message is empty, when the worktree has no
-// changes, or once the session has ended. A retry with the same request
-// key, including across a restart, finds the commit the key already made
-// and returns it instead of making a second one.
 func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionCommitRequest) (SessionCommitResponse, *APIError) {
 	project, stream, repository, api := s.sessionTrace(raw)
 	if api != nil {
@@ -163,11 +130,6 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	if key == "" {
 		return SessionCommitResponse{}, &APIError{Code: Validation, Message: "request_key must not be empty"}
 	}
-	// sessionMessage and sessionEnd hold this same lock, from their own busy
-	// check through recording what they do, so a commit cannot observe
-	// "not busy" or "not ended" and then write the worktree while a message
-	// that was about to start a turn, or an end that was about to release
-	// the worktree, slips in between the check and the write.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionCommitResponse{}, &APIError{Code: Conflict, Message: "a message is being started for this session; try again once it finishes"}
@@ -176,7 +138,6 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
 		return SessionCommitResponse{}, api
 	}
-	// State and existence are checked under the same guard as end and destroy.
 	if ended, err := sessionEnded(repository, stream); err != nil {
 		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {
@@ -221,10 +182,6 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 			return SessionCommitResponse{}, &APIError{Code: Validation, Message: "the worktree has no changes to commit"}
 		}
 	}
-	// A retry whose commit was already made, including one across a restart
-	// cut short before this record, finds commit == head here and still
-	// records the thread entry, idempotently, the way landingCommit's commit
-	// detection still lets land call record (landing.go).
 	summary := fmt.Sprintf("Committed %s: %s", commit, strings.SplitN(message, "\n", 2)[0])
 	if err := recordSessionEntry(ctx, repository, project, stream, "commit-"+key, s.now(), summary); err != nil {
 		return SessionCommitResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the commit entry of session %s; check the trace repository", stream)}
@@ -232,22 +189,15 @@ func (s *Service) sessionCommit(ctx context.Context, raw string, req SessionComm
 	return SessionCommitResponse{Commit: commit}, nil
 }
 
-// sessionChecksRole and sessionChecksThread scope a session check's Jev
-// judgment.
 const sessionChecksRole = "session-checks"
 const sessionChecksThread = "session-checks"
 
-// sessionCheckDocumentID names the record of a session's check run.
 func sessionCheckDocumentID(run int) string { return fmt.Sprintf("session-check-%d", run) }
 
-// sessionCheckRecordPath names the trace document a session's check run is
-// recorded as.
 func sessionCheckRecordPath(run int) string { return fmt.Sprintf("session-checks/checks-%d.json", run) }
 
 var sessionCheckRecordPattern = regexp.MustCompile(`^session-checks/checks-[0-9]+\.json$`)
 
-// sessionCheckRuns returns every check run recorded for the session, at its
-// latest revision.
 func sessionCheckRuns(repo *trace.Repository, stream config.WorkstreamID) ([]SessionCheckRun, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -291,22 +241,16 @@ type SessionCheckStart struct {
 	StartedAt time.Time       `json:"started_at"`
 }
 
-// sessionCheckStartDocumentID names the unfinished evidence of a session's
-// check run.
 func sessionCheckStartDocumentID(run int) string {
 	return sessionCheckDocumentID(run) + "-started"
 }
 
-// sessionCheckStartPath names the trace document the unfinished evidence of a
-// session's check run is recorded as.
 func sessionCheckStartPath(run int) string {
 	return fmt.Sprintf("session-checks/checks-%d-started.json", run)
 }
 
 var sessionCheckStartPattern = regexp.MustCompile(`^session-checks/checks-[0-9]+-started\.json$`)
 
-// sessionCheckStarts returns the unfinished evidence of every check run
-// recorded for the session, at its latest revision.
 func sessionCheckStarts(repo *trace.Repository, stream config.WorkstreamID) ([]SessionCheckStart, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -336,8 +280,6 @@ func sessionCheckStarts(repo *trace.Repository, stream config.WorkstreamID) ([]S
 	return starts, nil
 }
 
-// nextSessionCheckRun returns the run number the session's next check uses.
-// A run that recorded only unfinished evidence keeps its number.
 func nextSessionCheckRun(repo *trace.Repository, stream config.WorkstreamID) (int, error) {
 	runs, err := sessionCheckRuns(repo, stream)
 	if err != nil {
@@ -357,8 +299,6 @@ func nextSessionCheckRun(repo *trace.Repository, stream config.WorkstreamID) (in
 	return run + 1, nil
 }
 
-// sessionCheckKind reports the owner-facing word for a check selection: a
-// smart run selected checks through Jev, a full run ran every check.
 func sessionCheckKind(sel CheckSelection) string {
 	if sel.Mode == checkrun.SelectionSelected {
 		return "smart"
@@ -366,9 +306,6 @@ func sessionCheckKind(sel CheckSelection) string {
 	return "full"
 }
 
-// recordSessionCheckRun records run as the session's check-<run> record, and
-// its full captured output separately when it has an output path, the same
-// two-document shape a unit's check run uses.
 func recordSessionCheckRun(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, run SessionCheckRun, captured string) error {
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
@@ -385,11 +322,6 @@ func recordSessionCheckRun(ctx context.Context, repository *trace.Repository, pr
 	return repository.RecordDocuments(ctx, docs)
 }
 
-// sessionTraceEvidence records the trace link of one session check run as
-// unfinished evidence while the run goes on. The link a run prints is handed
-// to see, which returns at once; a goroutine records it, one extra revision
-// of the run's start document for each link that replaces another, so a slow
-// write never holds up the output Dagger prints.
 type sessionTraceEvidence struct {
 	ctx        context.Context
 	repository *trace.Repository
@@ -406,16 +338,12 @@ type sessionTraceEvidence struct {
 	done    chan struct{}
 }
 
-// newSessionTraceEvidence starts recording start's links. Its writes use a
-// context that outlives ctx's cancellation, so a link the run printed before
-// the request was cancelled still reaches the history.
 func newSessionTraceEvidence(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, start SessionCheckStart, now func() time.Time, log *slog.Logger) *sessionTraceEvidence {
 	e := &sessionTraceEvidence{ctx: context.WithoutCancel(ctx), repository: repository, project: project, stream: stream, start: start, now: now, log: log, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	go e.record()
 	return e
 }
 
-// see is the trace observer of the run.
 func (e *sessionTraceEvidence) see(url string) {
 	e.mu.Lock()
 	e.pending, e.latest = url, url
@@ -445,8 +373,6 @@ func (e *sessionTraceEvidence) record() {
 		id := sessionCheckStartDocumentID(start.Run)
 		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision + 1, Project: e.project, Workstream: e.stream, At: e.now(), Actor: ownerActor, Cause: sessionCheckDocumentID(start.Run)}
 		doc := trace.Document{Header: h, Path: sessionCheckStartPath(start.Run), Content: string(data) + "\n"}
-		// A failed write leaves the evidence at its earlier revision; the
-		// result the run records carries the link as well.
 		if err := e.repository.RecordDocuments(e.ctx, []trace.Document{doc}); err != nil {
 			e.log.Warn("session check trace link not recorded", "workstream", string(e.stream), "run", start.Run, "error", err.Error())
 			continue
@@ -455,8 +381,6 @@ func (e *sessionTraceEvidence) record() {
 	}
 }
 
-// finish waits for the link the run last printed to be recorded and returns
-// it, or "" when the run printed none.
 func (e *sessionTraceEvidence) finish() string {
 	close(e.wake)
 	<-e.done
@@ -465,23 +389,13 @@ func (e *sessionTraceEvidence) finish() string {
 	return e.latest
 }
 
-// sessionCheckLocks guards against two check runs of the same session
-// running at once.
-var sessionCheckLocks sync.Map // sessionLockKey -> *sync.Mutex
+var sessionCheckLocks sync.Map
 
 func sessionCheckLock(repository *trace.Repository, stream config.WorkstreamID) *sync.Mutex {
 	v, _ := sessionCheckLocks.LoadOrStore(sessionLockKey{repository, stream}, &sync.Mutex{})
 	return v.(*sync.Mutex)
 }
 
-// sessionCheck checks the session head commit: a smart check selected by
-// the service's existing smart-check selection over the changes between the
-// session's base commit and its head. When Jev is unconfigured or does not
-// select, it runs the full `dagger check` the pre-review check run uses. It
-// records the commit, whether the run was smart or full, the selected
-// checks for a smart run, status, exit code and output, and adds a thread
-// entry naming the checked commit. Only one check run per session can be in
-// progress at a time; a second request while one runs is refused.
 func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun, *APIError) {
 	project, stream, repository, api := s.sessionTrace(raw)
 	if api != nil {
@@ -495,8 +409,6 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 		return SessionCheckRun{}, &APIError{Code: Conflict, Message: "a check is already running for this session; try again once it finishes"}
 	}
 	defer mu.Unlock()
-	// Register the control under the admission lock and retain its lease
-	// through the external checker and the final trace writes.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionCheckRun{}, &APIError{Code: Conflict, Message: "the session is ending; try again once it finishes"}
@@ -573,10 +485,6 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	if result.TraceURL == "" {
 		result.TraceURL = latestLink
 	}
-	// A run the request's cancellation cut short records no result; the link
-	// it printed stays in the session's history as unfinished evidence. A run
-	// that ended on its own records its result whether or not the request is
-	// still there to hear it.
 	if ctx.Err() != nil && checkErr != nil {
 		return SessionCheckRun{}, &APIError{Code: Internal, Message: fmt.Sprintf("the check run of session %s was cancelled before it finished", stream)}
 	}
@@ -617,10 +525,6 @@ func (s *Service) sessionCheck(ctx context.Context, raw string) (SessionCheckRun
 	return sr, nil
 }
 
-// sessionPush pushes the session branch to the project's remote under the
-// session's branch name, with no force push and no pull request, using
-// credentials the service holds. It is refused when the remote branch has
-// commits not on the session branch.
 func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushResponse, *APIError) {
 	project, stream, repository, api := s.sessionTrace(raw)
 	if api != nil {
@@ -629,7 +533,6 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	if err := s.step("session-push-looked-up"); err != nil {
 		return SessionPushResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	// The lease covers every remote phase after admission.
 	lock := sessionLock(repository, stream)
 	if !lock.TryLock() {
 		return SessionPushResponse{}, &APIError{Code: Conflict, Message: "the session is ending; try again once it finishes"}
@@ -671,12 +574,6 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	}
 	expected := ""
 	if remoteExists {
-		// A remote tip the clone has never fetched is unknown to it, and
-		// asking merge-base to compare against an unknown commit fails
-		// outright instead of answering. Any commit the session branch
-		// already contains is necessarily present locally, so an unknown
-		// remote tip cannot be one of them: it is refused the same as a
-		// known commit merge-base reports is not an ancestor.
 		known, err := g.Known(ctx, remoteCommit)
 		if err != nil {
 			return SessionPushResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot check whether the remote branch %s is known locally: %v", branch, err)}
@@ -698,21 +595,6 @@ func (s *Service) sessionPush(ctx context.Context, raw string) (SessionPushRespo
 	return SessionPushResponse{Remote: remote, Branch: branch, Commit: head}, nil
 }
 
-// sessionEnd ends a session: refused while a turn is running, otherwise the
-// session's state moves to ended and its worktree and stored model-session
-// state are released. Its branch and commits, thread and trace stay
-// readable. Ending an already-ended session retries releasing whatever an
-// earlier, interrupted end left behind, and otherwise does nothing more.
-//
-// The transition to ended and both releases all happen under the same
-// per-session lock sessionMessage holds from its busy check through
-// recording the turn it starts, and sessionCommit and sessionCheck recheck
-// before acting: holding it across the whole operation, rather than only
-// across the transition, closes the window a split critical section would
-// leave open, where a commit or check could see ended still false, then
-// acquire the lock only after the transition finished but before the
-// worktree and model-session state were actually released, and act on a
-// worktree sessionEnd was concurrently tearing down.
 func (s *Service) sessionEnd(ctx context.Context, raw string) (SessionView, *APIError) {
 	project, stream, repository, api := s.sessionTrace(raw)
 	if api != nil {

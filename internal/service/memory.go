@@ -15,9 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// memoryTurns adds authenticated context tools to the existing role boundary.
-// Narrowed turns retain their narrower grants.
-// Exploratory sessions receive only the read tools, at the observer class.
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
 	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
 		assignment, err := assignmentContext(repo, scope)
@@ -65,9 +62,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	return turns
 }
 
-// registerHearsaySecrets registers the credential values the configuration
-// references, so they are redacted from logs and errors from the moment the
-// configuration is loaded.
 func registerHearsaySecrets(h config.Hearsay) {
 	if h.URL == "" {
 		return

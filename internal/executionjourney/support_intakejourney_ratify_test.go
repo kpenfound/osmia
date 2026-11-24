@@ -1,8 +1,9 @@
 package executionjourney
 
 import (
-	config "github.com/kpenfound/osmia/internal/config"
 	testing "testing"
+
+	config "github.com/kpenfound/osmia/internal/config"
 )
 
 func (f *shedFixture) inboxEntries(t *testing.T, stream config.WorkstreamID, kind string) []InboxEntry {

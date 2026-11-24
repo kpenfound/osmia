@@ -3,6 +3,13 @@ package executionjourney
 import (
 	context "context"
 	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
 	systemone "github.com/kpenfound/agentcore/jev/systemone"
@@ -13,12 +20,6 @@ import (
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	testing "testing"
-	time "time"
 )
 
 // newSessionControlsFixture is newSessionChatFixture but also returns the

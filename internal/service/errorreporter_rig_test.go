@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/errorreport"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const (

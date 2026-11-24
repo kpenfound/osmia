@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestConfigReportsDriftOfTheTopLevelFileOnly(t *testing.T) {

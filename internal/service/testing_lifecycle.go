@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/config"
@@ -45,13 +44,13 @@ func (a TestAccess) CrossRepoWorkgroupIDs(ctx context.Context, repository *trace
 	return a.s.crossRepoWorkgroupIDs(ctx, repository)
 }
 func (a TestAccess) WorkgroupInbox(ctx context.Context, known *trace.Repository, id config.WorkgroupID) ([]InboxEntry, *APIError) {
-	return a.s.workgroupInbox(ctx, known, id)
+	return a.s.intake().WorkgroupInbox(ctx, known, id)
 }
 func (a TestAccess) OpenDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	return a.s.openDecisions(ctx, repository, w)
 }
 func (a TestAccess) RatifyMember(ctx context.Context, o *shedOwner, asked shed.Pin) (RatifyResponse, *APIError) {
-	return a.s.ratifyMember(ctx, o, asked)
+	return a.s.intake().RatifyMember(ctx, o, asked)
 }
 func (a TestAccess) ShedAction(raw string, states ...string) (*shedOwner, *APIError) {
 	return a.s.shedAction(raw, states...)
@@ -113,9 +112,6 @@ func (a TestAccess) SetFixtureState(cfg *config.Config, opts Options, store *run
 }
 func (a TestAccess) SetActivity(r *activity.Registry) { a.s.activity = r }
 func (a TestAccess) SetHub(h *eventstream.Hub)        { a.s.hub = h }
-func (a TestAccess) NotifyPass(ctx context.Context, retry time.Duration) {
-	newNotifier(a.s, retry, nil).pass(ctx)
-}
 
 var TestBaseEntry = baseEntry
 var TestReapSandboxes = reapSandboxes

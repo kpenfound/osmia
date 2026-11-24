@@ -5,15 +5,16 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	reflect "reflect"
+	sync "sync"
+	testing "testing"
+	time "time"
+
 	network "github.com/chromedp/cdproto/network"
 	chromedp "github.com/chromedp/chromedp"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	reflect "reflect"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 // listenWeb is the configuration that opens the web listener on a free

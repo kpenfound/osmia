@@ -15,9 +15,6 @@ import (
 
 const projectContextTool = "project_context"
 
-// projectContext exposes the charter, the entity map and the notices, never
-// another workstream's private records. Offsets page sorted latest records or
-// exact content.
 func projectContext(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: projectContextTool, Effect: coreadapter.ToolRead,
 		Description: "List, search or read this project's charter, entity map (kb/entities.json) and informational notices. No path lists up to 20 current records; query filters path/content and prefix narrows the namespace (kb/ or notices/). Listing offset is a record index. With path, offset is a byte offset and content is limited to 16 KiB; reuse the returned revision for consistent continuation. next_offset continues either operation; -1 means complete. revision retrieves historical evidence. Notices are informational, not owner rulings. Use factory_context for your workstream's records.",

@@ -9,13 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// reservationWaitPass closes the waits for a shared workflow reservation that a
-// restart left open and whose operation is no longer waiting for its slot, each
-// once and with how it ended. A wait whose operation is still pending stays
-// open: the operation's next admission ends it granted, or a further refusal
-// updates it.
-//
-// The pass only looks; it neither admits nor refuses any operation.
 func (s *Service) reservationWaitPass(repository *trace.Repository) {
 	rec := s.slots
 	project := repository.Project()
@@ -37,7 +30,6 @@ func (s *Service) reservationWaitPass(repository *trace.Repository) {
 	}
 }
 
-// reservationWaitFate says how the recovered wait iv ended, and whether it did.
 func (s *Service) reservationWaitFate(repository *trace.Repository, streams []config.WorkstreamID, iv slotspans.Interval) (string, bool) {
 	if !slices.Contains(streams, iv.Workstream) {
 		return slotspans.Removed, true

@@ -3,6 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/eventstream"
@@ -10,12 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
-	"net/http"
-	"path/filepath"
-	"slices"
-	"strings"
-	"testing"
-	"time"
 )
 
 type fakeWebhook struct{ *fixturekit.Webhook }

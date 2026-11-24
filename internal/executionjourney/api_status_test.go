@@ -5,6 +5,15 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -20,14 +29,6 @@ import (
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 const chiefAgent = intakefixture.ChiefAgent

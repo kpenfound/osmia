@@ -1,10 +1,11 @@
 package executionjourney
 
 import (
+	testing "testing"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	testing "testing"
 )
 
 const askedQuestion = intakefixture.AskedQuestion

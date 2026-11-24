@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"

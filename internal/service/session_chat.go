@@ -15,19 +15,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// sessionServiceActor is the provenance of every service-written record on
-// a session's thread that is not the owner's own message: the working/idle
-// state and a context-rebuilt entry.
 var sessionServiceActor = trace.Actor{Kind: "service", ID: "session"}
 
-// sessionTrace resolves raw to a session workstream of an active project and
-// returns the project's open trace. An unknown workstream, one not in an
-// active project or one that is not a session is refused with not_found.
 func (s *Service) sessionTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
 	if err != nil {
@@ -58,34 +53,23 @@ func (s *Service) sessionTrace(raw string) (config.ProjectID, config.WorkstreamI
 	return "", "", nil, notFound
 }
 
-// sessionLockKey identifies one session's busy lock: a repository and the
-// one of its workstreams that is the session, so every session of every
-// project has its own lock.
 type sessionLockKey struct {
 	repository *trace.Repository
 	stream     config.WorkstreamID
 }
 
-// sessionLocks is the Go guard against two concurrent calls to sessionMessage
-// against the same session both finding it idle and both recording an owner
-// message: at most one turn ever runs per session, and there is no
-// message queue, so a message that cannot take its session's lock
-// immediately is refused as busy rather than waiting for the turn in
-// flight to finish.
 type sessionGate struct {
 	sync.Mutex
 	controls atomic.Int64
 }
 
-var sessionLocks sync.Map // sessionLockKey -> *sessionGate
+var sessionLocks sync.Map
 
 func sessionLock(repository *trace.Repository, stream config.WorkstreamID) *sessionGate {
 	v, _ := sessionLocks.LoadOrStore(sessionLockKey{repository, stream}, &sessionGate{})
 	return v.(*sessionGate)
 }
 
-// lastSessionRequestAt returns the request time of the thread's most recent
-// turn, or the zero time when it has none yet.
 func lastSessionRequestAt(th trace.Thread) time.Time {
 	if n := len(th.Turns); n > 0 {
 		return th.Turns[n-1].Request.At
@@ -93,9 +77,6 @@ func lastSessionRequestAt(th trace.Thread) time.Time {
 	return time.Time{}
 }
 
-// ensureSessionThread creates the session's one agent thread unless it
-// already exists, and returns it. The first creation fixes the identity's
-// timestamp; later calls leave it unchanged and never retry creation.
 func ensureSessionThread(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time) (trace.Thread, error) {
 	if th, err := repository.Thread(stream, sessionAgentID); err == nil {
 		return th, nil
@@ -123,13 +104,8 @@ type SessionEntry struct {
 	At   time.Time `json:"at"`
 }
 
-// sessionEntryPrefix is the per-workstream document path prefix every
-// service entry is recorded under.
 const sessionEntryPrefix = "session-entries/"
 
-// recordSessionEntry appends a service entry to the session's thread, such
-// as a commit made, a check result, or a context-rebuilt notice, so the
-// next turn receives it. A retry with the same id records nothing more.
 func recordSessionEntry(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, id string, at time.Time, text string) error {
 	data, err := json.Marshal(SessionEntry{ID: id, Text: text, At: at})
 	if err != nil {
@@ -144,9 +120,6 @@ func recordSessionEntry(ctx context.Context, repository *trace.Repository, proje
 	return nil
 }
 
-// sessionEntriesSince returns the session's service entries recorded after
-// cutoff, oldest first: each reaches exactly one turn, the first one whose
-// request comes after it was recorded.
 func sessionEntriesSince(repository *trace.Repository, stream config.WorkstreamID, cutoff time.Time) ([]SessionEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -169,9 +142,6 @@ func sessionEntriesSince(repository *trace.Repository, stream config.WorkstreamI
 	return out, nil
 }
 
-// sessionPrompt is one turn's input: the owner's new message, preceded by
-// any service entries recorded since the previous turn, so the agent
-// learns what the owner did with its work.
 func sessionPrompt(entries []SessionEntry, text string) string {
 	if len(entries) == 0 {
 		return text
@@ -186,12 +156,7 @@ func sessionPrompt(entries []SessionEntry, text string) string {
 	return b.String()
 }
 
-// setSessionState moves the session's SessionSubject workflow value to to,
-// recording why, unless it is already there. A retry with the same id is
-// idempotent.
 func setSessionState(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, at time.Time, id, cause, to string) error {
-	// Each effect belongs to one turn even if a later turn changed the state.
-	// A retry after its durable write must not change the later turn's state.
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	if err != nil {
 		return err
@@ -215,17 +180,14 @@ func setSessionState(ctx context.Context, repository *trace.Repository, project 
 	return err
 }
 
-// sessionConversationEntry converts a session's queued turn into a
-// ConversationEntry, the same shape the chief-of-staff conversation uses,
-// distinguishing a turn the owner stopped from one that failed.
 func sessionConversationEntry(q trace.QueuedTurn) ConversationEntry {
 	state := TurnQueued
 	switch {
 	case q.Claim == nil:
 	case q.CompletedAt.IsZero():
-		state = TurnRunning
+		state = api.TurnRunning
 	case q.Response != nil && q.Response.Stop != nil:
-		state = TurnStopped
+		state = api.TurnStopped
 	case q.Status() == "failed" || q.Status() == "interrupted":
 		state = TurnFailed
 	default:
@@ -235,11 +197,6 @@ func sessionConversationEntry(q trace.QueuedTurn) ConversationEntry {
 	return ConversationEntry{Turn: req.TurnID, Kind: "message", Text: req.Prompt, At: req.At, State: state, QueuedReason: queuedReason(trace.Thread{Turns: []trace.QueuedTurn{q}}, q)}
 }
 
-// sessionMessage records text as the next owner message on an idle
-// session's thread and starts exactly one agent turn on the session's
-// profile. It is refused, recording nothing, when the message is empty,
-// the session's profile is no longer one the service can run, or a turn is
-// already running.
 func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMessageRequest) (ConversationEntry, *APIError) {
 	project, stream, repository, api := s.sessionTrace(raw)
 	if api != nil {
@@ -269,7 +226,6 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	if _, _, _, api := s.sessionTrace(raw); api != nil {
 		return ConversationEntry{}, api
 	}
-	// End and destroy share this admission guard.
 	if ended, err := sessionEnded(repository, stream); err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the state of session %s; check the trace repository", stream)}
 	} else if ended {
@@ -311,8 +267,6 @@ func (s *Service) sessionMessage(ctx context.Context, raw string, req SessionMes
 	return sessionConversationEntry(q), nil
 }
 
-// dispatchSessionTurn wakes reconciliation of the durable session queue. The
-// conversation path publishes and reconciles the turn's operation.
 func dispatchSessionTurn(ctx context.Context, repository *trace.Repository, project config.ProjectID, stream config.WorkstreamID, turn string, at time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -321,9 +275,6 @@ func dispatchSessionTurn(ctx context.Context, repository *trace.Repository, proj
 	return nil
 }
 
-// sessionStop stops a session's running turn: it is recorded as stopped,
-// its worktree changes already made are kept, and the session returns to
-// idle. Stopping an idle session does nothing.
 func (s *Service) sessionStop(ctx context.Context, raw string) (SessionView, *APIError) {
 	_, stream, _, api := s.sessionTrace(raw)
 	if api != nil {

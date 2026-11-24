@@ -2,10 +2,11 @@ package executionjourney
 
 import (
 	context "context"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	reflect "reflect"
 	testing "testing"
 	time "time"
+
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // Approving delivery with a revision the client's view is now stale on

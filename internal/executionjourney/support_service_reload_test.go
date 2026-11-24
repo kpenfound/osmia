@@ -1,8 +1,9 @@
 package executionjourney
 
 import (
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	testing "testing"
+
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func reloadFails(t *testing.T, c *Client, path, field string) {

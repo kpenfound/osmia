@@ -12,11 +12,9 @@ import (
 	testing "testing"
 	time "time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 

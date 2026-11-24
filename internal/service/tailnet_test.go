@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func withTailnet(t *testing.T, opts *Options, names ...string) **fixturekit.TailnetNode {
@@ -311,7 +313,7 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 	_, c := start(t, opts)
 	node := *joined
 	for _, want := range []TailnetStatus{
-		{State: TailnetConnecting},
+		{State: api.TailnetConnecting},
 		{State: TailnetNeedsLogin, LoginURL: "https://login.tailscale.com/a/abc"},
 		{State: TailnetNeedsLogin},
 		{State: TailnetUp},

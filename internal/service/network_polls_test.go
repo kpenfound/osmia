@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func TestNetworkObserversShareGitCapacityWithoutWorkflowOrdering(t *testing.T) {

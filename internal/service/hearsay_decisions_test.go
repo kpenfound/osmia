@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -513,7 +513,7 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 	if u.str("kind") != "update" || u.Source != "osmia-work" || u.str("author") != "" || u.str("workstream") != "" || u.str("project") != string(f.repo.Project()) {
 		t.Fatalf("update: %s on %s", u.Raw, u.Source)
 	}
-	if !strings.Contains(u.str("text"), "Store") || !strings.Contains(u.str("text"), "Caused by") || u.str("created_at") != hearsayTime(hr(3)) || u.str("update") == "" {
+	if !strings.Contains(u.str("text"), "Store") || u.str("created_at") != hearsayTime(hr(3)) || u.str("update") == "" {
 		t.Fatalf("update: %s", u.Raw)
 	}
 	for _, field := range []string{"state", "status"} {

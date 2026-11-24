@@ -2,9 +2,6 @@ package intakejourney
 
 import (
 	context "context"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	fmt "fmt"
 	slices "slices"
 	strings "strings"
@@ -13,6 +10,7 @@ import (
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"

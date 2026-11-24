@@ -2,21 +2,17 @@ package intakejourney
 
 import (
 	context "context"
-	cdppage "github.com/chromedp/cdproto/page"
+	slices "slices"
+	strings "strings"
+	testing "testing"
+	time "time"
 
+	cdppage "github.com/chromedp/cdproto/page"
 	chromedp "github.com/chromedp/chromedp"
 	plan "github.com/kpenfound/osmia/internal/plan"
-
 	seal "github.com/kpenfound/osmia/internal/seal"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
-
-	slices "slices"
-
-	strings "strings"
-
-	testing "testing"
-	time "time"
 )
 
 // The page lists escalated questions, a contested unit and an amendment

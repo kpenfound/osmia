@@ -3,12 +3,14 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/api"
 	"regexp"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -16,8 +18,6 @@ var finalCheckPathPattern = regexp.MustCompile(`^final/checks-[0-9]+\.json$`)
 var finalCheckStartPathPattern = regexp.MustCompile(`^final/checks-[0-9]+-attempt-[0-9]+-started\.json$`)
 var unitSelectionPathPattern = regexp.MustCompile(`^units/[^/]+/checks-[0-9]+-selection\.json$`)
 
-// feedChecks joins durable starts with results. It reads final result revisions
-// separately: retries replace that document, but each attempt remains visible.
 func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -43,14 +43,13 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 		}
 		return nil
 	}
-	// Starts are read first so their time and selection survive a later result.
 	for _, d := range docs {
 		if d.Revision != latest[d.ID] {
 			continue
 		}
 		switch {
 		case unitSelectionPathPattern.MatchString(d.Path):
-			var start UnitCheckSelection
+			var start execution.UnitCheckSelection
 			if err := decode(d, &start); err != nil {
 				return nil, err
 			}
@@ -71,7 +70,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 	}
 	for _, d := range docs {
 		switch {
-		case checkPathPattern.MatchString(d.Path) && d.Revision == latest[d.ID]:
+		case execution.CheckPathPattern.MatchString(d.Path) && d.Revision == latest[d.ID]:
 			var run UnitCheckRun
 			if err := decode(d, &run); err != nil {
 				return nil, err
@@ -94,8 +93,6 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &run); err != nil {
 				return nil, err
 			}
-			// Results without start evidence (including preparation failures and
-			// legacy attempts) remain distinct by document revision.
 			key := finalCheckAttemptDocument(run.Review, run.Attempt)
 			entry := FeedEntry{Kind: "final_checks", At: d.At, FinalChecks: &FeedFinalChecks{TraceURL: run.TraceURL, Review: run.Review, State: run.Status, Source: run.Source, PullRequest: run.PullRequest, Push: run.Push, StatusURL: run.StatusURL, Counts: run.Counts, FailedChecks: run.FailedChecks, Reruns: run.Reruns, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[key]; ok && run.Attempt > 0 {
@@ -117,8 +114,6 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &run); err != nil {
 				return nil, err
 			}
-			// A result supersedes the run's unfinished evidence; it keeps that
-			// evidence's link when the result carries none.
 			entry := FeedEntry{Kind: "session_checks", At: run.FinishedAt, SessionChecks: &api.FeedSessionChecks{Run: run.Run, Commit: run.Commit, Kind: run.Kind, State: run.Status, Selection: feedSelection(run.Selection), Failed: run.Failed, Flaky: run.Flaky, Error: run.Error, TraceURL: run.TraceURL, StartedAt: run.StartedAt, FinishedAt: &run.FinishedAt}}
 			if i, ok := indexes[d.ID]; ok && entry.SessionChecks.TraceURL == "" {
 				entry.SessionChecks.TraceURL = out[i].SessionChecks.TraceURL
@@ -129,7 +124,7 @@ func feedChecks(repository *trace.Repository, stream config.WorkstreamID) ([]Fee
 			if err := decode(d, &report); err != nil {
 				return nil, err
 			}
-			review := &FeedFinalReview{Review: report.Review, State: report.Outcome, Reader: report.Reader, Turn: report.Turn, Failure: report.Failure, Blocking: countSeverity(report.Findings, FindingBlocking)}
+			review := &api.FeedFinalReview{Review: report.Review, State: report.Outcome, Reader: report.Reader, Turn: report.Turn, Failure: report.Failure, Blocking: delivery.CountSeverity(report.Findings, FindingBlocking)}
 			for _, criterion := range report.Criteria {
 				if strings.TrimSpace(criterion.Gap) != "" {
 					review.Gaps++

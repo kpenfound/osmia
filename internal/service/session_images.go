@@ -18,8 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// showImageTool reads from the active view. os.Root also confines the open if a
-// symlink changes between resolution and reading.
 func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: "show_image", Description: "Attach a PNG or JPEG from your current worktree to the session chat (at most 5 MiB)", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
@@ -38,8 +36,6 @@ func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view *
 				return nil, err
 			}
 			kind := http.DetectContentType(data)
-			// Bind the key to the turn, path and bytes, so retrying a call is harmless,
-			// while replacing a screenshot within a turn can attach a new image.
 			key := fmt.Sprintf("%s/%s/%s/%x", scope.Thread, scope.Turn, in.Path, sha256.Sum256(data))
 			h := trace.Header{Project: repository.Project(), Workstream: config.WorkstreamID(scope.Workstream), At: now(), Actor: trace.Actor{Kind: "agent", ID: scope.Thread}, Cause: scope.Turn}
 			v, err := repository.RecordImage(ctx, h, key, kind, data, scope.Turn)

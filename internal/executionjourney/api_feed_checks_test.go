@@ -4,15 +4,16 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	checkrun "github.com/kpenfound/osmia/internal/checks"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	filepath "path/filepath"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	checkrun "github.com/kpenfound/osmia/internal/checks"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestFeedUnitCheckRunShowsTheSelectionThatRanAfterARefusal(t *testing.T) {

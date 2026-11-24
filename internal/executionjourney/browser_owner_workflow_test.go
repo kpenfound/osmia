@@ -4,6 +4,13 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+
 	chromedp "github.com/chromedp/chromedp"
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -13,12 +20,6 @@ import (
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	atomic "sync/atomic"
-	testing "testing"
 )
 
 // TestBrowserOwnerWorkflowDemonstration takes one workstream from a hand-in

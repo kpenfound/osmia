@@ -22,86 +22,58 @@ import (
 
 const followUpTool = "follow_up"
 
-// followUpTurnPrefix opens the turn ID of every follow-up turn.
 const followUpTurnPrefix = "follow_up_"
 
-// The shortest and longest wait a follow_up may ask for.
 const (
 	minFollowUp = 5 * time.Minute
 	maxFollowUp = 24 * time.Hour
 )
 
-// followUpActor is who a follow-up turn, and a check-back the service
-// schedules itself, is attributed to.
 var followUpActor = trace.Actor{Kind: "service", ID: "follow-up"}
 
-// The reasons of the check-backs the service schedules itself.
 const (
 	autoFollowUpReason  = "an action you took started no work"
 	stallFollowUpReason = "your turn on a stall notice ended without an action that queued work, a follow_up or an attention item for the owner"
 )
 
-// stallTurnRule ends every stall notice and follow-up turn prompt. A
-// completed turn whose prompt carries it, other than a follow-up turn, is a
-// stall notice's turn.
 const stallTurnRule = "End this turn with one of: an action whose result shows queued work, a follow_up, or a set_status attention item for the owner."
 
-// The states of a follow-up.
 const (
 	followUpPending   = "pending"
 	followUpFired     = "fired"
 	followUpCancelled = "cancelled"
 )
 
-// followUp is one durable wake-up of a chief-of-staff thread, recorded under
-// follow-ups/ in the thread's own trace and workstream. Each thread holds at
-// most one per workstream it names, an empty Workstream naming the whole
-// thread; a newer revision replaces an unfired one.
 type followUp struct {
 	ID          string              `json:"id"`
 	Workstream  config.WorkstreamID `json:"workstream,omitempty"`
 	Reason      string              `json:"reason"`
 	ScheduledAt time.Time           `json:"scheduled_at"`
 	Due         time.Time           `json:"due"`
-	// By is "chief" for the chief's own follow_up and "service" for a
-	// check-back the service scheduled.
-	By string `json:"by"`
-	// Turn is the chief-of-staff turn the follow-up was scheduled in, or
-	// because of.
-	Turn      string `json:"turn"`
-	State     string `json:"state"`
-	FiredTurn string `json:"fired_turn,omitempty"`
-	// Replaces is the reason of the unfired follow-up this one replaced.
-	Replaces string `json:"replaces,omitempty"`
-	// Refires counts how often the follow-up was put back to pending
-	// because the turn it fired ended failed or interrupted.
-	Refires int `json:"refires,omitempty"`
+	By          string              `json:"by"`
+	Turn        string              `json:"turn"`
+	State       string              `json:"state"`
+	FiredTurn   string              `json:"fired_turn,omitempty"`
+	Replaces    string              `json:"replaces,omitempty"`
+	Refires     int                 `json:"refires,omitempty"`
 }
 
-// maxFollowUpRefires bounds how often a follow-up whose turn ended failed
-// or interrupted fires again.
 const maxFollowUpRefires = 3
 
-// followUpRefireDelay is how long after its turn ended a follow-up fires
-// again for the nth time: 5, 10 and then 20 minutes.
 func followUpRefireDelay(n int) time.Duration {
 	return minFollowUp << (n - 1)
 }
 
-// followUpActed records that a stall notice's turn ended its quiet itself:
-// an action of the turn queued work, or it set an attention item.
 type followUpActed struct {
 	Turn string `json:"turn"`
 	By   string `json:"by"`
 }
 
-// followUpRecords is what a chief thread's workstream records of follow-ups.
 type followUpRecords struct {
 	latest   map[string]followUp
 	revision map[string]int
-	// turns holds every turn any revision was scheduled in or because of.
-	turns map[string]bool
-	acted map[string]bool
+	turns    map[string]bool
+	acted    map[string]bool
 }
 
 func followUpID(thread string, named config.WorkstreamID) string {
@@ -114,14 +86,11 @@ func followUpActedID(turn string) string {
 	return "follow-up-acted-" + hex.EncodeToString(sum[:])
 }
 
-// followUpTurnID is the turn a follow-up's revision fires.
 func followUpTurnID(id string, revision int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\n%d", id, revision)))
 	return followUpTurnPrefix + hex.EncodeToString(sum[:20])
 }
 
-// followUpWindow is how long after an action that started no work the service
-// checks back: [loop] stall_after, or its default while the watchdog is off.
 func followUpWindow(cfg *config.Config) time.Duration {
 	if cfg == nil {
 		return config.DefaultStallAfter
@@ -159,7 +128,6 @@ func readFollowUps(r *trace.Repository, stream config.WorkstreamID) (followUpRec
 	return out, nil
 }
 
-// pending returns the thread's unfired follow-ups, soonest first.
 func (f followUpRecords) pending() []followUp {
 	var out []followUp
 	for _, x := range f.latest {
@@ -177,11 +145,6 @@ func recordFollowUp(ctx context.Context, r *trace.Repository, stream config.Work
 	return r.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// scheduleFollowUp schedules the service's check-back of the chief thread
-// because of turn, window after at, about the workstream named (empty for
-// the whole thread). It schedules none when turn already scheduled one, or
-// the chief did, or an unfired follow-up of the same workstream is due no
-// later. It returns when the check-back it scheduled is due, zero for none.
 func scheduleFollowUp(ctx context.Context, r *trace.Repository, host config.WorkstreamID, thread, turn string, named config.WorkstreamID, reason string, window time.Duration, at time.Time) (time.Time, error) {
 	recs, err := readFollowUps(r, host)
 	if err != nil || recs.turns[turn] {
@@ -203,9 +166,6 @@ func scheduleFollowUp(ctx context.Context, r *trace.Repository, host config.Work
 	return due, nil
 }
 
-// markFollowUpActed records that turn, when it is a stall notice's turn,
-// queued work or set an attention item, so the service schedules no
-// check-back for it.
 func markFollowUpActed(ctx context.Context, r *trace.Repository, host config.WorkstreamID, turn, by string, at time.Time) error {
 	th, err := r.Thread(host, trace.ChiefOfStaff)
 	if errors.Is(err, os.ErrNotExist) {
@@ -231,12 +191,10 @@ func markFollowUpActed(ctx context.Context, r *trace.Repository, host config.Wor
 	return nil
 }
 
-// stallTurn reports whether q is the chief's turn on a stall notice.
 func stallTurn(q trace.QueuedTurn) bool {
 	return !strings.HasPrefix(q.Request.TurnID, followUpTurnPrefix) && strings.Contains(q.Request.Prompt, stallTurnRule)
 }
 
-// newFollowUpTool is the follow_up tool of one chief-of-staff turn.
 func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	description := "Schedule a turn of your own to check back later. after: a Go duration from 5m to 24h, such as 45m or 3h. reason: what to check, which the turn's prompt repeats with what changed since. The service keeps one pending follow-up per workstream: a newer one replaces an unfired one. Use it whenever you expect work to start or finish later, instead of telling the owner it will happen; owner pauses do not stop it."
 	if scope.Role == trace.ChiefOfStaff {
@@ -291,8 +249,6 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			if err := recordFollowUp(ctx, r, host, recs.revision[id]+1, f, actor, scope.Turn, at); err != nil {
 				return nil, err
 			}
-			// The chief chose its own check-back: the service's from this
-			// turn are withdrawn.
 			for other, x := range recs.latest {
 				if other == id || x.State != followUpPending || x.By != "service" || x.Turn != scope.Turn {
 					continue
@@ -313,8 +269,6 @@ func newFollowUpTool(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}}
 }
 
-// renderFollowUps lists the pending follow-ups of the chief thread hosted on
-// host, for the chief's project context.
 func renderFollowUps(r *trace.Repository, host config.WorkstreamID) (string, error) {
 	recs, err := readFollowUps(r, host)
 	if err != nil {
@@ -340,29 +294,17 @@ func renderFollowUps(r *trace.Repository, host config.WorkstreamID) (string, err
 	return out.String(), nil
 }
 
-// followUps fires the due follow-ups of the chief threads on a trace, and
-// schedules the check-back of each stall notice's turn that ended without
-// ending its quiet.
 type followUps struct {
-	now     func() time.Time
-	window  time.Duration
-	profile func() (coreadapter.Profile, error)
-	// system returns the system prompt of a follow-up turn of the chief
-	// thread hosted on host in r.
-	system func(ctx context.Context, r *trace.Repository, host config.WorkstreamID) (string, error)
-	// service, when not nil, supplies the holds the summary of queued work
-	// reads.
-	service *Service
-	// archived, when not nil, returns the archive record of a workstream
-	// the owner or the chief archived.
+	now      func() time.Time
+	window   time.Duration
+	profile  func() (coreadapter.Profile, error)
+	system   func(ctx context.Context, r *trace.Repository, host config.WorkstreamID) (string, error)
+	service  *Service
 	archived func(raw string) (runtime.Archive, bool)
 }
 
-// stallLookback bounds how long after a stall notice's turn completed its
-// check-back may still be scheduled.
 const stallLookback = 24 * time.Hour
 
-// pass handles every stream of r whose chief thread it hosts.
 func (f followUps) pass(ctx context.Context, r *trace.Repository, streams []config.WorkstreamID) error {
 	var failed []error
 	for _, stream := range streams {
@@ -424,16 +366,12 @@ func (f followUps) stream(ctx context.Context, r *trace.Repository, host config.
 			continue
 		}
 		if err := f.fire(ctx, r, host, th, x, recs.revision[id], now); err != nil {
-			// One follow-up that cannot fire does not hold back the others.
 			failed = append(failed, fmt.Errorf("follow-up %s: %w", id, err))
 		}
 	}
 	return errors.Join(failed...)
 }
 
-// refire puts x back to pending when the turn it fired ended failed or
-// interrupted within stallLookback and it has fired again fewer than
-// maxFollowUpRefires times, due followUpRefireDelay after that turn ended. It returns x as recorded.
 func (f followUps) refire(ctx context.Context, r *trace.Repository, host config.WorkstreamID, th trace.Thread, x followUp, revision int) (followUp, error) {
 	if x.State != followUpFired || x.FiredTurn == "" || x.Refires >= maxFollowUpRefires {
 		return x, nil
@@ -451,7 +389,6 @@ func (f followUps) refire(ctx context.Context, r *trace.Repository, host config.
 	again.Due = ended.CompletedAt.Add(followUpRefireDelay(again.Refires))
 	err := recordFollowUp(ctx, r, host, revision+1, again, followUpActor, x.FiredTurn, f.now())
 	if errors.Is(err, trace.ErrConflict) {
-		// The chief replaced the follow-up meanwhile; the newer one stands.
 		return x, nil
 	}
 	if err != nil {
@@ -460,8 +397,6 @@ func (f followUps) refire(ctx context.Context, r *trace.Repository, host config.
 	return again, nil
 }
 
-// fire queues the turn of x's revision on the chief thread, unless a pass
-// before a restart already queued it, and records x fired.
 func (f followUps) fire(ctx context.Context, r *trace.Repository, host config.WorkstreamID, th trace.Thread, x followUp, revision int, now time.Time) error {
 	turn := followUpTurnID(x.ID, revision)
 	queued := slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
@@ -490,15 +425,11 @@ func (f followUps) fire(ctx context.Context, r *trace.Repository, host config.Wo
 	x.State, x.FiredTurn = followUpFired, turn
 	err := recordFollowUp(ctx, r, host, revision+1, x, followUpActor, turn, now)
 	if errors.Is(err, trace.ErrConflict) {
-		// The chief replaced the follow-up meanwhile; the newer one stands.
 		return nil
 	}
 	return err
 }
 
-// prompt is the prompt of x's follow-up turn: why and when it was
-// scheduled, what changed since on the workstream it names or every member
-// of the thread's workgroup, and the turn's rule.
 func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x followUp, now time.Time) (string, error) {
 	var b strings.Builder
 	who := "You scheduled"
@@ -548,8 +479,6 @@ func (f followUps) prompt(r *trace.Repository, host config.WorkstreamID, x follo
 	return b.String(), nil
 }
 
-// archiveResolution names the state an archived workstream ended in and,
-// when recorded, how it was resolved.
 func archiveResolution(a runtime.Archive) string {
 	parts := []string{emptyAsNone(a.State)}
 	if a.ResolutionEvidence != "" {
@@ -558,12 +487,8 @@ func archiveResolution(a runtime.Archive) string {
 	return strings.Join(parts, ", ")
 }
 
-// maxFollowUpChanges bounds the transitions a follow-up turn's prompt lists
-// for one workstream.
 const maxFollowUpChanges = 20
 
-// summary says what changed on stream since, from its transitions, where it
-// stands and what is queued or running in it now.
 func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, since time.Time) (string, error) {
 	var b strings.Builder
 	feature, err := r.Workflow(stream, trace.FeatureSubject)
@@ -617,16 +542,10 @@ func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, sinc
 	return b.String(), nil
 }
 
-// followUpPrompt opens the system prompt of every follow-up turn; the
-// chief's guidance and the workstream's rendered bundle follow it.
 const followUpPrompt = "You are the chief of staff for workstream %s. The prompt is a follow-up that came due: why it was scheduled, when, and what changed since. The project context below was assembled when it came due."
 
-// followUpEvery is how often the conversation path reads a trace's
-// follow-ups.
 const followUpEvery = 5 * time.Second
 
-// followUps fires the due follow-ups of the chief threads repository hosts,
-// at most once per followUpEvery of wall-clock time.
 func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repository) error {
 	if p.followUpRan == nil {
 		p.followUpRan = map[*trace.Repository]time.Time{}
@@ -655,8 +574,6 @@ func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repo
 	return f.pass(ctx, repository, streams)
 }
 
-// followUpSystem is the system prompt of a follow-up turn of the chief thread
-// target hosts on host.
 func (s *Service) followUpSystem(ctx context.Context, target *trace.Repository, host config.WorkstreamID) (string, error) {
 	bundle, err := target.ProjectFor(host)
 	if err != nil {

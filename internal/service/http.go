@@ -49,9 +49,6 @@ func fail(w http.ResponseWriter, code Code) {
 	respond(w, status, ErrorResponse{Error: APIError{Code: code, Message: message}})
 }
 
-// failWith reports a project operation error with the message the operation
-// composed: field names, identities and paths the caller supplied, never raw
-// file contents or parser output.
 func failWith(w http.ResponseWriter, api *APIError) {
 	status := http.StatusInternalServerError
 	switch api.Code {
@@ -95,8 +92,6 @@ func (s *Service) configuration() ConfigResponse {
 	for _, id := range s.projectsByNewestWorkstream(cfg) {
 		p := byID[id]
 		view := projectView(cfg.Root, p)
-		// A project without a trace, or removed since the snapshot, has no
-		// charter to report.
 		state, err := s.charterState(p.ID)
 		if err == nil {
 			view.CharterState = &state
@@ -192,10 +187,6 @@ func (s *Service) effectiveProfiles(state runtime.State) map[string]EffectivePro
 	return profiles
 }
 
-// sessionCheckWriteMargin pads the write deadline a session check's HTTP
-// response gets beyond the project's own checks_timeout, the budget the
-// check itself is bounded by, so recording the result after the check
-// finishes is never cut off by the deadline that bounds the check.
 const sessionCheckWriteMargin = time.Minute
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +227,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			fail(w, Forbidden)
 			return
 		}
-		respond(w, http.StatusAccepted, StopResponse{Stopping: true})
+		respond(w, http.StatusAccepted, api.StopResponse{Stopping: true})
 		s.cancel()
 		return
 	}
@@ -264,10 +255,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			respond(w, 200, s.runtimeView())
 			return
 		case Prefix + "/status":
-			// statusList assembles the workstream list from the trace and
-			// the runtime store (status.go); a request whose view cannot
-			// refresh within coreReadBound answers with the last one
-			// instead of blocking past it (bounded_read.go, boundedView).
 			out, stale := readview.Bounded(r.Context(), &s.statusViews, coreReadBound, s.statusList)
 			out.Tailnet = s.tailnetStatus(r.Context())
 			if stale {
@@ -322,7 +309,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.URL.Path == Prefix+"/design" {
-			if out, api := s.designList(r.URL.Query().Get("project")); api != nil {
+			if out, api := s.intake().DesignList(r.URL.Query().Get("project")); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)
@@ -446,13 +433,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if id, ok := strings.CutSuffix(r.URL.Path, "/check"); ok && r.Method == http.MethodPost {
 		if id, ok = strings.CutPrefix(id, Prefix+"/sessions/"); ok {
-			// A session check runs the project's own check command inline
-			// (session_controls.go, sessionCheck), which routinely outlives
-			// the server's default WriteTimeout; extend the write deadline
-			// to the project's own checks_timeout, the same budget the
-			// check itself is bounded by, plus a margin for recording the
-			// result, the same way the project-add route extends it to
-			// addProjectTimeout.
 			if _, _, repository, api := s.sessionTrace(id); api != nil {
 				failWith(w, api)
 				return
@@ -489,11 +469,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/design" {
-		var v DesignOpenRequest
+		var v api.DesignOpenRequest
 		if !decode(w, r, &v) {
 			return
 		}
-		out, api := s.openDesign(r.Context(), v)
+		out, api := s.intake().OpenDesign(r.Context(), v)
 		if api != nil {
 			failWith(w, api)
 		} else {
@@ -503,11 +483,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if id, ok := strings.CutSuffix(r.URL.Path, "/message"); ok && r.Method == http.MethodPost {
 		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
-			var v DesignMessageRequest
+			var v api.DesignMessageRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			if out, api := s.designMessage(r.Context(), id, v); api != nil {
+			if out, api := s.intake().DesignMessage(r.Context(), id, v); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)
@@ -531,7 +511,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if id, ok := strings.CutSuffix(r.URL.Path, "/start"); ok && r.Method == http.MethodPost {
 		if id, ok = strings.CutPrefix(id, Prefix+"/design/"); ok {
-			var req DesignStartRequest
+			var req api.DesignStartRequest
 			if r.Body != nil && r.ContentLength != 0 {
 				if !decode(w, r, &req) {
 					return
@@ -558,8 +538,6 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/create" {
-		// The create step clones over the network, so it extends the write
-		// deadline the way the project-add route does.
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(createProjectTimeout)); err != nil {
 			fail(w, Internal)
 			return
@@ -581,7 +559,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			failWith(w, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"})
 			return
 		}
-		respond(w, 200, ProjectCreationIdentity{ID: id})
+		respond(w, 200, api.ProjectCreationIdentity{ID: id})
 		return
 	}
 	if raw, ok := strings.CutPrefix(r.URL.Path, Prefix+"/projects/create/"); ok && r.Method == http.MethodGet {
@@ -624,11 +602,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/projects/rebase" {
-		var v ProjectRebaseRequest
+		var v api.ProjectRebaseRequest
 		if !decode(w, r, &v) {
 			return
 		}
-		if out, api := s.rebaseProject(r.Context(), v); api != nil {
+		if out, api := s.lifecycle().RebaseProject(r.Context(), v); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)
@@ -638,7 +616,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/rebase/"); ok {
 		if r.Method != http.MethodPost {
 			fail(w, Unsupported)
-		} else if out, api := s.rebaseWorkstream(r.Context(), id); api != nil {
+		} else if out, api := s.lifecycle().RebaseWorkstream(r.Context(), id); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)
@@ -693,7 +671,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			if !decode(w, r, &v) {
 				return
 			}
-			if out, api := s.ownerMoveWorkstream(r.Context(), stream, v); api != nil {
+			if out, api := s.lifecycle().OwnerMoveWorkstream(r.Context(), stream, v); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)
@@ -716,7 +694,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == Prefix+"/charter" && r.Method == http.MethodGet {
-		if out, api := s.charterProposals(); api != nil {
+		if out, api := s.intake().CharterProposals(); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)
@@ -735,7 +713,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		)
 		switch r.Method {
 		case http.MethodGet:
-			out, api = s.charterProposal(stream, question)
+			out, api = s.intake().CharterProposal(stream, question)
 		case http.MethodPost:
 			var v CharterDecisionRequest
 			if !decode(w, r, &v) {
@@ -765,7 +743,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		)
 		switch r.Method {
 		case http.MethodGet:
-			out, api = s.amendmentView(stream, id)
+			out, api = s.intake().AmendmentView(stream, id)
 		case http.MethodPost:
 			var v AmendmentDecisionRequest
 			if !decode(w, r, &v) {
@@ -786,48 +764,48 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/shed/"); ok && r.Method == http.MethodPost {
 		action, id, _ := strings.Cut(rest, "/")
 		var (
-			out ShedResponse
-			api *APIError
+			out    ShedResponse
+			apiErr *APIError
 		)
 		switch action {
 		case "object":
-			var v ShedObjectRequest
+			var v api.ShedObjectRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			out, api = s.shedObject(r.Context(), id, v)
+			out, apiErr = s.intake().ShedObject(r.Context(), id, v)
 		case "rule":
-			var v ShedRuleRequest
+			var v api.ShedRuleRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			out, api = s.shedRule(r.Context(), id, v)
+			out, apiErr = s.intake().ShedRule(r.Context(), id, v)
 		case "skip":
-			out, api = s.shedSkip(r.Context(), id)
+			out, apiErr = s.intake().ShedSkip(r.Context(), id)
 		case "overrule":
-			var v ShedOverruleRequest
+			var v api.ShedOverruleRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			out, api = s.shedOverrule(r.Context(), id, v)
+			out, apiErr = s.intake().ShedOverrule(r.Context(), id, v)
 		case "more":
 			var v ShedMoreRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			out, api = s.shedMore(r.Context(), id, v)
+			out, apiErr = s.shedMore(r.Context(), id, v)
 		case "redraft":
 			var v ShedRedraftRequest
 			if !decode(w, r, &v) {
 				return
 			}
-			out, api = s.shedRedraft(r.Context(), id, v)
+			out, apiErr = s.shedRedraft(r.Context(), id, v)
 		default:
 			fail(w, Unsupported)
 			return
 		}
-		if api != nil {
-			failWith(w, api)
+		if apiErr != nil {
+			failWith(w, apiErr)
 		} else {
 			respond(w, 200, out)
 		}
@@ -900,11 +878,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/checks-choice/"); ok && r.Method == http.MethodPost {
-		var v ChecksChoiceRequest
+		var v api.ChecksChoiceRequest
 		if !decode(w, r, &v) {
 			return
 		}
-		if out, api := s.answerChecksChoice(r.Context(), id, v); api != nil {
+		if out, api := s.delivery().AnswerChecksChoice(r.Context(), id, v); api != nil {
 			failWith(w, api)
 		} else {
 			respond(w, 200, out)
@@ -926,7 +904,7 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/archive/"); ok && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 		out, api := s.archive(id)
 		if r.Method == http.MethodDelete {
-			out, api = s.unarchive(id)
+			out, api = s.lifecycle().Unarchive(id)
 		}
 		if api != nil {
 			failWith(w, api)
@@ -1046,8 +1024,6 @@ func decode(w http.ResponseWriter, r *http.Request, out any) bool {
 	return decodeBody(w, data, out)
 }
 
-// decodeBody reads data as one JSON object with known, unique fields into
-// out. It answers a malformed body without echoing any of it.
 func decodeBody(w http.ResponseWriter, data []byte, out any) bool {
 	data = bytes.TrimSpace(data)
 	var err error
@@ -1087,7 +1063,6 @@ func uniqueJSON(d *json.Decoder) error {
 			if err != nil {
 				return err
 			}
-			// encoding/json matches struct fields case-insensitively.
 			name := strings.ToLower(fmt.Sprint(key))
 			if seen[name] {
 				return fmt.Errorf("duplicate key")
@@ -1102,8 +1077,6 @@ func uniqueJSON(d *json.Decoder) error {
 	return err
 }
 
-// routePathExists distinguishes an unsupported method on a known endpoint
-// from a path that has no API route.
 func routePathExists(path string) bool {
 	actual := strings.Split(path, "/")
 	for _, route := range Routes {

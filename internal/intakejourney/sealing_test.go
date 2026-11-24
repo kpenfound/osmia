@@ -12,14 +12,13 @@ import (
 	testing "testing"
 	time "time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	config "github.com/kpenfound/osmia/internal/config"
 	intake "github.com/kpenfound/osmia/internal/intake"
 	kb "github.com/kpenfound/osmia/internal/kb"
 	plan "github.com/kpenfound/osmia/internal/plan"
 	router "github.com/kpenfound/osmia/internal/router"
 	seal "github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )

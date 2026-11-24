@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"sync"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {

@@ -1,11 +1,10 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/config"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func onWorkspaces(t *testing.T, opts Options, backend string) {

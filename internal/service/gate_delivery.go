@@ -12,12 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// deliveryGate is the gate of the workstream's open delivery card e, which Jev
-// decides at the owner threshold. Its one option approves exactly what the card
-// pins: the final review, its revision, the reviewed commit and the draft's
-// hash, with the presented description and commit messages and, when the review
-// found something blocking, those findings accepted as they are. A card offered
-// again after a refused marking already carries an approval and is the owner's.
 func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, e InboxEntry) (*intake.Gate, error) {
 	review, _ := e.Answer.Body["review"].(int)
 	revision, _ := e.Answer.Body["review_revision"].(int)
@@ -93,8 +87,6 @@ func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository
 	return g, nil
 }
 
-// finalReviewText states a final report's verdict and findings the way the
-// delivery card shows them.
 func finalReviewText(r FinalReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Final review %d of commit %s. %s\n", r.Review, r.Commit, strings.TrimSpace(r.Summary))

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

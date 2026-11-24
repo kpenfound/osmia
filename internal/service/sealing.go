@@ -9,10 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/reconcile"
 )
 
-// repositoryAdapter routes repository-boundary operations: sealings to the
-// service's sealer, builds to its builder, landings, rebases and drift
-// rebases to its foreman, publications to its publisher, everything else to the configured
-// reconciler.
 type repositoryAdapter struct {
 	other     coreadapter.Reconciler
 	seals     *sealer
@@ -74,8 +70,6 @@ func (a repositoryAdapter) Apply(ctx context.Context, op coreadapter.Operation) 
 
 var _ reconcile.Bounded = repositoryAdapter{}
 
-// boundedBy returns the reconciler that bounds the operation: the foreman for
-// landings and rebases, the publisher for publications.
 func (a repositoryAdapter) boundedBy(op coreadapter.Operation) (reconcile.Bounded, bool) {
 	var b reconcile.Bounded
 	switch op.Action {
@@ -97,8 +91,6 @@ func (a repositoryAdapter) boundedBy(op coreadapter.Operation) (reconcile.Bounde
 	return b, b.Bound(op)
 }
 
-// Bound reports whether the operation is a landing, a rebase or a publication,
-// whose attempts are bounded and always reach a result.
 func (a repositoryAdapter) Bound(op coreadapter.Operation) bool {
 	_, ok := a.boundedBy(op)
 	return ok

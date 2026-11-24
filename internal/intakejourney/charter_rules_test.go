@@ -4,21 +4,18 @@ import (
 	context "context"
 	json "encoding/json"
 	errors "errors"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
+	testing "testing"
+	time "time"
 
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	trace "github.com/kpenfound/osmia/internal/trace"
-
 	"github.com/kpenfound/osmia/internal/projectstore"
-	testing "testing"
-	time "time"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 const charterRuling = intakefixture.CharterRuling

@@ -8,9 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kpenfound/osmia/internal/intake"
-
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -24,25 +23,18 @@ func (s *Service) groupApprovalLock(id config.WorkgroupID) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
-// heldGroupApprovals records, per root and workgroup, that the group-approval
-// pass has already reported the workgroup's retirement as unverifiable. Only
-// presence is kept, so a reason that names a different failing member on a later
-// pass does not report the same held workgroup again.
 var heldGroupApprovals sync.Map
 
 func (s *Service) heldGroupApprovalKey(id config.WorkgroupID) string {
 	return s.current().Root.String() + ":" + string(id)
 }
 
-// holdGroupApproval warns once while workgroup id stays unverified.
 func (s *Service) holdGroupApproval(id config.WorkgroupID, reason string) {
 	if _, held := heldGroupApprovals.LoadOrStore(s.heldGroupApprovalKey(id), reason); !held {
 		s.log().Warn("workgroup approval remains held", "workgroup", id, "error", reason)
 	}
 }
 
-// releaseGroupApproval ends the unverified state so a recurrence is reported
-// again.
 func (s *Service) releaseGroupApproval(id config.WorkgroupID) {
 	heldGroupApprovals.Delete(s.heldGroupApprovalKey(id))
 }
@@ -64,8 +56,6 @@ func (s *Service) approvalTrace(ctx context.Context, repo *trace.Repository, id 
 	return wt, g, err
 }
 
-// prepareGroupApproval replays only the decision's exact pinned records. Each
-// member's durable record asks the existing sealer to reconcile its VCS effects.
 func (s *Service) prepareGroupApproval(ctx context.Context, decision trace.GroupApproval) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -119,8 +109,6 @@ func (s *Service) prepareGroupApproval(ctx context.Context, decision trace.Group
 				}
 				return fmt.Errorf("prepare %s: %s", member.Workstream, api.Message)
 			}
-			// Recovery uses the decision's round and encoded dispositions, never the
-			// current draft or committee record.
 			if api := o.Record(ctx, shed.RatificationDocumentID(member.Round), shed.RatificationPath(member.Round), string(pinned), fmt.Sprintf("ratified-%d", member.Round), "prepare the pinned owner workgroup approval"); api != nil {
 				return fmt.Errorf("prepare %s: %s", member.Workstream, api.Message)
 			}
@@ -132,8 +120,6 @@ func (s *Service) prepareGroupApproval(ctx context.Context, decision trace.Group
 	return nil
 }
 
-// approvalMemberRepository resolves a live member while the controller is
-// running. Shutdown cancels its context before clearing active projects.
 func (s *Service) approvalMemberRepository(ctx context.Context, project config.ProjectID) (*trace.Repository, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -145,7 +131,6 @@ func (s *Service) approvalMemberRepository(ctx context.Context, project config.P
 	return repo, err
 }
 
-// resumeGroupApproval also serves retries after the members have left the shed.
 func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, bool, *APIError) {
 	lock := s.groupApprovalLock(id)
 	lock.Lock()
@@ -167,7 +152,7 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 		return RatifyResponse{}, false, nil
 	}
 	if decision.ProjectSpecRevision > 0 && projectSpecRevision != decision.ProjectSpecRevision {
-		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: projectSpecCatchingUp}
+		return RatifyResponse{}, true, &APIError{Code: Conflict, Message: intake.ProjectSpecCatchingUp}
 	}
 	matched := false
 	for _, member := range decision.Members {
@@ -187,7 +172,7 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 			return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
-	out := groupApprovalResponse(repo.Project(), stream, decision)
+	out := intake.GroupApprovalResponse(repo.Project(), stream, decision)
 	out.Sealing, out.Detail, err = s.groupApprovalDetail(decision)
 	if err != nil {
 		return RatifyResponse{}, true, &APIError{Code: Internal, Message: err.Error()}
@@ -198,10 +183,6 @@ func (s *Service) resumeGroupApproval(ctx context.Context, repo *trace.Repositor
 	return out, true, nil
 }
 
-// resealFailedMembers records again, as its next revision, the pinned
-// ratification of every member of the group approval whose latest sealing
-// failed, so the sealer seals that member afresh, as the owner's ratification
-// of a single workstream again does. It returns what it asked for.
 func (s *Service) resealFailedMembers(ctx context.Context, decision trace.GroupApproval) ([]string, error) {
 	var resealed []string
 	for _, member := range decision.Members {
@@ -245,9 +226,6 @@ func (s *Service) resealFailedMembers(ctx context.Context, decision trace.GroupA
 	return resealed, nil
 }
 
-// groupApprovalPass publishes completion only after every exact pinned sealing
-// has a successful durable outcome. A failed preparation remains pending with
-// the existing sealing diagnostics and prevents all group admission.
 func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -271,10 +249,6 @@ func (s *Service) groupApprovalPass(ctx context.Context, repo *trace.Repository)
 		if len(g.Members) < 2 {
 			continue
 		}
-		// Completion is authoritative even when every member has retired and
-		// only the adopted conversation's source locator remains. It is read
-		// from the revision-keyed approval state, so an idle workgroup neither
-		// decodes the approval nor opens its trace on each pass.
 		status, err := repo.GroupApprovalStatusOf(id)
 		if err != nil {
 			return err
@@ -399,10 +373,6 @@ func (s *Service) reconcileGroupApproval(ctx context.Context, repo *trace.Reposi
 	return s.step("group-completed")
 }
 
-// recoverMemberApprovals preserves existing owner decisions recorded before
-// a group completion receipt exists. Every member must have its own decision,
-// and the recorded project slices must match those exact revisions. Missing
-// coverage grants nothing; the existing owner ratification remains available.
 func (s *Service) recoverMemberApprovals(ctx context.Context, wt *trace.Repository, g trace.Workgroup) (trace.GroupApproval, bool, error) {
 	spec, revision, found, err := trace.ProjectSpecWithRevisionFor(wt, g.ID)
 	if err != nil || !found {
@@ -421,7 +391,7 @@ func (s *Service) recoverMemberApprovals(ctx context.Context, wt *trace.Reposito
 		if err != nil || !found {
 			return trace.GroupApproval{}, false, err
 		}
-		matches, err := sliceMatchesPin(spec, repo, stream, r.Revision)
+		matches, err := intake.SliceMatchesPin(spec, repo, stream, r.Revision)
 		if err != nil || !matches {
 			return trace.GroupApproval{}, false, err
 		}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -24,17 +23,11 @@ import (
 )
 
 const (
-	// publishInterval is the time between reconcile passes, and
-	// publishBackoff the time after a pass that could not reach Hearsay or
-	// was refused.
-	publishInterval = 15 * time.Second
-	publishBackoff  = time.Minute
-	// descriptionLimit bounds the prose a workstream record carries from
-	// what the owner handed in.
+	publishInterval  = 15 * time.Second
+	publishBackoff   = time.Minute
 	descriptionLimit = 16 << 10
 )
 
-// The core states of Hearsay's work contract.
 const (
 	coreProposed  = "proposed"
 	coreStarted   = "started"
@@ -43,47 +36,24 @@ const (
 	coreAbandoned = "abandoned"
 )
 
-// publishInputs is what one reconcile pass reads from the committed trace:
-// the project and every workstream eligible for Hearsay, read once so every
-// record source sees the same snapshot. A record source turns it into the
-// records it owns.
 type publishInputs struct {
-	cfg *config.Config
-	// owner is the Hearsay owner principal, named as author of the project
-	// and of everything the owner decides.
-	owner string
-	// workSource and ownerSource are the hooks sources: the work source holds
-	// the project and its workstreams, and the owner source holds what the
-	// owner decided.
+	cfg                     *config.Config
+	owner                   string
 	workSource, ownerSource string
 	project                 config.ProjectID
-	// created is when the project was registered.
-	created time.Time
-	// documents are the project's document revisions.
-	documents []trace.Document
-	streams   []*publishStream
-	// operations are the librarian's recorded operations by ID, which tell
-	// what caused each revision of the entity map.
-	operations map[string]coreadapter.Operation
+	created                 time.Time
+	documents               []trace.Document
+	streams                 []*publishStream
 }
 
-// publishStream is one eligible workstream with the trace records its
-// Hearsay records are built from.
 type publishStream struct {
 	status      trace.WorkstreamStatus
 	documents   []trace.Document
 	transitions []trace.Transition
 	evidence    lifecycle.MemberEvidence
-	// group is the workgroup of more than one member the workstream belongs
-	// to, when it belongs to one.
-	group *trace.PublishedWorkgroup
-	// approved is false while a cross-repo workstream's seal awaits the
-	// workgroup's approval, which keeps its seals unposted.
-	approved bool
+	group       *trace.PublishedWorkgroup
+	approved    bool
 
-	// The records the workstream's decisions are built from. They are read
-	// once per pass; decisionsRead is false when they could not be, and the
-	// workstream then posts no decision in that pass.
 	questions     []trace.QuestionState
 	rulings       []trace.Ruling
 	amendments    []trace.Amendment
@@ -94,17 +64,10 @@ type publishStream struct {
 
 func (s *publishStream) id() config.WorkstreamID { return s.status.Workstream }
 
-// publishSource builds the records one kind of artifact contributes to a
-// pass. Sources are independent; the reconciler orders their records by tier.
 type publishSource func(*publishInputs) []hearsay.Record
 
-// publishSources are the record sources of a pass.
 var publishSources = []publishSource{projectRecords, workstreamRecords, charterRecords, sealedSpecRecords, workgroupSpecRecords, decisionRecords, mapUpdateRecords}
 
-// publishHearsay joins the project runtime's lifetime. It reconciles the
-// project's Hearsay records on a cadence while publishing is configured and
-// does nothing otherwise. Hearsay outages and refusals back it off and never
-// stop local work or the service.
 func (s *Service) publishHearsay(ctx context.Context, repo *trace.Repository) error {
 	var delay time.Duration
 	var reported string
@@ -165,12 +128,6 @@ func publishSummary(res hearsay.Result, err error) string {
 	return strings.Join(parts, "; ")
 }
 
-// publishPass computes every record from the committed trace, posts those
-// whose content differs from what was last posted, and records the digest of
-// each successful post in the trace. The first pass is the backfill. A
-// refused or unreachable post leaves its digest as it was, so a later pass
-// posts it again. Records kept from a cleaned workstream or a removed project
-// join the pass when no live trace supplies them.
 func (s *Service) publishPass(ctx context.Context, repo *trace.Repository, cfg *config.Config) (hearsay.Result, error) {
 	token := hearsay.PublisherToken(cfg.Hearsay, nil)
 	if token == "" {
@@ -187,9 +144,6 @@ func (s *Service) publishPass(ctx context.Context, repo *trace.Repository, cfg *
 	return s.postRecords(ctx, repo, cfg, token, records)
 }
 
-// postRecords reconciles records, and the records kept in the trace that none
-// of them supplies, against what was last posted, and keeps the outcome in
-// the trace. A kept record is released once its current content is posted.
 func (s *Service) postRecords(ctx context.Context, repo *trace.Repository, cfg *config.Config, token string, live []hearsay.Record) (hearsay.Result, error) {
 	kept, keptErr := keptRecords(repo, live)
 	records := append(slices.Clone(live), kept...)
@@ -202,8 +156,6 @@ func (s *Service) postRecords(ctx context.Context, repo *trace.Repository, cfg *
 		posted[hearsay.Ref(p.Source, p.Key)] = hearsay.Posted{Digest: p.Digest, UpdatedAt: p.UpdatedAt}
 	}
 	res := hearsay.Reconcile(ctx, hearsay.Poster{URL: cfg.Hearsay.Publish.HooksURL, Token: token}, records, posted)
-	// What was posted is recorded even when the pass was cut short, so a
-	// later pass does not post it again.
 	var entries []trace.PostedRecord
 	for _, e := range res.Entries {
 		entries = append(entries, trace.PostedRecord{Source: e.Source, Key: e.Key, Digest: e.Digest, UpdatedAt: e.UpdatedAt})
@@ -218,9 +170,6 @@ func (s *Service) postRecords(ctx context.Context, repo *trace.Repository, cfg *
 	return res, keptErr
 }
 
-// collectPublishInputs reads the project's eligible workstreams: not
-// sessions, designs or the librarian's own. A workstream whose trace cannot
-// be read this pass, as when it is being cleaned, is left for a later one.
 func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *config.Config) (*publishInputs, error) {
 	publish := cfg.Hearsay.Publish
 	in := &publishInputs{cfg: cfg, owner: cfg.Hearsay.Principal, workSource: publish.WorkSource, ownerSource: publish.OwnerSource, project: repo.Project()}
@@ -240,7 +189,6 @@ func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *conf
 	if err != nil {
 		return nil, err
 	}
-	librarian := librarianWorkstream(repo.Project())
 	statuses, err := repo.Statuses()
 	if err != nil {
 		return nil, err
@@ -250,7 +198,7 @@ func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *conf
 			return nil, ctx.Err()
 		}
 		id := status.Workstream
-		if status.Kind == trace.SessionKind || id == librarian || !slices.Contains(eligible, id) || !hearsay.ValidID(string(id)) {
+		if status.Kind == trace.SessionKind || !slices.Contains(eligible, id) || !hearsay.ValidID(string(id)) {
 			continue
 		}
 		stream, err := readPublishStream(repo, status)
@@ -259,14 +207,9 @@ func collectPublishInputs(ctx context.Context, repo *trace.Repository, cfg *conf
 		}
 		in.streams = append(in.streams, stream)
 	}
-	in.operations = librarianOperations(repo)
 	return in, nil
 }
 
-// readPublishStream reads the trace records one workstream's Hearsay records
-// are built from. It fails when a part of the workstream cannot be read. A
-// workstream whose decisions cannot be read is still returned, with
-// decisionsRead false: its decisions wait for a later pass.
 func readPublishStream(repo *trace.Repository, status trace.WorkstreamStatus) (*publishStream, error) {
 	id := status.Workstream
 	stream := &publishStream{status: status}
@@ -292,8 +235,6 @@ func readPublishStream(repo *trace.Repository, status trace.WorkstreamStatus) (*
 	return stream, nil
 }
 
-// projectRef and workstreamRef name the work-source records every owner
-// record hangs from.
 func (in *publishInputs) projectRef() string {
 	return hearsay.Ref(in.workSource, "project/"+string(in.project))
 }
@@ -301,9 +242,6 @@ func (in *publishInputs) workstreamRef(id config.WorkstreamID) string {
 	return hearsay.Ref(in.workSource, "workstream/"+string(id))
 }
 
-// projectRecords posts the project on the work source with the owner named as
-// its author, so that a project without repos stays readable by the owner.
-// The repository is declared only when the project opted in.
 func projectRecords(in *publishInputs) []hearsay.Record {
 	if !hearsay.ValidID(string(in.project)) {
 		return nil
@@ -319,9 +257,6 @@ func projectRecords(in *publishInputs) []hearsay.Record {
 	return []hearsay.Record{{Source: in.workSource, Key: "project/" + string(in.project), Tier: hearsay.TierProject, Versions: []hearsay.Wire{w}}}
 }
 
-// workstreamRecords posts each eligible workstream on the work source with
-// no author: what the owner asked for, a core state, Osmia's own state as the
-// status, the pull request and why it was cancelled or abandoned.
 func workstreamRecords(in *publishInputs) []hearsay.Record {
 	var out []hearsay.Record
 	for _, st := range in.streams {
@@ -338,8 +273,6 @@ func workstreamRecords(in *publishInputs) []hearsay.Record {
 	return out
 }
 
-// charterRecords posts every charter revision as a revision of the project's
-// charter document on the owner source.
 func charterRecords(in *publishInputs) []hearsay.Record {
 	var versions []hearsay.Wire
 	var created time.Time
@@ -360,20 +293,9 @@ func charterRecords(in *publishInputs) []hearsay.Record {
 
 const charterDocument = "charter"
 
-// sealedSpecDocument is the ID of a workstream's spec document of the seals
-// the owner ratified. Document ids are project-wide, so it carries the
-// workstream's. jevSpecDocument is the ID of the document of the seals Jev
-// ratified, which the owner source never holds.
 func sealedSpecDocument(id config.WorkstreamID) string { return string(id) + "-spec" }
 func jevSpecDocument(id config.WorkstreamID) string    { return string(id) + "-jev-spec" }
 
-// sealedSpecRecords posts each seal of a workstream as a revision of a spec
-// document: the spec revision the seal ratified. A seal the owner ratified is a
-// revision of the workstream's spec document on the owner source, with the
-// owner as author. A seal Jev ratified, or that a Jev-decided amendment
-// produced, is a revision of its own document on the work source, inferred and
-// with no author, and the owner source never holds it. A seal awaiting its
-// workgroup's approval is not yet ratified.
 func sealedSpecRecords(in *publishInputs) []hearsay.Record {
 	var out []hearsay.Record
 	for _, st := range in.streams {
@@ -396,16 +318,12 @@ func sealedSpecRecords(in *publishInputs) []hearsay.Record {
 	return out
 }
 
-// sealedSpec is one seal's spec document revision, the document it belongs to
-// and who ratified it.
 type sealedSpec struct {
 	wire     hearsay.Wire
 	document string
 	by       decider
 }
 
-// sealedSpecs is the workstream's spec document revisions, one per seal,
-// oldest first. The owner's carry the owner as author. Jev's name no author.
 func (st *publishStream) sealedSpecs(in *publishInputs) []sealedSpec {
 	if !st.approved {
 		return nil
@@ -455,12 +373,6 @@ func (st *publishStream) sealedSpecs(in *publishInputs) []sealedSpec {
 	return versions
 }
 
-// sealRatifiers says who ratified each seal. A seal an amendment produced
-// belongs to whoever decided the amendment, and a plan-only amendment the chief
-// of staff decided leaves the spec with whoever ratified the seal before it.
-// Any other seal belongs to whoever ratified its round. A seal is Jev's only
-// when the record that made it says so, by the trace's own guarantee that Jev
-// writes it.
 func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Document) map[int]decider {
 	byAmendment := map[int]decider{}
 	inherits := map[int]bool{}
@@ -470,7 +382,6 @@ func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Docum
 			applied[id] = d
 		}
 	}
-	// A workgroup's amendment is the owner's decision.
 	for _, d := range st.documents {
 		if !strings.HasPrefix(d.Path, "tools/amendment-group-") || !strings.HasSuffix(d.Path, "-application.json") {
 			continue
@@ -511,8 +422,6 @@ func (st *publishStream) sealRatifiers(numbers []int, latest map[int]trace.Docum
 	return out
 }
 
-// roundRatifier is who ratified the round a seal records: Jev when the round's
-// ratification names Jev with its judgment, and the owner otherwise.
 func (st *publishStream) roundRatifier(sealDoc trace.Document) decider {
 	parsed, err := seal.Parse([]byte(sealDoc.Content))
 	if err != nil {
@@ -537,7 +446,6 @@ func (st *publishStream) roundRatifier(sealDoc trace.Document) decider {
 	return byOwner
 }
 
-// amendmentDeciderOf is who made the final decision on an amendment.
 func (st *publishStream) amendmentDeciderOf(id string) (decider, bool) {
 	var final trace.Document
 	var verdict intake.AmendmentDecision
@@ -557,8 +465,6 @@ func (st *publishStream) amendmentDeciderOf(id string) (decider, bool) {
 	return amendmentDecider(final, verdict)
 }
 
-// amendmentOf returns the amendment a document of the given file name under
-// amendments/<id>/ belongs to.
 func amendmentOf(path, file string) (string, bool) {
 	rest, ok := strings.CutPrefix(path, "amendments/")
 	if !ok {
@@ -568,7 +474,6 @@ func amendmentOf(path, file string) (string, bool) {
 	return id, ok && name == file && id != ""
 }
 
-// specRevision is the content of one recorded revision of spec.md.
 func (st *publishStream) specRevision(revision int) (string, bool) {
 	for _, d := range st.documents {
 		if d.ID == plan.SpecDocument && d.Revision == revision {
@@ -578,12 +483,8 @@ func (st *publishStream) specRevision(revision int) (string, bool) {
 	return "", false
 }
 
-// workgroupSpecDocument is the ID of a workgroup's project spec document.
 func workgroupSpecDocument(id config.WorkgroupID) string { return string(id) + "-project-spec" }
 
-// workgroupSpecRecords posts a workgroup's owner-approved project spec once
-// as a document on the project, on the owner source. Every member project
-// posts it on its own project.
 func workgroupSpecRecords(in *publishInputs) []hearsay.Record {
 	var out []hearsay.Record
 	seen := map[config.WorkgroupID]bool{}
@@ -600,9 +501,6 @@ func workgroupSpecRecords(in *publishInputs) []hearsay.Record {
 	return out
 }
 
-// renderProjectSpec renders the shared part of a project spec: its intended
-// behaviour, the contracts at the seams between repos and the workstream
-// graph. Each member's own slice and plan stay out.
 func renderProjectSpec(g trace.PublishedWorkgroup) string {
 	spec := g.Spec
 	var b strings.Builder
@@ -630,7 +528,6 @@ func joinStreams(ids []config.WorkstreamID) string {
 	return strings.Join(names, ", ")
 }
 
-// osmiaState is Osmia's own state for the workstream.
 func (st *publishStream) osmiaState() string {
 	if st.status.State == "" {
 		return "new"
@@ -638,10 +535,6 @@ func (st *publishStream) osmiaState() string {
 	return st.status.State
 }
 
-// coreState maps Osmia's workflow state to Hearsay's core states: a workstream
-// that is being shaped or awaits sealing is proposed; an approved, building
-// or assembled one is started; one waiting on an owner decision is blocked;
-// a delivered one is completed; an abandoned one is abandoned.
 func (st *publishStream) coreState() string {
 	switch state := st.status.State; state {
 	case intake.AbandonedState:
@@ -660,8 +553,6 @@ func (st *publishStream) coreState() string {
 	}
 }
 
-// handed is the text the owner handed in, when the workstream began as a
-// hand-in.
 func (st *publishStream) handed() string {
 	var text string
 	var revision int
@@ -673,8 +564,6 @@ func (st *publishStream) handed() string {
 	return text
 }
 
-// title is the workstream's name: the heading of its latest sealed spec, else
-// the first line of what the owner handed in, else its ID.
 func (st *publishStream) title() string {
 	latest, found := -1, ""
 	for _, d := range st.documents {
@@ -699,7 +588,6 @@ func (st *publishStream) title() string {
 	return string(st.id())
 }
 
-// specTitle is the text of the first level-one heading of a spec, or fallback.
 func specTitle(spec, fallback string) string {
 	for _, line := range strings.Split(spec, "\n") {
 		if t, ok := strings.CutPrefix(line, "# "); ok && strings.TrimSpace(t) != "" {
@@ -709,9 +597,6 @@ func specTitle(spec, fallback string) string {
 	return fallback
 }
 
-// description is what the owner asked for, followed by what is known of the
-// workgroup, the pull request and the cancellation. It never carries the
-// pull request's description.
 func (st *publishStream) description() string {
 	var parts []string
 	if ask := st.handed(); ask != "" {
@@ -750,7 +635,6 @@ func (st *publishStream) description() string {
 	return strings.Join(parts, "\n\n")
 }
 
-// abandonReason is the reason the owner gave when abandoning the workstream.
 func (st *publishStream) abandonReason() string {
 	for _, t := range slices.Backward(st.transitions) {
 		if t.ID == intake.AbandonTransition && t.Subject == trace.FeatureSubject && t.To == intake.AbandonedState {
@@ -760,9 +644,6 @@ func (st *publishStream) abandonReason() string {
 	return ""
 }
 
-// changedAt is when the workstream's published facts last changed in the
-// trace: its creation, its latest feature transition, and the delivery
-// records.
 func (st *publishStream) changedAt() time.Time {
 	at := st.status.CreatedAt
 	for _, t := range st.transitions {
@@ -785,8 +666,6 @@ func isWebURL(s string) bool {
 	return strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")
 }
 
-// boundedText cuts s to at most limit bytes on a character boundary, marking
-// a cut.
 func boundedText(s string, limit int) string {
 	if len(s) <= limit {
 		return s

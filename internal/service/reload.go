@@ -17,15 +17,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// scheduleHook is a named controller step. Stages separate scheduling hooks
-// from the observers that run beside the reconciliation pass.
 type scheduleHook struct {
 	name string
 	pass func(context.Context) error
 }
 
-// stages holds one loaded configuration's scheduling hooks, background
-// observers and operation adapters.
 type stages struct {
 	cfg        *config.Config
 	hooks      []scheduleHook
@@ -34,21 +30,14 @@ type stages struct {
 	repository repositoryAdapter
 }
 
-// pipeline holds the stages of a project's passes. A reload stores the
-// reloaded configuration's stages in next, and the next pass adopts them
-// before its first hook, so an operation already running finishes on the
-// stages it started with.
 type pipeline struct {
 	current, next atomic.Pointer[stages]
 	slowThreshold time.Duration
 	before        func(string) error
-	// Conversations adopt reloads without waiting for a scheduling pass.
-	conversation atomic.Pointer[stages]
+	conversation  atomic.Pointer[stages]
 }
 
 func (p *pipeline) schedule(ctx context.Context) error {
-	// Jev is never asked on the scheduling path: the hooks hand their exits to
-	// the router's worker.
 	ctx = router.OnSchedulingPath(ctx)
 	if next := p.next.Swap(nil); next != nil {
 		p.current.Store(next)
@@ -78,8 +67,6 @@ func (p *pipeline) schedule(ctx context.Context) error {
 	return nil
 }
 
-// stagedAdapter reconciles an operation through one adapter of the
-// pipeline's current stages.
 type stagedAdapter struct {
 	pipeline *pipeline
 	pick     func(*stages) coreadapter.Reconciler
@@ -94,8 +81,6 @@ func (a stagedAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 
 var _ reconcile.Bounded = stagedAdapter{}
 
-// Bound, Failing and GiveUp pass the operation's bounds on from the staged
-// adapter when it has them.
 func (a stagedAdapter) Bound(op coreadapter.Operation) bool {
 	b, ok := a.pick(a.pipeline.current.Load()).(reconcile.Bounded)
 	return ok && b.Bound(op)
@@ -115,15 +100,6 @@ func (a stagedAdapter) GiveUp(ctx context.Context, op coreadapter.Operation, why
 	return coreadapter.OperationResult{}, fmt.Errorf("operation %q is not bounded", op.Action)
 }
 
-// reload reads the top-level configuration file and replaces the loaded
-// configuration with it, together with each active project's effective
-// settings, only when the file passes. A failure is kept as the last reload
-// error until a reload succeeds. Settings that need a restart keep their loaded
-// values and are named in the response. A reload reads no project settings
-// from the store, so a revision that was saved but not adopted stays pending,
-// and it never adds or removes a project. The runtime state is resolved
-// against the candidate, never rewritten, and every running project's passes
-// adopt the candidate's stages from their next pass.
 func (s *Service) reload() (ReloadResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -171,8 +147,6 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	}
 	s.mu.Unlock()
 	s.spans.reload(reloadedAt, poolsOf(next.Capacity))
-	// The runtime's effective profiles and the daily budget's limit follow the
-	// configuration.
 	events := []Event{{Kind: EventResync}, {Kind: EventConfig}, {Kind: EventRuntime}}
 	for _, id := range next.ProjectIDs() {
 		events = append(events, Event{Kind: EventSpend, Project: id})
@@ -186,12 +160,6 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil
 }
 
-// candidate builds the configuration a reload applies over cfg: the top-level
-// file as it is on disk, with cfg's active projects, in registry order, each
-// with its effective settings. Settings a project inherits from the top level
-// follow the reloaded file; the stored revisions are not read for anything
-// else. Changed settings that need a restart keep cfg's values and are named:
-// the listen socket, the web and tailnet listeners and the telemetry export.
 func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error) {
 	top, err := config.LoadTopLevel(s.options.Config)
 	if err != nil {
@@ -217,7 +185,6 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 		pinned.Listen = cfg.Listen
 		next = &pinned
 	}
-	// The telemetry exporter is built once, at start.
 	if next.Telemetry != cfg.Telemetry {
 		restart = append(restart, "telemetry")
 		pinned := *next
@@ -227,11 +194,6 @@ func (s *Service) candidate(cfg *config.Config) (*config.Config, []string, error
 	return next, restart, nil
 }
 
-// effectiveProjects returns cfg's active projects as a reload of the top-level
-// file top leaves them: their effective settings, with the one setting a
-// project inherits, capacity.per_workstream, taken from top when the project's
-// effective revision leaves it out. A project whose effective revision cannot
-// be read again keeps its effective settings as they are.
 func (s *Service) effectiveProjects(top, cfg *config.Config) []config.Project {
 	revisions := s.effectiveRevisionsNow()
 	store := projectstore.Open(cfg.Root)
@@ -249,8 +211,6 @@ func (s *Service) effectiveProjects(top, cfg *config.Config) []config.Project {
 	return out
 }
 
-// reloadError describes a configuration that failed to load by its file and
-// field, never by values read from it.
 func reloadError(err error, at time.Time) *ReloadError {
 	var field *config.FieldError
 	if errors.As(err, &field) {

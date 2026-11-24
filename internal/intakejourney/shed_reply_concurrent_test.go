@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // A reply can commit its corrected draft between a pass's initial draft read

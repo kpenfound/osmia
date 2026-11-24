@@ -1,6 +1,11 @@
 package intakejourney
 
-import "github.com/kpenfound/osmia/internal/service"
+import (
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+)
 
 const CheckAction = service.CheckAction
 
@@ -19,19 +24,19 @@ type UnitReviewResult = service.UnitReviewResult
 type UnitVerdict = service.UnitVerdict
 
 var chiefActions = service.TestChiefActions
-var chiefContestPath = service.TestChiefContestPath
+var chiefContestPath = execution.ChiefContestPath
 var chiefOrdinaryTools = service.TestChiefOrdinaryTools
 var concurrentOperation = service.TestConcurrentOperation
-var decodeFinalReview = service.TestDecodeFinalReview
-var decodeLand = service.TestDecodeLand
+var decodeFinalReview = delivery.DecodeFinalReview
+var decodeLand = execution.DecodeLand
 
-var edgeObservationAt = service.TestEdgeObservationAt
+var edgeObservationAt = lifecycle.EdgeObservationAt
 
-const edgePoll = service.TestEdgePoll
+const edgePoll = lifecycle.EdgePoll
 
 var edgeWaiting = service.TestEdgeWaiting
 
-const escalateContest = service.TestEscalateContest
+const escalateContest = execution.EscalateContest
 const finalReportDocument = service.TestFinalReportDocument
 const finalReportPath = service.TestFinalReportPath
 
@@ -41,15 +46,15 @@ const finalReviewed = service.TestFinalReviewed
 
 var finalTurnID = service.TestFinalTurnID
 var foremanActor = service.TestForemanActor
-var landIDs = service.TestLandIDs
+var landIDs = execution.LandIDs
 
 type landInput = service.TestLandInput
 
-var leastWorkstream = service.TestLeastWorkstream
+var leastWorkstream = lifecycle.LeastWorkstream
 
 var masonTurnID = service.TestMasonTurnID
 
-var nextReadyTurn = service.TestNextReadyTurn
+var nextReadyTurn = lifecycle.NextReadyTurn
 
 const projectContextTool = service.TestProjectContextTool
 
@@ -59,7 +64,7 @@ type retriedTurns = service.TestRetriedTurns
 
 var reviewDocument = service.TestReviewDocument
 var reviewTurnID = service.TestReviewTurnID
-var reviewerActor = service.TestReviewerActor
+var reviewerActor = execution.ReviewerActor
 
 var unitContest = service.TestUnitContest
 

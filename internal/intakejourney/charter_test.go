@@ -9,11 +9,10 @@ import (
 	strings "strings"
 	testing "testing"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	charter "github.com/kpenfound/osmia/internal/charter"
 	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 

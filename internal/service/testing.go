@@ -31,12 +31,9 @@ type TestHooks struct {
 	ConversationTicks <-chan time.Time
 	Enforcement       *TestEnforcementBinding
 	ReviewChecks      ReviewChecks
-	CloudChecks       ReviewChecks
 	Boundary          func(context.Context, string) error
 	SchedulePassed    func()
 	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
-	CheckJJ           func(context.Context) (string, error)
-	SandboxBinary     string
 	// TelemetryExporter receives the service's spans in place of an OTLP
 	// exporter and turns telemetry on without an endpoint. The service never
 	// shuts it down, so a test reads an in-memory exporter after the service
@@ -57,9 +54,6 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	if hooks.ReviewChecks != nil {
 		opts.reviewChecks = hooks.ReviewChecks
 	}
-	if hooks.CloudChecks != nil {
-		opts.cloudChecks = hooks.CloudChecks
-	}
 	if hooks.Boundary != nil {
 		opts.boundary = hooks.Boundary
 	}
@@ -69,17 +63,11 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	if hooks.NotifyInbox != nil {
 		opts.notifyInbox = hooks.NotifyInbox
 	}
-	if hooks.CheckJJ != nil {
-		opts.checkJJ = hooks.CheckJJ
-	}
 	if hooks.TelemetryExporter != nil {
 		opts.telemetryExporter = hooks.TelemetryExporter
 	}
 	if hooks.Getenv != nil {
 		opts.getenv = hooks.Getenv
-	}
-	if hooks.SandboxBinary != "" {
-		opts.sbxBin = hooks.SandboxBinary
 	}
 	return Start(ctx, opts)
 }
@@ -147,11 +135,6 @@ func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
 
 // Now returns the service's configured fixture clock.
 func (a TestAccess) Now() time.Time { return a.s.now() }
-
-// LibrarianWorkstreamForTest identifies the librarian workstream an older trace can hold.
-func LibrarianWorkstreamForTest(id config.ProjectID) config.WorkstreamID {
-	return librarianWorkstream(id)
-}
 
 // EnforceThreadsForTest binds session execution while leaving workflow runners
 // under the fixture's control.
@@ -282,8 +265,8 @@ func (a TestAccess) RuleContested(ctx context.Context, w, u string, r ContestedR
 func (a TestAccess) DispatchHolds(c *config.Config, r *trace.Repository) func(scheduler.Candidate) (bool, error) {
 	return a.s.dispatchHolds(c, r)
 }
-func (a TestAccess) Holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-	return a.s.holds(p, w, r, c)
+func (a TestAccess) Holds(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+	return a.s.holds(p, r, c)
 }
 func (a TestAccess) Halt(p config.ProjectID) error {
 	_, active := a.s.runtimeOf(p)
@@ -293,9 +276,7 @@ func (a TestAccess) Halt(p config.ProjectID) error {
 	return a.s.halt(active)
 }
 
-type TestPollAttempt = lifecycle.TestPollAttempt
-
-func (a TestAccess) PollAttempts() []TestPollAttempt {
+func (a TestAccess) PollAttempts() []lifecycle.TestPollAttempt {
 	return a.s.polls.AttemptsForTest()
 }
 
@@ -357,14 +338,6 @@ func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) cor
 	controls := &runtimeControls{}
 	controls.service.Store(a.s)
 	return controls.decide(r, scope)
-}
-
-// FlakeFixTool returns the flake_fix tool of the claimed chief-of-staff turn
-// scope names, as the service composes it.
-func (a TestAccess) FlakeFixTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	controls := &runtimeControls{}
-	controls.service.Store(a.s)
-	return controls.flakeFix(r, scope)
 }
 
 // TriageTool returns the triage_finding tool of the claimed chief-of-staff turn

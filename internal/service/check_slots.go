@@ -36,34 +36,26 @@ func (s *Service) CheckSlots() CheckSlotStatus {
 	return s.checkSlots.status()
 }
 
-// checkSlotPool admits exported service check runs in arrival order. Its
-// lifetime is the service's, rather than a project's or a loaded config's.
 type checkSlotPool struct {
-	mu      sync.Mutex
-	limit   int
-	used    int
-	waiting []*checkSlotWait
-	changed func()
-	held    map[*checkSlotWait]struct{}
-	// maintenance excludes admission and Dagger turn dispatch, without holding
-	// mu during engine commands or blocking capacity snapshots.
+	mu          sync.Mutex
+	limit       int
+	used        int
+	waiting     []*checkSlotWait
+	changed     func()
+	held        map[*checkSlotWait]struct{}
 	maintenance chan struct{}
 	turns       map[*EngineTurn]struct{}
-	// spans, when set, sends a span for each slot the pool grants and each wait
-	// for one; now is its clock. They only observe the pool.
-	spans *slotspans.Recorder
-	now   func() time.Time
+	spans       *slotspans.Recorder
+	now         func() time.Time
 }
 
 type checkSlotWait struct {
 	run     CheckSlotRun
 	ready   chan struct{}
 	granted bool
-	// work names the run in the pool's slot spans.
-	work string
+	work    string
 }
 
-// interval identifies the held or wait interval of w's run.
 func (p *checkSlotPool) interval(kind slotspans.Kind, w *checkSlotWait, at time.Time) slotspans.Interval {
 	iv := slotspans.Interval{Kind: kind, Source: slotspans.SourceCheck, Pool: telemetry.PoolID(checksRole), Role: checksRole, Project: w.run.Project, Workstream: w.run.Workstream, Unit: w.run.Unit, Work: w.work, Start: at}
 	iv.Bound(p.limit, true)
@@ -87,7 +79,7 @@ func (p *checkSlotPool) status() CheckSlotStatus {
 	for _, w := range p.waiting {
 		out.Waiting = append(out.Waiting, w.run)
 	}
-	out.Active = p.activeChecks()
+	out.Active = p.activeChecksLocked()
 	return out
 }
 
@@ -97,9 +89,7 @@ func (p *checkSlotPool) notify() {
 	}
 }
 
-// admit must be called with mu held. Lowering the limit never interrupts
-// executing runs; they release capacity before any further admission.
-func (p *checkSlotPool) admit() {
+func (p *checkSlotPool) admitLocked() {
 	if p.maintenance != nil {
 		return
 	}
@@ -124,7 +114,7 @@ func (p *checkSlotPool) admit() {
 func (p *checkSlotPool) resize(limit int) {
 	p.mu.Lock()
 	p.limit = limit
-	p.admit()
+	p.admitLocked()
 	p.mu.Unlock()
 	p.notify()
 }
@@ -139,7 +129,7 @@ func (p *checkSlotPool) acquire(ctx context.Context, run CheckSlotRun) (func(), 
 	}
 	p.mu.Lock()
 	p.waiting = append(p.waiting, w)
-	p.admit()
+	p.admitLocked()
 	if p.spans != nil && !w.granted {
 		p.spans.Begin(p.interval(slotspans.Wait, w, p.clock()))
 	}
@@ -158,7 +148,7 @@ func (p *checkSlotPool) acquire(ctx context.Context, run CheckSlotRun) (func(), 
 				p.waiting = slices.Delete(p.waiting, i, i+1)
 				p.spans.End(p.interval(slotspans.Wait, w, time.Time{}), p.clock(), slotspans.Canceled)
 			}
-			p.admit()
+			p.admitLocked()
 			p.mu.Unlock()
 			p.notify()
 		})

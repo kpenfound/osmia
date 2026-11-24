@@ -1,8 +1,9 @@
 package executionjourney
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest"
 )
 
 type pageFixture struct {

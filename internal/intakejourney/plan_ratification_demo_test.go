@@ -4,6 +4,13 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -14,17 +21,8 @@ import (
 	seal "github.com/kpenfound/osmia/internal/seal"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
-
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 // exitDemoRoles runs every role in a container, the only sandbox the fake

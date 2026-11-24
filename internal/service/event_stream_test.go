@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -97,7 +98,7 @@ func TestEventStreamAnnouncesTraceChanges(t *testing.T) {
 	if _, err := c.Send(ctx, intakefixture.Stream, "How is it going?"); err != nil {
 		t.Fatal(err)
 	}
-	fixturekit.AwaitEvents(t, events, Event{Kind: EventConversation, Project: intakefixture.Project, Workstream: intakefixture.Stream}, Event{Kind: EventWorkstream, Project: intakefixture.Project, Workstream: intakefixture.Stream})
+	fixturekit.AwaitEvents(t, events, Event{Kind: api.EventConversation, Project: intakefixture.Project, Workstream: intakefixture.Stream}, Event{Kind: EventWorkstream, Project: intakefixture.Project, Workstream: intakefixture.Stream})
 
 	if _, err := c.Answer(ctx, 1, "In files.", ""); err != nil {
 		t.Fatal(err)

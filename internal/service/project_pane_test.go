@@ -1,12 +1,12 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestProjectPaneStatesRequireRecordedMerge(t *testing.T) {

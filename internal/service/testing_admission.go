@@ -21,17 +21,6 @@ func (a TestAccess) AcquireCheckSlot(ctx context.Context, run CheckSlotRun) (fun
 	return a.s.checkSlots.acquire(ctx, run)
 }
 
-// AcquireReviewCheckSlot includes the review's committee reservation.
-func (a TestAccess) AcquireReviewCheckSlot(ctx context.Context, run CheckSlotRun, operation string) (func(), error) {
-	return a.s.acquireReviewCheckSlot(ctx, run, operation)
-}
-
-// HasReviewReservation reports whether an operation still owns a reservation.
-func (a TestAccess) HasReviewReservation(operation string) bool {
-	_, found := a.s.reviewSlots.Load(operation)
-	return found
-}
-
 // GitOperationLimit returns the composed repository admission policy.
 func (a TestAccess) GitOperationLimit(repo *trace.Repository, other func(coreadapter.Operation) (func(), bool)) func(coreadapter.Operation) (func(), bool) {
 	return a.s.gitOperationLimit(repo, other)

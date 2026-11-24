@@ -5,13 +5,13 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// assignmentHeld checks dependencies on every worker turn, including resumed work.
 func assignmentHeld(r *trace.Repository, stream config.WorkstreamID, unit, role string) (bool, error) {
 	current, _, found, err := seal.Latest(r, stream)
 	if err != nil || !found {
@@ -83,12 +83,12 @@ func assignmentHeld(r *trace.Repository, stream config.WorkstreamID, unit, role 
 		if err != nil {
 			return false, err
 		}
-		if st.Value != amendmentApproved && st.Value != amendmentResealed {
+		if st.Value != intake.AmendmentApproved && st.Value != intake.AmendmentResealed {
 			continue
 		}
 		for _, d := range docs {
 			if d.Path == "amendments/"+req.ID+"/affected.json" {
-				var a amendmentAffected
+				var a intake.AmendmentAffected
 				if err := json.Unmarshal([]byte(d.Content), &a); err != nil {
 					return false, err
 				}

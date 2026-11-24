@@ -1,3 +1,7 @@
+// Package service runs the Osmia factory: it owns each active project's trace
+// and runtime state, drives the reconciliation, scheduling and conversation
+// loops, and serves the local HTTP API listed in Routes together with the Go
+// client for it.
 package service
 
 import (
@@ -9,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,8 +21,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kpenfound/agentcore/agent"
 	corejev "github.com/kpenfound/agentcore/jev"
 	"github.com/kpenfound/osmia/internal/activity"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -30,6 +35,7 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/readview"
@@ -47,15 +53,14 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
+// Options configures Start. Zero values select the defaults documented on
+// each field.
 type Options struct {
 	reviewChecks ReviewChecks
-	// cloudChecks replaces the cloud fallback runner when check_fallback is on.
-	cloudChecks ReviewChecks
-	// boundary injects interruptions using the current service lifetime. It is
-	// bound before controllers launch so startup reconciliation is covered.
-	boundary func(context.Context, string) error
-	Config   config.Options
-	Build    Identity
+	cloudChecks  ReviewChecks
+	boundary     func(context.Context, string) error
+	Config       config.Options
+	Build        Identity
 	// Workstreams supplies known identities when no trace exists. An existing
 	// trace supplies its validated workstream manifests.
 	Workstreams       []config.WorkstreamID
@@ -64,42 +69,20 @@ type Options struct {
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	Reconciliation    reconcile.Options
-	// Threads binds the runner-boundary reconciler to the trace this service
-	// owns and the configuration it has loaded. It is called each time a
-	// project's trace opens, at startup and when a project is added, and
-	// replaces any runner adapter in Reconciliation.
-	// With Threads set, the service also dispatches every queued workstream turn
-	// on its own, never more than one turn per thread in flight and within the
-	// configured capacity, replacing Reconciliation.Schedule. A runtime pause
-	// holds new turns on the threads it covers, except chief-of-staff turns,
-	// and a hard pause also stops the turns running on them; clearing it lets
-	// them run. Outbox events are delivered to each
-	// workstream's chief of staff as queued turns, one per event window, and
-	// each recorded answer to a question is queued on its asker's thread.
-	// The mason controller starts ready units of building workstreams and
-	// final-review follow-ups of assembled workstreams within capacity, choosing
-	// ready units disjoint from implementing and waiting units of their workstream,
-	// and queues each started unit's first mason turn for the scheduler. It
-	// parks a unit in waiting when its mason asks, and resumes it once the
-	// answer is queued as the mason's next turn. The reviewer controller
-	// dispatches exact-candidate reviews through durable reviewer threads,
-	// parks reviewer questions, and applies completed verdicts and owner
-	// rulings before the mason controller starts more work.
-	// Callers must not close the repository.
+	// Threads builds the runner-boundary reconciler for a project's trace and
+	// the configuration the service has loaded. The service calls it each time
+	// a project's trace opens. With Threads set the service dispatches queued
+	// workstream turns on its own, one turn per thread at a time and within
+	// the configured capacity, in place of Reconciliation.Schedule. Callers
+	// must not close the repository.
 	Threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error)
-	// Architect supplies the execution boundary of the architect's drafting
-	// turns, of its replies to shed rounds and of the redrafts the owner asks
-	// for. Without it no draft, reply and redraft is requested, one already
-	// requested stays pending, and handed workstreams, heard rounds and
-	// requested redrafts wait.
+	// Architect runs the architect's drafting, reply and redraft turns.
+	// Without it none is requested: requested ones stay pending, and handed
+	// workstreams, heard rounds and requested redrafts wait.
 	Architect *Architect
-	// Committee supplies the execution boundary of the committee's shed
-	// turns and final reviews. Without it no round or final review is
-	// requested, one already requested stays pending, and sketched
-	// workstreams, replied rounds and assembled workstreams wait; only a
-	// workstream whose debate the owner skipped at hand-in enters the shed,
-	// without a committee. The architect's replies and the
-	// debate's conclusion need no committee runner.
+	// Committee runs the committee's shed rounds and final reviews. Without it
+	// none is requested and requested ones stay pending; a workstream whose
+	// debate the owner skipped at hand-in still enters the shed.
 	Committee *Committee
 	// Issues fetches issue URLs handed in. It defaults to the GitHub REST API
 	// with the service's GITHUB_TOKEN environment variable, which no session
@@ -135,7 +118,7 @@ type Options struct {
 	JevProvider func(corejev.Settings, string) corejev.Provider
 	// JoinTailnet joins the owner's tailnet when listen.tailnet is set. It
 	// defaults to embedded Tailscale.
-	JoinTailnet JoinTailnet
+	JoinTailnet tailnet.Join
 	// TailnetRetry is how long the service waits before it joins the tailnet
 	// again after a failed join or a dropped listener. It defaults to 5
 	// seconds.
@@ -158,47 +141,21 @@ type Options struct {
 	// standard output and standard error goes through: the service's own
 	// records, embedded Tailscale's and the GitHub activity log. It defaults
 	// to a JSON handler on os.Stderr.
-	Logger *slog.Logger
-	// controls is set by Enforce so the chief-of-staff tools it binds reach
-	// the runtime state of the service started with these options.
-	controls *runtimeControls
-	// skills is the skill cache of the enforcement's engine; the service
-	// gives it the loaded refresh policy.
-	skills *skills.Manager
-	// notifyInbox replaces the inbox the notifier reads, for tests.
-	notifyInbox func(context.Context) (InboxResponse, *APIError)
-	// checkJJ replaces the check of the jj on PATH that picks the workspace
-	// backend of new workstreams, for tests.
-	checkJJ jjCheck
-	// sbxBin replaces the sbx binary reapSandboxes removes interrupted
-	// sessions' Docker Sandboxes with, for tests. It defaults to
-	// agent.SandboxCLI.
-	sbxBin string
-	// conversationTicks replaces retry and gate polling in conversation-path
-	// fixtures. Enqueues and completions still wake the path directly.
+	Logger            *slog.Logger
+	controls          *runtimeControls
+	skills            *skills.Manager
+	notifyInbox       func(context.Context) (InboxResponse, *APIError)
+	checkJJ           jjCheck
 	conversationTicks <-chan time.Time
-	// schedulePassed is called, if set, once every time a reconciliation
-	// pass's schedule stage completes without error - the stage that runs
-	// the scheduler's dispatch pass among its hooks. Nil runs no hook. Tests
-	// use it to wait for a pass to demonstrably complete instead of a fixed
-	// number of ticks or a sleep.
-	schedulePassed func()
-	hearsayPassed  func()
-	gateScanned    func()
-	// getenv replaces os.Getenv for the transcription key and the telemetry
-	// headers, for tests.
-	getenv func(string) string
-	// telemetryExporter replaces the exporter built from [telemetry] and turns
-	// telemetry on without an endpoint, for tests.
+	schedulePassed    func()
+	hearsayPassed     func()
+	gateScanned       func()
+	getenv            func(string) string
 	telemetryExporter sdktrace.SpanExporter
-	// transcribeLimit and transcribeTimeout replace the clip size limit and
-	// the request bound to the transcription server, for tests.
 	transcribeLimit   int64
 	transcribeTimeout time.Duration
 }
 
-// activeProject is the runtime state of one active project: its open trace
-// and its reconciliation and conversation paths.
 type activeProject struct {
 	id            config.ProjectID
 	repository    *trace.Repository
@@ -208,122 +165,71 @@ type activeProject struct {
 	cancel        context.CancelFunc
 	pollCancel    context.CancelFunc
 	done          chan error
-	// gates decides the project's owner gates for Jev beside its scheduler.
-	gates *gateWorker
+	gates         *gateWorker
 }
 
+// Service is a running factory service. Start returns it once it is bound and
+// ready; Wait joins its shutdown.
 type Service struct {
-	conversationSignal conversationSignal
-	memory             hearsay.Health
-	// jev answers the Jev judgments of every project's turns under the
-	// current configuration.
-	jev *jev.Judge
-	// router decides every exit of the routed state machines with Jev's answers,
-	// and routing hands it the exits a scheduling pass raises.
-	router  *router.Router
-	routing *router.Worker
-	// stalls remembers when the stall watchdog last found each subject
-	// explained.
-	stalls stallClocks
-	// gateWorkers maps each active project's trace to its gate worker, so a
-	// scheduling pass can wake it.
-	gateWorkers sync.Map
-	// reseeders maps each project to the re-seeder of its entity map.
-	reseeders sync.Map
-	mu        sync.Mutex // guards cfg, revisions, projects, pending and reloadErr
-	cfg       *config.Config
-	// revisions is the number of the stored revision each active project's
-	// loaded settings come from. A saved revision the service could not adopt
-	// is newer than it, and stays pending until the project's next save or a
-	// restart.
-	revisions map[config.ProjectID]int
-	// projects holds the runtime of every active project that has a trace, in
-	// registry order.
-	projects []*activeProject
-	// telemetry sends the service's spans. It is set once at start from the
-	// configuration, is never nil after Start and discards spans when
-	// telemetry is off.
-	telemetry *telemetry.Sink
-	// slots sends the slot spans of the capacity pools and keeps the intervals
-	// still open across a restart. It is nil while telemetry is off.
-	slots *slotspans.Recorder
-	// capacity is the pools' limits in force, readable without s.mu.
-	capacity atomic.Pointer[config.Capacity]
-	// spans sends the factory-level spans: pool limits, pauses, loop-guard
-	// trips, service start and uptime. Nil-safe; it sends nothing while
-	// telemetry is off.
-	spans *factorySpans
-	// pool is the role capacity the schedulers of every project draw on.
-	pool          *scheduler.Shared
-	gitOperations gitOperationPool
-	checkSlots    *checkSlotPool
-	// reviewSlots keeps each admitted review's committee reservation reachable
-	// while its workflow operation waits for check capacity.
-	reviewSlots sync.Map // operation ID -> *reviewReservation
-	// modelOperationStreams remembers the workstream each model operation
-	// capacity check last found its operation in.
-	modelOperationStreams sync.Map // project ID + "/" + operation ID -> config.WorkstreamID
-	// spends is the daily spend each project's daily budget pass publishes.
-	spends    daySpends
-	pending   error
-	reloadErr *ReloadError
-	projectMu sync.Mutex // serializes project registration, removal, reload and project configuration saves
-	handInMu  sync.Mutex // serializes hand-ins
-	// flakeFixMu serializes opening flake-fix workstreams, so occurrences of
-	// one group never race to reserve and hand in.
-	flakeFixMu sync.Mutex
-	sessionMu  sync.Mutex // serializes session opens
-	turns      runningTurns
-	options    Options
-	store      *runtime.Store
-	logger     *slog.Logger
-	lock       *os.File
-	listener   *net.UnixListener
-	web        net.Listener  // nil unless listen.web is configured
-	tailnet    *tailnet.Link // nil unless listen.tailnet is configured
-	// tailnetDone closes when the tailnet supervisor has stopped.
-	tailnetDone chan struct{}
-	socketInfo  os.FileInfo
-	server      *http.Server
-	lifetime    context.Context
-	cancel      context.CancelFunc
-	failures    chan error
-	done        chan struct{}
-	err         error
-	ready       atomic.Bool
-	requests    sync.WaitGroup
-	boundaryMu  sync.RWMutex
-	boundary    func(string) error
-	// hub carries change notifications to the client event stream.
-	hub *eventstream.Hub
-	// activity is the in-process record of long-running backend operations,
-	// separate from the trace and the runtime store: reporting and reading
-	// it never wait on the trace mutex or on operationMu.
-	activity *activity.Registry
-	// notifier posts new inbox entries to notify.webhook.
-	notifier *notifier
-	// reporter files the service's own errors as GitHub issues when
-	// [error_reports] enables it.
-	reporter *errorReporter
-	// driftAsked is set once an owner's drift rebase request is recorded,
-	// so the next pass reads the drift schedule.
-	driftAsked atomic.Bool
-	// polls keeps attempt timing across stage rebuilds on reload.
-	polls pullRequestAttempts
-	// statusViews holds the last workstream list statusList produced, so a
-	// request that cannot refresh it within coreReadBound still answers
-	// with that snapshot, marked stale, instead of blocking past the
-	// bound (bounded_read.go, readview.Bounded).
-	statusViews readview.Cache[StatusResponse]
-	// removed is the state of the reconciliation of removed projects'
-	// Hearsay records, and removedDone closes when that loop has stopped.
-	removed     removedPublication
-	removedDone chan struct{}
+	conversationSignal    conversationSignal
+	memory                hearsay.Health
+	jev                   *jev.Judge
+	router                *router.Router
+	routing               *router.Worker
+	stalls                stallClocks
+	gateWorkers           sync.Map
+	reseeders             sync.Map
+	mu                    sync.Mutex
+	cfg                   *config.Config
+	revisions             map[config.ProjectID]int
+	projects              []*activeProject
+	telemetry             *telemetry.Sink
+	slots                 *slotspans.Recorder
+	capacity              atomic.Pointer[config.Capacity]
+	spans                 *factorySpans
+	pool                  *scheduler.Shared
+	gitOperations         gitOperationPool
+	checkSlots            *checkSlotPool
+	committeeAdmissions   sync.Map
+	modelOperationStreams sync.Map
+	spends                daySpends
+	pending               error
+	reloadErr             *ReloadError
+	projectMu             sync.Mutex
+	handInMu              sync.Mutex
+	flakeFixMu            sync.Mutex
+	sessionMu             sync.Mutex
+	turns                 runningTurns
+	options               Options
+	store                 *runtime.Store
+	logger                *slog.Logger
+	lock                  *os.File
+	listener              *net.UnixListener
+	web                   net.Listener
+	tailnet               *tailnet.Link
+	tailnetDone           chan struct{}
+	socketInfo            os.FileInfo
+	server                *http.Server
+	lifetime              context.Context
+	cancel                context.CancelFunc
+	failures              chan error
+	done                  chan struct{}
+	err                   error
+	ready                 atomic.Bool
+	requests              sync.WaitGroup
+	boundaryMu            sync.RWMutex
+	boundary              func(string) error
+	hub                   *eventstream.Hub
+	activity              *activity.Registry
+	notifier              *notifier
+	reporter              *errorReporter
+	driftAsked            atomic.Bool
+	polls                 lifecycle.PullRequestAttempts
+	statusViews           readview.Cache[StatusResponse]
+	removed               removedPublication
+	removedDone           chan struct{}
 }
 
-// log returns s's structured logger, or a silent one when a test built s
-// directly without one: a missing logger never fails or panics the action
-// it would have recorded.
 func (s *Service) log() *slog.Logger {
 	if s.logger != nil {
 		return s.logger
@@ -341,8 +247,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
-	// Every record the service writes passes the error capture, which keeps
-	// nothing while the error reporter is off.
 	capture := newErrorCapture(opts.ErrorReporter.Queue, opts.ErrorReporter.Now)
 	logger = slog.New(capture.wrap(logger.Handler()))
 	opts.Logger = logger
@@ -399,17 +303,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	s.activity = activity.New(s.now)
-	s.activity.Notify = func() { s.hub.Publish(Event{Kind: EventActivity}) }
+	s.activity.Notify = func() { s.hub.Publish(Event{Kind: api.EventActivity}) }
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
-	// Check holders and waiters do not survive a restart: those the earlier run
-	// left open are sent as interrupted.
 	s.slots.Interrupt(telemetry.PoolID(checksRole))
-	// Getenv reads Jev's API key the same way the default would,
-	// and registers whatever value it reads for redaction: the owner may
-	// point api_key_env at any environment variable name, not only
-	// EnvSecrets' default, and the key must never reach a log record
-	// whichever name configures it.
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
 		value := os.Getenv(name)
 		redact.Register(value)
@@ -469,7 +366,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err = removeStaleSocket(cfg.Listen.Socket); err != nil {
 		return nil, err
 	}
-	// Protect the socket during bind, before its own mode can be restricted.
 	if err = os.Chmod(root.String(), 0700); err != nil {
 		return nil, err
 	}
@@ -522,10 +418,8 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		opts.WriteTimeout = 10 * time.Second
 	}
 	s.options = opts
-	s.recoverArchiveLifecycle(ctx)
+	s.lifecycle().RecoverArchiveLifecycle(ctx)
 	if s.tailnet != nil {
-		// A first join that fails leaves the tailnet down for the supervisor
-		// to retry; it never fails startup.
 		if node, err := s.joinTailnet(root, cfg.Listen.Tailnet); err != nil {
 			s.tailnet.Set(nil, err.Error())
 			logger.Warn("tailnet join failed; the supervisor will retry", "component", "tailnet", "hostname", cfg.Listen.Tailnet, "error", redact.Secrets(err.Error(), redact.KnownSecrets()...))
@@ -552,7 +446,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			st.Close()
 			return nil, fmt.Errorf("recover thread sessions: %w", err)
 		}
-		reapSandboxes(ctx, view, s.options.sbxBin)
+		reapSandboxes(ctx, view, agent.SandboxCLI)
 	}
 	if err = s.recoverWorkgroupChiefSessions(ctx, projects); err != nil {
 		s.cleanupSocket()
@@ -608,8 +502,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.reporter = newErrorReporter(s, capture)
 	s.reporter.configure(cfg)
 	go s.reporter.run(s.lifetime)
-	// Removed projects have no runtime, so their pending Hearsay records are
-	// posted from here.
 	s.removedDone = make(chan struct{})
 	go func() {
 		defer close(s.removedDone)
@@ -639,7 +531,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 			serving--
 		}
 		s.ready.Store(false)
-		// Event streams never go idle, so they end before the drain.
 		s.hub.Close()
 		drain, stop := context.WithTimeout(context.Background(), opts.ShutdownTimeout)
 		if e := s.server.Shutdown(drain); e != nil {
@@ -663,18 +554,13 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		s.mu.Lock()
 		projects := s.projects
 		s.mu.Unlock()
-		// A project failure that stopped the service is reported once.
 		if e := s.stop(projects...); e != nil && (s.err == nil || !errors.Is(e, s.err)) {
 			s.err = errors.Join(s.err, e)
 		}
 		s.mu.Lock()
 		s.projects = nil
 		s.mu.Unlock()
-		// Spans the stopped projects emitted last are sent before the service ends,
-		// and the intervals still open are kept for the next start.
 		s.slots.Close()
-		// The run's pool limit intervals and uptime end with the shutdown, then
-		// the spans the stopped projects emitted last are sent before the service ends.
 		s.spans.end()
 		if e := s.telemetry.Close(); e != nil {
 			logger.Warn("telemetry spans were not all sent", "component", "telemetry", "error", e.Error())
@@ -693,8 +579,6 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	return s, nil
 }
 
-// startedListeners names every listener the service has bound, for the
-// service-started log record.
 func startedListeners(s *Service) []string {
 	listeners := []string{"socket"}
 	if s.web != nil {
@@ -706,8 +590,6 @@ func startedListeners(s *Service) []string {
 	return listeners
 }
 
-// listenerName names the listener kind arrivedOn reports, for the
-// api-request-handled log record.
 func listenerName(kind tailnet.ListenerKind) string {
 	switch kind {
 	case tailnet.WebListener:
@@ -719,9 +601,6 @@ func listenerName(kind tailnet.ListenerKind) string {
 	}
 }
 
-// statusResponseWriter captures the status code an HTTP handler writes, for
-// the api-request-handled log record. Unwrap lets http.ResponseController
-// reach the underlying writer's Flush and SetWriteDeadline.
 type statusResponseWriter struct {
 	http.ResponseWriter
 	status int
@@ -766,8 +645,6 @@ func (s *Service) TailnetAddr() string {
 	return ""
 }
 
-// joinTailnet joins the tailnet as hostname with the node's state in the
-// root's tailnet directory.
 func (s *Service) joinTailnet(root config.Root, hostname string) (TailnetListener, error) {
 	dir, err := root.Tailnet()
 	if err != nil {
@@ -787,15 +664,12 @@ func (s *Service) Wait() error { <-s.done; return s.err }
 
 func (s *Service) Close() error { s.cancel(); return s.Wait() }
 
-// current returns the loaded configuration; project registration replaces it.
 func (s *Service) current() *config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg
 }
 
-// about returns the project's configuration. A draining project keeps the
-// configuration its in-flight work started with.
 func (s *Service) about(repository *trace.Repository) *config.Config {
 	cfg, projects := s.runtimes()
 	if cfg.Active(repository.Project()) {
@@ -809,17 +683,12 @@ func (s *Service) about(repository *trace.Repository) *config.Config {
 	return cfg.For(repository.Project())
 }
 
-// runtimes returns the loaded configuration and the runtime of every active
-// project that has a trace, in registry order.
 func (s *Service) runtimes() (*config.Config, []*activeProject) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg, slices.Clone(s.projects)
 }
 
-// runtimeOf returns the loaded configuration about project id and the
-// project's runtime, which is nil when the project has no trace. The
-// configuration has no project when id is not active.
 func (s *Service) runtimeOf(id config.ProjectID) (*config.Config, *activeProject) {
 	cfg, projects := s.runtimes()
 	cfg = cfg.For(id)
@@ -831,9 +700,6 @@ func (s *Service) runtimeOf(id config.ProjectID) (*config.Config, *activeProject
 	return cfg, nil
 }
 
-// projectFor resolves the project a project-scoped request names. A request
-// may leave the project out only while exactly one project is active; the
-// errors list the active projects.
 func (s *Service) projectFor(id config.ProjectID) (config.ProjectID, *APIError) {
 	ids := s.current().ProjectIDs()
 	if id == "" {
@@ -857,7 +723,6 @@ func (s *Service) projectFor(id config.ProjectID) (config.ProjectID, *APIError) 
 	return id, nil
 }
 
-// projectList joins project IDs with commas.
 func projectList(ids []config.ProjectID) string {
 	out := make([]string, len(ids))
 	for i, id := range ids {
@@ -873,13 +738,6 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	return s.Wait()
-}
-
-// RunSignals adds SIGINT and SIGTERM cancellation for a foreground entry point.
-func RunSignals(ctx context.Context, opts Options) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return Run(ctx, opts)
 }
 
 func removeStaleSocket(path string) error {
@@ -928,8 +786,6 @@ func (s *Service) cleanupSocket() {
 	}
 }
 
-// openAll opens the runtime of every active project of cfg that has a trace,
-// in registry order. Any failure opens none.
 func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 	var out []*activeProject
 	for _, id := range cfg.ProjectIDs() {
@@ -947,11 +803,6 @@ func (s *Service) openAll(cfg *config.Config) ([]*activeProject, error) {
 	return out, nil
 }
 
-// open opens the existing trace of the project cfg is about and its
-// reconciliation controller, and joins the project to the shared pool of role
-// capacity. Without a configured project, or without a trace for it, the
-// project runs idle: trace creation belongs to project registration. A caller
-// that closes the project without launching it leaves the pool.
 func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	if !cfg.HasProject() {
 		return nil, nil
@@ -976,30 +827,22 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 	return active, nil
 }
 
-// dispatcher is the scheduler of the project cfg is about, drawing on the
-// shared pool of role capacity.
 func (s *Service) dispatcher(cfg *config.Config, repository *trace.Repository) (*scheduler.Scheduler, error) {
 	limits := cfg.Capacity
 	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
 	return scheduler.New(repository, scheduler.Options{Now: s.options.Reconciliation.Now, Holds: s.dispatchHolds(cfg, repository), Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool})
 }
 
-// dispatchHolds is the scheduler's gate before capacity for the project cfg
-// is about: holds of its candidates.
 func (s *Service) dispatchHolds(cfg *config.Config, repository *trace.Repository) func(scheduler.Candidate) (bool, error) {
 	project := cfg.Project.ID
-	librarian := librarianWorkstream(project)
 	return func(c scheduler.Candidate) (bool, error) {
 		if conversationRole(c.Thread.Identity.Role) {
 			return true, nil
 		}
-		return s.holds(project, librarian, repository, c)
+		return s.holds(project, repository, c)
 	}
 }
 
-// admit is the scheduler's gate after holds and capacity. It holds every
-// mason turn of a unit whose workspace is behind its feature branch, so the
-// workspace has no writer when the foreman rebases it.
 func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
 	units := newUnitWorkspaces(cfg, repository)
 	return func(ctx context.Context, c scheduler.Candidate) (bool, error) {
@@ -1011,19 +854,13 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 	}
 }
 
-// holds reports whether the dispatch gate declines the candidate whatever
-// the capacity: a turn of the librarian's workstream, an architect or
-// committee turn, which their own passes run, a turn of an abandoned
-// workstream, and a turn a pause in force holds. The store is read on every
-// pass, so a cleared pause lets held turns run on the loop's next periodic
-// pass.
-func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
+func (s *Service) holds(project config.ProjectID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
 	if c.Thread.Identity.Role != trace.ChiefOfStaff {
 		if held, err := changeHeld(repository, c.Workstream); err != nil || held {
 			return true, err
 		}
 	}
-	if c.Workstream == librarian || c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
+	if c.Thread.Identity.Role == architectRole || c.Thread.Identity.Role == committeeRole {
 		return true, nil
 	}
 	if gone, err := abandoned(repository, c.Workstream); err != nil || gone {
@@ -1046,8 +883,6 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 		if err != nil {
 			return true, err
 		}
-		// Information-only role turns may ask during drafting; unit work remains
-		// held by the group approval and edge admission checks.
 		if approved || c.Turn.Request.Unit != "" {
 			if waiting, err := edgeWaiting(repository, c.Workstream); err != nil || waiting {
 				return waiting, err
@@ -1058,16 +893,11 @@ func (s *Service) holds(project config.ProjectID, librarian config.WorkstreamID,
 	return scheduler.Held(st.Pauses, project, c), nil
 }
 
-// priorities returns the runtime priority order in force.
 func (s *Service) priorities() []runtime.Priority {
 	st, _ := s.effective()
 	return st.Priorities
 }
 
-// chiefEventsProfile returns the profile of a new chief-of-staff turn that
-// delivers service events: the owner's override of the role's profile when
-// there is one, else roles.chief_of_staff.events_profile when it is set, else
-// the role's profile.
 func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Profile, error) {
 	return func() (coreadapter.Profile, error) {
 		st, _ := s.effective()
@@ -1079,8 +909,6 @@ func (s *Service) chiefEventsProfile(cfg *config.Config) func() (coreadapter.Pro
 	}
 }
 
-// chiefOverride resolves the chief of staff's effective profile name, which
-// may be any configured profile, not only one in the role's fallback chain.
 func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
 	st, _ := s.effective()
 	name := st.Profiles[trace.ChiefOfStaff]
@@ -1091,16 +919,13 @@ func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile
 	return name, profile, err
 }
 
-// ensureChiefsOfStaff gives every workstream in the trace its chief-of-staff
-// thread, leaving existing threads untouched. A session never gets one: it
-// has no chief of staff.
 func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
 		return err
 	}
 	for _, stream := range streams {
-		if session, err := isSession(repository, stream); err != nil {
+		if session, err := intake.IsSession(repository, stream); err != nil {
 			return fmt.Errorf("workstream %s: %w", stream, err)
 		} else if session {
 			continue
@@ -1108,12 +933,6 @@ func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 		if id, err := repository.CrossRepoWorkgroupOf(stream); err != nil {
 			return fmt.Errorf("workstream %s: %w", stream, err)
 		} else if id != "" {
-			// A cross-repo member's shared chief-of-staff thread lives
-			// only in its workgroup's own trace (chiefRepository), lazily
-			// created there the first time it is needed; this
-			// project-scoped backfill must never create a second one on
-			// the member's own repo, which would make the workgroup's
-			// chief of staff authoritative in two places (charter#2).
 			continue
 		}
 		if pending, err := repository.PendingCrossRepoWorkgroup(stream); err != nil {
@@ -1128,8 +947,6 @@ func ensureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 	return nil
 }
 
-// launch runs the controller for the service's lifetime. A loop failure stops
-// the service; cancellation from stop or shutdown does not.
 func (s *Service) launch(active *activeProject) {
 	if active == nil {
 		return
@@ -1152,8 +969,6 @@ func (s *Service) launch(active *activeProject) {
 			}
 			watchDone <- err
 		}()
-		// Publishing to Hearsay reads the committed trace and never blocks
-		// or fails the project: it stops with the project's runtime.
 		publishDone := make(chan struct{})
 		go func() {
 			defer close(publishDone)
@@ -1215,8 +1030,6 @@ func (s *Service) launch(active *activeProject) {
 	}()
 }
 
-// halt cancels the project's controller and joins it. It reports loop
-// failures other than cancellation.
 func (s *Service) halt(active *activeProject) error {
 	if active.cancel == nil {
 		return nil
@@ -1228,9 +1041,6 @@ func (s *Service) halt(active *activeProject) error {
 	return nil
 }
 
-// stop joins every project's controller, then releases their traces, so no
-// scheduler pass reads a trace that is closing. It reports loop failures
-// other than cancellation.
 func (s *Service) stop(projects ...*activeProject) error {
 	for _, p := range projects {
 		if p.cancel != nil {
@@ -1253,26 +1063,6 @@ func (s *Service) stop(projects ...*activeProject) error {
 	return err
 }
 
-// openReconciliation leaves trace creation to project registration; an existing
-// trace must open cleanly before the service can report readiness. The runner
-// boundary is served by the bound thread reconciler for turns and by the
-// service's own reconcilers for the retirement of librarian operations, architect drafts,
-// committee rounds and the architect's replies to them, and final reviews, and the repository
-// boundary by the service's sealer for sealings, its builder for builds and
-// its foreman for landings and rebases and its publisher for publications;
-// the daily budget, then the loop guard, then the architect controller, then the shed controller, then the sealing
-// controller, then the building controller, then the overlap, charter, refresh, drift,
-// landing, assembly and publication controllers run at the start of every pass, and the pass reconciles operations in stagePriority order. With
-// Options.Threads, outbox events are then delivered to each workstream's
-// chief of staff, recorded answers are queued on their askers' threads, the
-// mason controller parks, resumes and starts units, and the scheduler admits
-// worker turns within capacity and its runtime and workspace gates. Conversation
-// queues are reconciled independently by conversationPath;
-// without it, the configured Schedule hook runs instead. The hooks and
-// adapters come from the pipeline, which a reload may restage for the next pass.
-// The loop holds the pending operations of the architect and committee
-// reconcilers while a pause covers their workstream, and runs model workflows,
-// thread turns and committee rounds beside the pass under their own ordering.
 func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *reconcile.Controller, *pipeline, error) {
 	options := s.options.Reconciliation
 	directory, err := cfg.Root.ProjectTrace(cfg.Project.ID)
@@ -1293,15 +1083,12 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	}
 	observe := s.hub.TraceEvents(cfg.Project.ID)
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
-	// With telemetry off the trace derives nothing for spans.
 	if s.telemetry.Enabled() {
 		repository.ObserveSpans(s.recorder().Observe)
 	}
 	if options.Worker == "" {
 		options.Worker = "local-operations"
 	}
-	// The window a failing operation is retried for follows the loaded
-	// configuration's [loop] stall_after, also after a reload.
 	if options.GiveUpWindow == 0 && options.GiveUpWindowFor == nil {
 		options.GiveUpWindowFor = s.giveUpWindow
 	}
@@ -1357,8 +1144,6 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 	return repository, controller, p, nil
 }
 
-// stages builds the schedule hooks and operation adapters of cfg over
-// repository. Building them runs no hook and applies no operation.
 func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*stages, error) {
 	options, threads := s.options.Reconciliation, s.options.Threads
 	checkClient, cloudClient := s.configuredChecks(cfg), s.configuredCloudChecks(cfg)
@@ -1367,7 +1152,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	seals := &sealer{S: s.intake().SealerDependencies(), Repository: repository}
 	build := &builder{S: s.intake().BuilderDependencies(), Repository: repository}
 	overlap := &overlaps{s: s, repository: repository}
-	rules := charterer{S: s.intake().ChartererDependencies(), Repository: repository}
+	rules := intake.Charterer{S: s.intake().ChartererDependencies(), Repository: repository}
 	land := &foreman{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	finals := &delivery.FinalReviewer{S: s.deliveryFor(cfg), Repository: repository}
 	publish := &delivery.Publisher{S: s.deliveryFor(cfg), Repository: repository}
@@ -1379,7 +1164,7 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 	checks := &checkers{masons: &masons{s: s, cfg: cfg, repository: repository, checks: checkClient, cloudChecks: cloudClient}}
 	runner := runnerAdapter{deltas: deltaRunner{S: s.lifecycle()}, turns: options.Adapters[coreadapter.RunnerBoundary], draft: draft, amend: amend, amendRounds: amendRounds, rounds: rounds, finals: finals, checks: checks}
 	cleanup := &workspaceCleanup{Cfg: cfg, Repository: repository, Now: s.now}
-	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.changePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.baseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.edgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.edgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"stall-watchdog", stallWatch{s: s, cfg: cfg, repository: repository}.Run}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.designStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"landing-retry", landing.RetryPass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&mergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&workgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.projectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.projectSpecRefreshPass(ctx, repository) }}, {"flakes", (&flakeRecorder{s: s, cfg: cfg, repository: repository}).Pass}}
+	hooks := []scheduleHook{{"gates", func(context.Context) error { s.kickGates(repository); return nil }}, {"workgroup-change", func(ctx context.Context) error { return s.lifecycle().ChangePass(ctx, repository) }}, {"base-refresh", (&baseRefresher{S: s.lifecycle(), Repository: repository}).Pass}, {"base", func(ctx context.Context) error { return s.lifecycle().BaseWaitPass(ctx, repository) }}, {"edge-refresh", func(ctx context.Context) error { return s.lifecycle().EdgeResolverPass(ctx, repository) }}, {"edge", func(ctx context.Context) error { return s.lifecycle().EdgeWaitPass(ctx, repository) }}, {"daily-budget", daily.Pass}, {"loop-guard", loopGuard{s: s, cfg: cfg, repository: repository}.Pass}, {"stall-watchdog", stallWatch{s: s, cfg: cfg, repository: repository}.Run}, {"reservation-waits", func(context.Context) error { s.reservationWaitPass(repository); return nil }}, {"design-start", func(ctx context.Context) error { return s.intake().DesignStartPass(ctx, repository) }}, {"draft", draft.Pass}, {"budget", budget.Pass}, {"amendment", amend.Pass}, {"amendment-debate", amendRounds.Pass}, {"debate", rounds.Pass}, {"group-approval", func(ctx context.Context) error { return s.groupApprovalPass(ctx, repository) }}, {"seal", seals.Pass}, {"build", build.Pass}, {"overlap", overlap.Pass}, {"charter", rules.Pass}, {"drift", land.Drifts}, {"land", land.Pass}, {"final-review", finals.Pass}, {"publish", publish.Pass}, {"landing-retry", landing.RetryPass}, {"cleanup", cleanup.Pass}, {"archive-on-merge", (&lifecycle.MergeArchiver{S: s.lifecycle(), Repository: repository}).Pass}, {"archive-cleanup", (&archiveCleanup{S: s.lifecycle(), Workspaces: cleanup}).Pass}, {"workgroup-resolution", (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: repository}).Pass}, {"workgroup-project-spec", func(ctx context.Context) error { return s.lifecycle().ProjectSpecDraftPass(ctx, repository) }}, {"workgroup-project-spec-refresh", func(ctx context.Context) error { return s.lifecycle().ProjectSpecRefreshPass(ctx, repository) }}, {"flakes", (&flakeRecorder{s: s, cfg: cfg, repository: repository}).Pass}}
 	hooks = append([]scheduleHook{{"factory-policy", func(ctx context.Context) error { return s.reconcileFactoryPolicy(ctx, repository) }}}, hooks...)
 	if threads == nil && options.Schedule != nil {
 		hooks = append(hooks, scheduleHook{"configured", options.Schedule})
@@ -1394,8 +1179,8 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		if err != nil {
 			return nil, err
 		}
-		deliver, err := events.New(repository, events.Options{Workstreams: func() ([]config.WorkstreamID, error) { return intake.NonSessionWorkstreams(repository) }, Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.chiefEventsPrompt(cfg.Project.ID, repository),
-			Skip: s.chiefEventsSkip(repository), ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
+		deliver, err := events.New(repository, events.Options{Workstreams: func() ([]config.WorkstreamID, error) { return intake.NonSessionWorkstreams(repository) }, Now: options.Now, Window: cfg.EventWindow(), ProgressWindow: cfg.EventProgressWindow(), Profile: s.chiefEventsProfile(cfg), System: s.intake().ChiefEventsPrompt(cfg.Project.ID, repository),
+			Skip: s.intake().ChiefEventsSkip(repository), ChiefTarget: func(ctx context.Context, stream config.WorkstreamID) (*trace.Repository, func(), error) {
 				target, _, _, close, err := s.chiefRepository(ctx, repository, stream)
 				if errors.Is(err, errWorkgroupJoining) {
 					return nil, close, fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
@@ -1422,8 +1207,6 @@ func (s *Service) stages(cfg *config.Config, repository *trace.Repository) (*sta
 		repository: repositoryAdapter{other: options.Adapters[coreadapter.RepositoryBoundary], seals: seals, builds: build, lands: land, publishes: publish, landings: landing}}, nil
 }
 
-// concurrentOperation selects operations whose inspection and effects run
-// beside the scheduling pass under their operation class's ordering.
 func concurrentOperation(op coreadapter.Operation) bool {
 	if gitOperation(op) || networkOperation(op) || modelOperationRole(op) != "" {
 		return true
@@ -1438,9 +1221,6 @@ func concurrentOperation(op coreadapter.Operation) bool {
 	return false
 }
 
-// operationClass keeps execution order independent of which operations run
-// beside the pass. Scheduler-admitted workers share no workflow reservation;
-// owner conversations rely on their durable thread order.
 func operationClass(op coreadapter.Operation) trace.OperationClass {
 	if networkOperation(op) {
 		return trace.WorkerOperation
@@ -1460,10 +1240,6 @@ func operationClass(op coreadapter.Operation) trace.OperationClass {
 	return trace.WorkflowOperation
 }
 
-// stagePriority orders the operations of a pass so that the factory finishes
-// work before it widens it: the turns the scheduler dispatched and everything
-// else first, then the shed's rounds, replies and redrafts, then architect
-// drafts.
 func stagePriority(op coreadapter.Operation) int {
 	switch op.Action {
 	case RoundAction, ReplyAction, RedraftAction, AmendmentRoundAction, AmendmentReplyAction:
@@ -1474,9 +1250,6 @@ func stagePriority(op coreadapter.Operation) int {
 	return 0
 }
 
-// unlock releases the root ownership lock before closing its file. A child
-// process forked but not yet executed shares the open file, and closing alone
-// would leave the lock held until that child executes.
 func unlock(lock *os.File) {
 	syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	lock.Close()

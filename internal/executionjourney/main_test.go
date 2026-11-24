@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/browsertest"
-
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 

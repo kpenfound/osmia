@@ -3,6 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"math/big"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -13,11 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
-	"math/big"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
 )
 
 var budgetZone = time.FixedZone("UTC-7", -7*60*60)

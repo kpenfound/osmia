@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/delivery"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,8 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -301,7 +302,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	f, passed := newShedFixtureCounting(t, 2)
 	defer f.stop(t)
 	member := committeeAgent(1)
-	entered := blockTurn(f.architectFixture, roundTurnID(1, member, 1), func(ctx context.Context, tools *mcp.ClientSession) error {
+	entered := blockTurn(f.architectFixture, intake.RoundTurnID(1, member, 1), func(ctx context.Context, tools *mcp.ClientSession) error {
 		_, err := intakefixture.CallTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}})
 		return err
 	})
@@ -331,7 +332,7 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	f.awaitShed(t, stream, "heard-1")
 	th, err := f.repository().Thread(stream, member)
 	intakefixture.Must(t, err)
-	checkContinued(t, th, roundTurnPrefix(1, member), stopped.Request.TurnID, continuation)
+	checkContinued(t, th, intake.RoundTurnPrefix(1, member), stopped.Request.TurnID, continuation)
 	records, err := shed.Records(f.repository(), stream)
 	intakefixture.Must(t, err)
 	i := slices.IndexFunc(records, func(r shed.Record) bool { return r.Round == 1 && r.Member == member })

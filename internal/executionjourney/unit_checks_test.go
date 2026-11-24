@@ -4,17 +4,14 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-
-	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/service"
-
 	strings "strings"
 	testing "testing"
 	time "time"
 
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
-
 	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/service"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )

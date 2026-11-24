@@ -1,11 +1,12 @@
 package executionjourney
 
 import (
-	chromedp "github.com/chromedp/chromedp"
-	checkrun "github.com/kpenfound/osmia/internal/checks"
 	strconv "strconv"
 	"strings"
 	testing "testing"
+
+	chromedp "github.com/chromedp/chromedp"
+	checkrun "github.com/kpenfound/osmia/internal/checks"
 )
 
 func TestBrowserFeedCheckHistoryPreservesResultsAndLegacyCounts(t *testing.T) {

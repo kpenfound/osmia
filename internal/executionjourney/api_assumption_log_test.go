@@ -3,12 +3,13 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 // logAssumption claims a chief-of-staff turn on stream and logs text as an

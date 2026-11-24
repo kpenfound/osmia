@@ -4,13 +4,6 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -19,8 +12,13 @@ import (
 	testing "testing"
 	time "time"
 
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"

@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func withTopLevel(t *testing.T, opts Options, text string) {

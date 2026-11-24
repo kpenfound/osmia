@@ -1,11 +1,10 @@
 package intakejourney
 
 import (
-	"github.com/kpenfound/osmia/internal/browsertest"
-	"github.com/kpenfound/osmia/internal/coreadapter"
-
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/browsertest"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )

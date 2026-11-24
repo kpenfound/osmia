@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestDeliveryBriefItemsChangeTheDraftHashAndRefuseAnEarlierApproval(t *testing.T) {

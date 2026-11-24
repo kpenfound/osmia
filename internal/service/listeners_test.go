@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"net/http"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func firstStreamEvent(t *testing.T, client *http.Client, url, host string) string {

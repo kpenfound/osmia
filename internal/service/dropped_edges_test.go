@@ -1,13 +1,13 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

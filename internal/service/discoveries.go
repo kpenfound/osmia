@@ -22,23 +22,17 @@ import (
 const discoveryTool = "record_discovery"
 
 type workDiscovery struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Criterion   string `json:"criterion"`
-	Disposition string `json:"disposition"`
-	Unit        string `json:"unit,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	// DecidedBy is empty for the chief of staff's disposition, or "jev" with
-	// the Jev judgment it comes from.
-	DecidedBy string `json:"decided_by,omitempty"`
-	Judgment  string `json:"judgment,omitempty"`
-	// HandedToOwner says why the service could not carry out Jev's decision
-	// on the discovery, which is then open and the owner's.
+	ID            string `json:"id"`
+	Description   string `json:"description"`
+	Criterion     string `json:"criterion"`
+	Disposition   string `json:"disposition"`
+	Unit          string `json:"unit,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	DecidedBy     string `json:"decided_by,omitempty"`
+	Judgment      string `json:"judgment,omitempty"`
 	HandedToOwner string `json:"handed_to_owner,omitempty"`
 }
 
-// The outcomes of a discovery's disposition, which are the options of Jev's
-// decision, and the dispositions they record.
 var discoveryOutcomes = map[string]string{"assigned": "assign", "declined": "decline", "suggestion": "retain"}
 
 func discoveries(r *trace.Repository, stream config.WorkstreamID) (map[string]workDiscovery, error) {
@@ -60,8 +54,6 @@ func discoveries(r *trace.Repository, stream config.WorkstreamID) (map[string]wo
 	return out, nil
 }
 
-// unresolvedWork includes necessary discoveries, revisions still being
-// prepared and a merged dependency whose update is not yet planned.
 func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	if due, err := lifecycle.DependencyUpdateDue(r, stream); err != nil || due {
 		return due, err
@@ -94,16 +86,13 @@ func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, erro
 		if err != nil {
 			return false, err
 		}
-		if !slices.Contains([]string{amendmentRuled, amendmentApplied, "declined", amendmentRejected, amendmentUnapplied, "invalid"}, st.Value) {
+		if !slices.Contains([]string{amendmentRuled, intake.AmendmentApplied, "declined", intake.AmendmentRejected, intake.AmendmentUnapplied, "invalid"}, st.Value) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// recordDiscovery is the record_discovery tool of one turn. A chief-of-staff
-// turn may name any member of its workgroup, whose own trace holds the
-// discovery.
 func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	description := "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion, after it called decide for the discovery (kind discovery-disposition, subject its id): when Jev's decision is binding, only the disposition it picked (assign, decline or retain) is recorded, with the chief of staff's reasoning. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination."
 	properties := `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`
@@ -125,7 +114,6 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if err := json.Unmarshal(raw, &in); err != nil {
 			return nil, err
 		}
-		// Who decided a discovery is recorded by the service, never named by a caller.
 		in.DecidedBy, in.Judgment, in.HandedToOwner = "", "", ""
 		if scope.Role != trace.ChiefOfStaff && scope.Role != masonRole && scope.Role != reviewerRole {
 			return nil, errors.New("discovery recording is not granted")
@@ -222,8 +210,6 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				return priorityRefusal("owner_decided is only for a disposition the owner gave in the message this turn answers")
 			}
 		}
-		// The chief of staff's own disposition of an open discovery needs a
-		// decide result, and a confident Jev pick allows only itself.
 		var bound *jev.Result
 		switch {
 		case in.OwnerDecided:
@@ -259,9 +245,6 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 				if bound == nil {
 					return priorityRefusal(refused)
 				}
-				// The service refused the transition Jev's binding pick calls
-				// for. The discovery stays open and goes to the owner with Jev's
-				// judgment, and Jev is not asked about it again.
 				handed = fmt.Sprintf("Jev decided assign with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's reasoning: %s", bound.Confidence, bound.Judgment, refused, in.Reason)
 				in.HandedToOwner, in.Disposition, in.Unit = handed, "open", ""
 			}
@@ -299,7 +282,6 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 	}}
 }
 
-// unitDiscoveries pins the necessary work the reviewer must account for.
 func unitDiscoveries(r *trace.Repository, stream config.WorkstreamID, unit string) (string, string, error) {
 	ds, err := discoveries(r, stream)
 	if err != nil {
@@ -322,9 +304,6 @@ func unitDiscoveries(r *trace.Repository, stream config.WorkstreamID, unit strin
 	return string(data), fmt.Sprintf("%x", sha256.Sum256(data)), nil
 }
 
-// discoveryEntries lists the owner's decisions on a workstream's discoveries:
-// each open discovery whose disposition Jev decided and the service could not
-// carry out. Jev is not asked about it again.
 func discoveryEntries(r *trace.Repository, stream config.WorkstreamID) ([]intake.InboxEntry, error) {
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {

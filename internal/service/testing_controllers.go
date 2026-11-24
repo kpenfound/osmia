@@ -134,14 +134,9 @@ func BaseRefreshForTest(s *Service, repo *trace.Repository, now func() time.Time
 	return &baseRefresher{S: s.lifecycle(), Repository: repo}
 }
 
-type TestBaseObservation = baseObservation
-
 var TestBaseObservationAt = baseObservationAt
 var TestResolved = resolved
 
-const TestBaseObservationDocument = baseObservationDocument
-
-const TestDriftPath = driftPath
 const TestDriftReplayed = driftReplayed
 
 var TestDependentBaseChanged = dependentBaseChanged

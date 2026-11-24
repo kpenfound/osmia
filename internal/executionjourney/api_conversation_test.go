@@ -3,6 +3,13 @@ package executionjourney
 import (
 	context "context"
 	errors "errors"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	strings "strings"
+	testing "testing"
+	time "time"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
@@ -10,12 +17,6 @@ import (
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
-	time "time"
 )
 
 // runChief binds the fake chief of staff through the thread dispatcher. It
@@ -166,19 +167,6 @@ func TestConversationRejections(t *testing.T) {
 	must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("rejected messages were recorded: %+v", th.Turns)
-	}
-
-	// The librarian's workstream is in the trace but not in status, and its
-	// chief of staff never gets a turn: it is unknown to the conversation too.
-	librarian := intakefixture.PlantLibrarian(t, s.sole().repository, demoStart, ownerActor)
-	_, err = c.Send(ctx, librarian, "hello")
-	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
-	_, err = c.Conversation(ctx, librarian)
-	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
-	th, err = s.sole().repository.ChiefOfStaffThread(librarian)
-	must(t, err)
-	if len(th.Turns) != 0 {
-		t.Fatalf("a message to the librarian's workstream was recorded: %+v", th.Turns)
 	}
 
 	// Without a trace the workstream is unknown.

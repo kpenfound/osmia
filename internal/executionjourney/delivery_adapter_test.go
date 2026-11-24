@@ -143,7 +143,6 @@ func (d *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	return d.driver().Apply(ctx, op)
 }
 
-
 var publications = delivery.Publications
 
 func (d *publisher) recordPublication(ctx context.Context, stream config.WorkstreamID, record DeliveryPublication) error {

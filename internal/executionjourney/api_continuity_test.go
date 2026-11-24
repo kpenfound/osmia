@@ -5,6 +5,16 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	fs "io/fs"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -15,15 +25,6 @@ import (
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	fs "io/fs"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 var checkGrants = fixturekit.CheckGrants

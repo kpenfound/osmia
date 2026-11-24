@@ -5,12 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	os "os"
 	exec "os/exec"
 	filepath "path/filepath"
@@ -19,6 +13,13 @@ import (
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	seal "github.com/kpenfound/osmia/internal/seal"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 const walkSpec = "# Feature\n\n## Acceptance criteria\n\n1. Specs parse.\n2. Plans validate.\n3. Plans encode.\n"

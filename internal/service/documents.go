@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -28,20 +29,20 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 				fail(w, Unsupported)
 				return true
 			}
-			var in BaseUpstreamRequest
+			var in api.BaseUpstreamRequest
 			if !decode(w, r, &in) {
 				return true
 			}
-			if out, api := s.baseUpstream(r.Context(), raw, in); api != nil {
+			if out, api := s.lifecycle().BaseUpstream(r.Context(), raw, in); api != nil {
 				failWith(w, api)
 			} else {
 				respond(w, 200, out)
 			}
 			return true
 		}
-		_, stream, repo, api := s.conversationTrace(raw)
-		if api != nil {
-			failWith(w, api)
+		_, stream, repo, apiErr := s.conversationTrace(raw)
+		if apiErr != nil {
+			failWith(w, apiErr)
 			return true
 		}
 		var out trace.WorkstreamBase
@@ -50,12 +51,12 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 		case http.MethodGet:
 			out, err = repo.WorkstreamBase(stream)
 		case http.MethodPut:
-			var in BaseEdit
+			var in api.BaseEdit
 			if !decode(w, r, &in) {
 				return true
 			}
 			_, archivedBase := s.archivedWorkstream(string(in.Base))
-			if archivedBase || in.Base == librarianWorkstream(repo.Project()) {
+			if archivedBase {
 				fail(w, Validation)
 				return true
 			}

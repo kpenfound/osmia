@@ -7,6 +7,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -14,9 +15,6 @@ func (s *Service) delivery() *delivery.Controller {
 	return s.deliveryFor(s.current())
 }
 
-// deliveryFor binds the delivery controller to the configuration of its
-// operation: a running operation keeps its Dagger Cloud rerun runner when
-// reload installs new stages.
 func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 	return delivery.New(delivery.Dependencies{
 		Now: s.now, About: s.about, Current: s.current, Effective: s.effective,
@@ -30,22 +28,19 @@ func (s *Service) deliveryFor(cfg *config.Config) *delivery.Controller {
 		Committee: s.options.Committee, PullRequests: s.options.PullRequests, Jev: s.jev, Router: routerPort{s},
 		CloudStatuses: s.options.CloudStatuses, CloudRerun: s.configuredRerun(cfg), CloudTrace: s.configuredTrace(cfg), AutoTraceTimeout: s.options.CloudTraceTimeout, PostPushWait: s.options.FinalChecksWait,
 		ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
-		UpstreamDeliveryPending: upstreamDeliveryPending, UnresolvedWork: unresolvedWork, ReopenHeld: reopenHeld,
+		UpstreamDeliveryPending: lifecycle.UpstreamDeliveryPending, UnresolvedWork: unresolvedWork, ReopenHeld: lifecycle.ReopenHeld,
 		BaseObservationAt: func(r *trace.Repository, w config.WorkstreamID) (bool, int, error) {
 			observed, revision, err := baseObservationAt(r, w)
 			return observed.Unavailable, revision, err
 		},
-		WorkgroupMergeOrderResolved: workgroupMergeOrderResolved, WorkgroupMergeOrderWaived: workgroupMergeOrderWaived, ReviewMoves: reviewMoves,
-		DependentBaseChanged: dependentBaseChanged, BranchBase: branchBase, DriftRebaseNotes: driftRebaseNotes,
-		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: pendingMergeOrderReferences,
-		EdgePublicationWait: edgePublicationWait, UnresolvedMergeOrderEdge: unresolvedMergeOrderEdge,
-		CanonicalPublication: canonicalPublication, ChiefThread: s.chiefThread, RequestRebase: s.requestRebase,
+		WorkgroupMergeOrderResolved: lifecycle.WorkgroupMergeOrderResolved, WorkgroupMergeOrderWaived: lifecycle.WorkgroupMergeOrderWaived, ReviewMoves: lifecycle.ReviewMoves,
+		DependentBaseChanged: dependentBaseChanged, BranchBase: lifecycle.BranchBase, DriftRebaseNotes: lifecycle.DriftRebaseNotes,
+		WorkgroupEdgePending: workgroupEdgePending, PendingMergeOrderReferences: lifecycle.PendingMergeOrderReferences,
+		EdgePublicationWait: lifecycle.EdgePublicationWait, UnresolvedMergeOrderEdge: lifecycle.UnresolvedMergeOrderEdge,
+		CanonicalPublication: lifecycle.CanonicalPublication, ChiefThread: s.chiefThread, RequestRebase: s.requestRebase,
 	})
 }
 
-// requestRebase asks for the drift rebase of the workstream's branch onto its
-// upstream's base branch now. A workstream that takes none (it is paused,
-// held or has one in flight) is left to the schedule.
 func (s *Service) requestRebase(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) error {
 	_, api := s.lifecycle().RebaseWorkstream(ctx, string(stream))
 	if api != nil && api.Code != delivery.Conflict {

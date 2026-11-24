@@ -6,6 +6,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -15,7 +16,7 @@ func logUnsettledLifecycleOperations(t *testing.T, repo *trace.Repository, strea
 	var lookup func(coreadapter.Operation) (string, string, trace.Thread, error)
 	if len(services) > 0 {
 		lookup = func(op coreadapter.Operation) (string, string, trace.Thread, error) {
-			delta, err := decodeDeltaTurn(op)
+			delta, err := lifecycle.DecodeDeltaTurn(op)
 			if err != nil {
 				return "", "", trace.Thread{}, err
 			}
@@ -24,7 +25,7 @@ func logUnsettledLifecycleOperations(t *testing.T, repo *trace.Repository, strea
 				return "", "", trace.Thread{}, err
 			}
 			defer close()
-			agent, turn := delta.Agent, deltaTurnID(c, delta.Agent, delta.Tool)
+			agent, turn := delta.Agent, lifecycle.DeltaTurnID(c, delta.Agent, delta.Tool)
 			th, err := wt.Thread(c.Host, agent)
 			return agent, turn, th, err
 		}

@@ -8,6 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
@@ -41,9 +42,9 @@ func runtimeFor(r *trace.Repository) *activeProject {
 
 const quiet = fixturekit.Quiet
 const baseRefreshAction = service.TestBaseRefreshAction
-const baseObservationDocument = service.TestBaseObservationDocument
+const baseObservationDocument = lifecycle.BaseObservationDocument
 
-type baseObservation = service.TestBaseObservation
+type baseObservation = lifecycle.BaseObservation
 
 var baseObservationAt = service.TestBaseObservationAt
 var resolved = service.TestResolved
@@ -65,7 +66,7 @@ var actionOperation = fixturekit.ActionOperation
 var dependentBaseChanged = service.TestDependentBaseChanged
 var loadTraceWalk = service.LoadTraceWalkForTest
 
-const driftPath = service.TestDriftPath
+const driftPath = lifecycle.DriftPath
 const driftReplayed = service.TestDriftReplayed
 const publishUpstreamAction = "publish-upstream"
 const deliveryReviewAction = "delivery-review"

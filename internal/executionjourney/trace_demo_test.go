@@ -3,7 +3,6 @@ package executionjourney
 import (
 	context "context"
 	json "encoding/json"
-	plan "github.com/kpenfound/osmia/internal/plan"
 	net "net"
 	http "net/http"
 	exec "os/exec"
@@ -11,6 +10,8 @@ import (
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
+
+	plan "github.com/kpenfound/osmia/internal/plan"
 )
 
 // TestTraceNavigationDemonstration follows one local workstream through

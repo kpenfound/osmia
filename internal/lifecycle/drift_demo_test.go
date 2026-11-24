@@ -506,7 +506,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	}
 	rebased := intakefixture.TransitionByID(t, repository, stream, "drift-1-rebased")
 	for _, o := range landOperations(t, repository, stream) {
-		if in, err := service.TestDecodeLand(o.Operation); err == nil && in.Unit == "audit" && !o.Transition.At.After(rebased.At) {
+		if in, err := execution.DecodeLand(o.Operation); err == nil && in.Unit == "audit" && !o.Transition.At.After(rebased.At) {
 			t.Fatalf("audit's landing was asked for at %s, before drift rebase 1 finished at %s", o.Transition.At, rebased.At)
 		}
 	}

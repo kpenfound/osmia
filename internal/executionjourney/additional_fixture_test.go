@@ -4,16 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/questions"
-
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/trace"
-
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func (f *architectFixture) runs() []string {

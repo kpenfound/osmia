@@ -10,10 +10,9 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // While an architect draft is in flight, the capacity view a running service

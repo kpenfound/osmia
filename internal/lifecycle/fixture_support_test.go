@@ -161,7 +161,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			return &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: r}
 		},
 		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
-			_, event := service.TestLandIDs("accept", 1)
+			_, event := execution.LandIDs("accept", 1)
 			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
 		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn, LibrarianWorkstream: intake.LibrarianWorkstream,

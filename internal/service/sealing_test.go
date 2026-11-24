@@ -1,8 +1,9 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func (f *architectFixture) upstream(t *testing.T) string {

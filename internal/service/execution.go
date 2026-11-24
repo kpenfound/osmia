@@ -18,13 +18,9 @@ var masonTurnID = execution.MasonTurnID
 
 var interruption = execution.Interruption
 
-const DispatchStarted = execution.DispatchStarted
-
 const DispatchDeferred = execution.DispatchDeferred
 
 const DeferPaused = execution.DeferPaused
-
-const DeferBlocked = execution.DeferBlocked
 
 const DeferEntangled = execution.DeferEntangled
 
@@ -34,16 +30,7 @@ const DeferPriority = execution.DeferPriority
 
 const DeferCapacity = execution.DeferCapacity
 
-var dispatchDocument = execution.DispatchDocument
-
-var currentDeferral = execution.CurrentDeferral
-
-type UnitChange = execution.UnitChange
-
-var changeDocument = execution.ChangeDocument
-
 var viewPaths = execution.ViewPaths
-var turnViews = execution.TurnViews
 
 type retriedTurns = execution.RetriedTurns
 
@@ -51,55 +38,29 @@ var mirror = execution.Mirror
 
 const moveUnitTool = execution.MoveUnitTool
 
-var movePrefix = execution.MovePrefix
-
 var moveContest = execution.MoveContest
 
 const CheckAction = execution.CheckAction
 
 const checksRole = execution.ChecksRole
 
-var checksActor = execution.ChecksActor
-
-type checkInput = execution.CheckInput
-
 type UnitCheckRun = execution.UnitCheckRun
 
 var checkDocumentID = execution.CheckDocumentID
-
-var checkPathPattern = execution.CheckPathPattern
-
-var unitReviewerIdentity = execution.UnitReviewerIdentity
-
-var unitReviewerSelection = execution.UnitReviewerSelection
-
-const verdictTool = execution.VerdictTool
-
-const verdictOutcome = execution.VerdictOutcome
-
-var reviewerActor = execution.ReviewerActor
 
 type UnitVerdict = execution.UnitVerdict
 
 type UnitReviewResult = execution.UnitReviewResult
 
-type reviewerReports = execution.ReviewerReports
-
 type verdictTurns = execution.VerdictTurns
 
 var reviewTurnID = execution.ReviewTurnID
 
-var staleReview = execution.StaleReview
-
 var masonContest = execution.MasonContest
-
-var latestContestedRuling = execution.LatestContestedRuling
 
 var rulerName = execution.RulerName
 
 const LandAction = execution.LandAction
-
-const landingTrailer = execution.LandingTrailer
 
 var foremanActor = execution.ForemanActor
 
@@ -107,17 +68,9 @@ type landInput = execution.LandInput
 
 var landingDocument = execution.LandingDocument
 
-var landIDs = execution.LandIDs
-
-var decodeLand = execution.DecodeLand
-
 const RebaseAction = execution.RebaseAction
 
 var rebaseDocument = execution.RebaseDocument
-
-const doneTool = execution.DoneTool
-
-const masonDone = execution.MasonDone
 
 const reportPath = execution.ReportPath
 
@@ -127,41 +80,17 @@ type UnitReport = execution.UnitReport
 
 var reportDocument = execution.ReportDocument
 
-type masonReports = execution.MasonReports
-
 type reportingTurns = execution.ReportingTurns
 
 var reviewDocument = execution.ReviewDocument
 
-var reviewDiffTool = execution.ReviewDiffTool
-
 const resolveContestedTool = execution.ResolveContestedTool
-
-const escalateContest = execution.EscalateContest
-
-var chiefContestPath = execution.ChiefContestPath
 
 var unitContest = execution.UnitContest
 
-var chiefDecisions = execution.ChiefDecisions
-
-var chiefRulingsLeft = execution.ChiefRulingsLeft
-
 var contestRaised = execution.ContestRaised
 
-var contestEscalated = execution.ContestEscalated
-
-const maxRecoveries = execution.MaxRecoveries
-
-var interruptedInARow = execution.InterruptedInARow
-
 var failedReview = execution.FailedReview
-
-var checksContest = execution.ChecksContest
-
-var rebaseContest = execution.RebaseContest
-
-type UnitCheckSelection = execution.UnitCheckSelection
 
 type building = execution.Building
 
@@ -277,14 +206,6 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	return r.driver().One(ctx, stream, unit, state, paused)
 }
 
-func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state trace.WorkflowState) (UnitReviewResult, bool, error) {
-	return r.driver().StoredResult(stream, unit, state)
-}
-
-func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
-	return r.driver().RefreshReview(ctx, stream, unit, state, reason)
-}
-
 func (f *foreman) Pass(ctx context.Context) error { return f.driver().Pass(ctx) }
 
 func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int) (trace.Document, UnitReviewResult, bool, error) {
@@ -301,8 +222,6 @@ func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 
 var _ reconcile.Bounded = (*foreman)(nil)
 
-// Bound reports whether the operation is a landing or a rebase, whose attempts
-// are bounded and always reach a result.
 func (f *foreman) Bound(op coreadapter.Operation) bool {
 	return op.Boundary == coreadapter.RepositoryBoundary && (op.Action == LandAction || op.Action == RebaseAction)
 }
@@ -313,10 +232,6 @@ func (f *foreman) Failing(ctx context.Context, op coreadapter.Operation, failure
 
 func (f *foreman) GiveUp(ctx context.Context, op coreadapter.Operation, why reconcile.GiveUpReason) (coreadapter.OperationResult, error) {
 	return f.driver().GiveUp(ctx, op, why)
-}
-
-func (f *foreman) requestedAt(stream config.WorkstreamID, operation string) (time.Time, error) {
-	return f.driver().RequestedAt(stream, operation)
 }
 
 func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {

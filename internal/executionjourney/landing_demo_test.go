@@ -14,10 +14,9 @@ import (
 	testing "testing"
 	time "time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )

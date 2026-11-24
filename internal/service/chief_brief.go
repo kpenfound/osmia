@@ -16,15 +16,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// briefToolName is the chief-only tool that records a delivery brief.
 const briefToolName = delivery.BriefToolName
 
-// deliveryBrief returns the record_delivery_brief tool of one chief-of-staff
-// turn. It records the brief for the final review the call names in the trace
-// of the member workstream it names (the turn's own for an unshared chief),
-// replacing the earlier brief for the same review. A call the service refuses
-// is an ordinary result, {"recorded":false,"reason":...}, that stores and
-// replaces nothing.
 func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: briefToolName, Effect: coreadapter.ToolMemory,
 		Description: fmt.Sprintf("Record the delivery brief the owner reads before deciding delivery of a workstream's final review. Name the review with review and review_revision exactly as the final review notice gives them; a call naming any other review, a review the owner already approved, or a workstream with no reviewed final review awaiting approval is refused. Set workstream to the member (required for a shared chief). text: how the approved intent shows up in the product, then at most one line on how it was implemented, then any departure from the intent, at most %d characters; never list tests, files or commits. before_you_ship: optional lines, one per item, at most %d characters in total, only for what must be done to deploy the change. screenshots: at most %d image_id values returned by preview for this member at the reviewed commit. A refused call records nothing and says why; nothing is ever truncated. A later accepted call for the same review replaces the earlier brief.", delivery.MaxBriefText, delivery.MaxBriefItems, delivery.MaxBriefScreenshots),
@@ -100,10 +93,6 @@ func (c *runtimeControls) deliveryBrief(repo *trace.Repository, scope coreadapte
 	return tool
 }
 
-// previewScreenshots checks that every screenshot is an image the preview
-// tool captured of member stream at commit. The captures are recorded in the
-// chief's own workstream trace, as repo holds them; the images are the
-// member's, as target holds them.
 func previewScreenshots(repo *trace.Repository, own config.WorkstreamID, target *trace.Repository, stream config.WorkstreamID) delivery.ScreenshotCheck {
 	return func(commit string, screenshots []string) (string, error) {
 		docs, err := trace.Read[trace.Document](repo, own)
@@ -141,11 +130,6 @@ func previewScreenshots(repo *trace.Repository, own config.WorkstreamID, target 
 	}
 }
 
-// chiefThread returns the chief-of-staff thread that carries stream's
-// notices and whether a chief turn can run at all: a service with no thread
-// runner, a workstream with no chief thread and a retired workgroup member
-// have none. A shared thread that is busy or being joined is reported as one
-// with no turns yet, so the notice is still waiting for its turn.
 func (s *Service) chiefThread(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (trace.Thread, bool, error) {
 	if s.options.Threads == nil {
 		return trace.Thread{}, false, nil
@@ -169,24 +153,9 @@ func (s *Service) chiefThread(ctx context.Context, repository *trace.Repository,
 	return t, err == nil, err
 }
 
-// checksTool and checksChoiceTool are the chief-only tools that ask for a
-// fresh read or a rerun of the current push's Cloud checks, and that bring the
-// owner the choice to keep waiting for check results or to continue without
-// them.
 const (
-	checksTool       = delivery.ChecksToolName
-	checksChoiceTool = delivery.ChecksChoiceToolName
+	checksTool = delivery.ChecksToolName
 )
-
-// pullRequestChecks returns the pull_request_checks tool of one chief-of-staff turn.
-func (c *runtimeControls) pullRequestChecks(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return delivery.ChecksToolOf(c.deliveryController, repo, scope)
-}
-
-// askOwnerAboutChecks returns the ask_owner_about_checks tool of one chief-of-staff turn.
-func (c *runtimeControls) askOwnerAboutChecks(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return delivery.ChecksChoiceToolOf(c.deliveryController, repo, scope)
-}
 
 func (c *runtimeControls) deliveryController() *delivery.Controller {
 	if s := c.service.Load(); s != nil {
@@ -195,11 +164,8 @@ func (c *runtimeControls) deliveryController() *delivery.Controller {
 	return nil
 }
 
-// triageTool is the chief-only tool that records the triage of a blocking
-// finding of a final review.
 const triageTool = delivery.TriageToolName
 
-// triageFinding returns the triage_finding tool of one chief-of-staff turn.
 func (c *runtimeControls) triageFinding(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return delivery.TriageToolOf(func() *delivery.Controller {
 		if s := c.service.Load(); s != nil {

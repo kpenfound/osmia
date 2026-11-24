@@ -6,6 +6,12 @@ import (
 	errors "errors"
 	fmt "fmt"
 	os "os"
+	filepath "path/filepath"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -15,13 +21,6 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 	workspace "github.com/kpenfound/osmia/internal/workspace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
 var requireJJ = intakefixture.RequireJJ

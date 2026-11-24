@@ -5,4 +5,3 @@ import (
 )
 
 type TailnetListener = tailnet.Listener
-type JoinTailnet = tailnet.Join

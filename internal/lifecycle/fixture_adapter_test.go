@@ -29,14 +29,12 @@ type Options struct {
 	boundary       func(context.Context, string) error
 	schedulePassed func()
 	notifyInbox    func(context.Context) (api.InboxResponse, *api.APIError)
-	checkJJ        func(context.Context) (string, error)
-	sbxBin         string
 	reviewChecks   service.ReviewChecks
 	controls       *runtimeControls
 }
 
 func (o Options) hooks() service.TestHooks {
-	h := service.TestHooks{Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks}
+	h := service.TestHooks{Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, ReviewChecks: o.reviewChecks}
 	if o.controls != nil {
 		h.Enforcement = o.controls.binding
 	}
@@ -218,7 +216,7 @@ func (s *Service) feedList(raw string) (api.FeedResponse, *api.APIError) {
 	return service.InspectForTest(s.core()).Feed(raw)
 }
 func (s *Service) holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-	return service.InspectForTest(s.core()).Holds(p, w, r, c)
+	return service.InspectForTest(s.core()).Holds(p, r, c)
 }
 func InspectForTest(s *Service) service.TestAccess { return service.InspectForTest(s.core()) }
 

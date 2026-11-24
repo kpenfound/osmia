@@ -5,6 +5,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/service"
@@ -33,7 +34,7 @@ const DriftAction = service.DriftAction
 var stageChiefDocuments = service.TestStageChiefDocuments
 var withActions = service.TestWithActions
 var driftResolveTurnID = service.TestDriftResolveTurnID
-var driftReviewTurnID = service.TestDriftReviewTurnID
+var driftReviewTurnID = lifecycle.DriftReviewTurnID
 var driftDiffTool = service.TestDriftDiffTool
 var driftWorkspaces = service.TestDriftWorkspaces
 var operationTrailer = service.TestOperationTrailer

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -33,12 +34,12 @@ func completeDriftTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 
 func resolvedDone(outcome string) *coreadapter.Outcome {
 	data, _ := json.Marshal(MasonReport{Outcome: outcome})
-	return &coreadapter.Outcome{Status: masonDone, Report: string(data)}
+	return &coreadapter.Outcome{Status: execution.MasonDone, Report: string(data)}
 }
 
 func driftVerdict(t *testing.T, verdict UnitVerdict) *coreadapter.Outcome {
 	t.Helper()
-	return intakefixture.VerdictOutcome(t, verdict, verdictOutcome)
+	return intakefixture.VerdictOutcome(t, verdict, execution.VerdictOutcome)
 }
 
 var (

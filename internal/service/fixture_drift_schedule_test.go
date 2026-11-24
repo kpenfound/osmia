@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 

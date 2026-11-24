@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/plan"
 )
 
-// changeReadTimeout bounds the read of a commit's change ID in a trace walk.
 const changeReadTimeout = 5 * time.Second
 
 func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (any, *APIError) {
-	_, stream, repository, api := s.conversationTrace(raw)
-	if api != nil {
-		return nil, api
+	_, stream, repository, apiErr := s.conversationTrace(raw)
+	if apiErr != nil {
+		return nil, apiErr
 	}
 	if kind != "" && selector == "" {
 		return nil, &APIError{Code: Validation, Message: "trace selector must not be empty"}
@@ -29,7 +29,7 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		var w *traceWalk
 		w, err = loadTraceWalk(repository, stream)
 		if err == nil {
-			v := TraceSummary{Project: w.project, Workstream: stream, Feature: w.feature, Seal: w.seal, Criteria: []TraceCriterion{}, Units: []UnitTrace{}, Gaps: append([]TraceGap{}, w.gaps...)}
+			v := api.TraceSummary{Project: w.project, Workstream: stream, Feature: w.feature, Seal: w.seal, Criteria: []TraceCriterion{}, Units: []UnitTrace{}, Gaps: append([]TraceGap{}, w.gaps...)}
 			if w.specDoc != nil {
 				ref := refOf(*w.specDoc)
 				v.Spec = &ref
@@ -76,17 +76,12 @@ func (s *Service) traceView(ctx context.Context, raw, kind, selector string) (an
 		if !commitPattern.MatchString(selector) {
 			return nil, &APIError{Code: Validation, Message: "commit must be a full lowercase commit ID"}
 		}
-		// A rebased or squashed commit can be found by its operation trailer.
-		// A recorded commit may no longer be present in the clone, so the
-		// trace walk still searches its durable records in that case.
 		message := ""
 		if g, readErr := featureWorkspaces(s.about(repository), repository).Of(stream); readErr == nil {
 			if commit, readErr := g.Commit(ctx, selector); readErr == nil {
 				message = commit.Message
 			}
 		}
-		// On Jujutsu a unit's commits carry the unit's change ID, which
-		// finds the unit of a commit no record names.
 		change := ""
 		if g, readErr := newUnitWorkspaces(s.about(repository), repository).Of(stream); readErr == nil {
 			read, cancel := context.WithTimeout(ctx, changeReadTimeout)

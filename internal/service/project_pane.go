@@ -11,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// paneWorkgroup reads a live member's recorded workgroup identity and graph.
 func paneWorkgroup(repo *trace.Repository, stream config.WorkstreamID) (*WorkgroupView, error) {
 	id, err := repo.CrossRepoWorkgroupOf(stream)
 	if err != nil {
@@ -20,9 +19,6 @@ func paneWorkgroup(repo *trace.Repository, stream config.WorkstreamID) (*Workgro
 	return paneWorkgroupAt(repo, stream, id)
 }
 
-// paneWorkgroupAt reads only project-level records. An archived member's
-// trace may have been cleanup-deleted; its archive pins the workgroup ID,
-// or migration supplies its one-member mapping in the project record.
 func paneWorkgroupAt(repo *trace.Repository, stream config.WorkstreamID, id config.WorkgroupID) (*WorkgroupView, error) {
 	if id != "" {
 		spec, group, _, err := repo.CrossRepoProjectSpec(id)
@@ -33,7 +29,6 @@ func paneWorkgroupAt(repo *trace.Repository, stream config.WorkstreamID, id conf
 			if len(group.Members) < 2 {
 				return nil, fmt.Errorf("workgroup %s has no target members", id)
 			}
-			// The first member of a cross-repo record is its synthetic trace host.
 			return &WorkgroupView{ID: id, Members: group.Members[1:], Conversation: group.Conversation, Edges: append([]trace.Edge{}, spec.Graph...)}, nil
 		}
 	}
@@ -75,8 +70,6 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 	_, paused := s.pausing(w.Project, w.Workstream)
 	w.DisplayState = paneState(w.State, w.Wait, paused, open, merged)
 	if merged {
-		// A workstream the service landed on its base branch is delivered by that
-		// landing, not by a merged pull request.
 		landing, landed, err := delivery.ReadDeliveryLanding(repo, w.Workstream)
 		if err != nil {
 			return err
@@ -88,8 +81,6 @@ func (s *Service) presentWorkstream(repo *trace.Repository, w *WorkstreamStatus)
 	return nil
 }
 
-// landedState is the project pane label of a workstream delivered by its
-// landing, with the landed commit.
 func landedState(landing delivery.DeliveryLanding) string {
 	commit := landing.Commit
 	if len(commit) > 12 {
@@ -98,9 +89,6 @@ func landedState(landing delivery.DeliveryLanding) string {
 	return fmt.Sprintf("delivered (landed %s)", commit)
 }
 
-// markDroppedEdges names the edges of the workgroup that their dependent
-// dropped. Each waiver lives in the dependent's own trace, which is stream's
-// repository for stream's own edges and another project's for the rest.
 func (s *Service) markDroppedEdges(repo *trace.Repository, stream config.WorkstreamID, group *WorkgroupView) error {
 	if group == nil {
 		return nil
@@ -137,7 +125,7 @@ func (s *Service) markDroppedEdges(repo *trace.Repository, stream config.Workstr
 func presentArchivedWorkstream(repo *trace.Repository, w *WorkstreamStatus, a runtime.Archive) error {
 	var err error
 	w.Workgroup, err = paneWorkgroupAt(repo, w.Workstream, a.Workgroup)
-	done := archiveResolved(a)
+	done := lifecycle.ArchiveResolved(a)
 	if !done {
 		w.Wait = fmt.Sprintf("archived member %s has no pinned merge or cancel evidence; workgroup remains unresolved", w.Workstream)
 	}

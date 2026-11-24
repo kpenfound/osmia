@@ -2,32 +2,28 @@ package intakejourney
 
 import (
 	context "context"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	errors "errors"
 	fmt "fmt"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	os "os"
 	filepath "path/filepath"
-
-	"github.com/kpenfound/osmia/internal/projectstore"
 	slices "slices"
 	strings "strings"
 	sync "sync"
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const askedQuestion = intakefixture.AskedQuestion

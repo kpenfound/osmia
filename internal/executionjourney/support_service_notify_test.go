@@ -1,8 +1,9 @@
 package executionjourney
 
 import (
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	testing "testing"
+
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func settled(t *testing.T, count func() int) {

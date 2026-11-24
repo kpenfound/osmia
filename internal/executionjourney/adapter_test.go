@@ -2,27 +2,22 @@ package executionjourney
 
 import (
 	"context"
-
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
-
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
-
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"github.com/kpenfound/osmia/internal/trace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -33,8 +28,6 @@ type Options struct {
 	boundary       func(context.Context, string) error
 	schedulePassed func()
 	notifyInbox    func(context.Context) (api.InboxResponse, *api.APIError)
-	checkJJ        func(context.Context) (string, error)
-	sbxBin         string
 	reviewChecks   service.ReviewChecks
 	controls       *runtimeControls
 	// telemetryExporter receives the service's spans and turns telemetry on.
@@ -42,7 +35,7 @@ type Options struct {
 }
 
 func (o Options) hooks() service.TestHooks {
-	h := service.TestHooks{ConversationTicks: o.conversationTicks, Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, CheckJJ: o.checkJJ, SandboxBinary: o.sbxBin, ReviewChecks: o.reviewChecks, TelemetryExporter: o.telemetryExporter}
+	h := service.TestHooks{ConversationTicks: o.conversationTicks, Boundary: o.boundary, SchedulePassed: o.schedulePassed, NotifyInbox: o.notifyInbox, ReviewChecks: o.reviewChecks, TelemetryExporter: o.telemetryExporter}
 	if o.controls != nil {
 		h.Enforcement = o.controls.binding
 	}
@@ -206,7 +199,7 @@ func (s *Service) ruleContested(ctx context.Context, w, u string, r ContestedRul
 }
 
 func (s *Service) holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-	return service.InspectForTest(s.core()).Holds(p, w, r, c)
+	return service.InspectForTest(s.core()).Holds(p, r, c)
 }
 
 func InspectForTest(s *Service) service.TestAccess { return service.InspectForTest(s.core()) }

@@ -8,10 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/execution"
-
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/trace"

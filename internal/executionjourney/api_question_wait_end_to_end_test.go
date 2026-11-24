@@ -5,14 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	reviewtools "github.com/kpenfound/osmia/internal/review"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/service"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
@@ -21,6 +13,15 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	reviewtools "github.com/kpenfound/osmia/internal/review"
+	runtime "github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/service"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // holdQuestionReview lets delivery and dispatch run while the reviewer

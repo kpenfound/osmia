@@ -1,6 +1,9 @@
 package executionjourney
 
 import (
+	strings "strings"
+	time "time"
+
 	api "github.com/kpenfound/osmia/internal/api"
 	browsertest "github.com/kpenfound/osmia/internal/browsertest"
 	delivery "github.com/kpenfound/osmia/internal/delivery"
@@ -10,8 +13,6 @@ import (
 	service "github.com/kpenfound/osmia/internal/service"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	strings "strings"
-	time "time"
 )
 
 const draftSubject = intake.DraftSubject

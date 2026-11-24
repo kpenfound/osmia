@@ -39,13 +39,12 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		gate := sessionLock(p.repository, id)
 		lock := &gate.Mutex
 		if design {
-			lock = designLock(p.repository, id)
+			lock = intake.DesignLock(p.repository, id)
 		}
 		if !lock.TryLock() {
 			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "the session is busy; try again once it finishes"}
 		}
 		defer lock.Unlock()
-		// Re-resolve under the same lock every writer takes at admission.
 		streams, err = p.repository.Workstreams()
 		if err != nil {
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
@@ -64,7 +63,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		if err != nil {
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
-		if !allowed || id == librarianWorkstream(p.id) {
+		if !allowed {
 			return SessionDestroyResponse{}, &APIError{Code: Conflict, Message: "only an open design session or an exploratory session can be destroyed"}
 		}
 		threads, err := p.repository.Threads(id)
@@ -75,8 +74,6 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 		for _, th := range threads {
 			busy = busy || unfinishedSessionTurn(th)
 		}
-		// Completion includes relaying the turn and recording/acknowledging its
-		// operation, which can outlive the thread's completion timestamp.
 		operations, err := p.repository.Operations(id)
 		if err != nil {
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
@@ -170,7 +167,6 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 	if err := os.RemoveAll(runtime.ModelSessionDirectory(cfg.Root.String(), project, stream)); err != nil {
 		return err
 	}
-	// The root span is sent while the trace it is read from still exists.
 	s.recorder().Ended(repository, stream, intent.At, recordspans.Removed)
 	if _, err := repository.MarkWorkstreamTraceForDeletion(stream); err != nil {
 		return err
@@ -190,8 +186,6 @@ func (s *Service) finishSessionDestroy(ctx context.Context, cfg *config.Config, 
 }
 
 func (s *Service) forgetSessionStatus(project config.ProjectID, stream config.WorkstreamID) {
-	// A status read that already captured this session must not restore it
-	// to the cache when its background refresh eventually finishes.
 	s.statusViews.Invalidate(func(value StatusResponse) StatusResponse {
 		value.Workstreams = slices.DeleteFunc(slices.Clone(value.Workstreams), func(w WorkstreamStatus) bool { return w.Project == project && w.Workstream == stream })
 		return value
@@ -228,7 +222,6 @@ func forgetDestroyedSessionOpen(root config.Root, project config.ProjectID, stre
 	return nil
 }
 
-// reconcileSessionDestroys runs before workgroup wrapping and scheduling.
 func (s *Service) reconcileSessionDestroys(ctx context.Context, cfg *config.Config, projects []*activeProject, store *runtime.Store) error {
 	for _, p := range projects {
 		intents, err := trace.PendingSessionDestroys(cfg.Root, p.id)

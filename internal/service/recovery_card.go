@@ -23,23 +23,16 @@ type (
 	RecoveryMove     = api.RecoveryMove
 	RecoveryRequest  = api.RecoveryRequest
 	RecoveryResponse = api.RecoveryResponse
-	FeedRecovery     = api.FeedRecovery
 )
 
 const InboxRecovery = api.InboxRecovery
 
-// The states of a recovery card as the feed shows it.
 const (
 	recoveryOpen     = "open"
 	recoveryApproved = "approved"
 	recoveryStale    = "stale"
 )
 
-// recoveryRecord is the document recovery/<digest>.json: the recovery move a
-// stalled subject's card pins, written when the card opens, and its approval.
-// A card for a move that belongs to the owner is derived from the router's
-// record of the occurrence; its approval is recorded here as well, so a move
-// that changes no state still closes its card.
 type recoveryRecord struct {
 	api.RecoveryMove
 	State    string    `json:"state"`
@@ -53,8 +46,6 @@ func recoveryRecordPath(occurrence string) string {
 	return "recovery/" + router.Name(occurrence) + ".json"
 }
 
-// recoveryCard is one recovery card: its move, when it was opened and where it
-// stands. Current is the state of the move's subject now.
 type recoveryCard struct {
 	Move    api.RecoveryMove
 	Opened  time.Time
@@ -62,8 +53,6 @@ type recoveryCard struct {
 	Current trace.WorkflowState
 }
 
-// readRecoveryRecords returns the latest revision of each recovery record of
-// the workstream by occurrence, with the revision, in the order opened.
 func readRecoveryRecords(repo *trace.Repository, stream config.WorkstreamID) (map[string]recoveryRecord, map[string]int, []string, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -95,7 +84,6 @@ func readRecoveryRecords(repo *trace.Repository, stream config.WorkstreamID) (ma
 	return records, revisions, occurrences, nil
 }
 
-// writeRecoveryRecord records rec as the next revision of its document.
 func writeRecoveryRecord(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, rec recoveryRecord, revision int, actor trace.Actor, at time.Time) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
@@ -106,8 +94,6 @@ func writeRecoveryRecord(ctx context.Context, repo *trace.Repository, stream con
 	return repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: recoveryRecordPath(rec.Occurrence), Content: string(data) + "\n"}})
 }
 
-// recoveryWorkstreamStates maps the targets of the exits that can be sent to the owner
-// to the feature state the owner's move names.
 var recoveryWorkstreamStates = map[string]string{
 	intake.TargetRedraft:        SketchedState,
 	intake.TargetDebateRound:    InShedState,
@@ -120,8 +106,6 @@ var recoveryWorkstreamStates = map[string]string{
 	AbandonedState:              AbandonedState,
 }
 
-// recoverable reports whether the owner has a move for a target of a machine:
-// the owner's moves of units and workstreams, and the drop of a dependency.
 func recoverable(machine, target string) bool {
 	switch machine {
 	case execution.UnitMachine:
@@ -135,16 +119,10 @@ func recoverable(machine, target string) bool {
 	return false
 }
 
-// dependencyWaitExit reports whether the trigger is one of the exits from a
-// dependency wait that the owner clears by dropping the dependency.
 func dependencyWaitExit(trigger string) bool {
 	return trigger == lifecycle.TriggerUpstreamTerminal || trigger == lifecycle.TriggerUpstreamIntegrated || trigger == lifecycle.TriggerBaseUnavailable
 }
 
-// ownerBound reports whether the record is a move that belongs to the owner and
-// waits on the recovery card: a proposal that carries no authority for the gate
-// it needs and has no card of its own, or a move Jev judged would change what
-// the owner approved.
 func ownerBound(rec router.Record) bool {
 	return rec.State == router.StateOwner && (rec.OwnerCard == "" || rec.OwnerCard == router.RecoveryCard) && recoverable(rec.Machine, rec.Target)
 }
@@ -153,7 +131,6 @@ func recordMove(rec router.Record, target, origin, reason string) api.RecoveryMo
 	return api.RecoveryMove{Occurrence: rec.Occurrence, Machine: rec.Machine, Subject: rec.Subject, Unit: rec.Unit, From: rec.From, Version: rec.Version, Target: target, Origin: origin, Reason: reason}
 }
 
-// ownerBoundReason says why the owner decides the move.
 func ownerBoundReason(rec router.Record) (string, string) {
 	if rec.Hold == router.HoldIntent {
 		return api.RecoveryIntent, fmt.Sprintf("Jev judged that moving %s to %s would change what you approved, so the move is yours to approve", rec.Subject, rec.Target)
@@ -161,11 +138,6 @@ func ownerBoundReason(rec router.Record) (string, string) {
 	return api.RecoveryOwner, fmt.Sprintf("moving %s to %s is an owner decision that a proposal cannot make", rec.Subject, rec.Target)
 }
 
-// recoveryCards lists every recovery card of the workstream, open or not, in the
-// order they were opened. A card is open while the router's record or the stall
-// it was opened for stands, the card is not approved, and its subject is still
-// in the state and at the version the move pins; a subject that has moved on
-// makes the card stale.
 func (s *Service) recoveryCards(repo *trace.Repository, stream config.WorkstreamID) ([]recoveryCard, error) {
 	records, err := router.Records(repo, stream)
 	if err != nil {
@@ -230,10 +202,6 @@ func (s *Service) recoveryCards(repo *trace.Repository, stream config.Workstream
 	return out, nil
 }
 
-// recoveryEntries lists the recovery cards of the workstream that are open, as
-// inbox entries. A card pins the exact move: the subject, the state and version
-// it is in, the target and the reason; approving it applies that move and no
-// other.
 func (s *Service) recoveryEntries(repo *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	cards, err := s.recoveryCards(repo, w.Workstream)
 	if err != nil {
@@ -269,8 +237,6 @@ func (s *Service) recoveryEntries(repo *trace.Repository, w trace.WorkstreamStat
 	return out, nil
 }
 
-// feedRecoveries is one feed entry for each recovery card of the workstream,
-// placed where the card was opened.
 func (s *Service) feedRecoveries(repo *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	cards, err := s.recoveryCards(repo, stream)
 	if err != nil {
@@ -278,23 +244,13 @@ func (s *Service) feedRecoveries(repo *trace.Repository, stream config.Workstrea
 	}
 	out := make([]FeedEntry, 0, len(cards))
 	for _, card := range cards {
-		out = append(out, FeedEntry{Kind: "recovery", At: card.Opened, Recovery: &FeedRecovery{RecoveryMove: card.Move, State: card.State}})
+		out = append(out, FeedEntry{Kind: "recovery", At: card.Opened, Recovery: &api.FeedRecovery{RecoveryMove: card.Move, State: card.State}})
 	}
 	return out, nil
 }
 
-// recoveryApproval serialises approvals, so a double click applies the move
-// once.
 var recoveryApproval sync.Mutex
 
-// approveRecovery applies the move a recovery card pins as a pinned owner
-// decision. The request must name the move the card shows, and the card must
-// be open: a card whose subject has since changed state, or that was approved,
-// is refused as a conflict and nothing is applied. The move is then applied
-// through the owner's own path for its machine (the owner's unit and workstream
-// moves, and the drop of a dependency), which submits it to the router as a pinned
-// move: it asks Jev nothing, runs the apply-time check and the target's shared
-// effects, and records the owner as the decider and the authority.
 func (s *Service) approveRecovery(ctx context.Context, raw string, req RecoveryRequest) (RecoveryResponse, *APIError) {
 	project, stream, repo, traceErr := s.conversationTrace(raw)
 	if traceErr != nil {
@@ -327,8 +283,6 @@ func (s *Service) approveRecovery(ctx context.Context, raw string, req RecoveryR
 	if apiErr != nil {
 		return RecoveryResponse{}, apiErr
 	}
-	// The move is recorded as approved so that a move that changes no state
-	// closes its card too.
 	at := s.now()
 	marks, revisions, _, err := readRecoveryRecords(repo, stream)
 	if err != nil {
@@ -345,8 +299,6 @@ func (s *Service) approveRecovery(ctx context.Context, raw string, req RecoveryR
 	return RecoveryResponse{Project: project, Workstream: stream, Occurrence: m.Occurrence, Subject: m.Subject, Unit: m.Unit, From: m.From, Target: m.Target, Detail: detail, At: at}, nil
 }
 
-// applyRecovery applies the pinned move through the owner's path for its
-// machine and reports what it did.
 func (s *Service) applyRecovery(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repo *trace.Repository, m api.RecoveryMove, note string) (string, *APIError) {
 	if id, ok := changeOfSubject(m.Subject); ok {
 		if m.Target != changeStateTarget {
@@ -388,8 +340,6 @@ func (s *Service) applyRecovery(ctx context.Context, project config.ProjectID, s
 	return "", &APIError{Code: Conflict, Message: fmt.Sprintf("the owner has no move for %s to %s", m.Subject, m.Target)}
 }
 
-// dependencyOf returns the upstream workstream and the dependency type a
-// dependency decision's subject names.
 func dependencyOf(subject string) (config.WorkstreamID, string, bool) {
 	rest, ok := strings.CutPrefix(subject, "dependency-")
 	if !ok {
@@ -402,9 +352,6 @@ func dependencyOf(subject string) (config.WorkstreamID, string, bool) {
 	return config.WorkstreamID(upstream), edge, true
 }
 
-// recoverySubjectState returns the state and version of the subject a recovery
-// move pins: a workgroup change's state and journal revision, or the subject's
-// workflow state.
 func (s *Service) recoverySubjectState(repo *trace.Repository, stream config.WorkstreamID, subject string) (trace.WorkflowState, error) {
 	if id, ok := changeOfSubject(subject); ok {
 		return s.changeState(repo, stream, id)
@@ -412,11 +359,6 @@ func (s *Service) recoverySubjectState(repo *trace.Repository, stream config.Wor
 	return repo.RawWorkflow(stream, subject)
 }
 
-// recoveryTarget returns the state a recovery card moves a stalled subject to:
-// the stage it is in again for a unit, a kick for a unit that has not started,
-// a fresh final review for an assembled workstream, and assembled for a
-// building workstream that has nothing left to build. A subject with no way to
-// start again has no card.
 func (w stallWatch) recoveryTarget(stream config.WorkstreamID, unit string, state string) string {
 	if unit != "" {
 		return execution.RecoveryTarget(state)
@@ -427,11 +369,6 @@ func (w stallWatch) recoveryTarget(stream config.WorkstreamID, unit string, stat
 	return ""
 }
 
-// openRecovery opens the recovery card of a stall that neither Jev nor the chief
-// of staff cleared: the router decided the stalled exit, the chief of staff was
-// told, and the subject has not moved for a further stall window. The card pins
-// the move that starts the stalled stage again. Opening is idempotent: the card
-// of an occurrence is opened once.
 func (w stallWatch) openRecovery(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, rec router.Record, now time.Time, after time.Duration) error {
 	if rec.State == router.StateOwner || rec.State == router.StateStale || rec.State == router.StateDecided {
 		return nil

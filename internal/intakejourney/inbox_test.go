@@ -3,9 +3,6 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	fmt "fmt"
 	os "os"
 	filepath "path/filepath"
@@ -27,6 +24,7 @@ import (
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"

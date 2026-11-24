@@ -2,10 +2,10 @@ package intakejourney
 
 import (
 	context "context"
-	cdppage "github.com/chromedp/cdproto/page"
 	testing "testing"
 	time "time"
 
+	cdppage "github.com/chromedp/cdproto/page"
 	chromedp "github.com/chromedp/chromedp"
 	seal "github.com/kpenfound/osmia/internal/seal"
 	shed "github.com/kpenfound/osmia/internal/shed"

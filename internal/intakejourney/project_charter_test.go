@@ -3,14 +3,14 @@ package intakejourney
 import (
 	context "context"
 	errors "errors"
-	"github.com/kpenfound/osmia/internal/bundle"
-	"github.com/kpenfound/osmia/internal/charter"
 	filepath "path/filepath"
 	"reflect"
 	sync "sync"
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/charter"
 	config "github.com/kpenfound/osmia/internal/config"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	trace "github.com/kpenfound/osmia/internal/trace"

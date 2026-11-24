@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -22,8 +21,6 @@ func memoryWatchKey(cfg *config.Config) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
-// watchMemory joins the project runtime's lifetime. Remote outages retain its
-// cursor and never stop local work; local persistence failures stop the service.
 func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error {
 	delay := time.Duration(0)
 	for {
@@ -81,7 +78,6 @@ func (s *Service) watchMemory(ctx context.Context, repo *trace.Repository) error
 		if err != nil {
 			return err
 		}
-		targets = slices.DeleteFunc(targets, func(id config.WorkstreamID) bool { return id == librarianWorkstream(repo.Project()) })
 		if err := repo.RecordMemoryWatch(ctx, key, cursor, response.Cursor, response.Notifications, targets, s.now()); err != nil {
 			if ctx.Err() != nil {
 				return nil

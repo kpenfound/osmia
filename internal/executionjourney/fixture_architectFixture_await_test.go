@@ -1,8 +1,9 @@
 package executionjourney
 
 import (
-	config "github.com/kpenfound/osmia/internal/config"
 	testing "testing"
+
+	config "github.com/kpenfound/osmia/internal/config"
 )
 
 // await polls the workstream's feature and draft states until want accepts

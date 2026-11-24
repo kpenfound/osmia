@@ -4,11 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func startFeedChecks(t *testing.T, f *shedFixture, checks ReviewChecks, action string) func() {

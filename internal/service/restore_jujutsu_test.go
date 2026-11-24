@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,12 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -74,7 +76,7 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 		before := featureTip(t, f, stream)
 		upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM-" + step + ".md": "upstream\n"})
 		op := requestDrift(t, d, stream)
-		requested, err := d.requestedAt(stream, op.ID)
+		requested, err := d.driver().RequestedAt(stream, op.ID)
 		intakefixture.Must(t, err)
 		if _, err := d.Apply(stopAt(t, f.s, step), op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
 			t.Fatalf("the drift rebase was not cut short at %s: %v", step, err)
@@ -145,7 +147,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	awaitResolution(t, f.s, d, stream, op, "review 1 of candidate")
 	var candidates []string
 	for _, r := range driftRecords(t, repository, stream) {
-		if r.Outcome == driftResolved {
+		if r.Outcome == intake.DriftResolved {
 			candidates = append(candidates, r.Candidate)
 		}
 	}
@@ -344,7 +346,7 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			f, stream, repository := newApprovedFixtureOn(t, "copy-recovery-"+directory, config.WorkspacesJujutsu)
 			providers := newUnitWorkspaces(f.s.cfg, repository).streamWorkspaces
 			agent := masonAgent("resume")
-			name := unitName(stream, "resume")
+			name := execution.UnitName(stream, "resume")
 			if directory == driftsDirectory {
 				providers = driftWorkspaces(f.s.cfg, repository)
 				agent, name = driftMasonAgent, string(stream)
@@ -352,7 +354,7 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			g := intakefixture.ProviderOf(t, providers, stream)
 			base := featureTip(t, f, stream)
 			if directory == driftsDirectory {
-				_, err := g.Acquire(ctx, vcs.Request{Name: name, Branch: driftBranch(stream, 1), Ref: base})
+				_, err := g.Acquire(ctx, vcs.Request{Name: name, Branch: lifecycle.DriftBranch(stream, 1), Ref: base})
 				intakefixture.Must(t, err)
 			}
 			w, found, err := g.Workspace(ctx, name)
@@ -369,7 +371,7 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			req.AgentID, req.ThreadID, req.At = agent, agent, f.s.now()
 			_, err = repository.EnqueueTurn(ctx, req)
 			intakefixture.Must(t, err)
-			root := turnViews(f.s.cfg, repository.Project(), stream, agent, req.TurnID)
+			root := execution.TurnViews(f.s.cfg, repository.Project(), stream, agent, req.TurnID)
 			intakefixture.Must(t, os.MkdirAll(root, 0700))
 			paths, err := viewPaths(w.Path)
 			intakefixture.Must(t, err)
@@ -407,7 +409,7 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 				t.Fatalf("interrupted copy was not restored: %v", err)
 			}
 			for range 2 {
-				intakefixture.Must(t, m.recoverView(ctx, stream, agent, func() (string, error) { return w.Path, nil }))
+				intakefixture.Must(t, m.driver().RecoverView(ctx, stream, agent, func() (string, error) { return w.Path, nil }))
 			}
 			data, err := os.ReadFile(filepath.Join(w.Path, "CAPTURED.md"))
 			intakefixture.Must(t, err)

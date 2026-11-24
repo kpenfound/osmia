@@ -2,14 +2,15 @@ package service
 
 import (
 	"context"
+	"sync"
+	"testing"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"sync"
-	"testing"
 )
 
 type architectFixture struct {

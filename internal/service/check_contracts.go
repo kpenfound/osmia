@@ -9,6 +9,5 @@ type CloudRerunner = checks.CloudRerunner
 type TraceRunner = checks.TraceRunner
 
 const ChecksPassed = checks.ChecksPassed
-const ChecksFailed = checks.ChecksFailed
 const ChecksIncomplete = checks.ChecksIncomplete
 const ChecksSuperseded = checks.ChecksSuperseded

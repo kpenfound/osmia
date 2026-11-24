@@ -21,24 +21,13 @@ import (
 )
 
 const (
-	// maxTranscribeClip bounds one clip's decoded bytes. A request body may
-	// carry no more than that clip's base64 encoding and a small envelope.
-	maxTranscribeClip = 25 << 20
-	// transcribeTimeout bounds the request to the transcription server, from
-	// the connection to the last byte of its reply.
-	transcribeTimeout = 2 * time.Minute
-	// maxTranscribeReply bounds the reply read from the transcription server.
-	maxTranscribeReply = 1 << 20
-	// transcribeEnvelope is the room a request body has beyond the clip's
-	// base64 encoding for its other fields.
-	transcribeEnvelope = 4 << 10
-	// transcribeWriteMargin is how long the response may take to write after
-	// the transcription finishes.
+	maxTranscribeClip     = 25 << 20
+	transcribeTimeout     = 2 * time.Minute
+	maxTranscribeReply    = 1 << 20
+	transcribeEnvelope    = 4 << 10
 	transcribeWriteMargin = 10 * time.Second
 )
 
-// clipExtensions maps the audio media types browsers record to the filename
-// extension the transcription server recognizes the format by.
 var clipExtensions = map[string]string{
 	"audio/webm": "webm", "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mp4": "mp4", "audio/m4a": "m4a", "audio/x-m4a": "m4a",
 	"audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav", "audio/flac": "flac", "audio/x-flac": "flac",
@@ -46,8 +35,6 @@ var clipExtensions = map[string]string{
 
 var extensionWord = regexp.MustCompile(`^[a-z0-9]{1,10}$`)
 
-// clipFormat validates mimeType as an audio media type and returns it in the
-// form sent to the transcription server with the matching filename extension.
 func clipFormat(mimeType string) (string, string, bool) {
 	media, params, err := mime.ParseMediaType(mimeType)
 	if err != nil || !strings.HasPrefix(media, "audio/") {
@@ -80,18 +67,12 @@ func (s *Service) transcribeBound() time.Duration {
 	return transcribeTimeout
 }
 
-// transcribeRequest answers POST /v1/transcribe: it posts the request's clip to
-// the configured transcription server and answers with the text. The clip and
-// the text are held only for the request; neither reaches a log, a trace or
-// an event.
 func (s *Service) transcribeRequest(w http.ResponseWriter, r *http.Request) {
 	settings := s.current().Transcribe
 	if !settings.Enabled() {
 		failWith(w, &APIError{Code: TranscriptionOff, Field: "transcribe.url", Message: "transcription is not configured; set url under [transcribe] in the top-level config.toml and reload"})
 		return
 	}
-	// The server's read and write timeouts are sized for small requests; an
-	// upload and a transcription take longer.
 	bound := s.transcribeBound()
 	controls := http.NewResponseController(w)
 	_ = controls.SetReadDeadline(time.Now().Add(bound))
@@ -146,9 +127,6 @@ func (s *Service) transcribeRequest(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, TranscribeResponse{Text: text})
 }
 
-// forwardClip posts clip to the OpenAI-compatible transcription endpoint at
-// url and returns its text. A failure names what went wrong without the
-// clip, the text, the key or the server's reply.
 func (s *Service) forwardClip(ctx context.Context, url, model, keyEnv, mimeType, extension string, clip []byte, bound time.Duration) (string, *APIError) {
 	var form bytes.Buffer
 	writer := multipart.NewWriter(&form)
@@ -180,11 +158,9 @@ func (s *Service) forwardClip(ctx context.Context, url, model, keyEnv, mimeType,
 		getenv = os.Getenv
 	}
 	if key := getenv(keyEnv); key != "" {
-		// The key is registered before it can reach any record.
 		redact.Register(key)
 		request.Header.Set("Authorization", "Bearer "+key)
 	}
-	// A redirect would carry the clip to a server the owner did not name.
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
@@ -213,8 +189,6 @@ func (s *Service) forwardClip(ctx context.Context, url, model, keyEnv, mimeType,
 	return strings.TrimSpace(*out.Text), nil
 }
 
-// transcriptionFailed logs why a transcription failed, without the clip or
-// any text, and returns the error to answer with.
 func (s *Service) transcriptionFailed(reason, message string, cause error) *APIError {
 	attrs := []any{"reason", reason}
 	if cause != nil {

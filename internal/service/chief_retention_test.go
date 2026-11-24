@@ -2,15 +2,15 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -50,11 +50,11 @@ func stageChiefViewAfter(t *testing.T, mode string) (workspace string, repo *tra
 		}
 		resolutionDocument(t, repo, intakefixture.Stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, PullRequest: pr})
 		if mode != "ready" {
-			outcome := ownPullRequestOutcomeMerged
+			outcome := delivery.OwnPullRequestOutcomeMerged
 			if mode == "closed" {
-				outcome = ownPullRequestOutcomeClosed
+				outcome = delivery.OwnPullRequestOutcomeClosed
 			}
-			resolutionDocument(t, repo, intakefixture.Stream, ownPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, ownPullRequestOutcome{PullRequest: 42, Outcome: outcome})
+			resolutionDocument(t, repo, intakefixture.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 42, Outcome: outcome})
 		}
 	}
 	_, err = stageChiefDocuments(repo, intakefixture.Stream, workspace)

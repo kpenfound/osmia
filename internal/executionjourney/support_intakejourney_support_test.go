@@ -2,6 +2,10 @@ package executionjourney
 
 import (
 	context "context"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
+
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
@@ -11,9 +15,6 @@ import (
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
 )
 
 func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {

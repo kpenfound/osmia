@@ -4,8 +4,10 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-
-	"github.com/kpenfound/osmia/internal/service"
+	strings "strings"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -14,15 +16,11 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/service"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
-	strings "strings"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
 )
 
 // abandonCall posts an abandon request to the service's handler.
