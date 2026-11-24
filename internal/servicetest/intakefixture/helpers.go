@@ -665,8 +665,12 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 	}
 	if _, rest, ok := strings.Cut(req.Prompt, "the recommendation to "); ok {
 		recommendation, _, _ := strings.Cut(rest, ".\nPresent it")
-		call(status.ToolName, map[string]any{"goal": "Ship " + strings.TrimPrefix(title, "# ") + ".", "attention": ExitAttention(recommendation),
+		out, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship " + strings.TrimPrefix(title, "# ") + ".", "attention": ExitAttention(recommendation),
 			"note": "The ratification packet is ready.", "agents": []string{"The committee has finished its debate."}})
+		moot := strings.Contains(out, `"stored":false`) && strings.Contains(out, "nothing waits on the owner")
+		if err != nil || !moot && !strings.Contains(out, `"stored":true`) {
+			d.Problem("%s of %q: %s %v", status.ToolName, title, out, err)
+		}
 	}
 	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }

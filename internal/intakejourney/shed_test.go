@@ -40,31 +40,41 @@ func newSketchedDebateFixture(t *testing.T, members, rounds int) *journey.ShedFi
 
 type seen struct{ spec, plan, prompt string }
 
-func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T) {
-	t.Parallel()
-	const members = 3
-	f := journey.NewShedFixture(t, members)
-	defer f.Stop(t)
-	ctx := context.Background()
-	var architectProblems []error
+const committeeMembers = 3
+
+type committeeRound struct {
+	f      *journey.ShedFixture
+	stream config.WorkstreamID
+	turns  []string
+	reads  map[int]seen
+	runs   []string
+
+	boundary  []error
+	tools     []error
+	architect []error
+}
+
+func runCommitteeRound(t *testing.T) *committeeRound {
+	t.Helper()
+	f := journey.NewShedFixture(t, committeeMembers)
+	t.Cleanup(func() { f.Stop(t) })
+	r := &committeeRound{f: f, reads: map[int]seen{}}
 	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan},
 		func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			for _, name := range []string{shed.ObjectTool, shed.ConcedeTool} {
 				if _, err := fixturekit.CallTool(ctx, tools, name, map[string]any{"kind": "fit", "part": "spec", "argument": "x", "citations": []string{"charter#1"}, "objection": "x", "reason": "y"}); err == nil {
-					architectProblems = append(architectProblems, fmt.Errorf("the architect called %s", name))
+					r.architect = append(r.architect, fmt.Errorf("the architect called %s", name))
 				}
 			}
 			return nil
 		})
-	all := intakefixture.NewBarrier(members)
+	all := intakefixture.NewBarrier(committeeMembers)
 	var mu sync.Mutex
-	reads := map[int]seen{}
-	var problems []error
-	report := func(err error) {
+	report := func(into *[]error, err error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
-			problems = append(problems, err)
+			*into = append(*into, err)
 		}
 	}
 	read := func(ctx context.Context, i int, req agent.Request, tools *mcp.ClientSession) error {
@@ -77,199 +87,231 @@ func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T
 		}
 		graph, err := intakefixture.ReadTool(ctx, tools, "plan.json")
 		mu.Lock()
-		reads[i] = seen{spec, graph, req.Prompt}
+		r.reads[i] = seen{spec, graph, req.Prompt}
 		mu.Unlock()
 		return err
 	}
-	var turns []string
-	turns = append(turns, f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+	r.turns = append(r.turns, f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		if err := read(ctx, 1, req, tools); err != nil {
 			return err
 		}
-		report(intakefixture.CheckCommitteeBoundary(ctx, req, verified, tools, f.Clone))
+		report(&r.boundary, intakefixture.CheckCommitteeBoundary(ctx, req, verified, tools, f.Clone))
 
 		if recorded, reason, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "charter", "part": "spec#2", "argument": "No test shows it.", "citations": []string{"spec#2"}}); err != nil || recorded || !strings.Contains(reason, "must cite the charter rule") {
-			report(fmt.Errorf("charter objection without a charter citation: %v %q %v", recorded, reason, err))
+			report(&r.tools, fmt.Errorf("charter objection without a charter citation: %v %q %v", recorded, reason, err))
 		}
 		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "charter", "part": "spec#2", "argument": "No test shows it.", "citations": []string{"charter#2", "plan#dedupe"}}); err != nil || !recorded || id != shed.ObjectionID(1, intake.CommitteeAgent(1), 1) {
-			report(fmt.Errorf("charter objection: %v %q %v", recorded, id, err))
+			report(&r.tools, fmt.Errorf("charter objection: %v %q %v", recorded, id, err))
 		}
 		recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}})
 		if err != nil || !recorded {
-			report(fmt.Errorf("size objection: %v %q %v", recorded, id, err))
+			report(&r.tools, fmt.Errorf("size objection: %v %q %v", recorded, id, err))
 		}
 		if recorded, reason, err := intakefixture.ShedTool(ctx, tools, shed.ConcedeTool, map[string]any{"objection": id, "reason": "One criterion is not wide."}); err != nil || !recorded {
-			report(fmt.Errorf("concede: %q %v", reason, err))
+			report(&r.tools, fmt.Errorf("concede: %q %v", reason, err))
 		}
 		return nil
 	}))
-	turns = append(turns, f.Member(1, 2, 1, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+	r.turns = append(r.turns, f.Member(1, 2, 1, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		if err := read(ctx, 2, req, tools); err != nil {
 			return err
 		}
 		if recorded, reason, err := intakefixture.ShedTool(ctx, tools, shed.ConcedeTool, map[string]any{"objection": shed.ObjectionID(1, intake.CommitteeAgent(1), 1), "reason": "x"}); err != nil || recorded {
-			report(fmt.Errorf("conceded for another member: %q %v", reason, err))
+			report(&r.tools, fmt.Errorf("conceded for another member: %q %v", reason, err))
 		}
 		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "fit", "part": "plan", "argument": "The design resumes; the plan restarts.", "citations": []string{"spec#1"}}); err != nil || !recorded || id != shed.ObjectionID(1, intake.CommitteeAgent(2), 1) {
-			report(fmt.Errorf("fit objection: %v %q %v", recorded, id, err))
+			report(&r.tools, fmt.Errorf("fit objection: %v %q %v", recorded, id, err))
 		}
 		return nil
 	}))
-	turns = append(turns, f.Member(1, 3, 1, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+	r.turns = append(r.turns, f.Member(1, 3, 1, func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		return read(ctx, 3, req, tools)
 	}))
-	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
-	f.AwaitShed(t, stream, "concluded-1")
-	if err := errors.Join(append(problems, architectProblems...)...); err != nil {
+	r.stream = f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, r.stream, "concluded-1")
+	r.runs = f.Runs()
+	return r
+}
+
+func TestCommitteeRoundRunsEveryMemberInParallelOnOnePinnedRevision(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	if err := errors.Join(r.boundary...); err != nil {
 		t.Fatal(err)
 	}
+	for _, turn := range r.turns {
+		if n := len(slices.DeleteFunc(slices.Clone(r.runs), func(run string) bool { return run != turn })); n != 1 {
+			t.Fatalf("turn %s ran %d times: %v", turn, n, r.runs)
+		}
+	}
+	if len(r.reads) != committeeMembers {
+		t.Fatalf("members that read the revision: %d", len(r.reads))
+	}
+	for i, got := range r.reads {
+		if got != (seen{fixturekit.ValidSpec, fixturekit.ValidPlan, r.reads[1].prompt}) {
+			t.Fatalf("member %d read another revision or prompt: %+v", i, got)
+		}
+	}
+}
 
-	runs := f.Runs()
-	t.Run("every member runs once and reads the same revision", func(t *testing.T) {
-		for _, turn := range turns {
-			if n := len(slices.DeleteFunc(slices.Clone(runs), func(r string) bool { return r != turn })); n != 1 {
-				t.Fatalf("turn %s ran %d times: %v", turn, n, runs)
+func TestShedToolsRefuseWhatNeitherTheMemberNorTheArchitectMayDo(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	if err := errors.Join(append(r.tools, r.architect...)...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkstreamEntersTheShedWithTheCommittee(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	f := r.f
+	var moves []trace.Transition
+	for _, tr := range f.Transitions(t, r.stream) {
+		if tr.Subject == trace.FeatureSubject {
+			moves = append(moves, tr)
+		}
+	}
+	if len(moves) != 3 || moves[2].ID != intake.InShedState || moves[2].From != intake.SketchedState || moves[2].To != intake.InShedState || moves[2].Actor != intake.ShedActor || moves[2].Cause != intake.SketchedState ||
+		moves[2].Reason != "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 3" {
+		t.Fatalf("feature transitions: %+v", moves)
+	}
+	if status, err := f.C.Status(context.Background(), r.stream); err != nil || status.State == nil || *status.State != intake.InShedState {
+		t.Fatalf("status: %+v %v", status, err)
+	}
+}
+
+func TestCommitteeThreadsBelongToTheShedAndTheSchedulerHoldsTheirTurns(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	f := r.f
+	threads, err := f.Repository().Threads(r.stream)
+	fixturekit.Must(t, err)
+	var committee []string
+	for _, th := range threads {
+		if th.Identity.Role == intake.CommitteeRole {
+			committee = append(committee, th.Identity.ID)
+			if len(th.Turns) != 1 || th.Turns[0].Status() != "idle" || th.Identity.Actor != intake.ShedActor {
+				t.Fatalf("committee thread: %+v", th)
 			}
 		}
-		if len(reads) != members {
-			t.Fatalf("members that read the revision: %d", len(reads))
-		}
-		for i, got := range reads {
-			if got != (seen{fixturekit.ValidSpec, fixturekit.ValidPlan, reads[1].prompt}) {
-				t.Fatalf("member %d read another revision or prompt: %+v", i, got)
-			}
-		}
-	})
-	t.Run("the workstream enters the shed with the committee", func(t *testing.T) {
-		var moves []trace.Transition
-		for _, tr := range f.Transitions(t, stream) {
-			if tr.Subject == trace.FeatureSubject {
-				moves = append(moves, tr)
-			}
-		}
-		if len(moves) != 3 || moves[2].ID != intake.InShedState || moves[2].From != intake.SketchedState || moves[2].To != intake.InShedState || moves[2].Actor != intake.ShedActor || moves[2].Cause != intake.SketchedState ||
-			moves[2].Reason != "spec.md revision 1 and plan.json revision 1 enter the shed with a committee of 3" {
-			t.Fatalf("feature transitions: %+v", moves)
-		}
-		if status, err := f.C.Status(ctx, stream); err != nil || status.State == nil || *status.State != intake.InShedState {
-			t.Fatalf("status: %+v %v", status, err)
-		}
-	})
+	}
+	if want := []string{intake.CommitteeAgent(1), intake.CommitteeAgent(2), intake.CommitteeAgent(3)}; !slices.Equal(committee, want) {
+		t.Fatalf("committee %v, want %v", committee, want)
+	}
 
-	t.Run("committee threads belong to the shed and the scheduler holds their turns", func(t *testing.T) {
-		threads, err := f.Repository().Threads(stream)
-		fixturekit.Must(t, err)
-		var committee []string
-		for _, th := range threads {
-			if th.Identity.Role == intake.CommitteeRole {
-				committee = append(committee, th.Identity.ID)
-				if len(th.Turns) != 1 || th.Turns[0].Status() != "idle" || th.Identity.Actor != intake.ShedActor {
-					t.Fatalf("committee thread: %+v", th)
-				}
-			}
-		}
-		if want := []string{intake.CommitteeAgent(1), intake.CommitteeAgent(2), intake.CommitteeAgent(3)}; !slices.Equal(committee, want) {
-			t.Fatalf("committee %v, want %v", committee, want)
-		}
+	th, err := f.Repository().Thread(r.stream, intake.CommitteeAgent(1))
+	fixturekit.Must(t, err)
+	if held, err := f.S.DispatchHolds(f.S.Current(), f.Repository())(scheduler.Candidate{Workstream: r.stream, Thread: th}); err != nil || !held {
+		t.Fatalf("the scheduler does not hold committee turns: %v %v", held, err)
+	}
+}
 
-		th, err := f.Repository().Thread(stream, intake.CommitteeAgent(1))
-		fixturekit.Must(t, err)
-		if held, err := f.S.DispatchHolds(f.S.Current(), f.Repository())(scheduler.Candidate{Workstream: stream, Thread: th}); err != nil || !held {
-			t.Fatalf("the scheduler does not hold committee turns: %v %v", held, err)
-		}
-	})
-
+func TestCommitteeRoundRecordsEveryMembersContributionAndMovesTheShed(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	f, stream := r.f, r.stream
 	ops := f.AcknowledgedRoundOperations(t, stream)
-	t.Run("the round records every member's contribution and the shed moves", func(t *testing.T) {
-		if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" ||
-			ops[0].Result.Evidence != "round 1 against spec.md revision 1 and plan.json revision 1: 3 members heard, 3 objections, 1 concessions, 0 failed turns; 2 objections stand" {
-			t.Fatalf("operations: %+v", ops)
+	if len(ops) != 1 || !ops[0].Acknowledged || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" ||
+		ops[0].Result.Evidence != "round 1 against spec.md revision 1 and plan.json revision 1: 3 members heard, 3 objections, 1 concessions, 0 failed turns; 2 objections stand" {
+		t.Fatalf("operations: %+v", ops)
+	}
+	records, err := shed.Records(f.Repository(), stream)
+	fixturekit.Must(t, err)
+	if len(records) != committeeMembers {
+		t.Fatalf("records: %+v", records)
+	}
+	commit := ""
+	for i, rec := range records {
+		member := intake.CommitteeAgent(i + 1)
+		if rec.Round != 1 || rec.Member != member || rec.Revision != (shed.Pin{Spec: 1, Plan: 1}) || rec.Turn != r.turns[i] || rec.Failure != "" {
+			t.Fatalf("record %d: %+v", i+1, rec)
 		}
-		records, err := shed.Records(f.Repository(), stream)
-		fixturekit.Must(t, err)
-		if len(records) != members {
-			t.Fatalf("records: %+v", records)
+		docs := f.Documents(t, stream, shed.DocumentID(1, member))
+		if len(docs) != 1 || docs[0].Path != "shed/round-1/"+member+".json" || docs[0].Actor != (trace.Actor{Kind: "agent", ID: member}) || docs[0].Cause != ops[0].Operation.ID {
+			t.Fatalf("document of %s: %+v", member, docs)
 		}
-		commit := ""
-		for i, r := range records {
-			member := intake.CommitteeAgent(i + 1)
-			if r.Round != 1 || r.Member != member || r.Revision != (shed.Pin{Spec: 1, Plan: 1}) || r.Turn != turns[i] || r.Failure != "" {
-				t.Fatalf("record %d: %+v", i+1, r)
-			}
-			docs := f.Documents(t, stream, shed.DocumentID(1, member))
-			if len(docs) != 1 || docs[0].Path != "shed/round-1/"+member+".json" || docs[0].Actor != (trace.Actor{Kind: "agent", ID: member}) || docs[0].Cause != ops[0].Operation.ID {
-				t.Fatalf("document of %s: %+v", member, docs)
-			}
-			if !strings.Contains(docs[0].Content, `"revision": {`) {
-				t.Fatalf("%s: %q", docs[0].Path, docs[0].Content)
-			}
-			landed := intakefixture.DocumentCommit(t, f.S.Current().Root, f.Project, stream, docs[0].Path)
-			if commit != "" && landed != commit {
-				t.Fatalf("records landed in separate commits: %s %s", commit, landed)
-			}
-			commit = landed
+		if !strings.Contains(docs[0].Content, `"revision": {`) {
+			t.Fatalf("%s: %q", docs[0].Path, docs[0].Content)
 		}
-		if len(records[0].Objections) != 2 || len(records[0].Concessions) != 1 || len(records[1].Objections) != 1 || !records[2].Silent() {
-			t.Fatalf("contributions: %+v", records)
+		landed := intakefixture.DocumentCommit(t, f.S.Current().Root, f.Project, stream, docs[0].Path)
+		if commit != "" && landed != commit {
+			t.Fatalf("records landed in separate commits: %s %s", commit, landed)
 		}
-		var open []string
-		for _, d := range shed.OpenDissent(records) {
-			open = append(open, d.ID)
+		commit = landed
+	}
+	if len(records[0].Objections) != 2 || len(records[0].Concessions) != 1 || len(records[1].Objections) != 1 || !records[2].Silent() {
+		t.Fatalf("contributions: %+v", records)
+	}
+	var open []string
+	for _, d := range shed.OpenDissent(records) {
+		open = append(open, d.ID)
+	}
+	if want := []string{shed.ObjectionID(1, intake.CommitteeAgent(1), 1), shed.ObjectionID(1, intake.CommitteeAgent(2), 1)}; !slices.Equal(open, want) {
+		t.Fatalf("open dissent %v, want %v", open, want)
+	}
+	var shedMoves []trace.Transition
+	for _, tr := range f.Transitions(t, stream) {
+		if tr.Subject == intake.ShedSubject {
+			shedMoves = append(shedMoves, tr)
 		}
-		if want := []string{shed.ObjectionID(1, intake.CommitteeAgent(1), 1), shed.ObjectionID(1, intake.CommitteeAgent(2), 1)}; !slices.Equal(open, want) {
-			t.Fatalf("open dissent %v, want %v", open, want)
-		}
-		var shedMoves []trace.Transition
-		for _, tr := range f.Transitions(t, stream) {
-			if tr.Subject == intake.ShedSubject {
-				shedMoves = append(shedMoves, tr)
-			}
-		}
-		if len(shedMoves) != 5 || shedMoves[0].ID != "shed-round-1" || shedMoves[0].To != "round-1" || shedMoves[0].Cause != intake.InShedState || shedMoves[0].Actor != intake.ShedActor ||
-			shedMoves[1].ID != "shed-round-1-heard" || shedMoves[1].From != "round-1" || shedMoves[1].To != "heard-1" || shedMoves[1].Cause != ops[0].Operation.ID || shedMoves[1].Reason != ops[0].Result.Evidence {
-			t.Fatalf("shed transitions: %+v", shedMoves)
-		}
-	})
+	}
+	if len(shedMoves) != 5 || shedMoves[0].ID != "shed-round-1" || shedMoves[0].To != "round-1" || shedMoves[0].Cause != intake.InShedState || shedMoves[0].Actor != intake.ShedActor ||
+		shedMoves[1].ID != "shed-round-1-heard" || shedMoves[1].From != "round-1" || shedMoves[1].To != "heard-1" || shedMoves[1].Cause != ops[0].Operation.ID || shedMoves[1].Reason != ops[0].Result.Evidence {
+		t.Fatalf("shed transitions: %+v", shedMoves)
+	}
+}
 
-	t.Run("another pass runs no second round and duplicates no record", func(t *testing.T) {
-		d := &intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: f.Repository()}
-		fixturekit.Must(t, d.Pass(ctx))
-		same := func(got *coreadapter.OperationResult) bool {
-			return got != nil && got.Outcome == ops[0].Result.Outcome && got.Evidence == ops[0].Result.Evidence
-		}
-		if observed, err := d.Inspect(ctx, ops[0].Operation); err != nil || observed.State != coreadapter.EffectCompleted || !same(observed.Result) {
-			t.Fatalf("inspect after completion: %+v %v", observed, err)
-		}
-		if result, err := d.Apply(ctx, ops[0].Operation); err != nil || !same(&result) {
-			t.Fatalf("apply after completion: %+v %v", result, err)
-		}
-		if again := f.RoundOperations(t, stream); len(again) != 1 || len(f.Runs()) != len(runs) {
-			t.Fatalf("a second round ran: %+v %v", again, f.Runs())
-		}
-		if docs := f.Documents(t, stream, shed.DocumentID(1, intake.CommitteeAgent(1))); len(docs) != 1 {
-			t.Fatalf("retry duplicated records: %+v", docs)
-		}
-	})
+func TestAnotherPassOverACompletedRoundRunsNoSecondRoundAndDuplicatesNoRecord(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	f, stream := r.f, r.stream
+	ctx := context.Background()
+	ops := f.AcknowledgedRoundOperations(t, stream)
+	if len(ops) != 1 {
+		t.Fatalf("operations: %+v", ops)
+	}
+	d := &intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: f.Repository()}
+	fixturekit.Must(t, d.Pass(ctx))
+	same := func(got *coreadapter.OperationResult) bool {
+		return got != nil && got.Outcome == ops[0].Result.Outcome && got.Evidence == ops[0].Result.Evidence
+	}
+	if observed, err := d.Inspect(ctx, ops[0].Operation); err != nil || observed.State != coreadapter.EffectCompleted || !same(observed.Result) {
+		t.Fatalf("inspect after completion: %+v %v", observed, err)
+	}
+	if result, err := d.Apply(ctx, ops[0].Operation); err != nil || !same(&result) {
+		t.Fatalf("apply after completion: %+v %v", result, err)
+	}
+	if again := f.RoundOperations(t, stream); len(again) != 1 || len(f.Runs()) != len(r.runs) {
+		t.Fatalf("a second round ran: %+v %v", again, f.Runs())
+	}
+	if docs := f.Documents(t, stream, shed.DocumentID(1, intake.CommitteeAgent(1))); len(docs) != 1 {
+		t.Fatalf("retry duplicated records: %+v", docs)
+	}
+}
 
-	t.Run("the round leaves no views, workspaces or notes and copies no secret", func(t *testing.T) {
-		root := f.Opts.Config.Root
-		if entries, err := os.ReadDir(filepath.Join(root, "views")); err != nil || len(entries) != 0 {
-			t.Fatalf("views leaked: %v %v", entries, err)
+func TestCommitteeRoundLeavesNoViewsWorkspacesOrNotesAndCopiesNoSecret(t *testing.T) {
+	t.Parallel()
+	r := runCommitteeRound(t)
+	f, stream := r.f, r.stream
+	f.AcknowledgedRoundOperations(t, stream)
+	root := f.Opts.Config.Root
+	if entries, err := os.ReadDir(filepath.Join(root, "views")); err != nil || len(entries) != 0 {
+		t.Fatalf("views leaked: %v %v", entries, err)
+	}
+	for _, turn := range r.turns {
+		if _, err := os.Lstat(filepath.Join(root, "shed", string(f.Project), string(stream), turn, "workspace")); !os.IsNotExist(err) {
+			t.Fatalf("staged workspace of %s retained", turn)
 		}
-		for _, turn := range turns {
-			if _, err := os.Lstat(filepath.Join(root, "shed", string(f.Project), string(stream), turn, "workspace")); !os.IsNotExist(err) {
-				t.Fatalf("staged workspace of %s retained", turn)
-			}
+	}
+	if notes, ok := fixturekit.TraceFile(t, f.Trace, "notes/committee.md"); ok {
+		t.Fatalf("committee notes: %q", notes)
+	}
+	for path, content := range intakefixture.Snapshot(t, filepath.Join(root, "projects")) {
+		if strings.Contains(content, fixturekit.DemoSecret) {
+			t.Fatalf("secret copied into %s", path)
 		}
-		if notes, ok := fixturekit.TraceFile(t, f.Trace, "notes/committee.md"); ok {
-			t.Fatalf("committee notes: %q", notes)
-		}
-		for path, content := range intakefixture.Snapshot(t, filepath.Join(root, "projects")) {
-			if strings.Contains(content, fixturekit.DemoSecret) {
-				t.Fatalf("secret copied into %s", path)
-			}
-		}
-	})
+	}
 }
 
 func TestShedWaitsForACommitteeRunnerAndSurvivesRestart(t *testing.T) {
