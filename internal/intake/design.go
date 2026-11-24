@@ -47,7 +47,7 @@ const (
 		"The decisions, intent and tradeoffs, and rejected options above are the brief. Where this transcript differs from them, the brief wins.\n\n"
 )
 
-// designSessionSubject is the workflow subject that marks a workstream as a
+// DesignSessionSubject is the workflow subject that marks a workstream as a
 // design session: openDesign sets it to designOpenValue in the same commit
 // that creates the workstream, and startDesignWorkgroup moves it to
 // designClosedValue in the same commit that hands its brief off. Using a
@@ -73,8 +73,6 @@ type DesignBriefRecord struct {
 	NewProject *api.NewProject    `json:"new_project,omitempty"`
 }
 
-// designMode is the record a new-project design session carries from the
-// moment it opens.
 type designMode struct {
 	NewProject bool `json:"new_project"`
 }
@@ -118,7 +116,6 @@ func LatestDesignBrief(repository *trace.Repository, stream config.WorkstreamID)
 	return brief, latest.Revision, nil
 }
 
-// designTitleRecord is one revision of a design session's title.
 type designTitleRecord struct {
 	Title string `json:"title"`
 }
@@ -158,7 +155,6 @@ func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView,
 	return view, err
 }
 
-// maxRepoDescription is GitHub's longest repository description.
 const maxRepoDescription = 350
 
 // NormalizeNewProject validates a drafted new project and returns it with
@@ -218,15 +214,13 @@ func RenderDesignView(project config.ProjectID, w trace.WorkstreamStatus) Design
 	return DesignView{Workstream: w.Workstream, Project: project, CreatedAt: w.CreatedAt}
 }
 
-// openDesign opens a design session in a project: a new, ordinary workstream
+// OpenDesign opens a design session in a project: a new, ordinary workstream
 // with a chief-of-staff thread and no feature state, wrapped in its own
 // one-workstream workgroup like every other workstream. It takes no spec, no
 // plan and no units, and the owner's conversation with it never reaches the
 // tools or the context an ordinary chief of staff has.
 func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (DesignView, *APIError) {
 	if req.NewProject && req.Project == "" {
-		// A new project has no records yet, so the conversation lives in the
-		// first active project.
 		ids := s.Current().ProjectIDs()
 		if len(ids) == 0 {
 			return DesignView{}, &APIError{Code: NoProject, Message: "a new-project design session lives in an existing project, and no project is active; add one with osmia project add first"}
@@ -263,8 +257,6 @@ func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (Des
 		Project: project, Workstream: stream, At: now, Actor: OwnerActor, Cause: DesignOpenTransition}
 	open := trace.Transaction{Transition: trace.Transition{Header: openHeader, Subject: DesignSessionSubject, To: DesignOpenValue, Reason: "the owner opened a design session"}}
 	if req.NewProject {
-		// The mode and the marker commit together: a session is never open
-		// without the record of what it designs.
 		mode, err := json.Marshal(designMode{NewProject: true})
 		if err != nil {
 			return DesignView{}, &APIError{Code: Internal, Message: err.Error()}
@@ -283,7 +275,7 @@ func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (Des
 	return s.DesignRead(string(stream))
 }
 
-// designList reports every design session of every active project, or only
+// DesignList reports every design session of every active project, or only
 // those of the named project when it is not empty, newest first.
 func (s *Controller) DesignList(rawProject string) (DesignsResponse, *APIError) {
 	var filter config.ProjectID
@@ -327,7 +319,7 @@ func (s *Controller) DesignList(rawProject string) (DesignsResponse, *APIError) 
 	return DesignsResponse{Designs: out}, nil
 }
 
-// designRead reports one design session, by workstream ID, across every
+// DesignRead reports one design session, by workstream ID, across every
 // active project. A workstream that exists but is not a design session, or
 // was one and has since started a workgroup, is refused with not_found, the
 // same as an unknown one.
@@ -367,7 +359,7 @@ func (s *Controller) DesignRead(raw string) (DesignView, *APIError) {
 	return DesignView{}, notFound
 }
 
-// designTrace resolves raw to a design session of an active project and
+// DesignTrace resolves raw to a design session of an active project and
 // returns the project's open trace.
 func (s *Controller) DesignTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	id, err := config.ParseWorkstreamID(raw)
@@ -399,7 +391,7 @@ func (s *Controller) DesignTrace(raw string) (config.ProjectID, config.Workstrea
 	return "", "", nil, notFound
 }
 
-// designLockKey identifies one design session's busy lock: a repository and
+// DesignLockKey identifies one design session's busy lock: a repository and
 // the one of its workstreams that is the session, so every design session
 // of every project has its own lock.
 type DesignLockKey struct {
@@ -407,7 +399,7 @@ type DesignLockKey struct {
 	Stream     config.WorkstreamID
 }
 
-// designLocks is the Go guard against two concurrent calls to designMessage
+// DesignLocks is the Go guard against two concurrent calls to designMessage
 // or startDesignWorkgroup against the same design session both finding it
 // idle: at most one turn ever runs, and starting a workgroup never races a
 // turn in flight.
@@ -418,7 +410,7 @@ func DesignLock(repository *trace.Repository, stream config.WorkstreamID) *sync.
 	return v.(*sync.Mutex)
 }
 
-// designRolePrompt opens the system prompt of every design session turn. It
+// DesignRolePrompt opens the system prompt of every design session turn. It
 // states the agent's read-only, gate-free standing and the readiness pass it
 // runs before handoff.
 const DesignRolePrompt = "You are the design agent for a project the owner is scoping before any work starts. " +
@@ -504,7 +496,7 @@ func DesignRepoEntities(repo *trace.Repository) (string, error) {
 	return b.String(), nil
 }
 
-// designMessage records text as the next owner message on a design
+// DesignMessage records text as the next owner message on a design
 // session's thread and starts exactly one agent turn. It is refused,
 // recording nothing, when the message is empty, the workstream is no longer
 // a design session, or a turn is already running.
@@ -568,7 +560,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 	return Conversation(q)[0], nil
 }
 
-// draftBriefTool records the latest brief a design session's agent has
+// DraftBriefTool records the latest brief a design session's agent has
 // drafted: decisions, intent and tradeoffs, and rejected options, as one
 // piece of markdown. A later call replaces the one startDesignWorkgroup
 // reads; nothing before the latest call is used.
@@ -725,7 +717,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 		}}
 }
 
-// designReadRepoTool reads a file, or lists a directory, from the committed
+// DesignReadRepoTool reads a file, or lists a directory, from the committed
 // head of any active project: the session's project by default, or another
 // active project named by its project ID. It
 // reads only; it never writes, fetches credentials or touches version
@@ -761,8 +753,6 @@ func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Contr
 			if !fs.ValidPath(in.Path) || in.Start < 1 || in.Lines < 1 || in.Lines > 1000 {
 				return nil, errors.New("invalid code range")
 			}
-			// Project registration replaces the service configuration without
-			// replacing existing runners. Resolve membership and clones per read.
 			current := cfg
 			if service := controls.Load(); service != nil {
 				current = service.Current().For(r.Project())
@@ -845,7 +835,7 @@ func (s *Controller) StageDesignWorkspace(ctx context.Context, repository *trace
 	return paths, nil
 }
 
-// designTranscript renders a design session's conversation, oldest first,
+// DesignTranscript renders a design session's conversation, oldest first,
 // for attaching to its brief as a reference the brief itself always wins
 // over.
 func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) (string, error) {
@@ -871,7 +861,7 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 	return b.String(), nil
 }
 
-// startDesignWorkgroup hands a design session's latest drafted brief to the
+// StartDesignWorkgroup hands a design session's latest drafted brief to the
 // architect flow: it records the brief, with the conversation transcript
 // attached for reference, as the workstream's handed input, exactly as an
 // ordinary hand-in does, so the same chief-of-staff thread that held the
@@ -907,8 +897,6 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 		revision = requests[0].BriefRevision
 	}
 	if !found {
-		// A handed input without an intent belongs to upgrade recovery. Never attach
-		// today's draft project list to that immutable legacy input.
 		docs, err := trace.Read[trace.Document](repository, stream)
 		if err != nil {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
@@ -937,8 +925,6 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 		if strings.TrimSpace(brief.Content) == "" {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: "cannot read the drafted brief"}
 		}
-		// An owner selection recorded before handoff remains authoritative
-		// when resuming an upgraded start that has no intent yet.
 		if selected, recorded, err := DesignSelectionOf(repository, stream); err != nil {
 			return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		} else if recorded {
@@ -954,8 +940,6 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 		}
 		var creation config.ProjectID
 		if brief.NewProject != nil {
-			// Refused here, before any intent is recorded, nothing has been
-			// created on GitHub.
 			if api := s.CheckDesignNewProject(ctx, brief.NewProject); api != nil {
 				return DesignStartResponse{}, api
 			}

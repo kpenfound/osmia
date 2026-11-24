@@ -22,8 +22,6 @@ import (
 // gate whose judgment cannot finish within it goes to the owner as it is.
 const GateHold = 10 * time.Minute
 
-// Bounds on what a gate's state shows Jev, so a request stays within its
-// context.
 const (
 	maxGateSpec    = 24 << 10
 	maxGatePlan    = 16 << 10
@@ -31,9 +29,6 @@ const (
 	maxGateText    = 2 << 10
 )
 
-// escalateOption is the outcome of a chief-of-staff decision that puts the
-// subject to the owner. A binding pick of any other outcome that still ended
-// at the owner's gate was one the service could not carry out.
 const escalateOption = "escalate"
 
 // GateDecision is what a gate's records show of its ordinary decision.
@@ -88,8 +83,6 @@ func (s *Controller) GateResult(repository *trace.Repository, g Gate) (jev.Resul
 	return s.Jev.Lookup(repository, g.Stream, g.Kind, g.Key)
 }
 
-// optionLabel is how a pick is named to the owner: an option the chief wrote
-// by its text, the others by their name.
 func optionLabel(options []jev.DecisionOption, pick string) string {
 	for _, o := range options {
 		if o.Name == pick && strings.HasPrefix(o.Name, "option-") {
@@ -99,11 +92,6 @@ func optionLabel(options []jev.DecisionOption, pick string) string {
 	return pick
 }
 
-// holdsForJev reports whether the card of a gate is held back from the owner,
-// and when it is not, the recommendation Jev's result gives it and Jev's result
-// as the card shows it. A card is held while Jev's judgment is pending, which
-// is while Jev is configured and nothing is recorded, or while its binding pick
-// waits to be applied. It is read-only: it never asks Jev and records nothing.
 func (s *Controller) holdsForJev(repository *trace.Repository, g Gate) (held bool, rec string, view *api.InboxJev) {
 	if s.Jev == nil {
 		return false, "", nil
@@ -132,10 +120,6 @@ func (s *Controller) holdsForJev(repository *trace.Repository, g Gate) (held boo
 	return false, "", nil
 }
 
-// applyJevCard sets the recommendation and Jev's result of a card the owner
-// sees after Jev's judgment. Jev's pick replaces the chief of staff's
-// recommendation when it gave one; a deferral keeps the chief's, behind Jev's
-// word.
 func applyJevCard(e *InboxEntry, rec string, view *api.InboxJev) {
 	if view == nil {
 		return
@@ -150,8 +134,6 @@ func applyJevCard(e *InboxEntry, rec string, view *api.InboxJev) {
 	e.QuickReply = ""
 }
 
-// guardedCard applies the gate to a card: it reports whether the card shows,
-// and decorates it with Jev's result when it does.
 func (s *Controller) guardedCard(repository *trace.Repository, e *InboxEntry, g *Gate) bool {
 	if g == nil {
 		return true
@@ -214,7 +196,6 @@ func GateSection(b *strings.Builder, name, text string, limit int) {
 	fmt.Fprintf(b, "## %s\n%s\n\n", name, text)
 }
 
-// documentAt returns the content of the workstream's record at a revision.
 func documentAt(repository *trace.Repository, stream config.WorkstreamID, id string, revision int) (string, bool) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -228,7 +209,6 @@ func documentAt(repository *trace.Repository, stream config.WorkstreamID, id str
 	return "", false
 }
 
-// dissentText states a dissent record the way the packet shows it.
 func dissentText(entries []shed.Entry) string {
 	var b strings.Builder
 	for _, e := range entries {
@@ -275,7 +255,6 @@ func limitText(text string, limit int) string {
 	return text[:cut] + " [truncated]"
 }
 
-// charterText returns the project's charter for a gate's state.
 func (s *Controller) charterText(ctx context.Context, project config.ProjectID) string {
 	if s.LoadCharter == nil {
 		return ""
@@ -287,10 +266,6 @@ func (s *Controller) charterText(ctx context.Context, project config.ProjectID) 
 	return doc.Content
 }
 
-// ratificationGate is the ratification gate of a workstream whose open card is
-// e, or nil when Jev may not decide it: the card offers ratify only while no
-// objection blocks, and a workstream of a cross-repo workgroup is ratified by
-// the owner's group approval.
 func (s *Controller) ratificationGate(repository *trace.Repository, stream config.WorkstreamID, e InboxEntry) (*Gate, error) {
 	if !slices.Equal(e.Options, []string{"ratify"}) {
 		return nil, nil
@@ -350,18 +325,10 @@ func (s *Controller) ratificationGate(repository *trace.Repository, stream confi
 	return g, nil
 }
 
-// objectionIsJevs reports whether the objection is an escalated-objection gate
-// at the ratification gate: a committee objection the chief of staff escalated
-// that blocks ratification and that nobody disposed of.
 func objectionIsJevs(e shed.Entry) bool {
 	return e.Escalated && e.Blocking && e.Disposition == "" && e.Kind != shed.CharterConflict && e.Member != shed.OwnerMember
 }
 
-// objectionKind returns the kind of decision Jev makes on an objection that
-// blocks ratification and that nobody disposed of: a conflict between member
-// charters and the owner's own objection are the owner's own decisions, at the
-// owner threshold, and a committee objection the chief of staff escalated is an
-// escalated objection. Any other objection is not Jev's.
 func objectionKind(e shed.Entry) (jev.DecisionKind, bool) {
 	switch {
 	case !e.Blocking || e.Disposition != "":
@@ -376,11 +343,6 @@ func objectionKind(e shed.Entry) (jev.DecisionKind, bool) {
 	return "", false
 }
 
-// objectionGates returns the gates of the workstream's objections that block
-// ratification and wait for the owner, while the ratification packet is open:
-// the committee objections the chief of staff escalated, conflicts between
-// member charters and the owner's own objections. Jev may only dismiss or
-// overrule, which need no owner-written text.
 func (s *Controller) objectionGates(repository *trace.Repository, stream config.WorkstreamID, e InboxEntry) ([]Gate, error) {
 	entries, err := Dissent(repository, stream)
 	if err != nil {
@@ -403,9 +365,6 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 			continue
 		}
 		if _, carried := s.CarriedJudgment(repository, stream, jev.KindObjection, jev.ObjectionKey(entry.ID)); carried {
-			// The chief of staff's decision on it, which Jev's binding pick
-			// called for, could not be carried out: the objection is the
-			// owner's, with that judgment, and Jev is not asked again.
 			continue
 		}
 		entry := entry
@@ -468,7 +427,6 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 			}
 			i := slices.IndexFunc(now, func(x shed.Entry) bool { return x.ID == entry.ID })
 			if i < 0 {
-				// An objection the member conceded no longer stands.
 				return GateDecision{Recorded: true}, nil
 			}
 			if now[i].Disposition == "" || now[i].By != "" {
@@ -493,10 +451,6 @@ func (s *Controller) objectionGates(repository *trace.Repository, stream config.
 	return out, nil
 }
 
-// ratificationEntry is the workstream's ratification card as the owner sees it:
-// RatificationEntry, held back while Jev's judgment of the ratification or of an
-// escalated objection is pending or its pick is not applied, and with Jev's
-// result as its recommendation when the gate came to the owner after it.
 func (s *Controller) ratificationEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	e, open, err := RatificationEntry(repository, stream)
 	if err != nil || !open || s.Jev == nil {
@@ -547,11 +501,6 @@ func (s *Controller) ratificationEntry(repository *trace.Repository, stream conf
 	return e, true, nil
 }
 
-// amendmentGate is the gate of a presented amendment whose card is e, or nil
-// when Jev may not decide it: only an amendment that changes the sealed spec,
-// the approved intent, with no objection that blocks it, is Jev's to approve or
-// decline. A plan-only amendment is the chief of staff's, and an objection that
-// blocks needs the owner.
 func (s *Controller) amendmentGate(repository *trace.Repository, stream config.WorkstreamID, c AmendmentCase, current seal.Seal, entries []shed.Entry, e InboxEntry) (*Gate, error) {
 	if len(shed.Blocked(entries)) > 0 {
 		return nil, nil
@@ -607,8 +556,6 @@ func (s *Controller) amendmentGate(repository *trace.Repository, stream config.W
 	return g, nil
 }
 
-// amendmentEntry is a presented amendment's card as the owner sees it, held
-// back while Jev's judgment of it is pending or its pick is not applied.
 func (s *Controller) amendmentEntry(repository *trace.Repository, stream config.WorkstreamID, id string) (InboxEntry, bool, error) {
 	e, open, err := s.AmendmentEntry(repository, stream, id)
 	if err != nil || !open || s.Jev == nil {
@@ -642,10 +589,6 @@ func (s *Controller) AmendmentGateOf(repository *trace.Repository, stream config
 	return s.amendmentGate(repository, stream, c, current, AmendmentDissent(records), e)
 }
 
-// escalationRoles are the roles whose escalated questions are ordinary
-// escalated-question gates: the workers that build a feature. An architect's
-// question, such as the judgment that a project needs no change, is one of the
-// owner's own decisions, which Jev decides at the owner threshold.
 var escalationRoles = questions.RoutingRoles
 
 // TextOptions returns the options of a decision whose every option is carried
@@ -666,8 +609,6 @@ func TextOptions(texts []string) []jev.DecisionOption {
 	return options
 }
 
-// charterConflicts lists the charter citations the escalation's questions
-// report in conflict.
 func charterConflicts(e trace.InboxEntry) []string {
 	var out []string
 	for _, q := range e.Questions {
@@ -676,11 +617,6 @@ func charterConflicts(e trace.InboxEntry) []string {
 	return out
 }
 
-// escalationGate returns the gate of an escalation whose card is view, or, when
-// Jev may not decide it, nil and the binding Jev judgment it already carries.
-// Jev decides an escalation only from the options the chief of staff wrote. An
-// escalation that reports a conflict between member charters, or that an
-// architect raised, is one of the owner's own decisions, of its own kind.
 func (s *Controller) escalationGate(repository *trace.Repository, e trace.InboxEntry, view InboxEntry) (*Gate, *jev.Result, error) {
 	if e.Hold != "" || len(e.Questions) == 0 || e.Questions[0].Asked.ID == "" {
 		return nil, nil, nil
@@ -905,7 +841,7 @@ func (s *Controller) ReachedGates(ctx context.Context, p *Project) ([]Gate, erro
 		gone[w.Workstream] = w.State == AbandonedState
 	}
 	for _, w := range statuses {
-		if gone[w.Workstream] || w.Workstream == LibrarianWorkstream(p.ID) {
+		if gone[w.Workstream] {
 			continue
 		}
 		gates, err := s.WorkstreamGates(ctx, repository, w)
@@ -982,8 +918,6 @@ func (s *Controller) DeliveryCard(ctx context.Context, repository *trace.Reposit
 	return e, true, nil
 }
 
-// deliveryRouteGate returns the gate of the assembled workstream's delivery
-// route, or nil when there is none to judge.
 func (s *Controller) deliveryRouteGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*Gate, error) {
 	if s.DeliveryRouteGate == nil {
 		return nil, nil

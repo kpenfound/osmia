@@ -31,7 +31,6 @@ type FinalRebase struct {
 	Commit    string    `json:"commit"`
 }
 
-// ReadFeatureRebase returns the recorded replay of final review k.
 func (f *foreman) ReadFeatureRebase(stream config.WorkstreamID, k int) (FinalRebase, bool, error) {
 	return ReadFeatureRebase(f.repository, stream, k)
 }
@@ -57,7 +56,6 @@ func ReadFeatureRebase(repository *trace.Repository, stream config.WorkstreamID,
 	return FinalRebase{}, false, nil
 }
 
-// RecordFeatureRebase records the next revision of final/rebase.json.
 func (f *foreman) RecordFeatureRebase(ctx context.Context, stream config.WorkstreamID, rebase FinalRebase) error {
 	content, err := json.MarshalIndent(rebase, "", "  ")
 	if err != nil {
@@ -72,14 +70,12 @@ func (f *foreman) RecordFeatureRebase(ctx context.Context, stream config.Workstr
 	return f.repository.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// PrepareFeatureRebase records an unrecorded replay before final review reads it.
-// The service supplies base resolution so repository credentials stay at composition.
 func (f *foreman) PrepareFeatureRebase(ctx context.Context, g workspace.Provider, stream config.WorkstreamID, rebase FinalRebase, current string, resolve, base func() (seal.Base, error)) (FinalRebase, []string, string, error) {
 	before, branch, operation := rebase.Before, rebase.Branch, rebase.Operation
 	if current != before {
 		return rebase, nil, fmt.Sprintf("feature branch %s moved to %s since the review was asked for", branch, current), nil
 	}
-	requested, err := f.requestedAt(stream, operation)
+	requested, err := f.RequestedAt(stream, operation)
 	if err != nil {
 		return rebase, nil, "", err
 	}
@@ -117,7 +113,6 @@ func (f *foreman) PrepareFeatureRebase(ctx context.Context, g workspace.Provider
 	return rebase, nil, "", f.s.Step("final-rebase-recorded")
 }
 
-// MoveFeatureRebase advances the recorded replay, independently of the replay step.
 func (f *foreman) MoveFeatureRebase(ctx context.Context, g workspace.Provider, stream config.WorkstreamID, rebase FinalRebase, current string) (string, error) {
 	if current != rebase.Before && current != rebase.Commit {
 		return fmt.Sprintf("feature branch %s moved to %s during the review", rebase.Branch, current), nil

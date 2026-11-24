@@ -16,8 +16,6 @@ import (
 
 const otherProject config.ProjectID = "p_00000000000000000000000000000002"
 
-// masons creates a second workstream and, in each workstream, a mason thread
-// per ID with one queued turn.
 func masons(t *testing.T, f *fixture, repo *trace.Repository, ids map[config.WorkstreamID][]string) {
 	t.Helper()
 	must(t, repo.CreateWorkstream(context.Background(), other, f.clock.Now(), owner))
@@ -29,7 +27,6 @@ func masons(t *testing.T, f *fixture, repo *trace.Repository, ids map[config.Wor
 	}
 }
 
-// running records the threads whose turns ran, in order.
 type running struct {
 	mu  sync.Mutex
 	ran []string
@@ -55,8 +52,6 @@ func TestFreedSlotGoesToTheEarliestStage(t *testing.T) {
 	stages := []string{"reviewer", "mason", "committee", "architect"}
 	for i, want := range stages {
 		t.Run(want, func(t *testing.T) {
-			// Every later stage competes for the workstream's only slot, queued
-			// ahead of it in the trace.
 			f, repo := setup(t)
 			defer repo.Close()
 			for _, role := range slices.Backward(stages[i:]) {
@@ -90,7 +85,6 @@ func TestRuntimePriorityWinsWithinAStage(t *testing.T) {
 			f, repo := setup(t)
 			defer repo.Close()
 			masons(t, f, repo, map[config.WorkstreamID][]string{stream: {"a1"}, other: {"b1"}})
-			// The lower-priority workstream's review still goes before either mason.
 			f.thread(t, repo, stream, "reviewer1", "reviewer")
 			f.queue(t, repo, "reviewer1", "one")
 			var offered []string
@@ -120,7 +114,6 @@ func TestEqualPriorityWorkstreamsTakeSlotsInTurn(t *testing.T) {
 	ctx := context.Background()
 	ids := map[config.WorkstreamID][]string{stream: {"a1", "a2", "a3"}, other: {"b1", "b2", "b3"}}
 
-	// Within one pass, the slots alternate between the workstreams.
 	f, repo := setup(t)
 	defer repo.Close()
 	masons(t, f, repo, ids)
@@ -131,7 +124,6 @@ func TestEqualPriorityWorkstreamsTakeSlotsInTurn(t *testing.T) {
 		t.Fatalf("dispatched %v, want %v", got, want)
 	}
 
-	// Across passes, each freed slot goes to the other workstream.
 	f, repo = setup(t)
 	defer repo.Close()
 	masons(t, f, repo, ids)
@@ -153,8 +145,6 @@ func TestRotationContinuesAcrossRestart(t *testing.T) {
 	limits := Options{Capacity: &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}}
 	r := &running{}
 	must(t, f.controllerWith(t, repo, r.turns(), limits).Pass(ctx))
-	// A fresh scheduler reads the rotation from the trace: the workstream that
-	// has not had a turn goes next, not the one first by ID.
 	repo = f.reopen(t, repo)
 	defer func() { repo.Close() }()
 	c := f.controllerWith(t, repo, r.turns(), limits)
@@ -183,15 +173,11 @@ func TestPausedWorkstreamKeepsItsPlaceWithoutASlot(t *testing.T) {
 			defer mu.Unlock()
 			return !Held(pauses, c.Project, c), nil
 		}})
-	// The paused workstream sorts first by ID, yet the only slot goes to the
-	// other one on every pass.
 	must(t, c.Pass(ctx))
 	must(t, c.Pass(ctx))
 	if got, want := r.got(), []string{"b1", "b2"}; !slices.Equal(got, want) {
 		t.Fatalf("ran while paused %v, want %v", got, want)
 	}
-	// Held turns did not advance the paused workstream's place: on resume it
-	// has waited longest and takes the next slot.
 	mu.Lock()
 	pauses = nil
 	mu.Unlock()
@@ -208,7 +194,6 @@ func TestProjectsKeepIndependentSlots(t *testing.T) {
 	ctx := context.Background()
 	base := t.TempDir()
 	limits := &config.Capacity{Masons: 5, Reviewers: 5, Committee: 5, PerWorkstream: 1}
-	// Both projects have the same workstream and agent IDs.
 	var repos []*trace.Repository
 	var schedulers []*Scheduler
 	for _, id := range []config.ProjectID{project, otherProject} {
@@ -232,15 +217,11 @@ func TestRoleRotationIsKeptIndependentlyPerProject(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
-	// A single shared mason slot makes the projects share it, so a rotation
-	// keyed across projects, rather than per project, would show up as a
-	// dispatch out of each project's own queue order.
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}
 	shared := &Shared{}
 	var controllers []*reconcile.Controller
 	var runs []*running
 	for _, id := range []config.ProjectID{project, otherProject} {
-		// Both projects use the same workstream and agent IDs.
 		f, repo := setupIn(t, base, id, "a1", "a2")
 		defer repo.Close()
 		f.queue(t, repo, "a1", "one")
@@ -250,9 +231,6 @@ func TestRoleRotationIsKeptIndependentlyPerProject(t *testing.T) {
 		c := f.controllerWith(t, repo, r.turns(), Options{Capacity: limits, Shared: shared})
 		controllers, runs = append(controllers, c), append(runs, r)
 	}
-	// The first project's turn completes within its pass, but holds the
-	// shared slot for the other project until its own next pass publishes it
-	// free.
 	must(t, controllers[0].Pass(ctx))
 	must(t, controllers[1].Pass(ctx))
 	if got := runs[1].got(); len(got) != 0 {

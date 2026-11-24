@@ -80,8 +80,6 @@ const deliveryPath = delivery.DeliveryPath
 
 const deliveryDocument = delivery.DeliveryDocument
 
-const deliverySubject = delivery.DeliverySubject
-
 var descriptionHash = delivery.DescriptionHash
 
 var boundSubject = delivery.BoundSubject
@@ -145,7 +143,6 @@ func (d *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	return d.driver().Apply(ctx, op)
 }
 
-var deliveryTitle = delivery.DeliveryTitle
 
 var publications = delivery.Publications
 

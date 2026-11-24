@@ -45,8 +45,6 @@ const (
 	HeldByOther HoldCause = "other"
 )
 
-// explanation returns the explanation a hold with this cause gives, and
-// whether it gives one.
 func (c HoldCause) explanation() (Explanation, bool) {
 	switch c {
 	case HeldByPause:

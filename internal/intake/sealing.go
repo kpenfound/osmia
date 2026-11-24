@@ -32,21 +32,21 @@ const (
 	// RatifiedState is the feature state of a workstream whose ratified spec
 	// and plan are sealed and whose feature branch exists.
 	RatifiedState = "ratified"
-	// sealSubject is the workflow subject that tracks the sealings of one
+	// SealSubject is the workflow subject that tracks the sealings of one
 	// workstream: sealing-<k> while sealing k, the latest asked for, runs
 	// or waits to retry, and failed-<k> once it failed for a reason a retry
 	// does not put right. A sealing that succeeds is recorded by the feature
 	// state it moves, and one that fails after a later sealing was asked for
 	// records its failure without moving the subject.
 	SealSubject = "seal"
-	// branchesDirectory is the directory under the root holding the feature
+	// BranchesDirectory is the directory under the root holding the feature
 	// branch workspaces, by project and workstream.
 	BranchesDirectory = "branches"
 )
 
 var SealingActor = trace.Actor{Kind: "service", ID: "sealing"}
 
-// sealInput identifies the ratification a sealing seals: its number, the
+// SealInput identifies the ratification a sealing seals: its number, the
 // round the owner ratified in, the revisions they ratified and the revision
 // of the ratification's record, which the owner records again to ask for a
 // sealing after one failed.
@@ -60,12 +60,12 @@ type SealInput struct {
 
 func (in SealInput) Pin() shed.Pin { return shed.Pin{Spec: in.Spec, Plan: in.Plan} }
 
-// seals reports whether the sealing is of the given ratification record.
+// Seals reports whether the sealing is of the given ratification record.
 func (in SealInput) Seals(r Ratification) bool {
 	return in.Round == r.Round && in.Pin() == r.Revision && in.Ratification == r.Recorded
 }
 
-// ratification is the owner's recorded ratification with the revision of
+// Ratification is the owner's recorded ratification with the revision of
 // its record.
 type Ratification struct {
 	shed.Ratification
@@ -77,11 +77,11 @@ func SealIDs(k int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// featureBranch names the feature branch of a workstream in the project's
+// FeatureBranch names the feature branch of a workstream in the project's
 // clone.
 func FeatureBranch(stream config.WorkstreamID) string { return "osmia/" + string(stream) }
 
-// sealer is the sealing controller. Its pass asks for the sealing of every
+// Sealer is the sealing controller. Its pass asks for the sealing of every
 // ratification record no sealing was asked for: the record is the owner's
 // request, and the controller alone publishes the operation. Its reconciler
 // runs each sealing operation.
@@ -92,17 +92,13 @@ type Sealer struct {
 
 var _ coreadapter.Reconciler = (*Sealer)(nil)
 
-// Pass reconciles every workstream of the trace except the librarian's.
+// Pass reconciles every workstream of the trace.
 func (z *Sealer) Pass(ctx context.Context) error {
 	streams, err := NonSessionWorkstreams(z.Repository)
 	if err != nil {
 		return err
 	}
-	librarian := LibrarianWorkstream(z.Repository.Project())
 	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -113,7 +109,7 @@ func (z *Sealer) Pass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile asks for the sealing of the latest ratification record of a
+// Reconcile asks for the sealing of the latest ratification record of a
 // workstream in the shed when no sealing of that record was asked for. A
 // ratification whose sealing failed is recorded again by the owner to be
 // sealed again, never asked for again here.
@@ -137,7 +133,7 @@ func (z *Sealer) Reconcile(ctx context.Context, stream config.WorkstreamID) erro
 	return err
 }
 
-// latestRatification returns the owner's latest ratification of the
+// LatestRatification returns the owner's latest ratification of the
 // workstream, the one of the latest round at its latest recorded revision,
 // and whether there is one.
 func LatestRatification(repository *trace.Repository, stream config.WorkstreamID) (Ratification, bool, error) {
@@ -165,7 +161,7 @@ func LatestRatification(repository *trace.Repository, stream config.WorkstreamID
 	return Ratification{Ratification: r, Recorded: latest.Revision}, true, nil
 }
 
-// sealing returns the latest sealing operation of the given ratification
+// Sealing returns the latest sealing operation of the given ratification
 // record, and whether one was asked for.
 func (z *Sealer) Sealing(stream config.WorkstreamID, r Ratification) (trace.OperationRecord, bool, error) {
 	ops, err := z.Repository.Operations(stream)
@@ -193,7 +189,7 @@ func (z *Sealer) Header(id string, stream config.WorkstreamID, cause string, at 
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: z.Repository.Project(), Workstream: stream, At: at, Actor: SealingActor, Cause: cause}
 }
 
-// request publishes the next sealing of the workstream, of the given
+// Request publishes the next sealing of the workstream, of the given
 // ratification record, as a durable operation, and returns its number: the
 // one after the highest asked for, whatever the subject reads.
 func (z *Sealer) Request(ctx context.Context, stream config.WorkstreamID, r Ratification) (int, error) {
@@ -246,7 +242,7 @@ func DecodeSeal(op coreadapter.Operation) (SealInput, error) {
 	return in, nil
 }
 
-// stream returns the workstream a sealing operation belongs to: the one whose
+// Stream returns the workstream a sealing operation belongs to: the one whose
 // run event derives the operation ID.
 func (z *Sealer) Stream(op coreadapter.Operation, k int) (config.WorkstreamID, error) {
 	streams, err := z.Repository.Workstreams()
@@ -262,7 +258,7 @@ func (z *Sealer) Stream(op coreadapter.Operation, k int) (config.WorkstreamID, e
 	return "", fmt.Errorf("seal operation %s belongs to no workstream", op.ID)
 }
 
-// outcome returns the recorded terminal result of sealing k: succeeded when
+// Outcome returns the recorded terminal result of sealing k: succeeded when
 // it moved the workstream to ratified, failed when its failure is recorded,
 // nil before either.
 func (z *Sealer) Outcome(stream config.WorkstreamID, k int, operation string) (*coreadapter.OperationResult, error) {
@@ -282,7 +278,7 @@ func (z *Sealer) Outcome(stream config.WorkstreamID, k int, operation string) (*
 	return nil, nil
 }
 
-// git returns the provider of the workstream's feature branch workspace.
+// Git returns the provider of the workstream's feature branch workspace.
 func (z *Sealer) Git(stream config.WorkstreamID) (workspace.Provider, error) {
 	return FeatureWorkspaces(z.S.About(z.Repository), z.Repository).Of(stream)
 }
@@ -368,9 +364,6 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err != nil {
 		return fail("the ratified plan does not parse: " + err.Error())
 	}
-	// The upstream head is fetched and the entity map re-seeded from it
-	// before the footprints resolve, so a directory that landed upstream
-	// after drafting resolves too. A failure leaves the latest recorded map.
 	if z.S.Reseed != nil {
 		z.S.Reseed(ctx, z.Repository)
 	}
@@ -397,9 +390,6 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	if exists {
-		// A branch an earlier attempt created is the feature branch, and the
-		// commit it was created from is the seal. Any other branch of that
-		// name is not the service's to build on.
 		if base != fetched {
 			return fail(fmt.Sprintf("the clone has a branch %s at %s that is not on %s/%s; it is not the service's feature branch", branch, base, remote, selected.Branch))
 		}
@@ -416,10 +406,6 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	selected.Commit = base
 	record := seal.Seal{Version: seal.Version, Seal: in.Seal, Round: in.Round, Revision: in.Pin(), SpecHash: seal.SpecHash(spec.Content),
 		Base: selected, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
-	// The branch stays whatever happens next. An abandonment up to here
-	// records nothing more; one that lands between this check and the
-	// record leaves seal.json on the abandoned workstream, and the move to
-	// ratified, which expects the state the attempt read, refuses it.
 	if gone, err := Abandoned(z.Repository, stream); err != nil || gone {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -451,8 +437,6 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if !errors.Is(err, trace.ErrConflict) {
 		return coreadapter.OperationResult{}, err
 	}
-	// The state moved since it was read: to ratified by an earlier attempt
-	// of this sealing, or elsewhere by the owner.
 	result, err := z.Outcome(stream, in.Seal, op.ID)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -467,7 +451,7 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	return fail(fmt.Sprintf("the workstream is %s, not in the shed", FeatureState(moved.Value)))
 }
 
-// documents returns the ratified revisions of the spec and the plan.
+// Documents returns the ratified revisions of the spec and the plan.
 func (z *Sealer) Documents(stream config.WorkstreamID, pin shed.Pin) (spec, graph trace.Document, err error) {
 	docs, err := trace.Read[trace.Document](z.Repository, stream)
 	if err != nil {
@@ -481,7 +465,7 @@ func (z *Sealer) Documents(stream config.WorkstreamID, pin shed.Pin) (spec, grap
 	return docs[i], docs[j], nil
 }
 
-// record records the seal as the next revision of seal.json, unless this
+// Record records the seal as the next revision of seal.json, unless this
 // sealing recorded it already.
 func (z *Sealer) Record(ctx context.Context, stream config.WorkstreamID, record seal.Seal, cause string) error {
 	latest, doc, found, err := seal.PreparedLatest(z.Repository, stream)
@@ -503,7 +487,7 @@ func (z *Sealer) Record(ctx context.Context, stream config.WorkstreamID, record 
 		Project: z.Repository.Project(), Workstream: stream, At: z.S.Now(), Actor: SealingActor, Cause: cause}, Path: seal.Path, Content: string(content)}})
 }
 
-// fail records why the sealing failed, tells the chief of staff, and returns
+// Fail records why the sealing failed, tells the chief of staff, and returns
 // the failure as the operation's result. The subject moves to failed-<k>
 // only while it still reads sealing-<k>: a sealing a later one has replaced
 // records its failure and leaves the subject to the later one.
@@ -535,8 +519,6 @@ func (z *Sealer) Fail(ctx context.Context, stream config.WorkstreamID, in SealIn
 			"A footprint the entity map does not resolve resolves once what it names exists upstream. If the approved plan itself must change, the only way is for the owner to cancel the workgroup and hand it in again; tell the owner in plain words what happened.",
 			stream, in.Pin(), id, reason)
 	}
-	// A failed sealing has one way out, which the owner takes by ratifying
-	// again; the router records it as the exit's default.
 	x := z.failedExit(stream, state, to, id, transition, recorded, body)
 	if z.S.Router == nil {
 		return coreadapter.OperationResult{}, errors.New("routing a workstream's exits is unavailable")
@@ -551,7 +533,7 @@ func (z *Sealer) Fail(ctx context.Context, stream config.WorkstreamID, in SealIn
 	return coreadapter.OperationResult{Outcome: "failed", Evidence: recorded}, nil
 }
 
-// units counts units for a message.
+// Units counts units for a message.
 func Units(n int) string {
 	if n == 1 {
 		return "1 unit"
@@ -559,7 +541,7 @@ func Units(n int) string {
 	return strconv.Itoa(n) + " units"
 }
 
-// selectedBase commits the exact starting revision before a branch can exist.
+// SelectedBase commits the exact starting revision before a branch can exist.
 // Restart recovery reuses it even if the dependency integrates meanwhile.
 func (z *Sealer) SelectedBase(ctx context.Context, stream config.WorkstreamID, number int, operation string, g workspace.Provider) (seal.Base, error) {
 	id := fmt.Sprintf("seal-base-%d", number)

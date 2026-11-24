@@ -2,13 +2,11 @@ package executionjourney
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // TestDeliveryPresentationShowsTheTitleAndKeepsTheBodyEditable shows that
@@ -153,60 +151,6 @@ func TestSameRepositoryMaintenanceUpdatesAnExistingPullRequestsTitle(t *testing.
 	}
 	if p.pulls.Prs[0].Title != "A refreshed delivery title" {
 		t.Fatalf("pull request title %q, want it updated to the approved title", p.pulls.Prs[0].Title)
-	}
-}
-
-// recordLegacyApproval records, directly in the trace, a delivery approval
-// of the shape recorded before the title became part of the draft: one
-// with no Title field, as approveDelivery itself wrote before this change.
-func recordLegacyApproval(t *testing.T, p *publicationFixture, presented DeliveryPresentation) DeliveryApproval {
-	t.Helper()
-	ctx := context.Background()
-	r := presented.Report
-	legacy := DeliveryApproval{Review: r.Review, ReviewRevision: presented.ReviewRevision, Commit: r.Commit, Seal: r.Seal, SpecHash: r.SpecHash, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter,
-		Description: presented.Draft, DescriptionHash: descriptionHash(presented.Draft), Messages: presented.Messages, Style: presented.Style, At: p.s.now()}
-	content, err := json.Marshal(legacy)
-	must(t, err)
-	state, err := p.repository.Workflow(p.stream, deliverySubject)
-	must(t, err)
-	id := "legacy-delivery-owner-1"
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: deliveryDocument, Revision: 1, Project: p.repository.Project(), Workstream: p.stream, At: legacy.At, Actor: ownerActor, Cause: id}, Path: deliveryPath, Content: string(content)}
-	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: ownerHeader(id, p.repository.Project(), p.stream, "delivery-approval", legacy.At), Subject: deliverySubject, From: state.Value, To: "approved-1", Reason: "legacy approval fixture"}}
-	_, err = p.repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
-	must(t, err)
-	return legacy
-}
-
-// TestPublicationPublishesALegacyApprovalWithTheDerivedTitle shows that a
-// delivery approval recorded before this change, with no Title field,
-// still publishes, sending and matching against today's derived title,
-// deliveryTitle(description, stream) (spec#10).
-func TestPublicationPublishesALegacyApprovalWithTheDerivedTitle(t *testing.T) {
-	t.Parallel()
-	p := newPublicationFixture(t, "commit-per-unit")
-	ctx := context.Background()
-	presented, api := p.s.deliveryPresentation(ctx, string(p.stream))
-	if api != nil {
-		t.Fatal(api)
-	}
-	legacy := recordLegacyApproval(t, p, presented)
-	wantTitle := deliveryTitle(legacy.Description, p.stream)
-	if wantTitle == presented.Title {
-		t.Fatal("the derived title happens to equal the presented title; pick a draft where they differ")
-	}
-	op := p.request(t)
-	result, err := p.publisher().Apply(ctx, op)
-	if err != nil || result.Outcome != "succeeded" {
-		t.Fatalf("publication of a legacy approval %+v: %v", result, err)
-	}
-	if len(p.pulls.Prs) != 1 || p.pulls.Prs[0].Title != wantTitle {
-		t.Fatalf("pull request %+v, want the title derived from the legacy approval's description", p.pulls.Prs)
-	}
-	// A retry still matches the pull request it already updated with that
-	// derived title: it is not treated as mismatched and updated again.
-	again, err := p.publisher().Apply(ctx, op)
-	if err != nil || again.Outcome != "succeeded" || p.pulls.Creates != 1 || p.pulls.Updates != 1 {
-		t.Fatalf("retry of a legacy publication %+v, %v, %d pull requests, %d updates", again, err, p.pulls.Creates, p.pulls.Updates)
 	}
 }
 

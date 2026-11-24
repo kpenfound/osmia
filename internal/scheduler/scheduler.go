@@ -71,14 +71,9 @@ type Options struct {
 // project's passes. A scheduled turn that completes holds its slot for other
 // projects until its own project's next pass, which its completion wakes.
 type Shared struct {
-	mu sync.Mutex
-	// usageMu guards usage alone and is never held while taking another
-	// lock, so a project joins or leaves the pool whatever its caller holds.
-	usageMu sync.Mutex
-	// usage is what each project in the pool last published.
-	usage map[config.ProjectID]published
-	// reservations count workflow operations from admission through result
-	// recording, including the time before their runner claims a turn.
+	mu           sync.Mutex
+	usageMu      sync.Mutex
+	usage        map[config.ProjectID]published
 	reservations map[reservationKey]int
 	// Changed, when set, runs when published turns, waiting turns or workflow
 	// reservations change, or the project leaves the pool. It must not call
@@ -92,9 +87,6 @@ type Shared struct {
 	Limits func(role string) (limit int, bounded bool)
 }
 
-// published is one project's turns in flight by role kind, as its own
-// scheduler last counted them, and the queued turns its last pass found no
-// free slot for.
 type published struct {
 	roles   map[string]int
 	waiting []Wait
@@ -151,16 +143,12 @@ func (p *Shared) publish(project config.ProjectID, roles map[string]int, waiting
 	}
 }
 
-// same reports whether u and other count the same turns in flight and list
-// the same waiting turns, for the same reasons, in the same order.
 func (u published) same(other published) bool {
 	return maps.Equal(u.roles, other.roles) && slices.EqualFunc(u.waiting, other.waiting, func(a, b Wait) bool {
 		return a.Project == b.Project && a.Workstream == b.Workstream && a.Thread.Identity.ID == b.Thread.Identity.ID && a.Turn.Request.TurnID == b.Turn.Request.TurnID && a.Reason == b.Reason
 	})
 }
 
-// others returns the published counts by role kind of every project in the
-// pool but project.
 func (p *Shared) others(project config.ProjectID) map[string]int {
 	p.usageMu.Lock()
 	defer p.usageMu.Unlock()
@@ -228,8 +216,6 @@ type Scheduler struct {
 	options    Options
 }
 
-// lock serializes the passes of the scheduler, or of every scheduler of its
-// shared pool.
 func (s *Scheduler) lock() func() {
 	mu := &s.mu
 	if s.options.Shared != nil {
@@ -356,22 +342,14 @@ type Slots struct {
 	Waiting []Wait
 }
 
-// reading is what a pass reads before it offers slots: the turns in flight,
-// the queued turns and each stage's last dispatch.
 type reading struct {
-	// used counts the turns in flight of every project in the pool.
-	used usage
-	// own counts the turns in flight of the scheduler's own project.
+	used       usage
 	own        usage
 	candidates []Candidate
 	served     map[rotation]time.Time
-	// loaded is what the trace held when the pass read it.
-	loaded loaded
+	loaded     loaded
 }
 
-// read reads every workstream's threads, then its turn operations. With a
-// shared pool it adds the counts the pool's other projects published, and
-// never reads their traces.
 func (s *Scheduler) read() (reading, error) {
 	project := s.repository.Project()
 	l, err := load(s.repository)
@@ -401,24 +379,15 @@ func (s *Scheduler) read() (reading, error) {
 	return reading{used: used, own: own, candidates: candidates, served: l.served, loaded: l}, nil
 }
 
-// loaded is one trace's workstreams, their threads, the turns its turn
-// operations name and each stage's last dispatch.
 type loaded struct {
-	project    config.ProjectID
-	streams    []config.WorkstreamID
-	threads    map[config.WorkstreamID][]trace.Thread
-	dispatched map[turnKey]bool
-	// dispatchedAt is when each dispatched turn's operation was recorded.
+	project      config.ProjectID
+	streams      []config.WorkstreamID
+	threads      map[config.WorkstreamID][]trace.Thread
+	dispatched   map[turnKey]bool
 	dispatchedAt map[turnKey]time.Time
 	served       map[rotation]time.Time
 }
 
-// load reads every workstream's threads of repository, then its turn
-// operations. A session workstream is excluded: it has no spec, plan or unit
-// for this scheduler's roles to serve, and its own turns are dispatched
-// directly, never through this scheduler, so it never takes a slot or a
-// place in the rotation of chief-of-staff, mason, reviewer or committee
-// turns.
 func load(repository *trace.Repository) (loaded, error) {
 	var result loaded
 	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
@@ -455,7 +424,6 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 			roles[t.Identity.ID] = t.Identity.Role
 		}
 		for _, record := range records {
-			// Undecodable input is refused by the dispatcher and runs no turn.
 			in, err := thread.DecodeTurn(record.Operation)
 			if err != nil {
 				continue
@@ -476,7 +444,6 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 	return out, nil
 }
 
-// count adds the trace's turns in flight to used.
 func (l loaded) count(used usage) {
 	for _, stream := range l.streams {
 		for _, t := range l.threads[stream] {
@@ -488,8 +455,6 @@ func (l loaded) count(used usage) {
 	}
 }
 
-// order is the order candidates are offered in, given each stage's last
-// dispatch. Ties keep trace order, for stable admission across passes.
 func (s *Scheduler) order(served map[rotation]time.Time) func(a, b Candidate) int {
 	project := s.repository.Project()
 	rank := Rank(nil, project)
@@ -506,8 +471,6 @@ func (s *Scheduler) order(served map[rotation]time.Time) func(a, b Candidate) in
 	}
 }
 
-// stage orders the roles whose turns compete for a freed slot, so the factory
-// finishes work before it widens it.
 func stage(role string) int {
 	switch role {
 	case "reviewer":
@@ -526,8 +489,6 @@ type usage struct {
 	roles   map[string]int
 	streams map[streamKey]int
 	local   map[localKey]int
-	// flights lists the turns counted, for the spans of the slots they hold.
-	// Counting does not read them, and merge leaves them out.
 	flights map[turnKey]flight
 }
 
@@ -540,14 +501,12 @@ type streamKey struct {
 	workstream config.WorkstreamID
 }
 
-// localKey names a role or an agent within one workstream of one project.
 type localKey struct {
 	project    config.ProjectID
 	workstream config.WorkstreamID
 	name       string
 }
 
-// rotation names one workstream's place in a stage's rotation.
 type rotation struct {
 	project    config.ProjectID
 	workstream config.WorkstreamID
@@ -558,8 +517,6 @@ func rotationKey(project config.ProjectID, stream config.WorkstreamID, role stri
 	return rotation{project, stream, stage(role)}
 }
 
-// add counts a turn in flight. Role kinds share their slots across every
-// workstream; workstream and per-workstream role counts are kept per project.
 func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role string) {
 	if role == trace.ChiefOfStaff {
 		return
@@ -569,7 +526,6 @@ func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role st
 	u.local[localKey{project, stream, role}]++
 }
 
-// merge adds the counts of other to u.
 func (u usage) merge(other usage) {
 	for k, n := range other.roles {
 		u.roles[k] += n
@@ -582,8 +538,6 @@ func (u usage) merge(other usage) {
 	}
 }
 
-// refusal returns why the candidate's turn has no free slot, or "" when it
-// has one.
 func (s *Scheduler) refusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
 	if limits == nil || role == trace.ChiefOfStaff {
@@ -595,8 +549,6 @@ func (s *Scheduler) refusal(used usage, c Candidate) string {
 	return s.roleRefusal(used, c)
 }
 
-// roleRefusal applies role limits independently of the worker allowance of
-// a workstream. Workflow operations reserve roles through this same gate.
 func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
 	if limits == nil || role == trace.ChiefOfStaff {
@@ -617,9 +569,6 @@ func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	return ""
 }
 
-// inFlightTurn returns the thread's oldest unfinished turn and whether it is
-// in flight: claimed or named by a turn operation. A claim a restart
-// interrupted runs nowhere.
 func inFlightTurn(t trace.Thread, stream config.WorkstreamID, dispatched map[turnKey]bool) (trace.QueuedTurn, bool) {
 	for _, q := range t.Turns {
 		if q.CompletedAt.IsZero() {
@@ -638,10 +587,6 @@ type turnKey struct {
 	turn       string
 }
 
-// next returns the thread's oldest unfinished turn unless it is claimed. A
-// parked thread has no unfinished turn, so it is not offered to Admit. Turns
-// are claimed in sequence, so a claim is always on the oldest unfinished turn
-// and no later turn is eligible.
 func next(t trace.Thread) (trace.QueuedTurn, bool) {
 	for _, q := range t.Turns {
 		if q.CompletedAt.IsZero() {

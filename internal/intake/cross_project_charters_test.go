@@ -135,7 +135,6 @@ func TestCrossProjectCharterValidationAndContext(t *testing.T) {
 			}
 		}
 	}
-	// An authority reopened without bound member handles still reads every charter.
 	fixturekit.Must(t, f.group.Close())
 	reopened, err := trace.OpenWorkgroupAuthority(f.cfg.Root, f.workgroup.ID)
 	fixturekit.Must(t, err)
@@ -215,7 +214,6 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 	controller := New(Dependencies{Now: func() time.Time { return fixturekit.DemoStart }, Runtimes: func() (*config.Config, []*Project) {
 		return f.cfg, []*Project{{ID: f.a.Project(), Repository: f.a}, {ID: f.b.Project(), Repository: f.b}}
 	}})
-	// Decisions addressed through the original member still reach B after reopening.
 	fixturekit.Must(t, f.group.Close())
 	fixturekit.Must(t, f.b.Close())
 	bProject := f.cfg.Project

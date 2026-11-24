@@ -18,9 +18,6 @@ func draftFixture(t *testing.T) (*config.Config, *trace.Repository, *Controller,
 	return cfg, repo, drafts, FinalReport{Spec: 1, Summary: "Resumable uploads", Commit: strings.Repeat("c", 40)}
 }
 
-// TestDraftDeliveryTitleIsTheWorkstreamStatusGoal shows the drafted title is
-// the latest chief-of-staff status goal, not text taken from the final
-// review's summary (spec#1).
 func TestDraftDeliveryTitleIsTheWorkstreamStatusGoal(t *testing.T) {
 	t.Parallel()
 	cfg, repository, drafts, report := draftFixture(t)
@@ -33,9 +30,6 @@ func TestDraftDeliveryTitleIsTheWorkstreamStatusGoal(t *testing.T) {
 	}
 }
 
-// TestDraftDeliveryTitleFallsBackToSpecHeadingWithoutAGoal shows that a
-// workstream with no status goal gets a meaningful fallback title (the
-// sealed spec's first heading) before the bare workstream ID (spec#2).
 func TestDraftDeliveryTitleFallsBackToSpecHeadingWithoutAGoal(t *testing.T) {
 	t.Parallel()
 	cfg, repository, drafts, report := draftFixture(t)
@@ -50,10 +44,6 @@ func TestDraftDeliveryTitleFallsBackToSpecHeadingWithoutAGoal(t *testing.T) {
 	}
 }
 
-// TestDraftDeliveryBodyIsASpecSummaryWithNoWorkAccounting shows the drafted
-// body is a short prose summary of the sealed spec, with no per-criterion
-// evidence or gap lines, no landed-unit list and no reviewed commit hash
-// (spec#3).
 func TestDraftDeliveryBodyIsASpecSummaryWithNoWorkAccounting(t *testing.T) {
 	t.Parallel()
 	cfg, repository, drafts, report := draftFixture(t)
@@ -70,9 +60,6 @@ func TestDraftDeliveryBodyIsASpecSummaryWithNoWorkAccounting(t *testing.T) {
 	}
 }
 
-// TestDraftDeliveryClosesAnIssueInTheTargetRepository shows that a
-// workstream handed in from a GitHub issue in the repository the pull
-// request targets gets a "closes #N" reference (spec#4).
 func TestDraftDeliveryClosesAnIssueInTheTargetRepository(t *testing.T) {
 	t.Parallel()
 	cfg, repository, drafts, report := draftFixture(t)
@@ -85,9 +72,6 @@ func TestDraftDeliveryClosesAnIssueInTheTargetRepository(t *testing.T) {
 	}
 }
 
-// TestDraftDeliveryClosesAnIssueInAnotherRepository shows that a workstream
-// handed in from a GitHub issue in a different repository than the pull
-// request targets gets a "closes OWNER/REPO#N" reference (spec#5).
 func TestDraftDeliveryClosesAnIssueInAnotherRepository(t *testing.T) {
 	t.Parallel()
 	cfg, repository, drafts, report := draftFixture(t)
@@ -100,8 +84,6 @@ func TestDraftDeliveryClosesAnIssueInAnotherRepository(t *testing.T) {
 	}
 }
 
-// TestDraftDeliveryNoClosingReferenceForFileOrStdin shows that a workstream
-// handed in from a file or stdin gets no closing issue reference (spec#6).
 func TestDraftDeliveryNoClosingReferenceForFileOrStdin(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{"file:/home/owner/design.md", "stdin"} {

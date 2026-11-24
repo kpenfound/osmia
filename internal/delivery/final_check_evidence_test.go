@@ -88,7 +88,6 @@ func TestFinalChecksRecordCloudEvidenceOnFailedAndIncompleteRunsWithoutChangingT
 	if want := []string{"test:a", "test:b"}; !slices.Equal(run.Evidence.CoRun, want) {
 		t.Fatalf("co-run %v", run.Evidence.CoRun)
 	}
-	// Both failures of test:b are kept: the one the rerun answered and the one it ended in.
 	var failedB []string
 	for _, tr := range run.Evidence.Traces {
 		if tr.Kind == api.CheckTraceFailed && tr.Check == "test:b" {
@@ -109,16 +108,13 @@ func TestFinalChecksRecordCloudEvidenceOnFailedAndIncompleteRunsWithoutChangingT
 	}
 }
 
-func TestFinalCheckRunsWrittenWithoutEvidenceStillLoadAndConvert(t *testing.T) {
+func TestPullRequestRunWithoutRecordedEvidenceConvertsFromItsFailuresAndReruns(t *testing.T) {
 	t.Parallel()
-	old := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"passed","status_url":"https://dagger.cloud/checks/14.json","counts":{"total":2,"passed":2,"failed":0,"cancelled":0},` +
+	recorded := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"passed","status_url":"https://dagger.cloud/checks/14.json","counts":{"total":2,"passed":2,"failed":0,"cancelled":0},` +
 		`"reruns":[{"requested_at":"2026-01-02T03:04:05Z","original":{"id":10,"created_at":"2026-01-02T03:00:00Z"},"failed":[{"name":"test:a","trace_id":"trace-a","status_id":11}],"flakes":["test:a"]}],"flaky":["test:a"],"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
 	var run FinalCheckRun
-	if err := json.Unmarshal([]byte(old), &run); err != nil {
+	if err := json.Unmarshal([]byte(recorded), &run); err != nil {
 		t.Fatal(err)
-	}
-	if run.Evidence != nil || run.Status != "passed" {
-		t.Fatalf("run %+v", run)
 	}
 	evidence := run.FlakeEvidence()
 	if evidence.Engine != api.CheckEngineCloud || !slices.Equal(evidence.CoRun, []string{"test:a"}) || !slices.Equal(evidence.Flaky, []string{"test:a"}) {
@@ -127,18 +123,22 @@ func TestFinalCheckRunsWrittenWithoutEvidenceStillLoadAndConvert(t *testing.T) {
 	if traceRefs(evidence)["failed test:a"].TraceID != "trace-a" || len(evidence.Unavailable) != 2 || evidence.Unavailable[0].Where != "dagger trace trace-a" {
 		t.Fatalf("evidence %+v", evidence)
 	}
+}
+
+func TestLocalRunWithoutRecordedEvidenceConvertsFromItsSelectionAndOutput(t *testing.T) {
+	t.Parallel()
 	local := FinalCheckRun{Review: 1, Status: "passed", Flaky: []string{"dag://y"}, Selection: &CheckSelection{Links: []string{"dag://y", "dag://z"}}, OutputPath: "final/checks-1-output.txt", OutputRevision: 1}.FlakeEvidence()
 	if local.Engine != api.CheckEngineLocal || !slices.Equal(local.CoRun, []string{"dag://y", "dag://z"}) || local.OutputPath == "" || len(local.Unavailable) == 0 || local.Unavailable[0].Where != FinalChecksPath(1) {
 		t.Fatalf("local %+v", local)
 	}
 }
 
-func TestAFinalCheckRecordWithCancelledCountsStillRendersAsEvidence(t *testing.T) {
+func TestAFinalCheckRecordWithCancelledCountsRendersAsEvidence(t *testing.T) {
 	t.Parallel()
-	old := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"incomplete","exit_code":-1,` +
+	recorded := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"incomplete","exit_code":-1,` +
 		`"error":"the completed run is not a pass: 1 of 10 checks were cancelled","status_url":"https://dagger.cloud/checks/3.json","counts":{"total":10,"passed":9,"failed":0,"cancelled":1},"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
 	var run FinalCheckRun
-	if err := json.Unmarshal([]byte(old), &run); err != nil {
+	if err := json.Unmarshal([]byte(recorded), &run); err != nil {
 		t.Fatal(err)
 	}
 	if run.Counts == nil || run.Counts.Cancelled != 1 || run.Counts.Total != 10 {

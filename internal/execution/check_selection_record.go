@@ -30,17 +30,14 @@ type UnitCheckSelection struct {
 	TraceURL string `json:"trace_url,omitempty"`
 }
 
-func checkSelectionDocument(unit string, run int) string {
-	return checkDocumentID(unit, run) + "-selection"
+func CheckSelectionDocument(unit string, run int) string {
+	return CheckDocumentID(unit, run) + "-selection"
 }
 
-func checkSelectionPath(unit string, run int) string {
+func CheckSelectionPath(unit string, run int) string {
 	return fmt.Sprintf("units/%s/checks-%d-selection.json", unit, run)
 }
 
-// latestSelection returns the latest revision of the run's start record, the
-// document that carries it, and whether the run has one. It must match the
-// check run's identity.
 func (c *checkers) latestSelection(in checkInput, run *UnitCheckRun) (UnitCheckSelection, trace.Document, bool, error) {
 	docs, err := trace.Read[trace.Document](c.repository, in.Workstream)
 	if err != nil {
@@ -48,7 +45,7 @@ func (c *checkers) latestSelection(in checkInput, run *UnitCheckRun) (UnitCheckS
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == checkSelectionDocument(in.Unit, in.Run) && d.Revision > latest.Revision {
+		if d.ID == CheckSelectionDocument(in.Unit, in.Run) && d.Revision > latest.Revision {
 			latest = d
 		}
 	}
@@ -65,10 +62,6 @@ func (c *checkers) latestSelection(in checkInput, run *UnitCheckRun) (UnitCheckS
 	return prior, latest, true, nil
 }
 
-// restoreSelection restores the run's start evidence before preparation can
-// record a terminal result: the choice, the start time and the trace link an
-// earlier attempt of the run printed. Once the diff is available, it must
-// match too.
 func (c *checkers) restoreSelection(in checkInput, run *UnitCheckRun) (bool, error) {
 	prior, _, found, err := c.latestSelection(in, run)
 	if err != nil || !found {
@@ -83,8 +76,6 @@ func (c *checkers) restoreSelection(in checkInput, run *UnitCheckRun) (bool, err
 	return true, nil
 }
 
-// recordTrace records link on the run's start record as a new revision of it.
-// It records nothing when the latest revision already carries the link.
 func (c *checkers) recordTrace(ctx context.Context, in checkInput, run *UnitCheckRun, link string) error {
 	prior, latest, found, err := c.latestSelection(in, run)
 	if err != nil || !found || prior.TraceURL == link {
@@ -100,8 +91,6 @@ func (c *checkers) recordTrace(ctx context.Context, in checkInput, run *UnitChec
 	return c.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: latest.Path, Content: string(data) + "\n"}})
 }
 
-// selection reuses the run's immutable choice, including full-run fallbacks,
-// even if listing or the Jev configuration changes across a restart.
 func (c *checkers) selection(ctx context.Context, in checkInput, run *UnitCheckRun, dir, diff string, checks ReviewChecks) (CheckSelection, error) {
 	if found, err := c.restoreSelection(in, run); err != nil {
 		return CheckSelection{}, err
@@ -114,7 +103,7 @@ func (c *checkers) selection(ctx context.Context, in checkInput, run *UnitCheckR
 	if err != nil {
 		return CheckSelection{}, err
 	}
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: checkSelectionDocument(in.Unit, in.Run), Revision: 1, Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit, At: c.s.Now(), Actor: checksActor, Cause: checkRequestID(in.Unit, in.Run)}, Path: checkSelectionPath(in.Unit, in.Run), Content: string(data) + "\n"}
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: CheckSelectionDocument(in.Unit, in.Run), Revision: 1, Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit, At: c.s.Now(), Actor: ChecksActor, Cause: checkRequestID(in.Unit, in.Run)}, Path: CheckSelectionPath(in.Unit, in.Run), Content: string(data) + "\n"}
 	if err := c.repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
 			if found, readErr := c.restoreSelection(in, run); readErr != nil {
@@ -128,11 +117,6 @@ func (c *checkers) selection(ctx context.Context, in checkInput, run *UnitCheckR
 	return selection, nil
 }
 
-// traceWatch writes the trace links a check run prints to its start record
-// while the run goes on. The observer only hands a link to a writer goroutine,
-// because it runs on the goroutine that copies Dagger's output. A link that
-// cannot be written is tried again with the next one and when the watch
-// stops; the run's result record carries the link either way.
 type traceWatch struct {
 	c      *checkers
 	ctx    context.Context
@@ -144,14 +128,12 @@ type traceWatch struct {
 	latest string
 }
 
-// watchTraces starts recording the links the run prints.
 func (c *checkers) watchTraces(ctx context.Context, in checkInput, run UnitCheckRun) *traceWatch {
 	w := &traceWatch{c: c, ctx: ctx, in: in, run: run, wake: make(chan struct{}, 1), done: make(chan struct{}), latest: run.TraceURL}
 	go w.write()
 	return w
 }
 
-// observed returns ctx with the observer that feeds the writer.
 func (w *traceWatch) observed(ctx context.Context) context.Context {
 	return checkrun.WithTraceObserver(ctx, w.observe)
 }
@@ -166,10 +148,6 @@ func (w *traceWatch) observe(url string) {
 	}
 }
 
-// write records the latest link on the start record each time the observer
-// wakes it, and once more after the watch stops. Its writes survive the
-// cancellation of the run's context, so a run that is cancelled or stopped
-// after it printed a link still leaves the link on its start record.
 func (w *traceWatch) write() {
 	defer close(w.done)
 	ctx := context.WithoutCancel(w.ctx)
@@ -188,7 +166,6 @@ func (w *traceWatch) write() {
 	flush()
 }
 
-// stop ends the watch once the link last printed is on the start record.
 func (w *traceWatch) stop() {
 	close(w.wake)
 	<-w.done

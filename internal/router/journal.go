@@ -35,7 +35,6 @@ const (
 	StateStale = "stale"
 )
 
-// routeActor is who the router's own records are attributed to.
 var routeActor = trace.Actor{Kind: "service", ID: "router"}
 
 // Record is the content of an occurrence's route journal document.
@@ -102,7 +101,6 @@ type Record struct {
 	Decided    time.Time `json:"decided,omitempty"`
 }
 
-// final reports whether the record is a finished occurrence.
 func (r Record) final() bool {
 	switch r.State {
 	case StateCommitted, StateHeld, StateOwner, StateRefused, StateStale:
@@ -128,8 +126,6 @@ func OccurrenceKey(x Exit) string {
 	return fmt.Sprintf("%s@%d/%s/%s", x.Subject, x.Version, x.Trigger, cause)
 }
 
-// journalName is the digest the journal's subject, document and transitions
-// are named by.
 func journalName(key string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))[:32]
 }
@@ -142,8 +138,6 @@ func journalSubject(name string) string { return "route-" + name }
 func IsJournal(subject string) bool  { return strings.HasPrefix(subject, "route-") }
 func journalPath(name string) string { return "routes/" + name + ".json" }
 
-// readRecord returns the latest route record named name, its revision and the
-// journal subject's workflow state. A missing record is nil.
 func readRecord(repo *trace.Repository, stream config.WorkstreamID, name string) (*Record, int, trace.WorkflowState, error) {
 	state, err := repo.Workflow(stream, journalSubject(name))
 	if err != nil {
@@ -228,15 +222,6 @@ func Unfinished(repo *trace.Repository, stream config.WorkstreamID) ([]Record, e
 	return out, nil
 }
 
-// LookupOccurrence returns the route record of the occurrence with the key,
-// nil when it was never routed.
-func LookupOccurrence(repo *trace.Repository, stream config.WorkstreamID, key string) (*Record, error) {
-	rec, _, _, err := readRecord(repo, stream, journalName(key))
-	return rec, err
-}
-
-// journalWrite is one commit of the journal: the next revision of the record,
-// the journal subject moving to a state, and anything recorded with it.
 type journalWrite struct {
 	rec    Record
 	rev    int
@@ -244,18 +229,14 @@ type journalWrite struct {
 	to     string
 	reason string
 	events []trace.Event
-	// docs and txs are recorded in the same commit: the target's effects and
-	// the move's own transaction.
-	docs []trace.Document
-	txs  []trace.Transaction
+	docs   []trace.Document
+	txs    []trace.Transaction
 }
 
 func (r *Router) headerFor(x Exit, schema, id string, revision int, at time.Time, cause string) trace.Header {
 	return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: revision, Project: x.Project, Workstream: x.Workstream, Unit: x.Unit, At: at, Actor: routeActor, Cause: cause}
 }
 
-// writeJournal records w in one commit and reports the transition ID of the
-// journal subject's move.
 func (r *Router) writeJournal(ctx context.Context, x Exit, name string, w journalWrite) error {
 	subject := journalSubject(name)
 	at := r.now()

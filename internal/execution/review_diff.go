@@ -13,12 +13,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// reviewDiffTool serves the exact diff a unit review is pinned to: the
-// candidate against its base, verified against the recorded digest.
-func reviewDiffTool(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, identity UnitReviewIdentity) coreadapter.Tool {
+func ReviewDiffTool(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, identity UnitReviewIdentity) coreadapter.Tool {
 	return reviewtools.DiffTool(reviewtools.PinnedDiff{About: "the unit's candidate against the feature branch commit it was built on", From: identity.Candidate.BaseRevision, To: identity.Candidate.Revision,
 		Read: func(ctx context.Context) (string, error) {
-			g, err := newUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
+			g, err := NewUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
 			if err != nil {
 				return "", err
 			}

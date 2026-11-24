@@ -1,12 +1,7 @@
-// Package router is the one transition router. A caller that would change a
-// subject's state does not choose the next state: it raises an exit, with the
-// trigger, the default today's code would take, the legal targets and the
-// evidence. The router filters the targets through the hard prerequisites,
-// asks Jev the narrow questions of the decide-transition task, turns the
-// answers into the next state with a versioned table in code, and commits the
-// result through the trace's Transaction with the target's shared effects. Jev
-// makes judgments and code makes decisions: a failed request never blocks a
-// transition, and Jev is never called on the scheduling path.
+// Package router commits workflow transitions. A caller raises an exit with
+// its trigger, default target, legal targets and evidence; the router filters
+// the targets through the hard prerequisites, takes Jev's judgments, decides
+// the next state in code and commits it through the trace.
 package router
 
 import (
@@ -105,7 +100,6 @@ type Target struct {
 	Corroborate []Condition
 }
 
-// entered returns the state of the subject once the target is entered.
 func (t Target) entered() string {
 	if t.State != "" {
 		return t.State
@@ -157,7 +151,6 @@ type Authority struct {
 	Valid func(ctx context.Context) (string, error)
 }
 
-// pinned reports whether the authority makes the exit a pinned move.
 func (a *Authority) pinned() bool {
 	return a != nil && (a.Kind == AuthorityOwner || a.Kind == AuthorityJevGate || a.Kind == AuthorityChief)
 }
@@ -309,7 +302,6 @@ var ErrCannotCarryOut = errors.New("the target cannot be carried out")
 // Refusal returns an error saying the target cannot be carried out for reason.
 func Refusal(reason string) error { return fmt.Errorf("%w: %s", ErrCannotCarryOut, reason) }
 
-// validate reports why the exit cannot be routed, or nil.
 func (x Exit) validate() error {
 	switch {
 	case x.Repo == nil || x.Project == "" || x.Workstream == "":
@@ -346,7 +338,6 @@ func (x Exit) validate() error {
 	return nil
 }
 
-// defaultState returns the state of the subject the default target enters.
 func (x Exit) defaultState() string {
 	if t, ok := x.target(x.Default); ok {
 		return t.entered()

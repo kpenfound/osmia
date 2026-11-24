@@ -38,7 +38,6 @@ func (s *Controller) RetireStaleAmendment(ctx context.Context, repository *trace
 	}
 	matching, err := AmendmentSealMatches(repository, stream, c.Request.SealRevision, current)
 	if err != nil {
-		// One unreadable filing seal must not prevent other amendments progressing.
 		s.Log().Warn("cannot reconcile amendment filing seal", "workstream", stream, "amendment", id, "error", err)
 		return true, nil
 	}
@@ -123,8 +122,6 @@ func (a AmendmentDebate) RetiredTurns(ctx context.Context, stream config.Workstr
 	return nil
 }
 
-// settleRetiredAmendment reconciles retirement racing an operation's final
-// write, so its superseded result cannot schedule another attempt.
 func settleRetiredAmendment(repository *trace.Repository, stream config.WorkstreamID, id string, result *coreadapter.OperationResult, err *error) {
 	retired, readErr := AmendmentRetirementOutcome(repository, stream, id)
 	if readErr == nil && retired != nil {

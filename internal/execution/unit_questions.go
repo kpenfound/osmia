@@ -15,7 +15,7 @@ import (
 
 const questionWaitContestCause = "question-wait-reconciliation"
 
-func latestUnitTransition(repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, error) {
+func LatestUnitTransition(repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, error) {
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	if err != nil {
 		return trace.Transition{}, err
@@ -28,10 +28,8 @@ func latestUnitTransition(repository *trace.Repository, stream config.Workstream
 	return trace.Transition{}, nil
 }
 
-// questionWaitOwner follows the durable question cause as well as the actor:
-// an owner or recovery move can preserve a worker's question wait.
 func questionWaitOwner(repository *trace.Repository, stream config.WorkstreamID, unit, agent string, actor trace.Actor) (bool, error) {
-	latest, err := latestUnitTransition(repository, stream, unit)
+	latest, err := LatestUnitTransition(repository, stream, unit)
 	if err != nil || strings.HasPrefix(latest.Cause, "amendment_") {
 		return false, err
 	}
@@ -47,8 +45,6 @@ func questionWaitOwner(repository *trace.Repository, stream config.WorkstreamID,
 	if latest.Actor == actor {
 		return true, nil
 	}
-	// An unidentified wait with a delivered worker answer needs a visible
-	// recovery decision even when a different actor recorded the wait.
 	if !slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.Thread == agent && q.State == trace.QuestionAnswered }) {
 		return false, nil
 	}
@@ -59,39 +55,37 @@ func questionWaitOwner(repository *trace.Repository, stream config.WorkstreamID,
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.Thread == agent && questionDelivered(q, th) }), nil
+	return slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.Thread == agent && QuestionDelivered(q, th) }), nil
 }
 
 func questionWaitCause(cause, question string) bool {
 	return cause == trace.QuestionSubject(question)+"_"+trace.QuestionOpen || cause == trace.QuestionSubject(question)+"_"+trace.QuestionAnswered
 }
 
-func questionDelivered(q trace.QuestionState, th trace.Thread) bool {
+func QuestionDelivered(q trace.QuestionState, th trace.Thread) bool {
 	return q.State == trace.QuestionAnswered && q.Ruling != nil && slices.ContainsFunc(th.Turns, func(t trace.QueuedTurn) bool {
 		return t.Request.TurnID == questions.TurnID(q.Asked.ID) && t.Request.Cause == trace.QuestionSubject(q.Asked.ID)+"_"+trace.QuestionAnswered
 	})
 }
 
-// waitedQuestion reads the question named by the wait, independent of the
-// thread's latest turn. Later turns cannot hide a delivered answer.
 func waitedQuestion(repository *trace.Repository, stream config.WorkstreamID, unit string, th trace.Thread, asked []trace.QuestionState) (trace.QuestionState, bool, string, error) {
-	latest, err := latestUnitTransition(repository, stream, unit)
+	latest, err := LatestUnitTransition(repository, stream, unit)
 	if err != nil {
 		return trace.QuestionState{}, false, "", err
 	}
 	for _, q := range asked {
 		if q.Asked.Thread == th.Identity.ThreadID && questionWaitCause(latest.Cause, q.Asked.ID) {
 			if !slices.ContainsFunc(th.Turns, func(t trace.QueuedTurn) bool { return t.Request.TurnID == q.Asked.Turn }) {
-				if questionDelivered(q, th) {
+				if QuestionDelivered(q, th) {
 					return q, false, "the delivered question has no asking turn", nil
 				}
 				return q, false, "", nil
 			}
-			return q, questionDelivered(q, th), "", nil
+			return q, QuestionDelivered(q, th), "", nil
 		}
 	}
 	for _, q := range asked {
-		if q.Asked.Thread == th.Identity.ThreadID && questionDelivered(q, th) {
+		if q.Asked.Thread == th.Identity.ThreadID && QuestionDelivered(q, th) {
 			return q, false, "the waiting transition does not identify the worker's question", nil
 		}
 	}

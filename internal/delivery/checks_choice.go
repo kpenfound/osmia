@@ -97,9 +97,6 @@ func ReadChecksChoice(repository *trace.Repository, stream config.WorkstreamID, 
 	return out, found, nil
 }
 
-// writeChecksChoice records choice as the next revision of its document and
-// returns the revision. A concurrent write is retried against the latest
-// record, which keep reads again: it returns false to stop.
 func (s *Controller) writeChecksChoice(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, choice ChecksChoice, actor trace.Actor, cause string, keep func(ChecksChoiceRecord, bool) bool) (int, bool, error) {
 	data, err := json.MarshalIndent(choice, "", "  ")
 	if err != nil {
@@ -127,9 +124,6 @@ func (s *Controller) writeChecksChoice(ctx context.Context, repository *trace.Re
 	}
 }
 
-// closeObsoleteChecksChoices closes the offers of pushes before the current one
-// that nobody answered, as obsolete. A push that supersedes the one an offer
-// concerns closes the offer, whichever surface looks at it first.
 func (s *Controller) closeObsoleteChecksChoices(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) error {
 	current, found, err := CurrentPush(repository, stream)
 	if err != nil || !found {
@@ -161,9 +155,6 @@ func (s *Controller) closeObsoleteChecksChoices(ctx context.Context, repository 
 	return nil
 }
 
-// completedChecksOf returns the final check record that settled push: a
-// completed result of its pushed commit, or the owner's choice to continue
-// without one.
 func completedChecksOf(repository *trace.Repository, stream config.WorkstreamID, push Push) (FinalCheckRun, bool, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -184,8 +175,6 @@ func completedChecksOf(repository *trace.Repository, stream config.WorkstreamID,
 	return FinalCheckRun{}, false, nil
 }
 
-// finalCheckPath reports whether path is a final check result document,
-// final/checks-<k>.json, rather than one of the records kept beside it.
 func finalCheckPath(path string) bool {
 	rest, ok := strings.CutPrefix(path, "final/checks-")
 	if !ok {
@@ -203,9 +192,6 @@ func finalCheckPath(path string) bool {
 	return rest != ""
 }
 
-// pushNamed returns the workstream's current push when named is its number,
-// and otherwise why the request cannot act: no push is recorded, the named
-// push is superseded by the current one, or it is not a recorded push.
 func pushNamed(repository *trace.Repository, stream config.WorkstreamID, named int) (Push, string, error) {
 	current, found, err := CurrentPush(repository, stream)
 	if err != nil {
@@ -294,8 +280,6 @@ func describeOutcome(result checkrun.CloudResult) string {
 	return string(result.Outcome)
 }
 
-// forgetPoll makes the watch of push n read the statuses at its next attempt
-// instead of waiting for the poll interval to pass.
 func forgetPoll(repository *trace.Repository, stream config.WorkstreamID, push int) {
 	polled.Range(func(key, _ any) bool {
 		if k, ok := key.(pollKey); ok && k.stream == stream && k.push == push && k.repository.Project() == repository.Project() {
@@ -393,10 +377,6 @@ func (s *Controller) RerunChecksNow(ctx context.Context, repository *trace.Repos
 	return record, "", nil
 }
 
-// rerunOrganization is the Dagger Cloud organization a rerun of cfg's
-// project names with --org: dagger.organization for a project without a fork,
-// and none for a project with one, whose pull request checks run in an
-// organization the service's token cannot be assumed to belong to.
 func rerunOrganization(cfg *config.Config) string {
 	if cfg == nil || cfg.Project.Fork != "" {
 		return ""
@@ -404,8 +384,6 @@ func rerunOrganization(cfg *config.Config) string {
 	return cfg.Dagger.Organization
 }
 
-// rerunDirectory is the workstream's checkout, where a Dagger Cloud rerun is
-// requested from, or the project's clone when the workstream has none.
 func (s *Controller) rerunDirectory(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID) string {
 	dir := cfg.Project.Clone
 	if g, err := featureWorkspaces(cfg, repository).Of(stream); err == nil {
@@ -507,7 +485,6 @@ func (s *Controller) AnswerChecksChoice(ctx context.Context, raw string, req Che
 		return stale(fmt.Sprintf("no question about push %d is open", current.Number))
 	}
 	if record.State == req.Decision && record.Offer == req.Offer && req.Offer > 0 {
-		// The answer was recorded already; repeating it records nothing more.
 		return ChecksChoiceResponse{Project: project, Workstream: stream, Push: current.Number, PullRequest: current.PullRequest, PushedCommit: current.Commit, Decision: req.Decision, Detail: "already recorded", At: record.At}, nil
 	}
 	if record.State != ChecksChoiceOffered || record.Revision != req.Offer {
@@ -565,9 +542,6 @@ func ChecksChoiceEntry(repository *trace.Repository, w trace.WorkstreamStatus) (
 	return e, true, nil
 }
 
-// continuedChecks records the final check result of a push whose owner chose
-// to continue without check results: no result exists, and the record says
-// so. A record of the push already written is returned as it is.
 func (w *finalWatch) continuedChecks(ctx context.Context, choice ChecksChoiceRecord) (FinalCheckRun, error) {
 	run := w.base(checkrun.CloudResult{})
 	run.Status, run.ExitCode = ChecksContinued, -1
@@ -580,11 +554,6 @@ func (w *finalWatch) continuedChecks(ctx context.Context, choice ChecksChoiceRec
 	return run, nil
 }
 
-// chiefChecksTarget decodes the input of one of the chief-of-staff checks
-// tools into in, which must hold a Workstream field named by workstream, and
-// resolves the member workstream the call acts on. It returns an ordinary
-// refusal result when the call is not the chief of staff's or names a
-// workstream the chief does not share.
 func chiefChecksTarget(load func() *Controller, repository *trace.Repository, scope coreadapter.Scope, name string, raw json.RawMessage, in any, workstream func() config.WorkstreamID) (*Controller, *trace.Repository, config.WorkstreamID, json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
@@ -616,8 +585,6 @@ func chiefChecksTarget(load func() *Controller, repository *trace.Repository, sc
 	return s, target, stream, nil, nil
 }
 
-// pollFailedCheck is one failed check in the result of a pull_request_checks
-// poll. Command is empty when the check's status named no trace id.
 type pollFailedCheck struct {
 	Name      string `json:"name"`
 	TraceID   string `json:"trace_id,omitempty"`
@@ -732,8 +699,6 @@ func ChecksChoiceToolOf(load func() *Controller, repository *trace.Repository, s
 	return tool
 }
 
-// refusal is the ordinary result of a chief-of-staff checks call the service
-// refuses.
 func refusal(reason string) (json.RawMessage, error) {
 	return json.Marshal(struct {
 		Done   bool   `json:"done"`

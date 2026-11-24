@@ -145,9 +145,7 @@ type DeliveryBrief struct {
 }
 
 // DeliveryApproval preserves the exact title and text and reviewed identity
-// the owner approved when marking the pull request ready for review. Title is empty in an approval recorded before the
-// title became part of the draft; deliveryTitle(Description, stream) is
-// then used instead, as it was when that approval was recorded.
+// the owner approved when marking the pull request ready for review.
 // DescriptionHash allows publication to check the text it will send.
 type DeliveryApproval struct {
 	Review          int                         `json:"review"`

@@ -19,12 +19,8 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// engineFailure is the result of an attempt that exits without reporting a
-// failed check.
 var engineFailure = api.CheckResult{ExitCode: 1, Output: "Error: the engine session was lost\n"}
 
-// cloudPrompt is what a review prompt says about a run that used the cloud
-// engine.
 const cloudPrompt = "Dagger Cloud engine ran"
 
 func selectLinks(f *buildFixture, answers int, scores ...float64) {
@@ -43,7 +39,7 @@ func selectLinks(f *buildFixture, answers int, scores ...float64) {
 
 func advanceClock(f *buildFixture) {
 	f.clock.Mu.Lock()
-	f.clock.At = f.clock.At.Add(checkRetryDelay + time.Minute)
+	f.clock.At = f.clock.At.Add(CheckRetryDelay + time.Minute)
 	f.clock.Mu.Unlock()
 }
 
@@ -52,7 +48,7 @@ func recordedRun(t *testing.T, repository *trace.Repository, stream config.Works
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)
 	for _, d := range docs {
-		if d.Path == checkPath("resume", run) {
+		if d.Path == CheckPath("resume", run) {
 			var saved UnitCheckRun
 			must(t, json.Unmarshal([]byte(d.Content), &saved))
 			return saved, d.Content
@@ -181,7 +177,7 @@ func TestIncompleteCloudAttemptKeepsTheRetryAndContest(t *testing.T) {
 	outbox, err := repository.Outbox(stream)
 	must(t, err)
 	i := slices.IndexFunc(outbox, func(e trace.OutboxEntry) bool {
-		return e.TransitionID == checkDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
+		return e.TransitionID == CheckDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
 	})
 	if i < 0 || !strings.Contains(outbox[i].Event.Body, "held in checking") || !strings.Contains(outbox[i].Event.Body, cloudPrompt+" every check") {
 		t.Fatalf("chief notices %+v", outbox)
@@ -190,12 +186,12 @@ func TestIncompleteCloudAttemptKeepsTheRetryAndContest(t *testing.T) {
 	if len(local.Runs()) != 1 || len(cloud.Runs()) != 1 {
 		t.Fatalf("the retry delay was not kept: local %q cloud %q", local.Runs(), cloud.Runs())
 	}
-	for range maxIncompleteChecks - 1 {
+	for range MaxIncompleteChecks - 1 {
 		advanceClock(f)
 		runChecks(t, f.s, repository, stream)
 	}
 	if got := unitState(t, repository, stream, "resume"); got != UnitContested {
-		t.Fatalf("unit is %s after %d incomplete runs", got, maxIncompleteChecks)
+		t.Fatalf("unit is %s after %d incomplete runs", got, MaxIncompleteChecks)
 	}
 	contest := transitionReasons(t, repository, stream, UnitContested)
 	if len(contest) != 1 || !strings.Contains(contest[0], "did not complete") || !strings.Contains(contest[0], cloudPrompt+" every check") {
@@ -254,7 +250,7 @@ func TestLinksThatNeededCloudRunThereDirectlyLater(t *testing.T) {
 		t.Fatalf("remembered %+v", remembered)
 	}
 	const otherStream config.WorkstreamID = "w_00000000000000000000000000000000"
-	must(t, repository.CreateWorkstream(context.Background(), otherStream, f.clock.Now(), checksActor))
+	must(t, repository.CreateWorkstream(context.Background(), otherStream, f.clock.Now(), ChecksActor))
 	other, err := checkrun.RememberedIn(repository, otherStream)
 	must(t, err)
 	if len(other.Links) != 0 || other.EveryCheck {
@@ -269,8 +265,8 @@ func engineRunsEqual(a, b api.CheckEngineRun) bool {
 func TestRecordsWithoutEnginesReadAsLocalOnly(t *testing.T) {
 	t.Parallel()
 	checks := &fakeChecks{Outcomes: passing()}
-	f, stream, repository := newChecksFixture(t, "fallback-old-records", checks)
-	old := `{
+	f, stream, repository := newChecksFixture(t, "fallback-no-engines", checks)
+	recorded := `{
   "unit": "elder",
   "run": 7,
   "operation": "op",
@@ -287,16 +283,16 @@ func TestRecordsWithoutEnginesReadAsLocalOnly(t *testing.T) {
   "finished_at": "2026-01-01T00:01:00Z"
 }
 `
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: checkDocumentID("elder", 7), Revision: 1, Project: repository.Project(), Workstream: stream, Unit: "elder", At: f.clock.Now(), Actor: checksActor, Cause: checkRequestID("elder", 7)}
-	must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: checkPath("elder", 7), Content: old}}))
-	runs, err := checkRuns(repository, stream)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: CheckDocumentID("elder", 7), Revision: 1, Project: repository.Project(), Workstream: stream, Unit: "elder", At: f.clock.Now(), Actor: ChecksActor, Cause: checkRequestID("elder", 7)}
+	must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: CheckPath("elder", 7), Content: recorded}}))
+	runs, err := CheckRuns(repository, stream)
 	must(t, err)
 	if len(runs) != 1 || runs[0].Status != ChecksIncomplete || runs[0].Error != "engine unreachable" || runs[0].Output != "Error: engine lost\n" || runs[0].Engines != nil {
-		t.Fatalf("old record read as %+v", runs)
+		t.Fatalf("record without engines read as %+v", runs)
 	}
 	remembered, err := checkrun.RememberedIn(repository, stream)
 	must(t, err)
 	if len(remembered.Links) != 0 || remembered.EveryCheck {
-		t.Fatalf("an old record is remembered: %+v", remembered)
+		t.Fatalf("a record without engines is remembered: %+v", remembered)
 	}
 }

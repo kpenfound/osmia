@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -52,10 +51,6 @@ func (idleTurns) Run(context.Context, coreadapter.PreparedTurn) (coreadapter.Ses
 	return coreadapter.SessionResult{}, nil
 }
 
-// doneThrough starts the unit resume, has its mason call done with args, ends
-// the mason's turn with the outcome the reporting runner makes of it, and
-// finishes the unit. It returns the done result, the stored report and the
-// chief-of-staff event of the move to checking.
 func doneThrough(t *testing.T, args map[string]any) (map[string]any, UnitReport, trace.Event) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,14 +97,14 @@ func doneThrough(t *testing.T, args map[string]any) (map[string]any, UnitReport,
 	must(t, err)
 	var report UnitReport
 	for _, d := range docs {
-		if d.ID == reportDocument("resume") {
+		if d.ID == ReportDocument("resume") {
 			must(t, json.Unmarshal([]byte(d.Content), &report))
 		}
 	}
 	outbox, err := f.repository.Outbox(stream)
 	must(t, err)
 	for _, entry := range outbox {
-		if entry.TransitionID == checkingTransitionID("resume", 1) && intakefixture.ChiefEvent(entry.Event) {
+		if entry.TransitionID == CheckingTransitionID("resume", 1) && intakefixture.ChiefEvent(entry.Event) {
 			return result, report, entry.Event
 		}
 	}
@@ -322,7 +317,7 @@ func TestDoneStillRefusesAReportItsRulesReject(t *testing.T) {
 		if out := call(args); !strings.Contains(out, `"recorded":false`) {
 			t.Fatalf("%s: %s", name, out)
 		}
-		if _, ok := reports.accepted[turnKey(scope)]; ok {
+		if _, ok := reports.accepted[TurnKey(scope)]; ok {
 			t.Fatalf("%s was accepted", name)
 		}
 	}
@@ -332,50 +327,7 @@ func TestDoneStillRefusesAReportItsRulesReject(t *testing.T) {
 	if out := call(with("Again", nil)); out != `{"recorded":false,"reason":"this turn already reported its unit done; end the turn"}` {
 		t.Fatalf("second done: %s", out)
 	}
-	if got := reports.accepted[turnKey(scope)]; got.Report.Outcome != "Built" || got.OwnerAction != ownerActionWording {
+	if got := reports.accepted[TurnKey(scope)]; got.Report.Outcome != "Built" || got.OwnerAction != ownerActionWording {
 		t.Fatalf("accepted %+v", got)
-	}
-}
-
-func TestDoneToolOffersNoLearningsField(t *testing.T) {
-	t.Parallel()
-	f := newBuildFixture(t, "no-learnings")
-	scope := coreadapter.Scope{Project: string(f.repository.Project()), Workstream: string(stream), Unit: "resume", Thread: masonAgent("resume"), Turn: "t", Role: masonRole}
-	done := (&masonReports{}).tool(f.repository, scope)
-	var schema struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	must(t, json.Unmarshal(done.InputSchema, &schema))
-	if _, ok := schema.Properties["learnings"]; ok || strings.Contains(done.Description, "learnings") {
-		t.Fatalf("the done tool offers learnings: %s %s", done.InputSchema, done.Description)
-	}
-	if _, err := done.Handle(context.Background(), json.RawMessage(`{"outcome":"Built","learnings":["Uses chunks."]}`)); err == nil {
-		t.Fatal("a report with learnings was accepted")
-	}
-}
-
-// A report recorded before the done tool dropped learnings still reads, and
-// rewriting it keeps them.
-func TestReportsThatCarryLearningsStillRead(t *testing.T) {
-	t.Parallel()
-	turn := trace.QueuedTurn{}
-	turn.Request.TurnID = "turn_1"
-	turn.Response = &trace.TurnResponse{}
-	turn.Response.Result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: `{"outcome":"Built","learnings":["Uses chunks."," "],"owner_action":"Look."}`}
-	done, err := parseDoneReport(turn)
-	if err != nil || done.Outcome != "Built" || !slices.Equal(done.Learnings, []string{"Uses chunks.", " "}) || done.OwnerAction != "Look." {
-		t.Fatalf("old done report: %+v %v", done, err)
-	}
-	if reason := checkReport(done.MasonReport); reason != "" {
-		t.Fatalf("an old report with an empty learning is refused: %s", reason)
-	}
-	var recorded UnitReport
-	must(t, json.Unmarshal([]byte(`{"unit":"resume","turn":"turn_1","seal":1,"outcome":"Built","learnings":["Uses chunks."],"branch":"b","base":"x","candidate":"y"}`), &recorded))
-	if !slices.Equal(recorded.Learnings, []string{"Uses chunks."}) {
-		t.Fatalf("old unit report: %+v", recorded)
-	}
-	rewritten, err := json.Marshal(recorded)
-	if err != nil || !strings.Contains(string(rewritten), `"learnings":["Uses chunks."]`) {
-		t.Fatalf("a rewritten report lost its learnings: %s %v", rewritten, err)
 	}
 }

@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// notLandingReason says why a project whose delivery is not "jev" cannot land,
-// naming the setting that opts it in, or "" for a project that lands.
 func notLandingReason(cfg *config.Config) string {
 	if cfg.HasProject() && !cfg.Project.Lands() {
 		return fmt.Sprintf("the project's delivery is %q, so it delivers by pull request and never lands on its base branch; set delivery to %q to land", cfg.Project.Delivery, config.DeliveryJev)
@@ -70,12 +68,6 @@ func (s *Controller) ApproveAndLand(ctx context.Context, raw string, req Deliver
 	return DeliveryLandResponse{Approval: approval, Outcome: string(result.Outcome), Reason: result.Reason, Commit: result.Commit}, nil
 }
 
-// recordLandApproval records the owner's approval to land the presented
-// workstream as a revision of the delivery approval, with the drafted
-// description and messages the fallback to the draft pull request would
-// publish. An approval to land that already stands for the same presentation is
-// the approval; an approval to mark the pull request ready that stands for it
-// is a conflict.
 func (s *Controller) recordLandApproval(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, presented DeliveryPresentation, req DeliveryLandDecision) (DeliveryApproval, *APIError) {
 	blocking := ReportBlocking(presented.Report)
 	review, prior, existing, err := DeliveryDocuments(repository, stream)
@@ -117,10 +109,6 @@ func (s *Controller) recordLandApproval(ctx context.Context, project config.Proj
 	return approval, nil
 }
 
-// landingPending reports whether the workstream has a landing attempt with no
-// recorded outcome: the landing is held, being reconciled or has a refused push
-// whose fallback is not finished. Delivery waits for it, so the delivery card
-// does not come back.
 func landingPending(repository *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	l := &Lander{Repository: repository}
 	_, _, outcome, found, err := l.latest(stream)

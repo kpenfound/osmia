@@ -17,10 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A committee member's final-review turn, run through the final reviewer's
-// real turn path and isolation.Turns into a fake engine on every backend, is
-// granted no web tool and told nothing about the web: web access belongs to
-// the committee's plan and amendment debate alone.
 func TestFinalReviewTurnHoldsNoWebTools(t *testing.T) {
 	t.Parallel()
 	cfg, repo := deliveryTrace(t)
@@ -38,8 +34,6 @@ func TestFinalReviewTurnHoldsNoWebTools(t *testing.T) {
 				MemoryTurns: func(turns *isolation.Turns, _ *config.Config, _ *trace.Repository) *isolation.Turns { return turns },
 			})}
 			turns := reviewer.Turns(stream, FinalReviewInput{Review: 1}, FinalReport{Review: 1})
-			// The selection and service tools need a reviewed branch; the grant,
-			// the role ceiling and the engine path are the production ones.
 			turns.Select = func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: []string{"spec.md"}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			}

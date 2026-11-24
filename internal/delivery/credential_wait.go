@@ -10,9 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// credentialWaitMarker is the phrase every MissingCredentialError carries, so
-// the status of a workstream can recognise the wait in an operation's
-// recorded failure.
 const credentialWaitMarker = "waits for a GitHub credential"
 
 // MissingCredentialError is the error a final review's operation retries on
@@ -29,16 +26,10 @@ func (e *MissingCredentialError) Error() string {
 	return fmt.Sprintf("final review %d %s: the service was started without GITHUB_TOKEN, so it cannot %s; restart osmia serve with GITHUB_TOKEN set and the review continues", e.Review, credentialWaitMarker, e.Action)
 }
 
-// credentialNoticeSubject is the workflow subject that carries the one chief
-// of staff notice sent for a final review waiting for a credential.
 func credentialNoticeSubject(review int) string {
 	return fmt.Sprintf("final-review-%d-credential", review)
 }
 
-// missingCredential returns the MissingCredentialError of report's review
-// after telling the chief of staff once, so the missing credential shows on
-// the workstream, not only in the operation's retry record. A retry and a
-// restart find the notice recorded and send nothing.
 func (a *FinalReviewer) missingCredential(ctx context.Context, stream config.WorkstreamID, report FinalReport, action string) error {
 	err := &MissingCredentialError{Review: report.Review, Action: action}
 	subject := credentialNoticeSubject(report.Review)

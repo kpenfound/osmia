@@ -16,7 +16,7 @@ func completedTurn(result coreadapter.SessionResult, failure string, class corea
 
 func TestEndingsWithoutAReport(t *testing.T) {
 	t.Parallel()
-	done := &coreadapter.Outcome{Status: masonDone}
+	done := &coreadapter.Outcome{Status: MasonDone}
 	for _, tc := range []struct {
 		name   string
 		turn   trace.QueuedTurn
@@ -25,7 +25,7 @@ func TestEndingsWithoutAReport(t *testing.T) {
 		prompt string
 	}{
 		{"clean ending without done is classified", completedTurn(coreadapter.SessionResult{}, "", ""), false, false, ""},
-		{"clean ending after a refused done", completedTurn(coreadapter.SessionResult{Refusal: "learning 1 is empty"}, "", ""), true, false, "learning 1 is empty"},
+		{"clean ending after a refused done", completedTurn(coreadapter.SessionResult{Refusal: "outcome is empty"}, "", ""), true, false, "outcome is empty"},
 		{"behavioural failure", completedTurn(coreadapter.SessionResult{}, "the session failed: reported an outcome the role does not allow", coreadapter.Behavioural), true, false, "it failed: the session failed"},
 		{"failure after a refused done", completedTurn(coreadapter.SessionResult{Refusal: "outcome is required"}, "boom", coreadapter.Behavioural), true, false, "outcome is required"},
 		{"failure that used up its infrastructure retries", completedTurn(coreadapter.SessionResult{IsError: true}, "crashed", coreadapter.Infrastructure), false, false, ""},
@@ -53,7 +53,7 @@ func TestEndingsWithoutAReport(t *testing.T) {
 
 func TestContinuationPromptForAReportWithoutACandidate(t *testing.T) {
 	t.Parallel()
-	turn := completedTurn(coreadapter.SessionResult{Outcome: &coreadapter.Outcome{Status: masonDone}, TimedOut: true}, "", coreadapter.Behavioural)
+	turn := completedTurn(coreadapter.SessionResult{Outcome: &coreadapter.Outcome{Status: MasonDone}, TimedOut: true}, "", coreadapter.Behavioural)
 	prompt := continuationPrompt(turn, errors.New("git add: locked"))
 	for _, want := range []string{"accepted the report", "it ran out of time", "git add: locked", "call done again"} {
 		if !strings.Contains(prompt, want) {

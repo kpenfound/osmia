@@ -9,8 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// finalChecksView is the directory of the final reader's view that holds the
-// recorded check result.
 const finalChecksView = "final"
 
 // FinalCheckFiles returns the files of the reader's view that carry the

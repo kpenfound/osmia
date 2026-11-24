@@ -12,11 +12,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefEvents opens the system prompt of every event turn; the question
+// ChiefEvents opens the system prompt of every event turn; the question
 // guidance and the workstream's rendered bundle follow it.
 const ChiefEvents = "You are the chief of staff for workstream %s. The prompt lists service events. The project context below was assembled when the events were delivered."
 
-// chiefEventsOtherMember notes, for a workgroup of more than one member,
+// ChiefEventsOtherMember notes, for a workgroup of more than one member,
 // that this delivery's events are about a member other than the chief's own
 // host workstream, and that the chief must qualify that member's questions.
 const ChiefEventsOtherMember = " These events are about workstream %s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\"."
@@ -47,20 +47,13 @@ func (s *Controller) ChiefEventsSkip(repository *trace.Repository) func(config.W
 	}
 }
 
-// chiefEventsPrompt returns the system prompt of a workstream's event turns.
+// ChiefEventsPrompt returns the system prompt of a workstream's event turns.
 // The bundle is assembled from the project's files and the given trace only.
 // stream is the member whose events this delivery carries; the chief of
 // staff is identified by its workgroup's host, which may be a different
 // workstream when stream shares a chief of staff with others.
 func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, error) {
 	return func(ctx context.Context, stream config.WorkstreamID) (string, error) {
-		// repository is the caller's own long-lived instance (events.New's
-		// pass), so chiefRepository's per-call resolution must never close
-		// it out from under the rest of the pass. For an ordinary
-		// workstream or a same-repo workgroup member it returns repository
-		// itself with a no-op close; for a cross-repo workgroup's member it
-		// opens that workgroup's own trace transiently for this call alone,
-		// and closeTarget is what actually releases it.
 		target, host, bundleStream, closeTarget, err := s.ChiefRepository(ctx, repository, stream)
 		if errors.Is(err, ErrWorkgroupJoining) {
 			return "", fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
@@ -85,7 +78,7 @@ func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *tra
 	}
 }
 
-// answers returns the pass that queues recorded answers on their askers'
+// Answers returns the pass that queues recorded answers on their askers'
 // threads, with the profile each asker would start a new turn with when the
 // answer is delivered. Abandoned workstreams keep their answers undelivered,
 // and so does a question whose unit merged before its answer arrived: the

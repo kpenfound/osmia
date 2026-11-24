@@ -24,12 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// A delivery landing moves the upstream base branch of an opted-in project to
-// the signed commit of a workstream's current push, by a fast-forward, and
-// delivers the workstream on the strength of that. It is the delivery's own
-// operation: the landing of a unit into its workstream's feature branch is a
-// different one.
-
 const (
 	// LandDeliveryAction is the repository-boundary operation action that lands
 	// an assembled workstream's signed commit on the upstream base branch.
@@ -96,7 +90,6 @@ func (d LandDecider) actor() trace.Actor {
 	return ownerActor
 }
 
-// approval returns the decider as an approval records it: empty for the owner.
 func (d LandDecider) approval() (by, judgment string) {
 	if d.By == trace.DecidedByJev {
 		return d.By, d.Judgment
@@ -200,8 +193,6 @@ func (s *Controller) LandWorkstream(ctx context.Context, repository *trace.Repos
 	if !req.Decider.valid() {
 		return LandingResult{}, errors.New("a landing is decided by the owner or by Jev's decision, which names its judgment")
 	}
-	// A landing that settled the delivery is not asked again: its outcome is
-	// what the caller is told, whatever else has changed since.
 	lander := &Lander{S: s, Repository: repository}
 	if _, input, outcome, found, err := lander.latest(stream); err != nil {
 		return LandingResult{}, err
@@ -224,8 +215,6 @@ func (s *Controller) LandWorkstream(ctx context.Context, repository *trace.Repos
 	return s.landPush(ctx, repository, stream, req, target)
 }
 
-// landPush records the landing of the target push as an operation, once, and
-// applies it.
 func (s *Controller) landPush(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, req LandRequest, target landingPush) (LandingResult, error) {
 	lander := &Lander{S: s, Repository: repository}
 	attempt, input, outcome, found, err := lander.latest(stream)
@@ -253,8 +242,6 @@ func (s *Controller) landPush(ctx context.Context, repository *trace.Repository,
 	return lander.reported(op, result, err), nil
 }
 
-// reported turns the result of applying a landing operation into what the
-// caller is told.
 func (l *Lander) reported(op coreadapter.Operation, result coreadapter.OperationResult, err error) LandingResult {
 	in, _ := DecodeLand(op)
 	switch {
@@ -274,17 +261,11 @@ func (l *Lander) reported(op coreadapter.Operation, result coreadapter.Operation
 	return LandingResult{Outcome: LandingRefusedBeforePush, Reason: result.Evidence, Commit: in.Commit}
 }
 
-// landingPush is the push a landing lands, with the final review it signs.
 type landingPush struct {
 	push   Push
 	report FinalReport
 }
 
-// landingTarget returns the push a landing would land, or why it may not: the
-// project does not land, the workstream is not assembled, or checks did not
-// pass on the signed commit. gate adds what the delivery approval requires: the
-// final review is current, no discovered work or dependency waits, and blocking
-// findings are accepted.
 func (s *Controller) landingTarget(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, acceptBlocking, gate bool) (landingPush, string, error) {
 	var target landingPush
 	switch {
@@ -347,8 +328,6 @@ func (s *Controller) landingTarget(ctx context.Context, repository *trace.Reposi
 	return target, "", nil
 }
 
-// landingChecks returns why the checks recorded for the push do not show a pass
-// on its exact signed commit, or "" when they do.
 func landingChecks(repository *trace.Repository, stream config.WorkstreamID, push Push) (string, error) {
 	_, latest, err := IncompleteFinalChecks(repository, stream, push.Review, push.Reviewed)
 	if err != nil {
@@ -375,8 +354,6 @@ type Lander struct {
 
 var _ coreadapter.Reconciler = (*Lander)(nil)
 
-// landings serialises the applications of one landing operation within the
-// service, so that an entry point and the reconciler never push it at once.
 var landings sync.Map
 
 func lockLanding(id string) func() {
@@ -438,7 +415,6 @@ func (l *Lander) operationFor(stream config.WorkstreamID, event string, in LandI
 	return coreadapter.Operation{ID: trace.OperationID(l.Repository.Project(), stream, event), Boundary: coreadapter.RepositoryBoundary, Action: LandDeliveryAction, Input: input}, nil
 }
 
-// operation returns the recorded operation of landing attempt n.
 func (l *Lander) operation(stream config.WorkstreamID, n int) (coreadapter.Operation, error) {
 	records, err := l.Repository.Operations(stream)
 	if err != nil {
@@ -452,9 +428,6 @@ func (l *Lander) operation(stream config.WorkstreamID, n int) (coreadapter.Opera
 	return coreadapter.Operation{}, fmt.Errorf("landing attempt %d of workstream %s is not recorded", n, stream)
 }
 
-// latest returns the number, input and outcome of the workstream's latest
-// landing attempt, and whether there is one. The outcome is nil while the
-// attempt has none.
 func (l *Lander) latest(stream config.WorkstreamID) (int, LandInput, *coreadapter.OperationResult, bool, error) {
 	records, err := l.Repository.Operations(stream)
 	if err != nil {
@@ -595,7 +568,6 @@ func ReadDeliveryLanding(repository *trace.Repository, stream config.WorkstreamI
 	return DeliveryLanding{}, false, nil
 }
 
-// landingRun is one application of a landing operation.
 type landingRun struct {
 	*Lander
 	cfg    *config.Config
@@ -653,7 +625,6 @@ func (r *landingRun) apply(ctx context.Context) (coreadapter.OperationResult, er
 	if recorded && intent.Status == LandingRefused {
 		return r.fallback(ctx, intent)
 	}
-	// A project that delivers by pull request never reaches the base branch.
 	if !r.cfg.Project.Lands() {
 		return r.fail(ctx, fmt.Sprintf("the project's delivery is %q, so it never lands on its base branch", r.cfg.Project.Delivery))
 	}
@@ -667,8 +638,6 @@ func (r *landingRun) apply(ctx context.Context) (coreadapter.OperationResult, er
 	if err != nil {
 		return coreadapter.OperationResult{}, fmt.Errorf("cannot fetch %s of %s: %w", r.branch, r.cfg.Project.Upstream, err)
 	}
-	// What an earlier attempt left is settled before anything is judged or
-	// pushed: a base branch that holds the signed commit has landed it.
 	if landed, err := r.holds(ctx, fetched); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if landed {
@@ -695,8 +664,6 @@ func (r *landingRun) apply(ctx context.Context) (coreadapter.OperationResult, er
 		return coreadapter.OperationResult{}, err
 	}
 
-	// The base branch must be where a fast-forward to the signed commit can
-	// start: at an ancestor of it, which holds the base the review read.
 	if moved, err := r.baseMoved(ctx, fetched, target.report); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if moved != "" {
@@ -728,8 +695,6 @@ func (r *landingRun) apply(ctx context.Context) (coreadapter.OperationResult, er
 		}
 		return r.fallback(ctx, intent)
 	default:
-		// No verdict of the upstream: the push may have reached it. The next
-		// attempt fetches the base branch before it does anything else.
 		if err == nil {
 			err = errors.New(pushed.Output)
 		}
@@ -750,8 +715,6 @@ func (r *landingRun) apply(ctx context.Context) (coreadapter.OperationResult, er
 	return r.complete(ctx, intent, true, confirmed)
 }
 
-// holds reports whether the fetched base branch tip holds the signed commit:
-// it is the commit or a descendant of it.
 func (r *landingRun) holds(ctx context.Context, tip string) (bool, error) {
 	known, err := r.g.Known(ctx, r.in.Commit)
 	if err != nil || !known {
@@ -760,9 +723,6 @@ func (r *landingRun) holds(ctx context.Context, tip string) (bool, error) {
 	return r.g.Ancestor(ctx, r.in.Commit, tip)
 }
 
-// baseMoved returns why the fetched base branch cannot be fast-forwarded to
-// the signed commit, or "": it is not at an ancestor of it, or it no longer
-// holds the base the final review read.
 func (r *landingRun) baseMoved(ctx context.Context, fetched string, report FinalReport) (string, error) {
 	if known, err := r.g.Known(ctx, fetched); err != nil || !known {
 		return "", fmt.Errorf("the clone does not hold the fetched %s of %s at %s", r.branch, r.cfg.Project.Upstream, fetched)
@@ -786,7 +746,6 @@ func (r *landingRun) baseMoved(ctx context.Context, fetched string, report Final
 	return "", nil
 }
 
-// admit asks the router whether the landing move would be applied now.
 func (r *landingRun) admit(ctx context.Context, feature trace.WorkflowState) error {
 	admitter, ok := r.S.Router.(router.Admitter)
 	if !ok {
@@ -808,12 +767,8 @@ func (r *landingRun) admit(ctx context.Context, feature trace.WorkflowState) err
 	return nil
 }
 
-// landingOperations are the actions that hold a landing while one of them is in
-// flight on the workstream.
 var landingOperations = []string{execution.LandAction, execution.RebaseAction, execution.DriftAction, FinalReviewAction, deliveryReviewAction, PublishAction, publishUpstreamAction, LandDeliveryAction}
 
-// inFlight returns why another operation of the workstream holds the landing,
-// or "".
 func (r *landingRun) inFlight() (string, error) { return LandingBusy(r.Repository, r.stream, r.op) }
 
 // LandingBusy returns why another operation of the workstream holds the landing
@@ -844,8 +799,6 @@ func LandingBusy(repository *trace.Repository, stream config.WorkstreamID, op co
 	return "", nil
 }
 
-// move is the pinned move that delivers the workstream on the strength of the
-// landing: the router's trigger for it, with Jev's judgment when Jev decided.
 func (r *landingRun) move(feature trace.WorkflowState, docs []trace.Document, tx trace.Transaction, with ...trace.Transaction) intake.PinnedMove {
 	deliveredID, err := deliveredTransitionID(r.Repository, r.stream, fmt.Sprintf("%s-%s", mustTransition(r.in.Landing), DeliveredState))
 	if err != nil {
@@ -865,7 +818,6 @@ func mustTransition(landing int) string {
 	return transition
 }
 
-// recordIntent records the next revision of the landing's intent.
 func (r *landingRun) recordIntent(ctx context.Context, intent LandingIntent) error {
 	content, err := json.MarshalIndent(intent, "", "  ")
 	if err != nil {
@@ -880,14 +832,10 @@ func (r *landingRun) recordIntent(ctx context.Context, intent LandingIntent) err
 	return r.Repository.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// transition returns the header of one of the landing's outcome transitions.
 func (r *landingRun) header(outcome string) trace.Header {
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: mustTransition(r.in.Landing) + "-" + outcome, Revision: 1, Project: r.Repository.Project(), Workstream: r.stream, At: r.S.Now(), Actor: foremanActor, Cause: r.op.ID}
 }
 
-// finish records the landing's outcome on its subject, with a notice for the
-// chief of staff and the documents that belong with it, and returns it as the
-// operation's result. An outcome already recorded stands.
 func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string, docs ...trace.Document) (coreadapter.OperationResult, error) {
 	subject, err := r.Repository.Workflow(r.stream, LandingSubject)
 	if err != nil {
@@ -914,18 +862,11 @@ func (r *landingRun) finish(ctx context.Context, outcome, reason, notice string,
 	return coreadapter.OperationResult{Outcome: outcome, Evidence: reason}, nil
 }
 
-// fail ends the attempt with nothing pushed by this attempt and nothing landed:
-// a precondition no longer holds.
 func (r *landingRun) fail(ctx context.Context, why string) (coreadapter.OperationResult, error) {
 	reason := fmt.Sprintf("the landing of %s was not applied: %s", r.in.Commit, why)
 	return r.finish(ctx, LandOutcomeFailed, reason, fmt.Sprintf("%s. Nothing was pushed to the base branch, and the workstream is not delivered.", reason))
 }
 
-// moved ends the attempt because the base branch moved: the existing rebase of
-// the workstream onto it is asked for first, so a restart asks again, and then
-// the outcome is recorded together with the decision to land, which the
-// workstream keeps until it is landed again on the rebased commit or the
-// decision is dropped. No pull request is marked ready.
 func (r *landingRun) moved(ctx context.Context, why string) (coreadapter.OperationResult, error) {
 	if r.S.RequestRebase != nil {
 		if err := r.S.RequestRebase(ctx, r.Repository, r.stream); err != nil {
@@ -941,11 +882,6 @@ func (r *landingRun) moved(ctx context.Context, why string) (coreadapter.Operati
 	return r.finish(ctx, LandOutcomeBaseMoved, reason, fmt.Sprintf("%s. The workstream is rebased onto the new base branch and checked and reviewed again, and %s's decision to land is kept: it lands on the new commit once they pass.", reason, r.in.Decider.name()), doc)
 }
 
-// complete records a landing the fetched base branch confirms: in one commit
-// the landing record, the merge record every dependency edge, archive and
-// presentation already reads, the workstream's move to delivered and the
-// landing's outcome. It runs once: a restart that finds the outcome recorded
-// returns it.
 func (r *landingRun) complete(ctx context.Context, intent LandingIntent, recorded bool, confirmed string) (coreadapter.OperationResult, error) {
 	if err := r.S.landingStep("land-confirmed"); err != nil {
 		return coreadapter.OperationResult{}, err
@@ -974,8 +910,6 @@ func (r *landingRun) complete(ctx context.Context, intent LandingIntent, recorde
 	}
 	docs := []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: LandingDocument, Revision: revision, Project: r.Repository.Project(), Workstream: r.stream, At: at, Actor: foremanActor, Cause: r.op.ID},
 		Path: LandingPath, Content: string(content) + "\n"}}
-	// The workstream resolves as one whose branch was merged into upstream: the
-	// landing is that merge, made by the service.
 	if _, merged, err := ReadDeliveryMerge(r.Repository, r.stream); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if !merged {
@@ -1000,8 +934,6 @@ func (r *landingRun) complete(ctx context.Context, intent LandingIntent, recorde
 		Transition: trace.Transition{Header: landedHeader, Subject: LandingSubject, From: subject.Value, To: fmt.Sprintf("%s-%d", LandOutcomeLanded, r.in.Landing), Reason: reason}}
 	done := coreadapter.OperationResult{Outcome: LandOutcomeLanded, Evidence: reason}
 	if feature.Value != AssembledState {
-		// Delivered another way while the landing was under way: the landing is
-		// recorded, with its notice, and the workstream stays as it is.
 		landed.Events = []trace.Event{trace.Notice(landedHeader.ID, "state", fmt.Sprintf("Workstream landed: %s landed on %s of %s at %s by a fast-forward, decided by %s, although the workstream was already delivered another way.", r.in.Commit, r.branch, r.cfg.Project.Upstream, confirmed, by))}
 		if _, err := r.Repository.RecordDocumentsWith(ctx, docs, landed); err != nil {
 			if errors.Is(err, trace.ErrConflict) {
@@ -1031,7 +963,6 @@ func (r *landingRun) complete(ctx context.Context, intent LandingIntent, recorde
 	return done, nil
 }
 
-// routeLanded applies the move that records a landing through the router.
 func (s *Controller) routeLanded(ctx context.Context, m intake.PinnedMove) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing the delivery of a workstream is unavailable")
@@ -1039,7 +970,6 @@ func (s *Controller) routeLanded(ctx context.Context, m intake.PinnedMove) (rout
 	return s.Router.Route(ctx, m.Exit())
 }
 
-// landingStep is the fault-injection point of the landing's steps.
 func (s *Controller) landingStep(name string) error {
 	if s.Step == nil {
 		return nil
@@ -1047,12 +977,10 @@ func (s *Controller) landingStep(name string) error {
 	return s.Step(name)
 }
 
-// oneLine returns text as one line.
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
-// jsonMarshal encodes v as the indented JSON of a record.
 func jsonMarshal(v any) (string, error) {
 	content, err := json.MarshalIndent(v, "", "  ")
 	return string(content) + "\n", err

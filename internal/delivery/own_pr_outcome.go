@@ -98,7 +98,7 @@ func OwnPullRequestFinished(repo *trace.Repository, stream config.WorkstreamID) 
 // outcome document, written exactly like the base observation: one JSON
 // revision, read backward by record ID. It returns ok=false when the
 // recorded outcome already matches pr and outcome, so recording stays
-// idempotent across a restart between the lookup and the record (charter#2).
+// idempotent across a restart between the lookup and the record.
 func OwnPullRequestOutcomeDocumentFor(repo *trace.Repository, stream config.WorkstreamID, at time.Time, cause string, pr int, outcome string, mergeCommit ...string) (trace.Document, bool, error) {
 	prior, revision, err := OwnPullRequestOutcomeAt(repo, stream)
 	if err != nil {
@@ -254,8 +254,6 @@ func SettleLandedPullRequest(ctx context.Context, client pulls.Client, repo *tra
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
-			// The close may have reached the host before the response was lost: the
-			// next poll finds it closed and records that.
 			return false, nil
 		}
 		if err := step("landed-pr-closed"); err != nil {

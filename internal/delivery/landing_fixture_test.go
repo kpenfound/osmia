@@ -24,8 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// landPort is the router as the delivery controller uses it: routed in place,
-// and asked first whether a landing would be applied.
 type landPort struct{ *router.Router }
 
 func (p landPort) Submit(x router.Exit, done func(router.Result, error)) bool {
@@ -36,10 +34,6 @@ func (p landPort) Submit(x router.Exit, done func(router.Result, error)) bool {
 	return true
 }
 
-// landFixture is an assembled workstream of a project that opted in to
-// landing: a real local upstream, a clone holding the feature branch, the
-// signed commit of its recorded push with its passed checks, and a fake pull
-// request host holding the draft.
 type landFixture struct {
 	t        *testing.T
 	cfg      *config.Config
@@ -51,30 +45,22 @@ type landFixture struct {
 	router   *router.Router
 	clock    *watchClock
 
-	// base is the upstream base branch's commit when the review read it, and
-	// reviewed and signed the feature's tip before and after signing.
 	base, reviewed, signed string
 	branch                 string
 
 	options landOptions
 
-	mu      sync.Mutex
-	steps   []string
-	hooks   map[string]func() error
-	rebases int
-	moved   func() string
-	// findings are the findings the next recorded final review reports.
+	mu       sync.Mutex
+	steps    []string
+	hooks    map[string]func() error
+	rebases  int
+	moved    func() string
 	findings []FinalFinding
 }
 
 type landOptions struct {
-	// checks is the check result recorded for the push: "passed" (the default),
-	// "failed", "none" or "other" (a pass recorded for another commit).
-	checks string
-	// delivery overrides the project's delivery setting.
-	delivery string
-	// edgeWait is what a hard-block dependency waiting to merge says, and
-	// mergeOrder the reference of a merge-order dependency still waiting.
+	checks               string
+	delivery             string
 	edgeWait, mergeOrder string
 }
 
@@ -105,8 +91,6 @@ func newLandFixture(t *testing.T, opts ...landOptions) *landFixture {
 	f.git("clone", "--quiet", f.upstream, f.scratch)
 	f.base = f.rev(clone, "HEAD")
 
-	// The feature: two units on the base, and the commit the service signed
-	// from them, which is the one that was pushed.
 	f.write(clone, "unit-a.txt", "a\n")
 	f.commit(clone, "unit a")
 	f.write(clone, "unit-b.txt", "b\n")
@@ -125,7 +109,6 @@ func newLandFixture(t *testing.T, opts ...landOptions) *landFixture {
 	return f
 }
 
-// restart is a service that starts over: it remembers nothing but the trace.
 func (f *landFixture) controller() *Controller {
 	return New(Dependencies{
 		Now: f.clock.Now,
@@ -142,8 +125,6 @@ func (f *landFixture) controller() *Controller {
 		About:      func(*trace.Repository) *config.Config { return f.cfg },
 		Effective:  func() (runtime.State, []runtime.Diagnostic) { return runtime.State{}, nil },
 		ChangeHeld: func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
-		// The fixture holds no sealed plan, so the final review is current when it
-		// is the latest one recorded.
 		FinalGate: func(_ context.Context, repo *trace.Repository, stream config.WorkstreamID) (FinalReport, string, error) {
 			report, found, err := LatestFinalReport(repo, stream)
 			if err != nil || !found {
@@ -172,7 +153,6 @@ func (f *landFixture) controller() *Controller {
 
 func (f *landFixture) lander() *Lander { return &Lander{S: f.controller(), Repository: f.repo} }
 
-// hook runs fn at the named step of the landing, once.
 func (f *landFixture) hook(name string, fn func() error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -217,16 +197,12 @@ func (f *landFixture) commit(dir, message string) {
 	f.git("-C", dir, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "--quiet", "-m", message)
 }
 
-// sign returns the commit of reviewed with the delivery's message: the same
-// tree on the same parent, as signing leaves it.
 func (f *landFixture) sign(reviewed string) string {
 	f.t.Helper()
 	clone := f.cfg.Project.Clone
 	return f.git("-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit-tree", reviewed+"^{tree}", "-p", reviewed+"^", "-m", "unit b, signed")
 }
 
-// advanceUpstream moves the upstream base branch with a commit of someone
-// else's, and returns it.
 func (f *landFixture) advanceUpstream(name string) string {
 	f.t.Helper()
 	f.git("-C", f.scratch, "fetch", "--quiet", "origin")
@@ -241,7 +217,6 @@ func (f *landFixture) upstreamMain() string { return f.rev(f.upstream, "refs/hea
 
 func (f *landFixture) upstreamBranch() string { return f.rev(f.upstream, "refs/heads/"+f.branch) }
 
-// refuseBase installs the hook of a protected base branch on the upstream.
 func (f *landFixture) refuseBase() {
 	f.t.Helper()
 	hook := filepath.Join(f.upstream, "hooks", "pre-receive")
@@ -249,7 +224,6 @@ func (f *landFixture) refuseBase() {
 	fixturekit.Must(f.t, os.WriteFile(hook, []byte(script), 0700))
 }
 
-// transition records a feature transition of the fixture workstream.
 func (f *landFixture) transition(id, from, to string) {
 	f.t.Helper()
 	state, err := f.repo.Workflow(stream, trace.FeatureSubject)
@@ -260,8 +234,6 @@ func (f *landFixture) transition(id, from, to string) {
 	fixturekit.Must(f.t, err)
 }
 
-// record records final review k of the branch at reviewed, read on base, its
-// push of signed to the draft pull request, and the check result of the push.
 func (f *landFixture) record(k int, reviewed, base, signed, checks string) {
 	f.t.Helper()
 	ctx := context.Background()
@@ -292,14 +264,11 @@ func (f *landFixture) record(k int, reviewed, base, signed, checks string) {
 	fixturekit.Must(f.t, f.repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: FinalChecksDocument(k), Revision: revision, Project: f.repo.Project(), Workstream: stream, At: f.clock.Now(), Actor: foremanActor, Cause: report.Operation}, Path: FinalChecksPath(k), Content: string(data)}}))
 }
 
-// rebased is the branch after the existing rebase onto the moved base: its
-// units replayed on it, signed and pushed as push k with passed checks.
 func (f *landFixture) rebased(k int, onto string) (reviewed, signed string) {
 	f.t.Helper()
 	return f.rebasedWith(k, onto, "passed")
 }
 
-// rebasedWith is rebased with the check result recorded for the new push.
 func (f *landFixture) rebasedWith(k int, onto, checks string) (reviewed, signed string) {
 	f.t.Helper()
 	clone := f.cfg.Project.Clone
@@ -318,8 +287,6 @@ func (f *landFixture) rebasedWith(k int, onto, checks string) (reviewed, signed 
 	return reviewed, signed
 }
 
-// target is the push a landing would land, as the entry point reads it before
-// the gates of the delivery approval, which the unit's fixture holds none of.
 func (f *landFixture) target(c *Controller) landingPush {
 	f.t.Helper()
 	target, reason, err := c.landingTarget(context.Background(), f.repo, f.cfg, stream, true, false)
@@ -329,8 +296,6 @@ func (f *landFixture) target(c *Controller) landingPush {
 	return target
 }
 
-// land lands the workstream as decider decided, through the entry point's own
-// operation.
 func (f *landFixture) land(decider LandDecider) LandingResult {
 	f.t.Helper()
 	c := f.controller()
@@ -339,8 +304,6 @@ func (f *landFixture) land(decider LandDecider) LandingResult {
 	return result
 }
 
-// retry runs the service's own pass that lands again the workstreams whose base
-// moved.
 func (f *landFixture) retry() {
 	f.t.Helper()
 	fixturekit.Must(f.t, f.lander().RetryPass(context.Background()))
@@ -399,7 +362,6 @@ func (f *landFixture) notices(contains string) int {
 	return n
 }
 
-// pending returns the one landing operation the workstream has.
 func (f *landFixture) operation(n int) coreadapter.Operation {
 	f.t.Helper()
 	op, err := f.lander().operation(stream, n)
@@ -407,8 +369,6 @@ func (f *landFixture) operation(n int) coreadapter.Operation {
 	return op
 }
 
-// busy records an operation of the workstream that has no result: another
-// operation in flight.
 func (f *landFixture) busy() {
 	f.t.Helper()
 	event := trace.EventID("fixture-busy", "run")
@@ -421,8 +381,6 @@ func (f *landFixture) busy() {
 	fixturekit.Must(f.t, err)
 }
 
-// finishBusy gives the operation busy recorded its result, so it is no longer in
-// flight.
 func (f *landFixture) finishBusy() {
 	f.t.Helper()
 	ctx := context.Background()
@@ -445,7 +403,6 @@ func (f *landFixture) finishBusy() {
 	}
 }
 
-// landingAttempts is how many landing operations the workstream has.
 func (f *landFixture) landingAttempts() int {
 	f.t.Helper()
 	ops, err := f.repo.Operations(stream)

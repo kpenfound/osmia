@@ -19,8 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// webFixture is the dependencies of the architect and committee turn paths
-// over one trace repository.
 type webFixture struct {
 	cfg     *config.Config
 	repo    *trace.Repository
@@ -52,9 +50,6 @@ func newWebFixture(t *testing.T) *webFixture {
 	return f
 }
 
-// run runs one turn of role through turns, which the caller points at a fresh
-// recording engine and host, and whose selection and service tools are stubbed: the grants, the role ceiling, the system prompt
-// and the engine path are the production ones.
 func (f *webFixture) run(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engine, hosts *adaptertest.RecordingHosts, role, system, backend string) adaptertest.Turn {
 	t.Helper()
 	workspace := t.TempDir()
@@ -75,24 +70,14 @@ func (f *webFixture) run(t *testing.T, turns *isolation.Turns, engine *adapterte
 	return got
 }
 
-// Every architect turn path, run through its real constructor and
-// isolation.Turns into a fake engine, is granted the backend's web tools and
-// told about them, with the service tools it had before: drafting, the shed
-// reply and the redraft it can deliver, the amendment debate's reply and
-// amendment drafting.
 func TestArchitectTurnPathsHoldWebTools(t *testing.T) {
 	t.Parallel()
 	f := newWebFixture(t)
 	project := f.cfg.Project
 	drafting := []string{"file_read", FactoryContextTool, ReadRemoteFileTool, "inspect_code", DraftTool, questions.AskTool}
-	// The shed reply path also delivers the redraft, which is why it names the
-	// draft delivery tool beside reply.
 	reply := []string{"file_read", shed.ReplyTool, DraftTool, questions.AskTool}
-	// The amendment drafter embeds the drafter, so its turns are the drafting
-	// path's: it promotes Turns rather than defining a path of its own.
 	amending := &AmendmentDrafter{f.drafter}
 	amendment := &AmendmentDebate{f.debate}
-	// Amendment drafting builds its own system prompt: read the one it queues.
 	fixturekit.Must(t, f.drafter.EnsureThread(context.Background(), fixturekit.Stream))
 	fixturekit.Must(t, amending.Enqueue(context.Background(), f.cfg, fixturekit.Stream, "a1", 1, "operation", nil))
 	thread, err := f.repo.Thread(fixturekit.Stream, ArchitectAgent)
@@ -123,10 +108,6 @@ func TestArchitectTurnPathsHoldWebTools(t *testing.T) {
 	}
 }
 
-// A committee member's plan-debate turn and amendment-debate turn, run through
-// the debate's real constructor and isolation.Turns into a fake engine, hold
-// the backend's web tools and are told about them, with the service tools
-// they had before.
 func TestCommitteeDebateTurnsHoldWebTools(t *testing.T) {
 	t.Parallel()
 	f := newWebFixture(t)

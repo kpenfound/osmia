@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// contestedWithoutCandidate starts the unit resume and contests it as a mason
-// contest, before its mason reported anything: the unit has no candidate.
 func contestedWithoutCandidate(t *testing.T, f *buildFixture) trace.WorkflowState {
 	t.Helper()
 	ctx := context.Background()
@@ -39,10 +37,6 @@ func contestedWithoutCandidate(t *testing.T, f *buildFixture) trace.WorkflowStat
 	return state
 }
 
-// A mason contest that has no candidate can still reach its revise target
-// through the router: the owner's ruling is a pinned move that enters it, and a
-// ruling that is the chief of staff's is judged with only the targets that need
-// no candidate on offer.
 func TestAMasonContestWithNoCandidateReachesItsReviseTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -83,9 +77,6 @@ func TestAMasonContestWithNoCandidateReachesItsReviseTarget(t *testing.T) {
 	}
 }
 
-// An exit a scheduling pass raises is handed to the router's worker and the pass
-// goes on: Jev is asked beside the pass, never on it. The same exit raised by a
-// caller that is no scheduling pass is routed in place.
 func TestAnExitOnTheSchedulingPathIsHandedToTheWorker(t *testing.T) {
 	t.Parallel()
 	ctx, stop := context.WithCancel(context.Background())
@@ -110,10 +101,9 @@ func TestAnExitOnTheSchedulingPathIsHandedToTheWorker(t *testing.T) {
 	must(t, err)
 	exit := func(cause string) UnitExitInput {
 		return UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", State: state, Trigger: TriggerChecksPassed, Cause: cause,
-			Default: UnitReviewing, Targets: []string{UnitReviewing, UnitChecking}, Actor: checksActor, ID: "unit-resume-reviewing-test", HeaderCause: cause, Reason: "check run 1 passed"}
+			Default: UnitReviewing, Targets: []string{UnitReviewing, UnitChecking}, Actor: ChecksActor, ID: "unit-resume-reviewing-test", HeaderCause: cause, Reason: "check run 1 passed"}
 	}
 
-	// A pass hands its exit off: it returns while Jev has not answered.
 	res, err := f.s.raise(router.OnSchedulingPath(ctx), true, exit("checks-1"))
 	must(t, err)
 	if res.Committed {
@@ -133,7 +123,6 @@ func TestAnExitOnTheSchedulingPathIsHandedToTheWorker(t *testing.T) {
 		t.Fatalf("the unit is %s after the worker routed its exit", got)
 	}
 
-	// Routing on the scheduling path itself is refused: Jev is never asked there.
 	if _, err := r.Route(router.OnSchedulingPath(ctx), exitFor(t, f, "checks-2")); !errors.Is(err, router.ErrSchedulingPath) {
 		t.Fatalf("routing on the scheduling path: %v", err)
 	}
@@ -144,13 +133,11 @@ func exitFor(t *testing.T, f *buildFixture, cause string) router.Exit {
 	state, err := f.repository.Workflow(stream, trace.UnitSubject("resume"))
 	must(t, err)
 	x, err := f.s.UnitExit(UnitExitInput{Repo: f.repository, Stream: stream, Unit: "resume", State: state, Trigger: TriggerChecksPassed, Cause: cause,
-		Default: UnitChecking, Targets: []string{UnitChecking, UnitReviewing}, Actor: checksActor})
+		Default: UnitChecking, Targets: []string{UnitChecking, UnitReviewing}, Actor: ChecksActor})
 	must(t, err)
 	return x
 }
 
-// contestUnit moves the started unit resume, whatever state it is in, to
-// contested, as a contest raised on its candidate leaves it.
 func contestUnit(t *testing.T, f *buildFixture, repo *trace.Repository, id string) trace.WorkflowState {
 	t.Helper()
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
@@ -163,12 +150,6 @@ func contestUnit(t *testing.T, f *buildFixture, repo *trace.Repository, id strin
 	return state
 }
 
-// A ruling of the chief of staff on a contested unit is an exit the router
-// judges. With Jev finding the default fits, the ruling is entered as it was
-// given and its transition records the default it took. When Jev's answers
-// depart from it, the unit is entered into the other legal target through the
-// shared effects of a move, the transition names Jev as its decider, and the
-// departure is displayed.
 func TestAChiefRulingIsJudgedAndAScriptedDepartureIsRecorded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -69,9 +69,6 @@ func TestReplyOperationInputIsValidated(t *testing.T) {
 	}
 }
 
-// The conclusion at the round limit names what stopped the debate: the
-// configured cap, the further rounds the owner asked for, or the round that
-// debated the redraft they asked for instead.
 func TestBoundNamesWhatStoppedTheDebate(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {

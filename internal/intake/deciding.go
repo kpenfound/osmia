@@ -35,8 +35,6 @@ func (d Deciding) Name() string {
 	return "the owner"
 }
 
-// deciding returns who a recorded decider was, from the decider and judgment
-// its record names.
 func decidingOf(by, judgment string) Deciding {
 	if by == trace.DecidedByJev {
 		return Deciding{Judgment: judgment}

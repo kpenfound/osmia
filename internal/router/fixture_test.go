@@ -36,7 +36,6 @@ var (
 	checkers = trace.Actor{Kind: "service", ID: "checks"}
 )
 
-// fx is a workstream's trace with a router whose Jev is the fixture provider.
 type fx struct {
 	t        *testing.T
 	root     config.Root
@@ -48,8 +47,7 @@ type fx struct {
 	judge    *jev.Judge
 	effects  *router.Effects
 	router   *router.Router
-	// applied counts the effects that ran, by target.
-	applied map[string]*atomic.Int32
+	applied  map[string]*atomic.Int32
 }
 
 func newFx(t *testing.T, provider *jevfixture.Transitions) *fx {
@@ -82,8 +80,6 @@ func newFx(t *testing.T, provider *jevfixture.Transitions) *fx {
 	return f
 }
 
-// build makes a router and a Jev over the current trace and provider, as a
-// restarted service has.
 func (f *fx) build() {
 	f.judge = jevfixture.TransitionJudge(nil, f.provider)
 	f.router = &router.Router{Judge: f.judge, Effects: f.effects, Spans: func(r router.SpanRoute) {
@@ -92,7 +88,6 @@ func (f *fx) build() {
 	}}
 }
 
-// restart closes the trace and opens it again with a new router and Jev.
 func (f *fx) restart() {
 	f.t.Helper()
 	if err := f.repo.Close(); err != nil {
@@ -107,7 +102,6 @@ func (f *fx) restart() {
 	f.build()
 }
 
-// seed moves the unit to state, as the machine did before the exit.
 func (f *fx) seed(to string) {
 	f.t.Helper()
 	subject := trace.UnitSubject(unitID)
@@ -121,9 +115,6 @@ func (f *fx) seed(to string) {
 	}
 }
 
-// exit is the exit of a unit whose checks failed: today's default sends the
-// unit back to its mason; it can instead run the checks again or raise a
-// contest, and a redraft-like target needs the strict bar.
 func (f *fx) exit() router.Exit {
 	state, err := f.repo.Workflow(streamID, trace.UnitSubject(unitID))
 	if err != nil {
@@ -149,8 +140,6 @@ func (f *fx) exit() router.Exit {
 	}
 }
 
-// track registers an effect for every unit target that records a notice, and
-// counts how often each ran.
 func (f *fx) track(targets ...string) {
 	for _, target := range targets {
 		n := &atomic.Int32{}
@@ -178,7 +167,6 @@ func (f *fx) state() trace.WorkflowState {
 	return s
 }
 
-// moves returns the unit's transitions that the router chose.
 func (f *fx) moves() []trace.Transition {
 	f.t.Helper()
 	all, err := trace.Read[trace.Transition](f.repo, streamID)
@@ -194,7 +182,6 @@ func (f *fx) moves() []trace.Transition {
 	return out
 }
 
-// notices returns the chief-of-staff notices the route journals sent.
 func (f *fx) notices() []string {
 	f.t.Helper()
 	entries, err := f.repo.Outbox(streamID)
@@ -215,7 +202,6 @@ func (f *fx) notices() []string {
 	return out
 }
 
-// routeSpans returns the osmia.transition.route spans sent so far.
 func (f *fx) routeSpans() []tracetest.SpanStub {
 	f.t.Helper()
 	if err := f.sink.Flush(context.Background()); err != nil {
@@ -239,8 +225,6 @@ func attr(s tracetest.SpanStub, key string) string {
 	return ""
 }
 
-// request returns the state of a transition request as a map, and its option
-// names in the order of the first pick question.
 func request(t *testing.T, p *jevfixture.Transitions, n int) (state map[string]any, options []string) {
 	t.Helper()
 	reqs := p.TransitionRequests()
@@ -271,7 +255,6 @@ func contains(list []string, s string) bool {
 
 type atomicInt = atomic.Int32
 
-// refused returns the judgment records that were marked refused.
 func refused(t *testing.T, f *fx) []jev.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](f.repo, streamID)

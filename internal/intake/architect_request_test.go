@@ -33,7 +33,6 @@ func TestArchitectDoesNotRequestDraftAfterConcurrentAbandon(t *testing.T) {
 		Now:                clock.Now,
 		DesignStartPending: func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
 		Pausing: func(config.ProjectID, config.WorkstreamID) (runtime.Pause, bool) {
-			// Reconcile has read both states, but has not published its request.
 			h.ID, h.Cause = AbandonTransition, AbandonTransition
 			_, err := repo.SetFeatureState(ctx, h, AbandonedState, "Superseded")
 			fixturekit.Must(t, err)

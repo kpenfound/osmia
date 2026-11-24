@@ -10,11 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A committee objection the chief of staff escalated that blocks ratification
-// is an escalated-objection gate. The owner's own objection and a conflict
-// between member charters that block are the owner's own decisions, which Jev
-// decides at the owner threshold. One already disposed of, advice and one the
-// chief of staff kept are nobody's gate.
 func TestTheObjectionsJevDecidesAtTheRatificationGate(t *testing.T) {
 	escalated := shed.Entry{Dissent: shed.Dissent{Objection: shed.Objection{ID: "o1", Kind: shed.Charter}, Member: "agent_committee_1"}, Blocking: true, Escalated: true}
 	if kind, ok := objectionKind(escalated); !ok || kind != jev.KindEscalatedObjection || !objectionIsJevs(escalated) {
@@ -46,9 +41,6 @@ func TestTheObjectionsJevDecidesAtTheRatificationGate(t *testing.T) {
 	}
 }
 
-// An escalation whose questions report a conflict between member charters is
-// one of the owner's own decisions: its gate is of the charter-conflict kind and
-// offers the options the chief of staff wrote.
 func TestAnEscalationOfACharterConflictIsAnOwnerGate(t *testing.T) {
 	_, repo, _ := fixturekit.HardPauseRepository(t, 0)
 	question := trace.Question{Header: trace.Header{ID: "1", Workstream: fixturekit.Stream}, AskedBy: trace.Actor{Kind: "agent", ID: "mason1"}, Question: "Which charter wins?", CharterConflict: []string{"p1#1", "p2#2"}}
@@ -64,8 +56,6 @@ func TestAnEscalationOfACharterConflictIsAnOwnerGate(t *testing.T) {
 	}
 }
 
-// Jev never writes text: an option that is carried out with text is offered
-// only when the chief of staff wrote that text, once for each distinct text.
 func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheChiefsText(t *testing.T) {
 	options := TextOptions([]string{"Keep the project.", "  ", "", "Drop it.", "Keep the project."})
 	if len(options) != 2 || options[0] != (jev.DecisionOption{Name: "option-1", Description: "Keep the project."}) || options[1] != (jev.DecisionOption{Name: "option-4", Description: "Drop it."}) {
@@ -76,8 +66,6 @@ func TestAnOptionThatNeedsTextIsOfferedOnlyWithTheChiefsText(t *testing.T) {
 	}
 }
 
-// A card is decorated with Jev's result only when Jev gave one, and a
-// deferral keeps the chief of staff's recommendation behind Jev's word.
 func TestAJevCardKeepsTheChiefsRecommendationOnlyWhenJevGaveNoPick(t *testing.T) {
 	card := func() InboxEntry {
 		return InboxEntry{Recommendation: "ratify: nothing blocks.", QuickReply: "ratify: nothing blocks."}
@@ -99,8 +87,6 @@ func TestAJevCardKeepsTheChiefsRecommendationOnlyWhenJevGaveNoPick(t *testing.T)
 	}
 }
 
-// A pick of an option the chief of staff wrote is named to the owner by its
-// text, and the other options by their names.
 func TestAPickIsNamedByTheChiefsTextForAnEscalationAndByNameOtherwise(t *testing.T) {
 	options := []jev.DecisionOption{{Name: "option-1", Description: "Resume from the last chunk."}, {Name: "option-2", Description: "Restart."}}
 	if got := optionLabel(options, "option-2"); got != "Restart." {

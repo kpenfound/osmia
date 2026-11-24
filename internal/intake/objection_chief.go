@@ -20,7 +20,7 @@ import (
 
 const ResolveObjectionTool = "resolve_objection"
 
-// objectionGuidance tells the chief of staff how to handle the committee's
+// ObjectionGuidance tells the chief of staff how to handle the committee's
 // objections at the ratification gate. It belongs in the system prompt of
 // every chief-of-staff turn.
 const ObjectionGuidance = "When debate concludes or the owner skips it, every committee objection that still stands comes to you before the owner sees the ratification packet. " +
@@ -28,7 +28,7 @@ const ObjectionGuidance = "When debate concludes or the owner skips it, every co
 	"Call resolve_objection with escalate and a short note for the owner, saying what the objection is about, the finding that matters and what you recommend, only when it needs the owner: it would change approved intent, needs an owner-reserved tradeoff, or you are not sure the record answers it. " +
 	"The owner's inbox lists the ratification once you have decided every committee objection, and shows the owner only the objections you escalated and the owner's own."
 
-// objectionDecisionRequest is the chief of staff's decision on one committee
+// ObjectionDecisionRequest is the chief of staff's decision on one committee
 // objection.
 type ObjectionDecisionRequest struct {
 	Objection string
@@ -99,12 +99,8 @@ const (
 	ObjectionEscalated       = "escalated"
 )
 
-// objectionSubject is the workflow subject of one committee objection: it has
-// no state while the objection stands, and its first transition records how it
-// was decided.
 func objectionSubject(objection string) string { return "objection-" + objection }
 
-// objectionTarget is the state a decision enters.
 func objectionTarget(d shed.Decide) string {
 	if d == shed.Dismiss {
 		return ObjectionDismissed
@@ -112,7 +108,6 @@ func objectionTarget(d shed.Decide) string {
 	return ObjectionEscalated
 }
 
-// objectionDecision is the chief decision of a target.
 func objectionDecision(target string) shed.Decide {
 	if target == ObjectionDismissed {
 		return shed.Dismiss
@@ -120,11 +115,6 @@ func objectionDecision(target string) shed.Decide {
 	return shed.Escalate
 }
 
-// objectionDocument returns the record of the chief of staff's decision on one
-// committee objection that stands at the workstream's ratification gate. It is
-// refused as ObjectionSubject describes. A non-empty judgment is the Jev
-// judgment record the decision comes from; the decision then names Jev as its
-// decider.
 func (s *Controller) objectionDocument(repository *trace.Repository, stream config.WorkstreamID, objection string, decision shed.Decide, note, turn, judgment string) (trace.Document, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed of workstream %s; check the trace repository", stream)}
 	_, round, api := s.ObjectionSubject(repository, stream, objection)
@@ -201,11 +191,6 @@ func RegisterObjectionEffects(reg *router.Effects, load func() *Controller) {
 	}
 }
 
-// objectionExit returns the exit of the chief of staff's decision on a
-// committee objection: the decision it made is the default, and the other
-// decision is the other target. A binding pick of Jev's own decision on the
-// objection is a pinned move that enters exactly the decision it picked.
-// Dismissing needs the strict bar, escalating to the owner the modest one.
 func (s *Controller) objectionExit(repository *trace.Repository, stream config.WorkstreamID, req ObjectionDecisionRequest) (router.Exit, error) {
 	state, err := repository.Workflow(stream, objectionSubject(req.Objection))
 	if err != nil {
@@ -248,7 +233,6 @@ func (s *Controller) objectionExit(repository *trace.Repository, stream config.W
 	if req.Judgment != "" {
 		x.Authority = &router.Authority{Kind: router.AuthorityJevGate, Target: def, Judgment: req.Judgment}
 	} else {
-		// The chief of staff's own decision is entered as it made it.
 		x.Authority = &router.Authority{Kind: router.AuthorityChief, Target: def}
 	}
 	return x, nil
@@ -294,7 +278,6 @@ func (s *Controller) DecideObjection(ctx context.Context, repository *trace.Repo
 	return entries[i], nil
 }
 
-// routeWord says what the router did with an exit it did not commit.
 func routeWord(res router.Result) string {
 	switch res.Journal {
 	case router.StateOwner:
@@ -307,7 +290,7 @@ func routeWord(res router.Result) string {
 	return "held"
 }
 
-// resolveObjection returns the resolve_objection tool of one claimed
+// ResolveObjection returns the resolve_objection tool of one claimed
 // chief-of-staff turn. The chief of staff dismisses a committee objection at
 // the ratification gate on the owner's behalf, or escalates it to the owner.
 // A decision the service refuses is an ordinary result,
@@ -375,9 +358,6 @@ func (c *Controls) ResolveObjection(repository *trace.Repository, scope coreadap
 		}
 		entry, api := s.DecideObjection(ctx, target, stream, request)
 		if api != nil && bound != nil && api.Code != Internal && decision != shed.Escalate {
-			// The service refused the transition Jev's binding pick calls for.
-			// The objection goes to the owner with Jev's judgment, and Jev is
-			// not asked about it again.
 			request.Decision = shed.Escalate
 			request.Note = fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
 			if entry, handed := s.DecideObjection(ctx, target, stream, request); handed == nil {

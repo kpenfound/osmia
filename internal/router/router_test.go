@@ -25,15 +25,10 @@ func route(t *testing.T, f *fx, x router.Exit) router.Result {
 	return res
 }
 
-// departing scripts Jev to depart from the default to target at p, with every
-// own question corroborating.
 func departing(target string, p float64) *jevfixture.Transitions {
 	return &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, target, p, 0.9) }}
 }
 
-// When Jev agrees, the router commits the default through the Transaction with
-// the routing filled in, sends one request with the narrow questions, and
-// emits one followed route span.
 func TestTheDefaultIsCommittedWhenJevAgrees(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -51,8 +46,6 @@ func TestTheDefaultIsCommittedWhenJevAgrees(t *testing.T) {
 	if m.To != "implementing" || m.From != "checking" || m.DecidedBy != trace.DecidedByCode || m.DefaultTo != "implementing" || m.Judgment == "" || m.Departed() {
 		t.Fatalf("transition = %+v", m)
 	}
-	// A default that was followed keeps the reason its caller wrote; the table
-	// and the rule are in the route record.
 	if strings.Contains(m.Reason, "decide-transition") {
 		t.Fatalf("a followed default carries the routing in its reason: %q", m.Reason)
 	}
@@ -75,9 +68,6 @@ func TestTheDefaultIsCommittedWhenJevAgrees(t *testing.T) {
 	}
 }
 
-// The request carries the narrow questions with the target question in two
-// orders, offers only legal targets, holds no code, stays under 72 KiB, and its
-// numbers come from code.
 func TestTheRequestCarriesTheNarrowQuestions(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -104,7 +94,6 @@ func TestTheRequestCarriesTheNarrowQuestions(t *testing.T) {
 	if len(a) < 2 || len(a) != len(b) || a[0] != b[len(b)-1] || a[len(a)-1] != b[0] {
 		t.Fatalf("pick orders %v and %v are not two orders of the same options", a, b)
 	}
-	// approved and abandoned need an authority this exit does not carry.
 	for _, banned := range []string{"approved", "abandoned"} {
 		if contains(a, banned) {
 			t.Fatalf("%s is offered on an exit without its authority: %v", banned, a)
@@ -125,8 +114,6 @@ func TestTheRequestCarriesTheNarrowQuestions(t *testing.T) {
 	}
 }
 
-// A departed target that clears its bar is committed, recorded as Jev's
-// departure from the default; one below its bar is held.
 func TestADepartureCommitsAtItsBarAndHoldsBelowIt(t *testing.T) {
 	f := newFx(t, departing("checking", 0.8))
 	f.seed("checking")
@@ -146,7 +133,6 @@ func TestADepartureCommitsAtItsBarAndHoldsBelowIt(t *testing.T) {
 		t.Fatalf("spans = %+v", s)
 	}
 
-	// The strict bar is the decision threshold: 0.8 is under 0.9.
 	g := newFx(t, departing("redrafted", 0.8))
 	g.seed("checking")
 	res = route(t, g, g.exit())
@@ -163,8 +149,6 @@ func TestADepartureCommitsAtItsBarAndHoldsBelowIt(t *testing.T) {
 	}
 }
 
-// A trigger answer that does not corroborate a departure keeps it from
-// committing, whatever the picks say.
 func TestADepartureNeedsItsCorroboration(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.Departs(a, "checking", 0.95, 0.9)
@@ -178,8 +162,6 @@ func TestADepartureNeedsItsCorroboration(t *testing.T) {
 	}
 }
 
-// When the two orderings disagree the subject is held without moving, with
-// exactly one chief notice for the occurrence, however often the exit is raised.
 func TestDisagreeingOrdersHoldWithOneNotice(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.DefaultFits(a)
@@ -212,7 +194,6 @@ func TestDisagreeingOrdersHoldWithOneNotice(t *testing.T) {
 	}
 }
 
-// A default judged not to fit with no target clearing its bar is a hold too.
 func TestNoTargetClearingItsBarHolds(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.Departs(a, "contested", 0.6, 0.9)
@@ -225,7 +206,6 @@ func TestNoTargetClearingItsBarHolds(t *testing.T) {
 	}
 }
 
-// "Would change intent" sends the move to the owner instead of committing it.
 func TestWouldChangeIntentGoesToTheOwner(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.Departs(a, "contested", 0.95, 0.9)
@@ -250,7 +230,6 @@ func TestWouldChangeIntentGoesToTheOwner(t *testing.T) {
 	}
 }
 
-// A default that fits beats a different pick, even a confident one.
 func TestAPickDoesNotBeatADefaultThatFits(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.DefaultFits(a)
@@ -264,8 +243,6 @@ func TestAPickDoesNotBeatADefaultThatFits(t *testing.T) {
 	}
 }
 
-// With one legal target left there is nothing to choose between: the router
-// keeps the default itself and Jev is not asked.
 func TestOneLegalTargetIsFollowedWithoutARequest(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -280,8 +257,6 @@ func TestOneLegalTargetIsFollowedWithoutARequest(t *testing.T) {
 	}
 }
 
-// Candidate-exists filters only the targets that need a candidate: an exit with
-// no candidate still offers planned, ready and a revise target.
 func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("contested")
@@ -303,7 +278,6 @@ func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	if len(options) != 3 || contains(options, "review") || !contains(options, "revise") || !contains(options, "planned") || !contains(options, "ready") {
 		t.Fatalf("options = %v", options)
 	}
-	// An exit that supplies no candidate check offers none of those targets.
 	g := newFx(t, &jevfixture.Transitions{})
 	g.seed("contested")
 	y := g.exit()
@@ -315,7 +289,6 @@ func TestNoCandidateFiltersOnlyTargetsThatNeedOne(t *testing.T) {
 	}
 }
 
-// A target that fails a prerequisite never reaches Jev.
 func TestTargetsFailingAPrerequisiteAreNotOffered(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -339,9 +312,6 @@ func TestTargetsFailingAPrerequisiteAreNotOffered(t *testing.T) {
 	}
 }
 
-// Approval is legal only on an exit that carries a satisfactory reviewer verdict
-// for the current candidate or an owner decision, and the router applies it
-// through the shared approval effect and records the authority.
 func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 	approval := func(f *fx) {
 		f.effects.Register("unit", "approved", func(_ context.Context, p router.Plan) (router.Effect, error) {
@@ -357,8 +327,6 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 		return x
 	}
 
-	// A reviewer verdict: approved is offered, applied with the approval record,
-	// and the authority is the verdict's.
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("reviewing")
 	f.applied["approved"] = new(atomicInt)
@@ -381,8 +349,6 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 		t.Fatalf("approved is not offered with a verdict: %v", options)
 	}
 
-	// Jev may depart from an authorised approval, to another target at its bar,
-	// and the verdict is untouched.
 	g := newFx(t, departing("checking", 0.85))
 	g.seed("reviewing")
 	g.applied["approved"] = new(atomicInt)
@@ -392,8 +358,6 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 
-	// A verdict that is no longer the current one makes approved illegal: the
-	// default is not offered and the subject is held.
 	h := newFx(t, &jevfixture.Transitions{})
 	h.seed("reviewing")
 	h.applied["approved"] = new(atomicInt)
@@ -403,8 +367,6 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 
-	// Without the authority approved is never offered, and a scripted answer
-	// that names it is not applied: the default commits in degraded mode.
 	k := newFx(t, &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
 		r := jevfixture.Departs(a, "approved", 0.99, 0.99)
 		return r
@@ -421,9 +383,6 @@ func TestApprovalIsLegalOnlyWithAReviewerVerdictOrTheOwner(t *testing.T) {
 	}
 }
 
-// A chief proposal carries no authority: neither approved nor an owner gate is
-// ever offered or applied on it, and an owner decision commits exactly its
-// target through the shared effects without a request.
 func TestOwnerGatesOpenOnlyOnAnOwnerOrGateDecision(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -464,10 +423,6 @@ func TestOwnerGatesOpenOnlyOnAnOwnerOrGateDecision(t *testing.T) {
 	}
 }
 
-// A hard prerequisite that changes while the router waits for Jev (the budget
-// runs out, a landing starts) leaves the version alone: the pick is not
-// applied, Refuse is recorded, no effect runs, and the subject is held with one
-// notice.
 func TestAPrerequisiteChangingWhileWaitingRefusesThePick(t *testing.T) {
 	exhausted := false
 	provider := departing("checking", 0.9)
@@ -506,8 +461,6 @@ func TestAPrerequisiteChangingWhileWaitingRefusesThePick(t *testing.T) {
 	}
 }
 
-// The same holds for a landing that starts without any state version change,
-// for a degraded-mode default and for a pinned move.
 func TestEveryWayOfChoosingATargetIsCheckedWhenApplied(t *testing.T) {
 	landing := func(x router.Exit, target string) router.Exit {
 		x.Prereq.Operations = func(_ context.Context, tg router.Target) (string, error) {
@@ -563,9 +516,6 @@ func TestEveryWayOfChoosingATargetIsCheckedWhenApplied(t *testing.T) {
 	})
 }
 
-// A pick that is recorded but not applied when the service restarts is applied
-// on recovery, without a new request, if it is still legal; and refused if a
-// prerequisite changed in between.
 func TestARecordedPickIsFinishedAfterARestart(t *testing.T) {
 	for _, changed := range []bool{false, true} {
 		name := "still legal"
@@ -620,8 +570,6 @@ func TestARecordedPickIsFinishedAfterARestart(t *testing.T) {
 	}
 }
 
-// A second exit with the same occurrence key, after a restart too, reuses the
-// recorded result without a request, a commit or a second span.
 func TestTheSameOccurrenceIsAskedOnce(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -639,8 +587,6 @@ func TestTheSameOccurrenceIsAskedOnce(t *testing.T) {
 	if s := f.routeSpans(); len(s) != 1 {
 		t.Fatalf("%d route spans", len(s))
 	}
-	// Another cause is another occurrence, though the state version and the
-	// trigger are the same.
 	other := f.exit()
 	other.Cause = "checks-2"
 	if key := router.OccurrenceKey(other); key == router.OccurrenceKey(x) {
@@ -648,8 +594,6 @@ func TestTheSameOccurrenceIsAskedOnce(t *testing.T) {
 	}
 }
 
-// A request that fails commits the still-legal default as a fallback, the
-// record and the span say so, and Jev is degraded in the status.
 func TestAFailedRequestCommitsTheDefaultAsAFallback(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{Fail: func(int) error { return &systemone.Error{Kind: systemone.KindUnavailable, Message: "down"} }})
 	f.seed("checking")
@@ -675,8 +619,6 @@ func TestAFailedRequestCommitsTheDefaultAsAFallback(t *testing.T) {
 	}
 }
 
-// A request too large to send falls back without being sent, and shows Jev as
-// degraded.
 func TestARequestTooLargeFallsBack(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -696,8 +638,6 @@ func TestARequestTooLargeFallsBack(t *testing.T) {
 	}
 }
 
-// A large history and long evidence are trimmed to fit under 72 KiB, so the
-// request is sent.
 func TestALargeSummaryIsTrimmedToFit(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -720,7 +660,6 @@ func TestALargeSummaryIsTrimmedToFit(t *testing.T) {
 	}
 }
 
-// The shared effects of a target are the same whoever chooses it.
 func TestEveryPathEntersATargetThroughTheSameEffect(t *testing.T) {
 	paths := map[string]func(*fx) router.Exit{
 		"default": func(f *fx) router.Exit { return f.exit() },
@@ -749,8 +688,6 @@ func TestEveryPathEntersATargetThroughTheSameEffect(t *testing.T) {
 	}
 }
 
-// The exit's subject having moved on since it was raised is a stale exit: no
-// commit, no notice.
 func TestAStaleExitCommitsNothing(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -762,8 +699,6 @@ func TestAStaleExitCommitsNothing(t *testing.T) {
 	}
 }
 
-// The worker routes an exit beside the caller: Submit returns before Jev answers,
-// and an occurrence being routed is not submitted twice.
 func TestTheWorkerRoutesBesideTheCaller(t *testing.T) {
 	release := make(chan struct{})
 	provider := &jevfixture.Transitions{Wait: func(ctx context.Context) error {
@@ -801,9 +736,7 @@ func TestTheWorkerRoutesBesideTheCaller(t *testing.T) {
 	w.Wait()
 }
 
-// The router's words for the route span are the span's own: the outcomes, the
-// confidence bands and the triggers it can carry.
-func TestTheRouteVocabularyIsTheSpans(t *testing.T) {
+func TestRouteOutcomesAndConfidenceBandsMatchTheSpanVocabulary(t *testing.T) {
 	outcomes := []string{router.OutcomeFollowed, router.OutcomeDeparted, router.OutcomeHeld, router.OutcomeFallback}
 	if fmt.Sprint(outcomes) != fmt.Sprint(recordspans.RouteOutcomes) {
 		t.Fatalf("outcomes %v, span %v", outcomes, recordspans.RouteOutcomes)
@@ -812,27 +745,34 @@ func TestTheRouteVocabularyIsTheSpans(t *testing.T) {
 	if fmt.Sprint(bands) != fmt.Sprint(recordspans.ConfidenceBands) {
 		t.Fatalf("bands %v, span %v", bands, recordspans.ConfidenceBands)
 	}
+}
+
+func TestConfidenceBandsAgreeWithTheSpanBands(t *testing.T) {
 	for _, p := range []float64{-1, 0, 0.3, 0.49, 0.5, 0.6, 0.7, 0.85, 0.9, 0.95, 1, 2} {
 		if got, want := router.ConfidenceBand(p, 0.9), recordspans.ConfidenceBand(p, 0.9); got != want {
 			t.Fatalf("band of %v is %s, the span's is %s", p, got, want)
 		}
 	}
+}
+
+func TestEverySpanTriggerIsAValidTrigger(t *testing.T) {
 	for _, trigger := range recordspans.RouteTriggers {
 		if !router.ValidTrigger(trigger) {
 			t.Fatalf("trigger %s is not accepted", trigger)
 		}
 	}
+}
+
+func TestAnExitWithAnInvalidTriggerIsNotRouted(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
 	x := f.exit()
 	x.Trigger = "not a trigger"
 	if _, err := f.router.Route(context.Background(), x); err == nil {
-		t.Fatal("an exit with no trigger was routed")
+		t.Fatal("an exit with an invalid trigger was routed")
 	}
 }
 
-// An owner's decision makes approved legal as a pinned move: it commits with the
-// approval record and no request, and without a candidate it is refused.
 func TestAnOwnerDecisionApprovesAsAPinnedMove(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")
@@ -866,11 +806,6 @@ func TestAnOwnerDecisionApprovesAsAPinnedMove(t *testing.T) {
 	}
 }
 
-// Recover finishes, with no caller raising the exit again, a pick that was
-// recorded but not applied when the service stopped: a pick that is still
-// legal is applied without a new request, one whose prerequisite changed is
-// refused with one notice, and a machine that cannot rebuild its exit is left
-// alone.
 func TestRecoverFinishesRecordedPicksWithoutTheCaller(t *testing.T) {
 	for _, changed := range []bool{false, true} {
 		name := "still legal"
@@ -944,8 +879,6 @@ func TestRecoverFinishesRecordedPicksWithoutTheCaller(t *testing.T) {
 	}
 }
 
-// worksExit is the exit of the fixture with the targets that start agent work
-// marked as such.
 func worksExit(f *fx) router.Exit {
 	x := f.exit()
 	for i := range x.Targets {
@@ -957,11 +890,6 @@ func worksExit(f *fx) router.Exit {
 	return x
 }
 
-// A spent budget or the loop guard stops the targets that start work, however
-// the target is reached: they are not offered to Jev, a pick whose limit is
-// reached while Jev answers is refused with one notice, and a default, a
-// default entered through its trigger's own records and an owner's pinned
-// decision are refused as well.
 func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 	const why = "work is paused (daily-budget): the budget is spent"
 	t.Run("the targets are not offered", func(t *testing.T) {
@@ -1074,8 +1002,6 @@ func TestStoppedWorkStopsTheMovesThatStartIt(t *testing.T) {
 	})
 }
 
-// A pause of the owner holds the targets that start work without recording
-// anything or starting any, and the exit is offered again once the pause lifts.
 func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
 	const why = "work is paused (owner): resting"
 	t.Run("a default is held and then entered", func(t *testing.T) {
@@ -1149,10 +1075,6 @@ func TestAPauseHoldsAnExitUntilItLifts(t *testing.T) {
 	})
 }
 
-// A chief of staff's move is a pinned move for an ordinary target: the router
-// commits exactly it, with no request, and records the chief of staff as the
-// decider. It never authorises an owner gate or approval: such a target is
-// refused and nothing runs.
 func TestAChiefMoveIsPinnedButOpensNoOwnerGate(t *testing.T) {
 	f := newFx(t, &jevfixture.Transitions{})
 	f.seed("checking")

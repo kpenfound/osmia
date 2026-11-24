@@ -161,10 +161,6 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 		if !sub.Stands {
 			return intake.PriorityRefusal(why)
 		}
-		// A finding the chief of staff may triage needs a decide result. One
-		// that final reviews made the owner's has no decide result unless Jev
-		// picked it before: that pick cannot be carried out, and the finding
-		// is left to the owner with Jev's judgment.
 		var bound *jev.Result
 		if res, err := jev.Recorded(target, stream, jev.KindTriage, sub.Key); err != nil {
 			return nil, err
@@ -188,9 +184,6 @@ func TriageToolOf(load func() *Controller, repository *trace.Repository, scope c
 			if bound == nil {
 				return intake.PriorityRefusal(why)
 			}
-			// The service cannot carry out the transition Jev's binding pick
-			// calls for: the finding is left to the owner with Jev's judgment,
-			// and Jev is not asked about it again.
 			t.Outcome, t.Refused = followup.TriageOwner, why
 			t.Note = fmt.Sprintf("Jev decided code with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Confidence, bound.Judgment, why, note)
 			detail = "the service could not carry out Jev's decision (" + why + "); the finding is left to the owner with Jev's judgment"

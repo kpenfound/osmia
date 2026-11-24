@@ -111,9 +111,8 @@ func (p *Publisher) Pass(ctx context.Context) error {
 		return err
 	}
 	state, _ := p.S.Effective()
-	librarian := librarianWorkstream(p.Repository.Project())
 	for _, stream := range streams {
-		if stream == librarian || scheduler.Paused(state.Pauses, p.Repository.Project(), stream) {
+		if scheduler.Paused(state.Pauses, p.Repository.Project(), stream) {
 			continue
 		}
 		if session, err := isSession(p.Repository, stream); err != nil {
@@ -135,8 +134,6 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 	if held, err := p.S.ChangeHeld(p.Repository, stream); err != nil || held {
 		return err
 	}
-	// A landing in flight decides how the workstream is delivered: marking its
-	// pull request ready waits for the landing's outcome.
 	if landing, err := LandingInFlight(p.Repository, stream); err != nil || landing {
 		return err
 	}
@@ -243,8 +240,6 @@ func (p *Publisher) Request(ctx context.Context, stream config.WorkstreamID) err
 	return nil
 }
 
-// approver names who approved: Jev when its delivery decision recorded the
-// approval, the owner otherwise.
 func approver(a DeliveryApproval) string {
 	if a.DecidedBy == trace.DecidedByJev {
 		return "Jev"
@@ -274,7 +269,7 @@ func DecodePublish(op coreadapter.Operation) (PublishInput, error) {
 	return in, nil
 }
 
-// stream returns the workstream a publication operation belongs to: the one
+// Stream returns the workstream a publication operation belongs to: the one
 // whose run event derives the operation ID.
 func (p *Publisher) Stream(op coreadapter.Operation, in PublishInput) (config.WorkstreamID, error) {
 	streams, err := p.Repository.Workstreams()
@@ -290,7 +285,7 @@ func (p *Publisher) Stream(op coreadapter.Operation, in PublishInput) (config.Wo
 	return "", fmt.Errorf("publish operation %s belongs to no workstream", op.ID)
 }
 
-// outcome returns the recorded result of the publication of approval k:
+// Outcome returns the recorded result of the publication of approval k:
 // succeeded once it recorded the workstream delivered, failed once its
 // refusal is recorded, nil before either.
 func (p *Publisher) Outcome(stream config.WorkstreamID, k int) (*coreadapter.OperationResult, error) {
@@ -436,7 +431,7 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if branch == cfg.Project.BaseBranch {
 		return p.Refuse(ctx, stream, in, "delivery cannot push to the project base branch")
 	}
-	title := PublishedTitle(approval, stream)
+	title := approval.Title
 	if approval.Style != in.Style || len(approval.Messages) == 0 {
 		return p.Refuse(ctx, stream, in, "delivery messages and style require current owner approval")
 	}
@@ -495,14 +490,10 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	if exists && tip != published && !slices.ContainsFunc(prior, func(d DeliveryPublication) bool { return d.Commit == tip && d.Branch == branch && d.Fork == in.Fork }) {
 		return p.Refuse(ctx, stream, in, fmt.Sprintf("feature branch %s of %s is at %s, which no publication of this workstream pushed", branch, in.Fork, tip))
 	}
-	// An open PR at the old owned tip advances when the feature branch is pushed.
-	// Read it before the push so a closed or edited PR cannot be hidden by that advance.
 	before, err := client.Find(ctx, in.Upstream, in.Fork, branch)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	// This lookup already names the workstream's own pull request; a merged
-	// or closed one found here is recorded durably without any added call.
 	if err := RecordOwnPullRequestOutcomeFromFind(ctx, p.Repository, p.S.Now(), stream, op.ID, OwnPullRequestNumber(in, prior), before); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -578,11 +569,6 @@ func (p *Publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		return p.RefusePR(ctx, stream, in, branch, published, found)
 	}
 	pr := found[0]
-	// Every one of this workstream's incoming merge-order edges has merged
-	// (in.Draft is false), but the pull request this fresh, owner-approved
-	// publication confirmed is still a draft from an earlier publication
-	// made while waiting: mark it ready for review now, and only now, since
-	// this is the fresh delivery approval that authorises it (spec#13).
 	if !in.Draft && pr.Draft {
 		ready, err := client.Ready(ctx, in.Upstream, pr.Number)
 		if err != nil {
@@ -660,7 +646,7 @@ func (p *Publisher) MarkReady(ctx context.Context, stream config.WorkstreamID, o
 	if unresolved || in.Draft {
 		return p.DeliverDraft(ctx, stream, op, in, push, reference)
 	}
-	title, description := PublishedTitle(approval, stream), approval.Description
+	title, description := approval.Title, approval.Description
 	if pr.Title != title || pr.Body != description {
 		if _, err := client.Update(ctx, push.Upstream, pr.Number, pulls.Update{Base: pr.Base, Title: title, Body: description}); err != nil {
 			return coreadapter.OperationResult{}, err
@@ -687,8 +673,6 @@ func (p *Publisher) DeliverReady(ctx context.Context, stream config.WorkstreamID
 	return p.deliverReady(ctx, stream, op, in, push, "")
 }
 
-// deliverReady is DeliverReady with a notice for the chief of staff in the same
-// commit, when note is not empty.
 func (p *Publisher) deliverReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, note string) (coreadapter.OperationResult, error) {
 	at := p.S.Now()
 	ready := DeliveryReady{Source: api.ReadyByApproval, Approval: in.Approval, PullRequest: push.PullRequest, URL: push.URL, Upstream: push.Upstream, Commit: push.Commit, At: at}
@@ -714,8 +698,6 @@ func (p *Publisher) DeliverDraft(ctx context.Context, stream config.WorkstreamID
 	return p.deliverDraft(ctx, stream, op, in, push, reference, "")
 }
 
-// deliverDraft is DeliverDraft with a notice for the chief of staff in the same
-// commit, when note is not empty.
 func (p *Publisher) deliverDraft(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, push Push, reference, note string) (coreadapter.OperationResult, error) {
 	waiting := "a merge-order dependency"
 	if reference != "" {
@@ -736,9 +718,6 @@ func (p *Publisher) deliverDraft(ctx context.Context, stream config.WorkstreamID
 	return p.recordApplied(ctx, stream, in, reason, []trace.Document{doc}, txs...)
 }
 
-// deliveredTransactions are the transitions of the workstream to delivered,
-// with a notice for the chief of staff, and of the publication to the
-// published outcome of the approval.
 func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreadapter.Operation, in PublishInput, at time.Time, reason, notice, note string) ([]trace.Transaction, error) {
 	feature, err := p.Repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -769,13 +748,7 @@ func (p *Publisher) deliveredTransactions(stream config.WorkstreamID, op coreada
 	}, nil
 }
 
-// recordApplied records documents and transactions as the outcome of
-// approval k's operation; a conflict with an outcome already recorded returns
-// that outcome.
 func (p *Publisher) recordApplied(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string, docs []trace.Document, txs ...trace.Transaction) (coreadapter.OperationResult, error) {
-	// The first transaction is the workstream's move to delivered, which the
-	// approval authorised, the owner's or the one the service recorded for Jev's
-	// delivery decision; the router applies it as a pinned move.
 	approval, err := ApprovalAt(p.Repository, stream, in.Approval)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -797,11 +770,6 @@ func MatchingPublicationPR(pr pulls.PullRequest, in PublishInput, branch, title,
 	return (!in.Draft || pr.Draft) && (in.Retarget == nil || pr.Number == in.Retarget.Number && pr.URL == in.Retarget.URL) && pr.Number > 0 && pr.URL != "" && pr.State == "open" && !pr.Merged && pr.HeadRepository == in.Fork && pr.Head == branch && pr.Base == in.Base && pr.HeadCommit == commit && pr.Title == title && pr.Body == description
 }
 
-// pullRequestHeadBehind reports whether pr is the expected pull request in
-// every way except a head that has not reached tip yet: it is still at a commit
-// an earlier publication of the workstream recorded. The host moves a pull
-// request's head shortly after its branch moves, so this is a state to wait out
-// rather than a conflict to refuse.
 func pullRequestHeadBehind(pr pulls.PullRequest, in PublishInput, branch, title, description, tip string, prior []DeliveryPublication) bool {
 	if pr.HeadCommit == tip || !slices.ContainsFunc(prior, func(d DeliveryPublication) bool {
 		return d.Commit == pr.HeadCommit && d.Branch == branch && d.Fork == in.Fork
@@ -818,20 +786,6 @@ func (p *Publisher) RefusePR(ctx context.Context, stream config.WorkstreamID, in
 		seen = append(seen, fmt.Sprintf("#%d (%s, against %s at %s)", f.Number, f.State, f.Base, f.HeadCommit))
 	}
 	return p.Refuse(ctx, stream, in, fmt.Sprintf("%s of %s already has pull requests %s, and none is the one open against %s at %s with the approved description", branch, in.Fork, strings.Join(seen, ", "), in.Base, commit))
-}
-
-// DeliveryTitle is the pull request title and delivery commit subject an
-// approval recorded before the title became part of the draft still
-// publishes with: the description's first non-empty line without its
-// heading marks. PublishedTitle calls this only as that approval's
-// fallback; a current approval records its own Title.
-func DeliveryTitle(description string, stream config.WorkstreamID) string {
-	for _, line := range strings.Split(description, "\n") {
-		if line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); line != "" {
-			return BoundSubject(line)
-		}
-	}
-	return "Workstream " + string(stream)
 }
 
 // ApprovalAt returns revision k of the workstream's final/delivery.json.
@@ -884,7 +838,7 @@ func (p *Publisher) PublicationDocument(stream config.WorkstreamID, record Deliv
 		Path: PublicationPath, Content: string(content) + "\n"}, nil
 }
 
-// recordPublication records the next revision of final/publication.json.
+// RecordPublication records the next revision of final/publication.json.
 func (p *Publisher) RecordPublication(ctx context.Context, stream config.WorkstreamID, record DeliveryPublication) error {
 	doc, err := p.PublicationDocument(stream, record)
 	if err != nil {
@@ -893,15 +847,13 @@ func (p *Publisher) RecordPublication(ctx context.Context, stream config.Workstr
 	return p.Repository.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// deliver records, in one commit, the opened publication, the workstream's
+// Deliver records, in one commit, the opened publication, the workstream's
 // move from assembled to delivered with a notice for the chief of staff, and
 // the publication's outcome.
 func (p *Publisher) Deliver(ctx context.Context, stream config.WorkstreamID, in PublishInput, record DeliveryPublication) (coreadapter.OperationResult, error) {
 	return p.deliver(ctx, stream, in, record, "")
 }
 
-// deliver is Deliver with a notice for the chief of staff in the same commit,
-// when note is not empty.
 func (p *Publisher) deliver(ctx context.Context, stream config.WorkstreamID, in PublishInput, record DeliveryPublication, note string) (coreadapter.OperationResult, error) {
 	doc, err := p.PublicationDocument(stream, record)
 	if err != nil {
@@ -957,7 +909,7 @@ func (p *Publisher) deliver(ctx context.Context, stream config.WorkstreamID, in 
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// refuse records why the approval was refused, tells the chief of staff, and
+// Refuse records why the approval was refused, tells the chief of staff, and
 // returns the refusal as the operation's result. The workstream stays
 // assembled; approving again asks for another application.
 func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, reason string) (coreadapter.OperationResult, error) {
@@ -966,8 +918,6 @@ func (p *Publisher) Refuse(ctx context.Context, stream config.WorkstreamID, in P
 	return p.refuse(ctx, stream, in, recorded, body)
 }
 
-// refuse records the refusal with the reason and the notice it sends the chief
-// of staff, and returns it as the operation's result.
 func (p *Publisher) refuse(ctx context.Context, stream config.WorkstreamID, in PublishInput, recorded, body string) (coreadapter.OperationResult, error) {
 	transition, _ := PublishIDs(in.Approval)
 	id := transition + "-refused"

@@ -17,8 +17,6 @@ import (
 const secondPushedCommit = "4444444444444444444444444444444444444444"
 const secondReviewedCommit = "3333333333333333333333333333333333333333"
 
-// assemble moves the fixture workstream to assembled, where a final review
-// and the pull request's checks are watched.
 func (f *watchFixture) assemble() {
 	f.t.Helper()
 	_, err := f.repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{
@@ -27,8 +25,6 @@ func (f *watchFixture) assemble() {
 	fixturekit.Must(f.t, err)
 }
 
-// secondPush records push 2, which supersedes push 1, and returns the report
-// of the final review that made it.
 func (f *watchFixture) secondPush() FinalReport {
 	f.t.Helper()
 	publisher := &Publisher{S: f.reviewer.S, Repository: f.repo}
@@ -37,7 +33,6 @@ func (f *watchFixture) secondPush() FinalReport {
 	return FinalReport{Review: 2, Operation: "review-2", Commit: secondReviewedCommit}
 }
 
-// chief is a chief-of-staff turn's scope over the fixture workstream.
 func (f *watchFixture) chief(turn string) coreadapter.Scope {
 	f.t.Helper()
 	if f.scope == nil {
@@ -69,7 +64,6 @@ func (f *watchFixture) entry() (InboxEntry, bool) {
 	return e, open
 }
 
-// offer has the chief of staff ask the owner about push n.
 func (f *watchFixture) offer(push int, note string) map[string]any {
 	f.t.Helper()
 	tool := ChecksChoiceToolOf(f.load(), f.repo, f.chief("offer"))
@@ -78,7 +72,6 @@ func (f *watchFixture) offer(push int, note string) map[string]any {
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
 
-// answer is the owner's answer to the entry the inbox lists, as a client sends it.
 func (f *watchFixture) answer(e InboxEntry, decision string) (ChecksChoiceResponse, *api.APIError) {
 	f.t.Helper()
 	raw, err := json.Marshal(e.Answer.Body)
@@ -97,7 +90,6 @@ func TestChiefPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
 	f.api.set(f.loaded(), f.pending(2, 40*time.Second))
 	poll := ChecksToolOf(f.load(), f.repo, f.chief("poll"))
 
-	// The poll is made at once, inside the wait after the push.
 	got := f.call(poll, `{"action":"poll","push":1}`)
 	if got["done"] != true || got["outcome"] != "pending" || f.api.readCount() != 1 || f.api.commits[0] != "acme/widgets@"+pushedCommit {
 		t.Fatalf("poll %v, reads %v", got, f.api.commits)
@@ -112,8 +104,6 @@ func TestChiefPollsNowAndRerunsOnlyTheCurrentPush(t *testing.T) {
 		t.Fatalf("rerun %v, calls %q", got, calls)
 	}
 
-	// Push 2 supersedes push 1: a request naming push 1 is refused, naming
-	// the current push, and does nothing.
 	f.clock.Advance(time.Hour)
 	f.secondPush()
 	reads := f.api.readCount()
@@ -143,8 +133,6 @@ func TestChecksToolsAreRefusedForOtherRoles(t *testing.T) {
 		if tool.Name == ChecksChoiceToolName {
 			input = `{"push":1,"note":"nothing"}`
 		}
-		// A turn whose role is not the chief of staff's is denied before the
-		// call reaches the service, or refused by it.
 		out, err := tool.Handle(context.Background(), json.RawMessage(input))
 		if err == nil {
 			var got map[string]any
@@ -180,7 +168,6 @@ func TestOwnerSeesTheChoiceAndKeepsWaiting(t *testing.T) {
 		t.Fatalf("entry %+v", e)
 	}
 
-	// The chief of staff alone does not continue the final review.
 	f.clock.Advance(10 * time.Minute)
 	f.mustWait()
 	if len(f.runs()) != 0 {
@@ -195,13 +182,11 @@ func TestOwnerSeesTheChoiceAndKeepsWaiting(t *testing.T) {
 	if _, open := f.entry(); open {
 		t.Fatal("the entry stays after the answer")
 	}
-	// The watch still polls, and records no check result.
 	f.clock.Advance(10 * time.Minute)
 	f.mustWait()
 	if f.api.readCount() != reads+1 || len(f.runs()) != 0 {
 		t.Fatalf("reads %d (was %d), runs %+v", f.api.readCount(), reads, f.runs())
 	}
-	// The same answer again changes nothing; a different one is refused.
 	if _, apiErr := f.answer(e, ChecksChoiceKeepWaiting); apiErr != nil {
 		t.Fatalf("repeated answer: %v", apiErr)
 	}
@@ -239,13 +224,11 @@ func TestOwnerContinuesWithoutCheckResultsForThatPushOnly(t *testing.T) {
 			t.Fatalf("evidence lacks %q:\n%s", want, evidence)
 		}
 	}
-	// A restart and another read return the same record, once.
 	f.restart()
 	if again := f.mustComplete(); again.Status != ChecksContinued || len(f.runs()) != 1 {
 		t.Fatalf("again %+v, runs %+v", again, f.runs())
 	}
 
-	// Push 2 does not inherit the choice, before or after a restart.
 	f.clock.Advance(time.Hour)
 	second := f.secondPush()
 	f.report = second
@@ -278,7 +261,6 @@ func TestSupersededPushClosesTheChoiceAndRefusesItsAnswer(t *testing.T) {
 	if _, apiErr := f.answer(e, ChecksChoiceContinue); apiErr == nil || apiErr.Code != Conflict || !strings.Contains(apiErr.Message, "push 2") {
 		t.Fatalf("answer about a superseded push: %v", apiErr)
 	}
-	// The offer is closed as obsolete, and push 2's final review gets nothing from it.
 	record, _, err := ReadChecksChoice(f.repo, stream, 1)
 	fixturekit.Must(t, err)
 	if record.State != ChecksChoiceObsolete {
@@ -290,7 +272,6 @@ func TestSupersededPushClosesTheChoiceAndRefusesItsAnswer(t *testing.T) {
 	if len(f.runs()) != 0 {
 		t.Fatalf("runs %+v", f.runs())
 	}
-	// Push 2 needs its own offer, and its own answer.
 	if got := f.offer(1, "Old+push"); got["done"] != false {
 		t.Fatalf("offer about push 1: %v", got)
 	}
@@ -325,7 +306,6 @@ func TestChoiceSurvivesARestartOnceAndClosesWhenAResultCompletes(t *testing.T) {
 		t.Fatalf("offer after a restart %v", got)
 	}
 
-	// A completed result closes the question; answering it is then refused.
 	f.clock.Advance(10 * time.Minute)
 	f.api.setWithChecks(3, f.loaded(), f.done(3, "success", 5*time.Minute))
 	if run := f.mustComplete(); run.Status != "passed" {

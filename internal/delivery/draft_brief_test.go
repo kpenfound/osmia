@@ -13,8 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordFinalReportRevision records revision n of the final report document of
-// member and returns the report the drafts present for it.
 func recordFinalReportRevision(t *testing.T, repo *trace.Repository, member config.WorkstreamID, n int, report FinalReport) FinalReport {
 	t.Helper()
 	report.Review, report.Commit = n, strings.Repeat(fmt.Sprint(n), 40)
@@ -23,8 +21,6 @@ func recordFinalReportRevision(t *testing.T, repo *trace.Repository, member conf
 	return report
 }
 
-// recordBriefFor records brief as the next revision of its review's brief
-// document of member.
 func recordBriefFor(t *testing.T, repo *trace.Repository, member config.WorkstreamID, brief Brief) {
 	t.Helper()
 	content, err := json.Marshal(brief)
@@ -52,8 +48,6 @@ func draftWith(t *testing.T, drafts *Controller, cfg *config.Config, repo *trace
 	return title, body
 }
 
-// The Before you ship block follows the dependency sentence, precedes the
-// assumptions, and is filtered like the rest of the body.
 func TestDraftDeliveryHoldsTheBriefsBeforeYouShipItems(t *testing.T) {
 	t.Parallel()
 	cfg, repo, _, report := draftFixture(t)
@@ -78,9 +72,6 @@ func TestDraftDeliveryHoldsTheBriefsBeforeYouShipItems(t *testing.T) {
 	}
 }
 
-// Without a brief, with a brief only for an earlier review, or with a brief
-// without items, the title and body are exactly those of a trace with no brief;
-// the brief's other fields never enter them.
 func TestDraftDeliveryIsUnchangedWithoutApplicableBriefItems(t *testing.T) {
 	t.Parallel()
 	cfg, repo, drafts, report := draftFixture(t)
@@ -101,18 +92,15 @@ func TestDraftDeliveryIsUnchangedWithoutApplicableBriefItems(t *testing.T) {
 	check("a brief without items")
 	recordBriefFor(t, repo, stream, Brief{Review: 1, ReviewRevision: 1, Commit: report.Commit, Text: text, BeforeYouShip: []string{}, Screenshots: []string{shot}})
 	check("a brief with an empty item list")
-	// A newer final review makes the earlier brief stale, items and all.
 	recordBriefFor(t, repo, stream, Brief{Review: 1, ReviewRevision: 1, Commit: report.Commit, Text: text, BeforeYouShip: []string{"Rotate the key"}})
 	report = recordFinalReportRevision(t, repo, stream, 2, report)
 	wantTitle, wantBody = draftWith(t, drafts, cfg, repo, stream, report)
 	if strings.Contains(wantBody, "Rotate the key") || strings.Contains(wantBody, "Before you ship") {
 		t.Fatalf("a stale brief reached the body:\n%s", wantBody)
 	}
-	// A brief naming the right review under another report revision or commit is not this review's.
 	recordBriefFor(t, repo, stream, Brief{Review: 2, ReviewRevision: 1, Commit: report.Commit, Text: text, BeforeYouShip: []string{"Wrong revision"}})
 	recordBriefFor(t, repo, stream, Brief{Review: 2, ReviewRevision: 2, Commit: strings.Repeat("f", 40), Text: text, BeforeYouShip: []string{"Wrong commit"}})
 	check("a brief for another revision or commit")
-	// The main text and screenshots stay out even with items.
 	recordBriefFor(t, repo, stream, Brief{Review: 2, ReviewRevision: 2, Commit: report.Commit, Text: text, BeforeYouShip: []string{"Rotate the key"}, Screenshots: []string{shot}})
 	title, body := draftWith(t, drafts, cfg, repo, stream, report)
 	if !strings.Contains(body, "- Rotate the key\n") || title != wantTitle {
@@ -125,8 +113,6 @@ func TestDraftDeliveryIsUnchangedWithoutApplicableBriefItems(t *testing.T) {
 	}
 }
 
-// Two members of a shared chief keep their own briefs: each body holds only
-// its own items.
 func TestDraftDeliveryOfSharedChiefMembersUsesEachMembersOwnBrief(t *testing.T) {
 	t.Parallel()
 	cfg, repo, drafts, report := draftFixture(t)

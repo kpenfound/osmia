@@ -20,9 +20,6 @@ func IsSchedulingPath(ctx context.Context) bool {
 	return on
 }
 
-// maxRouting bounds the exits a worker routes at once, so a burst of exits does
-// not send Jev unbounded concurrent requests. One exit that waits on Jev holds
-// only its own slot.
 const maxRouting = 32
 
 // Worker routes the exits a scheduling pass raises. A pass never waits on Jev:

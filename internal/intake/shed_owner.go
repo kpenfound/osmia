@@ -14,7 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// draftPin returns the revisions of spec.md and plan.json the debate reads:
+// DraftPin returns the revisions of spec.md and plan.json the debate reads:
 // those a group decision pinned for the workstream, or else the latest
 // recorded ones.
 func (d *Debate) DraftPin(stream config.WorkstreamID) (shed.Pin, error) {
@@ -36,7 +36,7 @@ func OwnerHeader(id string, project config.ProjectID, stream config.WorkstreamID
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: OwnerActor, Cause: cause}
 }
 
-// shedOwner is one owner action on one workstream's shed: the workstream, its
+// ShedOwner is one owner action on one workstream's shed: the workstream, its
 // trace, the state the action found and the revision it is recorded against.
 type ShedOwner struct {
 	S          *ShedOwnerDependencies
@@ -55,7 +55,7 @@ type ShedOwner struct {
 	Deciding Deciding
 }
 
-// shedAction reads what every owner action of the shed needs and refuses a
+// ShedAction reads what every owner action of the shed needs and refuses a
 // workstream that is not in the shed. The current round is the round the
 // debate has reached, or the first round, which is what the owner's action is
 // recorded under.
@@ -103,7 +103,7 @@ func (s *Controller) ShedAction(raw string, states ...string) (*ShedOwner, *APIE
 	return &ShedOwner{S: s.ShedOwnerDependencies(), Project: project, Stream: stream, Repository: repository, Feature: feature.Value, Shed: state, Owner: owner, Skipped: skipped, Round: round, Pin: pin, Now: s.Now}, nil
 }
 
-// skippedDebate reports whether the owner has skipped debate on the
+// SkippedDebate reports whether the owner has skipped debate on the
 // workstream. The skip is the recorded transition, not the owner subject's
 // current value: the subject shows the owner's latest action, and a later
 // objection, ruling or reported edit moves it without un-skipping anything.
@@ -115,7 +115,7 @@ func SkippedDebate(repository *trace.Repository, stream config.WorkstreamID) (bo
 	return slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == SkipTransition }), nil
 }
 
-// featureState names a feature state for a message, including the state of a
+// FeatureState names a feature state for a message, including the state of a
 // workstream that has none.
 func FeatureState(value string) string {
 	if value == "" {
@@ -124,7 +124,7 @@ func FeatureState(value string) string {
 	return value
 }
 
-// document returns the latest recorded revision of one of the workstream's
+// Document returns the latest recorded revision of one of the workstream's
 // shed files, and whether it is recorded.
 func (o *ShedOwner) Document(path string) (trace.Document, bool, error) {
 	docs, err := trace.Read[trace.Document](o.Repository, o.Stream)
@@ -141,7 +141,7 @@ func (o *ShedOwner) Document(path string) (trace.Document, bool, error) {
 	return latest, found, nil
 }
 
-// record writes one revision of an owner file of the shed and then records
+// Record writes one revision of an owner file of the shed and then records
 // the transition of the owner subject that names it. The file is the debate's
 // input and the transition its provenance, so the file is committed first: an
 // interruption between the two leaves the owner's action recorded and
@@ -176,7 +176,7 @@ func (o *ShedOwner) Record(ctx context.Context, id, path, content, value, reason
 	return nil
 }
 
-// shedObject records the owner's own objection to the current round. It is
+// ShedObject records the owner's own objection to the current round. It is
 // the owner's, blocks like a member's, and the architect answers it in its
 // reply to the round.
 func (s *Controller) ShedObject(ctx context.Context, raw string, req ShedObjectRequest) (ShedResponse, *APIError) {
@@ -195,8 +195,6 @@ func (s *Controller) ShedObject(ctx context.Context, raw string, req ShedObjectR
 	if err != nil {
 		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the shed records of workstream %s; check the trace repository", o.Stream)}
 	}
-	// A round's file keeps the revision it was opened against, as a member's
-	// record keeps the revision its round was pinned to.
 	record := shed.Record{Version: shed.Version, Round: o.Round, Member: shed.OwnerMember, Revision: o.Pin}
 	for _, r := range records {
 		if r.Owned() && r.Round == o.Round {
@@ -216,7 +214,7 @@ func (s *Controller) ShedObject(ctx context.Context, raw string, req ShedObjectR
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: o.Round, Objection: objection.ID, Action: "objected", Detail: reason}, nil
 }
 
-// shedRule records the owner's ruling on one objection that stands: sustained,
+// ShedRule records the owner's ruling on one objection that stands: sustained,
 // which blocks until it is conceded, or dismissed, which is kept as the
 // owner's disposition and blocks no longer.
 func (s *Controller) ShedRule(ctx context.Context, raw string, req ShedRuleRequest) (ShedResponse, *APIError) {
@@ -231,7 +229,7 @@ func (s *Controller) ShedRule(ctx context.Context, raw string, req ShedRuleReque
 	return s.Dispose(ctx, o, req.Objection, disposition, req.Note, "ruled")
 }
 
-// shedOverrule records that the owner decided to proceed in spite of one
+// ShedOverrule records that the owner decided to proceed in spite of one
 // objection that stands, charter vetoes included. It is a disposition of the
 // same kind as a ruling, recorded against the revision the documents are at,
 // and the objection blocks no longer.
@@ -243,7 +241,7 @@ func (s *Controller) ShedOverrule(ctx context.Context, raw string, req ShedOverr
 	return s.Dispose(ctx, o, req.Objection, shed.Overruled, req.Reason, "overruled")
 }
 
-// dispose records one disposition of one objection that stands in the owner's
+// Dispose records one disposition of one objection that stands in the owner's
 // rulings of the current round. Disposing of the same objection again replaces
 // the earlier disposition.
 func (s *Controller) Dispose(ctx context.Context, o *ShedOwner, objection string, disposition shed.Disposition, note, action string) (ShedResponse, *APIError) {
@@ -292,7 +290,7 @@ func (s *Controller) DisposeBy(ctx context.Context, o *ShedOwner, objection stri
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: o.Round, Objection: ruling.Objection, Action: string(disposition), Detail: reason}, nil
 }
 
-// shedRedraft records the owner's request for the architect to redraft the
+// ShedRedraft records the owner's request for the architect to redraft the
 // spec and the plan after debate concluded, with the note that says what to
 // change. The controller asks the architect for the redraft and debate
 // resumes with the round that reads it.
@@ -333,9 +331,6 @@ func (s *Controller) ShedRedraft(ctx context.Context, raw string, req ShedRedraf
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: n, Action: "redraft", Detail: reason}, nil
 }
 
-// redraftHanded asks the architect for a new run of drafts of a handed
-// workstream whose drafting stopped, with the owner's note. handed is false
-// for any other workstream, whose redraft is a shed action.
 func (s *Controller) redraftHanded(ctx context.Context, raw, note string) (ShedResponse, bool, *APIError) {
 	project, stream, repository, api := s.ConversationTrace(raw)
 	if api != nil {
@@ -360,7 +355,7 @@ func (s *Controller) redraftHanded(ctx context.Context, raw, note string) (ShedR
 	return ShedResponse{Project: project, Workstream: stream, Action: "redraft", Detail: detail}, true, nil
 }
 
-// shedSkip records that the owner skips debate. No further committee turn
+// ShedSkip records that the owner skips debate. No further committee turn
 // starts; the workstream stays in the shed and still needs the owner's
 // ratification of both documents.
 func (s *Controller) ShedSkip(ctx context.Context, raw string) (ShedResponse, *APIError) {
@@ -371,11 +366,6 @@ func (s *Controller) ShedSkip(ctx context.Context, raw string) (ShedResponse, *A
 	if o.Skipped {
 		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("debate on workstream %s is already skipped", o.Stream)}
 	}
-	// A turn already dispatched runs to its record whatever the owner does
-	// next, and a skipped debate runs no round for what it wrote, so the skip
-	// waits for it. A round parked on a member's question, and a reply or
-	// redraft parked on the architect's, holds no turn: the skip is recorded
-	// and it never resumes.
 	if kind, n, ok := ShedState(o.Shed.Value); ok && slices.Contains([]string{"round", "reply", "redraft"}, kind) {
 		running := fmt.Sprintf("round %d", n)
 		if kind != "round" {
@@ -397,8 +387,6 @@ func (s *Controller) ShedSkip(ctx context.Context, raw string) (ShedResponse, *A
 		}
 		return ShedResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the skipped debate of workstream %s; check the trace repository", o.Stream)}
 	}
-	// A sketched workstream enters the shed without a committee: a skipped
-	// debate runs no round, and ratification happens in the shed.
 	if o.Feature == SketchedState {
 		h := OwnerHeader(SkipTransition+"-"+InShedState, o.Project, o.Stream, "owner-shed", o.Now())
 		if _, err := o.Repository.MoveFeatureState(ctx, h, SketchedState, InShedState, reason); err != nil && !errors.Is(err, trace.ErrConflict) {
@@ -408,7 +396,7 @@ func (s *Controller) ShedSkip(ctx context.Context, raw string) (ShedResponse, *A
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: o.Round, Action: SkippedValue, Detail: reason}, nil
 }
 
-// shedMore records the owner's request for further rounds after debate
+// ShedMore records the owner's request for further rounds after debate
 // concluded. The controller resumes from the conclusion and runs them.
 func (s *Controller) ShedMore(ctx context.Context, raw string, req ShedMoreRequest) (ShedResponse, *APIError) {
 	o, api := s.ShedAction(raw, InShedState)
@@ -437,7 +425,7 @@ func (s *Controller) ShedMore(ctx context.Context, raw string, req ShedMoreReque
 	return ShedResponse{Project: o.Project, Workstream: o.Stream, Round: n, Rounds: req.Rounds, Action: "more", Detail: reason}, nil
 }
 
-// rounds counts rounds for a message.
+// Rounds counts rounds for a message.
 func Rounds(n int) string {
 	if n == 1 {
 		return "1 more round"

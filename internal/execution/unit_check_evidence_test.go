@@ -53,8 +53,8 @@ func TestUnitCheckRunWithoutEvidenceConvertsFromItsOtherFields(t *testing.T) {
 	t.Parallel()
 	const link = "dag://go/packages/tests/test?go-test=TestFlaky"
 	summary, _ := checkrun.SummarizeCheckOutput(failedReport(link)+"CHECKS  ✔ 1 passed\n✔ "+link+" 1.0s OK\n", 0)
-	old := UnitCheckRun{Unit: "resume", Run: 3, Status: ChecksPassed, Selection: &CheckSelection{Mode: "selected", Links: []string{link, "dag://go/lint"}}, Output: summary, OutputPath: "units/resume/checks-3-output.txt", OutputRevision: 1, Flaky: []string{link}}
-	data, err := json.Marshal(old)
+	recorded := UnitCheckRun{Unit: "resume", Run: 3, Status: ChecksPassed, Selection: &CheckSelection{Mode: "selected", Links: []string{link, "dag://go/lint"}}, Output: summary, OutputPath: "units/resume/checks-3-output.txt", OutputRevision: 1, Flaky: []string{link}}
+	data, err := json.Marshal(recorded)
 	must(t, err)
 	if strings.Contains(string(data), "evidence") {
 		t.Fatalf("a record without evidence stores %s", data)
@@ -62,7 +62,7 @@ func TestUnitCheckRunWithoutEvidenceConvertsFromItsOtherFields(t *testing.T) {
 	var loaded UnitCheckRun
 	must(t, json.Unmarshal(data, &loaded))
 	evidence := loaded.FlakeEvidence()
-	if evidence.Engine != api.CheckEngineLocal || !slices.Equal(evidence.CoRun, []string{link, "dag://go/lint"}) || evidence.OutputPath != old.OutputPath || len(evidence.Diagnostics) != 1 || !slices.Equal(evidence.Flaky, []string{link}) {
+	if evidence.Engine != api.CheckEngineLocal || !slices.Equal(evidence.CoRun, []string{link, "dag://go/lint"}) || evidence.OutputPath != recorded.OutputPath || len(evidence.Diagnostics) != 1 || !slices.Equal(evidence.Flaky, []string{link}) {
 		t.Fatalf("evidence %+v", evidence)
 	}
 	if len(evidence.Unavailable) != 1 || evidence.Unavailable[0].Item != api.CheckItemParallelism || evidence.Unavailable[0].Where != "units/resume/checks-3.json" {

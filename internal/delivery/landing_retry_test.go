@@ -8,9 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// moveBase lands the fixture's workstream once while the base branch has moved
-// since the review, so the landing ends base-moved, and returns the commit the
-// base moved to.
 func (f *landFixture) moveBase(decider LandDecider) string {
 	f.t.Helper()
 	moved := f.advanceUpstream("someone-else.txt")
@@ -30,8 +27,6 @@ func (f *landFixture) route() LandingRoute {
 	return route
 }
 
-// requireDropped checks that the retry dropped the route for a reason naming
-// want, landed nothing and asked for no further attempt.
 func (f *landFixture) requireDropped(want string) {
 	f.t.Helper()
 	route := f.route()
@@ -44,16 +39,12 @@ func (f *landFixture) requireDropped(want string) {
 	if f.landingAttempts() != 1 || f.feature() != AssembledState || f.pulls.Readies != 0 {
 		f.t.Fatalf("the dropped route left %d attempts, the workstream %s and %d pull requests ready", f.landingAttempts(), f.feature(), f.pulls.Readies)
 	}
-	// Later passes leave it dropped.
 	f.retry()
 	if f.landingAttempts() != 1 || f.route().Status != LandingRouteDropped {
 		f.t.Fatal("a pass after the route was dropped acted")
 	}
 }
 
-// A binding decision of Jev's to land is kept across the move of the base and
-// carried out on the rebased commit under Jev's authority, with the judgment it
-// rests on.
 func TestAJevDecisionToLandIsRetriedOnTheRebasedCommitUnderJev(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -81,8 +72,6 @@ func TestAJevDecisionToLandIsRetriedOnTheRebasedCommitUnderJev(t *testing.T) {
 	}
 }
 
-// The rebase brings a new push, but until its checks are recorded the route
-// waits; a pass never lands the commit that did not land.
 func TestAPendingRouteWaitsForTheChecksOfTheRebasedPush(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -97,8 +86,6 @@ func TestAPendingRouteWaitsForTheChecksOfTheRebasedPush(t *testing.T) {
 	}
 }
 
-// Checks that failed on the rebased push are the existing repair path's: the
-// route is dropped, nothing lands and the pull request is not marked ready.
 func TestAPendingRouteIsDroppedWhenChecksFailOnTheRebasedPush(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -111,9 +98,6 @@ func TestAPendingRouteIsDroppedWhenChecksFailOnTheRebasedPush(t *testing.T) {
 	}
 }
 
-// A new final review that leaves blocking findings to the owner never lands
-// automatically: the earlier acceptance is not carried over, the route is
-// dropped and the delivery is the owner's.
 func TestAPendingRouteIsDroppedWhenTheNewFinalReviewLeavesBlockingFindings(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -127,8 +111,6 @@ func TestAPendingRouteIsDroppedWhenTheNewFinalReviewLeavesBlockingFindings(t *te
 	}
 }
 
-// Every gate is rechecked on the retry: a dependency that waits to merge, or a
-// project that no longer lands, drops the route.
 func TestAPendingRouteIsDroppedWhenALandingGateNoLongerHolds(t *testing.T) {
 	t.Parallel()
 	t.Run("a hard-block dependency waits", func(t *testing.T) {
@@ -160,9 +142,6 @@ func TestAPendingRouteIsDroppedWhenALandingGateNoLongerHolds(t *testing.T) {
 	})
 }
 
-// A retry whose base moved again asks for another rebase and keeps the
-// decision, and each attempt lands a different, newly pushed commit: nothing is
-// pushed to the base branch twice.
 func TestARetryWhoseBaseMovedAgainKeepsTheDecisionAndLandsOnce(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -177,7 +156,6 @@ func TestARetryWhoseBaseMovedAgainKeepsTheDecisionAndLandsOnce(t *testing.T) {
 	if f.upstreamMain() != again || f.rebases != 2 || f.landingAttempts() != 2 || f.stepCount("land-pushed") != 0 {
 		t.Fatalf("base at %s, %d rebases, %d attempts, %d pushes", f.upstreamMain(), f.rebases, f.landingAttempts(), f.stepCount("land-pushed"))
 	}
-	// The same push is not landed again.
 	f.retry()
 	if f.landingAttempts() != 2 {
 		t.Fatalf("%d attempts", f.landingAttempts())

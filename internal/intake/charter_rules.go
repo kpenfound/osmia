@@ -16,11 +16,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// charterActor records the charter revisions that append ratified rules and
+// CharterActor records the charter revisions that append ratified rules and
 // the proposals' moves to chartered.
 var CharterActor = trace.Actor{Kind: "service", ID: "charter"}
 
-// charterWriteAttempts bounds how often one pass rereads the charter after
+// CharterWriteAttempts bounds how often one pass rereads the charter after
 // the owner's concurrent edit took the revision a ratified rule was written
 // against.
 const CharterWriteAttempts = 3
@@ -31,7 +31,7 @@ func RenderCharterProposalView(p trace.CharterProposalState, detail string) Char
 		Decision: p.Proposal.Decision, Note: p.Proposal.Note, DecidedBy: p.Proposal.DecidedBy, Judgment: p.Proposal.Judgment, Charter: p.Proposal.Charter, Detail: detail}
 }
 
-// findCharterProposal returns the charter proposal made from question of the
+// FindCharterProposal returns the charter proposal made from question of the
 // workstream, and whether there is one.
 func FindCharterProposal(repository *trace.Repository, stream config.WorkstreamID, question string) (trace.CharterProposalState, bool, error) {
 	proposals, err := repository.CharterProposals()
@@ -65,7 +65,7 @@ func (s *Controller) CharterProposalLocation(repository *trace.Repository, strea
 	return repository, stream, question, nil
 }
 
-// charterProposals lists the charter proposals of every active project that
+// CharterProposals lists the charter proposals of every active project that
 // wait for the owner, leaving out those of abandoned workstreams.
 func (s *Controller) CharterProposals() (CharterProposalsResponse, *APIError) {
 	cfg, projects := s.Runtimes()
@@ -97,7 +97,7 @@ func (s *Controller) CharterProposals() (CharterProposalsResponse, *APIError) {
 	return out, nil
 }
 
-// charterProposal serves the charter proposal made from one question of a
+// CharterProposal serves the charter proposal made from one question of a
 // workstream, whatever its state.
 func (s *Controller) CharterProposal(raw, question string) (CharterProposalView, *APIError) {
 	_, stream, repository, api := s.ConversationTrace(raw)
@@ -118,7 +118,7 @@ func (s *Controller) CharterProposal(raw, question string) (CharterProposalView,
 	return RenderCharterProposalView(p, ""), nil
 }
 
-// decideCharter records the owner's decision on a charter proposal.
+// DecideCharter records the owner's decision on a charter proposal.
 func (s *Controller) DecideCharter(ctx context.Context, raw, question string, req CharterDecisionRequest) (CharterProposalView, *APIError) {
 	project, stream, repository, api := s.ConversationTrace(raw)
 	if api != nil {
@@ -127,7 +127,7 @@ func (s *Controller) DecideCharter(ctx context.Context, raw, question string, re
 	return s.RecordCharterDecision(ctx, project, stream, repository, question, req, OwnerActor, "owner-charter")
 }
 
-// recordCharterDecision records one decision on a proposed charter rule, as
+// RecordCharterDecision records one decision on a proposed charter rule, as
 // the actor: the next revision of the proposal's charter.json with the
 // decision, and its move to ratified or declined, in one commit. A declined
 // proposal tells the chief of staff; a ratified one does when its rule is in
@@ -211,17 +211,17 @@ func (s *Controller) RecordCharterDecisionBy(ctx context.Context, _ config.Proje
 	return RenderCharterProposalView(p, reason), nil
 }
 
-// decideCharterTool records the owner's decision on a charter proposal that
+// DecideCharterTool records the owner's decision on a charter proposal that
 // the owner gave the chief of staff in a message.
 const DecideCharterTool = "decide_charter"
 
-// charterGuidance tells the chief of staff when and how to use
+// CharterGuidance tells the chief of staff when and how to use
 // decide_charter. It belongs in the system prompt of every owner message
 // turn.
 const CharterGuidance = "When the owner's message ratifies or declines a charter rule you proposed, call decide_charter with the question the proposal came from, the owner's decision and the owner's own words as the note. " +
 	"Never decide a proposal the owner has not decided in the message; the owner can also decide it with osmia charter."
 
-// decideCharter returns the decide_charter tool of one claimed
+// DecideCharter returns the decide_charter tool of one claimed
 // chief-of-staff turn. It records the same decision as POST
 // /charter/<workstream>/<question> on the turn's workstream, with the owner
 // whose message the turn answers as its actor. A decision the service
@@ -279,13 +279,13 @@ func (c *Controls) DecideCharter(repository *trace.Repository, scope coreadapter
 	return tool
 }
 
-// charterer appends ratified charter rules to the project's charter.
+// Charterer appends ratified charter rules to the project's charter.
 type Charterer struct {
 	S          *ChartererDependencies
 	Repository *trace.Repository
 }
 
-// charterSource is the provenance a ratified rule carries in the charter, and
+// CharterSource is the provenance a ratified rule carries in the charter, and
 // the cause of the charter revision that appends it: the proposal's path.
 func CharterSource(p trace.CharterProposalState) string {
 	return "workstreams/" + string(p.Workstream) + "/" + p.Latest.Path
@@ -313,7 +313,7 @@ func (c Charterer) Pass(ctx context.Context) error {
 	return nil
 }
 
-// write appends a ratified proposal's rule to the charter as its next number,
+// Write appends a ratified proposal's rule to the charter as its next number,
 // then records the number and the charter revision in the proposal and moves
 // it to chartered, which tells the workstream's chief of staff. The charter
 // revision's cause is the proposal's path, so a charter revision recorded
@@ -357,8 +357,6 @@ func (c Charterer) Write(ctx context.Context, p trace.CharterProposalState) erro
 	if err := c.S.Step("charter-written"); err != nil {
 		return err
 	}
-	// The appended rule has the highest number of the revision that appended
-	// it.
 	next := p.Proposal
 	next.Number, next.Charter = charter.Parse(written.Content).Next()-1, written.Revision
 	content, err := json.MarshalIndent(next, "", "  ")
@@ -382,7 +380,7 @@ func (c Charterer) Write(ctx context.Context, p trace.CharterProposalState) erro
 	return nil
 }
 
-// written returns the charter revision that appended the rule of the
+// Written returns the charter revision that appended the rule of the
 // proposal at source, or nil when none did.
 func (c Charterer) Written(source string) (*trace.Document, error) {
 	docs, err := c.Repository.ProjectDocuments()

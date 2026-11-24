@@ -110,12 +110,9 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	case p.Delivered && !p.Maintenance:
 		return InboxEntry{}, false, nil
 	}
-	// The entry waits for the chief of staff's brief on this review.
 	if p.Brief != nil && p.Brief.State == BriefWaiting {
 		return InboxEntry{}, false, nil
 	}
-	// A decision to land that waits to be retried on the rebased commit is the
-	// delivery's decision: nobody is asked until the retry lands or drops it.
 	if _, retrying, err := PendingLandingRoute(repository, stream); err != nil || retrying {
 		return InboxEntry{}, false, err
 	}
@@ -125,15 +122,10 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 		return InboxEntry{}, false, err
 	}
 	if p.Approval != nil && p.Approval.Route == DeliveryRouteLand {
-		// An approval to land stands until the landing delivers the workstream:
-		// while a landing is held, being reconciled or falling back, the card
-		// stays away. It comes back if the landing ended without delivering.
 		if pending, err := landingPending(repository, stream); err != nil || pending {
 			return InboxEntry{}, false, err
 		}
 	} else if pending, err := landingPending(repository, stream); err != nil || pending {
-		// Jev's decision to land is under way: it delivers the workstream, or is
-		// refused, before the owner is asked.
 		return InboxEntry{}, false, err
 	} else if p.Approval != nil {
 		if refused, err := PublicationRefused(repository, stream, prior.Revision); err != nil || !refused {
@@ -169,8 +161,6 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 	}
 	e.Blocked = "Marking the pull request ready for review."
 	e.Options = []string{"approve"}
-	// A project that lands offers the same decision as a second answer, which
-	// moves its base branch to the checked commit instead.
 	if cfg := s.About(repository); p.CanLand {
 		e.Options = append(e.Options, "land")
 		e.Land = &InboxAnswer{Method: http.MethodPost, Path: e.Answer.Path + "/land", Body: body}

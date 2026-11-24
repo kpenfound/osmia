@@ -16,8 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// boundedLanding is a landing of the approved unit "resume" asked for and a
-// controller that reconciles it, with every other operation held.
 type boundedLanding struct {
 	f          *buildFixture
 	stream     config.WorkstreamID
@@ -41,9 +39,6 @@ func newBoundedLanding(t *testing.T, key string, options reconcile.Options) *bou
 	return &boundedLanding{f, stream, repository, lands, options, controller}
 }
 
-// withDeadlines replaces the controller with one whose attempts and
-// reconciliations are bounded by the given deadlines, zero meaning the ones
-// it has in service. The operation's history stays in the trace.
 func (b *boundedLanding) withDeadlines(t *testing.T, attempt, reconciliation time.Duration) {
 	t.Helper()
 	b.options.AttemptDeadline, b.options.ReconcileDeadline = attempt, reconciliation
@@ -52,7 +47,6 @@ func (b *boundedLanding) withDeadlines(t *testing.T, attempt, reconciliation tim
 	b.controller = controller
 }
 
-// pass makes the given number of passes a minute apart.
 func (b *boundedLanding) pass(t *testing.T, passes int) {
 	t.Helper()
 	for range passes {
@@ -70,8 +64,6 @@ func (b *boundedLanding) operation(t *testing.T) trace.OperationRecord {
 	return ops[0]
 }
 
-// notices returns the bodies of the notices the chief of staff was sent that
-// contain the words.
 func (b *boundedLanding) notices(t *testing.T, words string) []string {
 	t.Helper()
 	entries, err := b.repository.Outbox(b.stream)
@@ -95,18 +87,13 @@ func (b *boundedLanding) transitionsTo(t *testing.T, prefix string) []string {
 	t.Helper()
 	var ids []string
 	for _, tr := range allTransitions(t, b.f.cfg.Root, b.f.cfg.Project.ID, b.stream) {
-		if tr.Subject == landingSubject("resume") && strings.HasPrefix(tr.To, prefix) {
+		if tr.Subject == LandingSubject("resume") && strings.HasPrefix(tr.To, prefix) {
 			ids = append(ids, tr.ID)
 		}
 	}
 	return ids
 }
 
-// A landing that keeps failing with its commit confirmed absent ends, past the
-// failure limit and the give-up window, in a refusal through the landing's own
-// refuse path. The chief of staff is told once at the third failure and once of
-// the refusal, the refusal says the failure was not about the approval, and
-// nothing was committed.
 func TestLandingThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testing.T) {
 	t.Parallel()
 	b := newBoundedLanding(t, "give-up-absent", reconcile.Options{GiveUpWindow: 10 * time.Minute})
@@ -118,7 +105,6 @@ func TestLandingThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testi
 		}
 		return nil
 	}
-	// Past the failure limit, inside the window: still retrying.
 	b.pass(t, reconcile.GiveUpFailures+2)
 	if op := b.operation(t); op.Result != nil || reconcile.ConsecutiveFailures(op) != reconcile.GiveUpFailures+2 {
 		t.Fatalf("after %d failures: %+v", reconcile.GiveUpFailures+2, op)
@@ -126,7 +112,6 @@ func TestLandingThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testi
 	if got := b.notices(t, "has failed 3 times in a row"); len(got) != 1 || !strings.Contains(got[0], "The landing of unit resume") || !strings.Contains(got[0], "the clone is unreachable") {
 		t.Fatalf("notices at the third failure: %q", got)
 	}
-	// The window passes: the operation is refused.
 	b.pass(t, 8)
 	op := b.operation(t)
 	if op.Result == nil || op.Result.Outcome != "failed" || !op.Acknowledged {
@@ -159,9 +144,6 @@ func TestLandingThatKeepsFailingIsRefusedOnceItsCommitIsConfirmedAbsent(t *testi
 	}
 }
 
-// A landing whose commit already reached the feature branch is recorded
-// through its own success path when it is given up, not refused, and the commit
-// is not made again.
 func TestLandingWhoseCommitIsOnItsTargetIsRecordedWhenGivenUp(t *testing.T) {
 	t.Parallel()
 	b := newBoundedLanding(t, "give-up-completed", reconcile.Options{GiveUpWindow: 10 * time.Minute})
@@ -206,9 +188,6 @@ func TestLandingWhoseCommitIsOnItsTargetIsRecordedWhenGivenUp(t *testing.T) {
 	}
 }
 
-// A landing recorded durably before the controller wrote its result keeps its
-// success, even past the failure limit and the window: giving up is considered
-// only after inspection finds no durable outcome.
 func TestDurableLandingIsKeptPastTheGiveUpThreshold(t *testing.T) {
 	t.Parallel()
 	b := newBoundedLanding(t, "give-up-durable", reconcile.Options{GiveUpWindow: 10 * time.Minute})
@@ -220,14 +199,11 @@ func TestDurableLandingIsKeptPastTheGiveUpThreshold(t *testing.T) {
 		return nil
 	}
 	b.pass(t, reconcile.GiveUpFailures+1)
-	// The landing is recorded, and the service stops before the controller
-	// writes the operation's result.
 	mode = "crash"
 	b.pass(t, 1)
 	if op := b.operation(t); op.Result != nil || len(b.transitionsTo(t, "landed-")) != 1 {
 		t.Fatalf("the landing was not recorded durably before its result: %+v", op)
 	}
-	// The streak is now past the limit and the window.
 	mode = "unreachable"
 	jump(b.f.clock, b.f.clock.Now().Add(time.Hour))
 	b.pass(t, 1)
@@ -243,11 +219,6 @@ func TestDurableLandingIsKeptPastTheGiveUpThreshold(t *testing.T) {
 	}
 }
 
-// An attempt blocked on a clone lock held past its deadline is a retry that
-// names lock contention and changes nothing. When the landing is given up while
-// the clone is still held, its outcome is recorded as one that could not be
-// determined: never a refusal that says the commit is absent, and the chief of
-// staff is told. The lock outlives the attempt; the operation does not.
 func TestLandingGivenUpOnAHeldCloneSaysItsOutcomeCouldNotBeDetermined(t *testing.T) {
 	t.Parallel()
 	b := newBoundedLanding(t, "give-up-held", reconcile.Options{GiveUpWindow: 10 * time.Minute, AttemptDeadline: 100 * time.Millisecond, ReconcileDeadline: 100 * time.Millisecond})
@@ -297,8 +268,6 @@ func TestLandingGivenUpOnAHeldCloneSaysItsOutcomeCouldNotBeDetermined(t *testing
 	if got := b.notices(t, "may or may not have landed"); len(got) != 1 {
 		t.Fatalf("notices of the unknown outcome: %q", got)
 	}
-	// The operation is over, and the lock is not: a later step still gives up
-	// at its own deadline instead of hanging.
 	waited, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := workspace.Quiesced(waited, []workspace.Provider{g}, func(context.Context) error { return nil }); !workspace.IsContention(err) {
@@ -307,12 +276,9 @@ func TestLandingGivenUpOnAHeldCloneSaysItsOutcomeCouldNotBeDetermined(t *testing
 	close(release)
 	released = true
 	must(t, <-finished)
-	// Once the process is gone the clone is quiesced again and reads normally.
 	must(t, workspace.Quiesced(context.Background(), []workspace.Provider{g}, func(context.Context) error { return nil }))
 }
 
-// A landing still pending when its workstream is abandoned ends in a refusal
-// that says so, instead of staying in flight.
 func TestPendingLandingOfAnAbandonedWorkstreamReachesARefusal(t *testing.T) {
 	t.Parallel()
 	b := newBoundedLanding(t, "abandoned-landing", reconcile.Options{})
@@ -329,11 +295,6 @@ func TestPendingLandingOfAnAbandonedWorkstreamReachesARefusal(t *testing.T) {
 	}
 }
 
-// A landing whose clone is held by a process that outlived an earlier attempt
-// keeps retrying while the clone is held and is never refused for it. Once the
-// process is gone the clone is read again: the landing is recorded as landed
-// once, whether its commit reached the feature branch before the hold or is
-// made after it, and the commit is never made twice.
 func TestLandingIsRecordedOnceWhenAHeldCloneIsReleased(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -357,15 +318,11 @@ func TestLandingIsRecordedOnceWhenAHeldCloneIsReleased(t *testing.T) {
 			g, err := featureWorkspaces(b.f.cfg, b.repository).Of(b.stream)
 			must(t, err)
 			if tc.committed {
-				// The first attempt makes the commit and stops before recording it.
 				b.pass(t, 1)
 				if op := b.operation(t); op.Result != nil || len(b.landedCommits(t)) != 1 {
 					t.Fatalf("the first attempt: %+v, commits %v", op, b.landedCommits(t))
 				}
 			}
-			// An attempt on the held clone only waits for it, so it gets a short
-			// deadline; one that does the landing gets the deadline it has in
-			// service.
 			b.withDeadlines(t, 100*time.Millisecond, 100*time.Millisecond)
 			holding, release := make(chan struct{}), make(chan struct{})
 			finished := make(chan error, 1)

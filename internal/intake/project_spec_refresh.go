@@ -7,7 +7,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// sliceMatchesPin compares the slice with the exact recorded member revisions
+// SliceMatchesPin compares the slice with the exact recorded member revisions
 // used by both owner ratification and recovery of member decisions.
 func SliceMatchesPin(spec trace.ProjectSpec, repo *trace.Repository, member config.WorkstreamID, pin shed.Pin) (bool, error) {
 	slice, covered := trace.SliceFor(spec, member)

@@ -98,8 +98,6 @@ func (r FinalCheckRun) FlakeEvidence() api.CheckEvidence {
 	return evidence
 }
 
-// failedBeforeRerun lists the checks the record shows failed: those of the
-// rerun's failing posting and those still failing.
 func (r FinalCheckRun) failedBeforeRerun() []api.CheckFailure {
 	var failed []api.CheckFailure
 	for _, rerun := range r.Reruns {
@@ -117,8 +115,8 @@ func FinalChecksDocument(k int) string { return fmt.Sprintf("final-checks-%d", k
 
 func FinalChecksPath(k int) string { return fmt.Sprintf("final/checks-%d.json", k) }
 
-// FinalCheckAttempt is the start evidence a local check run on the rebased,
-// exported commit recorded, read from workstreams that hold such records.
+// FinalCheckAttempt is the start record of a local check run on the rebased,
+// exported commit.
 type FinalCheckAttempt struct {
 	Review    int             `json:"review"`
 	Attempt   int             `json:"attempt"`
@@ -161,9 +159,6 @@ type FinalCheckRerunRecord struct {
 	api.CheckRerun
 }
 
-// refused reports whether the request finished with an error, so Dagger Cloud
-// made no rerun. A request with no recorded end may have reached Dagger Cloud
-// before a restart, so it counts as made.
 func (r *FinalCheckRerunRecord) refused() bool {
 	return r != nil && !r.FinishedAt.IsZero() && r.Error != ""
 }
@@ -180,9 +175,7 @@ const (
 	// FinalChecksWait is how long after a push the service makes no status
 	// poll, so Dagger Cloud has the time to post its first statuses.
 	FinalChecksWait = 2 * time.Minute
-	// rerunSkew is the clock difference tolerated between the service and
-	// GitHub when a status is compared with the time a rerun was requested.
-	rerunSkew = 30 * time.Second
+	rerunSkew       = 30 * time.Second
 )
 
 // FinalCheckDelay is how long final review checks wait to be read again after
@@ -196,10 +189,7 @@ func FinalCheckDelay(n int) time.Duration {
 	return min(delay, time.Hour)
 }
 
-// polled remembers when each push's statuses were last read, so the reads
-// follow pull_request_poll. A restart forgets it and reads once at once; the
-// wait after the push is measured from the recorded push.
-var polled sync.Map // pollKey -> time.Time
+var polled sync.Map
 
 type pollKey struct {
 	repository *trace.Repository
@@ -251,9 +241,9 @@ func (e *WaitingChecksError) Error() string {
 // pushes it, and a service holding no GitHub credential returns a
 // MissingCredentialError instead of a record without a result.
 //
-// A completed record of the commit, from this watch or from an older local
-// run, is returned as it is. Reviews of delivered workstreams (maintenance)
-// push nothing and have no pull request statuses to wait for.
+// A completed record of the commit is returned as it is. Reviews of delivered
+// workstreams (maintenance) push nothing and have no pull request statuses to
+// wait for.
 //
 // A recorded failed result, whether recorded now or found already recorded,
 // has the trace output of each failed check that names a trace ID recorded
@@ -304,8 +294,6 @@ func (a *FinalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 		return FinalCheckRun{}, err
 	}
 	watch := &finalWatch{a: a, cfg: cfg, stream: stream, report: report, push: push}
-	// The owner's choice to continue without check results applies to the
-	// push it was made about and to no other.
 	if choice, recorded, err := ReadChecksChoice(a.Repository, stream, push.Number); err != nil {
 		return FinalCheckRun{}, err
 	} else if recorded && choice.State == ChecksChoiceContinue && choice.Concerns(push) {
@@ -314,15 +302,12 @@ func (a *FinalReviewer) finalChecks(ctx context.Context, cfg *config.Config, str
 	return watch.step(ctx, incomplete, latest)
 }
 
-// finalWatch is one attempt to settle the check result of one push.
 type finalWatch struct {
-	a      *FinalReviewer
-	cfg    *config.Config
-	stream config.WorkstreamID
-	report FinalReport
-	push   Push
-	// rerun is the push's rerun record when Dagger Cloud made the rerun it
-	// requested; refusedRerun is the record when it refused the request.
+	a            *FinalReviewer
+	cfg          *config.Config
+	stream       config.WorkstreamID
+	report       FinalReport
+	push         Push
 	rerun        *FinalCheckRerunRecord
 	refusedRerun *FinalCheckRerunRecord
 }
@@ -424,7 +409,6 @@ func statusID(s *pulls.CommitStatus) int64 {
 	return s.ID
 }
 
-// since says what the checks_timeout of the run counts from.
 func (w *finalWatch) since() string {
 	if w.rerun != nil {
 		return "rerun request"
@@ -432,11 +416,6 @@ func (w *finalWatch) since() string {
 	return "push"
 }
 
-// freshStatus reports whether status was posted by the rerun the record
-// holds: a posting other than the failing one that asked for it, and not
-// created before the request (less rerunSkew for the difference between the
-// two clocks). The failure still showing after the request is the same
-// posting as the recorded one, so it is never fresh.
 func (w *finalWatch) freshStatus(status *pulls.CommitStatus) bool {
 	if w.rerun == nil {
 		return true
@@ -476,10 +455,6 @@ func (w *finalWatch) record(ctx context.Context, result checkrun.CloudResult, re
 	return run, nil
 }
 
-// flakes returns the originally failed checks the rerun's evidence shows
-// passed: all of them when the fresh run has no failure, otherwise those whose
-// own status was posted as a success after the request. Whatever has no such
-// evidence stays failed.
 func (w *finalWatch) flakes(result checkrun.CloudResult, read pulls.CommitStatuses) []string {
 	var out []string
 	for _, original := range w.rerun.Failed {
@@ -519,8 +494,6 @@ func (w *finalWatch) recordIncomplete(ctx context.Context, incomplete int, lates
 	return run, IncompleteChecksError(run, incomplete+1, run.FinishedAt.Add(FinalCheckDelay(incomplete+1)))
 }
 
-// captureEvidence records what the Cloud statuses show about how the run ran,
-// from the result read and the checks the record names.
 func (w *finalWatch) captureEvidence(run *FinalCheckRun, result checkrun.CloudResult) {
 	evidence := checkrun.CloudEvidence(result, run.failedBeforeRerun(), run.Flaky)
 	run.Evidence = &evidence
@@ -533,8 +506,6 @@ func checkRef(s *pulls.CommitStatus) api.CheckStatusRef {
 	return api.CheckStatusRef{ID: s.ID, State: s.State, TargetURL: s.TargetURL, CreatedAt: s.CreatedAt}
 }
 
-// base is the record of a result before its status: the push it belongs to
-// and what the statuses showed.
 func (w *finalWatch) base(result checkrun.CloudResult) FinalCheckRun {
 	now := w.a.S.Now()
 	run := FinalCheckRun{Review: w.report.Review, Operation: w.report.Operation, Commit: w.report.Commit, Source: api.CheckSourcePullRequest, PullRequest: w.push.PullRequest, Push: w.push.Number, PushedCommit: w.push.Commit, PushedAt: w.push.At, StartedAt: w.push.At, FinishedAt: now, StatusURL: result.StatusURL}
@@ -588,15 +559,6 @@ func ReadFinalCheckRerun(repository *trace.Repository, stream config.WorkstreamI
 	return out, nil
 }
 
-// rerunChecks asks Dagger Cloud once to rerun the failed checks of the push
-// whose failure result shows. The request is recorded durably, with the push,
-// the time and the identity of the failing posting and its failed checks,
-// before the command runs, so a restart that finds the record never runs it
-// again, and the failing posting that stays on the commit is told apart from
-// the rerun's own. The command runs in the workstream's checkout with the API
-// token cloud_api_token_env names, in the organization rerunOrganization
-// gives. When Dagger Cloud refuses the request, the finished record is kept
-// in w.refusedRerun and w.rerun stays nil.
 func (w *finalWatch) rerunChecks(ctx context.Context, result checkrun.CloudResult) error {
 	a := w.a
 	rerunner := a.S.CloudRerun
@@ -658,15 +620,10 @@ func (w *finalWatch) writeRerun(ctx context.Context, record FinalCheckRerunRecor
 	return a.Repository.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{doc})
 }
 
-// loadMissingSubject is the workflow subject that carries the one chief of
-// staff notice sent for a push whose `load` status never appeared.
 func loadMissingSubject(review, push int) string {
 	return fmt.Sprintf("final-checks-%d-push-%d-load", review, push)
 }
 
-// noticeLoadMissing sends the chief of staff the notice that Dagger Cloud has
-// posted no `load` status for the pushed commit, once for the push: a retry,
-// a later poll and a restart find the notice recorded and send nothing.
 func (w *finalWatch) noticeLoadMissing(ctx context.Context) error {
 	a := w.a
 	subject := loadMissingSubject(w.report.Review, w.push.Number)

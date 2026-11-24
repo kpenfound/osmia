@@ -23,9 +23,6 @@ func (f *landFixture) hostWrites() (closes, comments int) {
 	return f.pulls.Closes, len(f.pulls.Comments)
 }
 
-// A landed workstream whose draft pull request is still open has it closed by
-// one poll, with one comment naming the landed commit and the base branch. Later
-// polls and a restart, which remembers only the trace, post nothing more.
 func TestALandedWorkstreamsOpenPullRequestIsClosedOnceWithACommentNamingTheLandedCommit(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -62,7 +59,6 @@ func TestALandedWorkstreamsOpenPullRequestIsClosedOnceWithACommentNamingTheLande
 		t.Fatalf("the recorded outcome is %+v at revision %d", outcome, revision)
 	}
 
-	// Later polls and a restart find nothing to do and write nothing.
 	f.pulls.Mu.Lock()
 	finds := f.pulls.Finds
 	f.pulls.Mu.Unlock()
@@ -85,8 +81,6 @@ func TestALandedWorkstreamsOpenPullRequestIsClosedOnceWithACommentNamingTheLande
 	}
 }
 
-// A close whose response is lost reached the host: the next poll finds the pull
-// request closed, records it and comments no more.
 func TestALostCloseResponseIsNotRepeatedByTheNextPoll(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -111,9 +105,6 @@ func TestALostCloseResponseIsNotRepeatedByTheNextPoll(t *testing.T) {
 	}
 }
 
-// A pull request the host already shows merged or closed after the landing is
-// left alone, and the workstream's delivered and resolved state is the
-// landing's, unchanged by the poll.
 func TestAPullRequestAlreadyMergedOrClosedAfterTheLandingIsLeftAlone(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -171,9 +162,6 @@ func TestAPullRequestAlreadyMergedOrClosedAfterTheLandingIsLeftAlone(t *testing.
 	}
 }
 
-// A workstream delivered by a pull request, with the pull request closed by
-// the owner, is not touched: only a landed workstream has its pull request
-// settled.
 func TestAWorkstreamThatDidNotLandHasItsPullRequestLeftAlone(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
@@ -186,8 +174,6 @@ func TestAWorkstreamThatDidNotLandHasItsPullRequestLeftAlone(t *testing.T) {
 	}
 }
 
-// The delivery presentation of a landed workstream reports its landing, with
-// the landed commit, and not a merge or a ready pull request.
 func TestTheDeliveryPresentationOfALandedWorkstreamReportsTheLanding(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)

@@ -88,10 +88,6 @@ func RecoveryTarget(state string) string {
 	return ""
 }
 
-// unitTarget describes the states a unit moves to, for the router. Checking,
-// reviewing and approved work on the unit's candidate. Approved is entered only
-// on a reviewer's verdict or the owner's decision, and merged only after a
-// landing.
 func unitTarget(name string) router.Target {
 	switch name {
 	case TargetWait:
@@ -99,10 +95,6 @@ func unitTarget(name string) router.Target {
 	case UnitImplementing:
 		return router.Target{Name: name, Description: "Give the unit's mason a turn with a fresh clean-turn allowance to revise the unit.", Bar: router.BarModest, Works: true}
 	case UnitChecking:
-		// Running the project's checks is no agent session: it spends neither the
-		// budget nor the loop guard's sessions, and the checks pass itself holds the
-		// run while a pause covers the workstream, so entering the state starts no
-		// agent work.
 		return router.Target{Name: name, Description: "Run the checks again on the unit's recorded candidate.", Bar: router.BarModest, NeedsCandidate: true}
 	case UnitReviewing:
 		return router.Target{Name: name, Description: "Have the unit's reviewer review the recorded candidate again.", Bar: router.BarModest, NeedsCandidate: true, Works: true}
@@ -122,8 +114,6 @@ func unitTarget(name string) router.Target {
 	return router.Target{Name: name, Description: name}
 }
 
-// standardTargets are the states the owner and the chief of staff move a
-// started unit to.
 var standardTargets = []string{UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
 
 // UnitExitInput is what a caller knows of an exit of a started unit.
@@ -246,9 +236,6 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 				return "", nil
 			},
 			Operations: func(_ context.Context, t router.Target) (string, error) {
-				// Every target waits for a landing or rebase of the unit to end,
-				// however it is reached; only the operation whose completion
-				// raised the exit does not hold it.
 				action, err := unitOperationExcept(in.Repo, in.Stream, in.Unit, in.Operation)
 				switch {
 				case err != nil:
@@ -261,8 +248,6 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 				return "", nil
 			},
 			Limits: func(ctx context.Context, t router.Target) (string, error) {
-				// A target that starts agent work stops at an exhausted budget or
-				// a tripped loop guard, however it is reached.
 				if !t.Works || s.Limits == nil {
 					return "", nil
 				}
@@ -301,11 +286,6 @@ func (s *Controller) UnitExit(in UnitExitInput) (router.Exit, error) {
 	return x, nil
 }
 
-// raise routes the exit of a started unit. A scheduling pass sets scheduled: when
-// the scheduler runs it, its exit is handed to the router's worker, which asks
-// Jev beside the pass, and the caller treats the unit as handled until a later
-// pass finds it moved or held. Any other caller waits in place, a pass run
-// directly included. The result of a handed-off exit is empty.
 func (s *Controller) raise(ctx context.Context, scheduled bool, in UnitExitInput) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing unit exits is unavailable")
@@ -324,15 +304,10 @@ func (s *Controller) raise(ctx context.Context, scheduled bool, in UnitExitInput
 	return s.Router.Route(ctx, x)
 }
 
-// sentBack reports whether a routed exit sent the unit to its mason by the
-// trigger's own default, whose findings the caller queues, and not by another
-// target, whose move gives the mason its turn.
 func sentBack(res router.Result) bool {
 	return res.Committed && res.Target == UnitImplementing && res.Outcome != router.OutcomeDeparted
 }
 
-// unitIntent is the sealed task and acceptance of the unit, as the intent Jev
-// reads; a unit the seal does not name has none.
 func (s *Controller) unitIntent(repo *trace.Repository, stream config.WorkstreamID, unit string) string {
 	u, err := sealedUnit(repo, coreadapter.Scope{Workstream: string(stream), Unit: unit})
 	if err != nil {
@@ -346,8 +321,6 @@ func (s *Controller) unitIntent(repo *trace.Repository, stream config.Workstream
 	return b.String()
 }
 
-// unitOperationExcept is unitOperation for an operation other than the one
-// named: the operation that raises an exit does not hold it.
 func unitOperationExcept(repo *trace.Repository, stream config.WorkstreamID, unit, except string) (string, error) {
 	records, err := repo.Operations(stream)
 	if err != nil {
@@ -406,9 +379,6 @@ func RegisterUnitEffects(reg *router.Effects, load func() *Controller) {
 	}
 }
 
-// moveCause is the record a move cites: the chief-of-staff turn that made it, or
-// else the transition into the state it leaves; for any other exit, the record
-// that raised it.
 func (s *Controller) moveCause(x router.Exit) (string, error) {
 	if x.Turn != "" {
 		return x.Turn, nil
@@ -460,9 +430,6 @@ func RebuildUnitExit(load func() *Controller) router.Rebuilder {
 	}
 }
 
-// triggerSpec is what is particular to a trigger: the one-line description of
-// a target as this trigger offers it, the trigger's own narrow questions, and
-// what their answers must show for the router to depart to a target.
 type triggerSpec struct {
 	describe    map[string]string
 	questions   []router.Question
@@ -473,23 +440,24 @@ func question(name, instructions string) router.Question {
 	return router.Question{Name: name, Instructions: instructions}
 }
 
-func atLeast(q string, l router.Level) router.Condition { return router.Condition{Question: q, AtLeast: l} }
-func atMost(q string, l router.Level) router.Condition  { return router.Condition{Question: q, AtMost: l} }
+func atLeast(q string, l router.Level) router.Condition {
+	return router.Condition{Question: q, AtLeast: l}
+}
+func atMost(q string, l router.Level) router.Condition {
+	return router.Condition{Question: q, AtMost: l}
+}
 
-// triggerSpecs defines, per trigger of a unit's exits, what the router asks Jev
-// beyond the questions every exit has. Each question is answered as a
-// probability of a proposition about the records in the summary.
 var triggerSpecs = map[string]triggerSpec{
 	TriggerMasonDone: {
-		describe:  map[string]string{UnitChecking: "Run the project's checks on the candidate the mason reported.", UnitContested: "Hold the unit for the owner: its report says it cannot meet its acceptance."},
-		questions: []router.Question{question("report_blocked", "The mason's report says its work is blocked or the acceptance cannot hold."), question("report_matches", "The report's outcome addresses the unit's task.")},
+		describe:    map[string]string{UnitChecking: "Run the project's checks on the candidate the mason reported.", UnitContested: "Hold the unit for the owner: its report says it cannot meet its acceptance."},
+		questions:   []router.Question{question("report_blocked", "The mason's report says its work is blocked or the acceptance cannot hold."), question("report_matches", "The report's outcome addresses the unit's task.")},
 		corroborate: map[string][]router.Condition{UnitContested: {atLeast("report_blocked", router.LevelModest)}},
 	},
 	TriggerMasonEndedClean: endedCleanSpec,
 	TriggerMarkersLeft:     endedCleanSpec,
 	TriggerTurnFailed: {
-		describe: map[string]string{UnitImplementing: "Queue a fresh turn for the unit's mason.", UnitReviewing: "Run a new review turn over the same candidate.", UnitContested: "Hold the unit for the owner to rule on."},
-		questions: []router.Question{question("transient", "The failure looks like infrastructure and not like the behaviour of the work."), question("repeats", "The same failure has repeated across the turns shown.")},
+		describe:    map[string]string{UnitImplementing: "Queue a fresh turn for the unit's mason.", UnitReviewing: "Run a new review turn over the same candidate.", UnitContested: "Hold the unit for the owner to rule on."},
+		questions:   []router.Question{question("transient", "The failure looks like infrastructure and not like the behaviour of the work."), question("repeats", "The same failure has repeated across the turns shown.")},
 		corroborate: map[string][]router.Condition{UnitImplementing: {atLeast("transient", router.LevelModest), atMost("repeats", router.LevelHalf)}, UnitReviewing: {atLeast("transient", router.LevelModest), atMost("repeats", router.LevelHalf)}},
 	},
 	TriggerChecksPassed: {
@@ -498,8 +466,8 @@ var triggerSpecs = map[string]triggerSpec{
 		corroborate: map[string][]router.Condition{UnitChecking: {atMost("pass_credible", router.LevelLow)}},
 	},
 	TriggerChecksFailed: {
-		describe:  map[string]string{UnitImplementing: "Send the unit back to its mason with the failed checks.", UnitChecking: "Run the checks again: the failure looks environmental.", UnitContested: "Hold the unit for the owner to rule on."},
-		questions: []router.Question{question("environmental", "The failure is infrastructure or flaky and not caused by the change."), question("actionable", "The check output tells the mason what to fix."), question("progress", "Successive send-backs got closer to passing.")},
+		describe:    map[string]string{UnitImplementing: "Send the unit back to its mason with the failed checks.", UnitChecking: "Run the checks again: the failure looks environmental.", UnitContested: "Hold the unit for the owner to rule on."},
+		questions:   []router.Question{question("environmental", "The failure is infrastructure or flaky and not caused by the change."), question("actionable", "The check output tells the mason what to fix."), question("progress", "Successive send-backs got closer to passing.")},
 		corroborate: map[string][]router.Condition{UnitChecking: {atLeast("environmental", router.LevelModest)}, UnitImplementing: {atLeast("actionable", router.LevelModest), atLeast("progress", router.LevelModest)}},
 	},
 	TriggerChecksIncomplete: {
@@ -508,13 +476,13 @@ var triggerSpecs = map[string]triggerSpec{
 		corroborate: map[string][]router.Condition{UnitChecking: {atLeast("environmental", router.LevelModest), atMost("persistent", router.LevelHalf)}},
 	},
 	TriggerReviewApproved: {
-		describe:  map[string]string{UnitApproved: "Approve the candidate on the reviewer's satisfactory verdict so the foreman lands it.", UnitReviewing: "Have the candidate reviewed again.", UnitChecking: "Run the checks again before the candidate is approved.", UnitContested: "Hold the unit for the owner to rule on."},
-		questions: []router.Question{question("verdict_consistent", "The reviewer's summary shows every acceptance item verified with no unresolved material point."), question("checks_cover", "The check evidence covers the changed behaviour.")},
+		describe:    map[string]string{UnitApproved: "Approve the candidate on the reviewer's satisfactory verdict so the foreman lands it.", UnitReviewing: "Have the candidate reviewed again.", UnitChecking: "Run the checks again before the candidate is approved.", UnitContested: "Hold the unit for the owner to rule on."},
+		questions:   []router.Question{question("verdict_consistent", "The reviewer's summary shows every acceptance item verified with no unresolved material point."), question("checks_cover", "The check evidence covers the changed behaviour.")},
 		corroborate: map[string][]router.Condition{UnitReviewing: {atMost("verdict_consistent", router.LevelLow)}, UnitChecking: {atMost("checks_cover", router.LevelLow)}},
 	},
 	TriggerReviewRejected: {
-		describe:  map[string]string{UnitImplementing: "Send the unit back to its mason with the reviewer's findings.", UnitReviewing: "Have the candidate reviewed again: the findings look mistaken.", UnitContested: "Hold the unit for the owner to rule on."},
-		questions: []router.Question{question("findings_actionable", "The findings tell the mason what to change."), question("findings_mistaken", "The findings contradict the acceptance or are out of scope."), question("progress", "Successive send-backs got closer to approval.")},
+		describe:    map[string]string{UnitImplementing: "Send the unit back to its mason with the reviewer's findings.", UnitReviewing: "Have the candidate reviewed again: the findings look mistaken.", UnitContested: "Hold the unit for the owner to rule on."},
+		questions:   []router.Question{question("findings_actionable", "The findings tell the mason what to change."), question("findings_mistaken", "The findings contradict the acceptance or are out of scope."), question("progress", "Successive send-backs got closer to approval.")},
 		corroborate: map[string][]router.Condition{UnitReviewing: {atLeast("findings_mistaken", router.LevelModest)}, UnitImplementing: {atLeast("findings_actionable", router.LevelModest), atLeast("progress", router.LevelModest)}},
 	},
 	TriggerReviewNoVerdict: {
@@ -528,8 +496,8 @@ var triggerSpecs = map[string]triggerSpec{
 		corroborate: map[string][]router.Condition{UnitChecking: {atLeast("candidate_changed", router.LevelModest)}},
 	},
 	TriggerLandingRefused: {
-		describe:  map[string]string{UnitChecking: "Run the checks again: the approval no longer holds.", UnitReviewing: "Have the candidate reviewed again.", UnitImplementing: "Send the unit back to its mason.", UnitContested: "Hold the unit for the owner to rule on.", UnitApproved: "Land again: the approval still holds and the refusal was not about the candidate."},
-		questions: []router.Question{question("input_stale", "The landing was refused because an input of the approval is stale."), question("environmental", "The landing failed for a reason of infrastructure.")},
+		describe:    map[string]string{UnitChecking: "Run the checks again: the approval no longer holds.", UnitReviewing: "Have the candidate reviewed again.", UnitImplementing: "Send the unit back to its mason.", UnitContested: "Hold the unit for the owner to rule on.", UnitApproved: "Land again: the approval still holds and the refusal was not about the candidate."},
+		questions:   []router.Question{question("input_stale", "The landing was refused because an input of the approval is stale."), question("environmental", "The landing failed for a reason of infrastructure.")},
 		corroborate: map[string][]router.Condition{UnitApproved: {atLeast("environmental", router.LevelModest), atMost("input_stale", router.LevelHalf)}},
 	},
 	TriggerStalled: {

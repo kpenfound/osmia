@@ -22,11 +22,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const verdictTool = "verdict"
+const VerdictTool = "verdict"
 
-const verdictOutcome = "verdict"
+const VerdictOutcome = "verdict"
 
-var reviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
+var ReviewerActor = trace.Actor{Kind: "service", ID: reviewerRole}
 
 // UnitVerdict is a unit reviewer's decision on a candidate: whether the
 // unit's acceptance holds, a summary of how the reviewer verified it, and the
@@ -53,10 +53,8 @@ type reviewerReports struct {
 	accepted map[string]UnitVerdict
 }
 
-// tool records one verdict per turn. A verdict the service would not accept
-// is refused with a reason the reviewer can correct before the turn ends.
 func (r *reviewerReports) tool(scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: verdictTool, Effect: coreadapter.ToolMemory,
+	tool := coreadapter.Tool{Name: VerdictTool, Effect: coreadapter.ToolMemory,
 		Description: "Record a verdict for the exact candidate in this turn. Decide satisfactory when the unit's task is done and every acceptance item holds, or material_findings otherwise. The summary says how you verified each acceptance item. Each finding names the acceptance item or part of the task that does not hold, the evidence, and what the mason should change. A refused verdict says why; correct it and call again. End your turn after acceptance.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"decision":{"type":"string","enum":["satisfactory","material_findings"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string"},"evidence":{"type":"string"},"action":{"type":"string"}},"required":["severity","evidence","action"],"additionalProperties":false}}},"required":["decision","summary","findings"],"additionalProperties":false}`)}
 	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -72,7 +70,7 @@ func (r *reviewerReports) tool(scope coreadapter.Scope) coreadapter.Tool {
 		if r.accepted == nil {
 			r.accepted = map[string]UnitVerdict{}
 		}
-		key := turnKey(scope)
+		key := TurnKey(scope)
 		if _, exists := r.accepted[key]; exists {
 			return refuseReport("this turn already recorded a verdict; end the turn")
 		}
@@ -90,15 +88,15 @@ type verdictTurns struct {
 func (t *verdictTurns) Run(ctx context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 	result, err := t.Turns.Run(ctx, prepared)
 	t.reports.mu.Lock()
-	verdict, ok := t.reports.accepted[turnKey(prepared.Scope)]
-	delete(t.reports.accepted, turnKey(prepared.Scope))
+	verdict, ok := t.reports.accepted[TurnKey(prepared.Scope)]
+	delete(t.reports.accepted, TurnKey(prepared.Scope))
 	t.reports.mu.Unlock()
 	if ok {
 		data, encodeErr := json.Marshal(verdict)
 		if encodeErr != nil {
 			return result, errors.Join(err, encodeErr)
 		}
-		result.Outcome = &coreadapter.Outcome{Status: verdictOutcome, Report: string(data)}
+		result.Outcome = &coreadapter.Outcome{Status: VerdictOutcome, Report: string(data)}
 	}
 	return result, err
 }
@@ -112,30 +110,19 @@ func (t *verdictTurns) CheckResume(ctx context.Context, previous, next coreadapt
 
 type reviewers struct{ *masons }
 
-// unitReviewerSystemPrompt is the unit reviewer's system prompt. It holds
-// Osmia's review protocol and the materiality rule; how to review is left to
-// the skills configured on the reviewer role.
 const unitReviewerSystemPrompt = "You are the unit reviewer. You decide one thing: whether this candidate does its unit's task and meets every acceptance item, under the project's written rules. Review the exact candidate identity your prompt gives, and no other revision. The approved spec defines intent; the plan records current assignments. Judge observable acceptance, not conformity to implementation guidance. Accept equivalent or stronger evidence with a reason, including applicable evidence from earlier reports. Do not weaken requirements. Use factory_context to retrieve assignments and evidence. Distinguish defects, missing evidence, faulty assignments and infrastructure failures. Record newly discovered necessary work with record_discovery and ask for coordination when ownership changes. The service ran the project's checks on this exact candidate, and your prompt carries their result; cite it as evidence rather than re-deriving what the checks prove. " + unitReviewMateriality + " When the candidate was rebased onto a feature branch that moved, the changes the rebase needs so that both the feature branch's work and the unit's task stand are in scope, whatever the task or the footprint names; a resolved path outside the task is not, on its own, a finding. Your read-only view holds the candidate's exact files; call workstream_diff to read its diff, whole or by file and line range. " + unitReviewSkills + " Call ask when a decision is needed, including when the task itself looks wrong, and end the turn; review resumes when the answer arrives. Otherwise call verdict." + checkGateReviewInstructions
 
-// unitReviewMateriality is the rule for which findings send a unit back. It
-// reads inside the verdict tool's contract: satisfactory when the task is done
-// and every acceptance item holds, and each finding names an acceptance item or
-// part of the task that does not hold.
 const unitReviewMateriality = "A finding is material, and the verdict is material_findings, when the task or an acceptance item does not hold, when the change reaches beyond what the task needs, or when it breaks a written rule. The written rules are the project's charter, its AGENTS.md or contributor documents, and the skills configured on your role. Every task is carried out under those rules, so a candidate that breaks one does not do its task: report the breach as a failing part of the task, naming the rule and where it is written (for example charter#1, or the AGENTS.md section) in the finding's evidence and what the mason should change in its action. A code-smell judgement call that breaks no written rule never blocks: when nothing else fails, decide satisfactory and note the call in the summary. Formatting and lint belong to the checks, not to your review."
 
-// unitReviewSkills hands the review method to the reviewer role's skills and
-// keeps Osmia's protocol above any skill's own instructions.
 const unitReviewSkills = "How to review is left to the skills configured on your role, such as pr-review and the code-style skills; follow them when your role has any. Read a skill's SKILL.md, and the files it references, with file_read at the path the skill list gives. When no skills are listed, review from the task, the acceptance items and the written rules. Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask: you still call ask when you need a decision, and you report only through verdict."
 
-// unitReviewPromptLead opens each candidate's review prompt with the decision
-// rule the system prompt and the verdict tool state.
 const unitReviewPromptLead = "Review this exact candidate: verify that it does the unit's task and that every acceptance item holds, then record your verdict. Decide satisfactory when the task is done and every acceptance item holds; a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task. A material finding names the acceptance item or the part of the task that does not hold, naming the rule and where it is written when it is a written-rule breach, and what the mason should change. Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary. "
 
-func reviewTurnID(unit string, version uint64) string {
+func ReviewTurnID(unit string, version uint64) string {
 	return fmt.Sprintf("%s-review-%d", reviewerAgent(unit), version)
 }
 
-func answerQuestionID(turn string) string {
+func AnswerQuestionID(turn string) string {
 	id := strings.TrimPrefix(turn, "answer_")
 	id, _, _ = strings.Cut(id, "-recover-")
 	return id
@@ -148,9 +135,6 @@ func (r *reviewers) Pass(ctx context.Context) error {
 	}
 	state, _ := r.s.Effective()
 	for _, stream := range streams {
-		if stream == librarianWorkstream(r.repository.Project()) {
-			continue
-		}
 		if session, err := isSession(r.repository, stream); err != nil {
 			return err
 		} else if session {
@@ -177,7 +161,7 @@ func (r *reviewers) Pass(ctx context.Context) error {
 			}
 			if st.Value == UnitImplementing {
 				if t := b.reviewTransitions[trace.UnitSubject(unit)]; bounceRevisionTransition(t) {
-					if err := r.resumeBounceRevision(ctx, stream, unit, t); err != nil {
+					if err := r.ResumeBounceRevision(ctx, stream, unit, t); err != nil {
 						return err
 					}
 				} else if err := r.resumeFindings(ctx, stream, unit, st); err != nil {
@@ -189,14 +173,14 @@ func (r *reviewers) Pass(ctx context.Context) error {
 				continue
 			}
 			if st.Value == UnitWaiting {
-				reviewerWaiting, err := questionWaitOwner(r.repository, stream, unit, reviewerAgent(unit), reviewerActor)
+				reviewerWaiting, err := questionWaitOwner(r.repository, stream, unit, reviewerAgent(unit), ReviewerActor)
 				if err != nil {
 					return err
 				}
 				if !reviewerWaiting {
 					continue
 				}
-				value, err := r.followQuestion(ctx, stream, unit, st)
+				value, err := r.FollowQuestion(ctx, stream, unit, st)
 				if err != nil {
 					return err
 				}
@@ -207,13 +191,12 @@ func (r *reviewers) Pass(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				// The answer turn may itself have asked another question.
-				if value, err := r.followQuestion(ctx, stream, unit, st); err != nil {
+				if value, err := r.FollowQuestion(ctx, stream, unit, st); err != nil {
 					return err
 				} else if value != UnitReviewing {
 					continue
 				}
-			} else if value, err := r.followQuestion(ctx, stream, unit, st); err != nil {
+			} else if value, err := r.FollowQuestion(ctx, stream, unit, st); err != nil {
 				return err
 			} else if value != UnitReviewing {
 				continue
@@ -226,9 +209,7 @@ func (r *reviewers) Pass(ctx context.Context) error {
 	return nil
 }
 
-// followQuestion parks a reviewer's latest question and resumes the question
-// named by the wait once its answer is delivered, even if later turns ran.
-func (r *reviewers) followQuestion(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
+func (r *reviewers) FollowQuestion(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (string, error) {
 	th, err := r.repository.Thread(stream, reviewerAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
 		return state.Value, nil
@@ -260,7 +241,7 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 			return "", err
 		}
 		if problem != "" {
-			return UnitContested, r.contestQuestionWait(ctx, stream, unit, state, reviewerActor, problem)
+			return UnitContested, r.contestQuestionWait(ctx, stream, unit, state, ReviewerActor, problem)
 		}
 		if !delivered {
 			return state.Value, nil
@@ -283,7 +264,7 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 	}
 	res, err := r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerQuestionFollow, Cause: id,
-		Default: to, Targets: []string{to}, Actor: reviewerActor, ID: id, HeaderCause: cause, Reason: reason,
+		Default: to, Targets: []string{to}, Actor: ReviewerActor, ID: id, HeaderCause: cause, Reason: reason,
 	})
 	switch {
 	case err != nil:
@@ -296,16 +277,16 @@ func (r *reviewers) followQuestion(ctx context.Context, stream config.Workstream
 
 func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, paused bool) error {
 	agent := reviewerAgent(unit)
-	if result, ok, err := r.storedResult(stream, unit, state); err != nil {
+	if result, ok, err := r.StoredResult(stream, unit, state); err != nil {
 		return err
 	} else if ok {
-		return r.applyReview(ctx, stream, unit, state, result)
+		return r.ApplyReview(ctx, stream, unit, state, result)
 	}
 	th, err := r.repository.Thread(stream, agent)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	turnID := reviewTurnID(unit, state.Version)
+	turnID := ReviewTurnID(unit, state.Version)
 	if err == nil && len(th.Turns) != 0 {
 		last := th.Turns[len(th.Turns)-1]
 		if strings.HasPrefix(last.Request.TurnID, "answer_") {
@@ -320,15 +301,15 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
-				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
+				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, ReviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
 					return err
 				}
-				return r.recover(ctx, last)
+				return r.Recover(ctx, last)
 			}
 			if last.CompletedAt.IsZero() {
 				return nil
 			}
-			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
+			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, ReviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
 				return err
 			}
 			transitions, err := trace.Read[trace.Transition](r.repository, stream)
@@ -341,16 +322,14 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 					latest = t
 				}
 			}
-			currentAnswer := latest.From == UnitWaiting && latest.To == UnitReviewing && latest.Cause == trace.QuestionSubject(answerQuestionID(last.Request.TurnID))+"_"+trace.QuestionAnswered
+			currentAnswer := latest.From == UnitWaiting && latest.To == UnitReviewing && latest.Cause == trace.QuestionSubject(AnswerQuestionID(last.Request.TurnID))+"_"+trace.QuestionAnswered
 			if !currentAnswer {
 				origin, originErr := r.answerOrigin(stream, unit, last)
 				currentAnswer = originErr == nil && (origin.Request.TurnID == turnID || strings.HasPrefix(origin.Request.TurnID, turnID+"-recover-"))
 			}
-			if currentAnswer && last.Status() == "idle" && last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == verdictOutcome {
+			if currentAnswer && last.Status() == "idle" && last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == VerdictOutcome {
 				return r.finishReview(ctx, stream, unit, state, last)
 			}
-			// An answer supplies context but never grants approval on its own.
-			// The next review turn still requires a verdict for this candidate.
 		}
 		if last.Request.TurnID == turnID || strings.HasPrefix(last.Request.TurnID, turnID+"-recover-") {
 			if th.Status == "interrupted" && th.Active == last.Request.TurnID && last.Response == nil {
@@ -364,18 +343,18 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 				last = th.Turns[len(th.Turns)-1]
 			}
 			if last.Status() == "interrupted" && !paused {
-				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
+				if contested, err := contestInterrupted(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, ReviewerActor, reviewerRole, th, r.s.Now()); err != nil || contested {
 					return err
 				}
-				return r.recover(ctx, last)
+				return r.Recover(ctx, last)
 			}
 			if last.CompletedAt.IsZero() {
 				return nil
 			}
-			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
+			if contested, err := contestFailure(ctx, r.s, r.repository, stream, unit, state, UnitReviewing, ReviewerActor, reviewerRole, last, r.s.Now()); err != nil || contested {
 				return err
 			}
-			verdict := last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == verdictOutcome
+			verdict := last.Response.Result.Outcome != nil && last.Response.Result.Outcome.Status == VerdictOutcome
 			if last.Status() == "failed" && !verdict {
 				return r.contestFailedTurn(ctx, stream, unit, state, last)
 			}
@@ -389,29 +368,26 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 		}
 	}
 	if slices.ContainsFunc(th.Turns, func(t trace.QueuedTurn) bool { return t.Request.TurnID == turnID && !t.CompletedAt.IsZero() }) {
-		return r.refreshReview(ctx, stream, unit, state, "the completed review turn was followed by a question answer without an applicable verdict; review the candidate again")
+		return r.RefreshReview(ctx, stream, unit, state, "the completed review turn was followed by a question answer without an applicable verdict; review the candidate again")
 	}
 	if paused {
 		return nil
 	}
-	// A candidate whose workspace does not descend from the feature branch's
-	// tip would be refused as stale once reviewed, so the review waits for the
-	// foreman's rebase, which makes a new candidate.
-	if behind, err := newUnitWorkspaces(r.cfg, r.repository).behind(ctx, stream, unit); err != nil || behind {
+	if behind, err := NewUnitWorkspaces(r.cfg, r.repository).Behind(ctx, stream, unit); err != nil || behind {
 		return err
 	}
 	req, identity, err := r.prepareUnitReview(ctx, stream, unit)
 	if err != nil {
 		return nil
-	} // preparation records the block for the chief
-	run, checked, err := latestRunFor(r.repository, stream, unit, identity)
+	}
+	run, checked, err := LatestRunFor(r.repository, stream, unit, identity)
 	if err != nil {
 		return err
 	}
 	if !checked {
-		return r.recheck(ctx, stream, unit, state, identity)
+		return r.Recheck(ctx, stream, unit, state, identity)
 	}
-	if err := r.ensureThread(ctx, stream, unit); err != nil {
+	if err := r.EnsureThread(ctx, stream, unit); err != nil {
 		return err
 	}
 	profile, _, err := r.s.RoleExecution(r.cfg, reviewerRole)
@@ -438,7 +414,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: unitReviewerSystemPrompt, Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: unitReviewerSystemPrompt, Prompt: prompt}
 	if r.s.Step != nil {
 		if err := r.s.Step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {
 			return err
@@ -451,14 +427,12 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	return err
 }
 
-// contestMissingVerdict contests a unit whose review turn ended without a
-// verdict, so the chief of staff or the owner can have it reviewed again.
 func (r *reviewers) contestMissingVerdict(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn) error {
 	id := trace.EventID(last.Response.ID, "contested")
 	reason := fmt.Sprintf("the reviewer's turn %s ended without recording a verdict", last.Request.TurnID)
 	_, err := r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewNoVerdict, Cause: last.Response.ID,
-		Default: UnitContested, Targets: []string{UnitContested, UnitReviewing}, Actor: reviewerActor,
+		Default: UnitContested, Targets: []string{UnitContested, UnitReviewing}, Actor: ReviewerActor,
 		ID: id, HeaderCause: last.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
 		Note:     reason,
 		Evidence: router.Evidence{Records: []router.Entry{{Kind: "review turn", ID: last.Request.TurnID, Text: reason}}},
@@ -466,19 +440,14 @@ func (r *reviewers) contestMissingVerdict(ctx context.Context, stream config.Wor
 	return err
 }
 
-// contestFailedTurn contests a unit whose review turn failed without an
-// exhausted infrastructure failure and without a verdict: it timed out, reached
-// its turn limit or failed behaviourally. The reason says what ended the turn,
-// and the router may instead have the candidate reviewed once more. The contest
-// is raised once per turn.
 func (r *reviewers) contestFailedTurn(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, last trace.QueuedTurn) error {
-	id := failureContestID(last.Response.ID)
+	id := FailureContestID(last.Response.ID)
 	transitions, err := trace.Read[trace.Transition](r.repository, stream)
 	if err != nil || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
 		return err
 	}
 	reason := fmt.Sprintf("the %s turn %s of unit %s ended without a verdict because %s", reviewerRole, last.Request.TurnID, unit, endedBy(last))
-	return r.s.contestTurn(ctx, r.repository, stream, unit, state, UnitReviewing, reviewerActor, reviewerRole, last, id, reason, "the review turn failed", true)
+	return r.s.contestTurn(ctx, r.repository, stream, unit, state, UnitReviewing, ReviewerActor, reviewerRole, last, id, reason, "the review turn failed", true)
 }
 
 func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate string) (string, error) {
@@ -495,20 +464,18 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 	for i := len(transitions) - 1; i >= 0; i-- {
 		if t := transitions[i]; t.Subject == trace.UnitSubject(unit) {
 			switch {
-			case t.From == UnitReviewing && t.To == UnitReviewing && t.Actor == reviewerActor:
+			case t.From == UnitReviewing && t.To == UnitReviewing && t.Actor == ReviewerActor:
 				guidance += "\n\nThe service asked for this review again: " + t.Reason + "."
-			case t.From == UnitContested && t.To == UnitReviewing && !isMove(t, unit):
+			case t.From == UnitContested && t.To == UnitReviewing && !IsMove(t, unit):
 				guidance += "\n\nThe unit was contested, and the " + t.Reason + "."
 				ruled = true
 			}
 			break
 		}
 	}
-	// A move into reviewing stays the review's guidance through the checks
-	// it may need first, until the unit returns to implementing.
 	for i := len(transitions) - 1; i >= 0; i-- {
 		if t := transitions[i]; t.Subject == trace.UnitSubject(unit) {
-			if isMove(t, unit) && t.To == UnitReviewing {
+			if IsMove(t, unit) && t.To == UnitReviewing {
 				guidance += "\n\nThe " + t.Reason + "."
 				break
 			}
@@ -536,22 +503,22 @@ func (r *reviewers) reviewGuidance(stream config.WorkstreamID, unit, candidate s
 		}
 	}
 	if !ruled && latest.Decision == "review" && latest.Candidate == candidate {
-		guidance += fmt.Sprintf("\n\nThe %s ruled on contested candidate %s: review it again. Note: %s", contestRuler(latest), latest.Candidate, latest.Note)
+		guidance += fmt.Sprintf("\n\nThe %s ruled on contested candidate %s: review it again. Note: %s", ContestRuler(latest), latest.Candidate, latest.Note)
 	}
 	return guidance, nil
 }
 
-func (r *reviewers) ensureThread(ctx context.Context, stream config.WorkstreamID, unit string) error {
+func (r *reviewers) EnsureThread(ctx context.Context, stream config.WorkstreamID, unit string) error {
 	agent := reviewerAgent(unit)
 	if _, err := r.repository.Thread(stream, agent); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return r.repository.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: reviewerActor, Cause: reviewDocument(unit)}, Role: reviewerRole, ThreadID: agent})
+	return r.repository.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: agent, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit)}, Role: reviewerRole, ThreadID: agent})
 }
 
-func (r *reviewers) recover(ctx context.Context, last trace.QueuedTurn) error {
+func (r *reviewers) Recover(ctx context.Context, last trace.QueuedTurn) error {
 	req := last.Request
 	req.ID = "request_" + req.TurnID + "-recover-" + fmt.Sprint(last.Sequence)
 	req.TurnID += "-recover-" + fmt.Sprint(last.Sequence)
@@ -562,14 +529,14 @@ func (r *reviewers) recover(ctx context.Context, last trace.QueuedTurn) error {
 	return err
 }
 
-func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state trace.WorkflowState) (UnitReviewResult, bool, error) {
+func (r *reviewers) StoredResult(stream config.WorkstreamID, unit string, state trace.WorkflowState) (UnitReviewResult, bool, error) {
 	docs, err := trace.Read[trace.Document](r.repository, stream)
 	if err != nil {
 		return UnitReviewResult{}, false, err
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
+		if d.ID == ReviewDocument(unit) {
 			latest = d
 		}
 	}
@@ -577,7 +544,7 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 	if latest.Revision == 0 || json.Unmarshal([]byte(latest.Content), &result) != nil || result.Turn == "" {
 		return UnitReviewResult{}, false, nil
 	}
-	if state.Value == UnitReviewing && result.Turn != reviewTurnID(unit, state.Version) && !strings.HasPrefix(result.Turn, reviewTurnID(unit, state.Version)+"-recover-") {
+	if state.Value == UnitReviewing && result.Turn != ReviewTurnID(unit, state.Version) && !strings.HasPrefix(result.Turn, ReviewTurnID(unit, state.Version)+"-recover-") {
 		if !strings.HasPrefix(result.Turn, "answer_") {
 			return UnitReviewResult{}, false, nil
 		}
@@ -591,9 +558,9 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 				latest = t
 			}
 		}
-		if latest.From != UnitWaiting || latest.To != UnitReviewing || latest.Cause != trace.QuestionSubject(answerQuestionID(result.Turn))+"_"+trace.QuestionAnswered {
+		if latest.From != UnitWaiting || latest.To != UnitReviewing || latest.Cause != trace.QuestionSubject(AnswerQuestionID(result.Turn))+"_"+trace.QuestionAnswered {
 			origin, err := r.answerOrigin(stream, unit, trace.QueuedTurn{Request: trace.TurnRequest{TurnID: result.Turn}})
-			if err != nil || (origin.Request.TurnID != reviewTurnID(unit, state.Version) && !strings.HasPrefix(origin.Request.TurnID, reviewTurnID(unit, state.Version)+"-recover-")) {
+			if err != nil || (origin.Request.TurnID != ReviewTurnID(unit, state.Version) && !strings.HasPrefix(origin.Request.TurnID, ReviewTurnID(unit, state.Version)+"-recover-")) {
 				return UnitReviewResult{}, false, nil
 			}
 		}
@@ -601,8 +568,6 @@ func (r *reviewers) storedResult(stream config.WorkstreamID, unit string, state 
 	return result, true, nil
 }
 
-// turnIdentity follows answer turns back to the exact evidence that prompted
-// the question. Current workspace contents cannot replace that identity.
 func (r *reviewers) turnIdentity(stream config.WorkstreamID, unit string, turn trace.QueuedTurn) (UnitReviewIdentity, error) {
 	origin, err := r.answerOrigin(stream, unit, turn)
 	if err != nil {
@@ -624,7 +589,7 @@ func (r *reviewers) answerOrigin(stream config.WorkstreamID, unit string, turn t
 		return trace.QueuedTurn{}, err
 	}
 	for range thread.Turns {
-		question := answerQuestionID(turn.Request.TurnID)
+		question := AnswerQuestionID(turn.Request.TurnID)
 		i := slices.IndexFunc(asked, func(q trace.QuestionState) bool {
 			return q.Asked.ID == question && q.Asked.Thread == thread.Identity.ThreadID
 		})
@@ -650,7 +615,7 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	}
 	identity, err := r.turnIdentity(stream, unit, turn)
 	if err != nil {
-		return r.refreshReview(ctx, stream, unit, state, "the verdict has no pinned candidate identity: "+err.Error())
+		return r.RefreshReview(ctx, stream, unit, state, "the verdict has no pinned candidate identity: "+err.Error())
 	}
 	_, current, evidenceErr := r.unitReviewEvidence(ctx, stream, unit)
 	reviewed := identity
@@ -659,9 +624,9 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 			return err
 		}
 	}
-	if evidenceErr == nil && staleReview(reviewed, current) == "" {
+	if evidenceErr == nil && StaleReview(reviewed, current) == "" {
 		if reason := validateVerdict(verdict); reason != "" {
-			return r.refreshReview(ctx, stream, unit, state, "the reviewer's verdict on "+turn.Request.TurnID+" was refused: "+reason+"; the candidate is reviewed again")
+			return r.RefreshReview(ctx, stream, unit, state, "the reviewer's verdict on "+turn.Request.TurnID+" was refused: "+reason+"; the candidate is reviewed again")
 		}
 	}
 	result := UnitReviewResult{Identity: identity, Turn: turn.Request.TurnID, Verdict: verdict}
@@ -671,7 +636,7 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
+		if d.ID == ReviewDocument(unit) {
 			latest = d
 			var prior UnitReviewResult
 			if json.Unmarshal([]byte(d.Content), &prior) == nil && prior.Verdict.Decision == "material_findings" && prior.Bounces > result.Bounces {
@@ -689,17 +654,14 @@ func (r *reviewers) finishReview(ctx context.Context, stream config.WorkstreamID
 	h := latest.Header
 	h.Revision++
 	h.At = r.s.Now()
-	h.Actor = reviewerActor
+	h.Actor = ReviewerActor
 	h.Cause = turn.Response.ID
 	if err := r.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: latest.Path, Content: string(content) + "\n"}}); err != nil {
 		return err
 	}
-	return r.applyReview(ctx, stream, unit, state, result)
+	return r.ApplyReview(ctx, stream, unit, state, result)
 }
 
-// validateVerdict returns why v is not a complete verdict: a known decision,
-// a summary, and findings that match the decision, each with a severity,
-// evidence and an action. It returns "" for a valid verdict.
 func validateVerdict(v UnitVerdict) string {
 	if v.Decision != "satisfactory" && v.Decision != "material_findings" {
 		return "decision must be satisfactory or material_findings"
@@ -721,15 +683,14 @@ func validateVerdict(v UnitVerdict) string {
 	return ""
 }
 
-func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult) error {
-	// The durable result retains every governing revision and the diff digest.
+func (r *reviewers) ApplyReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, result UnitReviewResult) error {
 	if result.Identity.Subject != string(stream)+"/"+unit || result.Identity.Candidate.Revision == "" || result.Identity.Candidate.BaseRevision == "" || result.Identity.Candidate.SpecRevision == "" || result.Identity.Candidate.PlanRevision == "" || result.Identity.DiffSHA256 == "" {
 		return errors.New("review result has incomplete candidate identity")
 	}
 	if reason, err := r.staleInputs(ctx, stream, unit, result.Identity); err != nil {
 		return err
 	} else if reason != "" {
-		return r.refreshReview(ctx, stream, unit, state, reason)
+		return r.RefreshReview(ctx, stream, unit, state, reason)
 	}
 	if reason := validateVerdict(result.Verdict); reason != "" {
 		return errors.New(reason)
@@ -745,7 +706,7 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 		}
 	}
 	id := fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), to, state.Version)
-	reason := fmt.Sprintf("reviewer verdict %s on %s: candidate %s from %s, spec %s, plan %s; review %s", result.Verdict.Decision, result.Turn, result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.SpecRevision, result.Identity.Candidate.PlanRevision, reviewDocument(unit))
+	reason := fmt.Sprintf("reviewer verdict %s on %s: candidate %s from %s, spec %s, plan %s; review %s", result.Verdict.Decision, result.Turn, result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision, result.Identity.Candidate.SpecRevision, result.Identity.Candidate.PlanRevision, ReviewDocument(unit))
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d material send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
@@ -759,17 +720,14 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	}
 	in := UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: trigger, Cause: result.Turn,
-		Default: to, Targets: targets, Actor: reviewerActor,
-		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))},
+		Default: to, Targets: targets, Actor: ReviewerActor,
+		ID: id, HeaderCause: ReviewDocument(unit), Reason: reason, Events: []trace.Event{notice(id, "unit", fmt.Sprintf("Unit %s review %s: %s.", unit, result.Verdict.Decision, reason))},
 		Note: reason,
 		Evidence: router.Evidence{Facts: map[string]any{"send_backs": result.Bounces, "max_send_backs": r.cfg.Shed.MaxBounces, "findings": len(result.Verdict.Findings)},
-			Records: []router.Entry{{Kind: "verdict", ID: reviewDocument(unit), Text: verdictText(result.Verdict)}}},
+			Records: []router.Entry{{Kind: "verdict", ID: ReviewDocument(unit), Text: verdictText(result.Verdict)}}},
 	}
 	if result.Verdict.Decision == "satisfactory" {
-		// The verdict is what authorises the approval, and only for the
-		// candidate it reviewed: the router checks it again when it enters
-		// approved.
-		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", reviewDocument(unit), revision), Valid: r.verdictHolds(stream, unit, result)}
+		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", ReviewDocument(unit), revision), Valid: r.verdictHolds(stream, unit, result)}
 	}
 	res, err := r.s.raise(ctx, true, in)
 	if err == nil && sentBack(res) {
@@ -778,7 +736,6 @@ func (r *reviewers) applyReview(ctx context.Context, stream config.WorkstreamID,
 	return err
 }
 
-// reviewRevision returns the latest revision of the unit's review.json.
 func (r *reviewers) reviewRevision(stream config.WorkstreamID, unit string) (int, error) {
 	docs, err := trace.Read[trace.Document](r.repository, stream)
 	if err != nil {
@@ -786,19 +743,16 @@ func (r *reviewers) reviewRevision(stream config.WorkstreamID, unit string) (int
 	}
 	revision := 0
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) && d.Revision > revision {
+		if d.ID == ReviewDocument(unit) && d.Revision > revision {
 			revision = d.Revision
 		}
 	}
 	return revision, nil
 }
 
-// verdictHolds returns the check that the reviewer's satisfactory verdict is
-// still the unit's latest and still reviews the unit's current candidate, base,
-// spec, plan and report. It returns why not, or "".
 func (r *reviewers) verdictHolds(stream config.WorkstreamID, unit string, result UnitReviewResult) func(context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
-		latest, ok, err := r.storedResult(stream, unit, trace.WorkflowState{})
+		latest, ok, err := r.StoredResult(stream, unit, trace.WorkflowState{})
 		if err != nil {
 			return "", err
 		}
@@ -809,8 +763,6 @@ func (r *reviewers) verdictHolds(stream config.WorkstreamID, unit string, result
 	}
 }
 
-// verdictText is a reviewer's verdict as the router's evidence: the decision,
-// its summary and each finding.
 func verdictText(v UnitVerdict) string {
 	text := v.Decision + ": " + v.Summary
 	for _, f := range v.Findings {
@@ -819,7 +771,7 @@ func verdictText(v UnitVerdict) string {
 	return text
 }
 
-func staleReview(reviewed, current UnitReviewIdentity) string {
+func StaleReview(reviewed, current UnitReviewIdentity) string {
 	for _, field := range []struct{ name, old, now string }{
 		{"candidate", reviewed.Candidate.Revision, current.Candidate.Revision},
 		{"base", reviewed.Candidate.BaseRevision, current.Candidate.BaseRevision},
@@ -839,28 +791,22 @@ func staleReview(reviewed, current UnitReviewIdentity) string {
 	return ""
 }
 
-// staleInputs returns why a reviewed identity no longer names the unit's
-// current report, seal, candidate, base, spec and plan: the recorded report
-// and seal, the tips of the unit branch and the feature branch, and the latest
-// spec and plan revisions. A seal, spec and plan that approved amendments
-// replaced without reworking, notifying or removing the unit are current. It
-// returns "" when every input is current.
 func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, unit string, reviewed UnitReviewIdentity) (string, error) {
-	_, current, err := m.candidateEvidence(ctx, stream, unit)
+	_, current, err := m.CandidateEvidence(ctx, stream, unit)
 	if err != nil {
 		return "stale review inputs: " + err.Error(), nil
 	}
 	if reviewed, err = m.carried(stream, unit, reviewed, current); err != nil {
 		return "", err
 	}
-	if reason := staleReview(reviewed, current); reason != "" {
+	if reason := StaleReview(reviewed, current); reason != "" {
 		return reason, nil
 	}
-	git, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
+	git, err := NewUnitWorkspaces(m.cfg, m.repository).Of(stream)
 	if err != nil {
 		return "", err
 	}
-	candidate, exists, err := git.Branch(ctx, unitBranch(stream, unit))
+	candidate, exists, err := git.Branch(ctx, UnitBranch(stream, unit))
 	if err != nil {
 		return "", err
 	}
@@ -893,15 +839,9 @@ func (m *masons) staleInputs(ctx context.Context, stream config.WorkstreamID, un
 	return "", nil
 }
 
-// maxReviewRefreshes is how many reviews of a unit in a row the service
-// refuses before it contests the unit instead of asking for another.
-const maxReviewRefreshes = 3
+const MaxReviewRefreshes = 3
 
-// refreshReview refuses the unit's review and keeps it reviewing, so its
-// candidate is reviewed again, with a notice saying why. The review that
-// would be the maxReviewRefreshes-th refused in a row contests the unit
-// instead, as a failed review the chief of staff or the owner rules on.
-func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
+func (r *reviewers) RefreshReview(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, reason string) error {
 	subject := trace.UnitSubject(unit)
 	transitions, err := trace.Read[trace.Transition](r.repository, stream)
 	if err != nil {
@@ -920,11 +860,10 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 		}
 		refreshes++
 	}
-	to, id, why, cause := UnitReviewing, fmt.Sprintf("%s-review-refresh-%d", subject, state.Version), reason, reviewDocument(unit)
+	to, id, why, cause := UnitReviewing, fmt.Sprintf("%s-review-refresh-%d", subject, state.Version), reason, ReviewDocument(unit)
 	var notice trace.Event
 	targets := []string{UnitReviewing, UnitChecking, UnitContested}
-	if refreshes+1 >= maxReviewRefreshes {
-		// maxReviewRefreshes stays a hard limit: the review is not offered again.
+	if refreshes+1 >= MaxReviewRefreshes {
 		targets = []string{UnitChecking, UnitContested}
 		to, id, cause = UnitContested, fmt.Sprintf("%s-contested-refresh-%d", subject, state.Version), latest
 		why = fmt.Sprintf("the service refused %d reviews of unit %s in a row, so the unit is contested instead of reviewed again; the latest was refused for this reason: %s", refreshes+1, unit, reason)
@@ -934,35 +873,32 @@ func (r *reviewers) refreshReview(ctx context.Context, stream config.WorkstreamI
 	}
 	_, err = r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewRefused, Cause: id,
-		Default: to, Targets: targets, Actor: reviewerActor,
+		Default: to, Targets: targets, Actor: ReviewerActor,
 		ID: id, HeaderCause: cause, Reason: why, Events: []trace.Event{notice},
 		Note:     why,
-		Evidence: router.Evidence{Facts: map[string]any{"refused_in_a_row": refreshes + 1, "max_refused_in_a_row": maxReviewRefreshes}, Records: []router.Entry{{Kind: "refusal", Text: reason}}},
+		Evidence: router.Evidence{Facts: map[string]any{"refused_in_a_row": refreshes + 1, "max_refused_in_a_row": MaxReviewRefreshes}, Records: []router.Entry{{Kind: "refusal", Text: reason}}},
 	})
 	return err
 }
 
-// recheck returns a reviewing unit to checking when no completed check run
-// is recorded for its current candidate, base and diff.
-func (r *reviewers) recheck(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, identity UnitReviewIdentity) error {
+func (r *reviewers) Recheck(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, identity UnitReviewIdentity) error {
 	id := fmt.Sprintf("%s-%s-review-%d", trace.UnitSubject(unit), UnitChecking, state.Version)
 	reason := fmt.Sprintf("no completed check run is recorded for candidate %s from %s; its checks run before it is reviewed", identity.Candidate.Revision, identity.Candidate.BaseRevision)
 	_, err := r.s.raise(ctx, true, UnitExitInput{
 		Repo: r.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerReviewNeedsChecks, Cause: id,
-		Default: UnitChecking, Targets: []string{UnitChecking}, Actor: reviewerActor,
-		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" returns to checking: "+reason+".")},
+		Default: UnitChecking, Targets: []string{UnitChecking}, Actor: ReviewerActor,
+		ID: id, HeaderCause: ReviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+" returns to checking: "+reason+".")},
 	})
 	return err
 }
 
-// ordinarySendBack identifies a reviewer or failed-check move back to the mason.
 func ordinarySendBack(t trace.Transition) bool {
-	return t.To == UnitImplementing && t.Cause == reviewDocument(t.Unit) &&
-		(t.From == UnitReviewing && t.Actor == reviewerActor || t.From == UnitChecking && t.Actor == checksActor)
+	return t.To == UnitImplementing && t.Cause == ReviewDocument(t.Unit) &&
+		(t.From == UnitReviewing && t.Actor == ReviewerActor || t.From == UnitChecking && t.Actor == ChecksActor)
 }
 
 func (r *reviewers) resumeFindings(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) error {
-	result, ok, err := r.storedResult(stream, unit, state)
+	result, ok, err := r.StoredResult(stream, unit, state)
 	if err != nil {
 		return err
 	}
@@ -989,10 +925,10 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	findings, _ := json.MarshalIndent(result.Verdict.Findings, "", "  ")
-	actor, prompt := reviewerActor, fmt.Sprintf("The reviewer returned candidate %s for revision. Address these findings in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
+	actor, prompt := ReviewerActor, fmt.Sprintf("The reviewer returned candidate %s for revision. Address these findings in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
 	if result.Checks > 0 {
-		actor, prompt = checksActor, fmt.Sprintf("The project's checks failed on candidate %s before review. Fix these failures in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
-		runs, err := checkRuns(r.repository, stream)
+		actor, prompt = ChecksActor, fmt.Sprintf("The project's checks failed on candidate %s before review. Fix these failures in your unit workspace, check the unit's acceptance again, then call done:\n%s", result.Identity.Candidate.Revision, findings)
+		runs, err := CheckRuns(r.repository, stream)
 		if err != nil {
 			return err
 		}
@@ -1001,12 +937,12 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		}
 	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}
-	ruling, found, err := latestContestedRuling(r.repository, stream, unit, result.Bounces)
+	ruling, found, err := LatestContestedRuling(r.repository, stream, unit, result.Bounces)
 	if err != nil {
 		return err
 	}
 	if found && ruling.Decision == "revise" && ruling.Candidate == result.Identity.Candidate.Revision {
-		request.Prompt += "\n\nThe " + contestRuler(ruling) + " ruled that this candidate needs revision: " + ruling.Note
+		request.Prompt += "\n\nThe " + ContestRuler(ruling) + " ruled that this candidate needs revision: " + ruling.Note
 	}
 	if r.s.Step != nil {
 		if err := r.s.Step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {

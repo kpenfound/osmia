@@ -1,3 +1,5 @@
+// Package delivery runs a workstream's final checks and review and publishes
+// or lands the assembled feature branch.
 package delivery
 
 import (
@@ -127,8 +129,6 @@ var isContinuation = intake.IsContinuation
 var isSession = intake.IsSession
 
 var landingDocument = execution.LandingDocument
-
-var librarianWorkstream = intake.LibrarianWorkstream
 
 const maxFinalRounds = intake.MaxFinalRounds
 

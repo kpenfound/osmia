@@ -10,12 +10,6 @@ import (
 	"testing"
 )
 
-// The step journals only recover from crashes: they commit their next step from
-// what the trace and the disk already say, and never ask Jev. The router is the
-// only path to Jev's transition judgments, and a file that neither imports the
-// router nor Jev, nor calls the router's entry points, cannot
-// ask it. Each journal's files are listed here, so a journal that came to depend
-// on either fails this test.
 var stepJournals = map[string][]string{
 	"project registration and creation": {"../service/projects.go", "../service/project_creation.go"},
 	"workgroup-change journal":          {"../lifecycle/workgroup_change.go", "../lifecycle/workgroup_change_apply.go", "../lifecycle/workgroup_change_turns.go"},

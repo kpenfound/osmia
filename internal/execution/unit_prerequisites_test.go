@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// publishOperation records a landing or rebase of the unit as an operation in
-// flight, with no result.
 func publishOperation(t *testing.T, f *buildFixture, unit, action, event string) coreadapter.Operation {
 	t.Helper()
 	input, err := json.Marshal(map[string]any{"unit": unit})
@@ -25,12 +23,10 @@ func publishOperation(t *testing.T, f *buildFixture, unit, action, event string)
 	return op
 }
 
-// sendBack is the exit of a unit whose checks failed, as the checkers raise
-// it: the default carries its own entry effects.
 func sendBack(t *testing.T, f *buildFixture, cause, operation string) router.Exit {
 	t.Helper()
 	x, err := f.s.UnitExit(UnitExitInput{Repo: f.repository, Stream: stream, Unit: "resume", Trigger: TriggerChecksFailed, Cause: cause,
-		Default: UnitImplementing, Targets: []string{UnitImplementing, UnitChecking, UnitContested}, Actor: checksActor, Operation: operation,
+		Default: UnitImplementing, Targets: []string{UnitImplementing, UnitChecking, UnitContested}, Actor: ChecksActor, Operation: operation,
 		ID: "unit-resume-implementing-" + cause, HeaderCause: cause, Reason: "check run 1 failed",
 		Events: []trace.Event{trace.Notice("unit-resume-implementing-"+cause, "unit", "Unit resume checks failed.")}})
 	must(t, err)
@@ -48,10 +44,6 @@ func operationHolding(t *testing.T, x router.Exit, names ...string) map[string]s
 	return out
 }
 
-// The landing or rebase whose completion raised an exit does not make that
-// exit's targets illegal, whether or not its result is written yet; any other
-// landing or rebase in flight on the unit does, for the default that carries
-// its own entry effects as for every other target.
 func TestOnlyTheCompletingOperationIsExemptFromTheOperationsPrerequisite(t *testing.T) {
 	t.Parallel()
 	targets := []string{UnitImplementing, UnitChecking, UnitContested}
@@ -101,8 +93,6 @@ func TestOnlyTheCompletingOperationIsExemptFromTheOperationsPrerequisite(t *test
 	})
 }
 
-// A default that carries its own entry effects is held by another operation in
-// flight on the unit when it is routed: nothing is committed and the unit stays.
 func TestADefaultWithEntryEffectsWaitsForAnotherOperation(t *testing.T) {
 	t.Parallel()
 	f, stream, repo := newChecksFixture(t, "operations-routed", &fakeChecks{Outcomes: passing()})
@@ -115,9 +105,6 @@ func TestADefaultWithEntryEffectsWaitsForAnotherOperation(t *testing.T) {
 	}
 }
 
-// An exhausted budget or a tripped loop guard makes the targets of a unit exit
-// that start agent work illegal through the unit's Limits prerequisite; the
-// targets that start none are left alone.
 func TestTheUnitsLimitsPrerequisiteStopsTheTargetsThatStartWork(t *testing.T) {
 	t.Parallel()
 	const why = "the loop guard: 12 agent sessions ran since the workstream's last progress"
@@ -147,10 +134,6 @@ func TestTheUnitsLimitsPrerequisiteStopsTheTargetsThatStartWork(t *testing.T) {
 	}
 }
 
-// However a target is reached it meets the unit's limits: a default that carries
-// its own entry effects, a pick and an owner's pinned decision are all refused
-// or held while the limit stands, and a pinned decision that passes commits
-// exactly its target as the owner, without asking Jev.
 func TestEveryWayOfReachingAUnitTargetMeetsTheLimits(t *testing.T) {
 	t.Parallel()
 	const why = "work is paused (daily-budget): the daily budget is spent"

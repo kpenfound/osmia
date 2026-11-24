@@ -47,8 +47,6 @@ func discoverNonSessionWorkstreams(repo *trace.Repository, keepOpen func(config.
 	return result, err
 }
 
-// designStartWorkstreams retains open designs only after the owner has
-// durably started them. Those starts are fenced against session destruction.
 func (s *Controller) designStartWorkstreams(repo *trace.Repository) ([]config.WorkstreamID, error) {
 	return discoverNonSessionWorkstreams(repo, func(stream config.WorkstreamID) (bool, error) {
 		return s.DesignStartPending(repo, stream)

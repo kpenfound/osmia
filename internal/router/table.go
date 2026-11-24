@@ -74,7 +74,6 @@ type Verdict struct {
 	Fits bool
 }
 
-// level returns the probability a level names, given the strict bar.
 func level(l Level, strict float64) float64 {
 	switch l {
 	case LevelStrict:
@@ -94,8 +93,6 @@ func barOf(t Target, strict float64) float64 {
 	return ModestBar
 }
 
-// corroborated reports whether the trigger's own answers show what the target
-// needs for a departure.
 func corroborated(t Target, own map[string]float64, strict float64) bool {
 	for _, c := range t.Corroborate {
 		p, ok := own[c.Question]
@@ -154,7 +151,6 @@ func Decide(def string, targets []Target, a jev.TransitionAnswers, strict float6
 	return Verdict{Action: ActionHold, Target: pick, Rule: "7:below_bar", Hold: HoldBelowBar, P: p}
 }
 
-// confidenceBand returns the band the route span carries for a verdict.
 func confidenceBand(v Verdict, asked bool, strict float64) string {
 	if !asked {
 		return ConfidenceNone
@@ -162,8 +158,6 @@ func confidenceBand(v Verdict, asked bool, strict float64) string {
 	return ConfidenceBand(v.P, strict)
 }
 
-// describe is a sentence on Jev's answers for a notice, built by code from the
-// answers alone.
 func describe(a jev.TransitionAnswers, v Verdict) string {
 	return fmt.Sprintf("default fits %.2f, picks %s (%.2f) and %s (%.2f), stuck %.2f, would change intent %.2f; table %s rule %s",
 		a.Fit, a.PickA.Choice, a.PickA.Confidence, a.PickB.Choice, a.PickB.Confidence, a.Stuck, a.Intent, TableVersion, v.Rule)

@@ -12,9 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// unitReviewerIdentity binds reads and checks to the queued turn's candidate,
-// including answer turns that continue an earlier review.
-func unitReviewerIdentity(r *trace.Repository, scope coreadapter.Scope) (UnitReviewIdentity, error) {
+func UnitReviewerIdentity(r *trace.Repository, scope coreadapter.Scope) (UnitReviewIdentity, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	thread, err := r.Thread(stream, scope.Thread)
 	if err != nil {
@@ -36,17 +34,15 @@ func unitReviewerIdentity(r *trace.Repository, scope coreadapter.Scope) (UnitRev
 	return UnitReviewIdentity{}, errors.New("review turn not found")
 }
 
-func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
-	identity, err := unitReviewerIdentity(r, scope)
+func UnitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, execution coreadapter.ExecutionSettings) (isolation.Selection, error) {
+	identity, err := UnitReviewerIdentity(r, scope)
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	provider, err := newUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
+	provider, err := NewUnitWorkspaces(cfg, r).Of(config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return isolation.Selection{}, err
 	}
-	// A thread runs one turn at a time, so the exports of its earlier turns
-	// are done with.
 	exports := filepath.Join(cfg.Root.String(), reviewInputsDirectory, scope.Project, scope.Workstream, scope.Thread)
 	dir := filepath.Join(exports, scope.Turn)
 	if err := os.RemoveAll(exports); err != nil {
@@ -55,6 +51,6 @@ func unitReviewerSelection(ctx context.Context, cfg *config.Config, r *trace.Rep
 	if err := provider.Export(ctx, identity.Candidate.Revision, dir); err != nil {
 		return isolation.Selection{}, err
 	}
-	paths, err := viewPaths(dir)
+	paths, err := ViewPaths(dir)
 	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: dir, Directory: dir, BaseRevision: identity.Candidate.Revision}, Paths: paths, Execution: execution}, err
 }

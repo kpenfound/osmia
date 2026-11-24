@@ -8,20 +8,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// apply enters the decided target, after checking every hard prerequisite
-// against current state once more. It serves every way a target is chosen: a
-// Jev pick, a degraded-mode default, a pick recovered after a restart, a
-// proposal, a pinned owner or gate decision and an owner card. A target that
-// has become illegal, or whose effects cannot be carried out, commits nothing,
-// runs no effect, records Refuse and holds the subject with one notice.
 func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, d decision) (Result, error) {
 	rec.Target = d.target
 	target, ok := x.target(d.target)
 	if !ok {
 		return r.refuse(ctx, x, name, rec, rev, journal, fmt.Sprintf("the target %s is not among the exit's targets", d.target))
 	}
-	// An owner's pause holds the work the target starts: nothing is committed
-	// and the pick stays recorded, so the exit is applied once the pause lifts.
 	if held, err := r.paused(ctx, x, target); err != nil {
 		return Result{}, err
 	} else if held != "" {
@@ -40,7 +32,6 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 		moveID = x.TransitionID(target)
 	}
 	routing := trace.Routing{DecidedBy: d.decidedBy, DefaultTo: x.defaultState()}
-	// A decider that has no judgment, such as a fallback, cites none.
 	if d.decidedBy != trace.DecidedByFallback && d.decidedBy != trace.DecidedByOwner && d.decidedBy != trace.DecidedByChief {
 		routing.Judgment = d.judgment
 	}
@@ -59,8 +50,6 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	if effect.Reason != "" {
 		reason = effect.Reason
 	}
-	// A default the router kept reads as the caller always wrote it; the table
-	// rule behind a departure, a fallback or a pinned move is part of its reason.
 	if d.outcome != OutcomeFollowed {
 		reason = fmt.Sprintf("%s [decide-transition table %s, rule %s, %s]", reason, TableVersion, d.rule, d.decidedBy)
 	}
@@ -98,14 +87,10 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 		reason: fmt.Sprintf("Route of %s committed %s (table %s rule %s)", rec.Occurrence, target.Name, rec.Table, d.rule),
 		docs:   effect.Documents, txs: txs}
 	if target.NoMove {
-		// Nothing moves, so the effect's events ride with the journal's own
-		// transition.
 		write.events = effect.Events
 	}
 	if err := r.writeJournal(ctx, x, name, write); err != nil {
 		if errors.Is(err, trace.ErrConflict) {
-			// Another writer got there: the occurrence was finished, or the subject
-			// moved, since this exit read it.
 			if again, _, _, rerr := readRecord(x.Repo, x.Workstream, name); rerr == nil && again != nil && again.final() {
 				return resultOf(*again, true), nil
 			}
@@ -121,10 +106,6 @@ func (r *Router) apply(ctx context.Context, x Exit, name string, rec *Record, re
 	return resultOf(*rec, false), nil
 }
 
-// refuse records that the decided target cannot be carried out: Refuse on the
-// judgment, a refused journal, and one notice to the chief of staff. The
-// subject stays where it is and is held; the stall watchdog and the recovery
-// card take it from there.
 func (r *Router) refuse(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, why string) (Result, error) {
 	if rec.JevRequested && rec.Judgment != "" && rec.Fallback == "" {
 		if err := r.Judge.Refuse(ctx, x.Repo, x.Workstream, rec.Judgment, why); err != nil {
@@ -136,9 +117,6 @@ func (r *Router) refuse(ctx context.Context, x Exit, name string, rec *Record, r
 	return r.finishHeld(ctx, x, name, rec, rev, journal, body)
 }
 
-// hold finishes the exit without moving the subject: held, with one notice that
-// carries Jev's view, or sent to the owner when acting would change approved
-// intent.
 func (r *Router) hold(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, state, why, view string, v *Verdict) (Result, error) {
 	rec.State, rec.Outcome, rec.Hold, rec.Decided = state, OutcomeHeld, why, r.now()
 	if v != nil {
@@ -183,9 +161,6 @@ func (r *Router) finishHeld(ctx context.Context, x Exit, name string, rec *Recor
 	return resultOf(*rec, false), nil
 }
 
-// stale finishes an exit whose subject moved on since it was raised: nothing is
-// committed and the chief of staff is not woken, since the subject is no longer
-// where the exit left it.
 func (r *Router) stale(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState, now trace.WorkflowState) (Result, error) {
 	rec.State, rec.Outcome, rec.Hold, rec.Decided = StateStale, OutcomeHeld, HoldStale, r.now()
 	rec.Reason = fmt.Sprintf("the subject is %s at version %d; the exit was raised at %s, version %d", now.Value, now.Version, x.From, x.Version)
@@ -202,8 +177,6 @@ func (r *Router) stale(ctx context.Context, x Exit, name string, rec *Record, re
 	return resultOf(*rec, false), nil
 }
 
-// span sends the route span of a decided exit, once: only the call that wrote
-// the occurrence's final record sends it.
 func (r *Router) span(x Exit, rec Record, chosen string) {
 	if r.Spans == nil {
 		return

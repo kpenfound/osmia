@@ -9,8 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// A project that delivers by pull request is refused Approve and land with a
-// conflict naming the delivery setting, before anything is recorded.
 func TestApproveAndLandIsRefusedOnAProjectThatDeliversByPullRequest(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t, landOptions{delivery: config.DeliveryPullRequest})
@@ -23,8 +21,6 @@ func TestApproveAndLandIsRefusedOnAProjectThatDeliversByPullRequest(t *testing.T
 	}
 }
 
-// A hard-block dependency or a merge-order dependency still waiting to merge
-// refuses the landing, with no approval recorded and nothing pushed.
 func TestApproveAndLandIsRefusedWhileADependencyWaitsToMerge(t *testing.T) {
 	t.Parallel()
 	t.Run("hard block", func(t *testing.T) {
@@ -48,8 +44,6 @@ func TestApproveAndLandIsRefusedWhileADependencyWaitsToMerge(t *testing.T) {
 	})
 }
 
-// nothingLanded checks that nothing was approved, recorded as an operation or
-// pushed to the base branch.
 func (f *landFixture) nothingLanded() {
 	f.t.Helper()
 	if f.documents(DeliveryDocument) != 0 || f.upstreamMain() != f.base || f.feature() != AssembledState {

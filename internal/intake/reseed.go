@@ -37,6 +37,5 @@ func (c *Controller) ReseedEntities(ctx context.Context, repo *trace.Repository)
 		reseeder.Warn(fmt.Sprintf("entity map re-seed skipped: fetching %s/%s: %v", remote, cfg.Project.BaseBranch, err))
 		return
 	}
-	// The re-seeder reports its own failure.
 	_ = reseeder.Reseed(ctx, head, git, kb.TraceLedger{Repository: repo, Actor: kb.ReseedActor, Now: c.Now})
 }

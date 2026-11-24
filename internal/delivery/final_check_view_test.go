@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// viewPath finds the paths of the reader's view a text mentions.
 var viewPath = regexp.MustCompile(`final/[A-Za-z0-9._/-]+`)
 
 func mentionedPaths(text string) []string {
@@ -33,10 +32,6 @@ func checkRecordHeader(repo *trace.Repository, id string, revision int) trace.He
 	return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: checksActor, Cause: "review"}
 }
 
-// Every file the check evidence names is in the reader's view, for each kind
-// of record: a pull request's passed, failed, incomplete and continued
-// results, a local run that captured its output to a file, and a maintenance
-// review, whose evidence names no file at all.
 func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 	t.Parallel()
 	pullRequest := FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, Source: api.CheckSourcePullRequest, PullRequest: 7, Push: 1, PushedCommit: pushedCommit, StatusURL: "https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=3", Counts: &api.CheckCounts{Total: 3, Passed: 3}}
@@ -98,7 +93,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 					t.Errorf("the evidence names %s, which the view lacks %v:\n%s", path, view, evidence)
 				}
 			}
-			// What the prompt lists is what the view holds.
 			if listed := slices.Sorted(slices.Values(FinalCheckPaths(c.run))); !slices.Equal(listed, c.files) {
 				t.Errorf("the prompt lists %v, the view holds %v", listed, c.files)
 			}
@@ -115,7 +109,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 	}
 }
 
-// A record of another commit is not the result of the commit the reader reads.
 func TestFinalCheckFilesHoldOnlyTheLatestRecordOfTheReviewedCommit(t *testing.T) {
 	t.Parallel()
 	_, repo := deliveryTrace(t)
@@ -140,8 +133,6 @@ func TestFinalCheckFilesHoldOnlyTheLatestRecordOfTheReviewedCommit(t *testing.T)
 	}
 }
 
-// The reader's prompt carries the check result in a labelled section before
-// the criteria, never at its end, and its view list names the record.
 func TestFinalPromptCarriesTheCheckResultBeforeTheCriteria(t *testing.T) {
 	t.Parallel()
 	run := FinalCheckRun{Review: 2, Commit: reviewedCommit, Source: api.CheckSourcePullRequest, PullRequest: 7, Push: 1, PushedCommit: pushedCommit, Status: "passed", StatusURL: "https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=3", Counts: &api.CheckCounts{Total: 3, Passed: 3},

@@ -53,7 +53,7 @@ func (s *Controller) SelectionBase(projects []config.ProjectID, base config.Work
 			if err != nil {
 				return "", &APIError{Code: Internal, Message: err.Error()}
 			}
-			if base != LibrarianWorkstream(project) && slices.Contains(streams, base) {
+			if slices.Contains(streams, base) {
 				return project, nil
 			}
 		}
@@ -103,7 +103,7 @@ func (s *Controller) RecordOwnerProjects(ctx context.Context, r *trace.Repositor
 	return nil
 }
 
-// ChooseDesignProjects answers only an unselected handed design from an upgrade.
+// ChooseDesignProjects records the owner's project selection for a handed design start that has none.
 func (s *Controller) ChooseDesignProjects(ctx context.Context, raw string, projects []config.ProjectID) (DesignStartResponse, *APIError) {
 	project, stream, r, api := s.ConversationTrace(raw)
 	if api != nil {
@@ -199,9 +199,6 @@ func (s *Controller) SelectionJoiningMember(stream config.WorkstreamID) (bool, e
 			return false, err
 		}
 		for _, origin := range streams {
-			// Allocation derives each member from its project and origin.
-			// Locate that origin without reading unrelated member traces,
-			// which may be held at a retirement snapshot boundary.
 			if origin != stream && !slices.ContainsFunc(projects, func(p *Project) bool {
 				return HandInWorkstream(p.ID, "design-"+string(origin)) == stream
 			}) {

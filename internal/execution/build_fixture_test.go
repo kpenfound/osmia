@@ -21,15 +21,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// buildFixture drives stopped controllers against a real trace and local workspaces.
-// The fake turns, checks, clock and sealed-document seeding are shared primitives.
 type buildFixture struct {
 	unitsFixture
 	s     *Controller
 	clock *fixturekit.DemoClock
-	// jev answers the router's transition requests: the default fits unless a
-	// test scripts it.
-	jev *jevfixture.Transitions
+	jev   *jevfixture.Transitions
 }
 
 func newBuildFixture(t *testing.T, key string) *buildFixture {
@@ -145,7 +141,7 @@ func approveDirectly(t *testing.T, s *Controller, repository *trace.Repository, 
 	r := &reviewers{masons: newMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	}, reviewTurnID, reviewDocument, r.one, UnitApproved)
+	}, ReviewTurnID, ReviewDocument, r.one, UnitApproved)
 }
 func approvedReview(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, UnitReviewResult) {
 	t.Helper()

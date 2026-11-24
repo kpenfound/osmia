@@ -41,16 +41,14 @@ const (
 	DeferCapacity = "capacity"
 )
 
-func dispatchDocument(unit string) string { return trace.UnitSubject(unit) + "-dispatch" }
+func DispatchDocument(unit string) string { return trace.UnitSubject(unit) + "-dispatch" }
 
 func dispatchPath(unit string) string { return fmt.Sprintf("units/%s/dispatch.json", unit) }
 
-// startedDispatch is the decision to start the unit from the given state.
 func startedDispatch(unit string, state trace.WorkflowState) UnitDispatch {
 	return UnitDispatch{Unit: unit, Version: state.Version, Decision: DispatchStarted, Message: fmt.Sprintf("Unit %s started implementing.", unit)}
 }
 
-// dispatchMessage returns the plain-language message of a deferral.
 func dispatchMessage(d UnitDispatch) string {
 	switch d.Reason {
 	case DeferPaused:
@@ -87,25 +85,16 @@ func dispatchMessage(d UnitDispatch) string {
 	return ""
 }
 
-// dispatchPass holds what the mason controller's pass ends with, from which
-// it decides why each ready unit it did not start waits.
 type dispatchPass struct {
-	cfg      *config.Config
-	pauses   []runtime.Pause
-	rank     func(config.WorkstreamID) int
-	entities kb.Map
-	// candidates are the workstreams that may start a unit, as the pass
-	// left them.
+	cfg        *config.Config
+	pauses     []runtime.Pause
+	rank       func(config.WorkstreamID) int
+	entities   kb.Map
 	candidates []building
-	// held names, by workstream, the unit the controller is blocked on.
-	held map[config.WorkstreamID]string
+	held       map[config.WorkstreamID]string
 }
 
-// deferral decides why a ready unit of the workstream waits. A unit of a
-// workstream neither paused nor held that is entangled with nothing in flight
-// and under its workstream's cap waits for a mason slot: the pass stopped
-// starting units only once every slot was taken.
-func (p dispatchPass) deferral(b building, unit string) (UnitDispatch, error) {
+func (p dispatchPass) Deferral(b building, unit string) (UnitDispatch, error) {
 	d := UnitDispatch{Unit: unit, Version: b.states[trace.UnitSubject(unit)].Version, Decision: DispatchDeferred}
 	pause, paused := scheduler.Pausing(p.pauses, p.cfg.Project.ID, b.stream)
 	blocked, held := p.held[b.stream]
@@ -142,8 +131,6 @@ func (p dispatchPass) deferral(b building, unit string) (UnitDispatch, error) {
 	return d, nil
 }
 
-// latestDispatches returns the latest units/<unit>/dispatch.json revision of
-// each unit of the workstream, by unit.
 func latestDispatches(repository *trace.Repository, stream config.WorkstreamID) (map[string]trace.Document, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -151,15 +138,13 @@ func latestDispatches(repository *trace.Repository, stream config.WorkstreamID) 
 	}
 	out := map[string]trace.Document{}
 	for _, d := range documents {
-		if d.Unit != "" && d.ID == dispatchDocument(d.Unit) {
+		if d.Unit != "" && d.ID == DispatchDocument(d.Unit) {
 			out[d.Unit] = d
 		}
 	}
 	return out, nil
 }
 
-// dispatchRevision returns the next revision of the unit's dispatch.json
-// holding the decision, or false when its latest revision already holds it.
 func (m *masons) dispatchRevision(stream config.WorkstreamID, previous trace.Document, d UnitDispatch) (trace.Document, bool, error) {
 	data, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
@@ -169,13 +154,10 @@ func (m *masons) dispatchRevision(stream config.WorkstreamID, previous trace.Doc
 	if previous.Revision > 0 && previous.Content == content {
 		return trace.Document{}, false, nil
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: dispatchDocument(d.Unit), Revision: previous.Revision + 1, Project: m.repository.Project(), Workstream: stream, Unit: d.Unit, At: m.s.Now(), Actor: masonActor, Cause: trace.UnitSubject(d.Unit) + "-" + UnitReady}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DispatchDocument(d.Unit), Revision: previous.Revision + 1, Project: m.repository.Project(), Workstream: stream, Unit: d.Unit, At: m.s.Now(), Actor: masonActor, Cause: trace.UnitSubject(d.Unit) + "-" + UnitReady}
 	return trace.Document{Header: h, Path: dispatchPath(d.Unit), Content: content}, true, nil
 }
 
-// recordDeferrals records, in one commit per workstream, why each ready unit
-// of the given workstreams waits, for each unit whose latest decision says
-// otherwise. A write another writer got to first is left to the next pass.
 func (m *masons) recordDeferrals(ctx context.Context, p dispatchPass, streams []building) error {
 	for _, b := range streams {
 		var docs []trace.Document
@@ -190,7 +172,7 @@ func (m *masons) recordDeferrals(ctx context.Context, p dispatchPass, streams []
 					return fmt.Errorf("workstream %s: %w", b.stream, err)
 				}
 			}
-			d, err := p.deferral(b, u.ID)
+			d, err := p.Deferral(b, u.ID)
 			if err != nil {
 				return fmt.Errorf("workstream %s unit %s: %w", b.stream, u.ID, err)
 			}
@@ -212,10 +194,7 @@ func (m *masons) recordDeferrals(ctx context.Context, p dispatchPass, streams []
 	return nil
 }
 
-// currentDeferral returns the deferral a unit's latest dispatch.json records
-// while it still applies: the unit is ready in the state the decision was
-// taken on.
-func currentDeferral(document trace.Document, state trace.WorkflowState) (*UnitDispatch, error) {
+func CurrentDeferral(document trace.Document, state trace.WorkflowState) (*UnitDispatch, error) {
 	if document.Revision == 0 || state.Value != UnitReady {
 		return nil, nil
 	}

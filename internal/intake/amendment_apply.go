@@ -18,11 +18,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// amendmentApplied is the state of an approved amendment once its effect on
+// AmendmentApplied is the state of an approved amendment once its effect on
 // the workstream's units, approvals and final report is recorded.
 const AmendmentApplied = "applied"
 
-// amendmentUnitID is the ID of the transition that reworks a unit for an
+// AmendmentUnitID is the ID of the transition that reworks a unit for an
 // amendment, or notifies it.
 func AmendmentUnitID(unit, id string, rework bool) string {
 	if rework {
@@ -31,11 +31,11 @@ func AmendmentUnitID(unit, id string, rework bool) string {
 	return trace.UnitSubject(unit) + "_notified_amendment_" + id
 }
 
-// amendmentMasonTurn is the mason turn that carries an amendment's notice and
+// AmendmentMasonTurn is the mason turn that carries an amendment's notice and
 // the unit's amended bundle.
 func AmendmentMasonTurn(unit, id string) string { return MasonAgent(unit) + "-amendment-" + id }
 
-// classifyAmendment returns the first revision of an amendment's application
+// ClassifyAmendment returns the first revision of an amendment's application
 // record: the revisions it moves the workstream from and to, the request and
 // the decision note, and the affected set the architect's draft recorded with
 // its units classified against the sealed and approved plans.
@@ -61,7 +61,7 @@ func ClassifyAmendment(req trace.Amendment, d AmendmentDecision, affectedDoc, se
 	return a, nil
 }
 
-// application returns the latest revision of an amendment's application
+// Application returns the latest revision of an amendment's application
 // record, and that document; a document of revision zero when the amendment
 // has none.
 func (a AmendmentDebate) Application(stream config.WorkstreamID, id string) (amendment.Application, trace.Document, error) {
@@ -85,7 +85,7 @@ func (a AmendmentDebate) Application(stream config.WorkstreamID, id string) (ame
 	return out, latest, nil
 }
 
-// apply records, in one commit, what a resealed amendment does to the
+// ApplyAmendment records, in one commit, what a resealed amendment does to the
 // workstream: each reworked unit that is implementing, reviewing or approved
 // moves to implementing; each notified unit that is implementing stays
 // there, and one that is reviewing or approved moves to reviewing; units the
@@ -230,7 +230,7 @@ func (a AmendmentDebate) ApplyAmendment(ctx context.Context, stream config.Works
 	return a.Follow(ctx, stream, req)
 }
 
-// amendUnit returns the transaction that reworks or notifies one unit in the
+// AmendUnit returns the transaction that reworks or notifies one unit in the
 // state it is in: a reworked unit moves to implementing; a notified unit
 // stays implementing or checking, or moves to reviewing from reviewing or
 // approved.
@@ -259,7 +259,7 @@ func (a AmendmentDebate) AmendUnit(stream config.WorkstreamID, app amendment.App
 		Events: []trace.Event{trace.Notice(id, "unit", "Unit "+unit+": "+reason+".")}}
 }
 
-// followups returns one follow-up unit for every changed criterion that a
+// Followups returns one follow-up unit for every changed criterion that a
 // merged unit serves, scoped to the footprints of the plan's units that
 // serve it, unless it is recorded already.
 func (a AmendmentDebate) Followups(stream config.WorkstreamID, app amendment.Application, p plan.Plan, merged []string) ([]followup.Unit, error) {
@@ -303,7 +303,7 @@ func (a AmendmentDebate) Followups(stream config.WorkstreamID, app amendment.App
 	return out, nil
 }
 
-// follow finishes an applied amendment's unit moves on every pass: a held
+// Follow finishes an applied amendment's unit moves on every pass: a held
 // unit that left waiting or contested is reworked or notified in the state
 // it is in now, and every move to implementing gets the mason turn that
 // carries the notice and the amended bundle. Each step finds what an earlier
@@ -359,7 +359,7 @@ func (a AmendmentDebate) Follow(ctx context.Context, stream config.WorkstreamID,
 	return nil
 }
 
-// enqueueAmended queues the mason turn that tells a unit's mason about the
+// EnqueueAmended queues the mason turn that tells a unit's mason about the
 // amendment and carries the unit's amended bundle, unless the mason's thread
 // holds it already. The thread is created when the unit has none. A unit
 // whose bundle cannot be assembled because its spec no longer matches its
@@ -396,7 +396,7 @@ func (a AmendmentDebate) EnqueueAmended(ctx context.Context, stream config.Works
 	return err
 }
 
-// amendedMasonPrompt is the text of the mason turn that follows an approved
+// AmendedMasonPrompt is the text of the mason turn that follows an approved
 // amendment: what it means for the unit, then the unit's amended bundle with
 // the amendment's notice.
 func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) string {

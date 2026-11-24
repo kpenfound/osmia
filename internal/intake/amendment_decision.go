@@ -47,15 +47,15 @@ func AmendmentDecisionPath(id string) string { return "amendments/" + id + "/dec
 
 func AmendmentDecisionID(id string) string { return "amendment_" + id + "_decision" }
 
-// amendmentDecided is the ID of the transition that records the k-th
+// AmendmentDecided is the ID of the transition that records the k-th
 // decision on an amendment.
 func AmendmentDecided(id string, k int) string { return fmt.Sprintf("amendment-%s-decided-%d", id, k) }
 
-// amendmentRulingTurn is the turn that delivers the recorded ruling on an
+// AmendmentRulingTurn is the turn that delivers the recorded ruling on an
 // amendment to its requester's thread.
 func AmendmentRulingTurn(id string) string { return "amendment_" + id + "_ruling" }
 
-// amendmentSealMatches compares the sealed documents in force at a recorded
+// AmendmentSealMatches compares the sealed documents in force at a recorded
 // seal revision with the current seal. An upstream base move keeps that identity.
 func AmendmentSealMatches(repository *trace.Repository, stream config.WorkstreamID, revision int, current seal.Seal) (bool, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -75,7 +75,7 @@ func AmendmentSealMatches(repository *trace.Repository, stream config.Workstream
 	return false, fmt.Errorf("seal.json revision %d is missing", revision)
 }
 
-// amendmentDecisions returns the recorded decisions on an amendment, oldest
+// AmendmentDecisions returns the recorded decisions on an amendment, oldest
 // first.
 func AmendmentDecisions(repository *trace.Repository, stream config.WorkstreamID, id string) ([]AmendmentDecision, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
@@ -96,7 +96,7 @@ func AmendmentDecisions(repository *trace.Repository, stream config.WorkstreamID
 	return out, nil
 }
 
-// amendmentRound returns the debate round an amendment is in: the first, and
+// CurrentAmendmentRound returns the debate round an amendment is in: the first, and
 // one more for every additional round requested.
 func CurrentAmendmentRound(repository *trace.Repository, stream config.WorkstreamID, id string) (int, error) {
 	decisions, err := AmendmentDecisions(repository, stream, id)
@@ -112,7 +112,7 @@ func CurrentAmendmentRound(repository *trace.Repository, stream config.Workstrea
 	return round, nil
 }
 
-// amendmentCase is what a decision on one amendment reads.
+// AmendmentCase is what a decision on one amendment reads.
 type AmendmentCase struct {
 	Request   trace.Amendment
 	State     trace.WorkflowState
@@ -123,7 +123,7 @@ type AmendmentCase struct {
 	Decisions []AmendmentDecision
 }
 
-// readAmendment reads one amendment of the workstream and reports whether the
+// ReadAmendment reads one amendment of the workstream and reports whether the
 // workstream filed it.
 func ReadAmendment(repository *trace.Repository, stream config.WorkstreamID, id string) (AmendmentCase, bool, error) {
 	requests, err := trace.Read[trace.Amendment](repository, stream)
@@ -172,7 +172,7 @@ func (c AmendmentCase) Response(project config.ProjectID, stream config.Workstre
 	return out
 }
 
-// amendmentView serves one amendment of a workstream.
+// AmendmentView serves one amendment of a workstream.
 func (s *Controller) AmendmentView(raw, id string) (AmendmentResponse, *APIError) {
 	project, stream, repository, api := s.ConversationTrace(raw)
 	if api != nil {
@@ -188,7 +188,7 @@ func (s *Controller) AmendmentView(raw, id string) (AmendmentResponse, *APIError
 	return c.Response(project, stream, ""), nil
 }
 
-// decideAmendment records the owner's decision on the named packet revision
+// DecideAmendment records the owner's decision on the named packet revision
 // of a presented amendment.
 func (s *Controller) DecideAmendment(ctx context.Context, raw, id string, req AmendmentDecisionRequest) (AmendmentResponse, *APIError) {
 	project, stream, repository, api := s.ConversationTrace(raw)
@@ -198,7 +198,7 @@ func (s *Controller) DecideAmendment(ctx context.Context, raw, id string, req Am
 	return s.RecordAmendmentDecision(ctx, project, stream, repository, id, req, OwnerActor, "owner-amendment")
 }
 
-// recordAmendmentDecision records one decision on an amendment, as the
+// RecordAmendmentDecision records one decision on an amendment, as the
 // actor, and moves the amendment to what the decision asks for: approved,
 // rejected, or proposed again for another debate round. A decision on a
 // packet revision already decided returns that decision when it
@@ -339,17 +339,17 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 	return c.Response(project, stream, reason), nil
 }
 
-// decideAmendmentTool records a decision on an amendment that the
+// DecideAmendmentTool records a decision on an amendment that the
 // owner gave the chief of staff in a message.
 const DecideAmendmentTool = "decide_amendment"
 
-// amendmentGuidance tells the chief of staff when and how to use
+// AmendmentGuidance tells the chief of staff when and how to use
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
 const AmendmentGuidance = "When the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
 	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
-// decideAmendment returns the decide_amendment tool of one claimed
+// DecideAmendment returns the decide_amendment tool of one claimed
 // chief-of-staff turn. It records the same decision as POST
 // /amendment/<workstream>/<n> on the turn's workstream. Delegated engineering
 // decisions identify the chief; relayed decisions identify the owner. A refusal is an
@@ -403,8 +403,6 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		if input.OwnerDecided {
 			actor = request.Actor
 		} else {
-			// The chief of staff's own decision on a plan-only amendment needs
-			// a decide result, and a confident pick allows only itself.
 			if bound, refusal, err = s.requirePlanAmendment(target, stream, input.Amendment, input.Decision); err != nil {
 				return nil, err
 			}
@@ -418,9 +416,6 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 			}
 			out, api = s.RecordAmendmentDecisionBy(ctx, target.Project(), stream, target, input.Amendment, decision, trace.JevActor, request.ID, bound.Judgment)
 			if api != nil && api.Code != Internal {
-				// The service refused the transition Jev's binding pick calls
-				// for. The amendment goes to the owner with Jev's judgment, and
-				// Jev is not asked about it again.
 				if s.Jev != nil {
 					if err := s.Jev.Refuse(ctx, target, stream, bound.Judgment, api.Message); err != nil {
 						return nil, err
@@ -505,11 +500,6 @@ func (s *Controller) PlanAmendmentSubject(repository *trace.Repository, stream c
 	return "", nil
 }
 
-// requirePlanAmendment applies the shared precondition to the chief of staff's
-// own decision on amendment id: when the chief of staff may decide the
-// amendment, a decide result must exist for it, and a binding pick allows only
-// itself. An amendment the chief may not decide, or one Jev's refused pick left
-// with the owner, passes with no result; the tool's own checks refuse it.
 func (s *Controller) requirePlanAmendment(repository *trace.Repository, stream config.WorkstreamID, id, outcome string) (*jev.Result, string, error) {
 	why, err := s.PlanAmendmentSubject(repository, stream, id)
 	if err != nil {
@@ -532,7 +522,7 @@ func EntryIDs(entries []shed.Entry) string {
 	return strings.Join(ids, ", ")
 }
 
-// reseal applies an approved amendment: it records the proposed spec and plan
+// Reseal applies an approved amendment: it records the proposed spec and plan
 // as the next revisions of spec.md and plan.json when they differ from the
 // sealed ones, and the next revision of seal.json naming them. A changed spec
 // takes the next seal number and its hash; a plan-only change keeps the seal
@@ -634,8 +624,6 @@ func (a AmendmentDebate) Reseal(ctx context.Context, stream config.WorkstreamID,
 		if err != nil {
 			return unapplied("the approved plan does not parse: " + err.Error())
 		}
-		// The upstream head is fetched and the entity map re-seeded from it
-		// before the footprints resolve, as a first sealing does.
 		if a.S.Reseed != nil {
 			a.S.Reseed(ctx, a.Repository)
 		}
@@ -692,7 +680,7 @@ func (a AmendmentDebate) AmendmentHeader(id string, stream config.WorkstreamID, 
 	return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, Unit: unit, At: a.S.Now(), Actor: AmendmentActor, Cause: cause}
 }
 
-// rule delivers the recorded ruling on a decided amendment, rejected,
+// Rule delivers the recorded ruling on a decided amendment, rejected,
 // unapplied or applied, to its requester's thread as the requester's next
 // turn, resumes the unit the request parked in the stage it preserved, and
 // moves the amendment to ruled. Each step finds
@@ -734,7 +722,7 @@ func (a AmendmentDebate) Rule(ctx context.Context, stream config.WorkstreamID, r
 	return nil
 }
 
-// deliverRuling queues the ruling as the next turn of the requester's thread
+// DeliverRuling queues the ruling as the next turn of the requester's thread
 // unless the thread holds it already. The turn carries the system prompt of
 // the turn that asked for the amendment, or asked the question the chief of
 // staff routed as one, and the profile the requester's role is bound to now.
@@ -757,7 +745,6 @@ func (a AmendmentDebate) DeliverRuling(ctx context.Context, stream config.Workst
 		if err != nil {
 			return err
 		}
-		// A changed assignment needs a fresh candidate before the reviewer resumes.
 		if doc.Revision > 0 && slices.Contains(app.Rework, req.Unit) {
 			return nil
 		}
@@ -796,7 +783,7 @@ func (a AmendmentDebate) DeliverRuling(ctx context.Context, stream config.Workst
 	return err
 }
 
-// amendmentRulingPrompt delivers an attributed amendment ruling to its
+// AmendmentRulingPrompt delivers an attributed amendment ruling to its
 // requester. The request and the decision note
 // are quoted in the shared envelope.
 func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outcome string) string {
@@ -827,7 +814,7 @@ func AmendmentRulingPrompt(req trace.Amendment, d AmendmentDecision, role, outco
 	return b.String()
 }
 
-// resumeUnit moves the unit the amendment parked from waiting back to the
+// ResumeUnit moves the unit the amendment parked from waiting back to the
 // stage its waiting transition preserved: implementing for a mason's request,
 // reviewing for a reviewer's. A unit the request did not park, or one that
 // left that wait, is not moved.

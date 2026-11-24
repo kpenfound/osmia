@@ -8,8 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 )
 
-// Admit says whether a pinned exit would be applied now and records nothing: a
-// hold is a hold, not a refusal, and the exit is admitted once it clears.
 func TestAdmitHoldsAPinnedExitWithoutRecordingAnything(t *testing.T) {
 	pinned := func(f *fx) router.Exit {
 		x := f.exit()

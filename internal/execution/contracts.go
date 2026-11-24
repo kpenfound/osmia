@@ -1,3 +1,5 @@
+// Package execution moves a sealed plan's units through mason turns, checks,
+// review and landing, and assembles the units into the feature branch.
 package execution
 
 import (
@@ -67,7 +69,6 @@ var featureState = intake.FeatureState
 var featureWorkspaces = intake.FeatureWorkspaces
 var isSession = intake.IsSession
 var landingCriteria = intake.LandingCriteria
-var librarianWorkstream = intake.LibrarianWorkstream
 var masonActor = intake.MasonActor
 var masonAgent = intake.MasonAgent
 var masonSystemPrompt = intake.MasonSystemPrompt

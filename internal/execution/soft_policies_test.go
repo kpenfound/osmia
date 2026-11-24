@@ -13,8 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// routeRecord returns the latest revision of the route journal of the exit with
-// the trigger.
 func routeRecord(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, trigger string) router.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
@@ -49,15 +47,10 @@ func lastUnitTransition(t *testing.T, repo *trace.Repository, stream config.Work
 	return out
 }
 
-// departsTo scripts a Jev that finds the default does not fit and picks target
-// with every question of the trigger corroborating it.
 func departsTo(target string) func(jevfixture.Ask) jevfixture.Reply {
 	return func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, target, 0.9, 0.9) }
 }
 
-// softLimitCases are the two ways Jev can answer an exit whose default is the
-// outcome of a policy limit: the default fits, or the other legal target is the
-// better one.
 type softLimitCase struct {
 	name      string
 	script    func(jevfixture.Ask) jevfixture.Reply
@@ -73,9 +66,6 @@ func softLimitCases(departTo string) []softLimitCase {
 	}
 }
 
-// requireDeparture checks what a departure past a limit records: the state it
-// entered, the default it left, Jev as the decider with the judgment, and the
-// reason, in the transition and in the route journal.
 func requireDeparture(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, trigger string, tc softLimitCase) {
 	t.Helper()
 	moved := lastUnitTransition(t, repo, stream)
@@ -92,19 +82,12 @@ func requireDeparture(t *testing.T, repo *trace.Repository, stream config.Workst
 		}
 		return
 	}
-	// The departure records why: the rule of the table that chose it and the
-	// answers of Jev behind it.
 	if rec.Outcome != router.OutcomeDeparted || rec.DecidedBy != trace.DecidedByJev || rec.Rule != "6:departure" || rec.Reason == "" ||
 		!strings.Contains(moved.Reason, "decide-transition table "+router.TableVersion+", rule 6:departure") {
 		t.Fatalf("the departure is not recorded with its reason: %+v, %q", rec, moved.Reason)
 	}
 }
 
-// The send-back count reaching shed.max_bounces sets the default of a failed
-// check run to contested, and the other legal targets stay offered. With a Jev
-// that finds the default fits the unit is contested as it always was; a
-// scripted departure sends it back to its mason past the limit, and the
-// departure records its reason.
 func TestTheSendBackCountSetsTheDefaultOfAFailedCheckRun(t *testing.T) {
 	t.Parallel()
 	failing := "dag://go/packages/tests/test?go-package=internal/trace"
@@ -126,7 +109,7 @@ func TestTheSendBackCountSetsTheDefaultOfAFailedCheckRun(t *testing.T) {
 				t.Fatalf("the limit left only %v on offer", rec.Offered)
 			}
 			if tc.departed {
-				if ruling, found, err := latestMasonRuling(repo, stream, "resume"); err != nil || !found || ruling.ResetTurn == 0 {
+				if ruling, found, err := LatestMasonRuling(repo, stream, "resume"); err != nil || !found || ruling.ResetTurn == 0 {
 					t.Fatalf("the departure gave the mason no fresh allowance: %+v %v %v", ruling, found, err)
 				}
 			}
@@ -143,17 +126,11 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// A mason whose turns ended without a report mason.max_clean_turns times sets
-// the default of the unit's exit to contested, with the mason's own turn as
-// another target. A departure gives the mason a turn with a fresh clean-turn
-// allowance, and records its reason.
 func TestTheCleanTurnLimitSetsTheDefaultOfAnEndingWithoutAReport(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range softLimitCases(UnitImplementing) {
 		if tc.departed {
-			// The mason's turn needs recent turns to have changed the work and
-			// the mason not to be blocked on a human.
 			tc.script = func(a jevfixture.Ask) jevfixture.Reply {
 				r := jevfixture.Departs(a, UnitImplementing, 0.9, 0.9)
 				r.Own["needs_human"] = 0.1
@@ -191,7 +168,7 @@ func TestTheCleanTurnLimitSetsTheDefaultOfAnEndingWithoutAReport(t *testing.T) {
 				t.Fatalf("the limit left only %v on offer", rec.Offered)
 			}
 			if tc.departed {
-				ruling, found, err := latestMasonRuling(f.repository, stream, "resume")
+				ruling, found, err := LatestMasonRuling(f.repository, stream, "resume")
 				if err != nil || !found || ruling.ResetTurn != first.Sequence {
 					t.Fatalf("the departure gave the mason no fresh allowance: %+v %v %v", ruling, found, err)
 				}

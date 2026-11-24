@@ -152,8 +152,6 @@ func (a *FinalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, st
 		}
 	}
 
-	// A merged or closed pull request is found before anything is pushed, so
-	// a push cannot hide it.
 	pr, reason, err := a.OwnPullRequest(ctx, client, stream, op.ID, upstream, fork, base, branch)
 	if err != nil || reason != "" {
 		return reason, err
@@ -174,7 +172,6 @@ func (a *FinalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, st
 		if last, found, err := PushOfCommit(a.Repository, stream, report.Commit); err != nil {
 			return "", err
 		} else if found && pr != nil && pr.Number == last.PullRequest && exists && tip == last.Commit {
-			// The branch already holds this reviewed commit's signed push.
 			return "", nil
 		}
 		if strings.TrimSpace(report.Summary) == "" {
@@ -268,8 +265,6 @@ func (a *FinalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, st
 	if err := publisher.RecordPublication(ctx, stream, record); err != nil {
 		return "", err
 	}
-	// The push supersedes the earlier ones: a question the owner was asked
-	// about the checks of one of them is closed.
 	if err := a.S.closeObsoleteChecksChoices(ctx, a.Repository, stream); err != nil {
 		return "", err
 	}
@@ -313,10 +308,6 @@ func (a *FinalReviewer) OwnPullRequest(ctx context.Context, client pulls.Client,
 	return pr, reason, nil
 }
 
-// adoptablePullRequest returns the one open pull request among found, which
-// are those with the feature branch as head, when it is against base from
-// the push repository, and why it cannot be the workstream's when it is not,
-// or when a pull request of the branch is already merged or closed.
 func adoptablePullRequest(found []pulls.PullRequest, fork, base, branch string) (*pulls.PullRequest, string) {
 	var open []pulls.PullRequest
 	var seen []string

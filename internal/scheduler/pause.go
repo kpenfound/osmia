@@ -56,8 +56,6 @@ func Stopping(pauses []runtime.Pause, project config.ProjectID, stream config.Wo
 	return runtime.Pause{}, false
 }
 
-// covers reports whether the pause covers the workstream of the project: a
-// factory pause, a pause on the project or one on the workstream.
 func covers(p runtime.Pause, project config.ProjectID, stream config.WorkstreamID) bool {
 	switch p.Target.Scope {
 	case "factory":

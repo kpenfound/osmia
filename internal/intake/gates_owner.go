@@ -10,10 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// charterGate is the gate of the workstream's charter proposal made from
-// question while it waits for the owner, or nil when there is none. Ratifying
-// writes the rule the chief of staff proposed, so it is offered only when the
-// proposal holds that text; declining needs no text.
 func (s *Controller) charterGate(repository *trace.Repository, stream config.WorkstreamID, question string) (*Gate, error) {
 	p, found, err := FindCharterProposal(repository, stream, question)
 	if err != nil || !found || p.State.Value != trace.CharterProposed {
@@ -79,9 +75,6 @@ func (s *Controller) CharterProposalCard(repository *trace.Repository, p trace.C
 	return view, true
 }
 
-// deliveryCard is the workstream's delivery card as the owner sees it: the
-// service's DeliveryEntry, held back while Jev's judgment of it is pending or
-// its pick is not applied.
 func (s *Controller) deliveryCard(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	e, open, err := s.DeliveryEntry(ctx, repository, stream)
 	if err != nil || !open || s.Jev == nil || s.DeliveryGate == nil {
@@ -97,9 +90,6 @@ func (s *Controller) deliveryCard(ctx context.Context, repository *trace.Reposit
 	return e, true, nil
 }
 
-// ownerGates returns the workstream's gates of the owner's own decisions that
-// the service builds: its delivery card and the cancellations presented in its
-// conversation.
 func (s *Controller) ownerGates(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]Gate, error) {
 	if !s.ownerJudged() {
 		return nil, nil
@@ -148,9 +138,6 @@ func (s *Controller) ownerGates(ctx context.Context, repository *trace.Repositor
 	return out, nil
 }
 
-// ownerJudged reports whether the owner's own decisions are put to Jev: only
-// while Jev is configured. Without it they stay with the owner as they are,
-// with nothing read for them and no fallback recorded.
 func (s *Controller) ownerJudged() bool {
 	return s.Jev != nil && s.Jev.Status().Mode != jev.ModeUnconfigured
 }

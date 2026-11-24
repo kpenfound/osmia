@@ -133,7 +133,6 @@ func (s *Controller) PreparePinnedDesignStart(ctx context.Context, r *trace.Repo
 		}
 	}
 	if intent.NewProject != nil {
-		// The selection waits for the creation, which reconcile runs.
 		return nil
 	}
 	if refusal := s.RecordOwnerProjects(ctx, r, stream, intent.Projects, ""); refusal != nil {
@@ -170,7 +169,7 @@ func DesignSelectionOf(r *trace.Repository, stream config.WorkstreamID) (DesignS
 }
 
 // DesignStartPending holds an allocation until its durable join is complete.
-// A handed design without a selection waits for the owner's upgrade decision.
+// A handed design without a selection waits for the owner to choose its projects.
 func (s *Controller) DesignStartPending(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
 	selected, found, err := DesignSelectionOf(r, stream)
 	if err != nil {
@@ -184,7 +183,7 @@ func (s *Controller) DesignStartPending(r *trace.Repository, stream config.Works
 		if len(selected.Members) == 1 && selected.Members[0].Workstream == stream {
 			return state.Value != "single", nil
 		}
-		return true, nil // the conversation address is not a drafting member
+		return true, nil
 	}
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
@@ -195,7 +194,7 @@ func (s *Controller) DesignStartPending(r *trace.Repository, stream config.Works
 	}), nil
 }
 
-// designStartPass reconciles the owner's handed design before any member can
+// DesignStartPass reconciles the owner's handed design before any member can
 // draft or ask. All identities are recorded before allocating the first member.
 func (s *Controller) DesignStartPass(ctx context.Context, r *trace.Repository) error {
 	streams, err := s.designStartWorkstreams(r)
@@ -301,7 +300,6 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	}
 	fromDesign := handed.Source == "design:"+string(stream)
 	if len(selected.Members) == 1 && selected.Members[0].Workstream == stream {
-		// The session is the member and keeps its own chief-of-staff thread.
 		if fromDesign {
 			if err := s.RequestHandoffTitle(ctx, r, stream, handed, false); err != nil {
 				return err
@@ -404,8 +402,6 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	if err := s.Step("design-workgroup-prepared"); err != nil {
 		return err
 	}
-	// Locators are written before removing local chiefs. Startup therefore
-	// cannot replace an adopted chief or turn an interrupted join into singles.
 	for _, m := range members {
 		if err := m.Project.RecordCrossRepoWorkgroup(ctx, m.Workstream, g.ID, handed.At, OwnerActor, DesignStartTransition); err != nil {
 			return err
@@ -464,9 +460,6 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		}
 	}
 	if fromDesign && len(members) > 0 {
-		// The conversation is adopted into the workgroup's shared chief of
-		// staff thread, which every member's events reach; the first member
-		// carries the request so that thread receives it once.
 		if err := s.RequestHandoffTitle(ctx, members[0].Project, members[0].Workstream, handed, len(members) > 1); err != nil {
 			return err
 		}
@@ -483,7 +476,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	return s.RefreshRuntime()
 }
 
-// designMemberTrace resolves the continued design address to a real member
+// DesignMemberTrace resolves the continued design address to a real member
 // for member-owned drafting and approval documents. Conversation routing keeps
 // the original address and authoritative chief thread.
 func (s *Controller) DesignMemberTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {

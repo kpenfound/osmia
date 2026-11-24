@@ -52,8 +52,6 @@ func TestLandingFastForwardsTheBaseToTheSignedCommitAndRecordsIt(t *testing.T) {
 	if f.feature() != DeliveredState || f.subject(LandingSubject) != "landed-1" {
 		t.Fatalf("the workstream is %s and its landing %s", f.feature(), f.subject(LandingSubject))
 	}
-	// The landing resolves the workstream as a merge of its branch does: the
-	// records every dependency edge, archive and presentation read.
 	docs, err := trace.Read[trace.Document](f.repo, stream)
 	fixturekit.Must(t, err)
 	evidence, err := trace.MemberResolutionFrom(docs)
@@ -64,7 +62,6 @@ func TestLandingFastForwardsTheBaseToTheSignedCommitAndRecordsIt(t *testing.T) {
 	if merge, merged, err := ReadDeliveryMerge(f.repo, stream); err != nil || !merged || merge.Upstream.Commit != f.signed || merge.Upstream.Branch != "main" {
 		t.Fatalf("the merge evidence is %+v %v %v", merge, merged, err)
 	}
-	// No pull request outcome is recorded: the landing is not a pull request merge.
 	if _, revision, err := OwnPullRequestOutcomeAt(f.repo, stream); err != nil || revision != 0 {
 		t.Fatalf("a pull request outcome was recorded: revision %d %v", revision, err)
 	}
@@ -183,7 +180,6 @@ func TestARouterHoldPushesNothingAndTheLandingLandsOnceItClears(t *testing.T) {
 			}
 
 			clear()
-			// The same landing is applied: the recorded operation, not a new one.
 			again := f.land(byOwner())
 			if again.Outcome != Landed || f.upstreamMain() != f.signed {
 				t.Fatalf("after the hold cleared the landing is %+v", again)
@@ -198,10 +194,7 @@ func TestARouterHoldPushesNothingAndTheLandingLandsOnceItClears(t *testing.T) {
 func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t *testing.T) {
 	t.Parallel()
 	for name, move := range map[string]func(f *landFixture) string{
-		// The base moved before the landing fetched it.
 		"before the fetch": func(f *landFixture) string { return f.advanceUpstream("someone-else.txt") },
-		// The base moved after the landing fetched it, so the upstream rejects
-		// the push.
 		"before the push": func(f *landFixture) string {
 			var moved string
 			f.hook("land-recorded", func() error { moved = f.advanceUpstream("someone-else.txt"); return nil })
@@ -236,8 +229,6 @@ func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t 
 				t.Fatalf("the landing is %s", f.subject(LandingSubject))
 			}
 
-			// The decision to land is kept, and nothing is pushed while the rebased
-			// branch is not pushed and checked.
 			route, pending, err := PendingLandingRoute(f.repo, stream)
 			fixturekit.Must(t, err)
 			if !pending || route.Landing != 1 || route.Push != 1 || route.Commit != f.signed || !route.Decider.Owner() {
@@ -248,9 +239,6 @@ func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t 
 				t.Fatalf("the retry acted before the rebased branch was pushed and checked: %s, %s, %d attempts", got, f.subject(LandingSubject), f.landingAttempts())
 			}
 
-			// The rebase and the checks on its commit have run: the service's own
-			// pass asks for the landing again on the new push and lands the new
-			// commit, with no second approval.
 			_, signed := f.rebased(2, moved)
 			f.retry()
 			if got := f.upstreamMain(); got != signed {
@@ -267,7 +255,6 @@ func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t 
 			if !found || landing.Commit != signed || landing.DecidedBy != trace.DecidedByOwner || landing.Push != 2 {
 				t.Fatalf("the landing record is %+v", landing)
 			}
-			// Later passes land nothing more.
 			f.retry()
 			if f.landingAttempts() != 2 || f.upstreamMain() != signed || f.rebases != 1 {
 				t.Fatalf("%d attempts, base at %s, %d rebases", f.landingAttempts(), f.upstreamMain(), f.rebases)
@@ -279,8 +266,6 @@ func TestABaseThatMovedIsNotAFallbackAndTheLandingIsRetriedOnTheRebasedCommit(t 
 func TestABaseThatRewroteTheReviewedBaseIsMovedToo(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
-	// The base branch was force-moved to a commit that does not hold the base
-	// the final review read.
 	f.git("-C", f.scratch, "fetch", "--quiet", "origin")
 	f.git("-C", f.scratch, "checkout", "--quiet", "--orphan", "rewritten")
 	f.write(f.scratch, "other.txt", "other\n")
@@ -323,8 +308,6 @@ func TestARefusedPushMarksTheDraftReadyAndDeliversWithoutLandingAgain(t *testing
 			if !found || intent.Status != LandingRefused || !strings.Contains(intent.Refusal, "Protected branch") || intent.Commit != f.signed || intent.BaseBefore != f.base {
 				t.Fatalf("the recorded intent is %+v", intent)
 			}
-			// The approval the marking rests on is the service's, authored for
-			// the decider, and no landing is recorded.
 			_, _, approval, err := DeliveryDocuments(f.repo, stream)
 			fixturekit.Must(t, err)
 			if approval == nil || approval.Commit != f.reviewed || approval.Description == "" {
@@ -341,7 +324,6 @@ func TestARefusedPushMarksTheDraftReadyAndDeliversWithoutLandingAgain(t *testing
 				t.Fatalf("the delivered transitions are %+v", delivered)
 			}
 
-			// A second attempt on the same delivery occurrence does nothing.
 			pushes := f.stepCount("land-recorded")
 			again, err := f.controller().LandWorkstream(context.Background(), f.repo, stream, LandRequest{Decider: decider, AcceptBlocking: true})
 			fixturekit.Must(t, err)
@@ -366,8 +348,6 @@ func TestAPushThatLandedBeforeTheCrashIsCompletedOnceWithoutPushingAgain(t *test
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f := newLandFixture(t)
-			// The upstream accepted the push, and the service went down before it
-			// recorded anything of it.
 			f.hook("land-pushed", func() error { return errors.New("the service stopped") })
 			op := f.requestedLanding(byOwner())
 			if _, err := f.lander().Apply(context.Background(), op); err == nil {
@@ -381,7 +361,6 @@ func TestAPushThatLandedBeforeTheCrashIsCompletedOnceWithoutPushingAgain(t *test
 			}
 			tip := afterwards(f)
 
-			// A restart: recovery finds the exact signed commit on the base.
 			result, err := f.lander().Apply(context.Background(), op)
 			fixturekit.Must(t, err)
 			if result.Outcome != LandOutcomeLanded {
@@ -408,7 +387,6 @@ func TestAPushThatLandedBeforeTheCrashIsCompletedOnceWithoutPushingAgain(t *test
 				t.Fatalf("the workstream does not resolve as merged: %+v %v %v", merge, merged, err)
 			}
 
-			// Recovering again completes nothing twice.
 			again, err := f.lander().Apply(context.Background(), op)
 			fixturekit.Must(t, err)
 			if again.Outcome != LandOutcomeLanded || f.documents(LandingDocument) != 1 || f.documents(MergeDocument) != 1 || len(f.transitions(DeliveredState)) != 1 {
@@ -421,7 +399,6 @@ func TestAPushThatLandedBeforeTheCrashIsCompletedOnceWithoutPushingAgain(t *test
 func TestAPushThatSucceededButReturnedAnErrorIsSettledAgainstTheFetchedBase(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
-	// The fault comes after the upstream accepted the push: the response is lost.
 	f.hook("land-confirmed", func() error { return errors.New("the connection dropped") })
 	result := f.land(byOwner())
 	if result.Outcome != LandingPending {
@@ -442,7 +419,6 @@ func TestAPushThatSucceededButReturnedAnErrorIsSettledAgainstTheFetchedBase(t *t
 func TestATransportFailureThatNeverReachedTheUpstreamIsRetriedNotRefused(t *testing.T) {
 	t.Parallel()
 	f := newLandFixture(t)
-	// The fetch reads the upstream and the push goes where nothing answers.
 	f.git("-C", f.cfg.Project.Clone, "config", "remote.upstream.pushurl", f.upstream+".gone")
 	result := f.land(byOwner())
 	if result.Outcome != LandingPending {
@@ -461,7 +437,6 @@ func TestATransportFailureThatNeverReachedTheUpstreamIsRetriedNotRefused(t *test
 		t.Fatalf("the attempt has an outcome %+v %v", outcome, err)
 	}
 
-	// The upstream is reachable again: the bounded recovery's retry lands it.
 	f.git("-C", f.cfg.Project.Clone, "config", "--unset", "remote.upstream.pushurl")
 	again := f.land(byOwner())
 	if again.Outcome != Landed || f.upstreamMain() != f.signed {
@@ -593,8 +568,6 @@ func landingOperationsOf(ops []trace.OperationRecord) []trace.OperationRecord {
 	return out
 }
 
-// requestedLanding records the landing of the fixture's push as an operation,
-// as the entry point does before it applies it.
 func (f *landFixture) requestedLanding(by LandDecider) coreadapter.Operation {
 	f.t.Helper()
 	op, err := f.lander().Request(context.Background(), stream, LandInput{Landing: 1, Push: 1, Review: 1, Reviewed: f.reviewed, Commit: f.signed, Decider: by})

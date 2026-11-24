@@ -11,7 +11,7 @@ import (
 
 var MasonActor = trace.Actor{Kind: "service", ID: "mason"}
 
-// masonAgent returns the agent and thread ID of a unit's mason: mason-<unit>,
+// MasonAgent returns the agent and thread ID of a unit's mason: mason-<unit>,
 // or mason_<hash> for a unit whose subject is hashed.
 func MasonAgent(unit string) string {
 	return "mason" + strings.TrimPrefix(trace.UnitSubject(unit), "unit")

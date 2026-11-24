@@ -65,9 +65,6 @@ func ReadyDocumentFor(repository *trace.Repository, stream config.WorkstreamID, 
 		Path: ReadyPath, Content: string(content) + "\n"}, nil
 }
 
-// deliveredTransitionID is the ID of the transition that moves the workstream
-// to delivered: DeliveredState the first time, and alternative when an earlier
-// delivery of the same workstream already used it.
 func deliveredTransitionID(repository *trace.Repository, stream config.WorkstreamID, alternative string) (string, error) {
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	if err != nil {
@@ -116,7 +113,6 @@ func MarkedReadyOnHost(ctx context.Context, rt router.Port, repository *trace.Re
 	if err != nil {
 		return false, err
 	}
-	// A workstream that moved since it was read is left to the next observation.
 	return res.Committed, nil
 }
 

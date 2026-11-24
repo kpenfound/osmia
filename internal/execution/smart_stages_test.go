@@ -105,7 +105,6 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 	}
 	all, err := trace.Read[trace.Cost](repo, stream)
 	must(t, err)
-	// The router's transition requests are costs of their own.
 	var costs []trace.Cost
 	for _, cost := range all {
 		if cost.Entry.Scope.Thread != "decisions" {
@@ -121,7 +120,7 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 		}
 	}
 	var start UnitCheckSelection
-	must(t, json.Unmarshal([]byte(docContent(t, docs, checkSelectionPath("resume", run.Run))), &start))
+	must(t, json.Unmarshal([]byte(docContent(t, docs, CheckSelectionPath("resume", run.Run))), &start))
 	if !reflect.DeepEqual(start.Selection, *s) {
 		t.Fatalf("recorded selection %+v, want %+v", start.Selection, s)
 	}
@@ -133,12 +132,11 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 	}
 	t.Logf("two listings plus %d scoped listings took %s in the fake", len(checks.Roots), checks.ListingTime)
 
-	// A new Judge models a restart; all three identities and answers are durable.
 	useJevProvider(f.s, p)
 	c := &checkers{masons: f.controller()}
 	ops, err := checkOperations(repo, stream)
 	must(t, err)
-	g, err := newUnitWorkspaces(f.cfg, repo).Of(stream)
+	g, err := NewUnitWorkspaces(f.cfg, repo).Of(stream)
 	must(t, err)
 	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
 	must(t, err)
@@ -146,7 +144,6 @@ func TestUnitChecksBreadthDepthRanking(t *testing.T) {
 	if !reflect.DeepEqual(again, *s) || len(p.Requests()) != 3 {
 		t.Fatalf("restart selection %+v requests %d", again, len(p.Requests()))
 	}
-	// The immutable unit record is restored even when every listing now fails.
 	checks.ListErr = errors.New("listing must not run after restore")
 	calls := len(checks.Calls)
 	restored := UnitCheckRun{Operation: run.Operation}
@@ -231,7 +228,6 @@ func TestUnitChecksStageFallbacks(t *testing.T) {
 			p := &jevtest.Provider{Results: results}
 			useJevProvider(f.s, p)
 			if scenario == "cool-down" {
-				// Three consecutive failures put the shared provider into cool-down.
 				for i := range 3 {
 					f.s.Jev.Evaluate(t.Context(), repo, jev.Judgment{Scope: coreadapter.Scope{Project: string(f.cfg.Project.ID), Workstream: string(stream), Thread: "checks", Turn: "warm", Role: "checks"}, Cause: []string{"warm-1", "warm-2", "warm-3"}[i], Task: "warm", Version: 1, Request: checkselect.Request(map[string]any{}, []string{"dag+check://warm"})})
 				}
@@ -284,7 +280,6 @@ func TestUnitChecksStageFallbacks(t *testing.T) {
 	}
 }
 
-// topOnlyChecks represents a runner which can list roots but lacks scoped listing.
 type topOnlyChecks struct {
 	*fakeChecks
 	roots []string

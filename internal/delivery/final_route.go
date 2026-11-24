@@ -32,27 +32,21 @@ var (
 	ExitQuestions = intake.ExitQuestions
 )
 
-// finalExitInput is what the recording of a final report knows of its exit.
 type finalExitInput struct {
-	Stream   config.WorkstreamID
-	State    trace.WorkflowState
-	Report   FinalReport
-	ID       string
-	Reason   string
-	Body     string
-	Blocking []string
-	Rounds   int
-	// Documents, Followups: the records of the report itself, written whichever
-	// state the round enters: the report, a post-merge follow-up and its unit.
+	Stream    config.WorkstreamID
+	State     trace.WorkflowState
+	Report    FinalReport
+	ID        string
+	Reason    string
+	Body      string
+	Blocking  []string
+	Rounds    int
 	Documents []trace.Document
 	Followups []trace.Transaction
-	// Plain is the round's transition as it is recorded when the router does not
-	// enter a state for it.
-	Plain trace.Transaction
-	At    time.Time
+	Plain     trace.Transaction
+	At        time.Time
 }
 
-// finalTrigger returns the trigger a recorded final report raises.
 func finalTrigger(r FinalReport, blocking int) string {
 	switch {
 	case r.Outcome != FinalReviewed:
@@ -63,13 +57,6 @@ func finalTrigger(r FinalReport, blocking int) string {
 	return TriggerFinalBlocking
 }
 
-// finalExit returns the exit of a recorded final report. A clean report has one
-// way out, and so has a report of a maintenance review. Otherwise today's
-// default records the report and leaves the findings to be triaged (or the
-// failure to the chief of staff); Jev may instead reopen the workstream for
-// repair units, at the strict bar, or ask for a fresh review. Every state the
-// round enters records the report and its notice; the departures also move the
-// workstream, through the shared effects of a workstream move.
 func (a *FinalReviewer) finalExit(in finalExitInput) router.Exit {
 	trigger := finalTrigger(in.Report, len(in.Blocking))
 	k := in.Report.Review
@@ -123,8 +110,6 @@ func (a *FinalReviewer) finalExit(in finalExitInput) router.Exit {
 	return x
 }
 
-// finalMoveNote is the note the workstream move of a departure carries: words
-// of code, never of the model.
 func finalMoveNote(r FinalReport) string {
 	if r.Outcome != FinalReviewed {
 		return fmt.Sprintf("final review %d failed", r.Review)
@@ -132,9 +117,6 @@ func finalMoveNote(r FinalReport) string {
 	return fmt.Sprintf("final review %d found blocking problems", r.Review)
 }
 
-// workstreamMovable returns why the workstream does not move from assembled
-// now, or "": a workgroup change holds it, it is not assembled, or its
-// publication is in flight.
 func (a *FinalReviewer) workstreamMovable(stream config.WorkstreamID) (string, error) {
 	feature, err := a.Repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -161,12 +143,6 @@ func (a *FinalReviewer) workstreamMovable(stream config.WorkstreamID) (string, e
 	return "", nil
 }
 
-// routeFinal records the final report through the router and returns the
-// outcome of the review. A round that was recorded already returns its outcome.
-// The report is a fact, not a choice: when the router holds the exit, sends it
-// to the owner or cannot carry its target out, the report and its notice are
-// recorded as the default records them, without a routing, and the router's
-// hold stands for the chief of staff, the stall watchdog and the recovery card.
 func (a *FinalReviewer) routeFinal(ctx context.Context, in finalExitInput, outcome coreadapter.OperationResult) (coreadapter.OperationResult, error) {
 	if a.S.Router == nil {
 		return coreadapter.OperationResult{}, errors.New("routing the rounds of the final review is unavailable")
@@ -201,14 +177,6 @@ const (
 	TargetDelivered         = intake.TargetDelivered
 )
 
-// routeDelivered applies the owner's delivery decision through the router as a
-// pinned move: the owner's approval of the delivery, the pull request marked
-// ready on its host, or the merge the owner recorded. The feature transaction
-// feature moves the workstream to delivered with its notice; docs and with are
-// the records the decision has always written beside it, in the same commit.
-// The router checks the hard prerequisites again, applies exactly this target,
-// records the owner as its authority, or Jev when judgment names the Jev
-// judgment the approval comes from, and asks Jev nothing.
 func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger, judgment string, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
 	by := LandDecider{}
 	if judgment != "" {
@@ -217,9 +185,6 @@ func routeDelivered(ctx context.Context, rt router.Port, repo *trace.Repository,
 	return routeDeliveredBy(ctx, rt, repo, stream, trigger, by, docs, feature, with...)
 }
 
-// routeDeliveredBy is routeDelivered for a delivery decided by by: the owner
-// when by names nobody, or Jev's delivery gate decision, which the router
-// records as such with its judgment.
 func routeDeliveredBy(ctx context.Context, rt router.Port, repo *trace.Repository, stream config.WorkstreamID, trigger string, by LandDecider, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) (router.Result, error) {
 	if rt == nil {
 		return router.Result{}, errors.New("routing the delivery of a workstream is unavailable")
@@ -227,8 +192,6 @@ func routeDeliveredBy(ctx context.Context, rt router.Port, repo *trace.Repositor
 	return rt.Route(ctx, deliveredMove(repo, stream, trigger, by, docs, feature, with...).Exit())
 }
 
-// deliveredMove is the pinned move of the workstream to delivered that feature
-// records.
 func deliveredMove(repo *trace.Repository, stream config.WorkstreamID, trigger string, by LandDecider, docs []trace.Document, feature trace.Transaction, with ...trace.Transaction) intake.PinnedMove {
 	t := feature.Transition
 	m := intake.PinnedMove{

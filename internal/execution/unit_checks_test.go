@@ -50,12 +50,12 @@ var unitState = intakefixture.UnitState
 
 func onlyRun(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) UnitCheckRun {
 	t.Helper()
-	return intakefixture.OnlyRun(t, repository, stream, checkRuns)
+	return intakefixture.OnlyRun(t, repository, stream, CheckRuns)
 }
 
 func currentReport(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) UnitReport {
 	t.Helper()
-	return intakefixture.CurrentReport[UnitReport](t, repository, stream, unit, reportDocument)
+	return intakefixture.CurrentReport[UnitReport](t, repository, stream, unit, ReportDocument)
 }
 
 func reviewTurn(t *testing.T, f *buildFixture, repository *trace.Repository, stream config.WorkstreamID) trace.TurnRequest {
@@ -92,8 +92,6 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)
-	// The router's own decide-transition judgments are not the check
-	// selection's: none of those is recorded with Jev unconfigured.
 	if slices.ContainsFunc(docs, func(d trace.Document) bool {
 		var record struct {
 			Task string `json:"task"`
@@ -107,7 +105,7 @@ func TestPassingChecksHandTheirResultToReview(t *testing.T) {
 	i := slices.IndexFunc(transitions, func(tr trace.Transition) bool {
 		return tr.Subject == trace.UnitSubject("resume") && tr.To == UnitReviewing
 	})
-	if i < 0 || transitions[i].From != UnitChecking || transitions[i].Actor != checksActor || transitions[i].Cause != checkDocumentID("resume", 1) || !strings.HasPrefix(transitions[i].ID, trace.UnitSubject("resume")+"-reviewing-checks-1-") {
+	if i < 0 || transitions[i].From != UnitChecking || transitions[i].Actor != ChecksActor || transitions[i].Cause != CheckDocumentID("resume", 1) || !strings.HasPrefix(transitions[i].ID, trace.UnitSubject("resume")+"-reviewing-checks-1-") {
 		t.Fatalf("move to review %+v", transitions)
 	}
 
@@ -202,7 +200,7 @@ func TestChecksRunEveryCheckWhenDaggerRefusesTheLinksJevSelects(t *testing.T) {
 	docs, err := trace.Read[trace.Document](c.repository, stream)
 	must(t, err)
 	for _, d := range docs {
-		if d.Path == checkSelectionPath("resume", run.Run) {
+		if d.Path == CheckSelectionPath("resume", run.Run) {
 			must(t, json.Unmarshal([]byte(d.Content), &start))
 		}
 	}
@@ -257,7 +255,7 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	c := &checkers{masons: f.controller()}
 	ops, err := checkOperations(repository, stream)
 	must(t, err)
-	g, err := newUnitWorkspaces(f.cfg, repository).Of(stream)
+	g, err := NewUnitWorkspaces(f.cfg, repository).Of(stream)
 	must(t, err)
 	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
 	must(t, err)
@@ -267,8 +265,6 @@ func TestChecksRunTheLinksJevSelects(t *testing.T) {
 	}
 }
 
-// The selection applies the configured threshold, and a decision is reused only
-// under the threshold it was made with, so a reload never reinterprets one.
 func TestChecksApplyTheConfiguredThreshold(t *testing.T) {
 	t.Parallel()
 	links := []string{
@@ -292,7 +288,7 @@ func TestChecksApplyTheConfiguredThreshold(t *testing.T) {
 	c := &checkers{masons: f.controller()}
 	ops, err := checkOperations(repository, stream)
 	must(t, err)
-	g, err := newUnitWorkspaces(f.cfg, repository).Of(stream)
+	g, err := NewUnitWorkspaces(f.cfg, repository).Of(stream)
 	must(t, err)
 	diff, err := g.Diff(context.Background(), run.Base, run.Candidate)
 	must(t, err)
@@ -386,12 +382,12 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	if run.Status != ChecksFailed || !slices.Equal(run.Failed, []string{failing}) || run.ExitCode != 1 {
 		t.Fatalf("check run %+v", run)
 	}
-	outputDocs := streamDocuments(t, repository, stream, checkDocumentID("resume", 1)+"-output")
+	outputDocs := streamDocuments(t, repository, stream, CheckDocumentID("resume", 1)+"-output")
 	if len(outputDocs) != 1 || outputDocs[0].Content != rawOutput || outputDocs[0].Path != run.OutputPath || run.OutputPath != "units/resume/checks-1-output.txt" || strings.Contains(run.Output, "passing detail") {
 		t.Fatal("complete check output or extracted diagnostics were not recorded")
 	}
 	r := &reviewers{masons: f.controller()}
-	result, ok, err := r.storedResult(stream, "resume", trace.WorkflowState{Value: UnitImplementing})
+	result, ok, err := r.StoredResult(stream, "resume", trace.WorkflowState{Value: UnitImplementing})
 	must(t, err)
 	if !ok || result.Checks != 1 || result.Bounces != 1 || result.Verdict.Decision != "material_findings" || len(result.Verdict.Findings) != 1 || !strings.Contains(result.Verdict.Findings[0].Evidence, failing) || result.Identity.Candidate.Revision != failed.Candidate {
 		t.Fatalf("send-back %+v", result)
@@ -399,7 +395,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	th, err := repository.Thread(stream, masonAgent("resume"))
 	must(t, err)
 	revise := th.Turns[len(th.Turns)-1].Request
-	if revise.TurnID != masonAgent("resume")+"-revise-checks-1" || revise.Actor != checksActor || !strings.Contains(revise.Prompt, "The project's checks failed on candidate "+failed.Candidate) || !strings.Contains(revise.Prompt, "built_test.go:9: wrong chunk") || !strings.Contains(revise.Prompt, run.OutputPath) || strings.Contains(revise.Prompt, "passing detail") {
+	if revise.TurnID != masonAgent("resume")+"-revise-checks-1" || revise.Actor != ChecksActor || !strings.Contains(revise.Prompt, "The project's checks failed on candidate "+failed.Candidate) || !strings.Contains(revise.Prompt, "built_test.go:9: wrong chunk") || !strings.Contains(revise.Prompt, run.OutputPath) || strings.Contains(revise.Prompt, "passing detail") {
 		t.Fatalf("revise turn %+v", revise)
 	}
 
@@ -408,7 +404,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 		t.Fatalf("mason turns %d, want %d: %v", len(again.Turns), len(th.Turns), err)
 	}
 
-	w, _, err := newUnitWorkspaces(f.cfg, repository).open(context.Background(), stream, "resume")
+	w, _, err := NewUnitWorkspaces(f.cfg, repository).open(context.Background(), stream, "resume")
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// Fixed.\n"), 0644))
 	completeMasonTurn(t, f, repository, stream, "resume", "fixed the chunk")
@@ -422,7 +418,7 @@ func TestFailedChecksReturnTheUnitToItsMason(t *testing.T) {
 	if got := unitState(t, repository, stream, "resume"); got != UnitReviewing {
 		t.Fatalf("unit is %s, want reviewing", got)
 	}
-	runs, err := checkRuns(repository, stream)
+	runs, err := CheckRuns(repository, stream)
 	must(t, err)
 	revised := currentReport(t, repository, stream, "resume")
 	if len(runs) != 2 || runs[1].Run != 2 || runs[1].Status != ChecksPassed || runs[1].Candidate != revised.Candidate || revised.Candidate == failed.Candidate || checks.Files[1] != "package trace\n\n// Fixed.\n" {
@@ -440,9 +436,9 @@ func TestRepeatedCheckFailuresContestTheUnit(t *testing.T) {
 	if got := unitState(t, repository, stream, "resume"); got != UnitContested {
 		t.Fatalf("unit is %s, want contested", got)
 	}
-	contest, _, err := masonContest(repository, stream, "resume")
+	contest, _, err := MasonContest(repository, stream, "resume")
 	must(t, err)
-	if !bounceContest(contest, "resume") || failedReview(contest, "resume") || !strings.Contains(contest.Reason, "1 send-backs reached shed.max_bounces") {
+	if !BounceContest(contest, "resume") || FailedReview(contest, "resume") || !strings.Contains(contest.Reason, "1 send-backs reached shed.max_bounces") {
 		t.Fatalf("contest %+v", contest)
 	}
 
@@ -475,7 +471,7 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 	if run.Status != ChecksIncomplete || run.Error != "engine unreachable" {
 		t.Fatalf("check run %+v", run)
 	}
-	subject, err := repository.Workflow(stream, checksSubject("resume"))
+	subject, err := repository.Workflow(stream, ChecksSubject("resume"))
 	must(t, err)
 	if subject.Value != "incomplete-1" {
 		t.Fatalf("checks subject %+v", subject)
@@ -483,7 +479,7 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 	outbox, err := repository.Outbox(stream)
 	must(t, err)
 	i := slices.IndexFunc(outbox, func(e trace.OutboxEntry) bool {
-		return e.TransitionID == checkDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
+		return e.TransitionID == CheckDocumentID("resume", 1)+"-incomplete" && e.Event.Kind == trace.NoticeKind
 	})
 	if i < 0 || !strings.Contains(outbox[i].Event.Body, "held in checking") || !strings.Contains(outbox[i].Event.Body, "engine unreachable") {
 		t.Fatalf("chief notices %+v", outbox)
@@ -495,13 +491,13 @@ func TestIncompleteChecksHoldTheUnitAndRunAgain(t *testing.T) {
 	}
 	advance := func() {
 		f.clock.Mu.Lock()
-		f.clock.At = f.clock.At.Add(checkRetryDelay + time.Minute)
+		f.clock.At = f.clock.At.Add(CheckRetryDelay + time.Minute)
 		f.clock.Mu.Unlock()
 	}
 
 	advance()
 	runChecks(t, f.s, repository, stream)
-	runs, err := checkRuns(repository, stream)
+	runs, err := CheckRuns(repository, stream)
 	must(t, err)
 	if len(runs) != 2 || runs[1].Status != ChecksIncomplete || !strings.Contains(runs[1].Error, "without reporting a failed check") || unitState(t, repository, stream, "resume") != UnitChecking {
 		t.Fatalf("check runs %+v", runs)
@@ -538,7 +534,7 @@ func TestStoppedChecksRunAgain(t *testing.T) {
 	if _, err := c.Apply(ctx, ops[i].Operation); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a stopped run returned %v", err)
 	}
-	if runs, err := checkRuns(repository, stream); err != nil || len(runs) != 0 {
+	if runs, err := CheckRuns(repository, stream); err != nil || len(runs) != 0 {
 		t.Fatalf("a stopped run was recorded: %+v %v", runs, err)
 	}
 	runChecks(t, f.s, repository, stream)
@@ -555,7 +551,7 @@ func TestChecksOfAReplacedCandidateDoNotRun(t *testing.T) {
 	must(t, c.Pass(context.Background()))
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
 	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resume-returned", Revision: 1, Project: repository.Project(), Workstream: stream, Unit: "resume", At: f.s.Now(), Actor: foremanActor, Cause: reportDocument("resume")}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resume-returned", Revision: 1, Project: repository.Project(), Workstream: stream, Unit: "resume", At: f.s.Now(), Actor: foremanActor, Cause: ReportDocument("resume")}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject("resume"), From: UnitChecking, To: UnitImplementing, Reason: "returned to its mason"}})
 	must(t, err)
 	runChecks(t, f.s, repository, stream)
@@ -572,7 +568,7 @@ func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 
 	docs, err := trace.Read[trace.Document](repository, stream)
 	must(t, err)
-	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == checkDocumentID("resume", 1) })
+	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == CheckDocumentID("resume", 1) })
 	var run UnitCheckRun
 	must(t, json.Unmarshal([]byte(docs[i].Content), &run))
 	run.Candidate = strings.Repeat("0", 40)
@@ -598,15 +594,13 @@ func TestReviewWithoutAMatchingCheckRunReturnsToChecking(t *testing.T) {
 
 func TestQuoteLinksKeepsRunSeparatorsReadableAsACommand(t *testing.T) {
 	t.Parallel()
-	got := strings.Join(quoteLinks([]string{"dagger", "check", "dag://?check=test&go-package=a", "&&", "dagger", "check", "dag+check://release/version"}), " ")
+	got := strings.Join(QuoteLinks([]string{"dagger", "check", "dag://?check=test&go-package=a", "&&", "dagger", "check", "dag+check://release/version"}), " ")
 	want := `dagger check "dag://?check=test&go-package=a" && dagger check dag+check://release/version`
 	if got != want {
 		t.Fatalf("command %s, want %s", got, want)
 	}
 }
 
-// A loaded setting reaches the real selector and the runner boundary, and
-// retries reuse both the recorded answers and the configured acceptance.
 func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"", "check_fallback_picks = 0", "check_fallback_picks = 2", "check_fallback_picks = 9"} {
@@ -657,7 +651,6 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 			if record.Acceptance != acceptance || len(record.Answers) != 3 {
 				t.Fatalf("record %+v", record)
 			}
-			// This is the identity used by threshold-only selections.
 			if settings.CheckFallbackPicks == 0 {
 				parts, _ := json.Marshal([]any{checkRequestID("resume", 1), checkselect.Task, checkselect.Version, record.Digest, "threshold=0.5"})
 				if wantID := fmt.Sprintf("judgment_%x", sha256.Sum256(parts)); selection.Judgment != wantID {
@@ -667,7 +660,7 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 			c := &checkers{masons: f.controller()}
 			ops, err := checkOperations(repository, stream)
 			must(t, err)
-			g, err := newUnitWorkspaces(f.cfg, repository).Of(stream)
+			g, err := NewUnitWorkspaces(f.cfg, repository).Of(stream)
 			must(t, err)
 			diff, err := g.Diff(t.Context(), run.Base, run.Candidate)
 			must(t, err)
@@ -691,15 +684,27 @@ func TestChecksApplyLoadedFallbackPicks(t *testing.T) {
 	}
 }
 
-func TestUnitReviewRequestCarriesProtocolAndOneDecisionRule(t *testing.T) {
-	t.Parallel()
+func unitReviewRequest(t *testing.T, name string) trace.TurnRequest {
+	t.Helper()
 	checks := &fakeChecks{Outcomes: passing()}
-	f, stream, repository := newChecksFixture(t, "review-decision-rule", checks)
+	f, stream, repository := newChecksFixture(t, name, checks)
 	runChecks(t, f.s, repository, stream)
-	req := reviewTurn(t, f, repository, stream)
+	return reviewTurn(t, f, repository, stream)
+}
 
-	system := req.SystemPrompt
-	for _, want := range []string{
+func requireContains(t *testing.T, label, text string, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(text, want) {
+			t.Errorf("%s lacks %q:\n%s", label, want, text)
+		}
+	}
+}
+
+func TestUnitReviewSystemPromptCarriesTheProtocol(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-protocol")
+	requireContains(t, "system prompt", req.SystemPrompt, []string{
 		"You are the unit reviewer",
 		"Review the exact candidate identity your prompt gives",
 		"the project's checks on this exact candidate", "cite it as evidence rather than re-deriving",
@@ -709,68 +714,54 @@ func TestUnitReviewRequestCarriesProtocolAndOneDecisionRule(t *testing.T) {
 		"factory_context", "record_discovery",
 		"Call ask when a decision is needed", "end the turn",
 		"Otherwise call verdict",
-	} {
-		if !strings.Contains(system, want) {
-			t.Errorf("system prompt lacks %q:\n%s", want, system)
-		}
-	}
-	if !strings.Contains(req.Prompt, "The candidate identity is:") || !strings.Contains(req.Prompt, "Review this exact candidate") {
-		t.Errorf("review prompt lacks the candidate identity:\n%s", req.Prompt)
-	}
+	})
+}
 
-	// The materiality rule: written rules, nothing else, make a standards finding material.
-	for _, want := range []string{
+func TestUnitReviewPromptNamesTheCandidateIdentity(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-identity")
+	requireContains(t, "review prompt", req.Prompt, []string{"The candidate identity is:", "Review this exact candidate"})
+}
+
+func TestUnitReviewSystemPromptStatesWhenAFindingIsMaterial(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-materiality")
+	requireContains(t, "system prompt", req.SystemPrompt, []string{
 		"when the task or an acceptance item does not hold",
 		"when the change reaches beyond what the task needs",
 		"when it breaks a written rule",
 		"the project's charter, its AGENTS.md or contributor documents, and the skills configured on your role",
 		"never blocks", "decide satisfactory and note the call in the summary",
 		"Formatting and lint belong to the checks",
-	} {
-		if !strings.Contains(system, want) {
-			t.Errorf("system prompt lacks the materiality rule %q:\n%s", want, system)
-		}
-	}
+		"report the breach as a failing part of the task, naming the rule and where it is written",
+	})
+}
 
-	// How to review belongs to the role's skills, under Osmia's protocol.
-	for _, want := range []string{
+func TestUnitReviewPromptTreatsAWrittenRuleBreachAsAFailingTask(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-rules")
+	requireContains(t, "review prompt", req.Prompt, []string{
+		"a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task",
+		"naming the rule and where it is written",
+		"Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary",
+	})
+}
+
+func TestUnitReviewSystemPromptHandsOffToConfiguredSkills(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-skills")
+	requireContains(t, "system prompt", req.SystemPrompt, []string{
 		"skills configured on your role", "pr-review", "file_read", "the path the skill list gives",
 		"When no skills are listed",
 		"Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask",
 		"you still call ask when you need a decision, and you report only through verdict",
-	} {
-		if !strings.Contains(system, want) {
-			t.Errorf("system prompt lacks the skills hand-off %q:\n%s", want, system)
-		}
-	}
-	for _, gone := range []string{"Code style, formatting and lint belong to the checks, not", "A finding is material only when"} {
-		if strings.Contains(system, gone) {
-			t.Errorf("system prompt keeps the old materiality wording %q", gone)
-		}
-	}
+	})
+}
 
-	// The composed request reads one way: a written-rule breach is a failing task
-	// part named with its rule and source, and code smells stay in the summary.
+func TestVerdictToolDescriptionNamesTheUnmetPartOfTheTask(t *testing.T) {
+	t.Parallel()
 	scope := coreadapter.Scope{Workstream: "stream", Unit: "resume", Thread: "reviewer-resume", Turn: "review-1", Role: reviewerRole}
-	verdict := (&reviewerReports{}).tool(scope).Description
-	if !strings.Contains(verdict, "every acceptance item holds") || !strings.Contains(verdict, "names the acceptance item or part of the task that does not hold") {
-		t.Fatalf("verdict tool description changed: %s", verdict)
-	}
-	for _, want := range []string{
-		"a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task",
-		"naming the rule and where it is written",
-		"Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary",
-	} {
-		if !strings.Contains(req.Prompt, want) {
-			t.Errorf("review prompt lacks %q:\n%s", want, req.Prompt)
-		}
-	}
-	for name, text := range map[string]string{"system prompt": system, "review prompt": req.Prompt} {
-		if strings.Contains(text, "names the task or acceptance item that does not hold") {
-			t.Errorf("%s still limits findings to acceptance items", name)
-		}
-	}
-	if !strings.Contains(system, "report the breach as a failing part of the task, naming the rule and where it is written") {
-		t.Errorf("system prompt does not report a breach as a failing task part:\n%s", system)
-	}
+	requireContains(t, "verdict tool description", (&reviewerReports{}).tool(scope).Description, []string{
+		"every acceptance item holds", "names the acceptance item or part of the task that does not hold",
+	})
 }

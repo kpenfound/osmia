@@ -66,7 +66,6 @@ func ReadCommitPath(ctx context.Context, clone, commit, name string) (CommitPath
 	return CommitPath{Dir: true, Names: names}, nil
 }
 
-// commitTreeEntry is one entry of git ls-tree output.
 type commitTreeEntry struct {
 	Mode, Kind, Object, Name string
 }
@@ -91,8 +90,6 @@ func parseCommitTree(out []byte) ([]commitTreeEntry, error) {
 	return entries, nil
 }
 
-// commitGit runs a read-only git command in clone, isolated from the host's
-// git configuration, with pathspecs taken literally.
 func commitGit(ctx context.Context, clone string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", clone}, args...)...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_LITERAL_PATHSPECS=1", "LC_ALL=C"}

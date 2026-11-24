@@ -177,18 +177,11 @@ func BriefLimits(text string, items, screenshots []string) string {
 	return ""
 }
 
-// briefTarget is the final review a brief can be recorded for.
 type briefTarget struct {
 	report   FinalReport
 	revision int
 }
 
-// briefTarget returns the member workstream's current reviewed final review
-// and its report revision when it awaits the owner's delivery approval, or why
-// no review does. A workstream awaits it while it is assembled, or delivered
-// with a pending update of its open pull request, its latest final review is
-// reviewed and still reads the branch, and the owner has not approved
-// delivery for that review.
 func (s *Controller) briefTarget(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, named *BriefInput) (briefTarget, string, error) {
 	review, _, approval, err := DeliveryDocuments(repository, stream)
 	if err != nil {
@@ -266,8 +259,6 @@ func (s *Controller) RecordBrief(ctx context.Context, repository *trace.Reposito
 		return Brief{}, 0, "", err
 	}
 	for attempt := 0; ; attempt++ {
-		// The review is read again as late as the write allows: a review
-		// recorded or an approval given since the first read ends the call.
 		if _, reason, err := s.briefTarget(ctx, repository, stream, &in); err != nil || reason != "" {
 			return Brief{}, 0, reason, err
 		}
@@ -284,11 +275,6 @@ func (s *Controller) RecordBrief(ctx context.Context, repository *trace.Reposito
 	}
 }
 
-// briefWaiting reports whether the delivery inbox entry for final review k
-// waits for its brief: the chief-of-staff turn that handles the review's
-// notice is queued or running, or has not been started, and a chief turn can
-// still run. A turn that ended in any status, or no chief turn that can run,
-// ends the wait.
 func (s *Controller) briefWaiting(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, k int) (bool, error) {
 	if s.ChiefThread == nil {
 		return false, nil
@@ -312,10 +298,6 @@ func (s *Controller) briefWaiting(ctx context.Context, repository *trace.Reposit
 	return false, nil
 }
 
-// presentBrief is the brief field of the presentation of report, the final
-// review whose report document has revision reviewRevision: the brief
-// recorded for it, or its waiting or none-recorded state. approved says the
-// owner approved delivery for it, which closes the brief.
 func (s *Controller) presentBrief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, report FinalReport, reviewRevision int, approved bool) (*DeliveryBrief, error) {
 	b, found, err := BriefForReport(repository, stream, report, reviewRevision)
 	if err != nil {

@@ -73,10 +73,6 @@ func (e *Effects) Registered(machine, target string) bool {
 	return ok
 }
 
-// build returns the effect of the plan's target. The exit's default target is
-// entered as the trigger enters it when the exit says how; any other target is
-// entered through the exit's own effect for it, or the registered effect, or has
-// none. The records of the trigger itself come with every target.
 func (e *Effects) build(ctx context.Context, p Plan) (Effect, error) {
 	var out Effect
 	var err error
