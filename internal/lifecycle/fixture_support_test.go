@@ -89,8 +89,8 @@ type productionDesignFixture struct {
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
 	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)
-	intakefixture.Must(t, err)
-	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: intakefixture.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
+	fixturekit.Must(t, err)
+	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: fixturekit.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
 func (f *shedFixture) unitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[execution.Building] {
 	m := newMasonController(f.s, repository)
@@ -164,7 +164,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			_, event := execution.LandIDs("accept", 1)
 			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
-		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn, LibrarianWorkstream: intake.LibrarianWorkstream,
+		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
 	if f.configuration.openPullRequestsStay {
 		shared.IdleRefresh = func(t trace.Transition) bool { return t.Reason == lifecycle.OwnPullRequestOpenReason }

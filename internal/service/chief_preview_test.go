@@ -22,7 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -31,22 +30,22 @@ func previewScope(t *testing.T, repo *trace.Repository, stream config.Workstream
 	t.Helper()
 	ctx := context.Background()
 	_, err := repo.EnsureChiefOfStaff(ctx, stream, now(), ownerActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request-preview", Revision: 1, Project: repo.Project(), Workstream: stream, At: now(), Actor: ownerActor, Cause: "preview"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "preview", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Show the page"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "preview-claim", t.TempDir(), now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "preview", Role: trace.ChiefOfStaff}
 }
 
 func previewView(t *testing.T) *isolation.FileView {
 	t.Helper()
 	source := t.TempDir()
-	intakefixture.Must(t, os.WriteFile(filepath.Join(source, "status.json"), []byte("{}"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(source, "status.json"), []byte("{}"), 0600))
 	view, err := (isolation.Views{Directory: t.TempDir()}).Create(context.Background(), coreadapter.Workspace{Directory: source, Access: coreadapter.ReadOnly}, []string{"status.json"})
-	intakefixture.Must(t, err)
-	t.Cleanup(func() { intakefixture.Must(t, view.Release(context.Background())) })
+	fixturekit.Must(t, err)
+	t.Cleanup(func() { fixturekit.Must(t, view.Release(context.Background())) })
 	return view
 }
 
@@ -57,9 +56,9 @@ func previewServiceFixture() *previewService {
 func previewInvoke(t *testing.T, tool coreadapter.Tool, raw json.RawMessage) previewResult {
 	t.Helper()
 	data, err := tool.Handle(context.Background(), raw)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var result previewResult
-	intakefixture.Must(t, json.Unmarshal(data, &result))
+	fixturekit.Must(t, json.Unmarshal(data, &result))
 	return result
 }
 
@@ -93,7 +92,7 @@ func newPreviewSource(t *testing.T) *previewSource {
 	candidate := moveFeature(t, f, stream, map[string]string{"preview-source.txt": "unit candidate\n"})
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument("resume"), Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: serviceActor, Cause: "preview"}
 	report, _ := json.Marshal(UnitReport{Candidate: candidate})
-	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "units/resume/report.json", Content: string(report)}}))
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "units/resume/report.json", Content: string(report)}}))
 	head := moveFeature(t, f, stream, map[string]string{"preview-source.txt": "feature head\n"})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
@@ -116,7 +115,7 @@ func (p *previewSource) environment(t *testing.T) string {
 	t.Helper()
 	p.preview(t, p.cases()[0].raw)
 	env, err := os.ReadFile(p.fake.Environment)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return string(env)
 }
 
@@ -129,7 +128,7 @@ func TestChiefPreviewShowsTheSourceOfTheCommitItNames(t *testing.T) {
 				t.Fatalf("preview: %+v", result)
 			}
 			exported, err := os.ReadFile(p.fake.Source)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if string(exported) != tc.source {
 				t.Fatalf("exported %q", exported)
 			}
@@ -143,9 +142,9 @@ func TestChiefPreviewCommitIsTheOneInspectCodeReads(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := p.preview(t, tc.raw)
 			raw, err := inspectCode(p.cfg, p.repo, p.scope, p.f.s.now).Handle(context.Background(), json.RawMessage(tc.inspect))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			var code struct{ Commit string }
-			intakefixture.Must(t, json.Unmarshal(raw, &code))
+			fixturekit.Must(t, json.Unmarshal(raw, &code))
 			if code.Commit != result.Commit {
 				t.Fatalf("preview %s differs from inspect %s", result.Commit, code.Commit)
 			}
@@ -157,7 +156,7 @@ func TestChiefPreviewStoresItsImageInTheShownTrace(t *testing.T) {
 	p := newPreviewSource(t)
 	result := p.preview(t, p.cases()[0].raw)
 	image, err := p.repo.StoredImage(p.stream, result.ImageID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if image.Workstream != p.stream || !bytes.Equal(image.Data, attachmentPNG(t)) {
 		t.Fatal("image not stored in shown trace")
 	}
@@ -167,7 +166,7 @@ func TestChiefPreviewRunsTheCallItWasGivenAsOneArgumentEach(t *testing.T) {
 	p := newPreviewSource(t)
 	p.preview(t, p.cases()[0].raw)
 	call, err := os.ReadFile(p.fake.Call)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	args := strings.Split(strings.TrimSuffix(string(call), "\x00"), "\x00")
 	if !slices.Equal(args, append(append([]string{"call"}, previewServiceFixture().Call...), "id")) {
 		t.Fatalf("call argv %q", args)
@@ -180,9 +179,9 @@ func TestChiefPreviewPinsTheServiceSettingsOfACall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p.preview(t, tc.raw)
 			doc, err := latestPreviewDocument(p.repo, p.stream, "preview-"+strings.TrimPrefix(trace.ToolCallID(p.scope, "preview", json.RawMessage(tc.raw)), "tool-"))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			var pin previewOperation
-			intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &pin))
+			fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &pin))
 			if !pin.AgentChosen || pin.Preview.Timeout != "5m" || pin.Preview.Port != 8080 {
 				t.Fatalf("service pin: %+v", pin)
 			}
@@ -195,9 +194,9 @@ func TestChiefPreviewCapturesTheRootPathWhenNoneIsGiven(t *testing.T) {
 	raw := p.cases()[1].raw
 	p.preview(t, raw)
 	doc, err := latestPreviewDocument(p.repo, p.stream, "preview-"+strings.TrimPrefix(trace.ToolCallID(p.scope, "preview", json.RawMessage(raw)), "tool-"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var pin previewOperation
-	intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &pin))
+	fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &pin))
 	if pin.Capture.Path != "/" {
 		t.Fatalf("omitted path captured %q", pin.Capture.Path)
 	}
@@ -207,14 +206,14 @@ func TestChiefPreviewCapturesTheDesktopViewThroughAServiceBinding(t *testing.T) 
 	p := newPreviewSource(t)
 	p.preview(t, p.cases()[1].raw)
 	capture, err := os.ReadFile(p.fake.Capture)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	args := strings.Split(strings.TrimSuffix(string(capture), "\x00"), "\x00")
 	if !slices.Contains(args, checks.ChromiumImage) || !slices.Contains(args, "with-service-binding") || slices.Contains(args, "up") {
 		t.Fatalf("capture argv %q", args)
 	}
 	i := slices.Index(args, "--args")
 	node, err := csv.NewReader(strings.NewReader(args[i+1])).Read()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(node[2], `"url":"http://preview:8080/"`) || !strings.Contains(node[2], `"width":1440`) || !strings.Contains(node[2], `"fullPage":false`) {
 		t.Fatalf("desktop capture %s", node[2])
 	}
@@ -249,11 +248,11 @@ func (p *previewSource) restarted(t *testing.T) (view *isolation.FileView, resul
 	view = previewView(t)
 	tool := p.controls.preview(p.cfg, p.repo, p.scope, view, p.f.s.now)
 	before, err := os.ReadFile(p.fake.Runs)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, restorePreviewImages(context.Background(), p.cfg, p.controls, p.repo, p.scope, view, p.f.s.now))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, restorePreviewImages(context.Background(), p.cfg, p.controls, p.repo, p.scope, view, p.f.s.now))
 	result = previewInvoke(t, tool, json.RawMessage(p.cases()[1].raw))
 	after, err := os.ReadFile(p.fake.Runs)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return view, result, before, after
 }
 
@@ -263,7 +262,7 @@ func TestChiefPreviewAfterARestartShowsTheStoredImageWithoutCapturingAgain(t *te
 		t.Fatal("restart captured again")
 	}
 	copied, err := view.Read(result.Path)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !bytes.Equal(copied, attachmentPNG(t)) {
 		t.Fatal("missing view image")
 	}
@@ -273,12 +272,12 @@ func TestChiefPreviewAfterARestartStoresEachImageAndCompletesEachToolOnce(t *tes
 	p := newPreviewSource(t)
 	p.restarted(t)
 	images, err := trace.Read[trace.Image](p.repo, p.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(images) != 2 {
 		t.Fatalf("duplicate images %d", len(images))
 	}
 	docs, err := trace.Read[trace.Document](p.repo, p.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, image := range images {
 		completed := 0
 		for _, doc := range docs {
@@ -320,25 +319,25 @@ func TestChiefPreviewLimitationsCompleteTurn(t *testing.T) {
 		t.Fatal("invalid request started Dagger")
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, doc := range docs {
 		if strings.HasPrefix(doc.ID, "preview-") {
 			t.Fatal("invalid request pinned a capture")
 		}
 	}
 	chief, err := repo.Thread(stream, trace.ChiefOfStaff)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	q := chief.Turns[len(chief.Turns)-1]
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.s.now()
-	intakefixture.Must(t, repo.CaptureTurn(context.Background(), q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: scope.Turn, RequestID: q.Request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "preview-session"}, FinalResponse: "Preview is unavailable", StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory}}))
-	intakefixture.Must(t, repo.CompleteTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, q.Claim.Token, f.s.now()))
+	fixturekit.Must(t, repo.CaptureTurn(context.Background(), q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: scope.Turn, RequestID: q.Request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "preview-session"}, FinalResponse: "Preview is unavailable", StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory}}))
+	fixturekit.Must(t, repo.CompleteTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, q.Claim.Token, f.s.now()))
 }
 
 func seedPreviewOperation(t *testing.T, repo *trace.Repository, scope coreadapter.Scope, raw json.RawMessage, stream config.WorkstreamID, commit string, settings *previewService) previewOperation {
 	t.Helper()
 	var in previewInput
-	intakefixture.Must(t, json.Unmarshal(raw, &in))
+	fixturekit.Must(t, json.Unmarshal(raw, &in))
 	if in.Path == "" {
 		in.Path = settings.Path
 	}
@@ -349,8 +348,8 @@ func seedPreviewOperation(t *testing.T, repo *trace.Repository, scope coreadapte
 	id := "preview-" + strings.TrimPrefix(trace.ToolCallID(scope, "preview", raw), "tool-")
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: config.WorkstreamID(scope.Workstream), Actor: serviceActor, Cause: scope.Turn}, Path: "tools/" + id + ".json"}
 	_, err := repo.BeginTool(context.Background(), scope, coreadapter.Tool{Name: "preview", Effect: coreadapter.ToolMemory}, raw, func() time.Time { return fixturekit.DemoStart })
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, writePreviewOperation(context.Background(), repo, &doc, op, func() time.Time { return fixturekit.DemoStart }))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, writePreviewOperation(context.Background(), repo, &doc, op, func() time.Time { return fixturekit.DemoStart }))
 	return op
 }
 
@@ -392,7 +391,7 @@ func resumeSharedPreview(t *testing.T, cross bool) *sharedPreview {
 	scope := previewScope(t, chief, host, now)
 	member := fixturekit.Quiet
 	target, _, refusal, err := chiefMember(chief, scope, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if refusal != "" {
 		t.Fatal(refusal)
 	}
@@ -404,21 +403,21 @@ func resumeSharedPreview(t *testing.T, cross bool) *sharedPreview {
 	view := previewView(t)
 	tool := controls.preview(s.cfg, chief, scope, view, now)
 	_, err = chief.BeginTool(context.Background(), scope, tool, raw, now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	image, err := target.RecordImage(context.Background(), trace.Header{Project: target.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: serviceActor, Cause: scope.Turn}, key, "image/png", attachmentPNG(t), scope.Turn)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, chief.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, chief.Close())
 	if cross {
-		chief, err = trace.OpenWorkgroupTrace(s.cfg.Root, group.ID, []trace.CrossRepoMember{{Workstream: intakefixture.Stream, Project: s.projects[0].repository}, {Workstream: member, Project: s.projects[1].repository}})
+		chief, err = trace.OpenWorkgroupTrace(s.cfg.Root, group.ID, []trace.CrossRepoMember{{Workstream: fixturekit.Stream, Project: s.projects[0].repository}, {Workstream: member, Project: s.projects[1].repository}})
 	} else {
 		chief, err = trace.Open(s.cfg.Root, s.cfg.Project)
 		s.projects[0].repository = chief
 	}
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { chief.Close() })
-	intakefixture.Must(t, chief.AbandonTurn(context.Background(), host, trace.ChiefOfStaff, scope.Turn, fixturekit.DemoStart))
+	fixturekit.Must(t, chief.AbandonTurn(context.Background(), host, trace.ChiefOfStaff, scope.Turn, fixturekit.DemoStart))
 	target, _, _, err = chiefMember(chief, scope, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resumed := scope
 	resumed.Turn = "preview-continuation"
 
@@ -426,12 +425,12 @@ func resumeSharedPreview(t *testing.T, cross bool) *sharedPreview {
 	for range 3 {
 		view = previewView(t)
 		tool = controls.preview(s.cfg, chief, scope, view, now)
-		intakefixture.Must(t, restorePreviewImages(context.Background(), s.cfg, controls, chief, resumed, view, now))
+		fixturekit.Must(t, restorePreviewImages(context.Background(), s.cfg, controls, chief, resumed, view, now))
 		result := previewInvoke(t, tool, raw)
 		copied, err := view.Read(result.Path)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		entries, err := os.ReadDir(filepath.Join(view.Workspace().Directory, "images"))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		p.results = append(p.results, sharedPreviewResult{result: result, copied: copied, copies: len(entries)})
 	}
 	return p
@@ -480,9 +479,9 @@ func TestChiefPreviewResumedRepeatedlyCopiesTheImageIntoTheViewOnce(t *testing.T
 func TestChiefPreviewResumedKeepsOneImageAndOneReference(t *testing.T) {
 	sharedPreviewVariants(t, func(t *testing.T, p *sharedPreview) {
 		images, err := trace.Read[trace.Image](p.target, p.member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		refs, err := trace.Read[trace.ImageReference](p.chief, p.host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(images) != 1 || len(refs) != 1 || refs[0].ImageID != p.image.ID || refs[0].Member != p.member {
 			t.Fatalf("images %d references %+v", len(images), refs)
 		}
@@ -492,7 +491,7 @@ func TestChiefPreviewResumedKeepsOneImageAndOneReference(t *testing.T) {
 func TestChiefPreviewResumedCompletesTheToolOnceWithTheRecordedImage(t *testing.T) {
 	sharedPreviewVariants(t, func(t *testing.T, p *sharedPreview) {
 		docs, err := trace.Read[trace.Document](p.chief, p.host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		completions := 0
 		for _, doc := range docs {
 			if doc.ID == p.key && doc.Revision == 2 {
@@ -503,9 +502,9 @@ func TestChiefPreviewResumedCompletesTheToolOnceWithTheRecordedImage(t *testing.
 			t.Fatalf("tool completions %d", completions)
 		}
 		resultDoc, err := latestPreviewDocument(p.chief, p.host, "preview-"+strings.TrimPrefix(p.key, "tool-"))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		op := p.op
-		intakefixture.Must(t, json.Unmarshal([]byte(resultDoc.Content), &op))
+		fixturekit.Must(t, json.Unmarshal([]byte(resultDoc.Content), &op))
 		if op.Result == nil || op.Result.ImageID != p.image.ID {
 			t.Fatalf("unfinished operation %+v", op)
 		}
@@ -530,17 +529,17 @@ func TestChiefPreviewRestartsCaptureWithoutReceipt(t *testing.T) {
 	seedPreviewOperation(t, repo, scope, raw, stream, commit, previewServiceFixture())
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "later branch movement\n"})
 	repo = restartTrace(t, f, repo)
-	intakefixture.Must(t, repo.AbandonTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, f.s.now()))
+	fixturekit.Must(t, repo.AbandonTurn(context.Background(), stream, trace.ChiefOfStaff, scope.Turn, f.s.now()))
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
 	view := previewView(t)
 	resumed := scope
 	resumed.Turn = "preview-continuation"
-	intakefixture.Must(t, restorePreviewImages(context.Background(), cfg, controls, repo, resumed, view, f.s.now))
+	fixturekit.Must(t, restorePreviewImages(context.Background(), cfg, controls, repo, resumed, view, f.s.now))
 	tool := controls.preview(cfg, repo, scope, view, f.s.now)
 	result := previewInvoke(t, tool, raw)
 	receipt, err := view.Read("previews/results.json")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(receipt), result.ImageID) {
 		t.Fatal("recovered receipt missing from chief view")
 	}
@@ -548,15 +547,15 @@ func TestChiefPreviewRestartsCaptureWithoutReceipt(t *testing.T) {
 		t.Fatalf("%+v", result)
 	}
 	source, err := os.ReadFile(fake.Source)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(source) != "pinned before interruption\n" {
 		t.Fatalf("source %q", source)
 	}
 	capture, err := os.ReadFile(fake.Capture)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	args := strings.Split(strings.TrimSuffix(string(capture), "\x00"), "\x00")
 	node, err := csv.NewReader(strings.NewReader(args[slices.Index(args, "--args")+1])).Read()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, want := range []string{`"url":"http://preview:8080/phone"`, `"width":390`, `"height":844`, `"fullPage":true`, `"phone":true`} {
 		if !strings.Contains(node[2], want) {
 			t.Fatalf("missing %s", want)
@@ -574,7 +573,7 @@ func TestChiefPreviewFailureDiagnostic(t *testing.T) {
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "failure\n"})
 	scope := previewScope(t, repo, stream, f.s.now)
 	raw := json.RawMessage(`{"call":["broken"],"port":8080}`)
-	intakefixture.Must(t, os.WriteFile(fake.Failure, []byte(strings.Repeat("output ", 10000)+secret+"\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(fake.Failure, []byte(strings.Repeat("output ", 10000)+secret+"\n"), 0600))
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
 	tool := controls.preview(cfg, repo, scope, previewView(t), f.s.now)
@@ -583,27 +582,27 @@ func TestChiefPreviewFailureDiagnostic(t *testing.T) {
 		t.Fatalf("diagnostic length %d", len(result.Limitation))
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, doc := range docs {
 		if strings.Contains(doc.Content, secret) {
 			t.Fatalf("secret persisted in %s", doc.ID)
 		}
 	}
 	before, err := os.ReadFile(fake.Runs)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	again := previewInvoke(t, tool, raw)
 	after, err := os.ReadFile(fake.Runs)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if again != result || !bytes.Equal(before, after) {
 		t.Fatal("failed operation did not retain diagnostic")
 	}
-	intakefixture.Must(t, os.Remove(fake.Failure))
+	fixturekit.Must(t, os.Remove(fake.Failure))
 	corrected := previewInvoke(t, tool, json.RawMessage(`{"call":["web"],"port":8080}`))
 	if corrected.ImageID == "" {
 		t.Fatalf("corrected request: %+v", corrected)
 	}
 	runs, err := os.ReadFile(fake.Runs)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Count(string(runs), "capture") != 2 {
 		t.Fatal("different call did not run separately")
 	}
@@ -612,9 +611,9 @@ func TestChiefPreviewFailureDiagnostic(t *testing.T) {
 func TestChiefPreviewSlotClockAndMaintenance(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := &Service{checkSlots: &checkSlotPool{limit: 1}}
-		run := CheckSlotRun{Project: intakefixture.Project, Workstream: intakefixture.Stream, Preview: true}
+		run := CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Preview: true}
 		release, err := s.checkSlots.acquire(t.Context(), CheckSlotRun{Unit: "holder"})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		done := make(chan error, 1)
 		go func() {
 			_, err := s.withPreviewSlot(t.Context(), run, "5m", func(ctx context.Context) ([]byte, error) {
@@ -633,7 +632,7 @@ func TestChiefPreviewSlotClockAndMaintenance(t *testing.T) {
 		}
 		release()
 		synctest.Wait()
-		intakefixture.Must(t, <-done)
+		fixturekit.Must(t, <-done)
 		entered, finish := make(chan struct{}), make(chan struct{})
 		gateDone := make(chan error, 1)
 		go func() {
@@ -657,7 +656,7 @@ func TestChiefPreviewSlotClockAndMaintenance(t *testing.T) {
 		}
 		close(finish)
 		synctest.Wait()
-		intakefixture.Must(t, <-gateDone)
+		fixturekit.Must(t, <-gateDone)
 		go func() {
 			_, err := s.withPreviewSlot(t.Context(), run, "5m", func(ctx context.Context) ([]byte, error) { <-ctx.Done(); return nil, ctx.Err() })
 			done <- err
@@ -685,7 +684,7 @@ func TestChiefPreviewTimedOutAndCancelledCapture(t *testing.T) {
 	settings.Timeout = "1s"
 	raw := json.RawMessage(`{"call":["web","--message","it's a string; $(never executed)"],"port":8080}`)
 	seedPreviewOperation(t, repo, scope, raw, stream, commit, settings)
-	intakefixture.Must(t, os.WriteFile(fake.Block, []byte("browser blocked: "+secret+"\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(fake.Block, []byte("browser blocked: "+secret+"\n"), 0600))
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
 	tool := controls.preview(cfg, repo, scope, previewView(t), f.s.now)
@@ -725,7 +724,7 @@ func TestChiefPreviewTimedOutAndCancelledCapture(t *testing.T) {
 	select {
 	case out := <-done:
 		var cancelled previewResult
-		intakefixture.Must(t, json.Unmarshal(out, &cancelled))
+		fixturekit.Must(t, json.Unmarshal(out, &cancelled))
 		if !strings.Contains(cancelled.Limitation, "canceled") {
 			t.Fatalf("cancellation %s", out)
 		}
@@ -770,7 +769,7 @@ func TestChiefPreviewRefusesUnsafeArguments(t *testing.T) {
 		t.Fatal("trailing flag accepted")
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, doc := range docs {
 		if strings.HasPrefix(doc.ID, "preview-") {
 			t.Fatal("unsafe call pinned for recovery")
@@ -795,25 +794,25 @@ func newSymlinkPreview(t *testing.T, backend string) *symlinkPreview {
 	t.Helper()
 	fake := fixturekit.InstallPreviewCLIs(t, attachmentPNG(t))
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, backend) })
-	stream, repo := seedBuild(t, f, "preview-symlinks", intakefixture.ValidPlan, backend, f.upstream(t))
+	stream, repo := seedBuild(t, f, "preview-symlinks", fixturekit.ValidPlan, backend, f.upstream(t))
 	cfg := f.s.about(repo)
 	moveFeature(t, f, stream, map[string]string{"preview-source.txt": "symlinks\n"})
 	g, err := featureWorkspaces(cfg, repo).Of(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	acquired, err := g.Acquire(context.Background(), vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	w := acquired.(workspace.Worktree)
-	intakefixture.Must(t, os.Symlink(t.TempDir(), filepath.Join(w.Path, "outside")))
-	intakefixture.Must(t, os.Symlink("preview-source.txt", filepath.Join(w.Path, "inside")))
-	intakefixture.Must(t, os.Symlink("outside", filepath.Join(w.Path, "chain")))
-	intakefixture.Must(t, os.Symlink("inside", filepath.Join(w.Path, "inside-chain")))
+	fixturekit.Must(t, os.Symlink(t.TempDir(), filepath.Join(w.Path, "outside")))
+	fixturekit.Must(t, os.Symlink("preview-source.txt", filepath.Join(w.Path, "inside")))
+	fixturekit.Must(t, os.Symlink("outside", filepath.Join(w.Path, "chain")))
+	fixturekit.Must(t, os.Symlink("inside", filepath.Join(w.Path, "inside-chain")))
 	for _, name := range []string{"--link", " padded ", "quo'ted", "comma,link"} {
-		intakefixture.Must(t, os.Symlink(t.TempDir(), filepath.Join(w.Path, name)))
+		fixturekit.Must(t, os.Symlink(t.TempDir(), filepath.Join(w.Path, name)))
 	}
 	tip, _, err := g.Branch(context.Background(), featureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	commit, err := g.Snapshot(context.Background(), w, tip)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fixturekit.DemoGit(t, cfg.Project.Clone, "-C", cfg.Project.Clone, "config", "core.symlinks", "false")
 	scope := previewScope(t, repo, stream, f.s.now)
 	controls := &runtimeControls{}
@@ -864,17 +863,17 @@ func TestChiefPreviewResumedCaptureRunsTheCallItPinned(t *testing.T) {
 		raw := json.RawMessage(`{"path":"/pinned"}`)
 		seedPreviewOperation(t, p.repo, p.scope, raw, p.stream, p.commit, settings)
 		repo := restartTrace(t, p.f, p.repo)
-		intakefixture.Must(t, repo.AbandonTurn(context.Background(), p.stream, trace.ChiefOfStaff, p.scope.Turn, p.f.s.now()))
+		fixturekit.Must(t, repo.AbandonTurn(context.Background(), p.stream, trace.ChiefOfStaff, p.scope.Turn, p.f.s.now()))
 		resumed := p.scope
 		resumed.Turn = "preview-continuation"
 		view := previewView(t)
-		intakefixture.Must(t, restorePreviewImages(context.Background(), p.cfg, p.controls, repo, resumed, view, p.f.s.now))
+		fixturekit.Must(t, restorePreviewImages(context.Background(), p.cfg, p.controls, repo, resumed, view, p.f.s.now))
 		result := previewInvoke(t, p.controls.preview(p.cfg, repo, p.scope, view, p.f.s.now), raw)
 		if result.ImageID == "" {
 			t.Fatalf("settings pin refused: %+v", result)
 		}
 		call, err := os.ReadFile(p.fake.Call)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !slices.Equal(strings.Split(strings.TrimSuffix(string(call), "\x00"), "\x00"), append(append([]string{"call"}, settings.Call...), "id")) {
 			t.Fatalf("settings pin changed: %s", call)
 		}
@@ -905,10 +904,10 @@ func TestChiefPreviewVerifiesServiceID(t *testing.T) {
 	controls.service.Store(f.s)
 	tool := controls.preview(f.s.about(repo), repo, scope, previewView(t), f.s.now)
 	encoded, err := base64.StdEncoding.DecodeString(fixturekit.PreviewServiceID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wrongType := base64.StdEncoding.EncodeToString(bytes.ReplaceAll(encoded, []byte("Service"), []byte("Counter")))
 	for i, value := range []string{wrongType, "", "Service@fake", "/etc/passwd", "/etc/passwd/", "env://DAGGER_CLOUD_TOKEN", "file:///etc/passwd", "cmd://command", "not an ID", fixturekit.PreviewServiceID, fixturekit.PreviewRecipeServiceID} {
-		intakefixture.Must(t, os.WriteFile(fake.ServiceID, []byte(value+"\n"), 0600))
+		fixturekit.Must(t, os.WriteFile(fake.ServiceID, []byte(value+"\n"), 0600))
 		raw, _ := json.Marshal(map[string]any{"call": []string{"web"}, "port": 8080, "path": fmt.Sprintf("/%d", i)})
 		result := previewInvoke(t, tool, raw)
 		if value != fixturekit.PreviewServiceID && value != fixturekit.PreviewRecipeServiceID {
@@ -923,7 +922,7 @@ func TestChiefPreviewVerifiesServiceID(t *testing.T) {
 				t.Fatalf("valid ID refused: %+v", result)
 			}
 			capture, err := os.ReadFile(fake.Capture)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			args := strings.Split(string(capture), "\x00")
 			if args[slices.Index(args, "--service")+1] != value {
 				t.Fatal("Service ID changed")
@@ -943,7 +942,7 @@ func TestChiefPreviewToolContract(t *testing.T) {
 		Properties map[string]json.RawMessage
 		Required   []string
 	}
-	intakefixture.Must(t, json.Unmarshal(tool.InputSchema, &schema))
+	fixturekit.Must(t, json.Unmarshal(tool.InputSchema, &schema))
 	for _, field := range []string{"call", "port", "timeout"} {
 		if len(schema.Properties[field]) == 0 {
 			t.Fatalf("missing input %s", field)

@@ -2,7 +2,6 @@ package executionjourney
 
 import (
 	"github.com/kpenfound/osmia/internal/intake"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const DeliveredState = intake.DeliveredState
@@ -11,37 +10,35 @@ const cancelReason = intake.CancelReason
 
 var abandonActor = intake.AbandonActor
 
-const BuildingState = intakefixture.BuildingState
+const BuildingState = intake.BuildingState
 
 const UnitPlanned = intake.UnitPlanned
 const UnitReady = intake.UnitReady
-const UnitImplementing = intakefixture.UnitImplementing
+const UnitImplementing = intake.UnitImplementing
 
 const UnitReviewing = intake.UnitReviewing
 const UnitApproved = intake.UnitApproved
 const UnitMerged = intake.UnitMerged
-const UnitWaiting = intakefixture.UnitWaiting
+const UnitWaiting = intake.UnitWaiting
 
 const UnitContested = intake.UnitContested
 
 type builder = intake.Builder
 
-var chiefActor = intakefixture.ChiefActor
+var chiefActor = intake.ChiefActor
 
 var ownerActor = intake.OwnerActor
-
-var librarianWorkstream = intake.LibrarianWorkstream
 
 const AssembledState = intake.AssembledState
 
 var featureWorkspaces = intake.FeatureWorkspaces
 
 var masonActor = intake.MasonActor
-var masonAgent = intakefixture.MasonAgent
+var masonAgent = intake.MasonAgent
 
 var serviceActor = intake.ServiceActor
 
-const reviewerRole = intakefixture.ReviewerRole
+const reviewerRole = intake.ReviewerRole
 
 var reviewerAgent = intake.ReviewerAgent
 
@@ -51,7 +48,7 @@ var featureBranch = intake.FeatureBranch
 
 type Committee = intake.Committee
 
-const masonRole = intakefixture.MasonRole
+const masonRole = intake.MasonRole
 
 const unitsDirectory = intake.UnitsDirectory
 

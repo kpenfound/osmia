@@ -187,11 +187,11 @@ func TestHealthStopsDegradingOnAFailureNothingRetries(t *testing.T) {
 func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *testing.T) {
 	t.Parallel()
 	s, c := servicetest.Start(t, servicetest.Fixture(t))
-	events, _ := servicetest.EventStream(t, c)
-	servicetest.NextEvent(t, events)
+	events, _ := fixturekit.EventStream(t, c)
+	fixturekit.NextEvent(t, events)
 
 	h := s.StartActivity("activity-test", api.ActivityCheck, fixturekit.Project, fixturekit.Stream, "selecting checks")
-	servicetest.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
+	fixturekit.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
 	out, err := c.Activity(context.Background())
 	fixturekit.Must(t, err)
 	if len(out.Activity) != 1 {
@@ -205,7 +205,7 @@ func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *te
 	afterStart := e.LastProgress
 
 	h.Progress("running checks", floatPtr(0.5))
-	servicetest.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
+	fixturekit.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
 	out, err = c.Activity(context.Background())
 	fixturekit.Must(t, err)
 	e = out.Activity[0]
@@ -214,7 +214,7 @@ func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *te
 	}
 
 	h.Finish(errors.New("boom"))
-	servicetest.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
+	fixturekit.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
 	out, err = c.Activity(context.Background())
 	fixturekit.Must(t, err)
 	if len(out.Activity) != 1 {

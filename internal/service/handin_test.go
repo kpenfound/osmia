@@ -41,7 +41,7 @@ func (f *handInFixture) repository() *trace.Repository { return f.s.sole().repos
 func (f *handInFixture) head(t *testing.T) map[string]int {
 	t.Helper()
 	return intakefixture.HandInHead(t, f.trace, func() []config.WorkstreamID { return f.streams(t) }, func(stream config.WorkstreamID) string {
-		return intakefixture.WorkstreamTraceDirectory(t, f.s.cfg.Root, f.project, stream)
+		return fixturekit.WorkstreamTraceDirectory(t, f.s.cfg.Root, f.project, stream)
 	})
 }
 
@@ -52,5 +52,5 @@ func (f *handInFixture) unchanged(t *testing.T, head map[string]int) bool {
 
 func (f *handInFixture) streams(t *testing.T) []config.WorkstreamID {
 	t.Helper()
-	return intakefixture.Streams(t, f.s.current().Root, f.project, "")
+	return intakefixture.Streams(t, f.s.current().Root, f.project)
 }

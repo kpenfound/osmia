@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -24,7 +23,7 @@ func hr(hours int) time.Time { return fixturekit.DemoStart.Add(time.Duration(hou
 func (f *publisherFixture) document(stream config.WorkstreamID, id string, revision int, path, content string, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: f.repo.Project(), Workstream: stream, At: when, Actor: actor, Cause: "fixture"}
-	intakefixture.Must(f.t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: content}}))
+	fixturekit.Must(f.t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: content}}))
 }
 
 func (f *publisherFixture) header(schema, id string, revision int, stream config.WorkstreamID, when time.Time, actor trace.Actor) trace.Header {
@@ -34,7 +33,7 @@ func (f *publisherFixture) header(schema, id string, revision int, stream config
 func (f *publisherFixture) ask(stream config.WorkstreamID, id, text string, when time.Time) {
 	f.t.Helper()
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
-	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 1, stream, when, mason), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text}))
+	fixturekit.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 1, stream, when, mason), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text}))
 }
 
 func (f *publisherFixture) escalate(stream config.WorkstreamID, id, text string, when time.Time) {
@@ -42,14 +41,14 @@ func (f *publisherFixture) escalate(stream config.WorkstreamID, id, text string,
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
 	e := &trace.Escalation{Batch: "escalation_" + id, Inbox: 1, Questions: []string{id}, Section: "spec.md: Upload limits", Conflict: "The spec caps uploads at 10 MiB but the plan streams without a cap.",
 		Blocked: "The unit waits on the ruling.", Options: []string{"Cap at 10 MiB", "Stream without a cap"}, Recommendation: "Cap at 10 MiB"}
-	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, chiefActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
+	fixturekit.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, chiefActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
 }
 
 func (f *publisherFixture) ruling(stream config.WorkstreamID, id string, revision int, r trace.Ruling, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	r.Header = f.header("osmia.trace.ruling", id, revision, stream, when, actor)
 	r.QuestionID, r.QuestionRevision = id, 1
-	intakefixture.Must(f.t, f.repo.Append(context.Background(), r))
+	fixturekit.Must(f.t, f.repo.Append(context.Background(), r))
 }
 
 func decisions(posts []hooksPost) []hooksPost {
@@ -103,13 +102,13 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 	f.hooks.take()
 	f.reopen()
 	posted, err := f.repo.HearsayPosted()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var cleared []trace.PostedRecord
 	for _, p := range posted {
 		p.Digest = ""
 		cleared = append(cleared, p)
 	}
-	intakefixture.Must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, hr(5)))
+	fixturekit.Must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, hr(5)))
 	posts, _ = f.pass()
 	rulings := decisions(posts)
 	if len(rulings) != 1 {
@@ -200,7 +199,7 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 	proposal := func(question, rule, decision, note string, charter int) string {
 		p := trace.CharterProposal{Question: question, Ruling: "workstreams/x/questions/" + question + "/rulings.jsonl", RulingRevision: 1, OwnerResponse: "Every upload must resume.", Rule: rule, Number: 2, Decision: decision, Note: note, Charter: charter}
 		data, err := json.Marshal(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return string(data)
 	}
 	f.document(stream, trace.CharterProposalID("1"), 1, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", "", "", 0), hr(1), chiefActor)
@@ -239,14 +238,14 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 func (f *publisherFixture) amendment(stream config.WorkstreamID, id string, citations []string, change, reason, question string, when time.Time) {
 	f.t.Helper()
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
-	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Amendment{Header: f.header("osmia.trace.amendment", id, 1, stream, when, mason), Requester: mason, Role: "mason", Thread: "thread", Turn: "turn-a" + id,
+	fixturekit.Must(f.t, f.repo.Append(context.Background(), trace.Amendment{Header: f.header("osmia.trace.amendment", id, 1, stream, when, mason), Requester: mason, Role: "mason", Thread: "thread", Turn: "turn-a" + id,
 		QuestionID: question, Citations: citations, Change: change, Reason: reason, Seal: 1, SealRevision: 1, SpecHash: "hash"}))
 }
 
 func (f *publisherFixture) amendmentDecision(stream config.WorkstreamID, id string, revision int, verdict, note string, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	data, err := json.Marshal(api.AmendmentDecision{Decision: verdict, Note: note, Round: 1, Packet: 1, Spec: 2, Plan: 2, SealRevision: 1, Actor: actor.ID})
-	intakefixture.Must(f.t, err)
+	fixturekit.Must(f.t, err)
 	f.document(stream, "amendment_"+id+"_decision", revision, "amendments/"+id+"/decision.json", string(data), when, actor)
 }
 
@@ -322,7 +321,7 @@ func publishScopeCalls(t *testing.T) *scopePublication {
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	record := func(id string, revision int, disposition, reason, unit string, when time.Time) {
 		data, err := json.Marshal(workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: disposition, Unit: unit, Reason: reason})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, chiefActor)
 	}
 	record(scopeDiscovery(1), 1, "open", "", "", hr(1))
@@ -333,7 +332,7 @@ func publishScopeCalls(t *testing.T) *scopePublication {
 	record(scopeDiscovery(3), 1, "open", "", "", hr(1))
 
 	approval, err := json.Marshal(api.DeliveryApproval{Review: 2, Commit: "tip", At: hr(6), AcceptedBlocking: []string{"spec#2: the retry cap is not enforced"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.document(stream, "final-delivery", 1, "final/delivery.json", string(approval), hr(6), owner)
 	followups := `[{"review":1,"report":1,"criterion":"spec#3","gap":"Resume is not tested after a restart","unit":{"id":"final-1"}},{"review":0,"criterion":"spec#1","gap":"Update dependency references","unit":{"id":"deps-1"}},{"review":1,"amendment":"2","criterion":"spec#1","gap":"AMENDMENT-FOLLOWUP","unit":{"id":"amend-1"}}]`
 	f.document(stream, "final-followups", 1, "final/followups.json", followups, hr(5), trace.Actor{Kind: "service", ID: "final-review"})
@@ -409,7 +408,7 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 
 	f.hooks.setStatus(http.StatusServiceUnavailable)
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if res.Posts != 0 {
 		t.Fatalf("pass during the outage: %+v", res)
 	}
@@ -489,7 +488,7 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 
 func (f *publisherFixture) storeMap(m kb.Map, when time.Time, cause string) {
 	f.t.Helper()
-	intakefixture.Must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: "agent_map"}, cause))
+	fixturekit.Must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: "agent_map"}, cause))
 }
 
 func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
@@ -544,7 +543,7 @@ func TestPublishSubsystemMapUpdatesNameTheReseedAndItsCommit(t *testing.T) {
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**")), hr(2), kb.ReseedCause(commit))
 
 	in, err := collectPublishInputs(context.Background(), f.repo, f.s.current())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	texts := map[string]string{}
 	for _, r := range mapUpdateRecords(in) {
 		text := r.Versions[0].Text
@@ -567,7 +566,7 @@ func TestPublishWorkgroupAmendmentRulingsArePostedOnEveryMemberProject(t *testin
 	change := func(id, state string, decision *lifecycle.ChangeDecision, request *trace.ProjectAmendment, text string) trace.Document {
 		c := lifecycle.WorkgroupChange{ID: id, Workgroup: "g_one", Origin: "w_member", Requester: request, Host: "w_host", Request: lifecycle.ChangeRequest{Key: id, Kind: "amend", Scope: "workgroup", Change: text}, State: state, Decision: decision}
 		data, err := json.Marshal(c)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return trace.Document{Header: trace.Header{ID: lifecycle.WorkgroupChangeDocument(id), Revision: map[string]int{"presented": 1, "approved": 2}[state], At: fixturekit.DemoStart.Add(time.Hour * time.Duration(len(state)))}, Content: string(data)}
 	}
 	approve := &lifecycle.ChangeDecision{Revision: 1, Decision: "approve"}
@@ -606,7 +605,7 @@ func TestPublishWorkgroupAmendmentRevisitsAnEarlierRuling(t *testing.T) {
 	doc := func(id string, rev int, at time.Time, decision string) trace.Document {
 		c := lifecycle.WorkgroupChange{ID: id, Workgroup: "g_one", Origin: "w_member", Requester: requester, Request: lifecycle.ChangeRequest{Kind: "amend", Change: "change " + id}, State: "approved", Decision: &lifecycle.ChangeDecision{Revision: 1, Decision: decision}}
 		data, err := json.Marshal(c)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return trace.Document{Header: trace.Header{ID: lifecycle.WorkgroupChangeDocument(id), Revision: rev, At: at}, Content: string(data)}
 	}
 	g := trace.PublishedWorkgroup{ID: "g_one", Members: []config.WorkstreamID{"w_member"}, Changes: []trace.Document{doc("later", 1, hr(5), "approve"), doc("earlier", 1, hr(2), "approve")}}

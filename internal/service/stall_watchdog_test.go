@@ -21,7 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -70,8 +69,8 @@ func newStallFixture(t *testing.T, loop string, p *jevfixture.Transitions) *stal
 	ctx := context.Background()
 	key := gateKey(t, true)
 	opts, cfg, repo := activityFixture(t)
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, fixturekit.DemoStart, ownerActor))
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor))
+	fixturekit.Must(t, repo.Close())
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts.Reconciliation.Now = clock.Now
 	withTopLevel(t, opts, "\n"+loop+"\n"+gateJevConfig(key))
@@ -80,10 +79,10 @@ func newStallFixture(t *testing.T, loop string, p *jevfixture.Transitions) *stal
 	}
 	opts.JevProvider = p.Factory()
 	s, err := Start(ctx, opts)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.Close())
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	f := &stallFixture{s: s, repo: repo, clock: clock, jev: p, log: &exitLog{}}
 	f.transition(t, "stall-seed-feature", trace.FeatureSubject, "", BuildingState, "", stallSeeder, fixturekit.DemoStart)
@@ -93,14 +92,14 @@ func newStallFixture(t *testing.T, loop string, p *jevfixture.Transitions) *stal
 
 func (f *stallFixture) transition(t *testing.T, id, subject, from, to, unit string, actor trace.Actor, at time.Time) {
 	t.Helper()
-	state, err := f.repo.RawWorkflow(intakefixture.Stream, subject)
-	intakefixture.Must(t, err)
+	state, err := f.repo.RawWorkflow(fixturekit.Stream, subject)
+	fixturekit.Must(t, err)
 	if state.Value != from {
 		t.Fatalf("subject %s is %q, not %q", subject, state.Value, from)
 	}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: intakefixture.Stream, Unit: unit, At: at, Actor: actor, Cause: "seed"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, Unit: unit, At: at, Actor: actor, Cause: "seed"}
 	_, err = f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: from, To: to, Reason: "seeded"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func (f *stallFixture) watch(after string) stallWatch {
@@ -122,7 +121,7 @@ func (f *stallFixture) firstPassed(w stallWatch) {
 func (f *stallFixture) pass(t *testing.T, w stallWatch) map[string]router.Exit {
 	t.Helper()
 	f.log.reset()
-	intakefixture.Must(t, w.Pass(context.Background()))
+	fixturekit.Must(t, w.Pass(context.Background()))
 	out := map[string]router.Exit{}
 	for _, x := range f.log.occurrences() {
 		out[x.Trigger] = x
@@ -193,7 +192,7 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 
 	for _, x := range []router.Exit{unit, ws} {
 		res, err := f.s.RouteExit(ctx, x)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !res.Committed || res.Target != execution.TargetWait {
 			t.Fatalf("the stalled exit of %s = %+v", x.Subject, res)
 		}
@@ -201,8 +200,8 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 	if again := f.pass(t, w); len(again) != 0 {
 		t.Fatalf("a stall decided by the router raised %d more exits", len(again))
 	}
-	outbox, err := f.repo.Outbox(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	outbox, err := f.repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range outbox {
 		if strings.Contains(e.Event.Body, "has made no progress for 46 minutes") {
@@ -212,7 +211,7 @@ func TestStallWatchdogRaisesOneStalledExitPerStall(t *testing.T) {
 	if notices != 2 {
 		t.Fatalf("the chief of staff got %d stall notices, want 2", notices)
 	}
-	if state, err := f.repo.Workflow(intakefixture.Stream, trace.UnitSubject(stallUnit)); err != nil || state.Value != UnitImplementing || state.Version != 1 {
+	if state, err := f.repo.Workflow(fixturekit.Stream, trace.UnitSubject(stallUnit)); err != nil || state.Value != UnitImplementing || state.Version != 1 {
 		t.Fatalf("the unit is %+v: %v", state, err)
 	}
 	if n := len(f.jev.TransitionRequests()); n != 1 {
@@ -227,7 +226,7 @@ func TestStallWatchdogIsOffWithAWindowOfZero(t *testing.T) {
 	f.quietFor(1000 * time.Hour)
 	w := stallWatch{s: f.s, cfg: f.s.current(), repository: f.repo, submit: f.log.submit}
 	f.firstPassed(w)
-	intakefixture.Must(t, w.Run(context.Background()))
+	fixturekit.Must(t, w.Run(context.Background()))
 	if got := f.log.occurrences(); len(got) != 0 {
 		t.Fatalf("the watchdog is off but raised %d exits", len(got))
 	}
@@ -239,19 +238,19 @@ func TestStallWatchdogIsExplainedByAPauseAndStartsOverWhenItLifts(t *testing.T) 
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
 	cfg := f.s.current()
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {intakefixture.Stream}}})
-	intakefixture.Must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream}}})
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	f.s.store = store
-	target := runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: intakefixture.Stream}
-	intakefixture.Must(t, store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
+	target := runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: fixturekit.Stream}
+	fixturekit.Must(t, store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
 	w := f.watch("45m")
 
 	f.quietFor(2 * time.Hour)
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a paused workstream raised %d exits", len(got))
 	}
-	intakefixture.Must(t, store.ClearPause(target, runtime.PauseOwner))
+	fixturekit.Must(t, store.ClearPause(target, runtime.PauseOwner))
 	f.quietFor(2*time.Hour + 30*time.Minute)
 	if got := f.pass(t, w); len(got) != 0 {
 		t.Fatalf("a workstream resumed 30 minutes ago raised %d exits", len(got))
@@ -286,13 +285,13 @@ func (f *stallFixture) queueOperation(t *testing.T, action string, at time.Time)
 	t.Helper()
 	id := "stall-" + action
 	event := trace.EventID(id, "operation")
-	op := coreadapter.Operation{ID: trace.OperationID(f.repo.Project(), intakefixture.Stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: json.RawMessage(fmt.Sprintf(`{"unit":%q}`, stallUnit))}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: intakefixture.Stream, Unit: stallUnit, At: at, Actor: stallSeeder, Cause: "seed"}
+	op := coreadapter.Operation{ID: trace.OperationID(f.repo.Project(), fixturekit.Stream, event), Boundary: coreadapter.RepositoryBoundary, Action: action, Input: json.RawMessage(fmt.Sprintf(`{"unit":%q}`, stallUnit))}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, Unit: stallUnit, At: at, Actor: stallSeeder, Cause: "seed"}
 	_, err := f.repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: id, To: "queued", Reason: "seeded"},
 		Events: []trace.Event{{ID: event, Kind: "operation", Body: action, Operation: &op}}})
-	intakefixture.Must(t, err)
-	records, err := f.repo.Operations(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
+	records, err := f.repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	for _, r := range records {
 		if r.Operation.ID == op.ID {
 			return r
@@ -304,15 +303,15 @@ func (f *stallFixture) queueOperation(t *testing.T, action string, at time.Time)
 
 func (f *stallFixture) fail(t *testing.T, record trace.OperationRecord, reason string) {
 	t.Helper()
-	a, _, err := f.repo.BeginOperation(context.Background(), intakefixture.Stream, record.EventID, trace.WorkflowOperation, trace.Actor{Kind: "service", ID: "stall-test"}, f.clock.Now)
-	intakefixture.Must(t, err)
+	a, _, err := f.repo.BeginOperation(context.Background(), fixturekit.Stream, record.EventID, trace.WorkflowOperation, trace.Actor{Kind: "service", ID: "stall-test"}, f.clock.Now)
+	fixturekit.Must(t, err)
 	if a == nil {
 		t.Fatal("the operation was not due")
 	}
 	defer a.Close()
 	retry := a.Action("retry", f.clock.Now())
 	retry.Failure, retry.RetryAt = reason, f.clock.Now().Add(time.Minute)
-	intakefixture.Must(t, a.Record(context.Background(), retry))
+	fixturekit.Must(t, a.Record(context.Background(), retry))
 }
 
 func TestStallWatchdogCitesTheLastFailureOfAnOperationThatCannotEnd(t *testing.T) {
@@ -362,7 +361,7 @@ func TestStallWatchdogCitesTheLastFailureOfAnOperationThatCannotEnd(t *testing.T
 		t.Fatalf("the exit does not cite the operation's last failure: %+v", unit.Evidence.Records)
 	}
 	effect, err := unit.Enter(context.Background(), router.Plan{Exit: unit})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(effect.Events) != 1 || !strings.Contains(effect.Events[0].Body, reason) {
 		t.Fatalf("the notice does not carry the last failure: %+v", effect.Events)
 	}
@@ -393,26 +392,26 @@ func TestHoldCauseNamesWhyAnOperationIsHeld(t *testing.T) {
 	t.Parallel()
 	f := newStallFixture(t, "", nil)
 	cfg := f.s.current()
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {intakefixture.Stream}}})
-	intakefixture.Must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream}}})
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	f.s.store = store
 	cause := f.s.holdingCause(f.repo)
 	land := coreadapter.Operation{Boundary: coreadapter.RepositoryBoundary, Action: LandAction}
 	publish := coreadapter.Operation{Boundary: coreadapter.RepositoryBoundary, Action: PublishAction}
 
-	if got := cause(intakefixture.Stream, land); got != scheduler.NotHeld {
+	if got := cause(fixturekit.Stream, land); got != scheduler.NotHeld {
 		t.Fatalf("a landing nothing holds is held by %q", got)
 	}
-	if got := cause(intakefixture.Stream, publish); got != scheduler.HeldByOther {
+	if got := cause(fixturekit.Stream, publish); got != scheduler.HeldByOther {
 		t.Fatalf("a publication without a credential is held by %q, want %q", got, scheduler.HeldByOther)
 	}
-	target := runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: intakefixture.Stream}
-	intakefixture.Must(t, store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
-	if got := cause(intakefixture.Stream, land); got != scheduler.HeldByPause {
+	target := runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: fixturekit.Stream}
+	fixturekit.Must(t, store.SetPause(runtime.Pause{Target: target, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
+	if got := cause(fixturekit.Stream, land); got != scheduler.HeldByPause {
 		t.Fatalf("a landing held by a pause is held by %q", got)
 	}
-	if !f.s.holding(f.repo)(intakefixture.Stream, land) {
+	if !f.s.holding(f.repo)(fixturekit.Stream, land) {
 		t.Fatal("holding does not hold a landing a pause holds")
 	}
 }
@@ -432,7 +431,7 @@ func TestAnUnresolvedHoldBecomesAStallAfterTheWindow(t *testing.T) {
 	f.quietFor(46 * time.Minute)
 	first := f.pass(t, w)[execution.TriggerStalled]
 	res, err := f.s.RouteExit(ctx, first)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if res.Committed || res.Outcome != router.OutcomeHeld || res.Hold != router.HoldOrdersDisagree {
 		t.Fatalf("the stalled exit = %+v, want a hold", res)
 	}
@@ -460,7 +459,7 @@ func TestStallWatchdogNeverAsksJevOnTheSchedulingPath(t *testing.T) {
 	w := f.watch("45m")
 	f.firstPassed(w)
 	ctx := router.OnSchedulingPath(context.Background())
-	intakefixture.Must(t, w.Run(ctx))
+	fixturekit.Must(t, w.Run(ctx))
 	if got := f.log.occurrences(); len(got) != 2 {
 		t.Fatalf("the watchdog raised %d exits", len(got))
 	}
@@ -492,7 +491,7 @@ func TestStalledExitsOfferTheDefaultAndTheWaysToStartTheStageAgain(t *testing.T)
 		state string
 		want  []string
 	}{{AssembledState, []string{"wait", "assembled"}}, {BuildingState, []string{"wait"}}} {
-		x := f.s.lifecycle().StalledExit(f.repo, intakefixture.Stream, trace.WorkflowState{Version: 3, Value: tc.state}, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"})
+		x := f.s.lifecycle().StalledExit(f.repo, fixturekit.Stream, trace.WorkflowState{Version: 3, Value: tc.state}, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"})
 		var names []string
 		for _, target := range x.Targets {
 			names = append(names, target.Name)
@@ -533,7 +532,7 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 	held := func() int {
 		t.Helper()
 		n := 0
-		for _, rec := range routeRecordsOf(t, f.repo, intakefixture.Stream) {
+		for _, rec := range routeRecordsOf(t, f.repo, fixturekit.Stream) {
 			if rec.Trigger == execution.TriggerStalled && rec.State == router.StateHeld {
 				n++
 			}
@@ -547,7 +546,7 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 	if round(96 * time.Minute)[execution.TriggerStalled].Subject == "" || held() != 2 {
 		t.Fatalf("the stall after the first hold was not held: %d held", held())
 	}
-	if cards := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(cards) != 0 {
+	if cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(cards) != 0 {
 		t.Fatalf("a stall held once has %d cards", len(cards))
 	}
 
@@ -558,7 +557,7 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 	if n := len(f.jev.TransitionRequests()); n != asked || held() != 2 {
 		t.Fatalf("Jev was asked %d more times and %d stalls are held", n-asked, held())
 	}
-	cards := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream)
+	cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream)
 	if len(cards) != 1 {
 		t.Fatalf("the stalled unit has %d recovery cards, want 1: %+v", len(cards), cards)
 	}
@@ -568,8 +567,8 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 	}
 	for _, at := range []time.Duration{150 * time.Minute, 4 * time.Hour} {
 		round(at)
-		if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 1 || recoveryDocuments(t, f.repo, intakefixture.Stream) != 1 || held() != 2 {
-			t.Fatalf("later passes made %d cards and %d records and hold %d stalls", len(got), recoveryDocuments(t, f.repo, intakefixture.Stream), held())
+		if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 1 || recoveryDocuments(t, f.repo, fixturekit.Stream) != 1 || held() != 2 {
+			t.Fatalf("later passes made %d cards and %d records and hold %d stalls", len(got), recoveryDocuments(t, f.repo, fixturekit.Stream), held())
 		}
 	}
 }
@@ -577,10 +576,10 @@ func TestAStallHeldAgainAndAgainEndsOnTheRecoveryCard(t *testing.T) {
 func (f *stallFixture) transitionOn(t *testing.T, ws config.WorkstreamID, id, subject, from, to, unit string, at time.Time) {
 	t.Helper()
 	state, err := f.repo.RawWorkflow(ws, subject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: ws, Unit: unit, At: at, Actor: stallSeeder, Cause: "seed"}
 	_, err = f.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: from, To: to, Reason: "seeded"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func (f *stallFixture) exitsOf(ws config.WorkstreamID, subject string) []router.Exit {
@@ -596,11 +595,11 @@ func (f *stallFixture) exitsOf(ws config.WorkstreamID, subject string) []router.
 func (f *stallFixture) queueTurn(t *testing.T, unit string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, Revision: 1, ID: "mason_stall", Project: f.repo.Project(), Workstream: intakefixture.Stream, At: at, Actor: stallSeeder, Cause: "seed"}
-	intakefixture.Must(t, f.repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: "mason_stall_thread"}))
+	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, Revision: 1, ID: "mason_stall", Project: f.repo.Project(), Workstream: fixturekit.Stream, At: at, Actor: stallSeeder, Cause: "seed"}
+	fixturekit.Must(t, f.repo.CreateThread(ctx, trace.Agent{Header: h, Role: "mason", ThreadID: "mason_stall_thread"}))
 	h.Schema, h.ID, h.Unit = "osmia.trace.turn-request", "request_stall", unit
 	_, err := f.repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: "mason_stall", ThreadID: "mason_stall_thread", TurnID: "stall-turn", Profile: coreadapter.Profile{Name: "mason-default", Backend: "fake", Model: "test"}, Prompt: "Build it"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T) {
@@ -610,9 +609,9 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 	f.sealWorkstream(t, "# Spec\n", "")
 	f.transition(t, "stall-unit-merged", trace.UnitSubject(stallUnit), UnitImplementing, UnitMerged, stallUnit, stallSeeder, fixturekit.DemoStart)
 
-	feature, err := f.repo.Workflow(intakefixture.Stream, trace.FeatureSubject)
-	intakefixture.Must(t, err)
-	x := f.s.lifecycle().StalledExit(f.repo, intakefixture.Stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"})
+	feature, err := f.repo.Workflow(fixturekit.Stream, trace.FeatureSubject)
+	fixturekit.Must(t, err)
+	x := f.s.lifecycle().StalledExit(f.repo, fixturekit.Stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"})
 	if len(x.Targets) != 2 || x.Targets[1].Name != AssembledState || x.Targets[1].NoMove || x.Targets[1].Bar != router.BarModest || x.Targets[1].Gate || x.Targets[1].Approval || x.Default != intake.TargetWait {
 		t.Fatalf("the stalled exit of a building workstream with nothing left to build: default %q targets %+v", x.Default, x.Targets)
 	}
@@ -630,7 +629,7 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 
 	f.quietFor(46*time.Minute + 50*time.Minute)
 	f.pass(t, w)
-	cards := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream)
+	cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream)
 	if len(cards) != 1 {
 		t.Fatalf("the stalled workstream has %d recovery cards, want 1", len(cards))
 	}
@@ -638,7 +637,7 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 	if m == nil || m.Unit != "" || m.Subject != trace.FeatureSubject || m.From != BuildingState || m.Target != AssembledState || m.Origin != api.RecoveryStall {
 		t.Fatalf("the card pins %+v", m)
 	}
-	if fail := f.s.lifecycle().Assemblable(f.repo, intakefixture.Stream); fail != nil {
+	if fail := f.s.lifecycle().Assemblable(f.repo, fixturekit.Stream); fail != nil {
 		t.Fatalf("the workstream the card moves to assembled cannot be assembled: %+v", fail)
 	}
 	if req := recoveryRequestOf(t, cards[0]); req.Target != AssembledState || req.From != BuildingState || req.Subject != trace.FeatureSubject {
@@ -647,9 +646,9 @@ func TestABuildingWorkstreamWithEveryUnitMergedHasAWayOutOfItsStall(t *testing.T
 
 	open := newStallFixture(t, "", nil)
 	open.sealWorkstream(t, "# Spec\n", "")
-	feature, err = open.repo.Workflow(intakefixture.Stream, trace.FeatureSubject)
-	intakefixture.Must(t, err)
-	if x := open.s.lifecycle().StalledExit(open.repo, intakefixture.Stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"}); len(x.Targets) != 1 {
+	feature, err = open.repo.Workflow(fixturekit.Stream, trace.FeatureSubject)
+	fixturekit.Must(t, err)
+	if x := open.s.lifecycle().StalledExit(open.repo, fixturekit.Stream, feature, lifecycle.StalledInput{Cause: "stalled-test", Actor: stallActor, Notice: "quiet", Reason: "stalled"}); len(x.Targets) != 1 {
 		t.Fatalf("a building workstream with an open unit can go to %+v", x.Targets)
 	}
 }
@@ -679,11 +678,11 @@ func TestAWorkstreamCardDoesNotExplainTheQuietOfItsUnits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newStallFixture(t, "", nil)
-	feature, err := f.repo.RawWorkflow(intakefixture.Stream, trace.FeatureSubject)
-	intakefixture.Must(t, err)
+	feature, err := f.repo.RawWorkflow(fixturekit.Stream, trace.FeatureSubject)
+	fixturekit.Must(t, err)
 	move := api.RecoveryMove{Occurrence: "stall-test-occurrence", Machine: intake.WorkstreamMachine, Subject: trace.FeatureSubject, From: feature.Value, Version: feature.Version, Target: AssembledState, Origin: api.RecoveryOwner, Reason: "the owner's move"}
-	intakefixture.Must(t, writeRecoveryRecord(ctx, f.repo, intakefixture.Stream, recoveryRecord{RecoveryMove: move, State: recoveryOpen, Opened: fixturekit.DemoStart}, 0, stallSeeder, fixturekit.DemoStart))
-	if cards := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(cards) != 1 {
+	fixturekit.Must(t, writeRecoveryRecord(ctx, f.repo, fixturekit.Stream, recoveryRecord{RecoveryMove: move, State: recoveryOpen, Opened: fixturekit.DemoStart}, 0, stallSeeder, fixturekit.DemoStart))
+	if cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(cards) != 1 {
 		t.Fatalf("the workstream has %d open cards, want 1", len(cards))
 	}
 	f.quietFor(46 * time.Minute)
@@ -716,17 +715,17 @@ func TestAnUpstreamExplainsItsDependentsOnlyWhileItIsNotStalled(t *testing.T) {
 	ctx := context.Background()
 	f := newStallFixture(t, "", nil)
 	upstream := config.WorkstreamID("w_00000000000000000000000000000b01")
-	intakefixture.Must(t, f.repo.CreateWorkstream(ctx, upstream, fixturekit.DemoStart, ownerActor))
+	fixturekit.Must(t, f.repo.CreateWorkstream(ctx, upstream, fixturekit.DemoStart, ownerActor))
 	f.transitionOn(t, upstream, "stall-upstream-building", trace.FeatureSubject, "", BuildingState, "", fixturekit.DemoStart)
 	f.transitionOn(t, upstream, "stall-upstream-unit", trace.UnitSubject("u9"), "", UnitImplementing, "u9", fixturekit.DemoStart.Add(40*time.Minute))
 	judge := func() bool {
 		t.Helper()
 		statuses, err := f.repo.Statuses()
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		w := f.watch("45m")
 		p := &stallPass{statuses: statuses, after: w.cfg.StallWindow(), now: f.clock.Now(), limit: f.s.GiveUpLimit().Failures, upstreams: map[config.WorkstreamID]*bool{}}
 		explains, err := w.upstreamExplains(ctx, p, upstream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return explains
 	}
 
@@ -739,11 +738,11 @@ func TestAnUpstreamExplainsItsDependentsOnlyWhileItIsNotStalled(t *testing.T) {
 		t.Fatal("an upstream quiet for 50 minutes with nothing to explain it explained its dependents")
 	}
 	cfg := f.s.current()
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {intakefixture.Stream, upstream}}})
-	intakefixture.Must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, upstream}}})
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	f.s.store = store
-	intakefixture.Must(t, store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: upstream}, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: cfg.Project.ID, Workstream: upstream}, Mode: "soft", Reason: "owner away", Source: runtime.PauseOwner, SetAt: fixturekit.DemoStart}))
 	if !judge() {
 		t.Fatal("a paused upstream did not explain its dependents")
 	}
@@ -752,28 +751,28 @@ func TestAnUpstreamExplainsItsDependentsOnlyWhileItIsNotStalled(t *testing.T) {
 func (f *stallFixture) seedChange(t *testing.T, c lifecycle.WorkgroupChange, revision int, at time.Time) {
 	t.Helper()
 	data, err := json.Marshal(c)
-	intakefixture.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.repo.Project(), Workstream: intakefixture.Stream, At: at, Actor: stallSeeder, Cause: "seed"}
-	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
+	fixturekit.Must(t, err)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.WorkgroupChangeDocument(c.ID), Revision: revision, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: at, Actor: stallSeeder, Cause: "seed"}
+	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: lifecycle.WorkgroupChangePath(c.ID), Content: string(data)}}))
 }
 
 func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newStallFixture(t, "", nil)
-	change := lifecycle.WorkgroupChange{ID: "c1", Workgroup: "wg", Host: intakefixture.Stream, Request: lifecycle.ChangeRequest{Key: "c1", Kind: "amend", Scope: "workgroup", Change: "Rename the field"}, State: "drafting", Failure: "member history is unavailable"}
+	change := lifecycle.WorkgroupChange{ID: "c1", Workgroup: "wg", Host: fixturekit.Stream, Request: lifecycle.ChangeRequest{Key: "c1", Kind: "amend", Scope: "workgroup", Change: "Rename the field"}, State: "drafting", Failure: "member history is unavailable"}
 	f.seedChange(t, change, 1, fixturekit.DemoStart)
 	subject := lifecycle.WorkgroupChangeDocument("c1")
 	w := f.watch("45m")
 
 	f.quietFor(44 * time.Minute)
 	f.pass(t, w)
-	if got := f.exitsOf(intakefixture.Stream, subject); len(got) != 0 {
+	if got := f.exitsOf(fixturekit.Stream, subject); len(got) != 0 {
 		t.Fatalf("a change drafted for 44 minutes raised %+v", got)
 	}
 	f.quietFor(46 * time.Minute)
 	f.pass(t, w)
-	got := f.exitsOf(intakefixture.Stream, subject)
+	got := f.exitsOf(fixturekit.Stream, subject)
 	if len(got) != 1 || got[0].Trigger != intake.TriggerStalled || got[0].Default != intake.TargetWait || len(got[0].Targets) != 1 {
 		t.Fatalf("a change drafted for 46 minutes raised %+v", got)
 	}
@@ -784,8 +783,8 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 	if res, err := f.s.RouteExit(ctx, x); err != nil || !res.Committed || res.Target != intake.TargetWait {
 		t.Fatalf("the change's stalled exit = %+v, %v", res, err)
 	}
-	outbox, err := f.repo.Outbox(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	outbox, err := f.repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	told := 0
 	for _, e := range outbox {
 		if strings.Contains(e.Event.Body, "Workgroup change c1 has sat drafting for 46 minutes") && strings.Contains(e.Event.Body, change.Failure) {
@@ -798,11 +797,11 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 
 	f.quietFor(46*time.Minute + 50*time.Minute)
 	f.pass(t, w)
-	if again := f.exitsOf(intakefixture.Stream, subject); len(again) != 0 {
+	if again := f.exitsOf(fixturekit.Stream, subject); len(again) != 0 {
 		t.Fatalf("a decided stall of the change was raised again: %+v", again)
 	}
 	var card *api.RecoveryMove
-	for _, e := range recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream) {
+	for _, e := range recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream) {
 		if e.Recovery != nil && e.Recovery.Subject == subject {
 			card = e.Recovery
 		}
@@ -813,17 +812,17 @@ func TestAWorkgroupChangeSittingInItsDraftStallsAndEndsOnARecoveryCard(t *testin
 
 	change.State = "debating"
 	f.seedChange(t, change, 2, f.clock.Now())
-	for _, e := range recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream) {
+	for _, e := range recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream) {
 		if e.Recovery != nil && e.Recovery.Subject == subject {
 			t.Fatalf("a change that moved on still has its card: %+v", e.Recovery)
 		}
 	}
 
 	presented := newStallFixture(t, "", nil)
-	presented.seedChange(t, lifecycle.WorkgroupChange{ID: "c2", Workgroup: "wg", Host: intakefixture.Stream, State: "presented"}, 1, fixturekit.DemoStart)
+	presented.seedChange(t, lifecycle.WorkgroupChange{ID: "c2", Workgroup: "wg", Host: fixturekit.Stream, State: "presented"}, 1, fixturekit.DemoStart)
 	presented.quietFor(3 * time.Hour)
 	presented.pass(t, presented.watch("45m"))
-	if got := presented.exitsOf(intakefixture.Stream, lifecycle.WorkgroupChangeDocument("c2")); len(got) != 0 {
+	if got := presented.exitsOf(fixturekit.Stream, lifecycle.WorkgroupChangeDocument("c2")); len(got) != 0 {
 		t.Fatalf("a presented change raised %+v", got)
 	}
 }

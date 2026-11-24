@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -31,7 +30,7 @@ func newCapacityRig(t *testing.T) *capacityRig {
 	t.Helper()
 	ctx := context.Background()
 	s, _, repo, clock := dailyBudgetService(t, 0, &adaptertest.Turns{})
-	intakefixture.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{intakefixture.Stream, sibling}}}))
+	fixturekit.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream, sibling}}}))
 	cfg := *s.cfg
 	cfg.Capacity = config.Capacity{Masons: 1, Reviewers: 1, Committee: 3, PerWorkstream: 5}
 	cfg.Project.Capacity.PerWorkstream = 2
@@ -39,11 +38,11 @@ func newCapacityRig(t *testing.T) *capacityRig {
 	for _, turn := range []struct {
 		stream      config.WorkstreamID
 		agent, role string
-	}{{intakefixture.Stream, "mason-1", masonRole}, {intakefixture.Stream, "mason-2", masonRole}, {intakefixture.Stream, "mason-3", masonRole}, {intakefixture.Stream, "r1", reviewerRole}, {intakefixture.Stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
+	}{{fixturekit.Stream, "mason-1", masonRole}, {fixturekit.Stream, "mason-2", masonRole}, {fixturekit.Stream, "mason-3", masonRole}, {fixturekit.Stream, "r1", reviewerRole}, {fixturekit.Stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
 		fixturekit.QueueRoleTurn(t, repo, turn.stream, turn.agent, turn.role, "u-"+turn.agent, clock.Now())
 	}
-	_, err := repo.ClaimTurn(ctx, intakefixture.Stream, "mason-1", "token", t.TempDir(), clock.Now())
-	intakefixture.Must(t, err)
+	_, err := repo.ClaimTurn(ctx, fixturekit.Stream, "mason-1", "token", t.TempDir(), clock.Now())
+	fixturekit.Must(t, err)
 	s.pool = &scheduler.Shared{}
 	return &capacityRig{t: t, s: s, repo: repo, clock: clock}
 }
@@ -51,8 +50,8 @@ func newCapacityRig(t *testing.T) *capacityRig {
 func (r *capacityRig) dispatch() {
 	r.t.Helper()
 	dispatch, err := r.s.dispatcher(r.s.cfg, r.repo)
-	intakefixture.Must(r.t, err)
-	intakefixture.Must(r.t, dispatch.Pass(context.Background()))
+	fixturekit.Must(r.t, err)
+	fixturekit.Must(r.t, dispatch.Pass(context.Background()))
 }
 
 func (r *capacityRig) siblingWaiting() SlotWait {
@@ -66,9 +65,9 @@ func deferredUnit(unit, reason string) UnitStatus {
 func (r *capacityRig) deferredList() []WorkstreamStatus {
 	gone := AbandonedState
 	return []WorkstreamStatus{
-		{Project: intakefixture.Project, Workstream: sibling, Units: []UnitStatus{deferredUnit("a", DeferCapacity), deferredUnit("b", DeferEntangled), deferredUnit("c", DeferPriority), deferredUnit("d", DeferWorkstreamCap), deferredUnit("e", DeferPaused)}},
-		{Project: intakefixture.Project, Workstream: intakefixture.Stream, Units: []UnitStatus{deferredUnit("f", DeferCapacity)}},
-		{Project: intakefixture.Project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferredUnit("g", DeferCapacity)}},
+		{Project: fixturekit.Project, Workstream: sibling, Units: []UnitStatus{deferredUnit("a", DeferCapacity), deferredUnit("b", DeferEntangled), deferredUnit("c", DeferPriority), deferredUnit("d", DeferWorkstreamCap), deferredUnit("e", DeferPaused)}},
+		{Project: fixturekit.Project, Workstream: fixturekit.Stream, Units: []UnitStatus{deferredUnit("f", DeferCapacity)}},
+		{Project: fixturekit.Project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferredUnit("g", DeferCapacity)}},
 	}
 }
 
@@ -88,8 +87,8 @@ func TestStatusCapacityReportsTheSlotsInUseAndWhoWaitsForThem(t *testing.T) {
 	want := &CapacityStatus{PerWorkstream: 2, Roles: []RoleCapacity{
 		{Role: masonRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{
 			r.siblingWaiting(),
-			{Workstream: intakefixture.Stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
-			{Workstream: intakefixture.Stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
+			{Workstream: fixturekit.Stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
+			{Workstream: fixturekit.Stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
 		{Role: reviewerRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
@@ -104,7 +103,7 @@ func TestStatusCapacityDropsTheWaitersOfAPausedWorkstream(t *testing.T) {
 	t.Parallel()
 	r := newCapacityRig(t)
 	r.dispatch()
-	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
+	fixturekit.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
 	got := r.s.statusList()
 	mason := fixturekit.RoleCapacityEntry(t, got.Capacity, masonRole)
 	if mason.Used != 1 || !reflect.DeepEqual(mason.Waiting, []SlotWait{r.siblingWaiting()}) {
@@ -130,7 +129,7 @@ func TestStatusCapacityListsDeferredUnitsOfActiveWorkstreamsThatWaitForASlot(t *
 		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
 		{Workstream: sibling, Unit: "c", Reason: DeferPriority},
 		{Workstream: sibling, Unit: "d", Reason: DeferWorkstreamCap},
-		{Workstream: intakefixture.Stream, Unit: "f", Reason: DeferCapacity},
+		{Workstream: fixturekit.Stream, Unit: "f", Reason: DeferCapacity},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason waiting with deferred units\n%+v\nwant\n%+v", got, want)
@@ -141,7 +140,7 @@ func TestStatusCapacityDropsTheDeferredUnitsOfAPausedWorkstream(t *testing.T) {
 	t.Parallel()
 	r := newCapacityRig(t)
 	r.dispatch()
-	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
+	fixturekit.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
 	capacity := r.s.capacityStatus(r.deferredList())
 	var got []SlotWait
 	for _, wait := range fixturekit.RoleCapacityEntry(t, capacity, masonRole).Waiting {
@@ -163,7 +162,7 @@ func TestStatusCapacityShowsNoWaitersUnderAFactoryPauseButKeepsTheSlotInFlight(t
 	t.Parallel()
 	r := newCapacityRig(t)
 	r.dispatch()
-	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: r.clock.Now()}))
+	fixturekit.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: r.clock.Now()}))
 	capacity := r.s.capacityStatus(r.deferredList())
 	for _, role := range capacity.Roles {
 		if len(role.Waiting) != 0 {
@@ -179,12 +178,12 @@ func TestReadingCapacityPublishesNoOperations(t *testing.T) {
 	t.Parallel()
 	r := newCapacityRig(t)
 	r.dispatch()
-	ops, err := r.repo.Operations(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	ops, err := r.repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	r.s.statusList()
 	r.s.capacityStatus(r.deferredList())
-	after, err := r.repo.Operations(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	after, err := r.repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(after) != len(ops) {
 		t.Fatalf("reading the capacity published %d operations", len(after)-len(ops))
 	}
@@ -224,15 +223,15 @@ func newProviderUsageRig(t *testing.T) *providerUsageRig {
 	backend := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](usage(0.5, true), usage(0, false))}
 	s, a, repo, clock := dailyBudgetService(t, 2, backend)
 	for i, turn := range []string{"t-0", "t-1"} {
-		op, err := thread.TurnOperation(intakefixture.Project, "event-"+turn, thread.TurnInput{Workstream: intakefixture.Stream, Agent: "agent-" + string(rune('0'+i)), Turn: turn})
-		intakefixture.Must(t, err)
+		op, err := thread.TurnOperation(fixturekit.Project, "event-"+turn, thread.TurnInput{Workstream: fixturekit.Stream, Agent: "agent-" + string(rune('0'+i)), Turn: turn})
+		fixturekit.Must(t, err)
 		_, err = a.Apply(ctx, op)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	appendDayCost(t, repo, sibling, "unmatched", clock.Now(), 0.25, true)
 	appendDayCost(t, repo, sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
-	intakefixture.Must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: intakefixture.Project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
-		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(intakefixture.Project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
+	fixturekit.Must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: fixturekit.Project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
 	cfg := *s.cfg
 	cfg.Profiles = map[string]config.Profile{
 		"default": {Agent: "claude", Model: "test", Fallback: "other"},
@@ -247,10 +246,10 @@ func newProviderUsageRig(t *testing.T) *providerUsageRig {
 	cfg.Roles[reviewerRole] = config.Role{Profile: "solo"}
 	cfg.Roles[trace.ChiefOfStaff] = config.Role{Profile: "other"}
 	s.cfg = &cfg
-	intakefixture.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{intakefixture.Stream}}}))
+	fixturekit.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream}}}))
 	limit := runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", SetAt: clock.Now(), ResetsAt: clock.Now().Add(time.Hour)}
-	intakefixture.Must(t, s.store.SetProviderLimit(limit))
-	intakefixture.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	fixturekit.Must(t, s.store.SetProviderLimit(limit))
+	fixturekit.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 
 	return &providerUsageRig{s: s, clock: clock, limit: limit}
 }
@@ -353,7 +352,7 @@ func TestStatusReportsUnreadableProviderUsageAsADiagnostic(t *testing.T) {
 		return nil
 	})
 	got := r.s.statusList()
-	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(intakefixture.Project) + "; check the trace repository"}) {
+	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(fixturekit.Project) + "; check the trace repository"}) {
 		t.Fatalf("unreadable provider usage: %+v %+v", got.ProviderUsage, got.Diagnostics)
 	}
 }

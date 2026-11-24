@@ -3,6 +3,10 @@ package intakejourney
 import (
 	context "context"
 	errors "errors"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	http "net/http"
 	httptest "net/http/httptest"
 	reflect "reflect"
@@ -16,87 +20,95 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func handInError(t *testing.T, c *Client, req HandInRequest) *APIError {
+func handInError(t *testing.T, c *journey.Client, req api.HandInRequest) *api.APIError {
 	t.Helper()
 	_, err := c.HandIn(context.Background(), req)
-	var api *APIError
-	if !errors.As(err, &api) {
+	var apiErr *api.APIError
+	if !errors.As(err, &apiErr) {
 		t.Fatalf("hand-in: %v", err)
 	}
-	return api
+	return apiErr
 }
 
-func handInStatus(t *testing.T, s *Service, body string) int {
+func handInStatus(t *testing.T, s *journey.Service, body string) int {
 	t.Helper()
 	w := httptest.NewRecorder()
-	s.handle(w, httptest.NewRequest(http.MethodPost, Prefix+"/handin", strings.NewReader(body)))
+	s.Handle(w, httptest.NewRequest(http.MethodPost, api.Prefix+"/handin", strings.NewReader(body)))
 	return w.Code
 }
 
-// documentRevisions returns the active project's revisions of one document.
-func documentRevisions(t *testing.T, s *Service, id string) []trace.Document {
+func documentRevisions(t *testing.T, s *journey.Service, id string) []trace.Document {
 	t.Helper()
-	return intakefixture.DocumentRevisions(t, s.sole().repository, id)
+	return intakefixture.DocumentRevisions(t, s.Sole().Repository, id)
 }
 
-func charterRevisionCount(t *testing.T, s *Service) int {
+func charterRevisionCount(t *testing.T, s *journey.Service) int {
 	t.Helper()
 	return len(documentRevisions(t, s, "charter"))
 }
 
-func TestHandInWithOptionalCharter(t *testing.T) {
+var unknownProject = config.ProjectID("p_0123456789abcdef0123456789abcdef")
+
+func newChartedProject(t *testing.T) (*journey.Service, *journey.Client, api.ProjectResponse) {
+	t.Helper()
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
+	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
+	fixturekit.Must(t, err)
+	return s, c, added
+}
+
+func TestHandInNeedsAKnownProjectAndAKeyEvenWithTheTemplateCharter(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	s, c := start(t, opts)
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
-	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
-
-	if api := handInError(t, c, HandInRequest{Project: unknown}); api.Code != NotFound || !strings.Contains(api.Message, string(unknown)) {
-		t.Fatalf("no active project: %+v", api)
+	if apiErr := handInError(t, c, api.HandInRequest{Project: unknownProject}); apiErr.Code != api.NotFound || !strings.Contains(apiErr.Message, string(unknownProject)) {
+		t.Fatalf("no active project: %+v", apiErr)
 	}
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
 	id := added.Project.ID
-
 	cfg, err := c.Configuration(ctx)
-	must(t, err)
-	if want := (&CharterState{Rules: 0, Revision: 1, Diagnostics: []charter.Diagnostic{}}); cfg.Project == nil || !reflect.DeepEqual(cfg.Project.CharterState, want) || len(cfg.Diagnostics) != 0 {
+	fixturekit.Must(t, err)
+	if want := (&api.CharterState{Rules: 0, Revision: 1, Diagnostics: []charter.Diagnostic{}}); cfg.Project == nil || !reflect.DeepEqual(cfg.Project.CharterState, want) || len(cfg.Diagnostics) != 0 {
 		t.Fatalf("template status: %+v %+v", cfg.Project, cfg.Diagnostics)
 	}
 	if added.Project.CharterState != nil {
 		t.Fatal("project add reports charter state")
 	}
-
-	// The template charter has no guidance and no rules, and the project
-	// still takes work: the request is judged on its own fields.
-	api := handInError(t, c, HandInRequest{Project: id})
-	if api.Code != Validation || !strings.Contains(api.Message, "key") {
-		t.Fatalf("template charter: %+v", api)
+	apiErr := handInError(t, c, api.HandInRequest{Project: id})
+	if apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, "key") {
+		t.Fatalf("template charter: %+v", apiErr)
 	}
 	if code := handInStatus(t, s, `{"project":"`+string(id)+`"}`); code != 422 {
 		t.Fatalf("template charter status %d", code)
 	}
-	if api := handInError(t, c, HandInRequest{Project: unknown}); api.Code != NotFound || !strings.Contains(api.Message, string(unknown)) {
-		t.Fatalf("unknown project: %+v", api)
+	if apiErr := handInError(t, c, api.HandInRequest{Project: unknownProject}); apiErr.Code != api.NotFound || !strings.Contains(apiErr.Message, string(unknownProject)) {
+		t.Fatalf("unknown project: %+v", apiErr)
 	}
-	if code := handInStatus(t, s, `{"project":"`+string(unknown)+`"}`); code != http.StatusNotFound {
+	if code := handInStatus(t, s, `{"project":"`+string(unknownProject)+`"}`); code != http.StatusNotFound {
 		t.Fatalf("unknown project status %d", code)
 	}
-	if api := handInError(t, c, HandInRequest{Project: "dagger"}); api.Code != Validation {
-		t.Fatalf("malformed project: %+v", api)
+	if apiErr := handInError(t, c, api.HandInRequest{Project: "dagger"}); apiErr.Code != api.Validation {
+		t.Fatalf("malformed project: %+v", apiErr)
 	}
 	if n := charterRevisionCount(t, s); n != 1 {
 		t.Fatalf("reads without an edit recorded %d revisions", n)
 	}
+}
 
-	writeCharter(t, c, id, trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n")
-	cfg, err = c.Configuration(ctx)
-	must(t, err)
+func TestOwnerCharterEditIsRecordedWithItsDiagnostics(t *testing.T) {
+	t.Parallel()
+	s, c, added := newChartedProject(t)
+	id := added.Project.ID
+	journey.WriteCharter(t, c, id, trace.CharterTemplate+"\n## Rules\n\n1. Keep changes small.\n3. Test every fix.\n3. Cite the charter.\n")
+	cfg, err := c.Configuration(context.Background())
+	fixturekit.Must(t, err)
 	state := cfg.Project.CharterState
 	if state == nil || state.Rules != 3 || state.Revision != 2 || len(state.Diagnostics) != 2 || !strings.Contains(state.Diagnostics[0].Message, "gap") || !strings.Contains(state.Diagnostics[1].Message, "cannot be cited") {
 		t.Fatalf("edited status: %+v", state)
 	}
-
 	if n := charterRevisionCount(t, s); n != 2 {
 		t.Fatalf("one edit recorded %d revisions in total", n)
 	}
@@ -104,54 +116,59 @@ func TestHandInWithOptionalCharter(t *testing.T) {
 	if docs[1].Actor != (trace.Actor{Kind: "owner", ID: "local"}) || docs[1].Cause != "owner-edit" {
 		t.Fatalf("edit provenance: %+v", docs[1].Header)
 	}
-
-	writeCharter(t, c, id, "# Charter\n")
-	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != Validation || !strings.Contains(api.Message, "key") {
-		t.Fatalf("emptied charter: %+v", api)
-	}
-	if n := charterRevisionCount(t, s); n != 3 {
-		t.Fatalf("the edit recorded %d revisions in total", n)
-	}
-
-	traceExec(t, added.Project.Trace, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, 'documents.jsonl', 'osmia.trace.document', 'charter', 99, '{not json}')")
-	cfg, err = c.Configuration(ctx)
-	must(t, err)
-	if cfg.Project == nil || cfg.Project.CharterState != nil || !hasDiagnostic(cfg.Diagnostics, Internal) {
-		t.Fatalf("unreadable charter: %+v %+v", cfg.Project, cfg.Diagnostics)
-	}
-	if api := handInError(t, c, HandInRequest{Project: id}); api.Code != Internal || !strings.Contains(api.Message, "cannot read the charter of project "+string(id)) {
-		t.Fatalf("unreadable charter hand-in: %+v", api)
-	}
-
-	_, err = c.RemoveProject(ctx, id)
-	if !failed(err, Internal) {
-		t.Fatalf("removing a project whose member resolution cannot be read: %v", err)
-	}
-
 }
 
-func TestContextProviderReadsActiveProject(t *testing.T) {
+func TestHandInStillNeedsAKeyAfterTheCharterIsEmptied(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	s, c := start(t, opts)
+	s, c, added := newChartedProject(t)
+	id := added.Project.ID
+	journey.WriteCharter(t, c, id, "# Charter\n")
+	if apiErr := handInError(t, c, api.HandInRequest{Project: id}); apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, "key") {
+		t.Fatalf("emptied charter: %+v", apiErr)
+	}
+	if n := charterRevisionCount(t, s); n != 2 {
+		t.Fatalf("the edit recorded %d revisions in total", n)
+	}
+}
+
+func TestUnreadableCharterIsReportedAndBlocksHandInAndRemoval(t *testing.T) {
+	t.Parallel()
+	_, c, added := newChartedProject(t)
+	ctx := context.Background()
+	id := added.Project.ID
+	fixturekit.TraceExec(t, added.Project.Trace, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, 'documents.jsonl', 'osmia.trace.document', 'charter', 99, '{not json}')")
+	cfg, err := c.Configuration(ctx)
+	fixturekit.Must(t, err)
+	if cfg.Project == nil || cfg.Project.CharterState != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) {
+		t.Fatalf("unreadable charter: %+v %+v", cfg.Project, cfg.Diagnostics)
+	}
+	if apiErr := handInError(t, c, api.HandInRequest{Project: id}); apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "cannot read the charter of project "+string(id)) {
+		t.Fatalf("unreadable charter hand-in: %+v", apiErr)
+	}
+	_, err = c.RemoveProject(ctx, id)
+	if !intakefixture.Failed(err, api.Internal) {
+		t.Fatalf("removing a project whose member resolution cannot be read: %v", err)
+	}
+}
+
+func TestContextProviderAssemblesTheActiveProjectsBundle(t *testing.T) {
+	t.Parallel()
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
 	ctx := context.Background()
 	provider := s.Context()
 	if provider.Mode("") != bundle.ModeFile {
 		t.Fatal(provider.Mode(""))
 	}
-	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
-	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
-		t.Fatalf("idle service: %v", err)
-	}
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
 	id := added.Project.ID
-	writeCharter(t, c, id, "1. Keep changes small.\n")
-	repo, err := s.repository(id)
-	must(t, err)
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.now(), Actor: ownerActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
+	journey.WriteCharter(t, c, id, "1. Keep changes small.\n")
+	repo, err := s.Repository(id)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "subsystem-service", Revision: 1, Project: id, At: s.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: "kb/service.md", Content: "Service notes\n"}}))
 	b, err := provider.Assemble(ctx, id, bundle.Scope{})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Contains(b.Render(), "Service notes") {
 		t.Fatalf("bundle carries prose: %s", b.Render())
 	}
@@ -161,12 +178,27 @@ func TestContextProviderReadsActiveProject(t *testing.T) {
 	if n := charterRevisionCount(t, s); n != 2 {
 		t.Fatalf("assembly recorded %d charter revisions", n)
 	}
-	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
+}
+
+func TestContextProviderRefusesProjectsThatAreNotActive(t *testing.T) {
+	t.Parallel()
+	opts, clone := journey.ProjectFixture(t)
+	s, c := journey.StartT(t, opts)
+	ctx := context.Background()
+	provider := s.Context()
+	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
+	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, intake.ErrNoActiveProject) {
+		t.Fatalf("idle service: %v", err)
+	}
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
+	id := added.Project.ID
+	if _, err := provider.Assemble(ctx, unknown, bundle.Scope{}); !errors.Is(err, intake.ErrNoActiveProject) {
 		t.Fatalf("other project: %v", err)
 	}
 	_, err = c.RemoveProject(ctx, id)
-	must(t, err)
-	if _, err := provider.Assemble(ctx, id, bundle.Scope{}); !errors.Is(err, errNoActiveProject) {
+	fixturekit.Must(t, err)
+	if _, err := provider.Assemble(ctx, id, bundle.Scope{}); !errors.Is(err, intake.ErrNoActiveProject) {
 		t.Fatalf("removed project: %v", err)
 	}
 }

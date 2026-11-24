@@ -18,37 +18,24 @@ import (
 // leaves unverified the real host's network behaviour, authentication and
 // actual merge or close semantics.
 type FakePulls struct {
-	Mu       sync.Mutex
-	Prs      []pulls.PullRequest
-	Finds    int
-	SyncHead bool
-	// HeadLag counts the Finds, among those with SyncHead set, that still answer
-	// with a pull request's earlier head after its branch moved, as a host does
-	// while it processes a push.
-	HeadLag int
-	Updates int
-	Creates int
-	Readies int
-	// Closes counts the calls that closed a pull request with a comment, and
-	// Comments holds the comments they posted, as {pull request number, text}.
-	Closes   int
-	Comments []PullComment
-	Lose     bool
-	Fork    func() string
-	// Branches, when set, answers the tip of the named feature branch of the
-	// fork in place of Fork, for a host that holds several workstreams' pull
-	// requests.
-	Branches func(branch string) string
-	// Statuses, when set, answers the combined status read of a commit.
-	Statuses func(ctx context.Context, repository, commit string) (pulls.CommitStatuses, error)
-	// findErr, when set, fails every Find as a refusing host does.
-	FindErr error
-	// uncredentialed reports the client holding no credential, as GitHub
-	// without a token does.
+	Mu             sync.Mutex
+	Prs            []pulls.PullRequest
+	Finds          int
+	SyncHead       bool
+	HeadLag        int
+	Updates        int
+	Creates        int
+	Readies        int
+	Closes         int
+	Comments       []PullComment
+	Lose           bool
+	Fork           func() string
+	Branches       func(branch string) string
+	Statuses       func(ctx context.Context, repository, commit string) (pulls.CommitStatuses, error)
+	FindErr        error
 	Uncredentialed bool
 }
 
-// tip is the commit the fork's branch is at.
 func (c *FakePulls) tip(branch string) string {
 	if c.Branches != nil {
 		return c.Branches(branch)

@@ -38,17 +38,11 @@ type GitHubRepo struct {
 // makes, hands out the SSH URLs its tests set (local bare repositories, so no
 // remote is ever contacted) and records every request, including any delete.
 type FakeGitHub struct {
-	Server *httptest.Server
-	// Login is the account the token authenticates as.
-	Login string
-	// DefaultBranch is the default branch a created repository gets, which
-	// GitHub takes from the account's own preference.
+	Server        *httptest.Server
+	Login         string
 	DefaultBranch string
-	// Remote returns the SSH URL a created repository is given.
-	Remote func(name string) string
-	// OnCreate runs before a create call is handled. When it reports handled,
-	// its status and body are the answer and nothing is created.
-	OnCreate func(g *FakeGitHub, body map[string]any) (handled bool, status int, response any)
+	Remote        func(name string) string
+	OnCreate      func(g *FakeGitHub, body map[string]any) (handled bool, status int, response any)
 
 	mu     sync.Mutex
 	repos  map[string]*GitHubRepo
@@ -96,13 +90,6 @@ func (g *FakeGitHub) Forget(fullName string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.repos, strings.ToLower(fullName))
-}
-
-// SetSSHURL changes the SSH URL of an existing repository.
-func (g *FakeGitHub) SetSSHURL(fullName, sshURL string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.repos[strings.ToLower(fullName)].SSHURL = sshURL
 }
 
 // Calls returns every request received so far.

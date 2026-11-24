@@ -36,10 +36,10 @@ func newAutoArchiveFixture(t *testing.T, key string) *autoArchiveFixture {
 	host := &fixturekit.FakePulls{}
 	opts.PullRequests = host
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
@@ -52,7 +52,7 @@ func (f *autoArchiveFixture) pass() error {
 
 func (f *autoArchiveFixture) mustPass() {
 	f.t.Helper()
-	intakefixture.Must(f.t, f.pass())
+	fixturekit.Must(f.t, f.pass())
 }
 
 func (f *autoArchiveFixture) deliver(pr int) api.DeliveryPublication {
@@ -76,7 +76,7 @@ func (f *autoArchiveFixture) setState(id, state string) {
 	f.t.Helper()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "fixture"}
 	_, err := f.repo.SetFeatureState(context.Background(), h, state, "fixture moves the workstream")
-	intakefixture.Must(f.t, err)
+	fixturekit.Must(f.t, err)
 }
 
 func (f *autoArchiveFixture) archive() (runtime.Archive, bool) {
@@ -173,7 +173,7 @@ func TestAutoArchiveSkipsAWorkstreamWithoutAMergedCurrentPullRequest(t *testing.
 		{"reopened out of delivered", func(f *autoArchiveFixture) {
 			f.deliver(autoArchivePullRequest)
 			f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
-			f.setState("reopened", intakefixture.BuildingState)
+			f.setState("reopened", intake.BuildingState)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestAutoArchiveSkipsASession(t *testing.T) {
 	t.Parallel()
 	f := newAutoArchiveFixture(t, "auto-archive-session-")
 	session := config.WorkstreamID("w_00000000000000000000000000000b01")
-	intakefixture.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, service.TestForemanActor))
+	fixturekit.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, service.TestForemanActor))
 	f.mustPass()
 	if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(session)); apiFault == nil || f.archives() != 0 {
 		t.Fatalf("session archive: %v archives=%d", apiFault, f.archives())
@@ -248,7 +248,7 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 					case "outcome closed":
 						f.outcome(autoArchivePullRequest, "closed")
 					case "reopened":
-						f.setState("reopened", intakefixture.BuildingState)
+						f.setState("reopened", intake.BuildingState)
 					}
 				})
 				f.mustPass()

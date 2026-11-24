@@ -42,7 +42,7 @@ func cadenceForeman(f *shedFixture, repository *trace.Repository, interval strin
 func passDrifts(t *testing.T, fm *foreman) {
 	t.Helper()
 	fm.nextDrift = time.Time{}
-	intakefixture.Must(t, fm.drifts(context.Background()))
+	fixturekit.Must(t, fm.drifts(context.Background()))
 }
 
 func restartTrace(t *testing.T, f *shedFixture, repository *trace.Repository) *trace.Repository {
@@ -62,9 +62,9 @@ func sealedAt(t *testing.T, repository *trace.Repository, stream config.Workstre
 func driftTransition(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) trace.Transition {
 	t.Helper()
 	states, err := repository.WorkflowStates(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	drift, err := lifecycle.LatestDrift(repository, stream, states)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if drift == nil {
 		t.Fatalf("workstream %s has no drift rebase", stream)
 	}
@@ -96,18 +96,18 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, _ := newFinalFixture(t, "cadence")
 	ctx := context.Background()
-	intakefixture.Must(t, repository.CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, repository.CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
 	sealed := sealedAt(t, repository, stream)
 	fm := cadenceForeman(f, repository, "1h")
 
 	setClock(f, sealed.Add(59*time.Minute+30*time.Second))
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	checkDrifts(t, repository, stream, 0, "before the interval elapsed")
 	setClock(f, sealed.Add(time.Hour))
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	checkDrifts(t, repository, stream, 0, "within a minute of the last read")
 	setClock(f, sealed.Add(time.Hour+30*time.Second))
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	ops := checkDrifts(t, repository, stream, 1, "once the interval elapsed since the sealing")
 	if reason := intakefixture.TransitionByID(t, repository, stream, "drift-1").Reason; !strings.HasPrefix(reason, "upstream_rebase 1h0m0s has elapsed since the sealing at "+sealed.Format(time.RFC3339)+": drift rebase 1 fetches") {
 		t.Fatalf("scheduled drift rebase reason %q", reason)
@@ -141,16 +141,16 @@ func TestScheduledDriftRebasesFollowTheIntervalAcrossRestart(t *testing.T) {
 
 	finalAt := second.At.Add(30 * time.Minute)
 	g, err := intake.FeatureWorkspaces(f.s.about(repository), repository).Of(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	base, err := lifecycle.BranchBase(ctx, repository, stream, g, tip)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	content, err := json.Marshal(delivery.FinalRebase{Review: 1, Operation: "planted-final-review", Branch: intake.FeatureBranch(stream), Before: tip, Commit: tip, Upstream: base})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	revision, err := intake.NextRevision(repository, stream, delivery.FinalRebaseDocument)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalRebaseDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: finalAt, Actor: service.TestForemanActor, Cause: "planted-final-review"},
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalRebaseDocument, Revision: revision, Project: repository.Project(), Workstream: stream, At: finalAt, Actor: service.TestForemanActor, Cause: "planted-final-review"},
 		Path: delivery.FinalRebasePath, Content: string(content) + "\n"}}))
 	setClock(f, second.At.Add(time.Hour))
 	passDrifts(t, fm)
@@ -191,7 +191,7 @@ func TestOwnerDriftRequestWaitsForTheLanderAcrossRestart(t *testing.T) {
 		}
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	requests := slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != lifecycle.DriftRequestSubject })
 	if len(requests) != 1 || requests[0].ID != "drift-request-2" || requests[0].To != "requested-2" || requests[0].Actor != intake.OwnerActor {
 		t.Fatalf("owner request transitions %+v", requests)
@@ -216,10 +216,10 @@ func TestOwnerDriftRequestWaitsForTheLanderAcrossRestart(t *testing.T) {
 	if k, err := fm.askDrift(ctx, stream, f.s.now()); err != nil || k != 3 {
 		t.Fatalf("a later request is answered by %d: %v", k, err)
 	}
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	checkDrifts(t, repository, stream, 2, "within a minute of the last read")
 	f.s.lifecycle().DriftAsked.Store(true)
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	checkDrifts(t, repository, stream, 3, "at the pass after the owner asked")
 }
 
@@ -229,16 +229,16 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	f.upstream(t)
 	stream, _ := f.builtAs(t, "rebase-api")
 	ctx := context.Background()
-	intakefixture.Must(t, f.repository().CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, f.repository().CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
 	fixturekit.AssertCode(t, f.c.Do(ctx, "POST", api.Prefix+"/projects/rebase", api.ProjectRebaseRequest{Project: "not-a-project"}, nil), api.Validation)
 	_, err := f.c.RebaseProject(ctx, "p_ffffffffffffffffffffffffffffffff")
 	fixturekit.AssertCode(t, err, api.NotFound)
 	idle := api.DriftSkip{Workstream: idleStream, Reason: "the workstream is not started, not building, assembled or delivered with a pull request"}
 
 	pause := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	intakefixture.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
+	fixturekit.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
 	got, err := f.c.RebaseProject(ctx, f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	skipped := []api.DriftSkip{idle, {Workstream: stream, Reason: "the workstream is paused"}}
 	if stream < idleStream {
 		skipped[0], skipped[1] = skipped[1], skipped[0]
@@ -249,13 +249,13 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	if state, err := f.repository().Workflow(stream, lifecycle.DriftRequestSubject); err != nil || state.Value != "" {
 		t.Fatalf("a paused workstream's request is %q: %v", state.Value, err)
 	}
-	intakefixture.Must(t, f.c.Do(ctx, "DELETE", api.Prefix+"/runtime/pause", pause, nil))
+	fixturekit.Must(t, f.c.Do(ctx, "DELETE", api.Prefix+"/runtime/pause", pause, nil))
 
 	bare := filepath.Join(filepath.Dir(f.clone), "remotes", "dagger", "dagger.git")
-	intakefixture.Must(t, os.Rename(bare, bare+".held"))
+	fixturekit.Must(t, os.Rename(bare, bare+".held"))
 	for k := 1; k <= 2; k++ {
 		got, err = f.c.RebaseProject(ctx, f.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if want := (api.ProjectRebaseResponse{Project: f.project, Covered: []api.DriftCoverage{{Workstream: stream, Drift: k}}, Skipped: []api.DriftSkip{idle}}); !reflect.DeepEqual(got, want) {
 			t.Fatalf("request %d: %+v", k, got)
 		}
@@ -268,17 +268,17 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 		})
 	}
 	st, err := f.c.Status(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if st.Drift == nil || st.Drift.Drift != 1 || st.Drift.Outcome != "requested" || !strings.HasPrefix(st.Drift.Reason, "the owner asked for a drift rebase at ") {
 		t.Fatalf("status while drift rebase 1 is held: %+v", st.Drift)
 	}
 
 	f.stop(t)
-	intakefixture.Must(t, os.Rename(bare+".held", bare))
+	fixturekit.Must(t, os.Rename(bare+".held", bare))
 	f.start(t)
 	intakefixture.Eventually(t, "the owner's second request never left drift at rebased-2", func() bool {
 		state, err := f.repository().Workflow(stream, lifecycle.DriftSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return state.Value == "rebased-2"
 	})
 	checkDrifts(t, f.repository(), stream, 2, "after both requests are answered")
@@ -288,12 +288,12 @@ func TestRebaseProjectThroughTheAPI(t *testing.T) {
 	}
 	rebased := intakefixture.TransitionByID(t, f.repository(), stream, "drift-2-rebased")
 	st, err = f.c.Status(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if want := (&api.DriftStatus{Drift: 2, Outcome: "rebased", At: rebased.At, Reason: rebased.Reason, Moved: []string{}}); !reflect.DeepEqual(st.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", st.Drift, want)
 	}
 	list, err := f.c.Statuses(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, w := range list.Workstreams {
 		if w.Workstream == idleStream && w.Drift != nil || w.Workstream == stream && !reflect.DeepEqual(w.Drift, st.Drift) {
 			t.Fatalf("status list drift of %s: %+v", w.Workstream, w.Drift)
@@ -308,7 +308,7 @@ func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
 	f.upstream(t)
 	stream, _ := f.builtAs(t, "rebase-one")
 	ctx := context.Background()
-	intakefixture.Must(t, f.repository().CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, f.repository().CreateWorkstream(ctx, idleStream, f.s.now(), intake.OwnerActor))
 	fixturekit.AssertCode(t, f.c.Do(ctx, "POST", api.Prefix+"/rebase/not-a-workstream", nil, nil), api.Validation)
 	fixturekit.AssertCode(t, f.c.Do(ctx, "GET", api.Prefix+"/rebase/"+string(stream), nil, nil), api.Unsupported)
 	_, err := f.c.RebaseWorkstream(ctx, "w_ffffffffffffffffffffffffffffffff")
@@ -320,7 +320,7 @@ func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
 	}
 
 	pause := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	intakefixture.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
+	fixturekit.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: pause, Mode: "soft", Reason: "hold", Source: "owner"}, nil))
 	_, err = f.c.RebaseWorkstream(ctx, stream)
 	fixturekit.AssertCode(t, err, api.Conflict)
 	if err == nil || !strings.Contains(err.Error(), "the workstream is paused") {
@@ -329,16 +329,16 @@ func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
 	if state, err := f.repository().Workflow(stream, lifecycle.DriftRequestSubject); err != nil || state.Value != "" {
 		t.Fatalf("a paused workstream's request is %q: %v", state.Value, err)
 	}
-	intakefixture.Must(t, f.c.Do(ctx, "DELETE", api.Prefix+"/runtime/pause", pause, nil))
+	fixturekit.Must(t, f.c.Do(ctx, "DELETE", api.Prefix+"/runtime/pause", pause, nil))
 
 	got, err := f.c.RebaseWorkstream(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if want := (api.WorkstreamRebaseResponse{Project: f.project, Workstream: stream, Drift: 1}); got != want {
 		t.Fatalf("request: %+v, want %+v", got, want)
 	}
 	intakefixture.Eventually(t, "the owner's request never left drift at rebased-1", func() bool {
 		state, err := f.repository().Workflow(stream, lifecycle.DriftSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return state.Value == "rebased-1"
 	})
 	if first := intakefixture.TransitionByID(t, f.repository(), stream, "drift-1"); !strings.HasPrefix(first.Reason, "the owner asked for a drift rebase at ") {
@@ -348,7 +348,7 @@ func TestRebaseWorkstreamThroughTheAPI(t *testing.T) {
 		t.Fatalf("the request reached another workstream: %q %v", state.Value, err)
 	}
 	got, err = f.c.RebaseWorkstream(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got.Drift != 2 {
 		t.Fatalf("the next request answers drift rebase %d, want 2", got.Drift)
 	}

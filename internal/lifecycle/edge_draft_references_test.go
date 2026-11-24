@@ -15,19 +15,18 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	pulls "github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repository, report, upstreamRepo, upstream := newCrossRepoEdgeDependent(t)
-	intakefixture.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
 	provider := f.s.Context()
 	assertBuildReference := func(want, reference string) {
 		t.Helper()
-		view, err := provider.Assemble(ctx, repository.Project(), bundle.Scope{Role: intakefixture.MasonRole, Workstream: stream})
-		intakefixture.Must(t, err)
+		view, err := provider.Assemble(ctx, repository.Project(), bundle.Scope{Role: intake.MasonRole, Workstream: stream})
+		fixturekit.Must(t, err)
 		if len(view.Dependencies) != 1 {
 			t.Fatalf("dependent context: %+v", view.Dependencies)
 		}
@@ -47,7 +46,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	home := filepath.Dir(f.clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
 	fixturekit.ConfigureDeliverySigner(t, f.clone)
-	intakefixture.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
 	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	pull := &fixturekit.FakePulls{SyncHead: true, Fork: func() string {
@@ -62,11 +61,11 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	intakefixture.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
 	assertBuildReference(publication.Fork+"@"+publication.Commit, "owner/other#77")
 
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
-	intakefixture.Must(t, pub.publisher().Pass(ctx))
+	fixturekit.Must(t, pub.publisher().Pass(ctx))
 	if operations := pub.operations(t); len(operations) != 0 {
 		t.Fatalf("unapproved dependent publication scheduled: %+v", operations)
 	}
@@ -103,7 +102,7 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if state, err := repository.Workflow(stream, "publication"); err != nil || state.Value != "published-1" {
 		t.Fatalf("the approval's outcome %+v: %v", state, err)
 	}
-	intakefixture.Must(t, pub.publisher().Pass(ctx))
+	fixturekit.Must(t, pub.publisher().Pass(ctx))
 	pull.Mu.Lock()
 	defer pull.Mu.Unlock()
 	if len(pull.Prs) != 2 || pull.Creates != 1 || pull.Readies != 0 {
@@ -125,9 +124,9 @@ func TestDeliveryPresentationOmitsDraftPullRequestWithoutPendingDependency(t *te
 		t.Fatalf("a workstream without a pending dependency presents a draft pull request: %v, %s", presented.DraftPullRequest, presented.Draft)
 	}
 	encoded, err := json.Marshal(presented)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var fields map[string]json.RawMessage
-	intakefixture.Must(t, json.Unmarshal(encoded, &fields))
+	fixturekit.Must(t, json.Unmarshal(encoded, &fields))
 	if _, present := fields["draft_pull_request"]; present {
 		t.Fatalf("presentation serializes draft_pull_request without a pending dependency: %s", encoded)
 	}

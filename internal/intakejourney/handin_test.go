@@ -2,12 +2,15 @@ package intakejourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	fs "io/fs"
 	http "net/http"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
-	slices "slices"
 	strings "strings"
 	syscall "syscall"
 	testing "testing"
@@ -21,150 +24,38 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-type handInFixture struct {
-	s       *Service
-	c       *Client
-	issues  *fakeIssues
-	project config.ProjectID
-	trace   string
-	home    string
-}
-
-// newHandInFixture starts a service with an active project whose charter has
-// rules.
-func newHandInFixture(t *testing.T) *handInFixture {
-	t.Helper()
-	opts, clone := projectFixture(t)
-	f := &handInFixture{}
-	data := intakefixture.NewHandInSetup(t, clone, func(fake *fakeIssues) intakefixture.ArchitectProjectClient {
-		opts.Issues = fake
-		f.s, f.c = start(t, opts)
-		return f.c
-	}, func(t *testing.T, project config.ProjectID, text string) { writeCharter(t, f.c, project, text) })
-	f.issues, f.project, f.trace, f.home = data.Issues, data.Project, data.Trace, data.Home
-	return f
-}
-
-func (f *handInFixture) handIn(t *testing.T, req HandInRequest) HandInResponse {
-	t.Helper()
-	return intakefixture.HandIn(t, f.c, f.project, req)
-}
-
-func (f *handInFixture) repository() *trace.Repository { return f.s.sole().repository }
-
-// head returns how many commits the project's trace and each of its
-// workstreams' traces hold, apart from the librarian's workstream of an older trace.
-func (f *handInFixture) head(t *testing.T) map[string]int {
-	t.Helper()
-	return intakefixture.HandInHead(t, f.trace, func() []config.WorkstreamID { return f.streams(t) }, func(stream config.WorkstreamID) string {
-		return workstreamTraceDirectory(t, f.s.current().Root, f.project, stream)
-	})
-}
-
-// unchanged reports whether nothing was committed since head outside the
-// librarian's workstream, and no workstream was created.
-func (f *handInFixture) unchanged(t *testing.T, head map[string]int) bool {
-	t.Helper()
-	return intakefixture.HandInUnchanged(t, f.head(t), head)
-}
-
-// streams lists the project's workstreams other than the librarian's.
-func (f *handInFixture) streams(t *testing.T) []config.WorkstreamID {
-	t.Helper()
-	return intakefixture.Streams(t, f.s.current().Root, f.project, librarianWorkstream(f.project))
-}
-
-// checkHanded verifies everything a successful hand-in records.
-func (f *handInFixture) checkHanded(t *testing.T, out HandInResponse, key, name, source, content string) {
-	t.Helper()
-	ctx := context.Background()
-	stream := HandInWorkstream(f.project, key)
-	if out.Project != f.project || out.Workstream != stream || out.State != HandedState || out.Source != source {
-		t.Fatalf("response %+v", out)
-	}
-	data, err := workstreamDocument(t, f.s.current().Root, f.project, stream, "handed/"+name)
-	must(t, err)
-	if string(data) != content {
-		t.Fatalf("handed bytes %q, want %q", data, content)
-	}
-	r := f.repository()
-	docs, err := trace.Read[trace.Document](r, stream)
-	must(t, err)
-	owner := trace.Actor{Kind: "owner", ID: "local"}
-	if len(docs) != 1 || docs[0].Path != "handed/"+name || docs[0].Content != content || docs[0].Source != source || docs[0].Actor != owner {
-		t.Fatalf("handed document %+v", docs)
-	}
-	transitions, err := trace.Read[trace.Transition](r, stream)
-	must(t, err)
-	transitions = slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != trace.FeatureSubject })
-	if len(transitions) != 1 {
-		t.Fatalf("transitions %+v", transitions)
-	}
-	tr := transitions[0]
-	if tr.Subject != trace.FeatureSubject || tr.From != "" || tr.To != "handed" || tr.Actor != owner || !strings.Contains(tr.Reason, "owner handed in handed/"+name+" from "+source) {
-		t.Fatalf("transition %+v", tr)
-	}
-	if events := allTransitions(t, f.s.current().Root, f.project, stream); !slices.ContainsFunc(events, func(tr trace.Transition) bool { return tr.To == "handed" }) {
-		t.Fatalf("transitions: %+v", events)
-	}
-	state, err := r.Workflow(stream, trace.FeatureSubject)
-	must(t, err)
-	if state != (trace.WorkflowState{Version: 1, Value: "handed"}) {
-		t.Fatalf("state %+v", state)
-	}
-	outbox, err := r.Outbox(stream)
-	must(t, err)
-	var notices []trace.OutboxEntry
-	for _, e := range outbox {
-		if chiefEvent(e.Event) {
-			notices = append(notices, e)
-		}
-	}
-	if len(notices) != 1 || notices[0].TransitionID != tr.ID || !strings.Contains(notices[0].Event.Body, "changed to handed") {
-		t.Fatalf("outbox %+v", outbox)
-	}
-	th, err := r.ChiefOfStaffThread(stream)
-	must(t, err)
-	if th.Identity.Role != trace.ChiefOfStaff {
-		t.Fatalf("chief of staff %+v", th)
-	}
-	if _, err := r.EnsureChiefOfStaff(ctx, stream, time.Now(), owner); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestHandInFileURLAndStdin(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
-	design := filepath.Join(f.home, "design.md")
+	f := journey.NewHandInFixture(t)
+	design := filepath.Join(f.Home, "design.md")
 	content := "# Design\n\nNo trailing newline, a tab\tand unicode: é"
-	must(t, os.WriteFile(design, []byte(content), 0600))
+	fixturekit.Must(t, os.WriteFile(design, []byte(content), 0600))
 
-	out := f.handIn(t, HandInRequest{Key: "file", Path: design})
-	f.checkHanded(t, out, "file", "design.md", "file:"+design, content)
+	out := f.HandIn(t, api.HandInRequest{Key: "file", Path: design})
+	f.CheckHanded(t, out, "file", "design.md", "file:"+design, content)
 
-	must(t, os.WriteFile(design, []byte("changed"), 0600))
-	if data, _ := workstreamDocument(t, f.s.current().Root, f.project, out.Workstream, "handed/design.md"); string(data) != content {
+	fixturekit.Must(t, os.WriteFile(design, []byte("changed"), 0600))
+	if data, _ := fixturekit.WorkstreamDocument(t, f.S.Current().Root, f.Project, out.Workstream, "handed/design.md"); string(data) != content {
 		t.Fatalf("handed copy follows the original: %q", data)
 	}
 
-	out = f.handIn(t, HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/12"})
-	f.checkHanded(t, out, "url", "issue-12.md", "https://github.com/owner/repo/issues/12", "# Issue title\n\nIssue body\n")
+	out = f.HandIn(t, api.HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/12"})
+	f.CheckHanded(t, out, "url", "issue-12.md", "https://github.com/owner/repo/issues/12", "# Issue title\n\nIssue body\n")
 
 	stdin := "piped\r\ndesign\n\n"
-	out = f.handIn(t, HandInRequest{Key: "stdin", Stdin: &stdin})
-	f.checkHanded(t, out, "stdin", "stdin", "stdin", stdin)
+	out = f.HandIn(t, api.HandInRequest{Key: "stdin", Stdin: &stdin})
+	f.CheckHanded(t, out, "stdin", "stdin", "stdin", stdin)
 
-	hidden := filepath.Join(f.home, ".hidden:design")
-	must(t, os.WriteFile(hidden, []byte("hidden"), 0600))
-	out = f.handIn(t, HandInRequest{Key: "hidden", Path: hidden})
-	f.checkHanded(t, out, "hidden", "input", "file:"+hidden, "hidden")
+	hidden := filepath.Join(f.Home, ".hidden:design")
+	fixturekit.Must(t, os.WriteFile(hidden, []byte("hidden"), 0600))
+	out = f.HandIn(t, api.HandInRequest{Key: "hidden", Path: hidden})
+	f.CheckHanded(t, out, "hidden", "input", "file:"+hidden, "hidden")
 
-	if streams := f.streams(t); len(streams) != 4 {
+	if streams := f.Streams(t); len(streams) != 4 {
 		t.Fatalf("workstreams %v", streams)
 	}
-	st, err := f.c.Status(context.Background(), HandInWorkstream(f.project, "stdin"))
-	must(t, err)
+	st, err := f.C.Status(context.Background(), intake.HandInWorkstream(f.Project, "stdin"))
+	fixturekit.Must(t, err)
 	if st.State == nil || *st.State != "handed" {
 		t.Fatalf("status %+v", st)
 	}
@@ -172,71 +63,68 @@ func TestHandInFileURLAndStdin(t *testing.T) {
 
 func TestHandInRetryReturnsTheSameWorkstream(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
-	design := filepath.Join(f.home, "design.md")
-	must(t, os.WriteFile(design, []byte("design"), 0600))
-	first := f.handIn(t, HandInRequest{Key: "retry", Path: design})
-	head := f.head(t)
+	f := journey.NewHandInFixture(t)
+	design := filepath.Join(f.Home, "design.md")
+	fixturekit.Must(t, os.WriteFile(design, []byte("design"), 0600))
+	first := f.HandIn(t, api.HandInRequest{Key: "retry", Path: design})
+	head := f.Head(t)
 
-	must(t, os.WriteFile(design, []byte("edited"), 0600))
-	if again := f.handIn(t, HandInRequest{Key: "retry", Path: design}); again != first {
+	fixturekit.Must(t, os.WriteFile(design, []byte("edited"), 0600))
+	if again := f.HandIn(t, api.HandInRequest{Key: "retry", Path: design}); again != first {
 		t.Fatalf("retry %+v, first %+v", again, first)
 	}
-	if !f.unchanged(t, head) {
+	if !f.Unchanged(t, head) {
 		t.Fatal("retry wrote to the trace")
 	}
-	f.checkHanded(t, first, "retry", "design.md", "file:"+design, "design")
+	f.CheckHanded(t, first, "retry", "design.md", "file:"+design, "design")
 
 	url := "https://github.com/owner/repo/issues/12"
-	first = f.handIn(t, HandInRequest{Key: "issue", URL: url})
-	if again := f.handIn(t, HandInRequest{Key: "issue", URL: url}); again != first || f.issues.Fetches != 1 {
-		t.Fatalf("retry %+v fetched %d times", again, f.issues.Fetches)
+	first = f.HandIn(t, api.HandInRequest{Key: "issue", URL: url})
+	if again := f.HandIn(t, api.HandInRequest{Key: "issue", URL: url}); again != first || f.Issues.Fetches != 1 {
+		t.Fatalf("retry %+v fetched %d times", again, f.Issues.Fetches)
 	}
 	text := "text"
-	first = f.handIn(t, HandInRequest{Key: "text", Stdin: &text})
-	if again := f.handIn(t, HandInRequest{Key: "text", Stdin: &text}); again != first {
+	first = f.HandIn(t, api.HandInRequest{Key: "text", Stdin: &text})
+	if again := f.HandIn(t, api.HandInRequest{Key: "text", Stdin: &text}); again != first {
 		t.Fatalf("stdin retry %+v", again)
 	}
-	if streams := f.streams(t); len(streams) != 3 {
+	if streams := f.Streams(t); len(streams) != 3 {
 		t.Fatalf("workstreams %v", streams)
 	}
 
-	head = f.head(t)
+	head = f.Head(t)
 	other := "other"
-	for _, req := range []HandInRequest{
+	for _, req := range []api.HandInRequest{
 		{Key: "text", Stdin: &other},
 		{Key: "text", Path: design},
 		{Key: "retry", URL: url},
-		{Key: "retry", Path: filepath.Join(f.home, "other.md")},
+		{Key: "retry", Path: filepath.Join(f.Home, "other.md")},
 	} {
-		req.Project = f.project
-		if api := handInError(t, f.c, req); api.Code != Conflict || !strings.Contains(api.Message, "key "+req.Key) {
-			t.Fatalf("%+v: %+v", req, api)
+		req.Project = f.Project
+		if apiErr := handInError(t, f.C, req); apiErr.Code != api.Conflict || !strings.Contains(apiErr.Message, "key "+req.Key) {
+			t.Fatalf("%+v: %+v", req, apiErr)
 		}
 	}
-	if !f.unchanged(t, head) || len(f.streams(t)) != 3 {
+	if !f.Unchanged(t, head) || len(f.Streams(t)) != 3 {
 		t.Fatal("refused retry wrote to the trace")
 	}
 }
 
-// The workstream a hand-in creates takes a priority and a workstream pause on
-// the running service, without a restart. A workstream the trace does not hold
-// is still refused.
 func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
+	f := journey.NewHandInFixture(t)
 	ctx := context.Background()
 	text := "design"
-	out := f.handIn(t, HandInRequest{Key: "known", Stdin: &text})
-	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: out.Workstream}
-	mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{out.Workstream}})
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
-	rt, err := f.c.Runtime(ctx)
-	must(t, err)
+	out := f.HandIn(t, api.HandInRequest{Key: "known", Stdin: &text})
+	target := runtime.Target{Scope: "workstream", Project: f.Project, Workstream: out.Workstream}
+	journey.Mutation(t, f.C, "PUT", "priority", api.PriorityRequest{Project: f.Project, Workstreams: []config.WorkstreamID{out.Workstream}})
+	journey.Mutation(t, f.C, "PUT", "pause", api.PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	rt, err := f.C.Runtime(ctx)
+	fixturekit.Must(t, err)
 	if len(rt.Diagnostics) != 0 {
 		t.Fatalf("diagnostics %+v", rt.Diagnostics)
 	}
-	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != f.project ||
+	if len(rt.Effective.Priorities) != 1 || rt.Effective.Priorities[0].Project != f.Project ||
 		!reflect.DeepEqual(rt.Effective.Priorities[0].Workstreams, []config.WorkstreamID{out.Workstream}) {
 		t.Fatalf("effective priorities %+v", rt.Effective.Priorities)
 	}
@@ -244,51 +132,51 @@ func TestHandInMakesItsWorkstreamKnownToRuntime(t *testing.T) {
 		t.Fatalf("effective pauses %+v", rt.Effective.Pauses)
 	}
 
-	if again := f.handIn(t, HandInRequest{Key: "known", Stdin: &text}); again != out {
+	if again := f.HandIn(t, api.HandInRequest{Key: "known", Stdin: &text}); again != out {
 		t.Fatalf("retry %+v, first %+v", again, out)
 	}
 	unknown := config.WorkstreamID("w_00000000000000000000000000000000")
-	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{unknown}}, nil), Validation)
-	assertCode(t, f.c.Do(ctx, "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: unknown}, Mode: "soft", Source: "owner"}, nil), Validation)
+	fixturekit.AssertCode(t, f.C.Do(ctx, "PUT", api.Prefix+"/runtime/priority", api.PriorityRequest{Project: f.Project, Workstreams: []config.WorkstreamID{unknown}}, nil), api.Validation)
+	fixturekit.AssertCode(t, f.C.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.Project, Workstream: unknown}, Mode: "soft", Source: "owner"}, nil), api.Validation)
 }
 
 func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
+	f := journey.NewHandInFixture(t)
 	ctx := context.Background()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	r := f.repository()
+	r := f.Repository()
 	text := "design"
 
-	stream := HandInWorkstream(f.project, "created")
-	must(t, r.CreateWorkstream(ctx, stream, time.Now().UTC(), owner))
-	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "created", Stdin: &text}), "created", "stdin", "stdin", text)
+	stream := intake.HandInWorkstream(f.Project, "created")
+	fixturekit.Must(t, r.CreateWorkstream(ctx, stream, time.Now().UTC(), owner))
+	f.CheckHanded(t, f.HandIn(t, api.HandInRequest{Key: "created", Stdin: &text}), "created", "stdin", "stdin", text)
 
-	stream = HandInWorkstream(f.project, "copied")
+	stream = intake.HandInWorkstream(f.Project, "copied")
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	must(t, r.CreateWorkstream(ctx, stream, at, owner))
-	must(t, r.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: owner, Cause: "handin"},
+	fixturekit.Must(t, r.CreateWorkstream(ctx, stream, at, owner))
+	fixturekit.Must(t, r.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: f.Project, Workstream: stream, At: at, Actor: owner, Cause: "handin"},
 		Path: "handed/stdin", Content: text, Source: "stdin"}))
-	f.checkHanded(t, f.handIn(t, HandInRequest{Key: "copied", Stdin: &text}), "copied", "stdin", "stdin", text)
+	f.CheckHanded(t, f.HandIn(t, api.HandInRequest{Key: "copied", Stdin: &text}), "copied", "stdin", "stdin", text)
 	transitions, err := trace.Read[trace.Transition](r, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !transitions[0].At.Equal(at) {
 		t.Fatalf("transition at %v", transitions[0].At)
 	}
 
 	copied := func(key string) config.WorkstreamID {
-		stream := HandInWorkstream(f.project, key)
-		must(t, r.CreateWorkstream(ctx, stream, at, owner))
-		must(t, r.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: f.project, Workstream: stream, At: at, Actor: owner, Cause: "handin"},
+		stream := intake.HandInWorkstream(f.Project, key)
+		fixturekit.Must(t, r.CreateWorkstream(ctx, stream, at, owner))
+		fixturekit.Must(t, r.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: f.Project, Workstream: stream, At: at, Actor: owner, Cause: "handin"},
 			Path: "handed/stdin", Content: text, Source: "stdin"}))
 		return stream
 	}
 	moves := func(stream config.WorkstreamID) string {
 		transitions, err := trace.Read[trace.Transition](r, stream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		var out []string
 		for _, tr := range transitions {
-			if tr.Subject == factoryPolicySubject {
+			if tr.Subject == intake.FactoryPolicySubject {
 				continue
 			}
 			if !tr.At.Equal(at) || tr.Actor != owner {
@@ -301,7 +189,7 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 
 	want := "shed-owner-skip:shed-owner:handin handin:feature:handin"
 	stream = copied("unskipped")
-	if out := f.handIn(t, HandInRequest{Key: "unskipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != HandedState || !out.SkipDebate {
+	if out := f.HandIn(t, api.HandInRequest{Key: "unskipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != intake.HandedState || !out.SkipDebate {
 		t.Fatalf("response %+v", out)
 	}
 	if got := moves(stream); got != want {
@@ -309,167 +197,173 @@ func TestHandInFinishesAnInterruptedHandIn(t *testing.T) {
 	}
 
 	stream = copied("skipped")
-	_, err = r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: ownerHeader(skipTransition, f.project, stream, handInTransition, at), Subject: ownerSubject, To: skippedValue, Reason: handInSkipReason}})
-	must(t, err)
-	_, err = f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "skipped", Stdin: &text})
-	if !failed(err, Conflict) || err.Error() != "conflict: key skipped already handed in workstream "+string(stream)+" skipping debate; use a new key" {
+	_, err = r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: intake.OwnerHeader(intake.SkipTransition, f.Project, stream, intake.HandInTransition, at), Subject: intake.OwnerSubject, To: intake.SkippedValue, Reason: intake.HandInSkipReason}})
+	fixturekit.Must(t, err)
+	_, err = f.C.HandIn(ctx, api.HandInRequest{Project: f.Project, Key: "skipped", Stdin: &text})
+	if !intakefixture.Failed(err, api.Conflict) || err.Error() != "conflict: key skipped already handed in workstream "+string(stream)+" skipping debate; use a new key" {
 		t.Fatalf("retry without the skip: %v", err)
 	}
-	if out := f.handIn(t, HandInRequest{Key: "skipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != HandedState || !out.SkipDebate {
+	if out := f.HandIn(t, api.HandInRequest{Key: "skipped", Stdin: &text, SkipDebate: true}); out.Workstream != stream || out.State != intake.HandedState || !out.SkipDebate {
 		t.Fatalf("response %+v", out)
 	}
 	if got := moves(stream); got != want {
 		t.Fatalf("transitions %s, want %s", got, want)
 	}
-	if len(f.streams(t)) != 4 {
-		t.Fatal(f.streams(t))
+	if len(f.Streams(t)) != 4 {
+		t.Fatal(f.Streams(t))
 	}
 }
 
 func TestHandInRefusalsWriteNothing(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
-	design := filepath.Join(f.home, "design.md")
-	must(t, os.WriteFile(design, []byte("design"), 0600))
+	f := journey.NewHandInFixture(t)
+	design := filepath.Join(f.Home, "design.md")
+	fixturekit.Must(t, os.WriteFile(design, []byte("design"), 0600))
 
-	f.handIn(t, HandInRequest{Key: "baseline", Path: design})
-	head := f.head(t)
+	f.HandIn(t, api.HandInRequest{Key: "baseline", Path: design})
+	head := f.Head(t)
 	empty, blank := "", " \n\t"
-	must(t, os.WriteFile(filepath.Join(f.home, "latin1.md"), []byte("bad \xff byte"), 0600))
-	large := strings.Repeat("x", MaxHandedBytes+1)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(f.Home, "latin1.md"), []byte("bad \xff byte"), 0600))
+	large := strings.Repeat("x", intake.MaxHandedBytes+1)
 	unknown := config.ProjectID("p_0123456789abcdef0123456789abcdef")
-	must(t, os.WriteFile(filepath.Join(f.home, "large.md"), []byte(large), 0600))
-	must(t, os.WriteFile(filepath.Join(f.home, "empty.md"), nil, 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(f.Home, "large.md"), []byte(large), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(f.Home, "empty.md"), nil, 0600))
 	for _, c := range []struct {
-		req  HandInRequest
-		code Code
+		req  api.HandInRequest
+		code api.Code
 		text string
 	}{
-		{HandInRequest{Project: unknown, Key: "k", Path: design}, NotFound, "project " + string(unknown) + " is not an active project"},
-		{HandInRequest{Project: f.project, Path: design}, Validation, "key must be"},
-		{HandInRequest{Project: f.project, Key: "-bad", Path: design}, Validation, "key must be"},
-		{HandInRequest{Project: f.project, Key: strings.Repeat("k", 129), Path: design}, Validation, "key must be"},
-		{HandInRequest{Project: f.project, Key: "k"}, Validation, "exactly one input"},
-		{HandInRequest{Project: f.project, Key: "k", Path: design, URL: "https://github.com/owner/repo/issues/12"}, Validation, "exactly one input"},
-		{HandInRequest{Project: f.project, Key: "k", Path: design, Stdin: &empty}, Validation, "exactly one input"},
-		{HandInRequest{Project: f.project, Key: "k", Path: "design.md"}, Validation, "absolute"},
-		{HandInRequest{Project: f.project, Key: "k", Path: f.home + "/../design.md"}, Validation, "absolute"},
-		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "missing.md")}, Validation, "cannot read " + filepath.Join(f.home, "missing.md")},
-		{HandInRequest{Project: f.project, Key: "k", Path: f.home}, Validation, "not a regular file"},
-		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "large.md")}, Validation, "larger than"},
-		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "empty.md")}, Validation, "empty"},
-		{HandInRequest{Project: f.project, Key: "k", Stdin: &empty}, Validation, "empty"},
-		{HandInRequest{Project: f.project, Key: "k", Stdin: &blank}, Validation, "empty"},
-		{HandInRequest{Project: f.project, Key: "k", Path: filepath.Join(f.home, "latin1.md")}, Validation, "UTF-8"},
-		{HandInRequest{Project: f.project, Key: "k", URL: "https://example.com/owner/repo/issues/12"}, Validation, "issue URL"},
-		{HandInRequest{Project: f.project, Key: "k", URL: "https://github.com/owner/repo/issues/13"}, Internal, "cannot fetch https://github.com/owner/repo/issues/13"},
+		{api.HandInRequest{Project: unknown, Key: "k", Path: design}, api.NotFound, "project " + string(unknown) + " is not an active project"},
+		{api.HandInRequest{Project: f.Project, Path: design}, api.Validation, "key must be"},
+		{api.HandInRequest{Project: f.Project, Key: "-bad", Path: design}, api.Validation, "key must be"},
+		{api.HandInRequest{Project: f.Project, Key: strings.Repeat("k", 129), Path: design}, api.Validation, "key must be"},
+		{api.HandInRequest{Project: f.Project, Key: "k"}, api.Validation, "exactly one input"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: design, URL: "https://github.com/owner/repo/issues/12"}, api.Validation, "exactly one input"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: design, Stdin: &empty}, api.Validation, "exactly one input"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: "design.md"}, api.Validation, "absolute"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: f.Home + "/../design.md"}, api.Validation, "absolute"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: filepath.Join(f.Home, "missing.md")}, api.Validation, "cannot read " + filepath.Join(f.Home, "missing.md")},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: f.Home}, api.Validation, "not a regular file"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: filepath.Join(f.Home, "large.md")}, api.Validation, "larger than"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: filepath.Join(f.Home, "empty.md")}, api.Validation, "empty"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Stdin: &empty}, api.Validation, "empty"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Stdin: &blank}, api.Validation, "empty"},
+		{api.HandInRequest{Project: f.Project, Key: "k", Path: filepath.Join(f.Home, "latin1.md")}, api.Validation, "UTF-8"},
+		{api.HandInRequest{Project: f.Project, Key: "k", URL: "https://example.com/owner/repo/issues/12"}, api.Validation, "issue URL"},
+		{api.HandInRequest{Project: f.Project, Key: "k", URL: "https://github.com/owner/repo/issues/13"}, api.Internal, "cannot fetch https://github.com/owner/repo/issues/13"},
 	} {
-		api := handInError(t, f.c, c.req)
-		if api.Code != c.code || !strings.Contains(api.Message, c.text) || strings.Contains(api.Message, f.issues.Token) {
-			t.Errorf("%+.80v: %+v", c.req, api)
+		apiErr := handInError(t, f.C, c.req)
+		if apiErr.Code != c.code || !strings.Contains(apiErr.Message, c.text) || strings.Contains(apiErr.Message, f.Issues.Token) {
+			t.Errorf("%+.80v: %+v", c.req, apiErr)
 		}
 	}
-	if !f.unchanged(t, head) || len(f.streams(t)) != 1 {
+	if !f.Unchanged(t, head) || len(f.Streams(t)) != 1 {
 		t.Fatal("a refused hand-in wrote to the trace")
 	}
+}
 
-	_, err := f.c.Abandon(context.Background(), f.streams(t)[0], "Owner finished checking hand-in refusals")
-	must(t, err)
-	_, err = f.c.RemoveProject(context.Background(), f.project)
-	must(t, err)
-	head = f.head(t)
-	api := handInError(t, f.c, HandInRequest{Project: f.project, Key: "k", Path: design})
-	if api.Code != NotFound || !strings.Contains(api.Message, "project "+string(f.project)+" is not an active project") {
-		t.Fatalf("inactive project: %+v", api)
+func TestHandInToARemovedProjectIsRefusedAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	f := journey.NewHandInFixture(t)
+	design := filepath.Join(f.Home, "design.md")
+	fixturekit.Must(t, os.WriteFile(design, []byte("design"), 0600))
+	f.HandIn(t, api.HandInRequest{Key: "baseline", Path: design})
+	_, err := f.C.Abandon(context.Background(), f.Streams(t)[0], "Owner finished checking hand-in refusals")
+	fixturekit.Must(t, err)
+	_, err = f.C.RemoveProject(context.Background(), f.Project)
+	fixturekit.Must(t, err)
+	head := f.Head(t)
+	apiErr := handInError(t, f.C, api.HandInRequest{Project: f.Project, Key: "k", Path: design})
+	if apiErr.Code != api.NotFound || !strings.Contains(apiErr.Message, "project "+string(f.Project)+" is not an active project") {
+		t.Fatalf("inactive project: %+v", apiErr)
 	}
-	if !f.unchanged(t, head) {
+	if !f.Unchanged(t, head) {
 		t.Fatal("an inactive project hand-in wrote to the trace")
 	}
 }
 
 func TestHandInStatusCodes(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
-	body := `{"project":"` + string(f.project) + `","key":"k","stdin":"text"}`
-	if code := handInStatus(t, f.s, body); code != http.StatusOK {
+	f := journey.NewHandInFixture(t)
+	body := `{"project":"` + string(f.Project) + `","key":"k","stdin":"text"}`
+	if code := handInStatus(t, f.S, body); code != http.StatusOK {
 		t.Fatalf("hand-in status %d", code)
 	}
-	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","stdin":"other"}`); code != http.StatusConflict {
+	if code := handInStatus(t, f.S, `{"project":"`+string(f.Project)+`","key":"k","stdin":"other"}`); code != http.StatusConflict {
 		t.Fatalf("key conflict status %d", code)
 	}
-	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"k","paths":["/tmp/a"]}`); code != http.StatusBadRequest {
+	if code := handInStatus(t, f.S, `{"project":"`+string(f.Project)+`","key":"k","paths":["/tmp/a"]}`); code != http.StatusBadRequest {
 		t.Fatalf("unknown field status %d", code)
 	}
-	if code := handInStatus(t, f.s, `{"project":"`+string(f.project)+`","key":"fetch","url":"https://github.com/owner/repo/issues/99"}`); code != http.StatusInternalServerError {
+	if code := handInStatus(t, f.S, `{"project":"`+string(f.Project)+`","key":"fetch","url":"https://github.com/owner/repo/issues/99"}`); code != http.StatusInternalServerError {
 		t.Fatalf("fetch failure status %d", code)
 	}
 }
 
-// serial: sets process environment variable GITHUB_TOKEN via t.Setenv
 func TestHandInCredentialsStayInTheService(t *testing.T) {
-	f := newHandInFixture(t)
-	f.handIn(t, HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/12"})
-	handInError(t, f.c, HandInRequest{Project: f.project, Key: "missing", URL: "https://github.com/owner/repo/issues/99"})
+	f := journey.NewHandInFixture(t)
+	f.HandIn(t, api.HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/12"})
+	handInError(t, f.C, api.HandInRequest{Project: f.Project, Key: "missing", URL: "https://github.com/owner/repo/issues/99"})
 
-	must(t, filepath.WalkDir(f.trace, func(path string, d fs.DirEntry, err error) error {
+	fixturekit.Must(t, filepath.WalkDir(f.Trace, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		data, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(data), f.issues.Token) {
+		if err == nil && strings.Contains(string(data), f.Issues.Token) {
 			t.Errorf("%s contains the issue client's token", path)
 		}
 		return err
 	}))
 
-	if err := coreadapter.PublicEnvironment(map[string]string{"GITHUB_TOKEN": f.issues.Token}); err == nil {
+	if err := coreadapter.PublicEnvironment(map[string]string{"GITHUB_TOKEN": f.Issues.Token}); err == nil {
 		t.Fatal("session environment admits GITHUB_TOKEN")
 	}
 
 	t.Setenv("GITHUB_TOKEN", "from-environment")
-	s, _ := start(t, fixture(t))
-	gh, ok := s.options.Issues.(issues.GitHub)
+	s, _ := journey.StartT(t, journey.Fixture(t))
+	gh, ok := s.Options.Issues.(issues.GitHub)
 	if !ok || gh.Token != "from-environment" || gh.BaseURL != "" || gh.HTTP == nil || gh.HTTP.Timeout == 0 {
-		t.Fatalf("default issue client %#v", s.options.Issues)
+		t.Fatalf("default issue client %#v", s.Options.Issues)
 	}
 }
 
 func TestHandInRefusesAFIFOWithoutBlocking(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
-	fifo := filepath.Join(f.home, "design.fifo")
-	must(t, syscall.Mkfifo(fifo, 0600))
-	done := make(chan *APIError, 1)
+	f := journey.NewHandInFixture(t)
+	fifo := filepath.Join(f.Home, "design.fifo")
+	fixturekit.Must(t, syscall.Mkfifo(fifo, 0600))
+	done := make(chan *api.APIError, 1)
 	go func() {
-		done <- handInError(t, f.c, HandInRequest{Project: f.project, Key: "fifo", Path: fifo})
+		done <- handInError(t, f.C, api.HandInRequest{Project: f.Project, Key: "fifo", Path: fifo})
 	}()
 	select {
-	case api := <-done:
-		if api.Code != Validation || !strings.Contains(api.Message, fifo+" is not a regular file") {
-			t.Fatalf("fifo: %+v", api)
+	case apiErr := <-done:
+		if apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, fifo+" is not a regular file") {
+			t.Fatalf("fifo: %+v", apiErr)
 		}
 	case <-time.After(time.Minute):
 		t.Fatal("hand-in of a FIFO blocked")
 	}
 	text := "design"
-	f.handIn(t, HandInRequest{Key: "after", Stdin: &text})
-	if len(f.streams(t)) != 1 {
-		t.Fatal(f.streams(t))
+	f.HandIn(t, api.HandInRequest{Key: "after", Stdin: &text})
+	if len(f.Streams(t)) != 1 {
+		t.Fatal(f.Streams(t))
 	}
 }
 
 func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
 	t.Parallel()
-	f := newHandInFixture(t)
+	f := journey.NewHandInFixture(t)
 	url := "https://github.com/owner/repo/issues/12"
 	release := make(chan struct{})
-	f.issues.Mu.Lock()
-	f.issues.Block, f.issues.Started = release, make(chan struct{})
-	started := f.issues.Started
-	f.issues.Mu.Unlock()
-	slow := make(chan HandInResponse, 1)
+	f.Issues.Mu.Lock()
+	f.Issues.Block, f.Issues.Started = release, make(chan struct{})
+	started := f.Issues.Started
+	f.Issues.Mu.Unlock()
+	slow := make(chan api.HandInResponse, 1)
 	go func() {
-		out, err := f.c.HandIn(context.Background(), HandInRequest{Project: f.project, Key: "issue", URL: url})
+		out, err := f.C.HandIn(context.Background(), api.HandInRequest{Project: f.Project, Key: "issue", URL: url})
 		if err != nil {
 			t.Error(err)
 		}
@@ -482,8 +376,8 @@ func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
 	}
 
 	text := "design"
-	f.handIn(t, HandInRequest{Key: "other", Stdin: &text})
-	fast := f.handIn(t, HandInRequest{Key: "issue", URL: url})
+	f.HandIn(t, api.HandInRequest{Key: "other", Stdin: &text})
+	fast := f.HandIn(t, api.HandInRequest{Key: "issue", URL: url})
 	close(release)
 	select {
 	case out := <-slow:
@@ -494,8 +388,8 @@ func TestHandInFetchDoesNotHoldOtherHandIns(t *testing.T) {
 	case <-time.After(time.Minute):
 		t.Fatal("held hand-in did not finish")
 	}
-	f.checkHanded(t, fast, "issue", "issue-12.md", url, "# Issue title\n\nIssue body\n")
-	if len(f.streams(t)) != 2 {
-		t.Fatal(f.streams(t))
+	f.CheckHanded(t, fast, "issue", "issue-12.md", url, "# Issue title\n\nIssue body\n")
+	if len(f.Streams(t)) != 2 {
+		t.Fatal(f.Streams(t))
 	}
 }

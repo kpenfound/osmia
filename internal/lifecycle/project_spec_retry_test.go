@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -48,10 +49,10 @@ func asError(apiFault *api.APIError) error {
 func projectSpecRecorded(t *testing.T, f *crossRepoRatifyFixture, id config.WorkgroupID) bool {
 	t.Helper()
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer wt.Close()
 	_, found, err := trace.ProjectSpecFor(wt, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return found
 }
 
@@ -62,7 +63,7 @@ func leaderNotices(t *testing.T, f *crossRepoRatifyFixture, text string) []strin
 		leader, leaderProject = f.stream2, f.project2
 	}
 	entries, err := mustRepo(t, f.s, leaderProject).Outbox(leader)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var bodies []string
 	for _, e := range entries {
 		if strings.Contains(e.Event.Body, text) {
@@ -84,14 +85,14 @@ func TestProjectSpecInitialDraftRetriesWithItsProblems(t *testing.T) {
 		firstPrompt.Store(req.Prompt)
 		args := validProjectSpecDraft(f)
 		args["behavior"] = "Resumable uploads, as " + string(f.project2) + "/charter#1 requires."
-		out, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, args)
+		out, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, args)
 		firstVerdict.Store(out)
 		return err
 	})
 	scriptProjectSpecTurn(f, "project-spec-draft-3", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		second.Add(1)
 		secondPrompt.Store(req.Prompt)
-		_, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
+		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
 	})
 	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
@@ -138,7 +139,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	}
 	reported := func() string {
 		entries, err := mustRepo(t, f.s, leaderProject).Outbox(leader)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range entries {
 			if strings.Contains(e.Event.Body, "The workgroup spec could not be drafted") {
 				return e.Event.Body
@@ -149,7 +150,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	intakefixture.Eventually(t, "the chief of staff is told drafting stopped", func() bool { return reported() != "" })
 	haltGuardControllers(t, f)
 	for range 3 {
-		intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+		fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	}
 	if refused.Load() != lifecycle.ProjectSpecDraftAttempts || projectSpecRecorded(t, f, id) {
 		t.Fatalf("drafting did not stop after %d refusals: calls=%d", lifecycle.ProjectSpecDraftAttempts, refused.Load())
@@ -158,7 +159,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("chief notice does not say what happened or what to do: %s", body)
 	}
 	entries, err := mustRepo(t, f.s, leaderProject).Outbox(leader)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range entries {
 		if strings.Contains(e.Event.Body, "The workgroup spec could not be drafted") {
@@ -183,7 +184,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	})
 	scriptProjectSpecTurn(f, "project-spec-draft-9", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		prompt.Store(req.Prompt)
-		_, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
+		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, validProjectSpecDraft(f))
 		return err
 	})
 	out, apiFault := f.s.lifecycle().MoveWorkstream(ctx, repo, f.stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-2")
@@ -196,14 +197,14 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 	if _, apiFault := f.s.lifecycle().MoveWorkstream(ctx, repo, f.stream1, api.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-3"); !intakefixture.Failed(asError(apiFault), api.Conflict) || !containsMessage(asError(apiFault), "drafting the workgroup spec") {
 		t.Fatalf("second request while drafting: %v", apiFault)
 	}
-	intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	if projectSpecRecorded(t, f, id) {
 		t.Fatal("a refused requested draft was recorded")
 	}
 	if p, _ := requested.Load().(string); !strings.Contains(p, note) || !strings.Contains(p, "Your previous draft was refused") {
 		t.Fatalf("requested draft prompt lacks the note or the refusal: %s", p)
 	}
-	intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	if !projectSpecRecorded(t, f, id) {
 		t.Fatal("retry of the requested draft not recorded")
 	}
@@ -211,7 +212,7 @@ func TestProjectSpecDraftStopsRetryingAndTheChiefAsksAgain(t *testing.T) {
 		t.Fatalf("retry prompt lacks the note or the refusal: %s", p)
 	}
 	recorded := "The workgroup spec is recorded; each member's committee review starts now."
-	intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	if got := leaderNotices(t, f, recorded); len(got) != 1 {
 		t.Fatalf("recorded workgroup spec reported %d times after the reported refusals", len(got))
 	}

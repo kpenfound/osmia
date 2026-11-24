@@ -3,6 +3,8 @@ package intakefixture
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +28,7 @@ const TrackedFile = "internal/trace/git.go"
 func ReadUnitStatus(t *testing.T, client UnitStatusClient, stream config.WorkstreamID, unit string) api.UnitStatus {
 	t.Helper()
 	st, err := client.Status(context.Background(), stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, u := range st.Units {
 		if u.Unit == unit {
 			return u
@@ -47,7 +49,7 @@ func DeferredUnit(t *testing.T, repository *trace.Repository, pauses []runtime.P
 		}
 	}
 	states, err := repository.WorkflowStates(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	d.Unit, d.Version, d.Decision = unit, states[trace.UnitSubject(unit)].Version, "deferred"
 	return api.UnitStatus{Unit: unit, State: "ready", Reason: d.Message, Deferral: &d}
 }
@@ -55,14 +57,14 @@ func DeferredUnit(t *testing.T, repository *trace.Repository, pauses []runtime.P
 func DispatchDecisions(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []string {
 	t.Helper()
 	documents, err := trace.Read[trace.Document](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []string
 	for _, doc := range documents {
 		if doc.ID != trace.UnitSubject(unit)+"-dispatch" {
 			continue
 		}
 		var d api.UnitDispatch
-		Must(t, json.Unmarshal([]byte(doc.Content), &d))
+		fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &d))
 		if doc.Revision != len(out)+1 || doc.Path != "units/"+unit+"/dispatch.json" || doc.Unit != unit || doc.Actor != intake.MasonActor || d.Unit != unit || d.Message == "" {
 			t.Fatalf("dispatch revision %+v", doc)
 		}
@@ -73,13 +75,11 @@ func DispatchDecisions(t *testing.T, repository *trace.Repository, stream config
 
 func AwaitDispatchDecisions(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, n int) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for len(DispatchDecisions(t, repository, stream, unit)) < n {
-		if time.Now().After(deadline) {
-			t.Fatalf("decisions on unit %s of %s: %q, want %d", unit, stream, DispatchDecisions(t, repository, stream, unit), n)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("%d decisions on unit %s of %s", n, unit, stream), wake, func() bool {
+		return len(DispatchDecisions(t, repository, stream, unit)) >= n
+	})
 }
 
 func MasonStarts(transitions []trace.Transition) []string {

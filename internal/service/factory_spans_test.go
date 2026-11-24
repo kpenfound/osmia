@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -56,7 +55,7 @@ func TestPoolLimitSpansCoverEveryConfiguredPoolAtShutdown(t *testing.T) {
 	opts := fixture(t)
 	s, _ := startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
 	cfg := s.current().Capacity
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	pools := poolSpans(exporter)
 	want := map[string]int{masonRole: cfg.Masons, reviewerRole: cfg.Reviewers, committeeRole: cfg.Committee, checksRole: cfg.Checks, architectRole: 0}
@@ -102,17 +101,17 @@ func TestReloadSplitsOnlyThePoolWhoseLimitChanged(t *testing.T) {
 	files := configFiles(t, opts)
 	files.write(t, files.topText+"[capacity]\nmasons = 2\n")
 	loaded, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	seed, err := trace.Create(ctx, loaded.Root, loaded.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, seed.CreateWorkstream(ctx, intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, seed.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, seed.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, seed.Close())
 	s, c := startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
-	repo, err := s.repository(intakefixture.Project)
-	intakefixture.Must(t, err)
+	repo, err := s.repository(fixturekit.Project)
+	fixturekit.Must(t, err)
 	limits := s.current().Capacity
-	release, admitted, err := s.pool.TryReserve(repo, intakefixture.Stream, masonRole, "held", &limits)
-	intakefixture.Must(t, err)
+	release, admitted, err := s.pool.TryReserve(repo, fixturekit.Stream, masonRole, "held", &limits)
+	fixturekit.Must(t, err)
 	if !admitted {
 		t.Fatal("the mason slot was refused")
 	}
@@ -120,13 +119,13 @@ func TestReloadSplitsOnlyThePoolWhoseLimitChanged(t *testing.T) {
 
 	files.write(t, files.topText+"[capacity]\nmasons = 2\n")
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	before := time.Now().UTC()
 	files.write(t, files.topText+"[capacity]\nmasons = 4\n")
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	after := time.Now().UTC()
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	pools := poolSpans(exporter)
 	for id, spans := range pools {
@@ -160,19 +159,19 @@ func TestPauseIsOneSpanWithoutItsReason(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	s, _ := startTelemetry(t, fixture(t), TestHooks{TelemetryExporter: exporter})
 	const reason = "reason-text with spaces"
-	target := runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}
+	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
 	setAt := time.Now().UTC().Add(-time.Minute)
-	intakefixture.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "soft", Reason: reason, Source: runtime.PauseOwner, SetAt: setAt}))
-	intakefixture.Must(t, s.clearPause(target))
-	intakefixture.Must(t, s.clearPause(target))
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "soft", Reason: reason, Source: runtime.PauseOwner, SetAt: setAt}))
+	fixturekit.Must(t, s.clearPause(target))
+	fixturekit.Must(t, s.clearPause(target))
+	fixturekit.Must(t, s.Close())
 
 	spans := namedFactorySpans(exporter, "osmia.pause")
 	if len(spans) != 1 {
 		t.Fatalf("pause spans: %+v", spans)
 	}
 	span := spans[0]
-	for key, want := range map[string]string{telemetry.KeyPauseScope: "workstream", telemetry.KeyPauseSource: "owner", telemetry.KeyOutcome: "released", telemetry.KeyProject: string(intakefixture.Project), telemetry.KeyWorkstream: string(intakefixture.Stream)} {
+	for key, want := range map[string]string{telemetry.KeyPauseScope: "workstream", telemetry.KeyPauseSource: "owner", telemetry.KeyOutcome: "released", telemetry.KeyProject: string(fixturekit.Project), telemetry.KeyWorkstream: string(fixturekit.Stream)} {
 		if got, _ := factoryAttr(span, key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}
@@ -196,11 +195,11 @@ func TestPauseSpanSurvivesARestart(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	opts := fixture(t)
 	s, _ := startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
-	target := runtime.Target{Scope: "project", Project: intakefixture.Project}
+	target := runtime.Target{Scope: "project", Project: fixturekit.Project}
 	setAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	intakefixture.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "soft", Reason: "first", Source: runtime.PauseOwner, SetAt: setAt}))
-	intakefixture.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "hard", Reason: "second", Source: runtime.PauseOwner, SetAt: setAt.Add(time.Minute)}))
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "soft", Reason: "first", Source: runtime.PauseOwner, SetAt: setAt}))
+	fixturekit.Must(t, s.setPause(runtime.Pause{Target: target, Mode: "hard", Reason: "second", Source: runtime.PauseOwner, SetAt: setAt.Add(time.Minute)}))
+	fixturekit.Must(t, s.Close())
 	if spans := namedFactorySpans(exporter, "osmia.pause"); len(spans) != 1 {
 		t.Fatalf("the replaced pause: %+v", spans)
 	} else if outcome, _ := factoryAttr(spans[0], telemetry.KeyOutcome); outcome != "replaced" {
@@ -208,8 +207,8 @@ func TestPauseSpanSurvivesARestart(t *testing.T) {
 	}
 
 	s2, _ := startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
-	intakefixture.Must(t, s2.clearPause(target))
-	intakefixture.Must(t, s2.Close())
+	fixturekit.Must(t, s2.clearPause(target))
+	fixturekit.Must(t, s2.Close())
 	spans := namedFactorySpans(exporter, "osmia.pause")
 	if len(spans) != 2 || !spans[1].StartTime.Equal(setAt.Add(time.Minute)) {
 		t.Fatalf("pause spans after the restart: %+v", spans)
@@ -225,7 +224,7 @@ func TestServiceStartEventAndUptimeSpan(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
 	s, _ := startTelemetry(t, fixture(t), TestHooks{TelemetryExporter: exporter})
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	starts, uptime := namedFactorySpans(exporter, "osmia.service.start"), namedFactorySpans(exporter, "osmia.service.uptime")
 	if len(starts) != 1 || len(uptime) != 1 {
 		t.Fatalf("start %+v, uptime %+v", starts, uptime)
@@ -252,7 +251,7 @@ func TestFactorySpansWriteNothingWhileTelemetryIsOff(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	s, _ := start(t, opts)
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if _, err := os.Stat(filepath.Join(opts.Config.Root, "service-intervals.json")); !os.IsNotExist(err) {
 		t.Fatalf("the interval ledger exists with telemetry off: %v", err)
 	}
@@ -267,7 +266,7 @@ func TestLoopGuardTripIsAnEventAndItsPauseASpan(t *testing.T) {
 	openRuntime(t, f, stream)
 	f.s.cfg.Loop.MaxSessions = 3
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.s.spans = newFactorySpans(sink, "", f.s.now, nil)
 	f.s.store.ObservePauseEnd(func(p runtime.Pause, replaced bool) { f.s.spans.pauseEnded(p, f.s.now(), replaced) })
 	f.s.spans.begin(poolsOf(f.s.cfg.Capacity))
@@ -275,14 +274,14 @@ func TestLoopGuardTripIsAnEventAndItsPauseASpan(t *testing.T) {
 	ctx := context.Background()
 
 	recordSessions(t, f, repository, stream, 3)
-	intakefixture.Must(t, g.Pass(ctx))
+	fixturekit.Must(t, g.Pass(ctx))
 	pause, paused := loopPause(f, stream)
 	if !paused {
 		t.Fatal("the loop guard did not pause the workstream")
 	}
-	intakefixture.Must(t, f.s.store.ClearPause(pause.Target, runtime.PauseOwner))
+	fixturekit.Must(t, f.s.store.ClearPause(pause.Target, runtime.PauseOwner))
 	f.s.spans.end()
-	intakefixture.Must(t, sink.Close())
+	fixturekit.Must(t, sink.Close())
 
 	trips := namedFactorySpans(exporter, "osmia.loop_guard.trip")
 	if len(trips) != 1 {
@@ -325,7 +324,7 @@ func TestNextStartClosesTheIntervalsOfARunThatNeverShutDown(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ledger := filepath.Join(t.TempDir(), "service-intervals.json")
 	var mu sync.Mutex
 	clock := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
@@ -343,18 +342,18 @@ func TestNextStartClosesTheIntervalsOfARunThatNeverShutDown(t *testing.T) {
 	first.save(now())
 	first.mu.Unlock()
 	crashed, err := os.ReadFile(ledger)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	last := now()
 	first.end()
-	intakefixture.Must(t, os.WriteFile(ledger, crashed, 0o600))
-	intakefixture.Must(t, sink.Flush(context.Background()))
+	fixturekit.Must(t, os.WriteFile(ledger, crashed, 0o600))
+	fixturekit.Must(t, sink.Flush(context.Background()))
 	exporter.Reset()
 
 	advance(time.Hour)
 	second := newFactorySpans(sink, ledger, now, nil)
 	second.begin(poolsOf(capacity))
 	second.end()
-	intakefixture.Must(t, sink.Close())
+	fixturekit.Must(t, sink.Close())
 
 	var interrupted []tracetest.SpanStub
 	for _, s := range exporter.GetSpans() {

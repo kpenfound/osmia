@@ -12,7 +12,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
@@ -24,13 +23,13 @@ func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
 	opts.TailnetRetry = time.Hour
 	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) { return nil, errors.New("no tailnet in this test") }
 	s, err := Start(context.Background(), opts)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	text := buf.String()
 	fixturekit.DecodeStructuredLines(t, text)
 	if !strings.Contains(text, `"component":"tailnet"`) {
 		t.Fatalf("tailnet join failure did not log through the service's logger: %s", text)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	fixturekit.DecodeStructuredLines(t, buf.String())
 }
 
@@ -42,8 +41,8 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, append(top, []byte(
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(top, []byte(
 		"\n[jev]\nmodel = \"jev-test\"\napi_key_env = \""+envVar+"\"\n")...), 0600))
 
 	for _, known := range redact.KnownSecrets() {
@@ -54,7 +53,7 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 
 	_, c := start(t, opts)
 	_, err = c.Runtime(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	found := false
 	for _, known := range redact.KnownSecrets() {

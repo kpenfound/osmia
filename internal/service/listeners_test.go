@@ -19,12 +19,12 @@ func firstStreamEvent(t *testing.T, client *http.Client, url, host string) strin
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if host != "" {
 		req.Host = host
 	}
 	resp, err := client.Do(req)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatalf("event stream: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
@@ -33,7 +33,7 @@ func firstStreamEvent(t *testing.T, client *http.Client, url, host string) strin
 	reader := bufio.NewReader(resp.Body)
 	for {
 		line, err := reader.ReadString('\n')
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if line == "\n" {
 			return event.String()
 		}
@@ -127,7 +127,7 @@ func TestARulingOverTheTailnetIsSeenByEveryListener(t *testing.T) {
 	r := newListenersRig(t)
 	ctx := context.Background()
 	inbox, err := r.c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 1 || inbox.Entries[0].Kind != InboxEscalation {
 		t.Fatalf("inbox: %+v", inbox)
 	}
@@ -171,11 +171,11 @@ func TestADroppedTailnetIsReportedDownWithItsReasonByEveryRead(t *testing.T) {
 		return err == nil && h.Tailnet != nil && h.Tailnet.State == TailnetDown
 	})
 	h, err := r.c.Health(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	st, err := r.c.Statuses(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	cfg, err := r.c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, got := range []*TailnetStatus{h.Tailnet, st.Tailnet, cfg.Tailnet} {
 		if got == nil || got.State != TailnetDown || got.Reason == "" {
 			t.Fatalf("outage diagnostics: %+v", got)

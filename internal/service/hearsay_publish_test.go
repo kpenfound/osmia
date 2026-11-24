@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/redact"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -67,9 +67,9 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 		t.Fatal("the publisher token is not registered for redaction")
 	}
 	view, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	raw, err := json.Marshal(view)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Contains(string(raw), token) || !strings.Contains(string(raw), `"token_env":"TEST_HEARSAY_PUBLISHER_TOKEN"`) || view.Effective.Hearsay.Publish == nil {
 		t.Fatalf("configuration response: %s", raw)
 	}
@@ -84,7 +84,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 		t.Fatalf("reload error: %v", err)
 	}
 	view, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	raw, _ = json.Marshal(view)
 	if strings.Contains(string(raw), token) || view.LastError == nil || view.LastError.Field != "hearsay.publish.hooks_url" {
 		t.Fatalf("configuration after the failed reload: %s", raw)
@@ -102,7 +102,7 @@ func TestPublishAbsentLeavesConfigurationUnpublished(t *testing.T) {
 	files.write(t, files.topText+withoutPublish)
 	s, c := start(t, opts)
 	view, err := c.Configuration(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if view.Effective.Hearsay.URL == "" || view.Effective.Hearsay.Publish != nil || view.Effective.Hearsay.Publishing() || s.current().HearsayScope() != "" {
 		t.Fatalf("publishing enabled without the table: %+v", view.Effective.Hearsay)
 	}
@@ -112,7 +112,7 @@ func memoryTurnConfig(t *testing.T, hearsay config.Hearsay, scope string) (*conf
 	t.Helper()
 	_, cfg := conversationFixture(t, "memory-tools-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	cfg.Hearsay = hearsay
 	cfg.Project.HearsayScope = scope
@@ -131,7 +131,7 @@ func memoryTurnTools(t *testing.T, cfg *config.Config, repo *trace.Repository) (
 	for role, grant := range turns.Grants {
 		granted[role] = grant.Tools
 		tools, err := turns.Scoped(context.Background(), coreadapter.Scope{Project: string(repo.Project()), Role: role})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, tool := range tools {
 			scoped[role] = append(scoped[role], tool.Name)
 		}

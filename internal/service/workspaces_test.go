@@ -37,7 +37,7 @@ func newWorkspacesFixture(t *testing.T, setting string) *workspacesFixture {
 	f.setting(t, setting)
 	s, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	f.handInFixture = &handInFixture{s: s, c: c, project: added.Project.ID, trace: added.Project.Trace, home: filepath.Dir(clone)}
 	return f
@@ -46,14 +46,14 @@ func newWorkspacesFixture(t *testing.T, setting string) *workspacesFixture {
 func (f *workspacesFixture) setting(t *testing.T, setting string) {
 	t.Helper()
 	text, err := os.ReadFile(f.top)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lines := strings.Split(string(text), "\n")
 	for i, line := range lines {
 		if strings.HasPrefix(line, "workspaces = ") {
 			lines[i] = fmt.Sprintf("workspaces = %q", setting)
 		}
 	}
-	intakefixture.Must(t, os.WriteFile(f.top, []byte(strings.Join(lines, "\n")), 0600))
+	fixturekit.Must(t, os.WriteFile(f.top, []byte(strings.Join(lines, "\n")), 0600))
 }
 
 func (f *workspacesFixture) handInKey(key string) (HandInResponse, error) {
@@ -64,9 +64,9 @@ func (f *workspacesFixture) handInKey(key string) (HandInResponse, error) {
 func (f *workspacesFixture) backend(t *testing.T, stream config.WorkstreamID) string {
 	t.Helper()
 	st, err := f.c.Status(context.Background(), stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	recorded, err := f.repository().Workspaces(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if st.Workspaces != recorded {
 		t.Fatalf("status reports workstream %s on %q; its manifest records %q", stream, st.Workspaces, recorded)
 	}
@@ -111,7 +111,7 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 			f.jj.Set(c.version, c.jj)
 			ctx := context.Background()
 			all, err := f.c.Statuses(ctx)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			ws := all.Workspaces
 			jj := c.version
 			if c.setting == config.WorkspacesGit {
@@ -141,7 +141,7 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 				}
 				return
 			}
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if got := f.backend(t, out.Workstream); got != c.want {
 				t.Fatalf("workstream on %q, want %q", got, c.want)
 			}
@@ -157,16 +157,16 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 	ctx := context.Background()
 	f := newWorkspacesFixture(t, config.WorkspacesAuto)
 	first, err := f.handInKey("first")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, first.Workstream); got != config.WorkspacesJujutsu {
 		t.Fatalf("the first workstream is on %q", got)
 	}
 
 	f.setting(t, config.WorkspacesGit)
 	_, err = f.c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	second, err := f.handInKey("second")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, second.Workstream); got != config.WorkspacesGit {
 		t.Fatalf("the workstream created after the change is on %q", got)
 	}
@@ -174,7 +174,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 		t.Fatalf("after the reload the first workstream is on %q", got)
 	}
 
-	intakefixture.Must(t, f.s.Close())
+	fixturekit.Must(t, f.s.Close())
 	f.jj.Set("", errJJMissing)
 	f.setting(t, config.WorkspacesAuto)
 	s, c := start(t, f.opts)
@@ -185,7 +185,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 		}
 	}
 	third, err := f.handInKey("third")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, third.Workstream); got != config.WorkspacesGit {
 		t.Fatalf("a workstream created without jj under auto is on %q", got)
 	}
@@ -197,7 +197,7 @@ func TestStatusChecksJJWithADeadline(t *testing.T) {
 	t.Parallel()
 	f := newWorkspacesFixture(t, config.WorkspacesAuto)
 	_, err := f.c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !f.jj.LastBounded() {
 		t.Fatal("status checked jj without a deadline")
 	}

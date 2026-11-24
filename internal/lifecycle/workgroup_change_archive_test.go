@@ -50,26 +50,26 @@ func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) 
 		return cleanup.checkpoint(ctx, step)
 	}
 	s, err := Start(ctx, opts)
-	intakefixture.Must(t, err)
-	t.Cleanup(func() { intakefixture.Must(t, s.Close()) })
+	fixturekit.Must(t, err)
+	t.Cleanup(func() { fixturekit.Must(t, s.Close()) })
 	c := NewClient(s.Socket())
 	t.Cleanup(func() { c.Close() })
 
 	_, err = c.Abandon(ctx, fixturekit.Stream, "Superseded.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.Archive(ctx, fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	assertLive := func(deleted bool) {
 		t.Helper()
 		sent, err := c.Send(ctx, otherStream, "Continue the unrelated work.")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		wait, closeWait := serviceChanges(t, s)
 		defer closeWait()
-		deadline := time.Now().Add(intakefixture.DemoTimeout)
+		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for {
 			conversation, err := c.Conversation(ctx, otherStream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
 				return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone && e.Text == "Answer to Continue the unrelated work."
 			}) {
@@ -81,17 +81,17 @@ func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) 
 			wait()
 		}
 		health, err := c.Health(ctx)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !health.Ready || !health.API || health.Backend != api.BackendReady {
 			t.Fatalf("archive stopped the live controller: %+v", health)
 		}
 		archived, err := c.Status(ctx, fixturekit.Stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !archived.Archived || archived.TraceDeleted != deleted || archived.State == nil || *archived.State != intake.AbandonedState {
 			t.Fatalf("archived status: %+v", archived)
 		}
 		list, err := c.Statuses(ctx)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(list.Diagnostics) != 0 || !slices.ContainsFunc(list.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == otherStream && !w.Archived }) ||
 			!slices.ContainsFunc(list.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == fixturekit.Stream && w.Archived }) {
 			t.Fatalf("global status after archive: %+v", list)
@@ -99,16 +99,16 @@ func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) 
 	}
 	assertLive(false)
 	c.Close()
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, err = Start(ctx, opts)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	c = NewClient(s.Socket())
 	assertLive(false)
 
 	cleanup.await(t)
 	cleanup.release()
 	wait, closeWait := serviceChanges(t, s)
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		a, ok := intakefixture.ArchiveRecord(t, s.store, fixturekit.Stream)
 		if ok && !a.CleanedAt.IsZero() {
@@ -121,24 +121,24 @@ func TestArchivedWorkstreamKeepsLiveChangesAndStatusAcrossRestart(t *testing.T) 
 	}
 	closeWait()
 	archivedRepo, err := s.repository(fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	remaining, err := archivedRepo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(remaining, fixturekit.Stream) {
 		t.Fatalf("cleanup changed unrelated work: %v", remaining)
 	}
 	unrelatedRepo, err := s.repository(otherProject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	unrelated, err := unrelatedRepo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.Contains(unrelated, otherStream) {
 		t.Fatal("cleanup removed unrelated work")
 	}
 	assertLive(true)
 	c.Close()
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, err = Start(ctx, opts)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	c = NewClient(s.Socket())
 	assertLive(true)
 }
@@ -146,8 +146,8 @@ func TestChangePassReportsLiveTraceErrorsAndCancellation(t *testing.T) {
 	t.Parallel()
 	opts, cfg := conversationFixture(t, "change-errors-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
-	t.Cleanup(func() { intakefixture.Must(t, repo.Close()) })
+	fixturekit.Must(t, err)
+	t.Cleanup(func() { fixturekit.Must(t, repo.Close()) })
 	s := &Service{cfg: cfg, options: opts}
 	s.setSole(runtimeFor(repo))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,7 +155,7 @@ func TestChangePassReportsLiveTraceErrorsAndCancellation(t *testing.T) {
 	if err := s.changePass(ctx, repo); err != context.Canceled {
 		t.Fatalf("pass lost cancellation: %v", err)
 	}
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	if err := s.changePass(context.Background(), repo); err == nil {
 		t.Fatal("pass suppressed a live trace error without an archive record")
 	}
@@ -215,7 +215,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			}
 			f.engine.Mu.Lock()
 			f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				_, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
+				_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
 					"behavior":  "Chunks the server accepts are acknowledged with their offset; the client resumes uploads from the last acknowledged offset.",
 					"contracts": []map[string]any{{"name": "acknowledgment", "text": "The server's acknowledgment of a stored chunk names its offset; the client reads that offset to resume."}},
 					"graph":     []map[string]any{{"from": string(retired), "to": string(survivor), "type": "contract"}},
@@ -227,14 +227,14 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			f.awaitApproved(t)
 			repo, err := f.s.repository(survivorProject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			wt, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, survivor)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			approval, approvalDoc, found, err := trace.ReadGroupApproval(wt, host)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !found || !approval.Complete {
 				t.Fatal("production effective seals are incomplete")
 			}
@@ -292,15 +292,15 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 						}
 						sl.Plan = string(data)
 					}
-					_, err = intakefixture.CallTool(ctx, tools, lifecycle.DeltaDraftTool, toolMap(proposed))
+					_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaDraftTool, toolMap(proposed))
 					return intakefixture.QuestionResult(req, "session-delta", "Added only the requested diagnostics."), err
 				}
 				if slices.Contains(names, lifecycle.DeltaReviewTool) {
-					_, err = intakefixture.CallTool(ctx, tools, lifecycle.DeltaReviewTool, map[string]any{"objections": []string{}, "note": "Only requested diagnostics change."})
+					_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaReviewTool, map[string]any{"objections": []string{}, "note": "Only requested diagnostics change."})
 					return intakefixture.QuestionResult(req, "session-review", "Reviewed the delta."), err
 				}
 				if slices.Contains(names, lifecycle.DeltaReplyTool) {
-					_, err = intakefixture.CallTool(ctx, tools, lifecycle.DeltaReplyTool, map[string]any{"reply": "Existing contract and unit assignments remain fixed."})
+					_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaReplyTool, map[string]any{"reply": "Existing contract and unit assignments remain fixed."})
 					return intakefixture.QuestionResult(req, "session-answer", "Answered the committee."), err
 				}
 				if strings.Contains(req.Prompt, "Confirm survivor journal status") {
@@ -308,7 +308,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				}
 				if strings.Contains(req.Prompt, "Approve the driver impact") {
 					approvals.Add(1)
-					_, err = intakefixture.CallTool(ctx, tools, lifecycle.DecideChangeTool, map[string]any{"id": key, "revision": int(revision.Load()), "decision": "approve", "pull_requests": "draft"})
+					_, err = fixturekit.CallTool(ctx, tools, lifecycle.DecideChangeTool, map[string]any{"id": key, "revision": int(revision.Load()), "decision": "approve", "pull_requests": "draft"})
 					return intakefixture.QuestionResult(req, "session-approval", "Approved this impact and draft disposition."), err
 				}
 				if strings.Contains(req.Prompt, "Request the driver change") {
@@ -316,7 +316,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					if affectsRetired {
 						scope = "workgroup"
 					}
-					_, err = intakefixture.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: key, Kind: kind, Scope: scope, Workstream: survivor, Change: "Cancel the selected work or add diagnostic refusal checks to its selected slices."}))
+					_, err = fixturekit.CallTool(ctx, tools, lifecycle.RequestChangeTool, toolMap(lifecycle.ChangeRequest{Key: key, Kind: kind, Scope: scope, Workstream: survivor, Change: "Cancel the selected work or add diagnostic refusal checks to its selected slices."}))
 					return intakefixture.QuestionResult(req, "session-request", "The impact will be presented here."), err
 				}
 				return intakefixture.QuestionResult(req, "session-chief", "Following the original shared conversation."), nil
@@ -333,9 +333,9 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					worker  string
 				}{{retiredProject, retired, "worker_first"}, {survivorProject, survivor, "worker_second"}} {
 					r, err := f.s.repository(m.project)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					th, err := r.Thread(m.stream, m.worker)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					if th.Active == "" {
 						return false
 					}
@@ -343,10 +343,10 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				return true
 			})
 			if strings.HasPrefix(tc.order, "merged-followup") {
-				intakefixture.Must(t, delivery.RecordOwnPullRequestOutcome(ctx, repo, f.s.now(), survivor, "owner", 7, delivery.OwnPullRequestOutcomeMerged))
+				fixturekit.Must(t, delivery.RecordOwnPullRequestOutcome(ctx, repo, f.s.now(), survivor, "owner", 7, delivery.OwnPullRequestOutcomeMerged))
 			}
 			_, err = f.c.Send(ctx, f.origin, "Request the driver change.")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			t.Log("waiting: single impact presented")
 			lifecycleAwait(t, f, "single impact presented", func() bool {
 				c := currentChange(t, f.s, f.origin, key)
@@ -360,7 +360,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			approve := func() lifecycle.WorkgroupChange {
 				t.Helper()
 				_, err = f.c.Send(ctx, f.origin, "Approve the driver impact; leave open PRs as drafts.")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				t.Log("waiting: approved boundary stop")
 				lastRevision := -1
 				lifecycleAwait(t, f, "approved boundary stop", func() bool {
@@ -394,10 +394,10 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				if interrupted {
 					race.Await(t)
 					authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					changes, err := lifecycle.ReadChanges(authority, host)
-					intakefixture.Must(t, err)
-					intakefixture.Must(t, authority.Close())
+					fixturekit.Must(t, err)
+					fixturekit.Must(t, authority.Close())
 					if len(changes) != 1 || len(changes[0].Followups) != 1 || len(changes[0].Applied) != 0 || !intakefixture.EqualJSONTest(changes[0].Decision, pinned.Decision) {
 						t.Fatal("interrupted follow-up lost pins or falsely completed")
 					}
@@ -422,14 +422,14 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					t.Fatal("restart changed the completed follow-up")
 				}
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				gotApproval, doc, found, err := trace.ReadGroupApproval(authority, host)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !found || !intakefixture.EqualJSONTest(approval, gotApproval) || !intakefixture.EqualJSONTest(approvalDoc, doc) {
 					t.Fatal("follow-up rewrote original approval pins")
 				}
 				groups, _, err := trace.Workgroups(authority)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				actual, ok := trace.WorkgroupOf(groups, survivor)
 				if !ok {
 					t.Fatal("follow-up lost original membership")
@@ -438,11 +438,11 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				if _, err := trace.ApprovedWorkgroupMembers(authority, actual, approval); err == nil {
 					t.Fatal("unapproved extra member was admitted")
 				}
-				intakefixture.Must(t, authority.Close())
+				fixturekit.Must(t, authority.Close())
 				return
 			}
 			_, err = f.c.Abandon(ctx, retired, "The owner cancelled the driver.")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if tc.order == "change-first" {
 				race.Armed.Store(true)
 				unblock()
@@ -461,7 +461,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				})
 			}
 			archive := func() error {
-				archiveCtx, cancel := context.WithTimeout(ctx, intakefixture.DemoTimeout)
+				archiveCtx, cancel := context.WithTimeout(ctx, fixturekit.DemoTimeout)
 				defer cancel()
 				retry := time.NewTicker(10 * time.Millisecond)
 				defer retry.Stop()
@@ -485,7 +485,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				case <-race.Reached:
 				case err := <-archived:
 					t.Fatalf("archive returned before checkpoint: %v", err)
-				case <-time.After(intakefixture.DemoTimeout):
+				case <-time.After(fixturekit.DemoTimeout):
 					t.Fatal("archive checkpoint not reached")
 				}
 				unblock()
@@ -495,18 +495,18 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					t.Fatal("archive snapshot did not exclude change effects")
 				}
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				changes, err := lifecycle.ReadChanges(authority, host)
-				intakefixture.Must(t, err)
-				intakefixture.Must(t, authority.Close())
+				fixturekit.Must(t, err)
+				fixturekit.Must(t, authority.Close())
 				if len(changes) != 1 || !intakefixture.EqualJSONTest(changes[0], pinned) {
 					t.Fatal("application crossed the held retirement snapshot")
 				}
 				race.Release()
 				select {
 				case err := <-archived:
-					intakefixture.Must(t, err)
-				case <-time.After(intakefixture.DemoTimeout):
+					fixturekit.Must(t, err)
+				case <-time.After(fixturekit.DemoTimeout):
 					t.Fatal("archive did not finish after snapshot release")
 				}
 			} else {
@@ -515,7 +515,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					if err != nil && strings.Contains(err.Error(), "an approved change is being applied to this workgroup; retry") {
 						return false
 					}
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					return true
 				})
 			}
@@ -533,15 +533,15 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			check := func(boundary string) lifecycle.WorkgroupChange {
 				t.Helper()
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				defer authority.Close()
 				gotApproval, gotDoc, found, err := trace.ReadGroupApproval(authority, host)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !found || !intakefixture.EqualJSONTest(gotApproval, approval) || !intakefixture.EqualJSONTest(gotDoc, approvalDoc) {
 					t.Fatalf("%s changed original effective approval pins", boundary)
 				}
 				changes, err := lifecycle.ReadChanges(authority, host)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if len(changes) != 1 {
 					t.Fatalf("%s lost or duplicated approved journal: %+v", boundary, changes)
 				}
@@ -565,12 +565,12 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			check("retained")
 			if resumeRetained {
 				retiredRepo, err := f.s.repository(retiredProject)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				history, err := trace.Read[trace.Transition](retiredRepo, retired)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				consume()
 				after, err := trace.Read[trace.Transition](retiredRepo, retired)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !intakefixture.EqualJSONTest(history, after) {
 					t.Fatal("survivor effect mutated retained retired history")
 				}
@@ -597,12 +597,12 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				t.Fatalf("duplicate effect or owner decision: %+v approvals=%d", finished, approvals.Load())
 			}
 			repo, err = f.s.repository(survivorProject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			assertEffect := func() {
 				t.Helper()
 				if kind == "cancel" {
 					transitions, err := trace.Read[trace.Transition](repo, survivor)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					count := 0
 					for _, tr := range transitions {
 						if tr.ID == "cancel-"+key {
@@ -615,7 +615,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					return
 				}
 				docs, err := trace.Read[trace.Document](repo, survivor)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				count := 0
 				for _, doc := range docs {
 					if doc.ID != amendment.DocumentID("group-"+key) {
@@ -623,7 +623,7 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 					}
 					count++
 					var app amendment.Application
-					intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &app))
+					fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &app))
 					if doc.Revision != 1 || app.From.Seal != 1 || app.To.Seal != 2 || app.To.SealRevision != app.From.SealRevision+1 || app.To.Spec != app.From.Spec+1 || app.To.Plan != app.From.Plan+1 || !slices.Equal(app.Added, []string{"diagnostics"}) || len(app.Rework) != 0 || len(app.Removed) != 0 {
 						t.Fatalf("survivor amendment changed unapproved sections or seals: %+v", app)
 					}
@@ -636,10 +636,10 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 			f.stop(t)
 			f.start(t)
 			sent, err := f.c.Send(ctx, survivor, "Confirm survivor journal status after restart.")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			lifecycleAwait(t, f, "survivor owner turn after restart", func() bool {
 				conversation, err := f.c.Conversation(ctx, survivor)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
 					return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone
 				})
@@ -648,15 +648,15 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				t.Fatalf("restart rewrote completed effects or hold: before=%+v after=%+v", finished, c)
 			}
 			repo, err = f.s.repository(survivorProject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			assertEffect()
 			gone, err := trace.WorkstreamTraceGone(f.s.current().Root, retiredProject, retired)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !gone {
 				t.Fatal("change reconciliation recreated retired history")
 			}
 			conversation, err := f.c.Conversation(ctx, survivor)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			prompts, ownerDecisions := 0, 0
 			for _, entry := range conversation.Entries {
 				if entry.Kind == "message" && strings.Contains(entry.Text, "Approve the driver impact") {
@@ -673,12 +673,12 @@ func TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader(t *testing.T
 				t.Fatal("impact hides the archived member that received no effect")
 			}
 			repo, err = f.s.repository(survivorProject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			authority, _, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, survivor)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			chief, err := authority.Thread(host, trace.ChiefOfStaff)
 			closeAuthority()
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !intakefixture.EqualJSONTest(f.before.Identity, chief.Identity) || len(chief.Turns) < len(f.before.Turns) || !intakefixture.EqualJSONTest(f.before.Turns, chief.Turns[:len(f.before.Turns)]) {
 				t.Fatal("retirement changed original conversation or design turns")
 			}
@@ -702,14 +702,14 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Abandon(ctx, f.stream1, "Owner retires this completed member.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	gate.Armed.Store(true)
 	retry := make(chan error, 1)
 	go func() {
@@ -720,7 +720,7 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	case <-gate.Reached:
 	case err := <-retry:
 		t.Fatalf("approval retry returned before checkpoint: %v", err)
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("approval retry checkpoint not reached")
 	}
 	archived := make(chan error, 1)
@@ -732,15 +732,15 @@ func TestArchiveSucceedsDuringRoutineGroupApprovalRetry(t *testing.T) {
 	}
 	select {
 	case err := <-archived:
-		intakefixture.Must(t, err)
-	case <-time.After(intakefixture.DemoTimeout):
+		fixturekit.Must(t, err)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("archive waited for routine group coordination")
 	}
 	gate.Release()
 	select {
 	case err := <-retry:
-		intakefixture.Must(t, err)
-	case <-time.After(intakefixture.DemoTimeout):
+		fixturekit.Must(t, err)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("approval retry did not finish")
 	}
 	cleanup.await(t)
@@ -757,9 +757,9 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 			p = project
 		}
 		repo, err := f.s.repository(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		streams, err := repo.Workstreams()
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		features := slices.DeleteFunc(slices.Clone(streams), func(stream config.WorkstreamID) bool {
 			return stream == f.origin
 		})
@@ -779,7 +779,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 			t.Fatal("production path requires Hearsay")
 		}
 		handed, err := trace.Get[trace.Document](repo, m, intake.HandedDocument, 1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		expectedBrief, source := f.handed.Content, f.handed.Source
 		if m == addition {
 			expectedBrief, source = brief, "stdin"
@@ -797,15 +797,15 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 			t.Fatalf("member retains an independent chief: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if _, found := trace.WorkgroupOf(groups, m); found {
 			t.Fatal("member retains a one-workstream group")
 		}
 		target, host, _, close, err := f.s.chiefRepository(ctx, repo, m)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		chief, err := target.Thread(host, trace.ChiefOfStaff)
 		close()
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(chief.Turns) < len(f.before.Turns) {
 			t.Fatal("design turns were lost")
 		}
@@ -814,33 +814,33 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 		}
 	}
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, group, _, err := repo.CrossRepoProjectSpec(id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if group.Conversation == nil || group.Conversation.Workstream != f.origin || group.Conversation.Project != f.project ||
 		len(group.Members) != 4 || group.Members[0] != f.origin ||
 		!slices.Contains(group.Members[1:], f.stream1) || !slices.Contains(group.Members[1:], f.stream2) || !slices.Contains(group.Members[1:], addition) {
 		t.Fatalf("continued conversation or exact member coverage changed: %+v", group)
 	}
 	groups, err := os.ReadDir(filepath.Join(f.s.current().Root.String(), "workgroups"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(groups) != 1 || groups[0].Name() != string(id) {
 		t.Fatalf("start or recovery duplicated workgroup authority: %v", groups)
 	}
 	handed, err := trace.Get[trace.Document](repo, f.origin, intake.HandedDocument, 1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !intakefixture.EqualJSONTest(handed, f.handed) {
 		t.Fatal("immutable handed brief changed")
 	}
 	alias, err := f.c.Status(ctx, f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if alias.Workstream != f.stream1 || alias.Project != f.project {
 		t.Fatalf("design status did not resolve to its member: %+v", alias)
 	}
 	listed, err := f.c.Statuses(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.ContainsFunc(listed.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == f.origin }) {
 		t.Fatal("status list exposes the adopted design host as independent work")
 	}
@@ -848,12 +848,12 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 		t.Fatal("source retains an authoritative queue")
 	}
 	historical, err := trace.Read[trace.TurnRequest](repo, f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.before.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
 	chief, _, _, closeChief, err := f.s.chiefRepository(ctx, repo, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer closeChief()
 	matching, err := readview.Consistent(func() (bool, error) {
 		var entries []api.ConversationEntry
@@ -878,7 +878,7 @@ func checkFollowupContinuation(t *testing.T, f *productionDesignFixture, project
 		}
 		return true, nil
 	}, chief.Generation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !matching {
 		t.Fatal("continued address and member endpoints resolve to different conversations or feeds")
 	}

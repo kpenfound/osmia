@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestWorkgroupPublicationRequiresItsOwnDeliveryApproval(t *testing.T) {
@@ -21,13 +20,13 @@ func TestWorkgroupPublicationRequiresItsOwnDeliveryApproval(t *testing.T) {
 	recordUpstreamOwnPullRequest(t, f.s, upstreamRepository, upstream, upstreamPublication)
 	client := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: upstreamPublication.PullRequest, URL: upstreamPublication.URL, State: "open", HeadRepository: upstreamPublication.Fork, Head: upstreamPublication.Branch, HeadCommit: upstreamPublication.Commit, Base: "main"}}}
 	f.s.options.PullRequests = client
-	intakefixture.Must(t, f.s.edgeResolverPass(ctx, repository))
+	fixturekit.Must(t, f.s.edgeResolverPass(ctx, repository))
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, pulls: client}
 
 	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, "Depends on owner/other#77."); err != nil || reason != "the owner has not marked the pull request ready for review" {
 		t.Fatalf("group ratification delivery gate: %q, %v", reason, err)
 	}
-	intakefixture.Must(t, p.publisher().Pass(ctx))
+	fixturekit.Must(t, p.publisher().Pass(ctx))
 	if ops := p.operations(t); len(ops) != 0 {
 		t.Fatalf("group ratification requested publication without this member's delivery approval: %+v", ops)
 	}
@@ -35,12 +34,12 @@ func TestWorkgroupPublicationRequiresItsOwnDeliveryApproval(t *testing.T) {
 	approval := p.approve(t, nil)
 	op := p.request(t)
 	in, err := delivery.DecodePublish(op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if in.Approval != 1 || in.Commit != approval.Commit || in.DescriptionHash != approval.DescriptionHash || !in.Draft {
 		t.Fatalf("publication did not pin this member's approved draft: %+v", in)
 	}
 	_, _, siblingApproval, err := delivery.DeliveryDocuments(upstreamRepository, upstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if siblingApproval != nil {
 		t.Fatal("approving one member also approved its sibling")
 	}

@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func routeThrough(s *Service, p *jevfixture.Transitions) {
 func routeOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, trigger string) (router.Record, bool) {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var found router.Record
 	var ok bool
 	revision := 0
@@ -32,7 +33,7 @@ func routeOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, t
 			continue
 		}
 		var rec router.Record
-		intakefixture.Must(t, json.Unmarshal([]byte(d.Content), &rec))
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &rec))
 		if rec.Trigger == trigger && d.Revision >= revision {
 			found, ok, revision = rec, true, d.Revision
 		}
@@ -73,20 +74,20 @@ func TestTheOwnersWorkstreamMoveIsAPinnedMove(t *testing.T) {
 	assembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	out, apiFault := f.s.ownerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intakefixture.BuildingState, Note: "Reopen it."})
+	out, apiFault := f.s.ownerMoveWorkstream(t.Context(), string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it."})
 	if apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
-	if out.State != intakefixture.BuildingState || out.Move == nil || out.Move.By != "owner" {
+	if out.State != intake.BuildingState || out.Move == nil || out.Move.By != "owner" {
 		t.Fatalf("the move %+v", out)
 	}
 	var feature trace.Transition
 	for _, tr := range transitions(t, repository, stream) {
-		if tr.Subject == trace.FeatureSubject && tr.To == intakefixture.BuildingState && tr.ID == lifecycle.WorkstreamMoveDocument(1)+"-"+intakefixture.BuildingState {
+		if tr.Subject == trace.FeatureSubject && tr.To == intake.BuildingState && tr.ID == lifecycle.WorkstreamMoveDocument(1)+"-"+intake.BuildingState {
 			feature = tr
 		}
 	}
-	if feature.DecidedBy != trace.DecidedByOwner || feature.DefaultTo != intakefixture.BuildingState || feature.Actor != intake.OwnerActor {
+	if feature.DecidedBy != trace.DecidedByOwner || feature.DefaultTo != intake.BuildingState || feature.Actor != intake.OwnerActor {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
 	rec, ok := routeOf(t, repository, stream, "ws.move_owner")
@@ -127,7 +128,7 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 		}
 	}
 	pending, err := router.Unfinished(repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	targets := map[string]router.Record{}
 	for _, rec := range pending {
 		if rec.Trigger == "ws.move_proposal" {
@@ -141,7 +142,7 @@ func TestAChiefProposalToAGateLeavesAPendingOwnerDecision(t *testing.T) {
 		}
 		notices := 0
 		outbox, err := repository.Outbox(stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range outbox {
 			if e.Event.Kind == trace.NoticeKind && strings.HasPrefix(e.TransitionID, "route-") && strings.Contains(e.Event.Body, card) && strings.Contains(e.Event.Body, to) {
 				notices++
@@ -172,15 +173,15 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 	}
 	var feature trace.Transition
 	for _, tr := range transitions(t, repository, stream) {
-		if tr.Subject == trace.FeatureSubject && tr.To == intakefixture.BuildingState && strings.HasPrefix(tr.ID, lifecycle.WorkstreamMoveDocument(1)) {
+		if tr.Subject == trace.FeatureSubject && tr.To == intake.BuildingState && strings.HasPrefix(tr.ID, lifecycle.WorkstreamMoveDocument(1)) {
 			feature = tr
 		}
 	}
-	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != intakefixture.BuildingState || feature.Departed() {
+	if feature.DecidedBy != trace.DecidedByChief || feature.DefaultTo != intake.BuildingState || feature.Departed() {
 		t.Fatalf("the feature's transition %+v", feature)
 	}
 	rec, ok := routeOf(t, repository, stream, "ws.move_proposal")
-	if !ok || rec.Outcome != router.OutcomeFollowed || rec.State != router.StateCommitted || rec.Default != intakefixture.BuildingState {
+	if !ok || rec.Outcome != router.OutcomeFollowed || rec.State != router.StateCommitted || rec.Default != intake.BuildingState {
 		t.Fatalf("route %+v (found %v)", rec, ok)
 	}
 }
@@ -188,6 +189,6 @@ func TestAChiefMoveToBuildingIsPinnedAndCommitted(t *testing.T) {
 func transitions(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
 	all, err := trace.Read[trace.Transition](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return all
 }

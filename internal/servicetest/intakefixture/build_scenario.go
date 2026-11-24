@@ -58,7 +58,7 @@ func AttemptOperation(t *testing.T, now time.Time, actor trace.Actor, repository
 	t.Helper()
 	ctx := context.Background()
 	ops, err := repository.Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.ID == op.ID })
 	if i < 0 {
 		t.Fatalf("operation %s is not recorded", op.ID)
@@ -66,7 +66,7 @@ func AttemptOperation(t *testing.T, now time.Time, actor trace.Actor, repository
 	var result coreadapter.OperationResult
 	var applied error
 
-	Must(t, repository.WithOperation(ctx, stream, ops[i].EventID, actor, func() time.Time { return now }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
+	fixturekit.Must(t, repository.WithOperation(ctx, stream, ops[i].EventID, actor, func() time.Time { return now }, func(a *trace.OperationAttempt, _ trace.OperationRecord) error {
 		seen, err := r.Inspect(ctx, op)
 		if err != nil {
 			return err
@@ -99,14 +99,14 @@ func (f *TurnScenario) AwaitMasonRan(t *testing.T, stream config.WorkstreamID, u
 	t.Helper()
 	wait, close := f.Changes(t)
 	defer close()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		select {
 		case <-f.Done():
 			t.Fatalf("the mason of unit %s of %s could not run: service stopped: %v", unit, stream, f.WaitError())
 		default:
 		}
-		th, err := f.Repository().Thread(stream, MasonAgent(unit))
+		th, err := f.Repository().Thread(stream, intake.MasonAgent(unit))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
 		}
@@ -127,10 +127,10 @@ func (f *TurnScenario) AwaitUnit(t *testing.T, stream config.WorkstreamID, unit,
 	t.Helper()
 	wait, close := f.Changes(t)
 	defer close()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		got, err := f.Repository().Workflow(stream, trace.UnitSubject(unit))
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if got.Value == state {
 			return
 		}
@@ -144,15 +144,15 @@ func (f *TurnScenario) AwaitUnit(t *testing.T, stream config.WorkstreamID, unit,
 func BackendOf(t *testing.T, options config.Options, project config.ProjectID, stream config.WorkstreamID) string {
 	t.Helper()
 	root, err := config.ResolveRoot(options.Root, "")
-	Must(t, err)
-	data, ok := fixturekit.TraceFile(t, WorkstreamTraceDirectory(t, root, project, stream), "workstreams/"+string(stream)+"/workstream.json")
+	fixturekit.Must(t, err)
+	data, ok := fixturekit.TraceFile(t, fixturekit.WorkstreamTraceDirectory(t, root, project, stream), "workstreams/"+string(stream)+"/workstream.json")
 	if !ok {
 		t.Fatalf("workstream %s has no manifest", stream)
 	}
 	var manifest struct {
 		Workspaces string `json:"workspaces"`
 	}
-	Must(t, json.Unmarshal(data, &manifest))
+	fixturekit.Must(t, json.Unmarshal(data, &manifest))
 	if manifest.Workspaces == "" {
 		return config.WorkspacesGit
 	}
@@ -163,24 +163,24 @@ func (f *TurnScenario) CaptureTurn(t *testing.T, repository *trace.Repository, s
 	t.Helper()
 	ctx := context.Background()
 	th, err := repository.Thread(stream, agent)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	token := "done-" + th.Turns[len(th.Turns)-1].Request.TurnID
 	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), agent, token)
 	q, err := repository.ClaimTurn(ctx, stream, agent, token, directory, f.Now())
-	Must(t, err)
+	fixturekit.Must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.Now()
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: token}, SessionDirectory: directory, StartedAt: q.Claim.At, FinalResponse: "Built", Outcome: outcome}}
-	Must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
-	Must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.Now()))
+	fixturekit.Must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
+	fixturekit.Must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.Now()))
 	return q
 }
 
 func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, text, cite string) {
 	t.Helper()
 	ctx := context.Background()
-	Must(t, func() error {
+	fixturekit.Must(t, func() error {
 		_, err := repository.EnsureChiefOfStaff(ctx, stream, f.Now(), fixturekit.OwnerActor)
 		return err
 	}())
@@ -188,23 +188,23 @@ func (f *TurnScenario) ChiefRecordsAnswer(t *testing.T, repository *trace.Reposi
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.Now(), Actor: f.ForemanActor, Cause: "test", Depth: 1},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "chief", Prompt: "Answer question " + id}
 	_, err := repository.EnqueueTurn(ctx, req)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	token := "claim-" + turn
 	directory := filepath.Join(f.Root().String(), "threads", string(f.Project), string(stream), trace.ChiefOfStaff, token)
 	q, err := repository.ClaimTurn(ctx, stream, trace.ChiefOfStaff, token, directory, f.Now())
-	Must(t, err)
+	fixturekit.Must(t, err)
 	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: turn}
 	tools, err := questions.Tools(repository, trace.ChiefOfStaff, chiefScope, f.Now)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	tools = jevfixture.AutoDecide(repository, stream, tools)
 	i := slices.IndexFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == questions.AnswerTool })
 	if i < 0 {
 		t.Fatal("the chief of staff has no answer tool")
 	}
 	input, err := json.Marshal(map[string]any{"question": id, "text": text, "citations": []string{cite}})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	out, err := tools[i].Handle(ctx, input)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) {
 		t.Fatalf("the chief of staff's answer to question %s: %s", id, out)
 	}
@@ -218,8 +218,8 @@ func (f *TurnScenario) CompleteClaimedTurn(t *testing.T, repository *trace.Repos
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.Now()
 	response := trace.TurnResponse{Header: h, AgentID: agent, ThreadID: agent, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: q.Claim.Token}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, Outcome: outcome}}
-	Must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
-	Must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.Now()))
+	fixturekit.Must(t, repository.CaptureTurn(ctx, q.Claim.Token, response))
+	fixturekit.Must(t, repository.CompleteTurn(ctx, stream, agent, q.Request.TurnID, q.Claim.Token, f.Now()))
 }
 
 func (f *TurnScenario) CompleteMasonTurn(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) trace.QueuedTurn {
@@ -227,14 +227,14 @@ func (f *TurnScenario) CompleteMasonTurn(t *testing.T, repository *trace.Reposit
 	content, err := json.Marshal(struct {
 		Outcome string `json:"outcome"`
 	}{Outcome: outcome})
-	Must(t, err)
-	return f.CaptureTurn(t, repository, stream, MasonAgent(unit), &coreadapter.Outcome{Status: "done", Report: string(content), Card: &ExampleCard})
+	fixturekit.Must(t, err)
+	return f.CaptureTurn(t, repository, stream, intake.MasonAgent(unit), &coreadapter.Outcome{Status: "done", Report: string(content), Card: &ExampleCard})
 }
 
 func FinalOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
 	t.Helper()
 	ops, err := repository.Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	ops = slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
 	slices.SortFunc(ops, func(a, b trace.OperationRecord) int { return a.Transition.At.Compare(b.Transition.At) })
 	return ops
@@ -243,7 +243,7 @@ func FinalOperations(t *testing.T, repository *trace.Repository, stream config.W
 func LandOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, action string) []trace.OperationRecord {
 	t.Helper()
 	ops, err := repository.Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action != action })
 }
 
@@ -265,20 +265,20 @@ func MoveFeature(t *testing.T, g workspace.Provider, stream config.WorkstreamID,
 	ctx := context.Background()
 
 	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: intake.FeatureBranch(stream)})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	w := acquired.(workspace.Worktree)
 	tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for name, content := range files {
 		if content == "" {
-			Must(t, os.Remove(filepath.Join(w.Path, name)))
+			fixturekit.Must(t, os.Remove(filepath.Join(w.Path, name)))
 			continue
 		}
-		Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
-		Must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
+		fixturekit.Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
+		fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
 	}
 	moved, err := g.Snapshot(ctx, w, tip)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return moved
 }
 
@@ -286,11 +286,11 @@ func MergeDirectly(t *testing.T, repository *trace.Repository, stream config.Wor
 	t.Helper()
 
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: trace.UnitSubject(unit) + "-" + merged, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: actor, Cause: "landing-" + unit}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: merged, Reason: fmt.Sprintf("unit %s landed as %s", unit, commit)}})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return commit
 }
 
@@ -304,14 +304,14 @@ func OnWorkspaces(t *testing.T, root, backend string) {
 	}
 	path := filepath.Join(root, "config.toml")
 	data, err := os.ReadFile(path)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	lines := strings.Split(string(data), "\n")
 	i := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "workspaces = ") })
 	if i < 0 {
 		t.Fatalf("%s sets no workspaces", path)
 	}
 	lines[i] = fmt.Sprintf("workspaces = %q", backend)
-	Must(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0600))
+	fixturekit.Must(t, os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0600))
 }
 
 func RunChecks(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, c PassReconciler, action string, attempt func(coreadapter.Operation, coreadapter.Reconciler) (coreadapter.OperationResult, error)) {
@@ -319,15 +319,15 @@ func RunChecks(t *testing.T, repository *trace.Repository, stream config.Workstr
 	ctx := context.Background()
 
 	for {
-		Must(t, c.Pass(ctx))
+		fixturekit.Must(t, c.Pass(ctx))
 		ops, err := repository.Operations(stream)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		i := slices.IndexFunc(ops, func(op trace.OperationRecord) bool { return op.Operation.Action == action && op.Result == nil })
 		if i < 0 {
 			return
 		}
 		_, err = attempt(ops[i].Operation, c)
-		Must(t, err)
+		fixturekit.Must(t, err)
 	}
 }
 
@@ -336,7 +336,7 @@ func AssembleBoth(t *testing.T, repository *trace.Repository, a PassReconciler, 
 	ctx := context.Background()
 	building := func() {
 		t.Helper()
-		Must(t, a.Pass(ctx))
+		fixturekit.Must(t, a.Pass(ctx))
 		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.BuildingState {
 			t.Fatalf("the workstream is %+v with a unit unmerged: %v", feature, err)
 		}
@@ -345,15 +345,15 @@ func AssembleBoth(t *testing.T, repository *trace.Repository, a PassReconciler, 
 	merge("resume", resume)
 	building()
 	head := merge("dedupe", dedupe)
-	Must(t, a.Pass(ctx))
+	fixturekit.Must(t, a.Pass(ctx))
 	if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != assembled {
 		t.Fatalf("the workstream is %+v with every unit merged: %v", feature, err)
 	}
 	if ops := FinalOperations(t, repository, stream, action); len(ops) != 0 {
 		t.Fatalf("final reviews asked for in the pass that assembled: %+v", ops)
 	}
-	Must(t, a.Pass(ctx))
-	Must(t, a.Pass(ctx))
+	fixturekit.Must(t, a.Pass(ctx))
+	fixturekit.Must(t, a.Pass(ctx))
 	ops := FinalOperations(t, repository, stream, action)
 	if len(ops) != 1 {
 		t.Fatalf("final review operations %+v", ops)
@@ -374,23 +374,23 @@ func SeedChecking[B any](t *testing.T, d UnitSeedDriver[B], repository *trace.Re
 
 	ctx := context.Background()
 	b, found, err := d.Read(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("fixture workstream is not building")
 	}
 	started, blocked, err := d.Start(ctx, b, unit)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !started || blocked {
 		t.Fatalf("fixture unit %s did not start", unit)
 	}
 	w, _, err := d.Open(ctx, stream, unit)
-	Must(t, err)
-	Must(t, os.WriteFile(filepath.Join(w.Path, MasonWrote), []byte("package trace\n"), 0644))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n"), 0644))
 	d.Complete(t, repository, stream, unit, outcome)
 	b, _, err = d.Read(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	moved, blocked, err := d.Finish(ctx, b, unit)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !moved || blocked {
 		t.Fatalf("fixture unit %s did not enter checking", unit)
 	}
@@ -410,14 +410,14 @@ func ApproveDirectly[I any](t *testing.T, repository *trace.Repository, stream c
 	ctx := context.Background()
 
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	_, identity, err := prepare(ctx, stream, unit)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	turn := turnID(unit, state.Version)
 	data, err := encode(identity, turn)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var latest trace.Document
 	for _, d := range docs {
 		if d.ID == document(unit) {
@@ -428,8 +428,8 @@ func ApproveDirectly[I any](t *testing.T, repository *trace.Repository, stream c
 	latest.Content = string(data) + "\n"
 	latest.At = time.Now()
 	latest.Cause = turn
-	Must(t, repository.RecordDocuments(ctx, []trace.Document{latest}))
-	Must(t, apply(ctx, stream, unit, state, false))
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{latest}))
+	fixturekit.Must(t, apply(ctx, stream, unit, state, false))
 	if approved, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || approved.Value != approvedState {
 		t.Fatalf("unit %s is %+v: %v", unit, approved, err)
 	}
@@ -439,7 +439,7 @@ func ApprovedReview[R any](t *testing.T, stream config.WorkstreamID, unit string
 	t.Helper()
 
 	review, result, ok, err := approval(stream, unit, 0)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !ok {
 		t.Fatalf("unit %s has no satisfactory review: %+v", unit, review)
 	}
@@ -450,7 +450,7 @@ func SeedBuild(t *testing.T, stop func(*testing.T), cfg func() *config.Config, r
 	t.Helper()
 	stop(t)
 	repository, err := trace.Open(cfg().Root, cfg().Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repository.Close() })
 	return record(t, repository, key, graph, backend, base), repository
 }
@@ -461,8 +461,8 @@ func ConfigureMasonThreads(t *testing.T, root, backend, capacity string, origina
 	OnWorkspaces(t, root, backend)
 	path := filepath.Join(root, "config.toml")
 	data, err := os.ReadFile(path)
-	Must(t, err)
-	Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "committee = 1\n", "committee = 1\n"+capacity, 1)), 0600))
 	return original
 }
 
@@ -477,11 +477,11 @@ func ScriptMasons(engine *fixturekit.DemoEngine, turnID func(string) string) *Fa
 	engine.Turns[turnID("dedupe")] = fake.Turn
 	for _, unit := range []string{"resume", "dedupe"} {
 		for i := 1; i <= 3; i++ {
-			name := fmt.Sprintf("%s-clarify-%d", MasonAgent(unit), i)
+			name := fmt.Sprintf("%s-clarify-%d", intake.MasonAgent(unit), i)
 			fake.Play[name] = FailMasonTurn
 			engine.Turns[name] = fake.Turn
 		}
-		HoldContinuations(engine, MasonAgent(unit))
+		HoldContinuations(engine, intake.MasonAgent(unit))
 	}
 	return fake
 }
@@ -512,45 +512,45 @@ func ExtendParallelMasons(t *testing.T, clone string, repository *trace.Reposito
 	home := filepath.Dir(clone)
 	for _, name := range []string{"upload", "audit"} {
 		dir := filepath.Join(clone, "internal", name)
-		Must(t, os.MkdirAll(dir, 0o700))
-		Must(t, os.WriteFile(filepath.Join(dir, "doc.go"), []byte("package "+name+"\n"), 0o600))
+		fixturekit.Must(t, os.MkdirAll(dir, 0o700))
+		fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "doc.go"), []byte("package "+name+"\n"), 0o600))
 		fixturekit.DemoGit(t, home, "-C", clone, "add", filepath.Join("internal", name))
 	}
 	fixturekit.DemoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "add upload and audit")
 	fixturekit.DemoGit(t, home, "-C", clone, "push", "-q", "upstream", "HEAD:refs/heads/main")
 	tree, err := (&workspace.Git{Clone: clone}).Tree(context.Background(), "HEAD")
-	Must(t, err)
+	fixturekit.Must(t, err)
 	mapping, err := kb.SeedFS(tree)
-	Must(t, err)
-	Must(t, kb.Store(context.Background(), repository, mapping, now, actor, "fixture"))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, kb.Store(context.Background(), repository, mapping, now, actor, "fixture"))
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()
 	for _, unit := range []string{"upload", "audit"} {
 		engine.Turns[turnID(unit)] = fake.Turn
 		for i := 1; i <= 3; i++ {
-			name := fmt.Sprintf("%s-clarify-%d", MasonAgent(unit), i)
+			name := fmt.Sprintf("%s-clarify-%d", intake.MasonAgent(unit), i)
 			fake.Play[name] = FailMasonTurn
 			engine.Turns[name] = fake.Turn
 		}
-		HoldContinuations(engine, MasonAgent(unit))
+		HoldContinuations(engine, intake.MasonAgent(unit))
 	}
 }
 func RaiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string, contest func() (trace.Header, bool, error), actor trace.Actor, escalate string, path func(string, string) string) {
 	t.Helper()
 	header, found, err := contest()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("fixture unit has no contest")
 	}
 	data, err := json.Marshal(api.ChiefContestDecision{Contest: header.ID, Decision: escalate, Turn: "fixture"})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	h := header
 	h.Schema = "osmia.trace.document"
 	h.ID = trace.UnitSubject(unit) + "-chief-" + header.ID
 	h.Revision = 1
 	h.Actor = actor
 	h.Cause = header.ID
-	Must(t, r.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path(unit, header.ID), Content: string(data)}}))
+	fixturekit.Must(t, r.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path(unit, header.ID), Content: string(data)}}))
 }
 
 func SeedApprovedUnits(t *testing.T, seed func(string, string), approve func(string, string)) {
@@ -564,10 +564,10 @@ func SeedApprovedUnits(t *testing.T, seed func(string, string), approve func(str
 func SeedBuilding(t *testing.T, clone, key, graph string, backend func() (string, error), record func(string, string, string, string) config.WorkstreamID, refresh func() error) config.WorkstreamID {
 	t.Helper()
 	selected, err := backend()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	base := strings.TrimSpace(fixturekit.DemoGit(t, clone, "-C", clone, "rev-parse", "HEAD"))
 	stream := record(key, graph, selected, base)
-	Must(t, refresh())
+	fixturekit.Must(t, refresh())
 	return stream
 }
 
@@ -576,9 +576,9 @@ func SeedDelivery(t *testing.T, repository *trace.Repository, stream config.Work
 	ctx := context.Background()
 	merge("resume", map[string]string{"resume.go": "package demo\n"})
 	merge("dedupe", map[string]string{"dedupe.go": "package demo\n"})
-	Must(t, pass(ctx))
+	fixturekit.Must(t, pass(ctx))
 	report, err := governing(ctx)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	report.Review, report.Outcome, report.Branch = 1, outcome, intake.FeatureBranch(stream)
 	report.Summary = "Resumable uploads"
 	report.Criteria = []api.FinalCriterion{
@@ -587,8 +587,8 @@ func SeedDelivery(t *testing.T, repository *trace.Repository, stream config.Work
 	}
 	record := func(r api.FinalReport, rev int) {
 		content, err := json.Marshal(r)
-		Must(t, err)
-		Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: document, Revision: rev, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: actor, Cause: "final-review"}, Path: path, Content: string(content)}}))
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: document, Revision: rev, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: actor, Cause: "final-review"}, Path: path, Content: string(content)}}))
 	}
 	record(report, 1)
 
@@ -599,8 +599,8 @@ func WithWeb(t *testing.T, root, addr string) {
 	t.Helper()
 	path := filepath.Join(root, "config.toml")
 	top, err := os.ReadFile(path)
-	Must(t, err)
-	Must(t, os.WriteFile(path, append(top, []byte("[listen]\nweb = \""+addr+"\"\n")...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(top, []byte("[listen]\nweb = \""+addr+"\"\n")...), 0600))
 }
 
 func DrivePass(t *testing.T, repo *trace.Repository, halt func() error, pass func() error) {

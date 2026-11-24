@@ -5,6 +5,10 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	strings "strings"
 	atomic "sync/atomic"
 	testing "testing"
@@ -22,66 +26,66 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 	for _, interrupted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("interrupted=%v", interrupted), func(t *testing.T) {
 			ctx := context.Background()
-			f := newProductionDesignFixture(t)
-			t.Cleanup(func() { f.stop(t) })
-			f.stop(t)
-			withWeb(t, f.opts, "127.0.0.1:0")
-			f.start(t)
-			f.startOwner(t)
-			packet := f.awaitPacket(t)
-			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			must(t, err)
-			f.awaitApproved(t)
+			f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{})
+			t.Cleanup(func() { f.Stop(t) })
+			f.Stop(t)
+			intakefixture.WithWeb(t, f.Opts.Config.Root, "127.0.0.1:0")
+			f.Start(t)
+			f.StartOwner(t)
+			packet := f.AwaitPacket(t)
+			_, err := f.C.Ratify(ctx, f.Origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+			fixturekit.Must(t, err)
+			f.AwaitApproved(t)
 			const answer = "Keep the acknowledged offset contract stable."
 			var escalated, relay atomic.Bool
-			f.engine.Mu.Lock()
-			f.engine.Turns["web-ruling-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
-				return questionResult(req, "web-worker", "Asked the chief."), err
+			f.Engine.Mu.Lock()
+			f.Engine.Turns["web-ruling-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
+				return intakefixture.QuestionResult(req, "web-worker", "Asked the chief."), err
 			}
-			f.engine.Turns[questions.TurnID("1")] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-				return questionResult(req, "web-worker", "Continued the original asking turn."), nil
+			f.Engine.Turns[questions.TurnID("1")] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+				return intakefixture.QuestionResult(req, "web-worker", "Continued the original asking turn."), nil
 			}
-			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				if strings.Contains(req.Prompt, "Present the shared decision") && escalated.CompareAndSwap(false, true) {
-					_, err := callTool(ctx, tools, questions.EscalateTool, map[string]any{
-						"questions":  []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
+					_, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{
+						"questions":  []string{string(f.Stream1) + ":1", string(f.Stream2) + ":1"},
 						"rephrasing": "May the acknowledged offset contract change?", "blocked": "Both asking origins.",
 						"options": []string{"Keep", "Change"}, "recommendation": "Keep the contract stable.",
 					})
-					return questionResult(req, "web-chief", "Asked the owner."), err
+					return intakefixture.QuestionResult(req, "web-chief", "Asked the owner."), err
 				}
 				if strings.Contains(req.Prompt, "Relay the recorded decision") && relay.Load() {
-					_, err := callTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream2) + ":1", "text": answer, "scope": "local"})
-					return questionResult(req, "web-chief", "Relayed to both origins."), err
+					_, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.Stream2) + ":1", "text": answer, "scope": "local"})
+					return intakefixture.QuestionResult(req, "web-chief", "Relayed to both origins."), err
 				}
-				return questionResult(req, "web-chief", "Following the agreed contract."), nil
+				return intakefixture.QuestionResult(req, "web-chief", "Following the agreed contract."), nil
 			}
-			f.engine.Mu.Unlock()
-			lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "web-ruling-ask", "Check the contract.")
-			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "web-ruling-ask", "Check the contract.")
-			f.wait(t, "both original questions", func() bool {
-				for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-					project := f.project
+			f.Engine.Mu.Unlock()
+			f.SharedDesign().LifecycleWorker(t, f.Project, f.Stream1, "worker_first", "web-ruling-ask", "Check the contract.")
+			f.SharedDesign().LifecycleWorker(t, f.Project2, f.Stream2, "worker_second", "web-ruling-ask", "Check the contract.")
+			f.Wait(t, "both original questions", func() bool {
+				for i, id := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+					project := f.Project
 					if i == 1 {
-						project = f.project2
+						project = f.Project2
 					}
-					repo, err := f.s.repository(project)
-					must(t, err)
+					repo, err := f.S.Repository(project)
+					fixturekit.Must(t, err)
 					qs, err := repo.Questions(id)
-					must(t, err)
+					fixturekit.Must(t, err)
 					if len(qs) != 1 {
 						return false
 					}
 				}
 				return true
 			})
-			_, err = f.c.Send(ctx, f.stream2, "Present the shared decision")
-			must(t, err)
-			var entry InboxEntry
-			f.wait(t, "one pinned shared entry", func() bool {
-				inbox, err := f.c.Inbox(ctx)
-				must(t, err)
+			_, err = f.C.Send(ctx, f.Stream2, "Present the shared decision")
+			fixturekit.Must(t, err)
+			var entry api.InboxEntry
+			f.Wait(t, "one pinned shared entry", func() bool {
+				inbox, err := f.C.Inbox(ctx)
+				fixturekit.Must(t, err)
 				if len(inbox.Entries) != 1 {
 					return false
 				}
@@ -90,10 +94,10 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 			})
 			post := func() (int, []byte) {
 
-				client := webHTTP()
+				client := intakefixture.WebHTTP()
 				defer client.CloseIdleConnections()
-				base := "http://" + f.s.WebAddr()
-				code, data := exchange(t, client, "GET", base+Prefix+"/feed/"+string(f.stream2), "", "", "")
+				base := "http://" + f.S.WebAddr()
+				code, data := intakefixture.Exchange(t, client, "GET", base+api.Prefix+"/feed/"+string(f.Stream2), "", "", "")
 				if code != 200 {
 					t.Fatalf("second member feed: %d %s", code, data)
 				}
@@ -103,12 +107,12 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 				}
 				body["text"] = answer
 				encoded, err := json.Marshal(body)
-				must(t, err)
-				return exchange(t, client, entry.Answer.Method, base+entry.Answer.Path, "application/json", string(encoded), "")
+				fixturekit.Must(t, err)
+				return intakefixture.Exchange(t, client, entry.Answer.Method, base+entry.Answer.Path, "application/json", string(encoded), "")
 			}
 			if interrupted {
-				hook := &designInterruption{Step: "owner-ruling-member", Nth: 1, Reached: make(chan struct{})}
-				f.hook.Store(hook)
+				hook := &intakefixture.DesignInterruption{Step: "owner-ruling-member", Nth: 1, Reached: make(chan struct{})}
+				f.Hook.Store(hook)
 				type response struct {
 					code int
 					body []byte
@@ -117,24 +121,24 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 				go func() { code, body := post(); finished <- response{code, body} }()
 				select {
 				case <-hook.Reached:
-				case <-time.After(demoTimeout):
+				case <-time.After(fixturekit.DemoTimeout):
 					t.Fatal("web ruling did not commit the first member")
 				}
-				f.stop(t)
+				f.Stop(t)
 				var result response
 				select {
 				case result = <-finished:
-				case <-time.After(demoTimeout):
+				case <-time.After(fixturekit.DemoTimeout):
 					t.Fatal("interrupted web ruling did not finish")
 				}
-				if result.code != 503 || errorCode(t, result.body) != Unavailable || !strings.Contains(string(result.body), "was interrupted; refresh the inbox and retry the same answer") {
+				if result.code != 503 || intakefixture.ErrorCode(t, result.body) != api.Unavailable || !strings.Contains(string(result.body), "was interrupted; refresh the inbox and retry the same answer") {
 					t.Fatalf("interrupted web ruling: %d %s", result.code, result.body)
 				}
-				f.hook.Store(nil)
-				f.start(t)
-				_, err = f.c.Answer(ctx, entry.Number, "Change the contract instead.", entry.Project)
-				var api *APIError
-				if !errors.As(err, &api) || api.Code != Conflict || api.Message != fmt.Sprintf("inbox entry %d is already answered", entry.Number) {
+				f.Hook.Store(nil)
+				f.Start(t)
+				_, err = f.C.Answer(ctx, entry.Number, "Change the contract instead.", entry.Project)
+				var apiErr *api.APIError
+				if !errors.As(err, &apiErr) || apiErr.Code != api.Conflict || apiErr.Message != fmt.Sprintf("inbox entry %d is already answered", entry.Number) {
 					t.Fatalf("different-text retry did not preserve the original ruling: %v", err)
 				}
 			}
@@ -142,31 +146,31 @@ func TestProjectPaneWebRulingResumesBothOriginsOnce(t *testing.T) {
 			if code != 200 {
 				t.Fatalf("shared web ruling: %d %s", code, data)
 			}
-			var response AnswerResponse
-			must(t, json.Unmarshal(data, &response))
+			var response api.AnswerResponse
+			fixturekit.Must(t, json.Unmarshal(data, &response))
 			if response.Number != entry.Number || response.Workstream != entry.Workstream || response.Batch != entry.Batch || response.Ruling != answer || len(response.Questions) != 2 || response.Questions[0] != "1" || response.Questions[1] != "1" {
 				t.Fatalf("answer lost the shared entry pins: %+v", response)
 			}
-			f.wait(t, "shared entry removed from API inbox", func() bool {
-				inbox, err := f.c.Inbox(ctx)
-				must(t, err)
+			f.Wait(t, "shared entry removed from API inbox", func() bool {
+				inbox, err := f.C.Inbox(ctx)
+				fixturekit.Must(t, err)
 				return len(inbox.Entries) == 0
 			})
 			relay.Store(true)
-			_, err = f.c.Send(ctx, f.stream2, "Relay the recorded decision")
-			must(t, err)
-			f.wait(t, "both origins complete once", func() bool {
-				for i, id := range []config.WorkstreamID{f.stream1, f.stream2} {
-					project, worker := f.project, "worker_first"
+			_, err = f.C.Send(ctx, f.Stream2, "Relay the recorded decision")
+			fixturekit.Must(t, err)
+			f.Wait(t, "both origins complete once", func() bool {
+				for i, id := range []config.WorkstreamID{f.Stream1, f.Stream2} {
+					project, worker := f.Project, "worker_first"
 					if i == 1 {
-						project, worker = f.project2, "worker_second"
+						project, worker = f.Project2, "worker_second"
 					}
-					repo, err := f.s.repository(project)
-					must(t, err)
+					repo, err := f.S.Repository(project)
+					fixturekit.Must(t, err)
 					qs, err := repo.Questions(id)
-					must(t, err)
+					fixturekit.Must(t, err)
 					th, err := repo.Thread(id, worker)
-					must(t, err)
+					fixturekit.Must(t, err)
 					count, complete := 0, false
 					for _, turn := range th.Turns {
 						if turn.Request.TurnID == questions.TurnID("1") {

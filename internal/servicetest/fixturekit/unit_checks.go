@@ -72,9 +72,8 @@ func FailedReport(link string) string {
 
 func Passing() []CheckOutcome { return []CheckOutcome{{Result: api.CheckResult{Output: PassedReport}}} }
 
-// LifecycleFailedReport is the report excerpt supplied by the owner from a
-// Dagger lifecycle check run. The summary, check link and TESTS lines retain
-// the supplied text.
+// LifecycleFailedReport is a Dagger report of one failed lifecycle check with
+// its summary, check link and TESTS lines.
 const LifecycleFailedReport = `! exit code 1
 ! dag://?check=test&go-package=internal/lifecycle: Go tests in internal/lifecycle: exit code: 1
 
@@ -85,10 +84,9 @@ CHECKS  ✘ 1 failed  ✔ 51 passed
     ✘ github.com/kpenfound/osmia/internal/lifecycle › TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader FAIL
 `
 
-// LifecycleFailureOutput surrounds the report with synthetic progress and
-// passing output to put its failure beyond either end of a bounded excerpt.
-// The file diagnostic is synthetic; the owner supplied no file location or
-// exact progress-line length. A 72 KiB line exercises the reported scale.
+// LifecycleFailureOutput surrounds LifecycleFailedReport with a 72 KiB
+// progress line and passing output, which puts the failure beyond either end
+// of a bounded excerpt.
 func LifecycleFailureOutput() string {
 	return strings.Repeat("progress ", 8192) + "\n" + LifecycleFailedReport +
 		"        lifecycle_test.go:42: expected pending change to apply\n" +

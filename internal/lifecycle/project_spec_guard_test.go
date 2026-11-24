@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,27 +31,27 @@ func haltGuardControllers(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	_, projects := f.s.runtimes()
 	for _, p := range projects {
-		intakefixture.Must(t, f.s.halt(p))
+		fixturekit.Must(t, f.s.halt(p))
 	}
 }
 func runGuardDraft(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	for _, project := range []config.ProjectID{f.project, f.project2} {
 		err := f.s.projectSpecDraftPass(context.Background(), mustRepo(t, f.s, project))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	id, err := mustRepo(t, f.s, f.project).CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer wt.Close()
 	groups, _, err := trace.Workgroups(wt)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	state, err := wt.Workflow(groups[0].Members[0], lifecycle.ProjectSpecDraftSubject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if state.Value == "failed" {
 		th, err := wt.Thread(groups[0].Members[0], intake.ArchitectAgent)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Fatalf("draft failed: %+v", th.Turns[len(th.Turns)-1].Response)
 	}
 }
@@ -58,7 +59,7 @@ func assertGuardRefusal(t *testing.T, f *crossRepoRatifyFixture, id config.Workg
 	t.Helper()
 	before := refreshDocument(t, f, id)
 	packet, err := f.c.Packet(context.Background(), f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
 	for _, text := range []string{string(id), string(f.stream1), fmt.Sprintf("criterion %d", n), "contracts are being redrafted", "read the packet again", failure} {
 		if !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, text) {
@@ -89,7 +90,7 @@ func scriptGuardDraft(t *testing.T, f *crossRepoRatifyFixture, turn string, crit
 				return nil, fmt.Errorf("architect saw wrong member plan revision: %s", data)
 			}
 		}
-		_, err = intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
+		_, err = fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
 			"behavior":  "Redrafted upload contract.",
 			"contracts": []map[string]any{{"name": "acknowledgment", "text": "The reviewed acknowledgment."}},
 			"slices": []map[string]any{
@@ -104,7 +105,7 @@ func scriptGuardDraft(t *testing.T, f *crossRepoRatifyFixture, turn string, crit
 func assertGuardRatifiable(t *testing.T, f *crossRepoRatifyFixture, id config.WorkgroupID, criterion int, revision int) {
 	t.Helper()
 	packet, err := f.c.Packet(context.Background(), f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if packet.ProjectSpecRevision != revision {
 		t.Fatalf("packet serves %d, want %d", packet.ProjectSpecRevision, revision)
 	}
@@ -113,9 +114,9 @@ func assertGuardRatifiable(t *testing.T, f *crossRepoRatifyFixture, id config.Wo
 		t.Fatalf("architect's criteria lost: %+v", slice)
 	}
 	_, err = f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	decision, found, err := mustRepo(t, f.s, f.project).GroupApprovalOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || decision.ProjectSpecRevision != revision || !reflect.DeepEqual(decision.ProjectSpec, *packet.ProjectSpec) || !trace.ContractCitation(decision.ProjectSpec, f.stream1, plan.Cite(criterion)) {
 		t.Fatalf("approval lost displayed contract: %+v", decision)
 	}
@@ -152,10 +153,10 @@ func TestProjectSpecContractGuardRedraftsChangedAndRemovedCriteria(t *testing.T)
 				t.Fatalf("redraft did not append once: %d", got.Revision)
 			}
 			wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			history, err := trace.Get[trace.Document](wt, "", trace.ProjectSpecsDocument, old.Revision)
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, wt.Close())
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, wt.Close())
 			if !reflect.DeepEqual(history, old) {
 				t.Fatal("redraft rewrote history")
 			}
@@ -181,7 +182,7 @@ func unpinnedProjectSpecDraftFixture(t *testing.T) (*crossRepoRatifyFixture, con
 	}{{f.project, f.stream1}, {f.project2, f.stream2}} {
 		intakefixture.Eventually(t, "member decision packet", func() bool {
 			state, err := mustRepo(t, f.s, member.project).Workflow(member.stream, trace.FeatureSubject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			return state.Value == intake.InShedState
 		})
 	}
@@ -191,35 +192,35 @@ func unpinnedProjectSpecDraftFixture(t *testing.T) (*crossRepoRatifyFixture, con
 		t.Fatal(apiFault)
 	}
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	groups, _, err := trace.Workgroups(wt)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	g := groups[0]
 	host := g.Members[0]
 	_, err = wt.Transact(ctx, trace.Transaction{Transition: trace.Transition{
 		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "project-spec-draft-1", Revision: 1, Project: wt.Project(), Workstream: host, At: f.s.now(), Actor: lifecycle.ProjectSpecDraftActor, Cause: "project-spec-draft"},
 		Subject: lifecycle.ProjectSpecDraftSubject, To: "drafting", Reason: "every member is sketched; the architect is asked for the project spec",
 	}})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: intake.ArchitectAgent, Revision: 1, Project: wt.Project(), Workstream: host, At: f.s.now(), Actor: lifecycle.ProjectSpecDraftActor, Cause: "project-spec-draft"}, Role: intake.ArchitectRole, ThreadID: intake.ArchitectThread}))
-	intakefixture.Must(t, f.s.enqueueProjectSpecDraft(ctx, wt, g, host, []trace.CrossRepoMember{
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: intake.ArchitectAgent, Revision: 1, Project: wt.Project(), Workstream: host, At: f.s.now(), Actor: lifecycle.ProjectSpecDraftActor, Cause: "project-spec-draft"}, Role: intake.ArchitectRole, ThreadID: intake.ArchitectThread}))
+	fixturekit.Must(t, f.s.enqueueProjectSpecDraft(ctx, wt, g, host, []trace.CrossRepoMember{
 		{Workstream: f.stream1, Project: mustRepo(t, f.s, f.project)},
 		{Workstream: f.stream2, Project: mustRepo(t, f.s, f.project2)},
 	}, "project-spec-draft-1"))
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, wt.Close())
 	return f, id, g
 }
 func captureUnpinnedProjectSpecTurn(t *testing.T, f *crossRepoRatifyFixture, wt *trace.Repository, host config.WorkstreamID, completed bool) {
 	t.Helper()
 	ctx := context.Background()
 	q, err := wt.ClaimTurn(ctx, host, intake.ArchitectAgent, "unpinned-claim", "/unpinned-session", f.s.now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.s.now(), lifecycle.ProjectSpecDraftActor
-	intakefixture.Must(t, wt.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: intake.ArchitectAgent, ThreadID: intake.ArchitectThread, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
+	fixturekit.Must(t, wt.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: intake.ArchitectAgent, ThreadID: intake.ArchitectThread, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: 1,
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "unpinned-session"}, SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, FinalResponse: "Unpinned project spec delivered"}}))
 	if completed {
-		intakefixture.Must(t, wt.CompleteTurn(ctx, host, intake.ArchitectAgent, q.Request.TurnID, q.Claim.Token, f.s.now()))
+		fixturekit.Must(t, wt.CompleteTurn(ctx, host, intake.ArchitectAgent, q.Request.TurnID, q.Claim.Token, f.s.now()))
 	}
 }
 func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
@@ -228,9 +229,9 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 	f, id, g := unpinnedProjectSpecDraftFixture(t)
 	host := g.Members[0]
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	captureUnpinnedProjectSpecTurn(t, f, wt, host, true)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, wt, g, trace.ProjectSpec{
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, wt, g, trace.ProjectSpec{
 		Behavior:  "Chunks are acknowledged and resumed.",
 		Contracts: []trace.Contract{{Name: "acknowledgment", Text: "The acknowledgment names the stored offset."}},
 		Slices: []trace.Slice{
@@ -239,7 +240,7 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 		},
 	}, f.s.now(), lifecycle.ProjectSpecDraftActor, "project-spec-draft-1"))
 	old := projectSpecDocument(t, wt)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, wt.Close())
 	spec := strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
 	reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, spec)
 	runRefresh(t, f)
@@ -248,14 +249,14 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 		t.Fatal("guard mechanically refreshed the contract")
 	}
 
-	intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, mustRepo(t, f.s, f.project), id))
 	wt, err = trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	state, err := wt.Workflow(host, lifecycle.ProjectSpecDraftSubject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, inputRevision, err := lifecycle.ReadProjectSpecDraftInput(wt, host)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 	if state.Value != "drafted" || inputRevision != 0 || !reflect.DeepEqual(refreshDocument(t, f, id), old) {
 		t.Fatalf("recorded draft reconciliation changed output or invented pins: state=%+v input=%d", state, inputRevision)
 	}
@@ -291,12 +292,12 @@ func TestProjectSpecContractGuardReconcilesDraftWithoutInput(t *testing.T) {
 		t.Fatalf("redraft duplicated: calls=%d revision=%d", calls.Load(), refreshDocument(t, f, id).Revision)
 	}
 	wt, err = trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	history, err := trace.Get[trace.Document](wt, "", trace.ProjectSpecsDocument, old.Revision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, inputRevision, err = lifecycle.ReadProjectSpecDraftInput(wt, host)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 	if !reflect.DeepEqual(history, old) || inputRevision != 1 {
 		t.Fatalf("redraft rewrote history or duplicated its request: input=%d", inputRevision)
 	}
@@ -311,23 +312,23 @@ func TestProjectSpecDraftSupersedesUnpinnedOutput(t *testing.T) {
 			f, id, g := unpinnedProjectSpecDraftFixture(t)
 			host := g.Members[0]
 			wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			switch stage {
 			case "reserved":
 				_, err := wt.ClaimTurn(ctx, host, intake.ArchitectAgent, "unpinned-claim", "/unpinned-session", f.s.now())
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 			case "captured", "completed":
 				captureUnpinnedProjectSpecTurn(t, f, wt, host, stage == "completed")
 			}
-			intakefixture.Must(t, wt.Close())
+			fixturekit.Must(t, wt.Close())
 			data, err := json.Marshal(lifecycle.ProjectSpecDraft{Behavior: "Unpinned contract", Slices: []lifecycle.ProjectSpecDraftSlice{
 				{Workstream: f.stream1, ContractCriteria: []int{1}},
 				{Workstream: f.stream2, ContractCriteria: []int{1}},
 			}})
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			output := filepath.Join(f.s.projectSpecTurnDirectoryFor(host), "project-spec-draft-1", "output")
-			intakefixture.Must(t, os.MkdirAll(output, 0700))
-			intakefixture.Must(t, os.WriteFile(filepath.Join(output, "project-spec.json"), data, 0600))
+			fixturekit.Must(t, os.MkdirAll(output, 0700))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(output, "project-spec.json"), data, 0600))
 			spec := strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
 			reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, spec)
 			var calls atomic.Int32
@@ -348,14 +349,14 @@ func TestProjectSpecDraftSupersedesUnpinnedOutput(t *testing.T) {
 				}
 			}
 			wt, err = trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			_, found, err := trace.ProjectSpecFor(wt, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			input, revision, err := lifecycle.ReadProjectSpecDraftInput(wt, host)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			th, err := wt.Thread(host, intake.ArchitectAgent)
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, wt.Close())
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, wt.Close())
 			if found || revision != 1 || input.Turn != "project-spec-draft-2" || len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() {
 				t.Fatalf("unpinned turn not superseded once: found=%v revision=%d input=%+v thread=%+v", found, revision, input, th)
 			}
@@ -377,7 +378,7 @@ func TestProjectSpecContractGuardAllowsOtherMembersToRefresh(t *testing.T) {
 	reviseRefreshMember(t, f, f.stream2, plan.SpecDocument, crossSpec2+"\nOther behavior.\n")
 	runRefresh(t, f)
 	packet, err := f.c.Packet(context.Background(), f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	first, _ := trace.SliceFor(*packet.ProjectSpec, f.stream1)
 	second, _ := trace.SliceFor(*packet.ProjectSpec, f.stream2)
 	if first.Spec != crossSpec1 || second.Spec != crossSpec2+"\nOther behavior.\n" || packet.ProjectSpecRevision != packets[0].ProjectSpecRevision+1 {
@@ -417,7 +418,7 @@ func TestProjectSpecContractGuardPinsMidRedraftEdits(t *testing.T) {
 			repo := mustRepo(t, f.s, f.project)
 			err := f.s.draftProjectSpecIfReady(context.Background(), repo, id)
 			if interruption == "none" {
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 			} else if !errors.Is(err, stop) {
 				t.Fatalf("interruption: %v", err)
 			}
@@ -437,11 +438,11 @@ func TestProjectSpecContractGuardPinsMidRedraftEdits(t *testing.T) {
 				haltGuardControllers(t, f)
 				f.s.clearBoundary()
 				if interruption != "recorded" {
-					intakefixture.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
+					fixturekit.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
 				}
 			}
 			packet, err := f.c.Packet(context.Background(), f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			slice, _ := trace.SliceFor(*packet.ProjectSpec, f.stream1)
 			if packet.ProjectSpecRevision != old.Revision+1 || slice.Spec != s2 || slice.Plan != crossPlan1 || calls.Load() != 1 {
 				t.Fatalf("redraft attached unseen text or duplicated: rev=%d calls=%d slice=%+v", packet.ProjectSpecRevision, calls.Load(), slice)
@@ -496,7 +497,7 @@ func TestProjectSpecContractGuardFailureAndRetry(t *testing.T) {
 		return &agent.Result{ClaudeID: "empty-redraft", ResultText: "No delivery", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.Mu.Unlock()
-	intakefixture.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
+	fixturekit.Must(t, f.s.draftProjectSpecIfReady(context.Background(), mustRepo(t, f.s, f.project), id))
 	assertGuardRefusal(t, f, id, 2, "ended without delivering")
 	runRefresh(t, f)
 	if !reflect.DeepEqual(refreshDocument(t, f, id), old) {
@@ -528,7 +529,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 	}
 	repo := mustRepo(t, f.s, f.project)
 	for range lifecycle.ProjectSpecDraftAttempts + 2 {
-		intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+		fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
 	}
 	if refused.Load() != lifecycle.ProjectSpecDraftAttempts || !reflect.DeepEqual(refreshDocument(t, f, id), old) {
 		t.Fatalf("guarded redraft did not stop after %d refusals: calls=%d", lifecycle.ProjectSpecDraftAttempts, refused.Load())
@@ -548,7 +549,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 	scriptProjectSpecTurn(f, "project-spec-draft-9", func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		calls.Add(1)
 		prompt.Store(req.Prompt)
-		_, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
+		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
 			"behavior":  "Redrafted upload contract.",
 			"contracts": []map[string]any{{"name": "acknowledgment", "text": "The reviewed acknowledgment."}},
 			"slices": []map[string]any{
@@ -567,7 +568,7 @@ func TestProjectSpecContractGuardRedraftStopsRetryingAndTheChiefAsksAgain(t *tes
 		t.Fatalf("chief's request not taken: %+v", out)
 	}
 	for range 2 {
-		intakefixture.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
+		fixturekit.Must(t, f.s.draftProjectSpecIfReady(ctx, repo, id))
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("requested redraft ran %d times", calls.Load())
@@ -596,12 +597,12 @@ func TestProjectSpecContractGuardHonorsApprovalDuringRedraft(t *testing.T) {
 		}
 		reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, crossSpec1)
 		packet, err := f.c.Packet(context.Background(), f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if packet.ProjectSpecRevision != packets[0].ProjectSpecRevision {
 			t.Fatal("unexpected revision before approval")
 		}
 		_, err = f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		approved = true
 		return nil
 	}
@@ -625,17 +626,17 @@ func TestProjectSpecContractGuardLeavesOrdinaryEditsMechanical(t *testing.T) {
 	runRefresh(t, f)
 	runGuardDraft(t, f)
 	packet, err := f.c.Packet(context.Background(), f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if packet.ProjectSpecRevision != 2 || packet.ProjectSpec.Behavior != packets[0].ProjectSpec.Behavior {
 		t.Fatal("ordinary edit ran the architect")
 	}
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	groups, _, err := trace.Workgroups(wt)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	th, err := wt.Thread(groups[0].Members[0], intake.ArchitectAgent)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 	if len(th.Turns) != 1 {
 		t.Fatalf("ordinary edit queued %d turns", len(th.Turns))
 	}
@@ -651,9 +652,9 @@ func TestProjectSpecContractGuardDefersHeldMembers(t *testing.T) {
 			reviseRefreshMember(t, f, f.stream1, plan.SpecDocument, strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1))
 			if hold == "joining" {
 				_, err := trace.CreateWorkgroup(context.Background(), mustRepo(t, f.s, f.project2), []config.WorkstreamID{f.stream2}, f.s.now(), intake.OwnerActor, "joining")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 			} else {
-				intakefixture.Must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: id, ArchivedAt: f.s.now()}))
+				fixturekit.Must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: id, ArchivedAt: f.s.now()}))
 			}
 			runGuardDraft(t, f)
 			if !reflect.DeepEqual(refreshDocument(t, f, id), old) {

@@ -67,7 +67,7 @@ func (l *flakeFixLive) failing(fail func(name string) bool) *announceFaults {
 func (l *flakeFixLive) pass(t *testing.T) {
 	t.Helper()
 	repo := l.repository()
-	intakefixture.Must(t, (&flakeRecorder{s: l.s, cfg: l.s.about(repo), repository: repo}).Pass(context.Background()))
+	fixturekit.Must(t, (&flakeRecorder{s: l.s, cfg: l.s.about(repo), repository: repo}).Pass(context.Background()))
 }
 
 func (l *flakeFixLive) current(t *testing.T, o flakes.Occurrence) flakes.Occurrence {
@@ -337,7 +337,7 @@ func TestFlakeAnnouncementReachesADeliveredOrAbandonedOriginatingWorkstream(t *t
 			l := startFlakeFixLive(t, "flake-announce-"+terminal, flakyOutcome(flakyTraceTest))
 			repo := l.repository()
 			other := config.WorkstreamID("w_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-			intakefixture.Must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
+			fixturekit.Must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 			run := recordUnitFlakyRun(t, repo, other, "resume", 1, flakyWebTest)
 			occ := l.occurrence(t, other, run)
 			l.awaitNoticeOf(t, other, occ.ID)

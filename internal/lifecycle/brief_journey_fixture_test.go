@@ -129,7 +129,7 @@ func (c *briefChief) earlyResults(review int) []string {
 }
 
 func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall) string {
-	out, err := intakefixture.CallTool(ctx, tools, call.Tool, call.Input)
+	out, err := fixturekit.CallTool(ctx, tools, call.Tool, call.Input)
 	if err != nil {
 		return call.Tool + " failed: " + err.Error()
 	}
@@ -273,9 +273,9 @@ func (j *briefJourney) assemble(t *testing.T, stream config.WorkstreamID, dir, r
 func (j *briefJourney) review(t *testing.T, stream config.WorkstreamID, op coreadapter.Operation, summary string) api.FinalReport {
 	t.Helper()
 	in, err := delivery.DecodeFinalReview(op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	j.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": summary, "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": summary, "findings": []any{}})
 		return err
 	})
 	a := &finalReviewer{s: j.s, repository: j.repository}
@@ -283,7 +283,7 @@ func (j *briefJourney) review(t *testing.T, stream config.WorkstreamID, op corea
 		t.Fatalf("final review %d: %+v", in.Review, result)
 	}
 	report, found, err := delivery.LatestFinalReport(j.repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || report.Review != in.Review || report.Outcome != delivery.FinalReviewed {
 		t.Fatalf("final review %d recorded %+v", in.Review, report)
 	}
@@ -302,10 +302,10 @@ func (j *briefJourney) reassemble(t *testing.T, files map[string]string) api.Fin
 			t.Fatalf("move to %s: %s", to, apiFault.Message)
 		}
 	}
-	move(intakefixture.BuildingState, "The owner asked for a change to the brief's page.")
+	move(intake.BuildingState, "The owner asked for a change to the brief's page.")
 	moveFeature(t, j.shedFixture, j.stream, files)
 	move(intake.AssembledState, "The change landed; review the branch.")
-	intakefixture.Must(t, (&finalReviewer{s: j.s, repository: j.repository}).Pass(ctx))
+	fixturekit.Must(t, (&finalReviewer{s: j.s, repository: j.repository}).Pass(ctx))
 	ops := finalOperations(t, j.repository, j.stream)
 	return j.review(t, j.stream, ops[len(ops)-1].Operation, "Resumable uploads, changed")
 }
@@ -313,7 +313,7 @@ func (j *briefJourney) reassemble(t *testing.T, files map[string]string) api.Fin
 func (j *briefJourney) capture(t *testing.T, name, commit string) string {
 	t.Helper()
 	var data bytes.Buffer
-	intakefixture.Must(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 3, 2))))
+	fixturekit.Must(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 3, 2))))
 	return j.captureImage(t, name, commit, data.Bytes())
 }
 
@@ -321,16 +321,16 @@ func (j *briefJourney) captureImage(t *testing.T, name, commit string, data []by
 	t.Helper()
 	ctx := context.Background()
 	img, err := j.repository.RecordImage(ctx, trace.Header{Project: j.repository.Project(), Workstream: j.stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, name, "image/png", data, "turn")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	content, err := json.Marshal(map[string]any{"workstream": j.stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.stream, "commit": commit}})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, j.repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.repository.Project(), Workstream: j.stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, j.repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.repository.Project(), Workstream: j.stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
 	return img.ID
 }
 
 func (j *briefJourney) run(t *testing.T) {
 	t.Helper()
-	intakefixture.Must(t, j.repository.Close())
+	fixturekit.Must(t, j.repository.Close())
 	j.start(t)
 	if !j.running {
 		t.Cleanup(func() { j.stop(t) })
@@ -344,7 +344,7 @@ func (j *briefJourney) halt(t *testing.T) {
 	j.chief.release()
 	j.stop(t)
 	repository, err := trace.Open(j.s.cfg.Root, j.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repository.Close() })
 	j.repository = repository
 	j.s.setSole(&activeProject{repository: repository})
@@ -383,7 +383,7 @@ func (j *briefJourney) awaitEntry(t *testing.T, stream config.WorkstreamID) api.
 func (j *briefJourney) present(t *testing.T, stream config.WorkstreamID) api.DeliveryPresentation {
 	t.Helper()
 	p, err := j.c.Delivery(context.Background(), stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return p
 }
 
@@ -397,9 +397,9 @@ func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, 
 		ID    string      `json:"id"`
 		Calls []briefCall `json:"calls"`
 	}{id, calls})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = j.c.Send(context.Background(), stream, briefDirective+string(data))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out []string
 	intakefixture.Eventually(t, "the chief of staff never made the calls of "+id, func() bool {
 		out = j.chief.result(id)
@@ -429,7 +429,7 @@ func (j *briefJourney) publish(t *testing.T) string {
 		op = j.request(t)
 	}
 	result, err := j.publisher().Apply(ctx, op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" || len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Prs[0].Draft {
 		t.Fatalf("marking ready %+v: %+v", result, j.pulls)
 	}

@@ -67,22 +67,22 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					return err == nil
 				})
 				_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				lifecycleAwait(t, f, "single-member completed seal", func() bool {
 					repo, err := f.s.repository(f.project)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					_, _, found, err := seal.Latest(repo, f.origin)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					return found
 				})
 				repo, err := f.s.repository(f.project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				cfg := f.s.current().For(f.project)
 				p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: "main", Branch: intake.FeatureBranch(f.origin), Commit: "feature-tip", PullRequest: 101}
 				resolutionDocument(t, repo, f.origin, delivery.PublicationDocument, delivery.PublicationPath, p)
 				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered-for-pane", Revision: 1, Project: f.project, Workstream: f.origin, At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
 				_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "Owner-approved ready PR published")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				publications = []api.DeliveryPublication{p}
 			} else {
 				edge := graph
@@ -98,13 +98,13 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 				members = members[:1]
 			}
 			initial, err := f.c.Status(ctx, f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			group := initial.Workgroup
 			if group == nil || len(group.Members) != len(members) {
 				t.Fatalf("group=%+v", group)
 			}
 			conversation, err := f.c.Conversation(ctx, f.origin)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(conversation.Entries) == 0 {
 				t.Fatal("original design conversation is empty")
 			}
@@ -121,20 +121,20 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 			resolvedRevision := func() int {
 				t.Helper()
 				repo, err := f.s.repository(f.project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if graph != "single" {
 					repo, err = trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					defer repo.Close()
 				}
 				ids, rev, err := trace.ResolvedWorkgroups(repo)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if rev > 0 && !slices.Equal(ids, []config.WorkgroupID{group.ID}) {
 					t.Fatalf("resolved groups=%v", ids)
 				}
 				if graph != "single" {
 					active, err := trace.ProjectSpecActive(repo, group.ID)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					if active != (rev == 0) {
 						t.Fatalf("project spec active=%v revision=%d", active, rev)
 					}
@@ -153,10 +153,10 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 			if graph == trace.EdgeHardBlock {
 				merge(0)
 				down, err := f.s.repository(f.project2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				await("sink wait cleared", func() bool {
 					wait, err := lifecycle.EdgeWaitDisplay(down, f.stream2)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					return wait == ""
 				})
 				await("chief of staff archives and cleans up the merged member", func() bool {
@@ -167,7 +167,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 			}
 			for _, m := range archived {
 				_, err := f.c.Archive(ctx, m.stream)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				await("authorized archive cleanup", func() bool {
 					a, ok := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
 					return ok && !a.CleanedAt.IsZero()
@@ -180,7 +180,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 			check := func(wantRevision int) {
 				t.Helper()
 				list, err := f.c.Statuses(ctx)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, m := range shown {
 					wantState, wantWait := "delivered (merged)", ""
 					if !merged[m.stream] {
@@ -188,7 +188,7 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 						wantWait = fmt.Sprintf("archived member %s has no pinned merge or cancel evidence; workgroup remains unresolved", m.stream)
 					}
 					row, err := f.c.Status(ctx, m.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					rows := []api.WorkstreamStatus{row}
 					for _, item := range list.Workstreams {
 						if item.Workstream == m.stream {
@@ -204,17 +204,17 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 						}
 					}
 					gone, err := trace.WorkstreamTraceGone(f.s.current().Root, m.project, m.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					if !gone {
 						t.Fatal("pane recreated cleaned member history")
 					}
 				}
 				if graph != "single" {
 					authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					entries, err := service.TestConversationEntries(authority, f.origin)
-					intakefixture.Must(t, err)
-					intakefixture.Must(t, authority.Close())
+					fixturekit.Must(t, err)
+					fixturekit.Must(t, authority.Close())
 					if len(entries) < len(conversation.Entries) || !slices.Equal(entries[:len(conversation.Entries)], conversation.Entries) {
 						t.Fatal("workgroup lost the original shared conversation")
 					}

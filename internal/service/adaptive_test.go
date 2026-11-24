@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,7 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -29,7 +29,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 	for _, tc := range []struct {
 		name, spec string
 		allowed    bool
-	}{{"engineering", intakefixture.ValidSpec, true}, {"intent", amendedSpec, false}} {
+	}{{"engineering", fixturekit.ValidSpec, true}, {"intent", amendedSpec, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, stream := builtForAmendment(t, 1)
 			defer f.stop(t)
@@ -56,7 +56,7 @@ func TestChiefDecidesEngineeringRevisionButCannotChangeIntent(t *testing.T) {
 					t.Fatalf("misattributed engineering ruling: %+v", turns)
 				}
 				m, err := newMasonController(f.s, f.repository()).bundle(context.Background(), stream, "resume")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if text := m.RenderAmendments(); !strings.Contains(text, "the chief of staff approved") || strings.Contains(text, "osmia:owner_response") {
 					t.Fatalf("misattributed assignment: %s", text)
 				}
@@ -73,70 +73,70 @@ func TestDiscoveryBlocksCompletionUntilAssignedWorkLands(t *testing.T) {
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
 	tool := recordDiscovery(c.repo, scope, c.f.s.now)
 	raw, err := tool.Handle(context.Background(), json.RawMessage(`{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var result struct {
 		ID       string `json:"id"`
 		Revision int    `json:"revision"`
 	}
-	intakefixture.Must(t, json.Unmarshal(raw, &result))
+	fixturekit.Must(t, json.Unmarshal(raw, &result))
 	if result.ID == "" {
 		t.Fatal(string(raw))
 	}
 	pending, err := unresolvedWork(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !pending {
 		t.Fatal("open necessary work did not block completion")
 	}
 	again, err := tool.Handle(context.Background(), json.RawMessage(`{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(again) != string(raw) {
 		t.Fatalf("duplicate discovery: %s %s", raw, again)
 	}
 	reused, err := tool.Handle(context.Background(), json.RawMessage(`{"key":"repair-fake","description":"Unrelated work","criterion":"spec#1"}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(reused), "different work") {
 		t.Fatalf("reused key hid new work: %s", reused)
 	}
 	_, previous, err := c.r.candidateEvidence(context.Background(), c.stream, "resume")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	jevfixture.Fallback(c.repo, c.repo.Project(), c.stream, jev.KindDiscovery, jev.DiscoveryKey(result.ID))
 	input, _ := json.Marshal(map[string]any{"id": result.ID, "revision": result.Revision, "disposition": "assigned", "unit": "resume", "reason": "This supporting change belongs to the upload outcome."})
 	assigned, err := tool.Handle(context.Background(), input)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(assigned), `"recorded":true`) {
 		t.Fatal(string(assigned))
 	}
 	pending, err = unresolvedWork(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !pending {
 		t.Fatal("assignment incorrectly counted as completion")
 	}
 	_, current, err := c.r.candidateEvidence(context.Background(), c.stream, "resume")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if why := execution.StaleReview(previous, current); !strings.Contains(why, "discovered work") {
 		t.Fatalf("new work did not invalidate old review: %q", why)
 	}
 	assignment, err := assignmentContext(c.repo, coreadapter.Scope{Workstream: string(c.stream), Unit: "resume", Role: reviewerRole})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(assignment, "Update the dependent fake") {
 		t.Fatal("reviewer did not receive discovered work")
 	}
 	mergeDirectly(t, c.f, c.repo, c.stream, "resume", map[string]string{"discovered.txt": "fake repaired\n"})
 	pending, err = unresolvedWork(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if pending {
 		t.Fatal("landed assignment did not resolve necessary work")
 	}
 	input, _ = json.Marshal(map[string]any{"id": result.ID, "revision": 2, "disposition": "declined", "reason": "Inspection shows the existing fake already covers this behavior."})
 	_, err = tool.Handle(context.Background(), input)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	pending, err = unresolvedWork(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if pending {
 		t.Fatal("reasoned disposition did not resolve the discovery")
 	}
 	stale, err := tool.Handle(context.Background(), input)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(stale), "discovery changed") {
 		t.Fatal(string(stale))
 	}
@@ -165,7 +165,7 @@ func TestRemoteFileResolvesCommitAndKeepsCredentialsInService(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	f, err := githubFile(context.Background(), client, "fixture-token", remoteFile{Repository: "https://github.com/example/project.git", Ref: "main", Path: "docs/design.md"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if calls != 2 || f.Commit != commit || f.Content != "# Referenced design\n" {
 		t.Fatalf("wrong remote evidence %+v", f)
 	}
@@ -184,13 +184,13 @@ func TestAssignmentContextAndDependenciesFollowCurrentPlan(t *testing.T) {
 	f, stream, repo, _ := newFinalFixture(t, "assignment-context")
 	defer repo.Close()
 	held, err := assignmentHeld(repo, stream, "dedupe", masonRole)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !held {
 		t.Fatal("dependent unit was dispatched before its prerequisite landed")
 	}
 	scope := coreadapter.Scope{Workstream: string(stream), Role: masonRole, Unit: "dedupe"}
 	text, err := assignmentContext(repo, scope)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, want := range []string{"plan revision 1", "Skip acknowledged chunks", "resume", "factory_context"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("assignment lacks %q: %s", want, text)
@@ -198,7 +198,7 @@ func TestAssignmentContextAndDependenciesFollowCurrentPlan(t *testing.T) {
 	}
 	mergeDirectly(t, f, repo, stream, "resume", map[string]string{"resume.txt": "implemented\n"})
 	held, err = assignmentHeld(repo, stream, "dedupe", masonRole)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if held {
 		t.Fatal("landed prerequisite still holds dependent work")
 	}
@@ -211,7 +211,7 @@ func factoryContextScope(c *contestFixture) coreadapter.Scope {
 func currentSpecDocument(t *testing.T, c *contestFixture) trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var spec trace.Document
 	for _, d := range docs {
 		if d.ID == plan.SpecDocument {
@@ -229,7 +229,7 @@ func recordLargeSource(t *testing.T, c *contestFixture) trace.Document {
 	source.Revision = 1
 	source.Cause = "fixture"
 	source.Content = `{"content":"` + strings.Repeat("é", 40000) + `"}`
-	intakefixture.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{source}))
+	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{source}))
 	return source
 }
 
@@ -240,15 +240,15 @@ func TestFactoryContextReadsAPriorRevisionOfADocument(t *testing.T) {
 	spec.Revision++
 	spec.Content = amendedSpec
 	spec.Cause = "fixture"
-	intakefixture.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{spec}))
+	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{spec}))
 	raw, err := factoryContext(c.repo, factoryContextScope(c)).Handle(context.Background(), json.RawMessage(`{"path":"spec.md","revision":1}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var got struct {
 		Content  string `json:"content"`
 		Revision int    `json:"revision"`
 	}
-	intakefixture.Must(t, json.Unmarshal(raw, &got))
-	if got.Revision != 1 || got.Content != intakefixture.ValidSpec {
+	fixturekit.Must(t, json.Unmarshal(raw, &got))
+	if got.Revision != 1 || got.Content != fixturekit.ValidSpec {
 		t.Fatalf("wrong historical evidence: %s", raw)
 	}
 }
@@ -257,7 +257,7 @@ func TestARecordedSourceResolvesAndAnInventedOneDoesNot(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "factory-source")
 	recordLargeSource(t, c)
-	intakefixture.Must(t, questions.Resolve(context.Background(), c.repo, c.stream, "source#source-fixture"))
+	fixturekit.Must(t, questions.Resolve(context.Background(), c.repo, c.stream, "source#source-fixture"))
 	if err := questions.Resolve(context.Background(), c.repo, c.stream, "source#missing"); err == nil {
 		t.Fatal("invented source resolved")
 	}
@@ -273,12 +273,12 @@ func TestFactoryContextPagesALargeSourceWithoutLoss(t *testing.T) {
 	for {
 		input, _ := json.Marshal(map[string]any{"path": source.Path, "offset": offset})
 		raw, err := tool.Handle(context.Background(), input)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var page struct {
 			Content string `json:"content"`
 			Next    int    `json:"next_offset"`
 		}
-		intakefixture.Must(t, json.Unmarshal(raw, &page))
+		fixturekit.Must(t, json.Unmarshal(raw, &page))
 		recovered.WriteString(page.Content)
 		if page.Next == 0 {
 			break
@@ -310,15 +310,15 @@ func TestFactoryContextListsFolders(t *testing.T) {
 	for _, id := range []string{"discovery-a", "discovery-b"} {
 		recorded = append(recorded, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: chiefActor, Cause: "fixture"}, Path: "discoveries/" + id + ".json", Content: "{}"})
 	}
-	intakefixture.Must(t, c.repo.RecordDocuments(context.Background(), recorded))
+	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), recorded))
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	for _, path := range []string{"discoveries", "discoveries/"} {
 		input, _ := json.Marshal(map[string]any{"path": path})
 		raw, err := tool.Handle(context.Background(), input)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var listed map[string]int
-		intakefixture.Must(t, json.Unmarshal(raw, &listed))
+		fixturekit.Must(t, json.Unmarshal(raw, &listed))
 		if len(listed) != 2 || listed["discoveries/discovery-a.json"] != 1 || listed["discoveries/discovery-b.json"] != 1 {
 			t.Fatalf("folder %q listed %s", path, raw)
 		}
@@ -341,7 +341,7 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	captured := "failure at start\n" + strings.Repeat("é", 70000) + "\nfailure at end\n"
 	path := "units/resume/checks-99-output.txt"
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "unit-resume-checks-99-output", Revision: 1, Project: c.repo.Project(), Workstream: c.stream, At: c.f.clock.Now(), Actor: execution.ChecksActor, Cause: "fixture"}, Path: path, Content: captured}
-	intakefixture.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
+	fixturekit.Must(t, c.repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
 	tool := factoryContext(c.repo, scope)
 	var recovered strings.Builder
@@ -349,12 +349,12 @@ func TestFactoryContextReadsCompleteCheckOutput(t *testing.T) {
 	for {
 		input, _ := json.Marshal(map[string]any{"path": path, "start": 1, "lines": 1000, "offset": offset})
 		raw, err := tool.Handle(context.Background(), input)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var page struct {
 			Content string `json:"content"`
 			Next    int    `json:"next_offset"`
 		}
-		intakefixture.Must(t, json.Unmarshal(raw, &page))
+		fixturekit.Must(t, json.Unmarshal(raw, &page))
 		recovered.WriteString(page.Content)
 		if page.Next == 0 {
 			break
@@ -373,48 +373,48 @@ func TestChiefInspectsMasonCandidateAndCommissionsWork(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "chief-engineering-tools")
 	scope := coreadapter.Scope{Project: string(c.repo.Project()), Workstream: string(c.stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "events_1"}
-	raw, err := inspectCode(c.f.s.about(c.repo), c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","path":"`+intakefixture.MasonWrote+`"}`))
-	intakefixture.Must(t, err)
+	raw, err := inspectCode(c.f.s.about(c.repo), c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","path":"`+fixturekit.MasonWrote+`"}`))
+	fixturekit.Must(t, err)
 	var evidence struct {
 		trace.CodeInspection
 		Citation string `json:"citation"`
 	}
-	intakefixture.Must(t, json.Unmarshal(raw, &evidence))
+	fixturekit.Must(t, json.Unmarshal(raw, &evidence))
 	if evidence.Commit == "" || evidence.Content != "package trace\n" || evidence.Citation == "" {
 		t.Fatalf("missing candidate evidence: %s", raw)
 	}
 	w, _, found, err := newUnitWorkspaces(c.f.s.cfg, c.repo).find(context.Background(), c.stream, "resume")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("unit workspace missing")
 	}
-	intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "unfinished.txt"), []byte("captured after the report\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "unfinished.txt"), []byte("captured after the report\n"), 0600))
 	latest, err := inspectCode(c.f.s.cfg, c.repo, scope, c.f.clock.Now).Handle(context.Background(), json.RawMessage(`{"unit":"resume","captured":true,"path":"unfinished.txt"}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var captured trace.CodeInspection
-	intakefixture.Must(t, json.Unmarshal(latest, &captured))
+	fixturekit.Must(t, json.Unmarshal(latest, &captured))
 	if captured.Commit == evidence.Commit || captured.Content != "captured after the report\n" {
 		t.Fatalf("captured inspection reused stale report: %s", latest)
 	}
 	tools, err := questions.Tools(c.repo, trace.ChiefOfStaff, scope, c.f.clock.Now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, tool := range tools {
 		if tool.Name != questions.RouteAmendmentTool {
 			continue
 		}
 		input := json.RawMessage(`{"citations":["spec#1"],"change":"Add a bounded investigation of interrupted transfers to the execution plan","reason":"The implementation revealed an unverified assumption; preserve approved intent"}`)
 		first, err := tool.Handle(context.Background(), input)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !strings.Contains(string(first), `"recorded":true`) {
 			t.Fatal(string(first))
 		}
 		second, err := tool.Handle(context.Background(), input)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if string(first) != string(second) {
 			t.Fatalf("repeated request duplicated work: %s %s", first, second)
 		}
 		state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if state.Value != UnitReviewing {
 			t.Fatalf("chief's own request parked unrelated unit: %s", state.Value)
 		}
@@ -439,14 +439,14 @@ func TestRecoveryDecisionDoesNotResetLoopGuard(t *testing.T) {
 	t.Parallel()
 	c := newContestFixture(t, "recovery-progress")
 	before, _, err := lastProgress(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	c.contest(t)
 	out := c.resolve(t, `{"unit":"resume","decision":"review","note":"Use the existing verification evidence"}`)
 	if !strings.Contains(out, `"recorded":true`) {
 		t.Fatal(out)
 	}
 	after, _, err := lastProgress(c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !after.Equal(before) {
 		t.Fatal("a recovery instruction reset the no-progress budget")
 	}
@@ -458,27 +458,27 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 	m := newMasonController(f.s, repo)
 	ctx := context.Background()
 	b, _, err := m.read(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	started, blocked, err := m.start(ctx, b, "dedupe")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !started || blocked {
 		t.Fatal("fixture did not start neighboring assignment")
 	}
 	directory := t.TempDir()
 	q, err := repo.ClaimTurn(ctx, stream, masonAgent("dedupe"), "writer", directory, f.clock.Now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	idle, err := revisionWorkersIdle(repo, stream, []string{"dedupe"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if idle {
 		t.Fatal("assignment revised underneath an active writer")
 	}
 	held, err := assignmentHeld(repo, stream, "resume", masonRole)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !held {
 		t.Fatal("overlapping implementation was dispatched")
 	}
 	held, err = assignmentHeld(repo, stream, "resume", reviewerRole)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if held {
 		t.Fatal("read-only review waited for an unrelated writer")
 	}
@@ -487,24 +487,24 @@ func TestReplanningWaitsForWritersWithoutHoldingReadOnlyReview(t *testing.T) {
 	h.ID = trace.EventID(q.Request.ID, "response")
 	h.At = f.clock.Now()
 	response := trace.TurnResponse{Header: h, AgentID: masonAgent("dedupe"), ThreadID: masonAgent("dedupe"), TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "writer-session"}, SessionDirectory: directory, StartedAt: q.Claim.At, FinalResponse: "Investigation recorded"}}
-	intakefixture.Must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
-	intakefixture.Must(t, repo.CompleteTurn(ctx, stream, masonAgent("dedupe"), q.Request.TurnID, q.Claim.Token, f.clock.Now()))
+	fixturekit.Must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
+	fixturekit.Must(t, repo.CompleteTurn(ctx, stream, masonAgent("dedupe"), q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 	idle, err = revisionWorkersIdle(repo, stream, []string{"dedupe"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !idle {
 		t.Fatal("completed writer permanently blocked replanning")
 	}
 	w, _, found, err := newUnitWorkspaces(f.s.cfg, repo).find(ctx, stream, "dedupe")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("captured unit workspace disappeared")
 	}
-	intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "investigation.txt"), []byte("work captured before done\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "investigation.txt"), []byte("work captured before done\n"), 0600))
 	scope := chiefTurn(t, f, repo, stream, "inspect_unfinished")
 	raw, err := inspectCode(f.s.cfg, repo, scope, f.clock.Now).Handle(ctx, json.RawMessage(`{"unit":"dedupe","path":"investigation.txt"}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var evidence trace.CodeInspection
-	intakefixture.Must(t, json.Unmarshal(raw, &evidence))
+	fixturekit.Must(t, json.Unmarshal(raw, &evidence))
 	if evidence.Commit == "" || evidence.Content != "work captured before done\n" {
 		t.Fatalf("chief cannot inspect unfinished captured work: %s", raw)
 	}

@@ -58,12 +58,12 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 	files := configFiles(t, opts)
 	_, c := start(t, opts)
 	before, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	files.write(t, files.topText+"[capacity]\nmasons = 0\n")
 	reloadFails(t, c, files.top, "capacity.masons")
 	now, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if now.Digest != before.Digest || !reflect.DeepEqual(now.Effective, before.Effective) || now.Effective.Capacity.Masons != 4 {
 		t.Fatalf("a failed reload changed the loaded configuration: %+v", now)
 	}
@@ -76,7 +76,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 
 	files.write(t, files.topText+"[capacity]\nmasons = 7\n")
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if now.LastError == nil || now.Digest != before.Digest || !hasCode(now.Diagnostics, "configuration", ReloadRequired) {
 		t.Fatalf("after the fix on disk: %+v", now)
 	}
@@ -87,7 +87,7 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 		t.Fatalf("unparsable reload: %v", err)
 	}
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	encoded, _ := json.Marshal(now)
 	if now.LastError == nil || now.LastError.Path != files.top || now.Digest != before.Digest || bytes.Contains(encoded, []byte("secret-reload-text")) {
 		t.Fatalf("after an unparsable reload: %s", encoded)
@@ -95,9 +95,9 @@ func TestReloadValidatesTheTopLevelFileBeforeApplying(t *testing.T) {
 
 	files.write(t, files.topText+"[capacity]\nmasons = 7\n")
 	reloaded, err := c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if reloaded.Digest == before.Digest || reloaded.Digest != now.Digest || len(reloaded.RestartRequired) != 0 {
 		t.Fatalf("reload: %+v, configuration digest %s", reloaded, now.Digest)
 	}
@@ -119,12 +119,12 @@ func TestReloadReportsRestartRequiredSettings(t *testing.T) {
 
 	files.write(t, files.topText+"[listen]\nsocket = \"local.sock\"\n[capacity]\nreviewers = 5\n")
 	reloaded, err := c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.socket"}) {
 		t.Fatalf("restart required: %+v", reloaded)
 	}
 	now, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if now.Effective.Listen.Socket != socket || now.Effective.Capacity.Reviewers != 5 || now.Digest != reloaded.Digest {
 		t.Fatalf("after reload: %+v", now)
 	}
@@ -141,19 +141,19 @@ func TestReloadKeepsTheRunningProjectsAndTheirEffectiveSettings(t *testing.T) {
 	first, second := root.ids[0], root.ids[1]
 	store := projectstore.Open(root.cfg.Root)
 	current, err := store.Current(first)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	newer, err := store.Replace(first, current.Pin, append(current.Data, "checks_timeout = \"30m\"\n"...))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	newcomer := config.ProjectID("p_cccccccccccccccccccccccccccccccc")
 	_, err = store.WriteFirst(newcomer, []byte("version = 1\nupstream = \"upstream/new\"\nclone = \""+filepath.Join(t.TempDir(), "new")+"\"\n"))
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, store.Add(newcomer))
-	intakefixture.Must(t, store.Remove(second))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, store.Add(newcomer))
+	fixturekit.Must(t, store.Remove(second))
 	files := configFiles(t, root.opts)
 	files.write(t, files.topText+"[capacity]\nper_workstream = 5\n")
 
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	loaded := s.current()
 	if got := loaded.ProjectIDs(); !slices.Equal(got, root.ids) {
@@ -163,7 +163,7 @@ func TestReloadKeepsTheRunningProjectsAndTheirEffectiveSettings(t *testing.T) {
 		t.Fatalf("the reload adopted the saved revision: checks_timeout %q", got)
 	}
 	read, err := c.ProjectConfig(ctx, first)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	timeout := settingOf(t, read, "checks_timeout")
 	if read.Pin != newer.Pin || !timeout.Pending || timeout.Value != "30m" || timeout.Effective != config.DefaultChecksTimeout {
 		t.Fatalf("the saved revision is not pending: %+v", timeout)
@@ -185,7 +185,7 @@ func TestReloadAppliesErrorReports(t *testing.T) {
 	files := configFiles(t, opts)
 	_, c := start(t, opts)
 	before, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if e := before.Effective.ErrorReports; e.Enabled || e.Repository != "kpenfound/osmia" {
 		t.Fatalf("default effective error reports: %+v", e)
 	}
@@ -200,9 +200,9 @@ max_comments_per_day = 3
 sources = ["github"]
 `)
 	reloaded, err := c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	now, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	want := config.ErrorReports{Enabled: true, Repository: "owner/other", Labels: []string{"bug"}, MaxIssuesPerHour: 1, MaxIssuesPerDay: 2, MaxCommentsPerDay: 3, Sources: []string{"github"}}
 	if len(reloaded.RestartRequired) != 0 || !reflect.DeepEqual(now.Effective.ErrorReports, want) || hasCode(now.Diagnostics, "configuration", RestartRequired) || reloaded.Digest == before.Digest {
 		t.Fatalf("reload %+v, effective %+v, diagnostics %+v", reloaded, now.Effective.ErrorReports, now.Diagnostics)
@@ -210,9 +210,9 @@ sources = ["github"]
 
 	files.write(t, files.topText)
 	reloaded, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(reloaded.RestartRequired) != 0 || !reflect.DeepEqual(now.Effective.ErrorReports, before.Effective.ErrorReports) {
 		t.Fatalf("after removing the section: %+v %+v", reloaded, now.Effective.ErrorReports)
 	}
@@ -228,16 +228,16 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	files := configFiles(t, opts)
 	_, c := start(t, opts)
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: intakefixture.Project, Workstreams: []config.WorkstreamID{intakefixture.Stream}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
 	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	stored, err := os.ReadFile(filepath.Join(opts.Config.Root, "runtime.json"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	unchanged := func(t *testing.T) {
 		t.Helper()
 		disk, err := os.ReadFile(filepath.Join(opts.Config.Root, "runtime.json"))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !bytes.Equal(disk, stored) {
 			t.Fatalf("reload rewrote runtime.json:\n%s", disk)
 		}
@@ -245,10 +245,10 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 
 	files.write(t, files.topText+"[roles.reviewer]\nprofile = \"other\"\n")
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	unchanged(t)
 	now, err := c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(now.Effective.Pauses, before.Effective.Pauses) || !reflect.DeepEqual(now.Effective.Priorities, before.Effective.Priorities) {
 		t.Fatalf("runtime controls changed: %+v", now.Effective)
 	}
@@ -259,19 +259,19 @@ func TestReloadPreservesRuntimeState(t *testing.T) {
 	withoutOther := strings.Replace(files.topText, "[profiles.other]\nagent = \"codex\"\nmodel = \"other\"\n", "", 1)
 	files.write(t, withoutOther)
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	unchanged(t)
 	now, err = c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if now.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) || !hasCode(now.Diagnostics, "profiles", Validation) {
 		t.Fatalf("stale override: %+v %+v", now.Profiles, now.Diagnostics)
 	}
 	files.write(t, files.topText)
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	unchanged(t)
 	now, err = c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(now.Effective, before.Effective) || !reflect.DeepEqual(now.Profiles, before.Profiles) {
 		t.Fatalf("runtime after restoring the profile: %+v, want %+v", now, before)
 	}
@@ -304,19 +304,19 @@ func TestReloadAppliesToNextTurnsAndKeepsRunningOnes(t *testing.T) {
 			}}, nil
 	}
 	s, c := start(t, opts)
-	first, err := c.Send(ctx, intakefixture.Stream, "first")
-	intakefixture.Must(t, err)
+	first, err := c.Send(ctx, fixturekit.Stream, "first")
+	fixturekit.Must(t, err)
 	select {
 	case <-turns.Entered:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the first message did not run")
 	}
 
 	files.write(t, files.topText+"[roles.chief_of_staff]\nprofile = \"other\"\n[capacity]\nmasons = 7\n")
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
-	second, err := c.Send(ctx, intakefixture.Stream, "second")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
+	second, err := c.Send(ctx, fixturekit.Stream, "second")
+	fixturekit.Must(t, err)
 	close(turns.Hold)
 	awaitConversation(t, c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 4 && l.Entries[3].State == TurnDone
@@ -347,19 +347,19 @@ func TestDefaultRootReloadsXDGConfig(t *testing.T) {
 	data, conf := filepath.Join(home, "data"), filepath.Join(home, "conf")
 	t.Setenv("XDG_DATA_HOME", data)
 	t.Setenv("XDG_CONFIG_HOME", conf)
-	intakefixture.Must(t, os.MkdirAll(data, 0700))
-	intakefixture.Must(t, os.MkdirAll(filepath.Join(conf, "osmia"), 0700))
+	fixturekit.Must(t, os.MkdirAll(data, 0700))
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(conf, "osmia"), 0700))
 	root := filepath.Join(data, "osmia")
-	intakefixture.Must(t, os.Rename(opts.Config.Root, root))
+	fixturekit.Must(t, os.Rename(opts.Config.Root, root))
 	top := filepath.Join(conf, "osmia", "config.toml")
-	intakefixture.Must(t, os.Rename(filepath.Join(root, "config.toml"), top))
+	fixturekit.Must(t, os.Rename(filepath.Join(root, "config.toml"), top))
 	opts.Config = config.Options{}
 	_, c := start(t, opts)
 	text, err := os.ReadFile(top)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(top, append(text, "[capacity]\nmasons = 7\n"...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(top, append(text, "[capacity]\nmasons = 7\n"...), 0600))
 	now, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(now.Drift.Files) == 0 || now.Drift.Files[0].Path != top || now.Drift.Files[0].State != ConfigChanged {
 		t.Fatalf("drift: %+v", now.Drift)
 	}
@@ -367,7 +367,7 @@ func TestDefaultRootReloadsXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if now.Effective.Capacity.Masons != 7 {
 		t.Fatalf("after reload: %+v", now.Effective.Capacity)
 	}

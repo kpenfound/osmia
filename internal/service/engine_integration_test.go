@@ -61,7 +61,7 @@ func runEngineUnitCheck(t *testing.T, tc engineUnitCase) engineUnitRun {
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("DOCKER_CONTEXT", "default")
 	if tc.mode == "managed" {
-		intakefixture.Must(t, os.Remove(fake.Version))
+		fixturekit.Must(t, os.Remove(fake.Version))
 	}
 	logs := &fixturekit.SyncBuffer{}
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
@@ -76,18 +76,18 @@ func runEngineUnitCheck(t *testing.T, tc engineUnitCase) engineUnitRun {
 	w, repo := seedBuild(t, f, "engine-check", independentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repo, w, "resume", resumeReport)
 	report := intakefixture.CurrentReport[UnitReport](t, repo, w, "resume", reportDocument)
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	out := engineUnitRun{fake: fake, f: f, stream: w, candidate: report.Candidate, logs: logs}
 	intakefixture.Soon(t, "the unit check to finish", func() bool {
 		r, err := f.s.repository(f.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		docs, err := trace.Read[trace.Document](r, w)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, d := range docs {
 			if d.Path == "units/resume/checks-1.json" {
-				intakefixture.Must(t, json.Unmarshal([]byte(d.Content), &out.run))
+				fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &out.run))
 			}
 			if strings.Contains(d.Content, "RUNNER=") {
 				out.captured = d.Content
@@ -158,7 +158,7 @@ func TestUnitChecksKeepTheCloudTokenOutOfTheFeedAndTheLogs(t *testing.T) {
 func TestManagedEngineUnitChecksRunInTheManagedContainer(t *testing.T) {
 	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous}, func(t *testing.T, _ engineUnitCase, r engineUnitRun) {
 		env, err := os.ReadFile(r.fake.Environments)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, want := range []string{"docker|container inspect osmia-dagger-engine||tcp://host-docker:2375", "registry.dagger.io/engine:v0.20.5||tcp://host-docker:2375", "dagger|check --progress=report --fail-fast --parallel 4|docker-container://osmia-dagger-engine|tcp://host-docker:2375"} {
 			if !strings.Contains(string(env), want) {
 				t.Fatalf("missing %q: %s", want, env)
@@ -208,8 +208,8 @@ func appendEngineConfig(t *testing.T, o *Options, text string) {
 	t.Helper()
 	path := filepath.Join(o.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, append(data, []byte(text)...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(data, []byte(text)...), 0600))
 }
 
 type engineReload struct {
@@ -234,7 +234,7 @@ func startManagedEngine(t *testing.T) *engineReload {
 	files := configFiles(t, o)
 	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
 	files.write(t, top)
-	intakefixture.Must(t, os.Remove(fake.Version))
+	fixturekit.Must(t, os.Remove(fake.Version))
 	s, c := start(t, o)
 	return &engineReload{fake: fake, files: files, top: top, s: s, c: c}
 }
@@ -243,17 +243,17 @@ func startManagedEngine(t *testing.T) *engineReload {
 // configuration that expects v0.21.0.
 func (e *engineReload) reloadedWhileBusy(t *testing.T) {
 	t.Helper()
-	intakefixture.Must(t, os.WriteFile(e.fake.DockerCommands, nil, 0600))
-	held, err := e.s.checkSlots.acquire(t.Context(), CheckSlotRun{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "checking-unit"})
-	intakefixture.Must(t, err)
-	turn, err := e.s.checkSlots.startEngineTurn(t.Context(), EngineTurn{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "working-unit", Agent: "mason-working", Turn: "turn-1"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(e.fake.DockerCommands, nil, 0600))
+	held, err := e.s.checkSlots.acquire(t.Context(), CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "checking-unit"})
+	fixturekit.Must(t, err)
+	turn, err := e.s.checkSlots.startEngineTurn(t.Context(), EngineTurn{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "working-unit", Agent: "mason-working", Turn: "turn-1"})
+	fixturekit.Must(t, err)
 	e.releaseWork = func() { held(); turn() }
 	t.Cleanup(e.releaseWork)
 	e.next = strings.Replace(e.top, "version = 'v0.20.5'", "version = 'v0.21.0'", 1)
 	e.files.write(t, e.next)
 	_, err = e.c.Reload(t.Context())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 // Serial: startup, reload and commands share process Docker selectors.
@@ -301,7 +301,7 @@ func TestReloadLeavesARunningEngineAloneAndReportsTheVersionMismatch(t *testing.
 		}
 	}
 	status, err := e.c.EngineStatus(t.Context())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if status.Mode != config.DaggerEngineManaged || !status.Reachable || status.Version != "v0.20.5" || status.ExpectedVersion != "v0.21.0" || !status.ConfiguredVersionMismatch || status.CacheSizeBytes == nil || *status.CacheSizeBytes != 4096 {
 		t.Fatalf("reloaded status: %+v", status)
 	}
@@ -316,7 +316,7 @@ func TestRejectedReloadLeavesChecksOnTheCurrentEngine(t *testing.T) {
 		t.Fatal("invalid reload accepted")
 	}
 	result, err := e.s.configuredChecks(e.s.current()).Check(t.Context(), t.TempDir(), checks.Identity{}, nil)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	assertEngineCheckOutput(t, result.Output, "managed", "", "docker-container://osmia-dagger-engine", "")
 }
 
@@ -326,9 +326,9 @@ func TestEngineRestartOnceWorkEndsRecreatesTheEngineAtTheReloadedVersion(t *test
 	e.reloadedWhileBusy(t)
 	e.releaseWork()
 	_, err := e.c.EngineAction(t.Context(), "restart")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	status, err := e.c.EngineStatus(t.Context())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if status.Version != "v0.21.0" || status.ConfiguredVersionMismatch || !status.VersionMismatch {
 		t.Fatalf("restarted status: %+v", status)
 	}
@@ -346,7 +346,7 @@ func TestEnginePruneSucceedsOnceWorkEnds(t *testing.T) {
 	e.reloadedWhileBusy(t)
 	e.releaseWork()
 	_, err := e.c.EngineAction(t.Context(), "prune")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 // Serial: startup, reload and commands share process Docker selectors.
@@ -356,7 +356,7 @@ func TestEngineRestartAndPruneDoNotApplyToAnExternalEngine(t *testing.T) {
 			e := startManagedEngine(t)
 			e.files.write(t, e.files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
 			_, err := e.c.Reload(t.Context())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			before := e.fake.Commands(t)
 			for _, action := range []string{"restart", "prune"} {
 				_, err = e.c.EngineAction(t.Context(), action)
@@ -366,7 +366,7 @@ func TestEngineRestartAndPruneDoNotApplyToAnExternalEngine(t *testing.T) {
 				}
 			}
 			status, err := e.c.EngineStatus(t.Context())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !status.Reachable || status.Version == "" || status.CacheSizeBytes == nil {
 				t.Fatalf("%s status: %+v", mode, status)
 			}
@@ -413,11 +413,11 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			}
 			t.Setenv("DOCKER_CONTEXT", "default")
 			_, err = c.Reload(t.Context())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			t.Setenv("DOCKER_CONTEXT", "named")
-			intakefixture.Must(t, os.WriteFile(fake.Environments, nil, 0600))
+			fixturekit.Must(t, os.WriteFile(fake.Environments, nil, 0600))
 			status, err := c.EngineStatus(t.Context())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if status.Reachable || status.DockerHost != "" || !strings.Contains(status.ReachabilityError, "DOCKER_HOST") || !strings.Contains(status.ReachabilityError, "DOCKER_CONTEXT") {
 				t.Fatalf("%+v", status)
 			}
@@ -428,7 +428,7 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			_, err = s.configuredChecks(s.current()).Check(t.Context(), t.TempDir(), checks.Identity{}, nil)
 			assertConflict(err)
 			log, err := os.ReadFile(fake.Environments)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(log) != 0 {
 				t.Fatalf("conflict reached engine: %s", log)
 			}
@@ -507,7 +507,7 @@ case "$1" in
  *) exit 92 ;;
 esac
 `, entered)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(fake.Directory, "docker"), []byte(script), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(fake.Directory, "docker"), []byte(script), 0700))
 	creating := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := deadlineAfter(r.Context(), creating, 500*time.Millisecond)
@@ -542,7 +542,7 @@ esac
 	started := time.Now()
 	close(creating)
 	next := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Unit: "waiting-for-creation"})
-	intakefixture.Must(t, awaitCheck(t, completed))
+	fixturekit.Must(t, awaitCheck(t, completed))
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("API did not deliver response at the action bound")
 	}

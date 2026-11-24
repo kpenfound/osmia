@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -48,20 +47,20 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "archive-stall-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	_, err = repo.Charter(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "done")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream, fixturekit.Quiet}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.activity = activity.New(s.now)
 	s.setSole(runtimeFor(repo))
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, Title: "fixture workstream", State: intake.AbandonedState, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, Title: "fixture workstream", State: intake.AbandonedState, ArchivedAt: fixturekit.DemoStart}))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	released := false
@@ -81,7 +80,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 		return trace.FinishWorkstreamTraceDeletion(root, p, w)
 	}}
 
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	select {
 	case <-started:
 	case <-time.After(10 * time.Second):
@@ -104,7 +103,7 @@ func TestReadEndpointsStayResponsiveWhileArchiveCleanupStallsInTraceRemoval(t *t
 		t.Fatal("deletion never completed once released")
 	}
 	remaining, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(remaining, fixturekit.Stream) || !slices.Contains(remaining, fixturekit.Quiet) {
 		t.Fatalf("unexpected remaining workstreams: %v", remaining)
 	}

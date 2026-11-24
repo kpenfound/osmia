@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
@@ -18,42 +17,52 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestChiefPreviewThroughMemberArchive(t *testing.T) {
+type previewImage struct {
+	*PreviewJourney
+	attachment api.FeedImage
+}
+
+func newCapturedPreview(t *testing.T) previewImage {
+	t.Helper()
 	f := NewPreviewJourney(t)
-	attachment := f.Capture(t)
-	ctx := context.Background()
-	groupFeed := func() api.WorkgroupFeedResponse {
-		t.Helper()
-		var out api.WorkgroupFeedResponse
-		fixturekit.Must(t, f.C.Do(ctx, http.MethodGet, api.Prefix+"/workgroups/"+string(f.Group.ID)+"/feed", nil, &out))
-		return out
-	}
-	assertGroupImage := func(removed bool) {
-		t.Helper()
-		n := 0
-		for _, entry := range groupFeed().Entries {
-			if entry.Kind != "image" {
-				continue
-			}
-			n++
-			if entry.Workstream != f.Member || entry.Repo != f.ID || entry.Image == nil || entry.Image.ID != attachment.ID {
-				t.Fatalf("shared image attribution: %+v", entry)
-			}
-			if removed {
-				if entry.Image.URL != "" || entry.Image.Placeholder != "image removed when "+string(f.Member)+" was archived" {
-					t.Fatalf("archived image: %+v", entry.Image)
-				}
-			} else if *entry.Image != attachment {
-				t.Fatalf("shared and member images differ: %+v %+v", entry.Image, attachment)
-			}
+	return previewImage{PreviewJourney: f, attachment: f.Capture(t)}
+}
+
+func (f previewImage) groupFeed(t *testing.T) api.WorkgroupFeedResponse {
+	t.Helper()
+	var out api.WorkgroupFeedResponse
+	fixturekit.Must(t, f.C.Do(context.Background(), http.MethodGet, api.Prefix+"/workgroups/"+string(f.Group.ID)+"/feed", nil, &out))
+	return out
+}
+
+func (f previewImage) assertGroupImage(t *testing.T, removed bool) {
+	t.Helper()
+	n := 0
+	for _, entry := range f.groupFeed(t).Entries {
+		if entry.Kind != "image" {
+			continue
 		}
-		if n != 1 {
-			t.Fatalf("shared image count: %d", n)
+		n++
+		if entry.Workstream != f.Member || entry.Repo != f.ID || entry.Image == nil || entry.Image.ID != f.attachment.ID {
+			t.Fatalf("shared image attribution: %+v", entry)
+		}
+		if removed {
+			if entry.Image.URL != "" || entry.Image.Placeholder != "image removed when "+string(f.Member)+" was archived" {
+				t.Fatalf("archived image: %+v", entry.Image)
+			}
+		} else if *entry.Image != f.attachment {
+			t.Fatalf("shared and member images differ: %+v %+v", entry.Image, f.attachment)
 		}
 	}
-	assertGroupImage(false)
-	url := "http://" + f.S.WebAddr() + attachment.URL
-	response, err := http.Get(url)
+	if n != 1 {
+		t.Fatalf("shared image count: %d", n)
+	}
+}
+
+func TestChiefPreviewImageIsServedAndSharedWithTheWorkgroup(t *testing.T) {
+	f := newCapturedPreview(t)
+	f.assertGroupImage(t, false)
+	response, err := http.Get("http://" + f.S.WebAddr() + f.attachment.URL)
 	fixturekit.Must(t, err)
 	data, err := io.ReadAll(response.Body)
 	response.Body.Close()
@@ -66,48 +75,47 @@ func TestChiefPreviewThroughMemberArchive(t *testing.T) {
 	fixturekit.Must(t, err)
 	refs, err := trace.Read[trace.ImageReference](repo, f.Sibling)
 	fixturekit.Must(t, err)
-	if len(images) != 1 || !bytes.Equal(images[0].Data, f.PNG) || len(refs) != 1 || refs[0].Member != f.Member || refs[0].ImageID != attachment.ID {
+	if len(images) != 1 || !bytes.Equal(images[0].Data, f.PNG) || len(refs) != 1 || refs[0].Member != f.Member || refs[0].ImageID != f.attachment.ID {
 		t.Fatalf("member receipt and shared reference: images=%d refs=%+v", len(images), refs)
 	}
+	runs, err := os.ReadFile(f.CLIs.Runs)
+	fixturekit.Must(t, err)
+	if strings.Count(string(runs), "capture\n") != 1 {
+		t.Fatalf("capture count: %q", runs)
+	}
+}
+
+func TestArchivingAMemberRemovesItsPreviewImageFromEveryRecord(t *testing.T) {
+	f := newCapturedPreview(t)
+	repo := f.Repository(t)
 	f.ArchiveMember(t)
-	assertGroupImage(true)
-	// Wait for production cleanup, including its durable completion receipt.
+	f.assertGroupImage(t, true)
 	wait, release := ServiceChanges(t, f.S)
 	defer release()
-	deadline := time.Now().Add(fixturekit.DemoTimeout)
-	for {
+	fixturekit.Until(t, "the archived member's trace cleanup", func() error { wait(); return nil }, func() bool {
 		state, _ := service.InspectForTest(f.S).LifecycleController().Store().Snapshot()
-		clean := false
 		for _, archive := range state.Archived {
 			if archive.Workstream == f.Member && !archive.CleanedAt.IsZero() {
-				clean = true
+				return true
 			}
 		}
-		if clean {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("member trace cleanup did not complete: %+v", state.Archived)
-		}
-		wait()
-	}
+		return false
+	})
 	root := service.InspectForTest(f.S).Config().Root
 	gone, err := trace.WorkstreamTraceGone(root, f.ID, f.Member)
 	fixturekit.Must(t, err)
 	if !gone {
 		t.Fatal("archived image trace remains on disk")
 	}
-	if _, err := repo.StoredImage(f.Member, attachment.ID); err == nil {
+	if _, err := repo.StoredImage(f.Member, f.attachment.ID); err == nil {
 		t.Fatal("archive retained image bytes")
 	}
-	response, err = http.Get(url)
+	response, err := http.Get("http://" + f.S.WebAddr() + f.attachment.URL)
 	fixturekit.Must(t, err)
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("archived endpoint: %d", response.StatusCode)
 	}
-	assertGroupImage(true)
-	// Remaining traces and the pinned archive presentation carry metadata only.
 	streams, err := repo.Workstreams()
 	fixturekit.Must(t, err)
 	for _, stream := range streams {
@@ -122,12 +130,7 @@ func TestChiefPreviewThroughMemberArchive(t *testing.T) {
 	}
 	state, _ := service.InspectForTest(f.S).LifecycleController().Store().Snapshot()
 	assertNoPreviewBytes(t, f.PNG, state.Archived)
-	assertNoPreviewBytes(t, f.PNG, groupFeed())
-	runs, err := os.ReadFile(f.CLIs.Runs)
-	fixturekit.Must(t, err)
-	if strings.Count(string(runs), "capture\n") != 1 {
-		t.Fatalf("capture count: %q", runs)
-	}
+	assertNoPreviewBytes(t, f.PNG, f.groupFeed(t))
 }
 
 func assertNoPreviewBytes(t *testing.T, png []byte, value any) {

@@ -48,20 +48,20 @@ func TestLiveWorkgroupLeaderHandlesRetiredMembersAndErrors(t *testing.T) {
 	const group config.WorkgroupID = "g_00000000000000000000000000000001"
 	cfg, _, clock := fixturekit.HardPauseRepository(t, 1)
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {a, b}}})
-	intakefixture.Must(t, err)
-	t.Cleanup(func() { intakefixture.Must(t, store.Close()) })
+	fixturekit.Must(t, err)
+	t.Cleanup(func() { fixturekit.Must(t, store.Close()) })
 	s := &Service{cfg: cfg, store: store}
 	g := trace.Workgroup{ID: group, Members: []config.WorkstreamID{fixturekit.Stream, b, a}}
 	leader, err := s.liveWorkgroupLeader(g)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if leader != a {
 		t.Fatalf("leader %s", leader)
 	}
 	for _, member := range []config.WorkstreamID{a, b} {
-		intakefixture.Must(t, s.store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: member, Workgroup: group, ArchivedAt: clock.Now()}))
+		fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: member, Workgroup: group, ArchivedAt: clock.Now()}))
 	}
 	leader, err = s.liveWorkgroupLeader(g)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if leader != "" {
 		t.Fatalf("retired leader %s", leader)
 	}
@@ -167,18 +167,18 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	defer f.stop(t)
 	deliverResolutionMembers(t, f)
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	authority, host, _, release, err := f.s.chiefRepository(ctx, repo, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	release()
 	if !found || !approval.Complete {
 		t.Fatal("missing completed group approval")
 	}
 	for _, m := range resolutionMembers(f) {
 		r, err := f.s.repository(m.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		recordResolutionMerge(t, r, m.stream)
 	}
 	awaitMemberMergeResolution(t, f)
@@ -186,7 +186,7 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	var journals []trace.Document
 	readJournals := func(wt *trace.Repository) []trace.Document {
 		docs, err := trace.Read[trace.Document](wt, host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return slices.DeleteFunc(docs, func(doc trace.Document) bool {
 			return !strings.HasPrefix(doc.ID, "workgroup-change-")
 		})
@@ -199,10 +199,10 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		}
 		lifecycleAwait(t, f, "presented retirement decision", func() bool {
 			wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, approval.Workgroup)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer wt.Close()
 			got, err := lifecycle.ReadChanges(wt, host)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(got) == 1 && got[0].State == "presented" {
 				change = got[0]
 				return true
@@ -222,12 +222,12 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		}
 		changes = []lifecycle.WorkgroupChange{decided}
 		wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, approval.Workgroup)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		journals = readJournals(wt)
-		intakefixture.Must(t, wt.Close())
+		fixturekit.Must(t, wt.Close())
 	}
 	sourceEvents, err := repo.Outbox(f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(sourceEvents, func(e trace.OutboxEntry) bool {
 		return e.Event.ID == trace.EventID(intake.DesignStartTransition, "state") &&
 			e.Event.Kind == trace.ProgressKind && e.Event.Operation == nil &&
@@ -236,17 +236,17 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 		t.Fatal("design-start event was not held before archive")
 	}
 	shared, err := f.c.Conversation(ctx, f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(shared.Entries) == 0 {
 		t.Fatal("the shared conversation is empty before the members are archived")
 	}
 	for _, m := range resolutionMembers(f) {
 		_, err := f.c.Archive(ctx, m.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	unlock()
 	var retainedEvents []trace.OutboxEntry
-	intakefixture.Must(t, repo.Serialize(func() error {
+	fixturekit.Must(t, repo.Serialize(func() error {
 		var err error
 		retainedEvents, err = repo.Outbox(f.origin)
 		return err
@@ -269,28 +269,28 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 	check := func() {
 		t.Helper()
 		r, err := f.s.repository(f.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		id, err := r.CrossRepoWorkgroupOf(f.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if id != approval.Workgroup {
 			t.Fatal("adopted source lost its locator")
 		}
 		outbox, err := r.Outbox(f.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !intakefixture.EqualJSONTest(outbox, retainedEvents) {
 			t.Fatal("fully retired group changed pending event history")
 		}
 		wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer wt.Close()
 		got, doc, found, err := trace.ReadGroupApproval(wt, host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !found || !intakefixture.EqualJSONTest(got, approval) || !intakefixture.EqualJSONTest(doc, pins) {
 			t.Fatal("retirement changed completed approval")
 		}
 		if pending {
 			retained, err := lifecycle.ReadChanges(wt, host)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !intakefixture.EqualJSONTest(retained, changes) {
 				t.Fatal("retirement changed the pending decision or its exact pins")
 			}
@@ -299,7 +299,7 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 			}
 		}
 		read, err := f.c.Conversation(ctx, f.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, earlier := range shared.Entries {
 			if !slices.ContainsFunc(read.Entries, func(e api.ConversationEntry) bool {
 				return e.Turn == earlier.Turn && e.Kind == earlier.Kind && e.Text == earlier.Text
@@ -313,31 +313,31 @@ func testFullyRetiredWorkgroup(t *testing.T, pending bool) {
 			}
 		}
 		groups, _, err := trace.Workgroups(wt)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		starting := &Service{cfg: f.s.current(), store: f.s.store}
 		retired, err := starting.workgroupFullyRetired(ctx, groups[0])
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !retired {
 			t.Fatal("retirement proof required a member runtime")
 		}
 		leader, err := f.s.liveWorkgroupLeader(groups[0])
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if leader != "" {
 			t.Fatal("retired group has a live leader")
 		}
 		resolved, revision, err := trace.ResolvedWorkgroups(wt)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !slices.Equal(resolved, []config.WorkgroupID{id}) || revision != 1 {
 			t.Fatalf("resolution changed: %v %d", resolved, revision)
 		}
 		active, err := trace.ProjectSpecActive(wt, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if active {
 			t.Fatal("fully resolved spec remained active")
 		}
 		for _, m := range resolutionMembers(f) {
 			gone, err := trace.WorkstreamTraceGone(f.s.current().Root, m.project, m.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !gone {
 				t.Fatal("retired history recreated")
 			}

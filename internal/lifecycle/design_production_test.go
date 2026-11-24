@@ -38,9 +38,9 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 	wait, closeWait := serviceChanges(t, f.s)
 	defer closeWait()
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief, host, _, closeChief, err := f.s.chiefRepository(context.Background(), repo, f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer closeChief()
 	type memberTrace struct {
 		repo   *trace.Repository
@@ -53,10 +53,10 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 			project = f.project2
 		}
 		member, err := f.s.repository(project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		members = append(members, memberTrace{member, address})
 		target, routedHost, _, release, err := f.s.chiefRepository(context.Background(), member, address)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		same := target == chief && routedHost == host
 		t.Logf("owner address=%s project=%s authoritative-project=%s host=%s shared-handle=%v", address, project, target.Project(), routedHost, same)
 		release()
@@ -82,13 +82,13 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 			}
 		}
 		op, err := thread.TurnOperation(chief.Project(), "workgroup-chief-"+sent.Turn, thread.TurnInput{Workstream: host, Agent: trace.ChiefOfStaff, Turn: sent.Turn})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		observed, err := (thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: chief}}).Inspect(context.Background(), op)
 		t.Logf("owner dispatch operation=%s observation=%+v error=%v; shared chief dispatch applies directly without an operation retry timer", op.ID, observed, err)
 		f.logTurns(t, chief, host)
 	}
 	diagnose()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		select {
 		case req := <-reached:
@@ -108,7 +108,7 @@ func (f *productionDesignFixture) awaitOwnerTurnRunning(t *testing.T, sent api.C
 		var due memberTrace
 		for _, member := range members {
 			ops, err := member.repo.Operations(member.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, op := range ops {
 				if !op.Acknowledged && op.RetryAt.After(now) && (next.RetryAt.IsZero() || op.RetryAt.Before(next.RetryAt)) {
 					next, due = op, member
@@ -141,10 +141,10 @@ func TestDesignProductionStartDraftRatifyAndRestart(t *testing.T) {
 				project = f.project2
 			}
 			repo, err := f.s.repository(project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			state, err := repo.Workflow(member, trace.FeatureSubject)
-			intakefixture.Must(t, err)
-			if state.Value != intakefixture.BuildingState {
+			fixturekit.Must(t, err)
+			if state.Value != intake.BuildingState {
 				return false
 			}
 		}
@@ -182,7 +182,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 			select {
 			case <-hook.Reached:
 				t.Logf("reached %s design=%s members=%s/%s repos=%s/%s", step, f.origin, f.stream1, f.stream2, f.project, f.project2)
-			case <-time.After(intakefixture.DemoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				f.timeout(t, "interruption boundary "+step)
 			}
 			if hook.Lifetime != f.s.lifetime || hook.Lifetime.Err() != nil {
@@ -206,7 +206,7 @@ func TestDesignProductionStartAndApprovalRecoverAtBoundaries(t *testing.T) {
 			f.checkContinuation(t)
 			if ratifyDone == nil {
 				_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 			}
 			f.awaitApproved(t)
 			f.checkContinuation(t)
@@ -226,11 +226,11 @@ func TestDesignProductionRatificationRefusesInvalidPacketBeforeDecisions(t *test
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			repo, err := f.s.repository(f.project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			wt, _, err := f.s.approvalTrace(ctx, repo, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			spec := *packet.ProjectSpec
 			if invalid == "cycle" {
 				spec.Graph = append(slices.Clone(spec.Graph), trace.Edge{From: f.stream2, To: f.stream1, Type: trace.EdgeContract})
@@ -238,7 +238,7 @@ func TestDesignProductionRatificationRefusesInvalidPacketBeforeDecisions(t *test
 				spec.Slices = slices.DeleteFunc(slices.Clone(spec.Slices), func(slice trace.Slice) bool { return slice.Workstream == f.stream2 })
 			}
 			writeCorruptedProjectSpec(t, wt, id, spec)
-			intakefixture.Must(t, wt.Close())
+			fixturekit.Must(t, wt.Close())
 			if _, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision); err == nil {
 				t.Fatal("invalid packet received owner approval")
 			}
@@ -248,7 +248,7 @@ func TestDesignProductionRatificationRefusesInvalidPacketBeforeDecisions(t *test
 					project = f.project2
 				}
 				r, err := f.s.repository(project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if _, found, err := r.GroupApprovalOf(member); err != nil || found {
 					t.Fatalf("refusal recorded a group decision: %v %v", found, err)
 				}
@@ -303,7 +303,7 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 	}()
 	select {
 	case <-hook.Reached:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		f.timeout(t, "pinned owner decision")
 	}
 	f.assertBarrier(t)
@@ -313,55 +313,55 @@ func TestDesignProductionApprovalRecoveryKeepsPinnedDrafts(t *testing.T) {
 			project = f.project2
 		}
 		repo, err := f.s.repository(project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, id := range []string{plan.SpecDocument, plan.PlanDocument} {
 			doc, err := trace.Get[trace.Document](repo, stream, id, 1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			doc.Revision, doc.At, doc.Cause = 2, f.clock.Now(), "later-draft"
 			if id == plan.SpecDocument {
 				doc.Content += "\nAdditional unapproved draft text.\n"
 			}
-			intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
+			fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
 		}
 	}
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wt, group, err := f.s.approvalTrace(ctx, repo, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	decision, _, found, err := trace.ReadGroupApproval(wt, group.Members[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || decision.Complete || !intakefixture.EqualJSONTest(decision.ProjectSpec, *packet.ProjectSpec) {
 		t.Fatal("owner decision did not pin the entire draft")
 	}
 	later := decision.ProjectSpec
 	later.Behavior = "A later unapproved project draft."
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, wt, group, later, f.clock.Now(), intake.OwnerActor, "later-draft"))
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, wt, group, later, f.clock.Now(), intake.OwnerActor, "later-draft"))
+	fixturekit.Must(t, wt.Close())
 	f.stop(t)
 	<-returned
 	f.hook.Store(nil)
 	f.start(t)
 	f.awaitApproved(t)
 	repo, err = f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	completed, found, err := repo.GroupApprovalOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	decision.Complete = true
 	if !found || !intakefixture.EqualJSONTest(decision, completed) {
 		t.Fatal("recovery changed the immutable decision or its pins")
 	}
 	effective, _, found, err := repo.ProjectSpecOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || !intakefixture.EqualJSONTest(effective, decision.ProjectSpec) {
 		t.Fatal("unapproved project draft became effective")
 	}
 	wt, group, err = f.s.approvalTrace(ctx, repo, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer wt.Close()
 	draft, found, err := trace.ProjectSpecFor(wt, group.ID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || draft.Behavior != later.Behavior {
 		t.Fatal("recovery rewrote draft history")
 	}
@@ -376,7 +376,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	f.stop(t)
 	f.start(t)
@@ -396,15 +396,15 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-idle", "Working within the slice."), nil
 		}
 		if strings.Contains(req.Prompt, ruling) && relayed.CompareAndSwap(false, true) {
-			_, err := intakefixture.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
+			_, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
 			return intakefixture.QuestionResult(req, "session-chief", "Ruling relayed."), err
 		}
-		_, err = intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Implement resumable uploads.", "note": "The offset contract remains agreed.", "agents": []string{}})
+		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Implement resumable uploads.", "note": "The offset contract remains agreed.", "agents": []string{}})
 		if err != nil {
 			return nil, err
 		}
 		if strings.Contains(req.Prompt, "affected-one") && strings.Contains(req.Prompt, "affected-two") && escalated.CompareAndSwap(false, true) {
-			_, err = intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"}, "rephrasing": escalation, "blocked": "Both asking origins.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
+			_, err = fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"}, "rephrasing": escalation, "blocked": "Both asking origins.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 		}
 		return intakefixture.QuestionResult(req, "session-chief", "The service is following the agreed design."), err
 	}
@@ -413,7 +413,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		if strings.Contains(req.SessionDir, "worker_second") {
 			question = "affected-two: may the offset contract change?"
 		}
-		_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 		return intakefixture.QuestionResult(req, "session-worker", "Asked the chief."), err
 	}
 	f.engine.Turns["unaffected-work"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
@@ -428,34 +428,34 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	}
 	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.stream2, "What is the current status of both repos?")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.owner, f.ownerAddress = sent, f.stream2
 	memberRepo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	workgroup, err := memberRepo.CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "owner status", func() bool {
 		var feed api.WorkgroupFeedResponse
-		intakefixture.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(workgroup)+"/feed", nil, &feed))
+		fixturekit.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(workgroup)+"/feed", nil, &feed))
 		return slices.ContainsFunc(feed.Entries, func(e api.FeedEntry) bool {
 			return e.Kind == "status" && e.Status != nil && e.Status.Goal == "Implement resumable uploads."
 		})
 	})
 	enqueue := func(p config.ProjectID, m config.WorkstreamID, id, turn string) {
 		repo, err := f.s.repository(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: p, Workstream: m, At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "workstream_created"}
-		intakefixture.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: intakefixture.MasonRole, ThreadID: id}))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: intake.MasonRole, ThreadID: id}))
 		h.Schema, h.ID = "osmia.trace.turn-request", "request_"+id
 		_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: id, ThreadID: id, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are a member mason.", Prompt: "Perform scoped work."})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	enqueue(f.project, f.stream1, "worker_first", "affected-ask")
 	enqueue(f.project2, f.stream2, "worker_second", "affected-ask")
 	var inbox api.InboxResponse
 	f.wait(t, "member escalation", func() bool {
 		got, err := f.c.Inbox(ctx)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		got.Entries = slices.DeleteFunc(slices.Clone(got.Entries), func(entry api.InboxEntry) bool { return entry.Question != escalation })
 		if len(got.Entries) > 1 {
 			t.Fatalf("consolidated escalation duplicated: %+v", got)
@@ -476,9 +476,9 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	}
 	entry := inbox.Entries[0]
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	inboxGroup, ok := trace.WorkgroupProjectID(entry.Project)
 	if !ok || inboxGroup != group || entry.Number < 1 || entry.Batch == "" || entry.Workstream != f.stream1 || entry.Kind != api.InboxEscalation || len(entry.Asked) != 2 {
 		t.Fatalf("escalation lost workgroup/batch identity or affected origins: %+v; group=%s", entry, group)
@@ -497,9 +497,9 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 				p, m = f.project2, f.stream2
 			}
 			repo, err := f.s.repository(p)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			worker, err := repo.Thread(m, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(worker.Turns) != 1 || worker.Turns[0].CompletedAt.IsZero() {
 				return false
 			}
@@ -520,12 +520,12 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			p, m = f.project2, f.stream2
 		}
 		repo, err := f.s.repository(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		before[id], err = repo.Thread(m, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if i < 2 {
 			qs, err := repo.Questions(m)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(qs) != 1 || qs[0].State != trace.QuestionEscalated || qs[0].Asked.Thread != id || qs[0].Asked.Turn != "affected-ask" || qs[0].Latest.Escalation == nil || qs[0].Latest.Escalation.Batch != entry.Batch || qs[0].Latest.Escalation.Inbox != entry.Number {
 				t.Fatalf("origin %s lost its asking link or escalation identity: %+v", id, qs)
 			}
@@ -535,7 +535,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 	f.stop(t)
 	f.start(t)
 	continued, err := f.c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	continued.Entries = slices.DeleteFunc(slices.Clone(continued.Entries), func(entry api.InboxEntry) bool { return entry.Question != escalation })
 	if len(continued.Entries) != 1 || !intakefixture.EqualJSONTest(entry, continued.Entries[0]) {
 		t.Fatalf("restart lost escalation: %+v", continued)
@@ -546,15 +546,15 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			p, m = f.project2, f.stream2
 		}
 		repo, err := f.s.repository(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		qs, err := repo.Questions(m)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(qs) != 1 || !intakefixture.EqualJSONTest(asked[id], qs[0]) {
 			t.Fatalf("restart changed origin %s's durable asking link: %+v", id, qs)
 		}
 	}
 	answer, err := f.c.Answer(ctx, continued.Entries[0].Number, ruling, continued.Entries[0].Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if answer.Number != entry.Number || answer.Batch != entry.Batch || answer.Ruling != ruling || len(answer.Questions) != 2 {
 		t.Fatalf("owner ruling did not cover the selected consolidated question: %+v", answer)
 	}
@@ -565,9 +565,9 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 				p, m = f.project2, f.stream2
 			}
 			repo, err := f.s.repository(p)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			worker, err := repo.Thread(m, id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(worker.Turns) != 2 || worker.Turns[1].CompletedAt.IsZero() {
 				return false
 			}
@@ -580,9 +580,9 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 			p, m = f.project2, f.stream2
 		}
 		repo, err := f.s.repository(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		worker, err := repo.Thread(m, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if i == 2 && !intakefixture.EqualJSONTest(before[id], worker) {
 			t.Fatal("owner ruling resumed an unaffected origin")
 		}
@@ -591,7 +591,7 @@ func TestDesignProductionContinuedStatusEscalationAndRuling(t *testing.T) {
 		}
 		if i < 2 {
 			qs, err := repo.Questions(m)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(qs) != 1 || !intakefixture.EqualJSONTest(asked[id].Asked, qs[0].Asked) || qs[0].State != trace.QuestionAnswered || qs[0].Ruling == nil || qs[0].Ruling.Revision != 2 || qs[0].Ruling.OwnerResponse != ruling || qs[0].Ruling.ReturnedAnswer != ruling {
 				t.Fatalf("origin %s did not retain its exact owner ruling and asking link: %+v", id, qs)
 			}
@@ -626,26 +626,26 @@ func TestDesignProductionSingleAffectedRepoKeepsOrdinaryRatification(t *testing.
 		t.Fatal("one affected repo introduced a project-spec gate")
 	}
 	out, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(out.Members) != 0 || out.Sealing != "requested" {
 		t.Fatalf("single-member owner contract changed: %+v", out)
 	}
 	f.wait(t, "single-repo seal", func() bool {
 		repo, err := f.s.repository(f.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		_, _, found, err := seal.Latest(repo, f.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return found
 	})
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief, err := repo.ChiefOfStaffThread(f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !intakefixture.EqualJSONTest(chief.Identity, f.before.Identity) || !intakefixture.EqualJSONTest(chief.Turns[:len(f.before.Turns)], f.before.Turns) {
 		t.Fatal("single-member continuation changed")
 	}
 	groups, _, err := trace.Workgroups(repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	group, found := trace.WorkgroupOf(groups, f.origin)
 	if !found || !slices.Equal(group.Members, []config.WorkstreamID{f.origin}) {
 		t.Fatal("single-member workgroup contract changed")
@@ -660,7 +660,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	reached := make(chan agent.Request, 1)
 	var hit atomic.Bool
@@ -677,16 +677,16 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	}
 	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.origin, message)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.owner, f.ownerAddress = sent, f.origin
 	f.awaitOwnerTurnRunning(t, sent, reached)
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief, host, _, close, err := f.s.chiefRepository(ctx, repo, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	before, err := chief.Thread(host, trace.ChiefOfStaff)
 	close()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	index := slices.IndexFunc(before.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == sent.Turn })
 	if index < 0 || before.Active != sent.Turn || before.Turns[index].Claim == nil || before.Turns[index].Response != nil || !before.Turns[index].CompletedAt.IsZero() {
 		t.Logf("continued chief status=%s active=%s sent=%s queue-index=%d", before.Status, before.Active, sent.Turn, index)
@@ -702,7 +702,7 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, message) {
 			replayed.Store(true)
-			_, err := intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue resumable uploads.", "note": "Restart retained the owner status request.", "agents": []string{}})
+			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue resumable uploads.", "note": "Restart retained the owner status request.", "agents": []string{}})
 			return intakefixture.QuestionResult(req, "session-recovered", "Status continued after restart."), err
 		}
 		return intakefixture.QuestionResult(req, "session-chief", "Following the approved contract."), nil
@@ -711,19 +711,19 @@ func TestDesignProductionContinuedPendingTurnRecoversWithBoundedReplay(t *testin
 	f.start(t)
 	f.wait(t, "pending owner turn replay", func() bool { return replayed.Load() })
 	repo, err = f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief, host, _, close, err = f.s.chiefRepository(ctx, repo, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer close()
 	f.wait(t, "recovery turn completion", func() bool {
 		recovered, err := chief.Thread(host, trace.ChiefOfStaff)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return recovered.Active == "" && slices.ContainsFunc(recovered.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.Actor == service.TestRecoveryActor && strings.Contains(q.Request.Prompt, message) && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
 	recovered, err := chief.Thread(host, trace.ChiefOfStaff)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	q := recovered.Turns[index]
 	if !intakefixture.EqualJSONTest(q.Request, request) || q.Response == nil || q.Response.RequestID != request.ID || q.Response.RequestRevision != request.Revision {
 		t.Fatal("restart lost the pending request or response link")

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestProviderLimitStatusAndOwnerClear(t *testing.T) {
@@ -18,34 +18,34 @@ func TestProviderLimitStatusAndOwnerClear(t *testing.T) {
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "model = \"test\"", "model = \"test\"\nfallback = \"other\"", 1)), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), "model = \"test\"", "model = \"test\"\nfallback = \"other\"", 1)), 0600))
 	s, client := start(t, opts)
 	at := s.now()
-	intakefixture.Must(t, s.recordProviderLimit(coreadapter.Profile{Backend: "claude"}, coreadapter.ProviderLimit{Status: "blocked", Kind: "five_hour", ResetsAt: at.Add(time.Hour)}))
+	fixturekit.Must(t, s.recordProviderLimit(coreadapter.Profile{Backend: "claude"}, coreadapter.ProviderLimit{Status: "blocked", Kind: "five_hour", ResetsAt: at.Add(time.Hour)}))
 	status, err := client.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if status.Profiles["mason"].Name != "other" || status.Profiles["mason"].Source != "provider_fallback" || len(status.ProviderLimits) != 1 {
 		t.Fatalf("fallback status: %+v", status)
 	}
 	rt, err := client.Runtime(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if rt.Effective.Profiles["mason"] != "other" {
 		t.Fatalf("runtime: %+v", rt)
 	}
-	intakefixture.Must(t, s.store.SetProviderLimit(runtime.ProviderLimit{Backend: "codex", Status: "blocked", SetAt: at}))
+	fixturekit.Must(t, s.store.SetProviderLimit(runtime.ProviderLimit{Backend: "codex", Status: "blocked", SetAt: at}))
 	status, err = client.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if status.Profiles["mason"].Source != "provider_pause" || status.Profiles["mason"].Name != "" || !strings.Contains(status.Profiles["mason"].Reason, "Provider") || s.admitRole("mason") {
 		t.Fatalf("pause status: %+v", status.Profiles["mason"])
 	}
-	intakefixture.Must(t, s.store.SetProfile("mason", "other"))
+	fixturekit.Must(t, s.store.SetProfile("mason", "other"))
 	if !s.admitRole("mason") {
 		t.Fatal("override did not resume role")
 	}
-	intakefixture.Must(t, s.store.ClearProfile("mason"))
+	fixturekit.Must(t, s.store.ClearProfile("mason"))
 	var ack MutationResponse
-	intakefixture.Must(t, client.Do(context.Background(), "DELETE", Prefix+"/runtime/provider-limit", ClearProviderLimitRequest{Backend: "codex"}, &ack))
+	fixturekit.Must(t, client.Do(context.Background(), "DELETE", Prefix+"/runtime/provider-limit", ClearProviderLimitRequest{Backend: "codex"}, &ack))
 	if !ack.Applied || !s.admitRole("mason") {
 		t.Fatal("owner clear did not resume fallback")
 	}

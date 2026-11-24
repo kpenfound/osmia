@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -29,7 +29,7 @@ var writeOrShellTools = []string{"Write", "Edit", "Bash", "apply_patch", "shell"
 func enforcedTurns(t *testing.T, f *shedFixture, repository *trace.Repository) (*isolation.Turns, *adaptertest.Engine, *adaptertest.RecordingHosts) {
 	t.Helper()
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
 	engine, hosts := &adaptertest.Engine{}, &adaptertest.RecordingHosts{}
 	turns.Engine, turns.Hosts = engine, hosts
@@ -40,7 +40,7 @@ func runEnforced(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engin
 	t.Helper()
 	_, err := turns.Run(context.Background(), coreadapter.PreparedTurn{Scope: scope, Profile: coreadapter.Profile{Name: scope.Role, Backend: backend, Model: "test"}, SessionDirectory: t.TempDir(),
 		SystemPrompt: "You are the " + scope.Role + ".", Prompt: "Work."})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	got, ok := adaptertest.LastTurn(engine, hosts)
 	if !ok {
 		t.Fatal("the turn did not reach the engine")
@@ -129,7 +129,7 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 			t.Run(name+"/"+backend, func(t *testing.T) {
 				turns, engine, hosts := enforcedTurns(t, f, repository)
 				workspace := t.TempDir()
-				intakefixture.Must(t, os.WriteFile(filepath.Join(workspace, "README.md"), []byte("hi\n"), 0600))
+				fixturekit.Must(t, os.WriteFile(filepath.Join(workspace, "README.md"), []byte("hi\n"), 0600))
 				turns.Workspaces = stagedWorkspaces{}
 				turns.Capture, turns.ViewTools, turns.Context = nil, nil, nil
 				turns.Select = func(context.Context, coreadapter.Scope) (isolation.Selection, error) {

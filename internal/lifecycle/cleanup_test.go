@@ -19,7 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -32,7 +31,7 @@ func newCleanupFixture(t *testing.T, backend string) (*shedFixture, config.Works
 	m := newMasonController(f.s, repository)
 	for _, unit := range []string{"upload", "audit"} {
 		b, found, err := m.read(stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !found {
 			t.Fatal("the workstream is not building")
 		}
@@ -40,8 +39,8 @@ func newCleanupFixture(t *testing.T, backend string) (*shedFixture, config.Works
 			t.Fatalf("%s did not start: %v", unit, err)
 		}
 		w, _, err := newUnitWorkspaces(f.s.cfg, repository).open(ctx, stream, unit)
-		intakefixture.Must(t, err)
-		intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, unit+".txt"), []byte(unit+"\n"), 0600))
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, unit+".txt"), []byte(unit+"\n"), 0600))
 	}
 	return f, stream, repository
 }
@@ -52,8 +51,8 @@ func newCleanup(f *shedFixture, repository *trace.Repository) *workspaceCleanup 
 func writeExport(t *testing.T, f *shedFixture, stream config.WorkstreamID, thread, turn string) string {
 	t.Helper()
 	dir := filepath.Join(f.s.cfg.Root.String(), lifecycle.ReviewInputsDirectory, string(f.project), string(stream), thread, turn)
-	intakefixture.Must(t, os.MkdirAll(dir, 0700))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate\n"), 0600))
+	fixturekit.Must(t, os.MkdirAll(dir, 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate\n"), 0600))
 	return dir
 }
 
@@ -67,7 +66,7 @@ func assertThere(t *testing.T, path string) {
 func assertUnitWorkspace(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, want bool) {
 	t.Helper()
 	_, _, found, err := newUnitWorkspaces(f.s.cfg, repository).find(context.Background(), stream, unit)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	dir := filepath.Join(f.s.cfg.Root.String(), intake.UnitsDirectory, string(f.project), string(stream), unit)
 	if want {
 		if !found {
@@ -86,26 +85,26 @@ func branchFile(t *testing.T, f *shedFixture, repository *trace.Repository, stre
 	t.Helper()
 	ctx := context.Background()
 	g, err := newUnitWorkspaces(f.s.cfg, repository).Of(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	tip, exists, err := g.Branch(ctx, branch)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !exists {
 		t.Fatalf("branch %s is gone", branch)
 	}
 	dir := t.TempDir()
-	intakefixture.Must(t, g.Export(ctx, tip, dir))
+	fixturekit.Must(t, g.Export(ctx, tip, dir))
 	data, err := os.ReadFile(filepath.Join(dir, name))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return string(data)
 }
 func recordUnitMerged(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: trace.UnitSubject(unit) + "-" + intake.UnitMerged, Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: time.Now().UTC(), Actor: service.TestForemanActor, Cause: "landing-" + unit}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: state.Value, To: intake.UnitMerged, Reason: fmt.Sprintf("unit %s landed", unit)}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestCleanupRemovesTheWorkspaceOfAMergedUnit(t *testing.T) {
@@ -124,21 +123,21 @@ func TestCleanupRemovesTheWorkspaceOfAMergedUnit(t *testing.T) {
 			recordUnitMerged(t, repository, stream, "upload")
 
 			c := newCleanup(f, repository)
-			intakefixture.Must(t, c.Pass(ctx))
+			fixturekit.Must(t, c.Pass(ctx))
 			assertUnitWorkspace(t, f, repository, stream, "upload", false)
 			fixturekit.AssertGone(t, merged)
 			assertUnitWorkspace(t, f, repository, stream, "audit", true)
 			assertThere(t, inFlight)
 			assertThere(t, filepath.Join(f.s.cfg.Root.String(), intake.BranchesDirectory, string(f.project), string(stream)))
 			g, err := newUnitWorkspaces(f.s.cfg, repository).Of(stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if _, exists, err := g.Branch(ctx, execution.UnitBranch(stream, "upload")); err != nil || !exists {
 				t.Fatalf("branch of the merged unit is gone: %v", err)
 			}
 			if len(c.failures) != 0 {
 				t.Fatalf("cleanup failed: %v", c.failures)
 			}
-			intakefixture.Must(t, c.Pass(ctx))
+			fixturekit.Must(t, c.Pass(ctx))
 			assertUnitWorkspace(t, f, repository, stream, "audit", true)
 		})
 	}
@@ -157,11 +156,11 @@ func TestCleanupKeepsTheWorkOfAnAbandonedWorkstream(t *testing.T) {
 			export := writeExport(t, f, stream, intake.ReviewerAgent("audit"), intake.ReviewerAgent("audit")+"-review-1")
 			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: intake.AbandonTransition, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: intake.AbandonTransition}
 			_, err := repository.SetFeatureStateUnless(ctx, h, intake.AbandonedState, "superseded", intake.AbandonedState, intake.DeliveredState)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			feature := filepath.Join(f.s.cfg.Root.String(), intake.BranchesDirectory, string(f.project), string(stream))
 
 			c := newCleanup(f, repository)
-			intakefixture.Must(t, c.Pass(ctx))
+			fixturekit.Must(t, c.Pass(ctx))
 			assertUnitWorkspace(t, f, repository, stream, "upload", false)
 			fixturekit.AssertGone(t, done)
 			if got := branchFile(t, f, repository, stream, execution.UnitBranch(stream, "upload"), "upload.txt"); got != "upload\n" {
@@ -172,8 +171,8 @@ func TestCleanupKeepsTheWorkOfAnAbandonedWorkstream(t *testing.T) {
 			assertThere(t, export)
 
 			_, err = repository.CancelTurns(ctx, stream, f.s.now(), intake.AbandonActor, intake.CancelReason)
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, c.Pass(ctx))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, c.Pass(ctx))
 			if len(c.failures) != 0 {
 				t.Fatalf("cleanup failed: %v", c.failures)
 			}
@@ -185,11 +184,11 @@ func TestCleanupKeepsTheWorkOfAnAbandonedWorkstream(t *testing.T) {
 			fixturekit.AssertGone(t, filepath.Join(f.s.cfg.Root.String(), lifecycle.ReviewInputsDirectory, string(f.project), string(stream)))
 			fixturekit.AssertGone(t, filepath.Join(f.s.cfg.Root.String(), intake.UnitsDirectory, string(f.project), string(stream)))
 			g, err := intake.FeatureWorkspaces(f.s.cfg, repository).Of(stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if _, exists, err := g.Branch(ctx, intake.FeatureBranch(stream)); err != nil || !exists {
 				t.Fatalf("the feature branch is gone: %v", err)
 			}
-			intakefixture.Must(t, c.Pass(ctx))
+			fixturekit.Must(t, c.Pass(ctx))
 		})
 	}
 }
@@ -205,7 +204,7 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 	root, project := f.s.cfg.Root.String(), string(f.project)
 	var turns []string
 	for _, rel := range []string{
-		filepath.Join("threads", project, string(stream), intakefixture.MasonAgent("upload"), "turn-1", "transcript.jsonl"),
+		filepath.Join("threads", project, string(stream), intake.MasonAgent("upload"), "turn-1", "transcript.jsonl"),
 		filepath.Join("architect", project, string(stream), "draft-1", "session", "transcript.jsonl"),
 		filepath.Join("shed", project, string(stream), "round-1-member-1", "session", "prompt.md"),
 		filepath.Join("final", project, string(stream), "final-1", "session", "report.json"),
@@ -215,27 +214,27 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 		filepath.Join("checks", project, string(stream), "final-123", "output.txt"),
 	} {
 		path := filepath.Join(root, rel)
-		intakefixture.Must(t, os.MkdirAll(filepath.Dir(path), 0700))
-		intakefixture.Must(t, os.WriteFile(path, []byte("recorded\n"), 0600))
+		fixturekit.Must(t, os.MkdirAll(filepath.Dir(path), 0700))
+		fixturekit.Must(t, os.WriteFile(path, []byte("recorded\n"), 0600))
 		turns = append(turns, filepath.Join(root, strings.Join(strings.Split(rel, string(filepath.Separator))[:3], string(filepath.Separator))))
 	}
 
 	c := newCleanup(f, repository)
-	intakefixture.Must(t, c.Pass(ctx))
+	fixturekit.Must(t, c.Pass(ctx))
 	for _, dir := range turns {
 		assertThere(t, dir)
 	}
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: intake.AbandonTransition, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: intake.AbandonTransition}
 	_, err := repository.SetFeatureStateUnless(ctx, h, intake.AbandonedState, "superseded", intake.AbandonedState, intake.DeliveredState)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repository.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.ServiceActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	request := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_owner-message", Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = repository.EnqueueTurn(ctx, trace.TurnRequest{Header: request, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "owner-message",
 		Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the chief of staff.", Prompt: "Anything left?"})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, c.Pass(ctx))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, c.Pass(ctx))
 	assertUnitWorkspace(t, f, repository, stream, "upload", false)
 	fixturekit.AssertGone(t, filepath.Join(root, intake.BranchesDirectory, project, string(stream)))
 	for _, dir := range turns {
@@ -243,15 +242,15 @@ func TestCleanupRemovesTheTurnDirectoriesOfAFinishedWorkstream(t *testing.T) {
 	}
 
 	_, err = repository.CancelTurns(ctx, stream, f.s.now(), intake.AbandonActor, intake.CancelReason)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, c.Pass(ctx))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, c.Pass(ctx))
 	if len(c.failures) != 0 {
 		t.Fatalf("cleanup failed: %v", c.failures)
 	}
 	for _, dir := range turns {
 		fixturekit.AssertGone(t, dir)
 	}
-	if th, err := repository.Thread(stream, intakefixture.MasonAgent("upload")); err != nil || len(th.Turns) == 0 {
+	if th, err := repository.Thread(stream, intake.MasonAgent("upload")); err != nil || len(th.Turns) == 0 {
 		t.Fatalf("the trace lost the mason's turns: %+v %v", th, err)
 	}
 }
@@ -261,32 +260,32 @@ func TestUnitReviewKeepsOneExportPerThread(t *testing.T) {
 	f, stream, repo := newReviewFixture(t, "exports")
 	ctx := context.Background()
 	r := &reviewers{masons: newMasonController(f.s, repo)}
-	intakefixture.Must(t, r.Pass(ctx))
+	fixturekit.Must(t, r.Pass(ctx))
 	th, err := repo.Thread(stream, intake.ReviewerAgent("resume"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	turn := th.Turns[0].Request.TurnID
 	earlier := writeExport(t, f, stream, th.Identity.ThreadID, turn+"-earlier")
 	other := writeExport(t, f, stream, intake.ReviewerAgent("dedupe"), intake.ReviewerAgent("dedupe")+"-review-1")
-	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Unit: "resume", Thread: th.Identity.ThreadID, Turn: turn, Role: intakefixture.ReviewerRole}
+	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Unit: "resume", Thread: th.Identity.ThreadID, Turn: turn, Role: intake.ReviewerRole}
 
 	selection, err := execution.UnitReviewerSelection(ctx, f.s.about(repo), repo, scope, coreadapter.ExecutionSettings{})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fixturekit.AssertGone(t, earlier)
 	assertThere(t, other)
-	assertThere(t, filepath.Join(selection.Workspace.SourceDirectory, intakefixture.MasonWrote))
+	assertThere(t, filepath.Join(selection.Workspace.SourceDirectory, fixturekit.MasonWrote))
 }
 
 func TestReapSandboxesRemovesWhatInterruptedSessionsLeft(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	root, err := config.ResolveRoot(dir, dir)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	cfg := &config.Config{Root: root, Project: config.Project{ID: "p_0123456789abcdef0123456789abcdef"}}
 	project := string(cfg.Project.ID)
 	record := func(name string, parts ...string) string {
 		session := filepath.Join(append([]string{dir}, parts...)...)
-		intakefixture.Must(t, os.MkdirAll(session, 0700))
-		intakefixture.Must(t, procs.WriteSandboxName(session, name))
+		fixturekit.Must(t, os.MkdirAll(session, 0700))
+		fixturekit.Must(t, procs.WriteSandboxName(session, name))
 		return session
 	}
 	mason := record("agent-mason-1", "threads", project, "w_1", "mason-upload", "turn-1")
@@ -299,7 +298,7 @@ func TestReapSandboxesRemovesWhatInterruptedSessionsLeft(t *testing.T) {
 	script := "#!/bin/sh\n" +
 		`if [ "$1" = rm ] && [ "$3" = agent-stuck-1 ]; then echo "sbx is unavailable" >&2; exit 1; fi` + "\n" +
 		`echo "$3" >> "` + removedLog + `"` + "\n"
-	intakefixture.Must(t, os.WriteFile(sbxBin, []byte(script), 0700))
+	fixturekit.Must(t, os.WriteFile(sbxBin, []byte(script), 0700))
 	service.TestReapSandboxes(context.Background(), cfg, sbxBin)
 	removedData, err := os.ReadFile(removedLog)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

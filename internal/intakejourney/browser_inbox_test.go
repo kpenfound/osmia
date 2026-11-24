@@ -2,6 +2,15 @@ package intakejourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/browsertest"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	testing "testing"
@@ -15,85 +24,69 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// The page lists escalated questions, a contested unit and an amendment
-// with their workstream, rephrasing, options, recommendation and what their
-// answer pins, and answers each inline through its endpoint: a written
-// answer, the one-tap acceptance only a quick reply offers, a ruling on the
-// contest and a decision on the amendment. Each answered entry leaves the
-// inbox through the event stream. A decision on an amendment packet the
-// page no longer shows the latest of is refused; the page shows the refusal
-// and the refreshed entry and sends nothing again.
 func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	t.Parallel()
-	f := newPageFixture(t)
-	p := openBrowser(t)
+	f := journey.NewPageFixture(t)
+	p := browsertest.OpenBrowser(t)
 	ctx := context.Background()
-	live := f.s.sole().repository
+	live := f.S.Sole().Repository
 	at := time.Now().UTC()
 	header := func(schema, id string, actor trace.Actor) trace.Header {
-		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: actor, Cause: "planted"}
+		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: actor, Cause: "planted"}
 	}
 	move := func(subject, id, to string, actor trace.Actor, docs ...trace.Document) {
 		t.Helper()
-		state, err := live.Workflow(stream, subject)
-		must(t, err)
+		state, err := live.Workflow(fixturekit.Stream, subject)
+		fixturekit.Must(t, err)
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: header("osmia.trace.transition", id, actor), Subject: subject, From: state.Value, To: to, Reason: "moved to " + to}}
 		if len(docs) > 0 {
 			_, err = live.RecordDocumentsWith(ctx, docs, tx)
 		} else {
 			_, err = live.Transact(ctx, tx)
 		}
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
 
-	// Two masons ask a question each, which the chief of staff escalates
-	// apart: the first recommends what may be accepted with one tap, the
-	// second what may not.
 	ask := func(agent, thread, question string) trace.Question {
 		t.Helper()
-		must(t, live.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", agent, ownerActor), Role: demoRole, ThreadID: thread}))
-		asked, err := live.Ask(ctx, agent, claimTurn(t, live, t.TempDir(), stream, agent, thread, "build_"+agent, at), question, at)
-		must(t, err)
+		fixturekit.Must(t, live.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", agent, intake.OwnerActor), Role: fixturekit.DemoRole, ThreadID: thread}))
+		asked, err := live.Ask(ctx, agent, fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, agent, thread, "build_"+agent, at), question, at)
+		fixturekit.Must(t, err)
 		return asked
 	}
-	first := ask(demoAgent, demoThread, "Where does upload state live?")
+	first := ask(fixturekit.DemoAgent, fixturekit.DemoThread, "Where does upload state live?")
 	second := ask("agent_mason_history", "thread_mason_history", "May I rewrite the branch history?")
-	_, err := live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
+	_, err := live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{first.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Options: []string{"Files", "A database"}, Recommendation: "Keep it in files."}, at)
-	must(t, err)
-	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
+	fixturekit.Must(t, err)
+	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{second.ID}, Rephrasing: "May the mason rewrite the branch history?",
 		Blocked: "The upload unit.", Recommendation: "Force-push the cleaned branch."}, at)
-	must(t, err)
-	// A reviewer's turn fails on the index unit.
-	plantReport(t, live, stream, "index", at)
-	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
-	move(trace.UnitSubject("index"), "index-contested", UnitContested, reviewerActor)
-	raiseFixtureContest(t, live, stream, "index")
-	// A budget amendment is presented.
-	sealed, sealDoc, _, err := seal.Latest(live, stream)
-	must(t, err)
-	_, err = live.FileBudgetAmendment(ctx, stream, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.",
+	fixturekit.Must(t, err)
+	plantReport(t, live, fixturekit.Stream, "index", at)
+	move(trace.UnitSubject("index"), "index-reviewing", intake.UnitReviewing, service.TestForemanActor)
+	move(trace.UnitSubject("index"), "index-contested", intake.UnitContested, execution.ReviewerActor)
+	journey.RaiseFixtureContest(t, live, fixturekit.Stream, "index")
+	sealed, sealDoc, _, err := seal.Latest(live, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	_, err = live.FileBudgetAmendment(ctx, fixturekit.Stream, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.",
 		Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}, at)
-	must(t, err)
+	fixturekit.Must(t, err)
 	packet := func(revision int, recommendation string) trace.Document {
-		h := header("osmia.trace.document", "amendment-1-presented-packet", shedActor)
+		h := header("osmia.trace.document", "amendment-1-presented-packet", intake.ShedActor)
 		h.Revision = revision
-		return trace.Document{Header: h, Path: amendmentPacketPath("1"), Content: `{"round":1,"recommendation":"` + recommendation + `"}` + "\n"}
+		return trace.Document{Header: h, Path: intake.AmendmentPacketPath("1"), Content: `{"round":1,"recommendation":"` + recommendation + `"}` + "\n"}
 	}
-	move(amendmentSubject("1"), "amendment-1-presented", amendmentPresented, shedActor, packet(1, "approve: no objection stands"))
+	move(intake.AmendmentSubject("1"), "amendment-1-presented", intake.AmendmentPresented, intake.ShedActor, packet(1, "approve: no objection stands"))
 
-	escalations := entriesOf(t, f.c, InboxEscalation)
-	contests := entriesOf(t, f.c, InboxContested)
-	amendments := entriesOf(t, f.c, InboxAmendment)
+	escalations := intakefixture.EntriesOf(t, f.C, api.InboxEscalation)
+	contests := intakefixture.EntriesOf(t, f.C, api.InboxContested)
+	amendments := intakefixture.EntriesOf(t, f.C, api.InboxAmendment)
 	if len(escalations) != 2 || escalations[0].QuickReply != "Keep it in files." || escalations[1].QuickReply != "" || len(contests) != 1 || len(amendments) != 1 {
 		t.Fatalf("planted inbox: %+v %+v %+v", escalations, contests, amendments)
 	}
-	accepted, written, contest, amendment := decisionCard(escalations[0]), decisionCard(escalations[1]), decisionCard(contests[0]), decisionCard(amendments[0])
+	accepted, written, contest, amendment := intakefixture.DecisionCard(escalations[0]), intakefixture.DecisionCard(escalations[1]), intakefixture.DecisionCard(contests[0]), intakefixture.DecisionCard(amendments[0])
 
-	link := newLinkProxy(t, f.s.WebAddr())
-	// Hold inbox responses, including reads already in flight, while the
-	// server advances the packet. Submit releases them after the handler
-	// has copied the displayed revision into its request.
+	link := browsertest.NewLinkProxy(t, f.S.WebAddr())
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`(() => {
 			const gate = window.inboxGate = { closed: false, waiting: [] };
@@ -121,11 +114,9 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.Listener.Addr().String()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Eval(`window.notReloaded = true`, nil)
-	// The list counts what waits on each workstream; the entries show with
-	// their workstream.
-	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "4")
-	p.Await("nothing waits on the quiet workstream", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=needs]`)+`) === null`)
-	p.SelectWorkstream(stream)
+	p.AwaitText(`[data-select="`+string(fixturekit.Stream)+`"] [data-field=needs]`, "4")
+	p.Await("nothing waits on the quiet workstream", `document.querySelector(`+browsertest.Quote(`[data-select="`+string(intakefixture.Quiet)+`"] [data-field=needs]`)+`) === null`)
+	p.SelectWorkstream(fixturekit.Stream)
 	for selector, want := range map[string]string{
 		accepted + "[data-field=kind]":            "Question",
 		accepted + "[data-field=question]":        "Where should upload state live?",
@@ -148,31 +139,26 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	} {
 		p.AwaitText(selector, want)
 	}
-	// The amendment offers each of its options as a button.
 	var offered []string
-	p.Eval(`[...document.querySelectorAll(`+quote(amendment+"[data-decision-choice]")+`)].map((b) => b.dataset.decisionChoice)`, &offered)
+	p.Eval(`[...document.querySelectorAll(`+browsertest.Quote(amendment+"[data-decision-choice]")+`)].map((b) => b.dataset.decisionChoice)`, &offered)
 	if !slices.Equal(offered, amendments[0].Options) {
 		t.Fatalf("the amendment's option buttons: %v, want %v", offered, amendments[0].Options)
 	}
-	// The card leads with the rephrasing; what the role asked in its own
-	// words starts collapsed.
 	var collapsed bool
-	p.Eval(`document.querySelector(`+quote(accepted+"details.asked")+`)?.open === false`, &collapsed)
+	p.Eval(`document.querySelector(`+browsertest.Quote(accepted+"details.asked")+`)?.open === false`, &collapsed)
 	if !collapsed {
 		t.Fatal("the asked questions are not collapsed under the rephrasing")
 	}
-	// The API offers no quick reply on the second question, so the page
-	// offers no acceptance.
 	var acceptable bool
-	p.Eval(`document.querySelector(`+quote(written+"[data-field=accept]")+`) !== null`, &acceptable)
+	p.Eval(`document.querySelector(`+browsertest.Quote(written+"[data-field=accept]")+`) !== null`, &acceptable)
 	if acceptable {
 		t.Fatal("the page offers to accept a recommendation the API withholds a quick reply for")
 	}
 
 	ruling := func(id string) *trace.Ruling {
 		t.Helper()
-		questions, err := live.Questions(stream)
-		must(t, err)
+		questions, err := live.Questions(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		i := slices.IndexFunc(questions, func(q trace.QuestionState) bool { return q.Asked.ID == id })
 		if i < 0 {
 			t.Fatalf("no question %s", id)
@@ -180,7 +166,6 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 		return questions[i].Ruling
 	}
 
-	// An answer is written before it is sent.
 	p.Click(written + "button[type=submit]")
 	p.AwaitText("#inbox-result", "Write an answer first.")
 	if r := ruling(second.ID); r != nil {
@@ -190,69 +175,63 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	p.Click(written + "button[type=submit]")
 	p.AwaitOutcome("Answered inbox entry 2.")
 	p.AwaitGone("the written answer's entry", written)
-	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=needs]`, "3")
-	if r := ruling(second.ID); r == nil || r.OwnerResponse != "Keep the history; add a fixup commit." || r.Actor != ownerActor {
+	p.AwaitText(`[data-select="`+string(fixturekit.Stream)+`"] [data-field=needs]`, "3")
+	if r := ruling(second.ID); r == nil || r.OwnerResponse != "Keep the history; add a fixup commit." || r.Actor != intake.OwnerActor {
 		t.Fatalf("the written answer's ruling: %+v", r)
 	}
 
-	// An option fills the answer; the one-tap acceptance sends the quick
-	// reply itself.
 	p.Click(accepted + "[data-field=option]:nth-of-type(2)")
-	p.Await("the option in the answer", `document.querySelector(`+quote(accepted+"textarea")+`).value === 'A database'`)
+	p.Await("the option in the answer", `document.querySelector(`+browsertest.Quote(accepted+"textarea")+`).value === 'A database'`)
 	p.Click(accepted + "[data-field=accept]")
 	p.AwaitOutcome("Accepted the recommendation on inbox entry 1.")
 	p.AwaitGone("the accepted entry", accepted)
-	if r := ruling(first.ID); r == nil || r.OwnerResponse != "Keep it in files." || r.Actor != ownerActor {
+	if r := ruling(first.ID); r == nil || r.OwnerResponse != "Keep it in files." || r.Actor != intake.OwnerActor {
 		t.Fatalf("the accepted ruling: %+v", r)
 	}
 
-	// A contested unit is ruled on with a decision and a note.
 	p.Click(contest + `[data-decision-choice="review"]`)
 	p.AwaitText("#inbox-result", "Give a note for the ruling.")
 	p.TypeInto(contest+"input[name=note]", "The reviewer's sandbox failed; review it again.")
 	p.Click(contest + `[data-decision-choice="review"]`)
 	p.AwaitOutcome("Ruled review on unit index.")
 	p.AwaitGone("the contested unit", contest)
-	if state, err := live.Workflow(stream, trace.UnitSubject("index")); err != nil || state.Value != UnitReviewing {
+	if state, err := live.Workflow(fixturekit.Stream, trace.UnitSubject("index")); err != nil || state.Value != intake.UnitReviewing {
 		t.Fatalf("the ruled unit: %+v %v", state, err)
 	}
-	transitions, err := trace.Read[trace.Transition](live, stream)
-	must(t, err)
+	transitions, err := trace.Read[trace.Transition](live, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	ruled := slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != trace.UnitSubject("index") })
-	if last := ruled[len(ruled)-1]; last.Actor != ownerActor || !strings.HasSuffix(last.Reason, "The reviewer's sandbox failed; review it again.") {
+	if last := ruled[len(ruled)-1]; last.Actor != intake.OwnerActor || !strings.HasSuffix(last.Reason, "The reviewer's sandbox failed; review it again.") {
 		t.Fatalf("the contested ruling: %+v", last)
 	}
 
-	// The stream is held while the amendment's packet is presented again,
-	// so the page still shows the first revision when the owner decides.
-	gate := p.Gate("*" + Prefix + "/events")
+	gate := p.Gate("*" + api.Prefix + "/events")
 	gate.Set(true)
 	p.Eval(`window.inboxGate.closed = true`, nil)
 	link.Cut()
 	p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
 	link.Restore()
-	must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "ratify: no objection stands")}))
+	fixturekit.Must(t, live.RecordDocuments(ctx, []trace.Document{packet(2, "ratify: no objection stands")}))
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 1")
-	p.Click(amendment + `[data-decision-choice="` + AmendmentReject + `"]`)
+	p.Click(amendment + `[data-decision-choice="` + intake.AmendmentReject + `"]`)
 	p.AwaitText("#inbox-result", "packet revision 1 of amendment 1 is not the latest; revision 2 is presented")
 	p.AwaitText(amendment+"[data-field=pins]", "packet revision 2")
 	p.AwaitText(amendment+"[data-field=recommendation]", "approve: no objection stands")
-	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.State != amendmentPresented || out.Decision != nil {
+	if out, err := f.C.Amendment(ctx, fixturekit.Stream, "1"); err != nil || out.State != intake.AmendmentPresented || out.Decision != nil {
 		t.Fatalf("the refused decision: %+v %v", out, err)
 	}
 	gate.Set(false)
 	p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
-	p.Click(amendment + `[data-decision-choice="` + AmendmentReject + `"]`)
+	p.Click(amendment + `[data-decision-choice="` + intake.AmendmentReject + `"]`)
 	p.AwaitOutcome("Decided reject on amendment 1.")
 	p.AwaitGone("the decided amendment", amendment)
-	if out, err := f.c.Amendment(ctx, stream, "1"); err != nil || out.Decision == nil || out.Decision.Decision != AmendmentReject || out.Decision.Packet != 2 {
+	if out, err := f.C.Amendment(ctx, fixturekit.Stream, "1"); err != nil || out.Decision == nil || out.Decision.Decision != intake.AmendmentReject || out.Decision.Packet != 2 {
 		t.Fatalf("the decided amendment: %+v %v", out, err)
 	}
 	p.Await("the same document", `window.notReloaded === true`)
-	// The page sent the refused decision once and never again.
 	decisions := 0
 	for _, path := range p.Paths() {
-		if path == Prefix+"/amendment/"+string(stream)+"/1" {
+		if path == api.Prefix+"/amendment/"+string(fixturekit.Stream)+"/1" {
 			decisions++
 		}
 	}
@@ -261,47 +240,42 @@ func TestBrowserPageAnswersQuestionsContestsAndAmendments(t *testing.T) {
 	}
 }
 
-// The page shows a ratification packet with the dissent that stands and
-// decides it inline: it overrules one objection and sustains another,
-// refuses a redraft without a note, asks for one with a note, and ratifies
-// the revisions the redraft's debate concluded at. Each is recorded as the
-// matching command's call records it.
 func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
-	t.Cleanup(func() { f.stop(t) })
-	p := openBrowser(t)
-	faults := &faults{}
-	veto := shed.ObjectionID(1, committeeAgent(1), 1)
-	size := shed.ObjectionID(1, committeeAgent(2), 1)
-	f.member(1, 1, 1, objects(faults, shed.Charter, "spec#2", "charter#1"))
-	f.member(1, 2, 1, objects(faults, shed.Size, "plan#resume", "spec#1"))
-	f.script(replyTurnID(1, 1), nil, answers(faults, "Kept as it is.", veto, size))
-	f.script((roundInput{Round: 1, Redraft: true}).TurnID(1), map[string]string{plan.PlanPath: splitPlan}, nil)
-	f.member(2, 1, 1, silent)
-	f.member(2, 2, 1, concedes(faults, size))
-	f.script(replyTurnID(2, 1), nil, nil)
-	ws := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, ws, "concluded-1")
+	f := journey.NewDebateFixtureWith(t, 2, 1, servicetest.ListenWeb, nil)
+	t.Cleanup(func() { f.Stop(t) })
+	p := browsertest.OpenBrowser(t)
+	faults := &intakefixture.Faults{}
+	veto := shed.ObjectionID(1, intake.CommitteeAgent(1), 1)
+	size := shed.ObjectionID(1, intake.CommitteeAgent(2), 1)
+	f.Member(1, 1, 1, intakefixture.Objects(faults, shed.Charter, "spec#2", "charter#1"))
+	f.Member(1, 2, 1, intakefixture.Objects(faults, shed.Size, "plan#resume", "spec#1"))
+	f.Script(intake.ReplyTurnID(1, 1), nil, intakefixture.Answers(faults, "Kept as it is.", veto, size))
+	f.Script((intake.RoundInput{Round: 1, Redraft: true}).TurnID(1), map[string]string{plan.PlanPath: splitPlan}, nil)
+	f.Member(2, 1, 1, intakefixture.Silent)
+	f.Member(2, 2, 1, intakefixture.Concedes(faults, size))
+	f.Script(intake.ReplyTurnID(2, 1), nil, nil)
+	ws := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, ws, "concluded-1")
 	faults.Check(t)
-	f.chiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
-	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
-	var entries []InboxEntry
-	soon(t, "the ratification entry", func() bool {
-		entries = f.inboxEntries(t, ws, InboxRatification)
+	f.ChiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
+	f.ChiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	var entries []api.InboxEntry
+	intakefixture.Soon(t, "the ratification entry", func() bool {
+		entries = f.InboxEntries(t, ws, api.InboxRatification)
 		return len(entries) > 0
 	})
 	if len(entries) != 1 {
 		t.Fatalf("ratification entries %+v", entries)
 	}
-	card := decisionCard(entries[0])
+	card := intakefixture.DecisionCard(entries[0])
 	choices := func() []string {
 		var out []string
-		p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &out)
+		p.Eval(`[...document.querySelectorAll(`+browsertest.Quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &out)
 		return out
 	}
 
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Eval(`window.notReloaded = true`, nil)
 	p.SelectWorkstream(ws)
@@ -311,10 +285,9 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
 	p.AwaitText(card+"[data-field=pins]", "spec revision 1, plan revision 1")
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=standing]`, "blocking")
-	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+committeeAgent(1)+" in round 1 on spec#2")
+	p.AwaitText(card+`[data-objection="`+veto+`"]`, "charter by "+intake.CommitteeAgent(1)+" in round 1 on spec#2")
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=argument]`, "It does not hold.")
 	p.AwaitText(card+`[data-objection="`+veto+`"] [data-field=escalation]`, "Chief of staff: The veto cites the small-changes rule.")
-	// Nothing blocked may be ratified.
 	if got := choices(); slices.Contains(got, "ratify") || !slices.Contains(got, "overrule "+veto) || !slices.Contains(got, "sustain "+size) || !slices.Contains(got, "redraft") {
 		t.Fatalf("the decisions offered while objections block: %v", got)
 	}
@@ -326,8 +299,8 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.TypeInto(card+"input[name=note]", "Split the resume unit.")
 	p.Click(card + `[data-decision-choice="sustain ` + size + `"]`)
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")
-	entries = f.inboxEntries(t, ws, InboxRatification)
-	dissent := f.dissent(t, ws)
+	entries = f.InboxEntries(t, ws, api.InboxRatification)
+	dissent := f.Dissent(t, ws)
 	if len(entries) != 1 || len(entries[0].Options) != 0 || len(dissent) != 2 {
 		t.Fatalf("after the dispositions: %+v %+v", entries, dissent)
 	}
@@ -337,20 +310,17 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 		}
 	}
 
-	// A redraft says what to change.
 	p.Click(card + `[data-decision-choice="redraft"]`)
 	p.AwaitText("#inbox-result", "Say what the redraft should change.")
-	if asked, err := shed.Redrafts(f.repository(), ws); err != nil || len(asked) != 0 {
+	if asked, err := shed.Redrafts(f.Repository(), ws); err != nil || len(asked) != 0 {
 		t.Fatalf("a redraft without a note was recorded: %+v %v", asked, err)
 	}
 	p.TypeInto(card+"input[name=note]", "Split the resume unit into what it addresses.")
 	p.Click(card + `[data-decision-choice="redraft"]`)
-	// The redraft is debated, and the packet of the round that concludes it
-	// replaces the one the page showed.
 	p.AwaitText(card+"[data-field=pins]", "spec revision 1, plan revision 2")
 	p.AwaitText(card+"[data-field=recommendation]", "ratify: no objection stands")
-	asked, err := shed.Redrafts(f.repository(), ws)
-	must(t, err)
+	asked, err := shed.Redrafts(f.Repository(), ws)
+	fixturekit.Must(t, err)
 	if len(asked) != 1 || asked[0].Round != 1 || asked[0].Note != "Split the resume unit into what it addresses." {
 		t.Fatalf("the recorded redraft %+v", asked)
 	}
@@ -358,43 +328,40 @@ func TestBrowserPageDecidesARatificationPacket(t *testing.T) {
 	p.Click(card + `[data-decision-choice="ratify"]`)
 	p.AwaitOutcome("the owner ratified spec.md revision 1 and plan.json revision 2 after round 2")
 	p.AwaitGone("the ratified packet", card)
-	if record := f.ratification(t, ws, 2); record.Revision != (shed.Pin{Spec: 1, Plan: 2}) || record.Round != 2 {
+	if record := f.Ratification(t, ws, 2); record.Revision != (shed.Pin{Spec: 1, Plan: 2}) || record.Round != 2 {
 		t.Fatalf("the recorded ratification %+v", record)
 	}
-	if moves := f.ownerMoves(t, ws); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "redraft-1", "ratified-2"}) {
+	if moves := f.OwnerMoves(t, ws); !slices.Equal(moves, []string{"overruled-1", "ruled-1", "redraft-1", "ratified-2"}) {
 		t.Fatalf("owner subject went %v", moves)
 	}
 	p.Await("the same document", `window.notReloaded === true`)
 	faults.Check(t)
 }
 
-// The ratification card shows the owner the objections the chief of staff
-// escalated, with its note, and folds those it dismissed below them with its
-// reasons: a dismissed charter veto blocks nothing and takes no ruling there.
 func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
-	t.Cleanup(func() { f.stop(t) })
-	p := openBrowser(t)
-	faults := &faults{}
-	veto := shed.ObjectionID(1, committeeAgent(1), 1)
-	size := shed.ObjectionID(1, committeeAgent(2), 1)
-	f.member(1, 1, 1, objects(faults, shed.Charter, "spec#2", "charter#1"))
-	f.member(1, 2, 1, objects(faults, shed.Size, "plan#resume", "spec#1"))
-	f.script(replyTurnID(1, 1), nil, answers(faults, "Kept as it is.", veto, size))
-	ws := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, ws, "concluded-1")
+	f := journey.NewDebateFixtureWith(t, 2, 1, servicetest.ListenWeb, nil)
+	t.Cleanup(func() { f.Stop(t) })
+	p := browsertest.OpenBrowser(t)
+	faults := &intakefixture.Faults{}
+	veto := shed.ObjectionID(1, intake.CommitteeAgent(1), 1)
+	size := shed.ObjectionID(1, intake.CommitteeAgent(2), 1)
+	f.Member(1, 1, 1, intakefixture.Objects(faults, shed.Charter, "spec#2", "charter#1"))
+	f.Member(1, 2, 1, intakefixture.Objects(faults, shed.Size, "plan#resume", "spec#1"))
+	f.Script(intake.ReplyTurnID(1, 1), nil, intakefixture.Answers(faults, "Kept as it is.", veto, size))
+	ws := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, ws, "concluded-1")
 	faults.Check(t)
-	f.chiefDecides(t, ws, veto, shed.Dismiss, "Each unit is one small change with its own test.")
-	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
-	var entries []InboxEntry
-	soon(t, "the ratification entry", func() bool {
-		entries = f.inboxEntries(t, ws, InboxRatification)
+	f.ChiefDecides(t, ws, veto, shed.Dismiss, "Each unit is one small change with its own test.")
+	f.ChiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	var entries []api.InboxEntry
+	intakefixture.Soon(t, "the ratification entry", func() bool {
+		entries = f.InboxEntries(t, ws, api.InboxRatification)
 		return len(entries) > 0
 	})
-	card := decisionCard(entries[0])
+	card := intakefixture.DecisionCard(entries[0])
 
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Ratification")
@@ -402,7 +369,7 @@ func TestBrowserPageFoldsObjectionsTheChiefOfStaffDismissed(t *testing.T) {
 	p.AwaitText(card+"[data-field=dismissed] summary", "Dismissed by the chief of staff (1)")
 	p.AwaitText(card+`[data-field=dismissed] [data-objection="`+veto+`"] [data-field=note]`, "Chief of staff: Each unit is one small change with its own test.")
 	var choices []string
-	p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &choices)
+	p.Eval(`[...document.querySelectorAll(`+browsertest.Quote(card+"[data-decision-choice]")+`)].map((o) => o.dataset.decisionChoice)`, &choices)
 	if !slices.Contains(choices, "ratify") || !slices.Contains(choices, "overrule "+size) || slices.ContainsFunc(choices, func(c string) bool { return strings.HasSuffix(c, " "+veto) }) {
 		t.Fatalf("the decisions offered with the veto dismissed: %v", choices)
 	}

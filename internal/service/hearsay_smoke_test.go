@@ -22,7 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -51,15 +50,15 @@ func TestHearsaySmokeConfig(t *testing.T) {
 	}
 	f := newPublisherFixture(t, func(cfg *config.Config) { cfg.Hearsay = smokeHearsay("http://api:8080", "http://connectors:8081") })
 	setup, err := buildMemorySetup(f.cfg, f.repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for name, content := range setup.Files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
-		intakefixture.Must(t, os.MkdirAll(filepath.Dir(path), 0o755))
-		intakefixture.Must(t, os.WriteFile(path, append(content, '\n'), 0o644))
+		fixturekit.Must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		fixturekit.Must(t, os.WriteFile(path, append(content, '\n'), 0o644))
 	}
 	summary, err := json.MarshalIndent(map[string]any{"project": f.repo.Project(), "work_source": setup.WorkSource, "owner_source": setup.OwnerSource, "publisher": setup.Publisher, "principal": setup.Principal, "hearsay_scope": setup.Scope}, "", "  ")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(dir, "memory-setup-summary.json"), append(summary, '\n'), 0o644))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "memory-setup-summary.json"), append(summary, '\n'), 0o644))
 	t.Logf("wrote %d fragments for project %s under %s", len(setup.Files), f.repo.Project(), dir)
 }
 
@@ -202,15 +201,15 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 	evidence := os.Getenv("OSMIA_SMOKE_EVIDENCE")
 	if evidence != "" {
-		intakefixture.Must(t, os.MkdirAll(evidence, 0o755))
+		fixturekit.Must(t, os.MkdirAll(evidence, 0o755))
 	}
 	keep := func(name string, v any) {
 		t.Helper()
 		data, err := json.MarshalIndent(v, "", "  ")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Logf("---- %s ----\n%s", name, data)
 		if evidence != "" {
-			intakefixture.Must(t, os.WriteFile(filepath.Join(evidence, name+".json"), append(data, '\n'), 0o644))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(evidence, name+".json"), append(data, '\n'), 0o644))
 		}
 	}
 	tokens := map[string]string{}
@@ -263,7 +262,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), chiefActor)
 
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	posts := hookLog.take()
 	keep("publisher-pass-1", map[string]any{"posts": res.Posts, "failures": res.Failures, "unreachable": res.Unreachable, "requests": posts})
 	if res.Posts == 0 || len(res.Failures) != 0 || res.Unreachable {
@@ -277,7 +276,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	var sent []post
 	for _, p := range posts {
 		var raw map[string]any
-		intakefixture.Must(t, json.Unmarshal(p.Body, &raw))
+		fixturekit.Must(t, json.Unmarshal(p.Body, &raw))
 		if p.Status != http.StatusAccepted {
 			t.Errorf("POST %s = %d %s", p.Path, p.Status, p.Body)
 		}
@@ -332,7 +331,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 
 	res2, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	again := hookLog.take()
 	keep("publisher-pass-2", map[string]any{"posts": res2.Posts, "failures": res2.Failures, "requests": again})
 	if res2.Posts != 0 || len(again) != 0 || len(res2.Failures) != 0 {
@@ -398,7 +397,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			continue
 		}
 		var project smokeBundle
-		intakefixture.Must(t, json.Unmarshal(raw, &project))
+		fixturekit.Must(t, json.Unmarshal(raw, &project))
 		keep("get_bundle-project-"+name, json.RawMessage(raw))
 		if project.Scope.ID != entity {
 			t.Errorf("%s: the default read was %q, want %q", name, project.Scope.ID, entity)
@@ -413,7 +412,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			continue
 		}
 		var b smokeBundle
-		intakefixture.Must(t, json.Unmarshal(raw, &b))
+		fixturekit.Must(t, json.Unmarshal(raw, &b))
 		keep("get_bundle-workstream-"+name, json.RawMessage(raw))
 		got := b.decisions()
 		if g := got[string(stream)+"-ruling-1"]; g != (smokeLogged{"ratified", "owner", "current", "Cap uploads at 10 MiB."}) {
@@ -443,7 +442,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 					System string `json:"system"`
 				} `json:"source"`
 			}
-			intakefixture.Must(t, json.Unmarshal(raw, &doc))
+			fixturekit.Must(t, json.Unmarshal(raw, &doc))
 			keep("get_l1-spec-"+name, json.RawMessage(raw))
 			if !strings.Contains(doc.RawText, "Cap uploads at 10 MiB") || doc.ArtifactClass != "spec" || doc.Source.System != smokeOwnerSrc {
 				t.Errorf("%s: the sealed spec is served as class %q from %q: %q", name, doc.ArtifactClass, doc.Source.System, doc.RawText)
@@ -455,7 +454,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("%s: traverse(topics, stances): %v", name, err)
 		} else {
 			var g smokeTraversed
-			intakefixture.Must(t, json.Unmarshal(raw, &g))
+			fixturekit.Must(t, json.Unmarshal(raw, &g))
 			keep("traverse-workstream-decisions-"+name, json.RawMessage(raw))
 			d := g.decisions()
 			if d[string(stream)+"-ruling-1"].Tier != "ratified" || d[assumptionID].Tier != "inferred" {
@@ -467,7 +466,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("%s: traverse(documents): %v", name, err)
 		} else {
 			var g smokeTraversed
-			intakefixture.Must(t, json.Unmarshal(raw, &g))
+			fixturekit.Must(t, json.Unmarshal(raw, &g))
 			keep("traverse-workstream-documents-"+name, json.RawMessage(raw))
 			if !slices.ContainsFunc(g.Nodes, func(n smokeNode) bool {
 				return n.Type == "document" && n.Class == "spec" && n.Line == "# Upload limits"
@@ -479,11 +478,11 @@ func TestHearsaySmokeRun(t *testing.T) {
 		provider := hearsay.Provider{Local: bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return f.repo, nil }},
 			Config: f.s.current, Health: &hearsay.Health{}, Client: client}
 		out, err := provider.Assemble(context.Background(), f.repo.Project(), bundle.Scope{Role: r.role, Workstream: stream})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var scopes []string
 		for _, m := range out.Memory {
 			var s smokeBundle
-			intakefixture.Must(t, json.Unmarshal(m, &s))
+			fixturekit.Must(t, json.Unmarshal(m, &s))
 			scopes = append(scopes, s.Scope.ID)
 		}
 		if out.Mode != hearsay.Mode || !slices.Equal(scopes, []string{entity, streamEntity}) {
@@ -512,7 +511,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 		req.Header.Set("Hearsay-Principal", "smoke-outsider")
 		req.Header.Set("Authorization", "Bearer "+smokeEnv(t, "HEARSAY_SMOKE_OUTSIDER_TOKEN"))
 		resp, err := (&http.Client{Transport: direct}).Do(req)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer resp.Body.Close()
 		raw, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, raw

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,13 +13,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 var routeSamples = strings.NewReplacer(
-	"{workstream}", string(intakefixture.Stream),
-	"{project}", string(intakefixture.Project),
+	"{workstream}", string(fixturekit.Stream),
+	"{project}", string(fixturekit.Project),
 	"{number}", "1",
 	"{unit}", "u1",
 	"{image}", "image-unknown",
@@ -66,14 +65,14 @@ func TestRoutesAreServed(t *testing.T) {
 func TestRoutesListEveryPath(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob("*.go")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	literal := regexp.MustCompile(`Prefix\s*\+\s*"(/[^"]*)"`)
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") || file == "client.go" {
 			continue
 		}
 		src, err := os.ReadFile(file)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, m := range literal.FindAllStringSubmatch(string(src), -1) {
 			path := Prefix + m[1]
 			listed := false
@@ -121,7 +120,7 @@ func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
 	}
 
 	s, _ := start(t, fixture(t))
-	target := strings.NewReplacer("{workstream}", string(intakefixture.Stream)).Replace(path)
+	target := strings.NewReplacer("{workstream}", string(fixturekit.Stream)).Replace(path)
 	send := func(method, body string) ErrorResponse {
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")

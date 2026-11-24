@@ -32,7 +32,7 @@ func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for requested.State != "presented" {
 		if time.Now().After(deadline) {
 			t.Fatalf("controller did not present the impact summary: %+v", requested)
@@ -51,17 +51,17 @@ func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 	}
 	repo := f.repository(fixturekit.Project)
 	changes, err := lifecycle.ReadChanges(repo, fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(changes) != 1 || changes[0].State == "applied" || len(changes[0].Applied) != 0 || !intakefixture.EqualJSONTest(changes[0].Decision, approved.Decision) || !intakefixture.EqualJSONTest(changes[0].Members, approved.Members) || !intakefixture.EqualJSONTest(changes[0].Before, approved.Before) || !intakefixture.EqualJSONTest(changes[0].After, approved.After) {
 		t.Fatalf("refused removal lost or applied the approved journal: %+v", changes)
 	}
 	unblock()
-	deadline = time.Now().Add(intakefixture.DemoTimeout)
+	deadline = time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		repo, err = s.repository(fixturekit.Project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		changes, err = lifecycle.ReadChanges(repo, fixturekit.Stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(changes) == 1 && changes[0].State == "applied" {
 			break
 		}
@@ -75,22 +75,22 @@ func TestApprovedChangeSurvivesProjectRemovalGate(t *testing.T) {
 		t.Fatalf("cancellation changed original pins or duplicated effects: %+v", finished)
 	}
 	_, err = client.RemoveProject(ctx, fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if s.current().Active(fixturekit.Project) {
 		t.Fatal("resolved project stayed active after removal")
 	}
 	resolved, err := config.ResolveRoot(f.opts.Config.Root, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repo, err = trace.OpenByID(resolved, fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	changes, err = lifecycle.ReadChanges(repo, fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(changes) != 1 || !intakefixture.EqualJSONTest(changes[0], finished) {
 		t.Fatalf("removal changed the applied journal: %+v", changes)
 	}
 	transitions, err := trace.Read[trace.Transition](repo, fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	count := 0
 	for _, tr := range transitions {
 		if tr.ID == "cancel-"+requested.ID {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync"
@@ -31,7 +32,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			deliverResolutionMembers(t, f)
 			for _, m := range resolutionMembers(f) {
 				repo, err := f.s.repository(m.project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				recordResolutionMerge(t, repo, m.stream)
 			}
 			awaitMemberMergeResolution(t, f)
@@ -63,23 +64,23 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 				t.Fatal("observer did not retain its locked journal read")
 			}
 			wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, change.Workgroup)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer wt.Close()
 			journal := func() []byte {
 				docs, err := trace.Read[trace.Document](wt, change.Host)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				docs = slices.DeleteFunc(docs, func(doc trace.Document) bool {
 					return !strings.HasPrefix(doc.ID, "workgroup-change-")
 				})
 				data, err := json.Marshal(docs)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				return data
 			}
 			before := journal()
 			if retire {
 				for _, m := range resolutionMembers(f) {
 					_, err := f.c.Archive(ctx, m.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 				}
 			}
 			unlock()
@@ -92,7 +93,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 			}()
 			select {
 			case <-finished:
-			case <-time.After(intakefixture.DemoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("held change observer did not finish")
 			}
 			if retire {
@@ -100,7 +101,7 @@ func TestChangeApplicationRechecksRetirementAfterObserverRead(t *testing.T) {
 					t.Fatal("retired observer changed the journal bytes or revision history")
 				}
 				changes, err := lifecycle.ReadChanges(wt, change.Host)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if len(changes) != 1 || !intakefixture.EqualJSONTest(changes[0], decided) {
 					t.Fatal("retired observer changed the approved decision or its exact pins")
 				}

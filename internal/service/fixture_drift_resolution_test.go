@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
@@ -59,7 +60,7 @@ func resolutionWorkspace(t *testing.T, f *shedFixture, stream config.WorkstreamI
 func featureTip(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()
 	tip, _, err := workspaces(f.s.cfg, branchesDirectory, backendOf(t, f, stream)).Branch(context.Background(), featureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return tip
 }
 

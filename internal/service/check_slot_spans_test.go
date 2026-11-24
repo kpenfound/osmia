@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,7 +54,7 @@ func TestCheckPoolSendsHeldAndWaitSlotSpans(t *testing.T) {
 	ctx := context.Background()
 	exporter := tracetest.NewInMemoryExporter()
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer sink.Close()
 	clock := &spanClock{now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 	rec := slotspans.New(sink, slotspans.Options{Now: clock.Now})
@@ -66,7 +67,7 @@ func TestCheckPoolSendsHeldAndWaitSlotSpans(t *testing.T) {
 
 	t0 := clock.Now()
 	holder, err := p.acquire(ctx, run("holder"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t1 := clock.Advance(5 * time.Second)
 	queued := queuedSlot(ctx, p, run("queued"))
 	waitForQueue(t, p, 1)
@@ -84,7 +85,7 @@ func TestCheckPoolSendsHeldAndWaitSlotSpans(t *testing.T) {
 	t4 := clock.Advance(5 * time.Second)
 	release()
 
-	intakefixture.Must(t, sink.Flush(ctx))
+	fixturekit.Must(t, sink.Flush(ctx))
 	type bounds struct{ start, end time.Time }
 	waits, holds := map[string]bounds{}, map[string]bounds{}
 	outcomes := map[string]string{}
@@ -142,7 +143,7 @@ func TestCheckSlotHeldWhenTheServiceStopsIsSentInterruptedByTheNextRun(t *testin
 	if _, err := s.checkSlots.acquire(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if _, err := os.Stat(filepath.Join(opts.Config.Root, "slot-intervals.json")); err != nil {
 		t.Fatalf("the open interval was not kept: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestCheckSlotHeldWhenTheServiceStopsIsSentInterruptedByTheNextRun(t *testin
 	}
 
 	s, _ = startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	got := slotSpansOf(exporter)
 	if len(got) != 1 || got[0].Name != "osmia.slot.held" {
 		t.Fatalf("spans after the next run: %+v", got)
@@ -185,7 +186,7 @@ func TestSlotIntervalsAreNotKeptWhileTelemetryIsOff(t *testing.T) {
 	if _, err := s.checkSlots.acquire(context.Background(), CheckSlotRun{Unit: "unit"}); err != nil {
 		t.Fatal(err)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if _, err := os.Stat(filepath.Join(opts.Config.Root, "slot-intervals.json")); !os.IsNotExist(err) {
 		t.Fatalf("ledger stat: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestPoolLimitsFollowTheConfigurationInForce(t *testing.T) {
 	before, _ := s.poolLimit(masonRole)
 	files.write(t, files.topText+"[capacity]\nmasons = "+strconv.Itoa(before+3)+"\n")
 	_, err := c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got, bounded := s.poolLimit(masonRole); !bounded || got != before+3 {
 		t.Fatalf("mason limit %d after a reload that set %d", got, before+3)
 	}

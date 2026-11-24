@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
@@ -14,7 +13,7 @@ func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
 	for range 100 {
 		p := &checkSlotPool{limit: 1}
 		holder, err := p.acquire(context.Background(), CheckSlotRun{Unit: "holder"})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		ctx, cancel := context.WithCancel(context.Background())
 		next := queuedSlot(ctx, p, CheckSlotRun{Unit: "cancelled"})
 		var wg sync.WaitGroup

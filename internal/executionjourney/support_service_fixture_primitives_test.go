@@ -2,7 +2,6 @@ package executionjourney
 
 import (
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 type checkOutcome = fixturekit.CheckOutcome
@@ -13,7 +12,7 @@ type fakeChecks = fixturekit.FakeChecks
 
 type fakePulls = fixturekit.FakePulls
 
-const masonWrote = intakefixture.MasonWrote
+const masonWrote = fixturekit.MasonWrote
 
 const passedReport = fixturekit.PassedReport
 

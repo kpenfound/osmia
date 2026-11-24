@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 func readWorkgroupFeed(t *testing.T, f *productionDesignFixture, group config.WorkgroupID) api.WorkgroupFeedResponse {
 	t.Helper()
 	var feed api.WorkgroupFeedResponse
-	intakefixture.Must(t, f.c.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(group)+"/feed", nil, &feed))
+	fixturekit.Must(t, f.c.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(group)+"/feed", nil, &feed))
 	return feed
 }
 
@@ -103,7 +104,7 @@ func TestSharedFeedStaysReadableAfterEveryMemberIsAutoArchived(t *testing.T) {
 			}
 		}
 		conversation, err := g.c.Conversation(ctx, g.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, m := range resolutionMembers(g.f()) {
 			if entries := archiveEntries(conversation.Entries, m.stream); len(entries) != 1 {
 				t.Fatalf("%s: conversation entries of %s: %+v", phase, m.stream, conversation.Entries)
@@ -136,19 +137,19 @@ func TestSharedFeedStaysReadableAfterTheOwnerArchivesEveryMember(t *testing.T) {
 	}
 	for _, m := range resolutionMembers(g.f()) {
 		repo, err := g.s.repository(m.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		recordResolutionMerge(t, repo, m.stream)
 	}
 	down, err := g.s.repository(g.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lifecycleAwait(t, g.f(), "the downstream edge is released", func() bool {
 		wait, err := lifecycle.EdgeWaitDisplay(down, g.stream2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return wait == ""
 	})
 	for _, m := range resolutionMembers(g.f()) {
 		resp, err := g.c.Archive(context.Background(), m.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if resp.ArchivedBy != api.ArchivedByOwner {
 			t.Fatalf("owner archive reports %+v", resp)
 		}

@@ -81,7 +81,7 @@ func TestDriftRebaseMovesTheFeatureBranchAndTheSeal(t *testing.T) {
 	result := settleOperation(t, f.s, repository, stream, op, d)
 	g := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit)
 	tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if tip == before || parentOf(t, f, tip) != upstream || fileAt(t, f, tip, "internal/trace/resume.go") != "package trace\n" || fileAt(t, f, tip, "UPSTREAM.md") != "upstream\n" {
 		t.Fatalf("the feature branch is at %s, not the feature commit replayed onto %s", tip, upstream)
 	}
@@ -140,15 +140,15 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	ctx := context.Background()
 	g := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit)
 	before, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 	requestDrift(t, d, stream)
 	sealed := intakefixture.StreamDocuments(t, repository, stream, seal.DocumentID)
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 
 	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(f.s.cfg.Root.String(), "runtime.json"), state, 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(f.s.cfg.Root.String(), "runtime.json"), state, 0600))
 	f.start(t)
 	ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return driftOperations(t, f.repository(), stream) })
 	f.stop(t)
@@ -157,7 +157,7 @@ func TestPausedWorkstreamIsSkippedByDriftRebases(t *testing.T) {
 	}
 
 	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
 	d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	if requested, err := d.requestDrifts(ctx, testDrift); err != nil || len(requested) != 0 {
@@ -194,7 +194,7 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 			t.Fatalf("drift rebase %d interrupted at %s replayed %d times in all", k, point, replays)
 		}
 		tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if tip == before || parentOf(t, f, tip) != upstream {
 			t.Fatalf("drift rebase %d interrupted at %s left the branch at %s, not on %s", k, point, tip, upstream)
 		}
@@ -214,7 +214,7 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 			t.Fatalf("drift rebase %d interrupted at %s recorded %q", k, point, outcomes)
 		}
 		transitions, err := trace.Read[trace.Transition](repository, stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if n := len(slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.ID != fmt.Sprintf("drift-%d-rebased", k) })); n != 1 {
 			t.Fatalf("drift rebase %d recorded its outcome %d times", k, n)
 		}
@@ -222,7 +222,7 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 	interrupt := func(k int, point string) (before, upstream string, op coreadapter.Operation) {
 		t.Helper()
 		before, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		upstream = advanceUpstream(t, f, map[string]string{fmt.Sprintf("UPSTREAM-%d.md", k): "upstream\n"})
 		op = requestDrift(t, d, stream)
 		stop := true
@@ -271,7 +271,7 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 
 	before, upstream, _ = interrupt(4, "drift-recorded")
 	f.s.clearBoundary()
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.start(t)
 	ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return driftOperations(t, f.repository(), stream) })
 	f.stop(t)
@@ -279,7 +279,7 @@ func TestInterruptedDriftRebaseRecoversWithoutReplayingAgain(t *testing.T) {
 		t.Fatalf("drift operations after a restart %+v", ops)
 	}
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
 	check(repository, 4, "drift-recorded", before, upstream, *ops[3].Result)
 }
@@ -291,7 +291,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	d := drifter{lands}
 	ctx := context.Background()
-	intakefixture.Must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	landings := landOperations(t, repository, stream)
 	if len(landings) != 1 || landings[0].Result != nil {
 		t.Fatalf("landing operations %+v", landings)
@@ -309,7 +309,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 
 	op := requestDrift(t, d, stream)
 	for range 2 {
-		intakefixture.Must(t, lands.Pass(ctx))
+		fixturekit.Must(t, lands.Pass(ctx))
 	}
 	if ops := landOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("landings asked for while a drift rebase has no result: %+v", ops)
@@ -324,7 +324,7 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 		t.Fatalf("drift retry did not wait for the recorded unit rebase: %v", err)
 	}
 	tip, _, err := intake.Workspaces(f.s.cfg, intake.BranchesDirectory, config.WorkspacesGit).Branch(ctx, intake.FeatureBranch(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("unit rebases during the drift rebase %+v", ops)
@@ -332,9 +332,9 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	if drift := driftOperations(t, repository, stream); len(drift) != 1 || drift[0].Result != nil {
 		t.Fatalf("drift completed before unit carryover: %+v", drift)
 	}
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lands.repository = repository
 	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
 		t.Fatalf("restarted drift did not resume its recorded unit rebase: %v", err)
@@ -348,14 +348,14 @@ func TestDriftRebaseIsSerializedWithLandings(t *testing.T) {
 	}
 	settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if state.Value != execution.UnitChecking {
 		t.Fatalf("rebased approved unit remained %s", state.Value)
 	}
 	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
 		t.Fatalf("drift rebase result %+v", result)
 	}
-	intakefixture.Must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	if got := landOperations(t, repository, stream); len(got) != 1 {
 		t.Fatalf("rebased unit landed under its old approval: %+v", got)
 	}
@@ -368,12 +368,12 @@ func TestDriftRebaseHoldsBackOnlyItsOwnWorkstream(t *testing.T) {
 	drifting := recordBuild(t, f, repository, "drift-elsewhere-other", independentPlan, config.WorkspacesGit, base)
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	ctx := context.Background()
-	intakefixture.Must(t, lands.requestDrift(ctx, drifting, "the test asks for a drift rebase"))
+	fixturekit.Must(t, lands.requestDrift(ctx, drifting, "the test asks for a drift rebase"))
 	if ops := driftOperations(t, repository, drifting); len(ops) != 1 || ops[0].Result != nil {
 		t.Fatalf("drift operations %+v", ops)
 	}
 
-	intakefixture.Must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	landings := landOperations(t, repository, stream)
 	if len(landings) != 1 {
 		t.Fatalf("landings asked for while another workstream's drift rebase has no result: %+v", landings)
@@ -381,7 +381,7 @@ func TestDriftRebaseHoldsBackOnlyItsOwnWorkstream(t *testing.T) {
 	if result := settleOperation(t, f.s, repository, stream, landings[0].Operation, lands); result.Outcome != "succeeded" {
 		t.Fatalf("landing result %+v", result)
 	}
-	intakefixture.Must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 1 {
 		t.Fatalf("unit rebases asked for while another workstream's drift rebase has no result: %+v", ops)
 	}
@@ -399,12 +399,12 @@ func TestDriftWaitsForActiveMasonBeforeRebasingItsWorkspace(t *testing.T) {
 	ctx := context.Background()
 	units := newUnitWorkspaces(f.s.cfg, repository)
 	w, before, found, err := units.find(ctx, stream, "dedupe")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
-	_, err = repository.ClaimTurn(ctx, stream, intakefixture.MasonAgent("dedupe"), "active-mason", f.s.cfg.Root.String(), f.clock.Now())
-	intakefixture.Must(t, err)
+	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "active-mason", f.s.cfg.Root.String(), f.clock.Now())
+	fixturekit.Must(t, err)
 	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	op := requestDrift(t, d, stream)
@@ -425,13 +425,13 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 	ctx := context.Background()
 	units := newUnitWorkspaces(f.s.cfg, repository)
 	w, base, found, err := units.find(ctx, stream, "dedupe")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
-	intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "CONFLICT.md"), []byte("unit\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CONFLICT.md"), []byte("unit\n"), 0600))
 	_, err = intakefixture.ProviderOf(t, units.streamWorkspaces, stream).Snapshot(ctx, w, base)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	from := intakefixture.Seals(t, repository, stream)[0].Base.Commit
 	upstream := advanceUpstream(t, f, map[string]string{"CONFLICT.md": "upstream\n"})
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
@@ -464,8 +464,8 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 			t.Fatalf("upstream moved events of a unit conflict %+v", moved)
 		}
 		checkMoved(t, moved[0], stream, trace.UpstreamMove{Drift: 1, From: from, To: upstream}, "unit dedupe conflicts with the feature branch", "CONFLICT.md")
-		th, err := repository.Thread(stream, intakefixture.MasonAgent("dedupe"))
-		intakefixture.Must(t, err)
+		th, err := repository.Thread(stream, intake.MasonAgent("dedupe"))
+		fixturekit.Must(t, err)
 		count := 0
 		for _, turn := range th.Turns {
 			if turn.Request.TurnID == execution.ResolveTurnID("dedupe", 1) {
@@ -480,9 +480,9 @@ func TestDriftQueuesUnitConflictOnce(t *testing.T) {
 		}
 	}
 	check()
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	d.repository = repository
 	if _, err := d.Apply(ctx, op); err != nil {
 		t.Fatalf("drift after restart: %v", err)

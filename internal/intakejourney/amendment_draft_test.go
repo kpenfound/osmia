@@ -3,6 +3,9 @@ package intakejourney
 import (
 	context "context"
 	json "encoding/json"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	testing "testing"
@@ -14,16 +17,14 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-func seedAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, stream config.WorkstreamID) {
+func seedAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID) {
 	t.Helper()
-	intakefixture.SeedAmendment(t, f.project, f.clock.Now, repo, stream)
+	intakefixture.SeedAmendment(t, f.Project, f.Clock.Now, repo, stream)
 }
 
-// fileAmendment files amendment id of the workstream: a mason's request to
-// revise spec#1.
-func fileAmendment(t *testing.T, f *architectFixture, repo *trace.Repository, stream config.WorkstreamID, id string) {
+func fileAmendment(t *testing.T, f *journey.ArchitectFixture, repo *trace.Repository, stream config.WorkstreamID, id string) {
 	t.Helper()
-	intakefixture.FileAmendment(t, f.project, f.clock.Now, repo, stream, id)
+	intakefixture.FileAmendment(t, f.Project, f.Clock.Now, repo, stream, id)
 }
 
 func TestArchitectAmendmentDrafts(t *testing.T) {
@@ -35,42 +36,42 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 		merged          bool
 		criteria, units []string
 	}{
-		{"criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1)}, "proposed", false, []string{"spec#1"}, []string{"resume"}},
-		{"plan-only", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "proposed", false, []string{}, []string{"resume"}},
-		{"invalid", map[string]string{plan.PlanPath: cyclicPlan}, "invalid", false, nil, nil},
-		{"whole-suite-criterion", map[string]string{plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)}, "invalid", false, nil, nil},
-		{"whole-suite-unit", map[string]string{plan.PlanPath: acceptancePlan(t, validPlan, "dagger check passes")}, "invalid", false, nil, nil},
-		{"merged", map[string]string{plan.PlanPath: strings.Replace(validPlan, "TestResume", "TestResumeAfterRestart", 1)}, "invalid", true, nil, nil},
+		{"criterion", map[string]string{plan.SpecPath: strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1)}, "proposed", false, []string{"spec#1"}, []string{"resume"}},
+		{"plan-only", map[string]string{plan.PlanPath: strings.Replace(fixturekit.ValidPlan, "TestResume", "TestResumeAfterRestart", 1)}, "proposed", false, []string{}, []string{"resume"}},
+		{"invalid", map[string]string{plan.PlanPath: fixturekit.CyclicPlan}, "invalid", false, nil, nil},
+		{"whole-suite-criterion", map[string]string{plan.SpecPath: strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)}, "invalid", false, nil, nil},
+		{"whole-suite-unit", map[string]string{plan.PlanPath: intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "dagger check passes")}, "invalid", false, nil, nil},
+		{"merged", map[string]string{plan.PlanPath: strings.Replace(fixturekit.ValidPlan, "TestResume", "TestResumeAfterRestart", 1)}, "invalid", true, nil, nil},
 		{"declined", map[string]string{"decline.txt": "The requested change contradicts the charter."}, "declined", false, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f := newArchitectFixture(t)
+			f := journey.NewArchitectFixture(t)
 
-			f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-			f.script("amend-1-1", tc.files, nil)
-			stream := f.handIn(t, "amend-"+tc.name, handedDesign)
-			f.await(t, stream, sketched)
-			f.stop(t)
-			repo, err := trace.Open(f.s.current().Root, f.s.current().Project)
-			must(t, err)
+			f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+			f.Script("amend-1-1", tc.files, nil)
+			stream := f.HandIn(t, "amend-"+tc.name, fixturekit.HandedDesign)
+			f.Await(t, stream, intakefixture.Sketched)
+			f.Stop(t)
+			repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
+			fixturekit.Must(t, err)
 			defer func() { _ = repo.Close() }()
 			seedAmendment(t, f, repo, stream)
 			if tc.name == "plan-only" {
-				_, err := repo.MoveFeatureState(context.Background(), trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assembled", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: ownerActor, Cause: "fixture"}, BuildingState, AssembledState, "final review began")
-				must(t, err)
+				_, err := repo.MoveFeatureState(context.Background(), trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assembled", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, intake.BuildingState, intake.AssembledState, "final review began")
+				fixturekit.Must(t, err)
 			}
 			if tc.merged {
-				_, err := repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "unit-resume-merged", Revision: 1, Project: f.project, Workstream: stream, Unit: "resume", At: f.clock.Now(), Actor: ownerActor, Cause: "fixture"}, Subject: trace.UnitSubject("resume"), To: "merged", Reason: "landed"}})
-				must(t, err)
+				_, err := repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "unit-resume-merged", Revision: 1, Project: f.Project, Workstream: stream, Unit: "resume", At: f.Clock.Now(), Actor: intake.OwnerActor, Cause: "fixture"}, Subject: trace.UnitSubject("resume"), To: "merged", Reason: "landed"}})
+				fixturekit.Must(t, err)
 			}
-			a := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
-			must(t, a.Pass(context.Background()))
+			a := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: repo}}
+			fixturekit.Must(t, a.Pass(context.Background()))
 			ops, err := repo.Operations(stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			var operation *trace.OperationRecord
 			for i := range ops {
-				if ops[i].Operation.Action == AmendmentDraftAction {
+				if ops[i].Operation.Action == intake.AmendmentDraftAction {
 					operation = &ops[i]
 				}
 			}
@@ -78,64 +79,64 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 				t.Fatal("amendment draft operation missing")
 			}
 			observation, err := a.Inspect(context.Background(), operation.Operation)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if observation.State != coreadapter.EffectAbsent || observation.Evidence == "" {
 				t.Fatalf("absent amendment observation has no evidence: %+v", observation)
 			}
 			if tc.name == "plan-only" {
-				profile, _, err := f.s.roleExecution(f.s.current(), architectRole)
-				must(t, err)
+				profile, _, err := f.S.RoleExecution(f.S.Current(), intake.ArchitectRole)
+				fixturekit.Must(t, err)
 				turn := "amend-1-1"
-				request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: draftingActor, Cause: operation.Operation.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: "Draft the amendment", Prompt: "Draft the amendment from request.json and draft/."}
+				request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: intake.DraftingActor, Cause: operation.Operation.ID, Depth: 1}, AgentID: intake.ArchitectAgent, ThreadID: intake.ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: "Draft the amendment", Prompt: "Draft the amendment from request.json and draft/."}
 				_, err = repo.EnqueueTurn(context.Background(), request)
-				must(t, err)
+				fixturekit.Must(t, err)
 				_, err = a.Dispatch(context.Background(), stream, turn)
-				must(t, err)
-				must(t, repo.Close())
-				repo, err = trace.Open(f.s.current().Root, f.s.current().Project)
-				must(t, err)
-				a = &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
+				fixturekit.Must(t, err)
+				fixturekit.Must(t, repo.Close())
+				repo, err = trace.Open(f.S.Current().Root, f.S.Current().Project)
+				fixturekit.Must(t, err)
+				a = &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: repo}}
 			}
 			_, err = a.Apply(context.Background(), operation.Operation)
-			must(t, err)
-			must(t, repo.Close())
-			repo, err = trace.Open(f.s.current().Root, f.s.current().Project)
-			must(t, err)
-			a = &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, repo.Close())
+			repo, err = trace.Open(f.S.Current().Root, f.S.Current().Project)
+			fixturekit.Must(t, err)
+			a = &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: repo}}
 			_, err = a.Apply(context.Background(), operation.Operation)
-			must(t, err)
-			must(t, a.Pass(context.Background()))
-			if runs := f.runs(); len(runs) != 2 {
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, a.Pass(context.Background()))
+			if runs := f.Runs(); len(runs) != 2 {
 				t.Fatalf("architect ran after recovery: %v", runs)
 			}
 			state, err := repo.Workflow(stream, "amendment_1")
-			must(t, err)
+			fixturekit.Must(t, err)
 			got := state.Value
 			if got != tc.want {
 				t.Fatalf("state %s, want %s", got, tc.want)
 			}
 
-			verdict := map[string]string{"proposed": draftValid, "invalid": draftInvalid, "declined": draftDeclined}[tc.want]
-			if delivered := f.delivered("amend-1-1"); len(delivered) != len(tc.files) || delivered[len(delivered)-1].Verdict != verdict {
+			verdict := map[string]string{"proposed": intake.DraftValid, "invalid": intake.DraftInvalid, "declined": intake.DraftDeclined}[tc.want]
+			if delivered := f.Delivered("amend-1-1"); len(delivered) != len(tc.files) || delivered[len(delivered)-1].Verdict != verdict {
 				t.Fatalf("deliveries %+v, want verdict %s", delivered, verdict)
 			}
 			feature, err := repo.Workflow(stream, trace.FeatureSubject)
-			must(t, err)
-			wantFeature := BuildingState
+			fixturekit.Must(t, err)
+			wantFeature := intake.BuildingState
 			if tc.name == "plan-only" {
-				wantFeature = AssembledState
+				wantFeature = intake.AssembledState
 			}
 			if feature.Value != wantFeature {
 				t.Fatalf("feature became %s", feature.Value)
 			}
-			if docs := readDocs(t, repo, stream, plan.SpecDocument); len(docs) != 1 || docs[0].Content != validSpec {
+			if docs := intakefixture.ReadDocs(t, repo, stream, plan.SpecDocument); len(docs) != 1 || docs[0].Content != fixturekit.ValidSpec {
 				t.Fatalf("sealed spec changed: %+v", docs)
 			}
-			if docs := readDocs(t, repo, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != validPlan {
+			if docs := intakefixture.ReadDocs(t, repo, stream, plan.PlanDocument); len(docs) != 1 || docs[0].Content != fixturekit.ValidPlan {
 				t.Fatalf("sealed plan changed: %+v", docs)
 			}
 			docs, err := trace.Read[trace.Document](repo, stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			var candidate []trace.Document
 			for _, doc := range docs {
 				if strings.HasPrefix(doc.Path, "amendments/1/") {
@@ -151,10 +152,10 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 			if len(candidate) != 3 {
 				t.Fatalf("candidate docs: %+v", candidate)
 			}
-			data, err := workstreamDocument(t, f.s.current().Root, f.project, stream, "amendments/1/affected.json")
-			must(t, err)
-			var affected amendmentAffected
-			must(t, json.Unmarshal(data, &affected))
+			data, err := fixturekit.WorkstreamDocument(t, f.S.Current().Root, f.Project, stream, "amendments/1/affected.json")
+			fixturekit.Must(t, err)
+			var affected intake.AmendmentAffected
+			fixturekit.Must(t, json.Unmarshal(data, &affected))
 			if !slices.Equal(affected.Criteria, tc.criteria) || !slices.Equal(affected.Units, tc.units) {
 				t.Fatalf("affected %+v", affected)
 			}
@@ -164,23 +165,23 @@ func TestArchitectAmendmentDrafts(t *testing.T) {
 
 func TestAmendmentDraftReconcilesThroughRunningService(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
-	t.Cleanup(func() { f.stop(t) })
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	f.script("amend-1-1", map[string]string{
-		plan.SpecPath: strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1),
+	f := journey.NewArchitectFixture(t)
+	t.Cleanup(func() { f.Stop(t) })
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	f.Script("amend-1-1", map[string]string{
+		plan.SpecPath: strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "An interrupted upload resumes from a durable checkpoint.", 1),
 	}, nil)
-	workstream := f.handIn(t, "amendment-reconcile", handedDesign)
-	f.await(t, workstream, sketched)
+	workstream := f.HandIn(t, "amendment-reconcile", fixturekit.HandedDesign)
+	f.Await(t, workstream, intakefixture.Sketched)
 
-	seedAmendment(t, f, f.repository(), workstream)
-	operations := awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+	seedAmendment(t, f, f.Repository(), workstream)
+	operations := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
 		t.Helper()
-		ops, err := f.repository().Operations(workstream)
-		must(t, err)
+		ops, err := f.Repository().Operations(workstream)
+		fixturekit.Must(t, err)
 		var drafts []trace.OperationRecord
 		for _, op := range ops {
-			if op.Operation.Action == AmendmentDraftAction {
+			if op.Operation.Action == intake.AmendmentDraftAction {
 				drafts = append(drafts, op)
 			}
 		}
@@ -194,24 +195,24 @@ func TestAmendmentDraftReconcilesThroughRunningService(t *testing.T) {
 			t.Fatalf("amendment observation has no evidence: %+v", action)
 		}
 	}
-	state, err := f.repository().Workflow(workstream, "amendment_1")
-	must(t, err)
+	state, err := f.Repository().Workflow(workstream, "amendment_1")
+	fixturekit.Must(t, err)
 	if state.Value != "proposed" {
 		t.Fatalf("amendment state %q, want proposed", state.Value)
 	}
-	feature, err := f.repository().Workflow(workstream, trace.FeatureSubject)
-	must(t, err)
-	if feature.Value != BuildingState {
-		t.Fatalf("feature state %q, want %q", feature.Value, BuildingState)
+	feature, err := f.Repository().Workflow(workstream, trace.FeatureSubject)
+	fixturekit.Must(t, err)
+	if feature.Value != intake.BuildingState {
+		t.Fatalf("feature state %q, want %q", feature.Value, intake.BuildingState)
 	}
-	adapter := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: f.repository()}}
+	adapter := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: f.Repository()}}
 	observation, err := adapter.Inspect(context.Background(), operations[0].Operation)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if observation.State != coreadapter.EffectCompleted || observation.Evidence == "" {
 		t.Fatalf("completed amendment observation has no evidence: %+v", observation)
 	}
-	health, err := f.c.Health(context.Background())
-	must(t, err)
+	health, err := f.C.Health(context.Background())
+	fixturekit.Must(t, err)
 	if !health.Ready {
 		t.Fatalf("service is not ready after amendment reconciliation: %+v", health)
 	}
@@ -219,23 +220,23 @@ func TestAmendmentDraftReconcilesThroughRunningService(t *testing.T) {
 
 func TestAmendmentDraftInspectRunningTurnHasEvidence(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	workstream := f.handIn(t, "amendment-inspect-running", handedDesign)
-	f.await(t, workstream, sketched)
-	f.stop(t)
+	f := journey.NewArchitectFixture(t)
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	workstream := f.HandIn(t, "amendment-inspect-running", fixturekit.HandedDesign)
+	f.Await(t, workstream, intakefixture.Sketched)
+	f.Stop(t)
 
-	repo, err := trace.Open(f.s.current().Root, f.s.current().Project)
-	must(t, err)
+	repo, err := trace.Open(f.S.Current().Root, f.S.Current().Project)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	seedAmendment(t, f, repo, workstream)
-	adapter := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
-	must(t, adapter.Pass(context.Background()))
+	adapter := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.S.Intake().DrafterDependencies(), Repository: repo}}
+	fixturekit.Must(t, adapter.Pass(context.Background()))
 	operations, err := repo.Operations(workstream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var operation *trace.OperationRecord
 	for i := range operations {
-		if operations[i].Operation.Action == AmendmentDraftAction {
+		if operations[i].Operation.Action == intake.AmendmentDraftAction {
 			operation = &operations[i]
 			break
 		}
@@ -243,29 +244,27 @@ func TestAmendmentDraftInspectRunningTurnHasEvidence(t *testing.T) {
 	if operation == nil {
 		t.Fatal("amendment draft operation missing")
 	}
-	profile, _, err := f.s.roleExecution(f.s.current(), architectRole)
-	must(t, err)
+	profile, _, err := f.S.RoleExecution(f.S.Current(), intake.ArchitectRole)
+	fixturekit.Must(t, err)
 	turn := "amend-1-1"
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.project, Workstream: workstream, At: f.clock.Now(), Actor: draftingActor, Cause: operation.Operation.ID, Depth: 1}, AgentID: architectAgent, ThreadID: architectThread, TurnID: turn, Profile: profile, SystemPrompt: "Draft the amendment", Prompt: "Draft the amendment from request.json and draft/."}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: f.Project, Workstream: workstream, At: f.Clock.Now(), Actor: intake.DraftingActor, Cause: operation.Operation.ID, Depth: 1}, AgentID: intake.ArchitectAgent, ThreadID: intake.ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: "Draft the amendment", Prompt: "Draft the amendment from request.json and draft/."}
 	_, err = repo.EnqueueTurn(context.Background(), request)
-	must(t, err)
-	_, err = repo.ClaimTurn(context.Background(), workstream, architectAgent, "running-amendment-turn", "fixture-session", f.clock.Now())
-	must(t, err)
+	fixturekit.Must(t, err)
+	_, err = repo.ClaimTurn(context.Background(), workstream, intake.ArchitectAgent, "running-amendment-turn", "fixture-session", f.Clock.Now())
+	fixturekit.Must(t, err)
 	observation, err := adapter.Inspect(context.Background(), operation.Operation)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if observation.State != coreadapter.EffectUnknown || observation.Evidence == "" {
 		t.Fatalf("running amendment observation has no evidence: %+v", observation)
 	}
 }
 
-var readDocs = intakefixture.ReadDocs
-
 func TestAmendmentAffectedSetIncludesEveryServingUnit(t *testing.T) {
 	t.Parallel()
-	graph, err := plan.Parse([]byte(parallelPlan))
-	must(t, err)
-	revised := strings.Replace(validSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
-	got := affectedRevision(validSpec, revised, graph, graph)
+	graph, err := plan.Parse([]byte(journey.ParallelPlan))
+	fixturekit.Must(t, err)
+	revised := strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
+	got := intake.AffectedRevision(fixturekit.ValidSpec, revised, graph, graph)
 	if !slices.Equal(got.Criteria, []string{"spec#1"}) || !slices.Equal(got.Units, []string{"resume", "upload"}) {
 		t.Fatalf("affected set %+v", got)
 	}

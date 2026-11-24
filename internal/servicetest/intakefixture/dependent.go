@@ -28,7 +28,7 @@ func SealDependent(t *testing.T, c *intake.Controller, repo *trace.Repository, b
 	ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
 	fixturekit.Must(t, err)
 	var docs []trace.Document
-	for _, d := range []struct{ id, path, content string }{{"spec", "spec.md", ValidSpec}, {"plan", "plan.json", ValidPlan}, {shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratified)}} {
+	for _, d := range []struct{ id, path, content string }{{"spec", "spec.md", fixturekit.ValidSpec}, {"plan", "plan.json", fixturekit.ValidPlan}, {shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratified)}} {
 		h := header
 		h.ID = d.id
 		docs = append(docs, trace.Document{Header: h, Path: d.path, Content: d.content})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,7 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -33,7 +33,7 @@ func departTo(target string, p float64) *jevfixture.Transitions {
 func lastOn(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, subject string) trace.Transition {
 	t.Helper()
 	transitions, err := trace.Read[trace.Transition](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out trace.Transition
 	for _, tr := range transitions {
 		if tr.Subject == subject {
@@ -46,7 +46,7 @@ func lastOn(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, su
 func routeFor(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, trigger string) []router.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	latest := map[string]trace.Document{}
 	var order []string
 	for _, d := range docs {
@@ -63,7 +63,7 @@ func routeFor(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, 
 	var out []router.Record
 	for _, id := range order {
 		var rec router.Record
-		intakefixture.Must(t, json.Unmarshal([]byte(latest[id].Content), &rec))
+		fixturekit.Must(t, json.Unmarshal([]byte(latest[id].Content), &rec))
 		if rec.Trigger == trigger {
 			out = append(out, rec)
 		}
@@ -93,7 +93,7 @@ func departuresInFeed(t *testing.T, s *Service, repo *trace.Repository, stream c
 func routeNotices(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
 	t.Helper()
 	outbox, err := repo.Outbox(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range outbox {
 		if e.Event.Kind == trace.NoticeKind && strings.HasPrefix(e.TransitionID, "route-") {
@@ -202,25 +202,25 @@ func parkAndRelease(t *testing.T, f *shedFixture) (*trace.Repository, config.Wor
 	f.upstream(t)
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	base, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 	parked := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if parked.To != "waiting" || parked.DefaultTo != "waiting" || parked.DecidedBy != trace.DecidedByCode {
 		t.Fatalf("parking the dependent %+v", parked)
 	}
 	upstream := advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
 	data, err := json.Marshal(lifecycle.BaseObservation{Base: seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, revision, err := lifecycle.BaseObservationAt(repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "base-observation", Revision: revision + 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}, Path: "base-observation.json", Content: string(data)}
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
 	return repo, stream
 }
 
@@ -231,7 +231,7 @@ func TestABaseWaitThatClearsFollowsItsDefault(t *testing.T) {
 	routeJev(f.s, p)
 	repo, stream := parkAndRelease(t, f)
 
-	intakefixture.Must(t, f.s.baseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.s.baseWaitPass(context.Background(), repo))
 	cleared := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if cleared.To != "available" || cleared.DefaultTo != "available" || cleared.DecidedBy != trace.DecidedByCode || cleared.Departed() || cleared.Cause != "base-availability" {
 		t.Fatalf("the wait clearing %+v", cleared)
@@ -253,7 +253,7 @@ func TestAScriptedDepartureKeepsABaseWaitParked(t *testing.T) {
 	repo, stream := parkAndRelease(t, f)
 	ctx := context.Background()
 
-	intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 	kept := lastOn(t, repo, stream, lifecycle.BaseWaitSubject)
 	if kept.From != "waiting" || kept.To != "waiting" || kept.DefaultTo != "available" || kept.DecidedBy != trace.DecidedByJev || kept.Judgment == "" || !kept.Departed() {
 		t.Fatalf("the departure %+v", kept)
@@ -261,7 +261,7 @@ func TestAScriptedDepartureKeepsABaseWaitParked(t *testing.T) {
 	if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
 		t.Fatalf("the dependent is not parked after Jev kept the wait: %v %v", waiting, err)
 	}
-	intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times for one observation", n)
 	}
@@ -279,18 +279,18 @@ func TestMovingOntoUpstreamIsAPinnedOwnerMove(t *testing.T) {
 	routeJev(f.s, p)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	base, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 	stream, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 	advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
 	cfg := f.s.about(repo)
 	g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault != nil {
 		t.Fatal(apiFault)
@@ -317,7 +317,7 @@ func heldDrift(t *testing.T, key string) (*shedFixture, drifter, config.Workstre
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	w := resolutionWorkspace(t, f, stream)
 	for review := 1; review <= 2; review++ {
-		intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte(fmt.Sprintf("/internal/ @feature%d\n", review)), 0600))
+		fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte(fmt.Sprintf("/internal/ @feature%d\n", review)), 0600))
 		completeDriftTurn(t, f, repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
 		awaitResolution(t, f.s, d, stream, op, fmt.Sprintf("review %d", review))
 		completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,7 +27,7 @@ import (
 func upstreamMovedEvents(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OutboxEntry {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	outbox = slices.DeleteFunc(outbox, func(e trace.OutboxEntry) bool { return e.Event.Kind != trace.UpstreamMovedKind })
 	slices.SortStableFunc(outbox, func(a, b trace.OutboxEntry) int { return a.At.Compare(b.At) })
 	return outbox
@@ -47,21 +48,21 @@ func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, m
 func chiefDeliverer(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
 	t.Helper()
 	if _, err := repository.ChiefOfStaffThread(stream); errors.Is(err, os.ErrNotExist) {
-		intakefixture.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
+		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
 	} else {
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	d, err := events.New(repository, events.Options{Now: f.s.now, Profile: func() (coreadapter.Profile, error) {
 		return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
 	}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return d
 }
 
 func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, body string) int {
 	t.Helper()
 	th, err := repository.ChiefOfStaffThread(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, q := range th.Turns {
 		if strings.Contains(q.Request.Prompt, body) {
@@ -87,7 +88,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in CODEOWNERS")
 	conflicted := moved[0].Event.Body
-	intakefixture.Must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
+	fixturekit.Must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("the conflict was delivered in %d turns", n)
 	}
@@ -95,10 +96,10 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	threads := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), service.TestDriftMasonAgent)
 	turn := lifecycle.DriftResolveTurnID(1, 1)
 	_, err := repository.ClaimTurn(ctx, stream, service.TestDriftMasonAgent, "resolving", filepath.Join(threads, turn), f.clock.Now())
-	intakefixture.Must(t, err)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: service.TestDriftMasonAgent, Turn: turn, Role: intakefixture.MasonRole}
+	fixturekit.Must(t, err)
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: service.TestDriftMasonAgent, Turn: turn, Role: intake.MasonRole}
 	tools, err := service.TestDriftMasonTools(repository, scope, f.s.now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(tools) != 2 {
 		t.Fatalf("the drift mason's question tools %+v", tools)
 	}
@@ -108,7 +109,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("the drift mason's amend returned %s", got)
 	}
 	requests, err := trace.Read[trace.Amendment](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "" || requests[0].Requester.ID != service.TestDriftMasonAgent {
 		t.Fatalf("the drift mason's amendment %+v", requests)
 	}
@@ -116,7 +117,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("the amendment is %+v: %v", state, err)
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, tr := range transitions {
 		if tr.Cause == "amendment_1_filed" {
 			t.Fatalf("the drift mason's amendment parked %s", tr.Subject)
@@ -130,9 +131,9 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 
 	restart := func() {
 		t.Helper()
-		intakefixture.Must(t, repository.Close())
+		fixturekit.Must(t, repository.Close())
 		repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	}
 	restart()
@@ -140,13 +141,13 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	recovered, err := repository.ClaimTurn(ctx, stream, service.TestDriftMasonAgent, "recovering", filepath.Join(threads, "recover"), f.clock.Now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if recovered.Request.TurnID != service.TestDriftMasonAgent+"-recover-1" {
 		t.Fatalf("the recovering turn is %s", recovered.Request.TurnID)
 	}
 	scope.Turn = recovered.Request.TurnID
 	tools, err = service.TestDriftMasonTools(repository, scope, f.s.now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	amend = intakefixture.AskTool(t, tools, questions.AmendTool)
 	if got := intakefixture.Handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatalf("the recovering turn's amend returned %s", got)
@@ -158,13 +159,13 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("upstream moved events after a restart %+v", moved)
 	}
 	deliverer := chiefDeliverer(t, f, repository, stream)
-	intakefixture.Must(t, deliverer.Pass(ctx))
+	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, moved[1].Event.Body); n != 0 {
 		t.Fatalf("the amendment's event was queued behind the conflict's turn in %d turns", n)
 	}
 	completeDriftTurn(t, f, repository, stream, trace.ChiefOfStaff, nil)
-	intakefixture.Must(t, deliverer.Pass(ctx))
-	intakefixture.Must(t, deliverer.Pass(ctx))
+	fixturekit.Must(t, deliverer.Pass(ctx))
+	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("after a restart the conflict was delivered in %d turns", n)
 	}
@@ -173,7 +174,7 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 
 	w := resolutionWorkspace(t, f, stream)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
 	completeClaimedTurn(t, f, repository, stream, service.TestDriftMasonAgent, recovered, resolvedDone("Kept both owners"))
 	awaitResolution(t, f.s, d, stream, op, "review 1")
 	completeDriftTurn(t, f, repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, approvedResolution))
@@ -187,9 +188,9 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("the amendment is %+v after the drift rebase: %v", state, err)
 	}
 	states, err := repository.WorkflowStates(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	st, err := lifecycle.LatestDrift(repository, stream, states)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if st == nil || st.Outcome != lifecycle.DriftRebased || !reflect.DeepEqual(st.Moved, []string{conflicted, moved[1].Event.Body}) {
 		t.Fatalf("status drift %+v", st)
 	}
@@ -236,15 +237,15 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	r := &reviewers{masons: newMasonController(f.s, repository)}
 	agent := intake.ReviewerAgent("dedupe")
 	if th, err := repository.Thread(stream, agent); err == nil && th.Active != "" {
-		intakefixture.Must(t, repository.AbandonTurn(ctx, stream, agent, th.Active, f.s.now()))
+		fixturekit.Must(t, repository.AbandonTurn(ctx, stream, agent, th.Active, f.s.now()))
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, r.one(ctx, stream, "dedupe", state, false))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, r.one(ctx, stream, "dedupe", state, false))
 	th, err := repository.Thread(stream, agent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	review := th.Turns[len(th.Turns)-1]
 	if want := fmt.Sprintf("drift rebase 1 moved its upstream base from %s to %s", from, upstream); !strings.Contains(review.Request.Prompt, want) {
 		t.Fatalf("the review prompt lacks %q:\n%s", want, review.Request.Prompt)
@@ -253,10 +254,10 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 		t.Fatalf("the review prompt does not send upstream's change to the chief of staff:\n%s", review.Request.Prompt)
 	}
 	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.s.cfg.Root.String(), "threads", "reviewing"), f.clock.Now())
-	intakefixture.Must(t, err)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: intakefixture.ReviewerRole}
+	fixturekit.Must(t, err)
+	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: intake.ReviewerRole}
 	tools, err := questions.Tools(repository, agent, scope, f.s.now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(tools) != 1 || tools[0].Name != questions.AskTool {
 		t.Fatalf("the reviewer's question tools %+v", tools)
 	}

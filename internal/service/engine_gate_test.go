@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/engine"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 )
 
@@ -40,11 +40,11 @@ func TestEngineGateNamesAdmittedChecksOnly(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				p := &checkSlotPool{limit: 1}
 				s := &Service{checkSlots: p}
-				held := CheckSlotRun{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "admitted"}
+				held := CheckSlotRun{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "admitted"}
 				release, err := p.acquire(t.Context(), held)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				ctx, cancel := context.WithCancel(t.Context())
-				queued := queuedSlot(ctx, p, CheckSlotRun{Project: intakefixture.Project, Workstream: sibling, Review: 17})
+				queued := queuedSlot(ctx, p, CheckSlotRun{Project: fixturekit.Project, Workstream: sibling, Review: 17})
 				synctest.Wait()
 				before := s.CheckSlots()
 				if before.Limit != 1 || before.Used != 1 || len(before.Waiting) != 1 || !reflect.DeepEqual(before.Active, []CheckSlotRun{held}) {
@@ -80,7 +80,7 @@ func TestEngineGateNamesAdmittedChecksOnly(t *testing.T) {
 					t.Fatalf("released run retained: %+v", st)
 				}
 				called := false
-				intakefixture.Must(t, action.run(s, t.Context(), gateEngine{run: func(context.Context) error { called = true; return nil }}))
+				fixturekit.Must(t, action.run(s, t.Context(), gateEngine{run: func(context.Context) error { called = true; return nil }}))
 				if !called {
 					t.Fatal("idle operation did not proceed")
 				}
@@ -95,7 +95,7 @@ func TestEngineGatePassesNotApplicableThroughWhileBusy(t *testing.T) {
 		for _, action := range gateActions {
 			p := &checkSlotPool{limit: 1}
 			release, err := p.acquire(t.Context(), CheckSlotRun{Unit: "busy"})
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			control := engine.New(config.ResolvedDagger{Mode: mode}, engine.Options{Command: func(context.Context, string, []string, ...string) (string, error) {
 				t.Fatal("not-applicable operation ran a command")
 				return "", nil
@@ -114,18 +114,18 @@ func TestEngineGateRetainsEveryActiveIdentity(t *testing.T) {
 	t.Parallel()
 	p := &checkSlotPool{limit: 3}
 	runs := []CheckSlotRun{
-		{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "implement"},
-		{Project: intakefixture.Project, Workstream: sibling, Review: 3},
-		{Project: intakefixture.Project, Workstream: otherStream, Session: true},
+		{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "implement"},
+		{Project: fixturekit.Project, Workstream: sibling, Review: 3},
+		{Project: fixturekit.Project, Workstream: otherStream, Session: true},
 	}
 	for _, run := range runs {
 		release, err := p.acquire(t.Context(), run)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(release)
 	}
-	turn := EngineTurn{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "mason-unit", Agent: "mason", Turn: "implementation"}
+	turn := EngineTurn{Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "mason-unit", Agent: "mason", Turn: "implementation"}
 	release, err := p.startEngineTurn(t.Context(), turn)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(release)
 	control := gateEngine{run: func(context.Context) error { t.Fatal("busy engine was touched"); return nil }}
 	for _, action := range gateActions {
@@ -181,8 +181,8 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 			s, adapter := hardPauseService(t, cfg, repo, clock, backend)
 			s.checkSlots = &checkSlotPool{limit: 1}
 			adapter.cfg = cfg
-			op, err := thread.TurnOperation(intakefixture.Project, "engine-turn", thread.TurnInput{Workstream: intakefixture.Stream, Agent: "agent-0", Turn: "t-0"})
-			intakefixture.Must(t, err)
+			op, err := thread.TurnOperation(fixturekit.Project, "engine-turn", thread.TurnInput{Workstream: fixturekit.Stream, Agent: "agent-0", Turn: "t-0"})
+			fixturekit.Must(t, err)
 			finished := make(chan error, 1)
 			go func() { _, err := adapter.Apply(t.Context(), op); finished <- err }()
 			awaitCheck(t, entered)
@@ -192,22 +192,22 @@ func TestEngineGateTracksDispatchedDaggerTurns(t *testing.T) {
 				err := action.run(s, t.Context(), control)
 				if dagger {
 					var busy *EngineBusyError
-					want := EngineTurn{Project: intakefixture.Project, Workstream: intakefixture.Stream, Agent: "agent-0", Turn: "t-0"}
+					want := EngineTurn{Project: fixturekit.Project, Workstream: fixturekit.Stream, Agent: "agent-0", Turn: "t-0"}
 					if !errors.As(err, &busy) || !reflect.DeepEqual(busy.Turns, []EngineTurn{want}) || len(busy.Checks) != 0 || commands != 0 {
 						t.Fatalf("Dagger turn refusal: %v, commands %d", err, commands)
 					}
-					for _, name := range []string{string(intakefixture.Project), string(intakefixture.Stream), "agent-0", "t-0"} {
+					for _, name := range []string{string(fixturekit.Project), string(fixturekit.Stream), "agent-0", "t-0"} {
 						if !strings.Contains(err.Error(), name) {
 							t.Fatalf("refusal omits %s: %v", name, err)
 						}
 					}
 				} else {
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 				}
 			}
 			close(finish)
-			intakefixture.Must(t, awaitCheck(t, finished))
-			intakefixture.Must(t, s.RestartEngine(t.Context(), control))
+			fixturekit.Must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, s.RestartEngine(t.Context(), control))
 			if commands != map[bool]int{false: 3, true: 1}[dagger] {
 				t.Fatalf("commands %d", commands)
 			}
@@ -241,17 +241,17 @@ func TestEngineGateExcludesStartsDuringMaintenance(t *testing.T) {
 					}})
 				}()
 				<-inside
-				check := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Project: intakefixture.Project, Workstream: sibling, Unit: "new-check"})
-				op, err := thread.TurnOperation(intakefixture.Project, "maintenance-turn", thread.TurnInput{Workstream: intakefixture.Stream, Agent: "agent-0", Turn: "t-0"})
-				intakefixture.Must(t, err)
+				check := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Project: fixturekit.Project, Workstream: sibling, Unit: "new-check"})
+				op, err := thread.TurnOperation(fixturekit.Project, "maintenance-turn", thread.TurnInput{Workstream: fixturekit.Stream, Agent: "agent-0", Turn: "t-0"})
+				fixturekit.Must(t, err)
 				turnDone := make(chan error, 1)
 				go func() { _, err := adapter.Apply(t.Context(), op); turnDone <- err }()
 				synctest.Wait()
 				if st := s.CheckSlots(); st.Used != 0 || len(st.Active) != 0 || len(st.Waiting) != 1 {
 					t.Fatalf("check started during maintenance: %+v", st)
 				}
-				th, err := repo.Thread(intakefixture.Stream, "agent-0")
-				intakefixture.Must(t, err)
+				th, err := repo.Thread(fixturekit.Stream, "agent-0")
+				fixturekit.Must(t, err)
 				q := th.Turns[0]
 				if q.Claim != nil || q.Response != nil || len(q.Attempts) != 0 || !q.CompletedAt.IsZero() {
 					t.Fatalf("maintenance wait recorded turn evidence: %+v", q)
@@ -263,15 +263,15 @@ func TestEngineGateExcludesStartsDuringMaintenance(t *testing.T) {
 				}
 				close(finish)
 				synctest.Wait()
-				intakefixture.Must(t, <-operationDone)
+				fixturekit.Must(t, <-operationDone)
 				release := <-check
 				if release == nil {
 					t.Fatal("check did not proceed")
 				}
 				release()
-				intakefixture.Must(t, <-turnDone)
-				th, err = repo.Thread(intakefixture.Stream, "agent-0")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, <-turnDone)
+				th, err = repo.Thread(fixturekit.Stream, "agent-0")
+				fixturekit.Must(t, err)
 				q = th.Turns[0]
 				if q.Response == nil || q.Response.Failure != "" || len(q.Attempts) != 1 || q.CompletedAt.IsZero() {
 					t.Fatalf("turn did not proceed cleanly: %+v", q)
@@ -334,7 +334,7 @@ func TestEngineGateCancellationAndFailedMaintenanceReleaseWaiters(t *testing.T) 
 					t.Fatal("failed maintenance did not release waiter")
 				}
 				release()
-				intakefixture.Must(t, s.RestartEngine(t.Context(), gateEngine{run: func(context.Context) error { return nil }}))
+				fixturekit.Must(t, s.RestartEngine(t.Context(), gateEngine{run: func(context.Context) error { return nil }}))
 			})
 		})
 	}
@@ -395,7 +395,7 @@ func TestCreatingEngineActionReleasesMaintenance(t *testing.T) {
 					t.Fatal("maintenance retained waiting check")
 				}
 				release()
-				intakefixture.Must(t, s.RestartEngine(t.Context(), gateEngine{run: func(context.Context) error { return nil }}))
+				fixturekit.Must(t, s.RestartEngine(t.Context(), gateEngine{run: func(context.Context) error { return nil }}))
 			})
 		})
 	}

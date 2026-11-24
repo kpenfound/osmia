@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -16,10 +15,10 @@ func recordRouted(t *testing.T, repo *trace.Repository, id, from, to string, rou
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, Unit: "resume", At: at, Actor: trace.Actor{Kind: "service", ID: "checks"}, Cause: "checks-1"}
 	subject := trace.UnitSubject("resume")
 	state, err := repo.Workflow(fixturekit.Stream, subject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	tr := trace.Transition{Header: h, Subject: subject, From: from, To: to, Reason: "check run 1 failed on candidate abc", DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}
 	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: tr})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestOnlyADepartureIsPostedToHearsay(t *testing.T) {

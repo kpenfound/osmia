@@ -146,12 +146,14 @@ project runtime bindings and HTTP dispatch. Workflow journeys use the same
 composition root, with fake execution boundaries and local repositories.
 
 The [preview journey](../internal/servicetest/preview_test.go),
-`TestChiefPreviewThroughMemberArchive`, sends an owner message to a production
-chief turn without saving preview settings. The chief inspects the member's
-committed Service code and names its call and port in the preview tool request.
-Offline Dagger and Chromium commands capture the built member's exact source;
-the journey checks both feeds, image bytes and headers, archive placeholders
-and deletion of the member trace without bytes in retained presentations.
+`TestChiefPreviewImageIsServedAndSharedWithTheWorkgroup` and
+`TestArchivingAMemberRemovesItsPreviewImageFromEveryRecord`, sends an owner
+message to a production chief turn without saving preview settings. The chief
+inspects the member's committed Service code and names its call and port in the
+preview tool request. Offline Dagger and Chromium commands capture the built
+member's exact source; the journeys check both feeds, image bytes and headers,
+archive placeholders and deletion of the member trace without bytes in retained
+presentations.
 `TestBrowserChiefPreviewThroughMemberArchive` in
 [browsertest](../internal/browsertest/browser_preview_journey_test.go) uses the
 same running-service fixture to check a live thumbnail, its full-size link and

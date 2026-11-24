@@ -39,7 +39,7 @@ func newContestFixture(t *testing.T, key string) *contestFixture {
 func (c *contestFixture) state(t *testing.T) trace.WorkflowState {
 	t.Helper()
 	state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return state
 }
 
@@ -59,13 +59,13 @@ func (c *contestFixture) resolve(t *testing.T, input string) string {
 func (c *contestFixture) decided(t *testing.T) {
 	t.Helper()
 	contest, contested, err := unitContest(c.repo, c.stream, "resume")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !contested {
 		return
 	}
 	key := jev.ContestKey(contest.ID)
 	if res, err := jev.Recorded(c.repo, c.stream, jev.KindContestedRuling, key); err != nil || res.Status != jev.None {
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return
 	}
 	jevfixture.Fallback(c.repo, c.repo.Project(), c.stream, jev.KindContestedRuling, key)

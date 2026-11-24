@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -20,21 +19,21 @@ func routedFixture(t *testing.T) *trace.Repository {
 	t.Helper()
 	ctx := context.Background()
 	cfg, err := projectstore.LoadConfig(fixtureAt(t, t.TempDir()).Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, fixturekit.DemoStart, owner)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, fixturekit.DemoStart, owner))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, owner))
 
 	var version uint64
 	from := ""
 	step := func(id, to string, actor trace.Actor, route trace.Routing) {
 		t.Helper()
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "u1", At: fixturekit.DemoStart.Add(time.Duration(version+1) * time.Minute), Actor: actor, Cause: "fixture", Depth: 1}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: "u1", At: fixturekit.DemoStart.Add(time.Duration(version+1) * time.Minute), Actor: actor, Cause: "fixture", Depth: 1}
 		tr := trace.Transition{Header: h, Subject: trace.UnitSubject("u1"), From: from, To: to, Reason: "reason " + id, DecidedBy: route.DecidedBy, Judgment: route.Judgment, DefaultTo: route.DefaultTo}
 		state, err := repo.Transact(ctx, trace.Transaction{ExpectedVersion: version, Transition: tr})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		version, from = state.Version, to
 	}
 	svc := trace.Actor{Kind: "service", ID: "osmia"}
@@ -54,8 +53,8 @@ func routedFixture(t *testing.T) *trace.Repository {
 func TestFeedCarriesTheRoutingAndMarksOnlyDepartures(t *testing.T) {
 	t.Parallel()
 	repo := routedFixture(t)
-	entries, err := feedEntries(repo, repo, intakefixture.Stream)
-	intakefixture.Must(t, err)
+	entries, err := feedEntries(repo, repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	type view struct {
 		decidedBy, judgment, defaultTo string
 		departed                       bool
@@ -85,16 +84,16 @@ func TestFeedCarriesTheRoutingAndMarksOnlyDepartures(t *testing.T) {
 			continue
 		}
 		data, err := json.Marshal(e)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var back api.FeedEntry
-		intakefixture.Must(t, json.Unmarshal(data, &back))
+		fixturekit.Must(t, json.Unmarshal(data, &back))
 		if !reflect.DeepEqual(back.Transition, e.Transition) {
 			t.Fatalf("round trip of %s: %+v, want %+v", data, back.Transition, e.Transition)
 		}
 		var raw struct {
 			Transition map[string]any `json:"transition"`
 		}
-		intakefixture.Must(t, json.Unmarshal(data, &raw))
+		fixturekit.Must(t, json.Unmarshal(data, &raw))
 		_, hasDecidedBy := raw.Transition["decided_by"]
 		if hasDecidedBy != (e.Transition.DecidedBy != "") {
 			t.Fatalf("decided_by encoded=%v for %+v", hasDecidedBy, e.Transition)
@@ -105,8 +104,8 @@ func TestFeedCarriesTheRoutingAndMarksOnlyDepartures(t *testing.T) {
 func TestUnitTraceHistoryCarriesTheRoutingAndMarksOnlyDepartures(t *testing.T) {
 	t.Parallel()
 	repo := routedFixture(t)
-	walk, err := loadTraceWalk(repo, intakefixture.Stream)
-	intakefixture.Must(t, err)
+	walk, err := loadTraceWalk(repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	unit, ok := walk.unit("u1", "")
 	if !ok {
 		t.Fatal("no trace for u1")

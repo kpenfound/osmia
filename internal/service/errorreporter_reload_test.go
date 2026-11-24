@@ -7,7 +7,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/errorreport"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 const (
@@ -118,7 +117,7 @@ func TestErrorReporterReloadBackReconcilesTheInterruptedWrite(t *testing.T) {
 			intent := r.state().Intents[0]
 			if tc.exists {
 				rendered, err := errorreport.RenderIssue(intent.Filing)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				r.gh.Seed(reloadA, rendered.Title, rendered.Body, intent.Labels...)
 			}
 			r.reload(section(reloadA))

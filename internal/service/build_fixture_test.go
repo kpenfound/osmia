@@ -21,8 +21,8 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
 	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)
-	intakefixture.Must(t, err)
-	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: intakefixture.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
+	fixturekit.Must(t, err)
+	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: fixturekit.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
 
 func newReviewFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {

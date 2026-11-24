@@ -1,11 +1,10 @@
 package lifecycle_test
 
 import (
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 var (
-	amendedSpec = strings.Replace(intakefixture.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
+	amendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
 )

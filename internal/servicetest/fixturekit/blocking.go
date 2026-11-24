@@ -8,7 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 )
 
-// blockingTurns delegates to scripted fake agent results, first calling the
+// BlockingTurns delegates to scripted fake agent results, first calling the
 // per-turn hook with the turn's context. Its fake, adaptertest.Turns, stands
 // in for a real model session; it leaves the real agent backend's actual
 // behaviour, timing and output unverified.

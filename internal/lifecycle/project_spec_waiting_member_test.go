@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -53,9 +54,9 @@ func TestAWaitingMemberNamesTheMemberWhoseDraftingStopped(t *testing.T) {
 	repo2.WakeWorkflow()
 	intakefixture.Eventually(t, "the second member's drafting stops", func() bool {
 		state, err := repo2.Workflow(f.stream2, intake.DraftSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		feature, err := repo1.Workflow(f.stream1, trace.FeatureSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return state.Value == intake.DraftExhausted && feature.Value == intake.SketchedState
 	})
 

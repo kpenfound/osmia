@@ -110,7 +110,7 @@ func (s *autoArchiveSteps) await(t *testing.T, phase string) {
 	s.mu.Unlock()
 	select {
 	case <-reached:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatalf("the archiver never reached %s", phase)
 	}
 }
@@ -179,12 +179,12 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	group, err := g.c.Status(ctx, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if group.Workgroup == nil {
 		t.Fatal("the member has no workgroup")
 	}
 	second, err := g.s.repository(g.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	recordResolutionMerge(t, second, g.stream2)
 	g.merge(t)
 	lifecycleAwait(t, g.productionDesignFixture, "the chief of staff archives the merged member", func() bool { _, ok := g.archive(); return ok })
@@ -195,30 +195,30 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 		t.Fatalf("automatic archive=%+v", a)
 	}
 	first, err := g.s.repository(g.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](first, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	evidence, err := trace.MemberResolutionFrom(docs)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !evidence.OwnPullRequestMerged() {
 		t.Fatalf("the own pull request outcome was not recorded before the archive: %+v", evidence)
 	}
 	lookups := g.host.lookups(g.pubs[0].Branch)
 
 	view, err := g.c.Status(ctx, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !view.Archived || view.ArchivedBy != api.ArchivedByChief {
 		t.Fatalf("archived row=%+v", view)
 	}
 	list, err := g.c.Statuses(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, row := range list.Workstreams {
 		if want := row.Workstream == g.member; row.Archived != want || want && row.ArchivedBy != api.ArchivedByChief || !want && row.ArchivedBy != "" {
 			t.Fatalf("pane row=%+v", row)
 		}
 	}
 	var feed api.WorkgroupFeedResponse
-	intakefixture.Must(t, g.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(group.Workgroup.ID)+"/feed", nil, &feed))
+	fixturekit.Must(t, g.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(group.Workgroup.ID)+"/feed", nil, &feed))
 	for _, m := range feed.Members {
 		if want := m.Workstream == g.member; m.Archived != want || want && m.ArchivedBy != api.ArchivedByChief {
 			t.Fatalf("member summary=%+v", m)
@@ -227,7 +227,7 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 
 	for _, read := range []config.WorkstreamID{g.member, g.stream2, g.origin} {
 		conversation, err := g.c.Conversation(ctx, read)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		entries := archiveEntries(conversation.Entries, g.member)
 		if len(entries) != 1 || !strings.Contains(entries[0].Text, g.pubs[0].URL) || !strings.Contains(entries[0].Text, "because its pull request merged") {
 			t.Fatalf("conversation of %s: %+v", read, conversation.Entries)
@@ -250,22 +250,22 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	g.gate.release()
 	lifecycleAwait(t, g.productionDesignFixture, "the member's cleanup", func() bool { a, ok := g.archive(); return ok && !a.CleanedAt.IsZero() })
 	authority, err := trace.OpenWorkgroupAuthority(g.s.current().Root, a.Workgroup)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resolved, revision, err := trace.ResolvedWorkgroups(authority)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	active, err := trace.ProjectSpecActive(authority, a.Workgroup)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	authority.Close()
 	if !slices.Equal(resolved, []config.WorkgroupID{a.Workgroup}) || revision != 1 || active {
 		t.Fatalf("workgroup after the member's cleanup: %v revision=%d active=%v", resolved, revision, active)
 	}
 	down, err := g.s.repository(g.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var observed lifecycle.EdgeObservation
 	lifecycleAwait(t, g.productionDesignFixture, "the dependent's edge observed merged", func() bool {
 		var err error
 		observed, _, _, err = lifecycle.EdgeObservationAt(down, g.stream2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return len(observed.Edges) == 1 && observed.Edges[0].Merged
 	})
 	if observed.Edges[0].Commit != "upstream-merge" {
@@ -276,7 +276,7 @@ func TestAutoArchiveMergedWorkgroupMemberThroughBackgroundPasses(t *testing.T) {
 	}
 	for _, read := range []config.WorkstreamID{g.stream2, g.origin} {
 		conversation, err := g.c.Conversation(ctx, read)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if entries := archiveEntries(conversation.Entries, g.member); len(entries) != 1 {
 			t.Fatalf("conversation of %s after cleanup: %+v", read, conversation.Entries)
 		}
@@ -306,7 +306,7 @@ func TestAutoArchiveSurvivesAnInterruptionBeforeTheEntryIsVisible(t *testing.T) 
 	for range 2 {
 		for _, read := range []config.WorkstreamID{g.stream2, g.origin} {
 			conversation, err := g.c.Conversation(ctx, read)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if entries := archiveEntries(conversation.Entries, g.member); len(entries) != 1 {
 				t.Fatalf("conversation of %s after restart: %+v", read, conversation.Entries)
 			}
@@ -329,9 +329,9 @@ func TestAutoArchiveAfterARestartBetweenTheMergeAndTheArchive(t *testing.T) {
 		t.Fatal("archived before the archiver committed")
 	}
 	first, err := g.s.repository(g.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](first, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if evidence, err := trace.MemberResolutionFrom(docs); err != nil || !evidence.OwnPullRequestMerged() {
 		t.Fatalf("the merge was not recorded: %+v %v", evidence, err)
 	}
@@ -354,9 +354,9 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	repo, err := g.s.repository(g.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lock := g.s.changeApplicationLock(id)
 	lock.Lock()
 	var released atomic.Bool
@@ -372,7 +372,7 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 		t.Fatal("archived while a workgroup change held the archive")
 	}
 	conversation, err := g.c.Conversation(ctx, g.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(archiveEntries(conversation.Entries, g.member)) != 0 {
 		t.Fatalf("announced a refused archive: %+v", conversation.Entries)
 	}
@@ -383,7 +383,7 @@ func TestAutoArchiveWritesNothingWhileAWorkgroupChangeHoldsTheArchive(t *testing
 	}
 	g.gate.release()
 	conversation, err = g.c.Conversation(ctx, g.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(archiveEntries(conversation.Entries, g.member)) != 1 {
 		t.Fatalf("conversation: %+v", conversation.Entries)
 	}
@@ -394,7 +394,7 @@ func TestAutoArchiveLeavesAnOwnerArchiveAndAnnouncesNothing(t *testing.T) {
 	ctx := context.Background()
 	g := newAutoArchiveGroup(t)
 	resp, err := g.c.Archive(ctx, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if resp.ArchivedBy != api.ArchivedByOwner {
 		t.Fatalf("owner archive reports %+v", resp)
 	}
@@ -407,12 +407,12 @@ func TestAutoArchiveLeavesAnOwnerArchiveAndAnnouncesNothing(t *testing.T) {
 		t.Fatalf("owner archive changed: %+v -> %+v", owner, after)
 	}
 	view, err := g.c.Status(ctx, g.member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if view.ArchivedBy != api.ArchivedByOwner {
 		t.Fatalf("archived by %q", view.ArchivedBy)
 	}
 	conversation, err := g.c.Conversation(ctx, g.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if entries := archiveEntries(conversation.Entries, g.member); len(entries) != 0 {
 		t.Fatalf("announced an owner archive: %+v", entries)
 	}

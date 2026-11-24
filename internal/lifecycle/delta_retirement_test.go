@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -84,9 +85,9 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	var intent trace.OperationRecord
 	for _, m := range resolutionMembers(f) {
 		repo, err := f.s.repository(m.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		ops, err := repo.Operations(m.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, op := range ops {
 			if op.Operation.Action == lifecycle.DeltaTurnAction {
 				if address != "" {
@@ -102,11 +103,11 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	before := currentChange(t, f.s, f.origin, c.ID)
 	awaitMemberBuilt(t, f, owner, address)
 	_, err := f.c.Abandon(ctx, address, "Owner cancelled the member before its queued delta ran.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Archive(ctx, address)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	observed, err := (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectCompleted || observed.Result == nil || observed.Result.Outcome != "cancelled" {
 		t.Fatalf("retired queued intent: %+v", observed)
 	}
@@ -118,7 +119,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 		t.Fatal("retirement inspection changed the authoritative journal")
 	}
 	attempt, _, err := owner.BeginOperation(ctx, address, intent.EventID, trace.WorkerOperation, trace.Actor{Kind: "service", ID: "retired-delta-retry"}, f.clock.Now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("could not force the retired dispatch retry")
 	}
@@ -127,9 +128,9 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	retry.RetryAt = retry.At.Add(time.Second)
 	err = attempt.Record(ctx, retry)
 	attempt.Close()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ops, err := owner.Operations(address)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
 		return op.Operation.ID == intent.Operation.ID && op.Result == nil && op.RetryAt.After(f.clock.Now())
 	}) {
@@ -144,7 +145,7 @@ func testQueuedDeltaRetirement(t *testing.T, unavailable bool) {
 	queued.Release()
 	cleanup.await(t, f)
 	ops, err = owner.Operations(address)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	index := slices.IndexFunc(ops, func(op trace.OperationRecord) bool { return op.Operation.ID == intent.Operation.ID })
 	if index < 0 || ops[index].Result == nil || ops[index].Result.Outcome != "cancelled" {
 		logUnsettledLifecycleOperations(t, owner, address)
@@ -277,9 +278,9 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	var owner *trace.Repository
 	for _, m := range resolutionMembers(f) {
 		repo, err := f.s.repository(m.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		ops, err := repo.Operations(m.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, op := range ops {
 			if op.Operation.Action == lifecycle.DeltaTurnAction {
 				intent, address, owner = op, m.stream, repo
@@ -290,13 +291,13 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		t.Fatalf("delta was not queued before retirement: %+v", intent)
 	}
 	var in lifecycle.DeltaTurnInput
-	intakefixture.Must(t, json.Unmarshal(intent.Operation.Input, &in))
+	fixturekit.Must(t, json.Unmarshal(intent.Operation.Input, &in))
 	before := currentChange(t, f.s, f.origin, c.ID)
 	awaitRunning := func() {
 		t.Helper()
 		select {
 		case <-running:
-		case <-time.After(intakefixture.DemoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("shared delta turn did not start")
 		}
 	}
@@ -306,9 +307,9 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		queued.Release()
 		awaitRunning()
 		wt, c, retired, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		th, err := wt.Thread(c.Host, intake.ArchitectAgent)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		index := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
 		if retired || index < 0 {
 			t.Fatal("retiring member did not start the shared turn")
@@ -318,13 +319,13 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 			t.Fatalf("shared turn was not claimed before retirement: %+v", active)
 		}
 		current, err := wt.CurrentTurnClaim(c.Host, active.Claim)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		closeAuthority()
 		if !current {
 			t.Fatal("shared claim was not active before retirement")
 		}
 		ops, err := owner.Operations(address)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
 			return op.Operation.ID == intent.Operation.ID && op.Claim != nil && op.Result == nil
 		}) {
@@ -334,9 +335,9 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	}
 	awaitMemberBuilt(t, f, owner, address)
 	_, err := f.c.Abandon(ctx, address, "Owner cancelled the shared delta dispatch's member.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Archive(ctx, address)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !retireWhileRunning {
 		survivor := f.stream1
 		if survivor == address {
@@ -347,14 +348,14 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		awaitRunning()
 	}
 	observed, err := (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectUnknown || observed.Result != nil {
 		t.Fatalf("running shared claim was settled: %+v", observed)
 	}
 	wt, after, retired, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	th, err := wt.Thread(after.Host, intake.ArchitectAgent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	closeAuthority()
 	if !retired || !intakefixture.EqualJSONTest(before, after) || !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.TurnID == turn && q.Claim != nil && q.Response == nil && q.CompletedAt.IsZero()
@@ -370,31 +371,31 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	released = true
 	lifecycleAwait(t, f, "shared delta response captured", func() bool {
 		wt, c, _, closeAuthority, err := (deltaRunner{s: f.s}).load(ctx, in)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer closeAuthority()
 		th, err := wt.Thread(c.Host, intake.ArchitectAgent)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 			return q.Request.TurnID == turn && q.Response != nil && !q.CompletedAt.IsZero()
 		})
 	})
 	wt, after, retired, closeAuthority, err = (deltaRunner{s: f.s}).load(ctx, in)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err = wt.Thread(after.Host, intake.ArchitectAgent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !retired || !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.TurnID == turn && q.Response != nil && !q.CompletedAt.IsZero()
 	}) {
 		t.Fatal("running shared turn did not retain its captured response")
 	}
 	observed, err = (deltaRunner{s: f.s}).Inspect(ctx, intent.Operation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if observed.State != coreadapter.EffectAbsent || observed.Result != nil {
 		t.Fatalf("captured shared response was replaced by retirement: %+v", observed)
 	}
 	result, err := (deltaRunner{s: f.s}).Apply(ctx, intent.Operation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	outcome := "completed"
 	if unavailable {
 		outcome = "failed"
@@ -403,12 +404,12 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 		t.Fatalf("captured delta did not reconcile its ordinary outcome: %+v", result)
 	}
 	retained, err := wt.Thread(after.Host, intake.ArchitectAgent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !intakefixture.EqualJSONTest(th, retained) {
 		t.Fatal("reconciling retired controller changed the captured shared response")
 	}
 	_, latest, _, closeLatest, err := (deltaRunner{s: f.s}).load(ctx, in)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	closeLatest()
 	if unavailable {
 		if latest.State != "failed" || !intakefixture.EqualJSONTest(before.Before, latest.Before) || !intakefixture.EqualJSONTest(before.After, latest.After) {
@@ -431,7 +432,7 @@ func testRetiredDeltaPreservesRunningSharedClaim(t *testing.T, unavailable, reti
 	owner.WakeWorkflow()
 	cleanup.await(t, f)
 	ops, err := owner.Operations(address)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
 		return op.Operation.ID == intent.Operation.ID && op.Result != nil && op.Result.Outcome == outcome
 	}) {
@@ -460,7 +461,7 @@ func deliverRetirementDelta(ctx context.Context, req agent.Request, tools *mcp.C
 	for _, mutate := range mutations {
 		mutate(&after)
 	}
-	out, err := intakefixture.CallTool(ctx, tools, lifecycle.DeltaDraftTool, toolMap(after))
+	out, err := fixturekit.CallTool(ctx, tools, lifecycle.DeltaDraftTool, toolMap(after))
 	if err == nil && strings.Contains(out, `"recorded":false`) {
 		return intakefixture.QuestionResult(req, "session-retirement-delta", "Refused: "+out), nil
 	}
@@ -482,9 +483,9 @@ func installRetirementDelta(t *testing.T, f *productionDesignFixture, drafts *at
 			drafts.Add(1)
 			return deliverRetirementDelta(ctx, req, tools, mutations...)
 		case slices.Contains(names, lifecycle.DeltaReviewTool):
-			_, err = intakefixture.CallTool(ctx, tools, lifecycle.DeltaReviewTool, map[string]any{"objections": []string{}, "note": "The existing member slices remain fixed."})
+			_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaReviewTool, map[string]any{"objections": []string{}, "note": "The existing member slices remain fixed."})
 		case slices.Contains(names, lifecycle.DeltaReplyTool):
-			_, err = intakefixture.CallTool(ctx, tools, lifecycle.DeltaReplyTool, map[string]any{"reply": "The contract retains the recorded offset."})
+			_, err = fixturekit.CallTool(ctx, tools, lifecycle.DeltaReplyTool, map[string]any{"reply": "The contract retains the recorded offset."})
 		default:
 			return previous(ctx, req, turn, tools)
 		}
@@ -499,12 +500,12 @@ func assertFrozenSliceRefusal(t *testing.T, f *productionDesignFixture, survivor
 		project = f.project2
 	}
 	repo, err := f.s.repository(project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wt, host, _, closeAuthority, err := f.s.chiefRepository(context.Background(), repo, survivor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer closeAuthority()
 	th, err := wt.Thread(host, intake.ArchitectAgent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	turn := lifecycle.DeltaTurnID(lifecycle.WorkgroupChange{ID: change}, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	if !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.TurnID == turn && q.Response != nil && strings.Contains(q.Response.Result.FinalResponse, "member "+string(archived)+" is archived and its slice is frozen")
@@ -517,7 +518,7 @@ func awaitMemberBuilt(t *testing.T, f *productionDesignFixture, owner *trace.Rep
 	t.Helper()
 	lifecycleAwait(t, f, "member build recorded", func() bool {
 		ops, err := owner.Operations(address)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return slices.ContainsFunc(ops, func(op trace.OperationRecord) bool {
 			return op.Operation.Action == intake.BuildAction && op.Result != nil
 		})

@@ -28,16 +28,16 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	const ownersRuling, relayedAnswer = "Keep the index fixed at start.", "The index does not rebuild on start."
 
 	f := newQuestionFixture(t, "wg-", "[capacity]\nmasons = 2\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
-		{fixturekit.Stream, intakefixture.DemoAgent, intakefixture.DemoThread, "mason", "build"},
+		{fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "mason", "build"},
 		{second, "agent_second", "thread_second", "mason", "build2"},
 	})
 	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
 
 	grouping, err := trace.Open(f.cfg.Root, f.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = trace.CreateWorkgroup(ctx, grouping, []config.WorkstreamID{fixturekit.Stream, second}, clock.Now(), intake.OwnerActor, "test-workgroup")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, grouping.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, grouping.Close())
 
 	var mu sync.Mutex
 	var problems []string
@@ -47,9 +47,9 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
 
-	ask := func(question string) intakefixture.DemoTurn {
+	ask := func(question string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			if out, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question}); err != nil || !strings.Contains(out, `"recorded":true`) {
+			if out, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question}); err != nil || !strings.Contains(out, `"recorded":true`) {
 				problem("%s ask: %s %v", req.Name, out, err)
 			}
 			return intakefixture.QuestionResult(req, "session-"+req.Name, "Asked"), nil
@@ -74,7 +74,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 
 		acted := false
 		if needRelay {
-			out, err := intakefixture.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(second) + ":1", "text": relayedAnswer, "scope": "local"})
+			out, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(second) + ":1", "text": relayedAnswer, "scope": "local"})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				problem("relay: %s %v", out, err)
 			}
@@ -84,7 +84,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			acted = true
 		}
 		if needEscalate {
-			out, err := intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{
 				"questions": []string{string(second) + ":1"}, "rephrasing": "Should the index rebuild on start?",
 				"blocked": "The second workstream's build.", "options": []string{"Rebuild", "Keep"}, "recommendation": "Keep.",
 			})
@@ -97,7 +97,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 			acted = true
 		}
 		if needAnswer {
-			out, err := intakefixture.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}})
+			out, err := fixturekit.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": "1", "text": "In files under the root.", "citations": []string{"charter#1"}})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				problem("answer: %s %v", out, err)
 			}
@@ -137,7 +137,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		describe("first workstream", fixturekit.Stream)
 		describe("second workstream", second)
 		describeThread("shared chief of staff", fixturekit.Stream, trace.ChiefOfStaff)
-		describeThread("first asker", fixturekit.Stream, intakefixture.DemoAgent)
+		describeThread("first asker", fixturekit.Stream, fixturekit.DemoAgent)
 		describeThread("second asker", second, "agent_second")
 		a1, e2, r := flags()
 		fmt.Fprintf(&b, "flags: answered1=%v escalated2=%v relayed=%v\n", a1, e2, r)
@@ -149,7 +149,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 
 	pump := func(s *Service, check func() bool) {
 		t.Helper()
-		deadline := time.Now().Add(intakefixture.DemoTimeout)
+		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for !check() {
 			select {
 			case ticks <- clock.Now():
@@ -164,7 +164,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	}
 
 	s, err := Start(ctx, opts)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	closed := false
 	defer func() {
 		if !closed {
@@ -190,15 +190,15 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		if err != nil || len(q2) != 1 || q2[0].State != trace.QuestionEscalated {
 			return false
 		}
-		th, err := repo.Thread(fixturekit.Stream, intakefixture.DemoAgent)
+		th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
 		return err == nil && slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") }) && chiefSettled(repo)
 	}
 	pump(s, escalatedAndAnswered)
 
 	host1, err := repo.ChiefOfStaffHost(fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	host2, err := repo.ChiefOfStaffHost(second)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if host1 != fixturekit.Stream || host2 != fixturekit.Stream {
 		t.Fatalf("hosts: %s, %s, want %s for both", host1, host2, fixturekit.Stream)
 	}
@@ -206,37 +206,37 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		t.Fatalf("workstream %s's own chief-of-staff identity gained a turn: %+v", second, own)
 	}
 	chief1, err := repo.ChiefOfStaffThread(fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief2, err := repo.ChiefOfStaffThread(second)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if chief1.Identity.ID != trace.ChiefOfStaff || chief2.Identity.ID != trace.ChiefOfStaff || len(chief1.Turns) != len(chief2.Turns) {
 		t.Fatalf("workstreams do not share one chief-of-staff thread: %+v vs %+v", chief1, chief2)
 	}
 
 	ruling1, err := repo.Questions(fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if ruling1[0].Ruling == nil || ruling1[0].Ruling.Actor != (trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}) {
 		t.Fatalf("question 1 of %s should be answered by the chief of staff: %+v", fixturekit.Stream, ruling1[0])
 	}
 
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	closed = true
 	s2, c := start(t, opts)
 	repo2 := <-lives
 	current = repo2
 
-	before, err := repo2.Thread(fixturekit.Stream, intakefixture.DemoAgent)
-	intakefixture.Must(t, err)
+	before, err := repo2.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	beforeTurns := slices.Clone(before.Turns)
 
 	q2, err := repo2.Questions(second)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(q2) != 1 || q2[0].State != trace.QuestionEscalated {
 		t.Fatalf("escalated question lost across restart: %+v", q2)
 	}
 
 	inbox, err := c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var number int
 	for _, e := range inbox.Entries {
 		if e.Workstream == second && slices.ContainsFunc(e.Asked, func(q api.InboxQuestion) bool { return q.ID == "1" }) {
@@ -257,13 +257,13 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 	})
 
 	resumed, err := repo2.Thread(second, "agent_second")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(resumed.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") })
 	if i < 0 || resumed.Turns[i].Request.ThreadID != "thread_second" || !strings.Contains(resumed.Turns[i].Request.Prompt, relayedAnswer) {
 		t.Fatalf("the owner's ruling did not resume the second workstream's own thread and turn: %+v", resumed.Turns)
 	}
-	first, err := repo2.Thread(fixturekit.Stream, intakefixture.DemoAgent)
-	intakefixture.Must(t, err)
+	first, err := repo2.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	gainedTurn := len(first.Turns) != len(beforeTurns)
 	leaked := slices.ContainsFunc(first.Turns, func(q trace.QueuedTurn) bool {
 		return strings.Contains(q.Request.Prompt, relayedAnswer) || strings.Contains(q.Request.Prompt, ownersRuling)
@@ -272,7 +272,7 @@ func TestWorkgroupSharesOneChiefOfStaffAcrossMembersAndARestart(t *testing.T) {
 		t.Fatalf("the owner's ruling on the second workstream's question was delivered to the first workstream too: before=%+v after=%+v", beforeTurns, first.Turns)
 	}
 	q2After, err := repo2.Questions(second)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if q2After[0].State != trace.QuestionAnswered || q2After[0].Ruling == nil || q2After[0].Ruling.ReturnedAnswer != relayedAnswer {
 		t.Fatalf("question 1 of %s was not answered with the owner's relayed ruling: %+v", second, q2After[0])
 	}

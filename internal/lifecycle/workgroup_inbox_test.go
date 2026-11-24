@@ -54,7 +54,7 @@ func newCrossRepoInboxFixture(t *testing.T) *crossRepoInboxFixture {
 	t.Helper()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "wgi-")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
 	root := opts.Config.Root
@@ -66,7 +66,7 @@ clone = "`+home2+`"
 `)
 	opts.Workstreams = nil
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
@@ -78,29 +78,29 @@ clone = "`+home2+`"
 		agent, thread string
 	}
 	byProject := map[config.ProjectID][]member{
-		fixturekit.Project: {{f.stream1, intakefixture.DemoAgent, intakefixture.DemoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
+		fixturekit.Project: {{f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
 		otherProject:       {{f.stream2, "agent_mason2", "thread_mason2"}, {unrelatedStream2, "agent_u2", "thread_u2"}},
 	}
 	for _, p := range cfg.Projects {
-		intakefixture.Must(t, os.MkdirAll(p.Clone, 0700))
+		fixturekit.Must(t, os.MkdirAll(p.Clone, 0700))
 		repo, err := trace.Create(ctx, cfg.Root, p, clock.Now(), owner)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, m := range byProject[p.ID] {
-			intakefixture.Must(t, repo.CreateWorkstream(ctx, m.stream, clock.Now(), owner))
-			intakefixture.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: m.agent, Project: p.ID, Workstream: m.stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: m.thread}))
+			fixturekit.Must(t, repo.CreateWorkstream(ctx, m.stream, clock.Now(), owner))
+			fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: m.agent, Project: p.ID, Workstream: m.stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: m.thread}))
 		}
 		fixturekit.RecordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
-		intakefixture.Must(t, repo.Close())
+		fixturekit.Must(t, repo.Close())
 	}
 
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	f.engine = &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]intakefixture.DemoTurn{}}
+	f.engine = &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
-	intakefixture.Must(t, os.Mkdir(views, 0700))
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": intakefixture.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
+	fixturekit.Must(t, os.Mkdir(views, 0700))
+	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
 	f.cfg.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.mu.Lock()
@@ -309,7 +309,7 @@ func (f *crossRepoInboxFixture) repositories(t *testing.T, s *Service) (repo1, r
 
 func (f *crossRepoInboxFixture) driveTicksUntil(t *testing.T, s *Service, label string, condition func() bool) {
 	t.Helper()
-	deadline := time.NewTimer(intakefixture.DemoTimeout)
+	deadline := time.NewTimer(fixturekit.DemoTimeout)
 	defer deadline.Stop()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
@@ -347,9 +347,9 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 
 	f := newCrossRepoInboxFixture(t)
 
-	ask := func(question string) intakefixture.DemoTurn {
+	ask := func(question string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			out, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+			out, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("%s ask: %s %v", req.Name, out, err)
 			}
@@ -369,7 +369,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		switch {
 		case !relayed && strings.Contains(req.Prompt, ", escalation_1 (questions 1, 1): "+ruling):
 			flagMu.Unlock()
-			out, err := intakefixture.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
+			out, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("relay_ruling: %s %v", out, err)
 			}
@@ -379,7 +379,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
 		case !escalated1 && !escalated2 && strings.Contains(req.Prompt, "asked by the mason: "+question1) && strings.Contains(req.Prompt, "asked by the mason: "+question2):
 			flagMu.Unlock()
-			out, err := intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
 				"rephrasing": "Is the chunk store part of the contract?", "blocked": "Both workstreams.", "options": []string{"Yes", "No"}, "recommendation": "Yes."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate consolidated: %s %v", out, err)
@@ -390,7 +390,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
 		case !escalatedU1 && strings.Contains(req.Prompt, "asked by the mason: "+questionU1):
 			flagMu.Unlock()
-			out, err := intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index add a file?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate u1: %s %v", out, err)
@@ -401,7 +401,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
 		case !escalatedU2 && strings.Contains(req.Prompt, "asked by the mason: "+questionU2):
 			flagMu.Unlock()
-			out, err := intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
 				"rephrasing": "Is the retry bound owner-set?", "blocked": "The retry unit.", "options": []string{}, "recommendation": "No."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate u2: %s %v", out, err)
@@ -423,7 +423,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	}
 
 	s, err := Start(ctx, f.cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed := false
 	defer func() {
@@ -446,7 +446,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		stream              config.WorkstreamID
 		agent, thread, turn string
 	}{
-		{repo1, f.stream1, intakefixture.DemoAgent, intakefixture.DemoThread, "build1"},
+		{repo1, f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread, "build1"},
 		{repo2, f.stream2, "agent_mason2", "thread_mason2", "build2"},
 		{repo1, unrelatedStream1, "agent_u1", "thread_u1", "build_u1"},
 		{repo2, unrelatedStream2, "agent_u2", "thread_u2", "build_u2"},
@@ -454,7 +454,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + m.turn, Revision: 1, Project: m.repo.Project(), Workstream: m.stream, At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "message_" + m.turn, Depth: 1}
 		_, err := m.repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: m.agent, ThreadID: m.thread, TurnID: m.turn,
 			Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: " + m.turn})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 
 	f.waitCompleted(t, s, "first asking turns after the completed join")
@@ -463,11 +463,11 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		stream config.WorkstreamID
 		agent  string
 	}{
-		{repo1, f.stream1, intakefixture.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
+		{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 		{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
 	} {
 		th, err := m.repo.Thread(m.stream, m.agent)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(th.Turns) != 1 || !th.Parked() || th.Turns[0].Status() != "waiting" {
 			t.Fatalf("first asking turn %s/%s: %+v; %s", m.stream, m.agent, th, f.diagnostics(s))
 		}
@@ -481,7 +481,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	f.waitCompleted(t, s, "escalations and event acknowledgements")
 
 	inbox, err := c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 3 {
 		t.Fatalf("inbox before any ruling: %+v; %s", inbox, f.diagnostics(s))
 	}
@@ -520,9 +520,9 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	}
 
 	_, err = c.Answer(ctx, consolidated.Number, ruling, workgroupProject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	inbox, err = c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 2 {
 		t.Fatalf("inbox after ruling on the consolidated entry: %+v", inbox)
 	}
@@ -554,7 +554,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			!th.Parked() && !th.Turns[i].CompletedAt.IsZero() && th.Turns[i].Response != nil && th.Turns[i].Status() == "idle"
 	}
 	f.driveTicksUntil(t, s, "both affected workers complete exactly one continuation", func() bool {
-		return resumedWith(repo1, f.stream1, intakefixture.DemoAgent) && resumedWith(repo2, f.stream2, "agent_mason2")
+		return resumedWith(repo1, f.stream1, fixturekit.DemoAgent) && resumedWith(repo2, f.stream2, "agent_mason2")
 	})
 	f.waitCompleted(t, s, "ruling continuations and event acknowledgements")
 
@@ -578,7 +578,7 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	}
 
 	inbox, err = c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 2 {
 		t.Fatalf("inbox after the relay: %+v", inbox)
 	}
@@ -596,34 +596,34 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			stream config.WorkstreamID
 			agent  string
 		}{
-			{repo1, f.stream1, intakefixture.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
+			{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 			{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
 			{repo1, unrelatedStream1, trace.ChiefOfStaff}, {repo2, unrelatedStream2, trace.ChiefOfStaff},
 		} {
 			th, err := m.repo.Thread(m.stream, m.agent)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
 		target, host, _, close, err := s.chiefRepository(ctx, repo1, f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer close()
 		th, err := target.ChiefOfStaffThread(host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		threads = append(threads, th)
 		data, err := json.Marshal(threads)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return data
 	}
 	beforeThreads := threadsSnapshot()
 	beforeConversation1, err := c.Conversation(ctx, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	beforeConversation2, err := c.Conversation(ctx, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	c.Close()
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	closed = true
 	s, err = Start(ctx, f.cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed = false
 	c = NewClient(s.Socket())
@@ -635,14 +635,14 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		t.Fatalf("restart changed durable worker or chief threads: before=%s after=%s", beforeThreads, afterThreads)
 	}
 	afterInbox, err := c.Inbox(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterInbox, inbox) {
 		t.Fatalf("restart changed the unaffected inbox or repeated the consolidated escalation: before=%+v after=%+v", inbox, afterInbox)
 	}
 	afterConversation1, err := c.Conversation(ctx, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	afterConversation2, err := c.Conversation(ctx, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterConversation1, beforeConversation1) || !reflect.DeepEqual(afterConversation2, beforeConversation2) {
 		t.Fatalf("restart changed member conversations: before=%+v / %+v after=%+v / %+v", beforeConversation1, beforeConversation2, afterConversation1, afterConversation2)
 	}

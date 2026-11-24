@@ -14,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -29,11 +28,11 @@ type briefResult struct {
 func briefCall(t *testing.T, tool coreadapter.Tool, in map[string]any) briefResult {
 	t.Helper()
 	raw, err := json.Marshal(in)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	out, err := tool.Handle(context.Background(), raw)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var result briefResult
-	intakefixture.Must(t, json.Unmarshal(out, &result))
+	fixturekit.Must(t, json.Unmarshal(out, &result))
 	return result
 }
 
@@ -51,9 +50,9 @@ func recordFinalReview(t *testing.T, f *shedFixture, repository *trace.Repositor
 	next := report
 	next.Review, next.Operation, next.Outcome = k, fmt.Sprintf("final-operation-%d", k), finalReviewed
 	_, err := (&delivery.FinalReviewer{S: f.s.delivery(), Repository: repository}).Record(context.Background(), stream, next)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	review, _, _, err := deliveryDocuments(repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return review.Revision
 }
 
@@ -61,17 +60,17 @@ func previewCapture(t *testing.T, repository *trace.Repository, stream config.Wo
 	t.Helper()
 	ctx := context.Background()
 	image, err := repository.RecordImage(ctx, trace.Header{Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", attachmentPNG(t), "turn")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	content, err := json.Marshal(previewOperation{Workstream: stream, Commit: commit, Result: &previewResult{ImageID: image.ID, Workstream: stream, Commit: commit}})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
 	return image.ID
 }
 
 func briefDocuments(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, review int) int {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, d := range docs {
 		if d.ID == delivery.BriefDocument(review) {
@@ -111,7 +110,7 @@ func TestDeliveryBriefIsRecordedWithTheReviewItNamesAndReplaced(t *testing.T) {
 		t.Fatalf("call: %+v", result)
 	}
 	brief, found, err := delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != text || !slices.Equal(brief.BeforeYouShip, items) || brief.Review != 1 || brief.ReviewRevision != p.ReviewRevision || brief.Commit != report.Commit {
 		t.Fatalf("stored %+v, %v", brief, found)
 	}
@@ -119,7 +118,7 @@ func TestDeliveryBriefIsRecordedWithTheReviewItNamesAndReplaced(t *testing.T) {
 		t.Fatalf("replacement: %+v", result)
 	}
 	brief, found, err = delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != "Replaced." || len(brief.BeforeYouShip) != 0 || briefDocuments(t, repository, stream, 1) != 2 {
 		t.Fatalf("replaced %+v, %v", brief, found)
 	}
@@ -167,7 +166,7 @@ func TestDeliveryBriefRefusals(t *testing.T) {
 		}
 	}
 	brief, found, err := delivery.ReadBrief(repository, stream, 1, revision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != "Kept." || len(brief.Screenshots) != 0 || briefDocuments(t, repository, stream, 1) != 1 {
 		t.Fatalf("a refused call changed the brief: %+v, %v", brief, found)
 	}
@@ -227,7 +226,7 @@ func TestDeliveryBriefIsClosedByApproval(t *testing.T) {
 		t.Fatalf("after approval: %+v", result)
 	}
 	brief, _, err := delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	after, api := f.s.deliveryPresentation(ctx, string(stream))
 	if brief.Text != "Before approval." || briefDocuments(t, repository, stream, 1) != 1 || api != nil || after.Approval == nil || after.Approval.Description != approved.Description || after.Brief == nil || after.Brief.State != delivery.BriefRecorded {
 		t.Fatalf("approval did not close the brief: %+v %v", after.Brief, api)
@@ -241,7 +240,7 @@ func TestFinalReviewNoticeAsksForTheBrief(t *testing.T) {
 	f, stream, repository, report := deliveryFixture(t)
 	revision := recordFinalReview(t, f, repository, stream, report, 2)
 	entries, err := repository.Outbox(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var body string
 	for _, e := range entries {
 		if e.TransitionID == "final-review-2-reviewed" {
@@ -302,7 +301,7 @@ func (r *briefReview) state(want string, listed bool, fallback bool) {
 		r.t.Fatalf("brief %+v, want state %s", p.Brief, want)
 	}
 	e, open, err := r.c.DeliveryEntry(ctx, r.repository, r.stream)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	if open != listed {
 		r.t.Fatalf("entry open %v, want %v (brief state %s)", open, listed, want)
 	}
@@ -317,7 +316,7 @@ func (r *briefReview) claimReviewNotice() trace.QueuedTurn {
 	r.t.Helper()
 	ctx := context.Background()
 	entries, err := r.repository.Outbox(r.stream)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	var notice trace.OutboxEntry
 	for _, e := range entries {
 		if e.TransitionID == "final-review-2-reviewed" {
@@ -326,14 +325,14 @@ func (r *briefReview) claimReviewNotice() trace.QueuedTurn {
 	}
 	token := "delivery_brief"
 	_, err = r.repository.Claim(ctx, r.stream, notice.Event.ID, token, events.Actor.ID, time.Now().UTC(), time.Minute)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	return trace.QueuedTurn{Request: trace.TurnRequest{TurnID: events.TurnID(token)}}
 }
 
 func (r *briefReview) record(review, revision int, text string) {
 	r.t.Helper()
 	recorded, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, review, revision, text)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	if !recorded {
 		r.t.Fatalf("brief refused: %s", reason)
 	}
@@ -364,7 +363,7 @@ func TestABriefOfAnEarlierReviewIsRefusedAndTheEntryKeepsWaiting(t *testing.T) {
 	r := newBriefReview(t)
 	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
 	stale, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, 1, r.revision, "Stale.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if stale || reason == "" {
 		t.Fatalf("a brief for review 1 was accepted after review 2: %q", reason)
 	}
@@ -419,7 +418,7 @@ func TestADelayedBriefOfTheSupersededReviewIsRefused(t *testing.T) {
 	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
 	recordFinalReview(t, r.f, r.repository, r.stream, r.report, 3)
 	delayed, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, 2, r.revision, "Delayed.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if delayed || !strings.Contains(reason, "not the current") {
 		t.Fatalf("delayed call: %v %q", delayed, reason)
 	}

@@ -18,7 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 type fileState struct {
@@ -29,9 +28,9 @@ type fileState struct {
 func stateOf(t *testing.T, path string) fileState {
 	t.Helper()
 	data, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	info, err := os.Stat(path)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return fileState{string(data), info.ModTime()}
 }
 
@@ -56,9 +55,9 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	github.Remote = func(string) string { return remote }
 	opts.Repositories = github.Client()
 	legacy, err := os.ReadFile(top)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(top, append(legacy, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
-	intakefixture.Must(t, os.Chmod(top, 0400))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(top, append(legacy, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
+	fixturekit.Must(t, os.Chmod(top, 0400))
 	baseline := stateOf(t, top)
 	untouched := func(step string) {
 		t.Helper()
@@ -75,12 +74,12 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	}
 
 	first, err := c.ProjectConfig(ctx, fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if first.Pin == "" || first.Revision != 1 || first.Error != nil {
 		t.Fatalf("first read: %+v", first)
 	}
 	saved, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{ChecksTimeout: textOf("45m")}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if saved.Outcome != api.ProjectConfigApplied || saved.Pin == first.Pin || saved.Revision != 2 || s.current().For(fixturekit.Project).Project.ChecksTimeout != "45m" {
 		t.Fatalf("applied save: %+v", saved)
 	}
@@ -101,7 +100,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		return nil
 	}
 	pending, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: saved.Pin, Set: api.ProjectConfigValues{Landing: textOf("squash")}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	s.boundary = nil
 	if pending.Outcome != api.ProjectConfigSavedNotApplied || !strings.Contains(pending.Reason, "the scheduler is unreachable") || s.current().For(fixturekit.Project).Project.Landing != "commit-per-unit" {
 		t.Fatalf("not applied save: %+v", pending)
@@ -109,20 +108,20 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	untouched("settings saves")
 
 	edited, err := os.ReadFile(top)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.Chmod(top, 0600))
-	intakefixture.Must(t, os.WriteFile(top, append(edited, "\n[capacity]\nmasons = 7\n"...), 0600))
-	intakefixture.Must(t, os.Chmod(top, 0400))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.Chmod(top, 0600))
+	fixturekit.Must(t, os.WriteFile(top, append(edited, "\n[capacity]\nmasons = 7\n"...), 0600))
+	fixturekit.Must(t, os.Chmod(top, 0400))
 	baseline = stateOf(t, top)
 	reloaded, err := c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	now, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if reloaded.Digest != now.Digest || now.Effective.Capacity.Masons != 7 || len(now.Effective.Projects) != 1 || now.Effective.Projects[0].Landing != "commit-per-unit" || now.Effective.Projects[0].ChecksTimeout != "45m" {
 		t.Fatalf("after the reload: %+v", now.Effective.Projects)
 	}
 	read, err := c.ProjectConfig(ctx, fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if read.Pin != pending.Pin || !settingNamed(t, read, "landing").Pending || settingNamed(t, read, "landing").Value != "squash" {
 		t.Fatalf("the reload did not leave the saved revision pending: %+v", read)
 	}
@@ -134,10 +133,10 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	cloneA := filepath.Join(home, "clone-a")
 	fixturekit.DemoGit(t, home, "init", "--quiet", cloneA)
 	addedA, err := c.AddProject(ctx, fixturekit.Request(cloneA))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	req := api.ProjectCreateRequest{Name: "New Project", Repo: "newrepo", Description: "A new project", Charter: creationCharter}
 	createdB, err := c.CreateProject(ctx, req)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project), string(addedA.Project.ID), string(createdB.Project.ID)}) {
 		t.Fatalf("registry after add and create: %v", got)
 	}
@@ -150,7 +149,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		}
 	}
 	_, err = c.RemoveProject(ctx, addedA.Project.ID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project), string(createdB.Project.ID)}) {
 		t.Fatalf("registry after the removal: %v", got)
 	}
@@ -169,14 +168,14 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	s.boundary = nil
 	interrupted := interruptedProject(t, root, fixturekit.Project, addedA.Project.ID, createdB.Project.ID)
 
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, c = start(t, opts)
 	want := []string{string(fixturekit.Project), string(createdB.Project.ID), string(interrupted)}
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry after the restart: %v, want %v", got, want)
 	}
 	now, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(now.Effective.ActiveProjects, want) {
 		t.Fatalf("effective.active_projects %v, want %v", now.Effective.ActiveProjects, want)
 	}
@@ -205,9 +204,9 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	untouched("restart")
 	cloneOfProject := s.current().For(fixturekit.Project).Project.Clone
 
-	intakefixture.Must(t, s.Close())
-	intakefixture.Must(t, os.RemoveAll(cloneOfProject))
-	intakefixture.Must(t, os.WriteFile(cloneOfProject, []byte("not a directory"), 0600))
+	fixturekit.Must(t, s.Close())
+	fixturekit.Must(t, os.RemoveAll(cloneOfProject))
+	fixturekit.Must(t, os.WriteFile(cloneOfProject, []byte("not a directory"), 0600))
 	_, err = Start(ctx, opts)
 	if err == nil {
 		t.Fatal("startup did not refuse stored settings that do not load")
@@ -239,7 +238,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		t.Fatalf("revisions: %d %v", len(revisions), err)
 	}
 	files, err := filepath.Glob(filepath.Join(root, "projects", "*", "config.toml"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(files) != 0 {
 		t.Fatalf("project files: %v", files)
 	}
@@ -249,7 +248,7 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 func mustRoot(t *testing.T, root string) config.Root {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return resolved
 }
 

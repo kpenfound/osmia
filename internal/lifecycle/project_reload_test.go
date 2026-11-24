@@ -26,14 +26,14 @@ func TestRemovalRefusesUnresolvedProjectThenRemovesIt(t *testing.T) {
 	}
 	unblock()
 	_, err = c.Abandon(context.Background(), f.streams[fixturekit.Project], "Owner resolved this project's member.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.RemoveProject(context.Background(), fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(s.traces()) != 1 || s.traces()[0].Project() != otherProject {
 		t.Fatal("the removed project still participates after removal")
 	}
 	out, err := c.Reload(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(out.RestartRequired) != 0 || len(s.traces()) != 1 || s.current().Active(fixturekit.Project) {
 		t.Fatalf("a reload changed the active projects: %+v", out)
 	}

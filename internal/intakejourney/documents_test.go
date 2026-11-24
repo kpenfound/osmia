@@ -2,6 +2,10 @@ package intakejourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,57 +15,66 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestOwnerDocumentAPIPinsRevisionsAndEnforcesRatification(t *testing.T) {
+func TestOwnerCharterEditPinsItsRevision(t *testing.T) {
 	t.Parallel()
-	opts, clone := projectFixture(t)
-	must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "trace.go"), []byte("package trace\n"), 0600))
-	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "internal")
-	s, c := start(t, opts)
+	opts, clone := journey.ProjectFixture(t)
+	_, c := journey.StartT(t, opts)
 	ctx := context.Background()
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
-	charterPath := Prefix + "/projects/charter/" + string(added.Project.ID)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
+	charterPath := api.Prefix + "/projects/charter/" + string(added.Project.ID)
 	var charter trace.Document
-	must(t, c.Do(ctx, http.MethodGet, charterPath, nil, &charter))
-	edit := CharterEdit{Revision: charter.Revision, Content: "1. Keep changes focused.\n"}
-	must(t, c.Do(ctx, http.MethodPut, charterPath, edit, &charter))
-	assertCode(t, c.Do(ctx, http.MethodPut, charterPath, edit, nil), Conflict)
+	fixturekit.Must(t, c.Do(ctx, http.MethodGet, charterPath, nil, &charter))
+	edit := api.CharterEdit{Revision: charter.Revision, Content: "1. Keep changes focused.\n"}
+	fixturekit.Must(t, c.Do(ctx, http.MethodPut, charterPath, edit, &charter))
+	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, charterPath, edit, nil), api.Conflict)
+}
+
+func TestOwnerDraftEditPinsRevisionsAndIsRefusedOnceRatified(t *testing.T) {
+	t.Parallel()
+	opts, clone := journey.ProjectFixture(t)
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "trace.go"), []byte("package trace\n"), 0600))
+	fixturekit.DemoGit(t, filepath.Dir(clone), "-C", clone, "add", "internal")
+	s, c := journey.StartT(t, opts)
+	ctx := context.Background()
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
 	text := "Add a feature"
-	handed, err := c.HandIn(ctx, HandInRequest{Project: added.Project.ID, Key: "documents", Stdin: &text})
-	must(t, err)
-	repo, err := s.repository(added.Project.ID)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, Revision: 1, Project: added.Project.ID, Workstream: handed.Workstream, At: s.now(), Actor: ownerActor, Cause: "draft"}
-	spec := trace.Document{Header: h, Path: "spec.md", Content: validSpec}
+	handed, err := c.HandIn(ctx, api.HandInRequest{Project: added.Project.ID, Key: "documents", Stdin: &text})
+	fixturekit.Must(t, err)
+	repo, err := s.Repository(added.Project.ID)
+	fixturekit.Must(t, err)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, Revision: 1, Project: added.Project.ID, Workstream: handed.Workstream, At: s.Now(), Actor: intake.OwnerActor, Cause: "draft"}
+	spec := trace.Document{Header: h, Path: "spec.md", Content: fixturekit.ValidSpec}
 	spec.ID = "spec"
-	plan := trace.Document{Header: h, Path: "plan.json", Content: validPlan}
+	plan := trace.Document{Header: h, Path: "plan.json", Content: fixturekit.ValidPlan}
 	plan.ID = "plan"
-	must(t, repo.RecordDocuments(ctx, []trace.Document{spec, plan}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{spec, plan}))
 	h.Schema, h.ID = "osmia.trace.transition", "sketch"
 	_, err = repo.SetFeatureState(ctx, h, "sketched", "Draft ready")
-	must(t, err)
-	draftPath := Prefix + "/documents/" + string(handed.Workstream)
+	fixturekit.Must(t, err)
+	draftPath := api.Prefix + "/documents/" + string(handed.Workstream)
 	var docs map[string]trace.Document
-	must(t, c.Do(ctx, http.MethodGet, draftPath, nil, &docs))
-	draft := DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: validSpec + "\nAn owner note.\n", Plan: validPlan}
-	must(t, c.Do(ctx, http.MethodPut, draftPath, draft, &docs))
+	fixturekit.Must(t, c.Do(ctx, http.MethodGet, draftPath, nil, &docs))
+	draft := api.DraftEdit{SpecRevision: 1, PlanRevision: 1, Spec: fixturekit.ValidSpec + "\nAn owner note.\n", Plan: fixturekit.ValidPlan}
+	fixturekit.Must(t, c.Do(ctx, http.MethodPut, draftPath, draft, &docs))
 	if docs["spec"].Revision != 2 || docs["plan"].Revision != 1 {
 		t.Fatalf("saved draft: %+v", docs)
 	}
-	assertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), Conflict)
+	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), api.Conflict)
 	draft.SpecRevision = 2
 	draft.Plan = "invalid"
-	assertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), Validation)
-	draft.Plan = validPlan
+	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), api.Validation)
+	draft.Plan = fixturekit.ValidPlan
 	rh := h
 	rh.Schema, rh.ID = "osmia.trace.document", "owner-ratification"
 	ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 2, Plan: 1}, nil))
-	must(t, err)
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: rh, Path: "shed/round-1/ratification.json", Content: string(ratified)}}))
-	assertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), Conflict)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: rh, Path: "shed/round-1/ratification.json", Content: string(ratified)}}))
+	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), api.Conflict)
 	h.ID = "ratify"
 	_, err = repo.SetFeatureState(ctx, h, "ratified", "Owner ratified")
-	must(t, err)
-	assertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), Conflict)
+	fixturekit.Must(t, err)
+	fixturekit.AssertCode(t, c.Do(ctx, http.MethodPut, draftPath, draft, nil), api.Conflict)
 }

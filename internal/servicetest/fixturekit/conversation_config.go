@@ -10,7 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// conversationFixture creates a Project with a trace holding two workstreams
+// Conversation creates a Project with a trace holding two workstreams
 // and a charter rule.
 func Conversation(t *testing.T, prefix string) (config.Options, *config.Config) {
 	t.Helper()

@@ -33,30 +33,30 @@ func TestBrowserProjectPaneStatesAndSingleMemberDrilldown(t *testing.T) {
 	t.Parallel()
 	opts, repo := sidebarFixture(t)
 	ctx := context.Background()
-	states := []string{intake.HandedState, intake.RatifiedState, intakefixture.BuildingState, intakefixture.BuildingState, intake.DeliveredState, intake.DeliveredState, intake.AbandonedState}
+	states := []string{intake.HandedState, intake.RatifiedState, intake.BuildingState, intake.BuildingState, intake.DeliveredState, intake.DeliveredState, intake.AbandonedState}
 	labels := []string{"planning", "ready", "building", "paused", "PR open", "delivered (merged)", "cancelled"}
 	var ids []config.WorkstreamID
 	for i, state := range states {
 		id := config.WorkstreamID(fmt.Sprintf("w_%032x", i+200))
 		ids = append(ids, id)
-		intakefixture.Must(t, repo.CreateWorkstream(ctx, id, fixturekit.DemoStart, intake.OwnerActor))
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, id, fixturekit.DemoStart, intake.OwnerActor))
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "pane-state", Revision: 1, Project: repo.Project(), Workstream: id, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "fixture"}
 		_, err := repo.SetFeatureState(ctx, h, state, "Project pane fixture")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if i == 4 || i == 5 {
 			publication := api.DeliveryPublication{Status: delivery.PublicationOpened, PullRequest: i + 100, URL: fmt.Sprintf("https://example.invalid/pull/%d", i+100)}
 			data, err := json.Marshal(publication)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			h.Schema, h.ID = "osmia.trace.document", delivery.PublicationDocument
-			intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
+			fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
 			if i == 5 {
-				intakefixture.Must(t, delivery.RecordOwnPullRequestOutcome(ctx, repo, fixturekit.DemoStart, id, "fixture", publication.PullRequest, delivery.OwnPullRequestOutcomeMerged))
+				fixturekit.Must(t, delivery.RecordOwnPullRequestOutcome(ctx, repo, fixturekit.DemoStart, id, "fixture", publication.PullRequest, delivery.OwnPullRequestOutcomeMerged))
 			}
 		}
 	}
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	s, _ := start(t, opts)
-	intakefixture.Must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: ids[3]}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Owner review", SetAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: ids[3]}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Owner review", SetAt: fixturekit.DemoStart}))
 	p := browsertest.OpenBrowser(t)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the project pane as the entry point", `!document.querySelector('[data-view="project-pane"]').hidden`)
@@ -83,10 +83,10 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	t.Cleanup(func() { f.stop(t) })
 	f.stop(t)
 	file, err := os.OpenFile(filepath.Join(f.opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = file.WriteString(listenWeb + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, file.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, file.Close())
 	f.opts.PullRequests = &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: 123, State: "open", HeadRepository: "owner/dagger", Head: intake.FeatureBranch(f.stream1)}}, Fork: func() string { return "" }}
 	f.start(t)
 	f.engine.Mu.Lock()
@@ -97,7 +97,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		}
 	}
 	f.engine.Turns["project-spec-draft-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		_, err := intakefixture.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
+		_, err := fixturekit.CallTool(ctx, tools, lifecycle.ProjectSpecDraftTool, map[string]any{
 			"behavior":  "The server acknowledges stored chunk offsets; the client resumes from the acknowledgment.",
 			"contracts": []map[string]any{{"name": "acknowledgment", "text": "Keep acknowledged offsets stable."}},
 			"graph":     []map[string]any{{"from": string(f.stream1), "to": string(f.stream2), "type": "merge_order"}},
@@ -108,7 +108,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	chiefTurn := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Report the shared workgroup goal.") {
-			_, err := intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
+			_, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Ship resumable uploads.", "note": "Both repos share one design.", "agents": []string{}})
 			return intakefixture.QuestionResult(req, "pane-chief-status", "Reported the shared goal."), err
 		}
 		return chiefTurn(ctx, req, turn, tools)
@@ -121,7 +121,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.Await("the original design chat", `!document.querySelector('[data-view="design"]').hidden`)
 	f.sharedDesign().RecordBriefProjects(t, f.project, f.project2)
 	brief, err := f.c.Design(context.Background(), f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	startState := func() string {
 		var state string
 		p.Eval(`JSON.stringify({revision: document.querySelector('#design-brief').dataset.revision, disabled: document.querySelector('#design-start').disabled, outcome: document.querySelector('#design-start-result').dataset.outcome, text: document.querySelector('#design-start-result').textContent})`, &state)
@@ -129,7 +129,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	}
 	t.Logf("recorded brief revision %d; browser before refresh: %s", brief.Design.BriefRevision, startState())
 	projects, err := json.Marshal([]config.ProjectID{f.project, f.project2})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	p.Await("the confirmed brief ready to start", `document.querySelector('#design-brief').dataset.revision === `+browsertest.Quote(fmt.Sprint(brief.Design.BriefRevision))+` && JSON.stringify(Array.from(document.querySelectorAll('#design-brief [data-field=projects] li'), li => li.dataset.project)) === `+browsertest.Quote(string(projects))+` && !document.querySelector('#design-start').disabled`)
 	p.AwaitText("#design-brief [data-field=projects]", "dagger (home)")
 	p.AwaitText("#design-brief [data-field=projects]", "client")
@@ -145,22 +145,22 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	})
 	packet := f.awaitPacket(t)
 	originRepo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	selected, found, err := intake.DesignSelectionOf(originRepo, f.origin)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || len(selected.Members) != 2 || selected.Members[0].Repo != f.project || selected.Members[1].Repo != f.project2 {
 		t.Fatalf("affected-repo selection: %+v", selected)
 	}
 	_, err = f.c.Send(context.Background(), f.origin, "Report the shared workgroup goal.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "both members have the shared goal", func() bool {
 		listed, err := f.c.Statuses(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return len(listed.Workstreams) == 2 && listed.Workstreams[0].Status != nil && listed.Workstreams[1].Status != nil &&
 			listed.Workstreams[0].Status.Goal == "Ship resumable uploads." && listed.Workstreams[1].Status.Goal == "Ship resumable uploads."
 	})
 	listed, err := f.c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(listed.Workstreams) != 2 {
 		t.Fatalf("expected two real members with no design host: %+v", listed.Workstreams)
 	}
@@ -185,14 +185,14 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		p.AwaitText(selector+` [data-field=project]`, repoName)
 	}
 	_, err = f.c.Ratify(context.Background(), f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	p.Await("the continued chat opens its workgroup without a reload", `!document.querySelector('[data-view="workgroup"]').hidden && location.hash === `+browsertest.Quote("#workgroup="+string(selected.Group)))
 	p.Click(`[data-open-member="` + string(f.stream1) + `"]`)
 	assertSharedDesignConversation := func() {
 		t.Helper()
 		var shared api.WorkgroupFeedResponse
-		intakefixture.Must(t, f.c.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(selected.Group)+"/feed", nil, &shared))
+		fixturekit.Must(t, f.c.Do(context.Background(), "GET", api.Prefix+"/workgroups/"+string(selected.Group)+"/feed", nil, &shared))
 		var found bool
 		for _, entry := range shared.Entries {
 			if entry.Kind == "response" && strings.Contains(entry.Text, "acknowledged offset") {
@@ -208,15 +208,15 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	}
 	assertSharedDesignConversation()
 	upstream, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: intake.FeatureBranch(f.stream1), PullRequest: 123, URL: "https://example.invalid/dagger/dagger/pull/123"}
 	data, err := json.Marshal(publication)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.project, Workstream: f.stream1, At: f.clock.Now(), Actor: service.TestForemanActor, Cause: "fixture"}
-	intakefixture.Must(t, upstream.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
+	fixturekit.Must(t, upstream.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
 	h.Schema, h.ID = "osmia.trace.transition", "pane-upstream-published"
 	_, err = upstream.SetFeatureState(context.Background(), h, intake.DeliveredState, "Published fixture PR")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "the service's merge wait with the upstream PR", func() bool {
 		status, err := f.c.Status(context.Background(), f.stream2)
 		return err == nil && status.Wait == "waiting on owner: dagger/dagger#123 merge"
@@ -230,7 +230,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	p.AwaitText(`[data-pane-workstream="`+string(f.stream2)+`"] [data-field=state]`, "blocked")
 	p.AwaitText(`[data-pane-workstream="`+string(f.stream2)+`"] [data-field=wait]`, "waiting on owner: dagger/dagger#123 merge")
 	inbox, err := f.c.Inbox(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 0 {
 		t.Fatalf("merge wait created inbox entries: %+v", inbox.Entries)
 	}
@@ -243,12 +243,12 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	var escalated atomic.Bool
 	f.engine.Mu.Lock()
 	f.engine.Turns["pane-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
+		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the acknowledged offset contract change?"})
 		return intakefixture.QuestionResult(req, "pane-worker", "Asked the chief."), err
 	}
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.Contains(req.Prompt, "Present the shared decision") && escalated.CompareAndSwap(false, true) {
-			_, err := intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{
+			_, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{
 				"questions":  []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
 				"rephrasing": "May the acknowledged offset contract change?", "blocked": "Both asking origins.",
 				"options": []string{"Keep", "Change"}, "recommendation": "Keep the contract stable.",
@@ -267,9 +267,9 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 				project = f.project2
 			}
 			repo, err := f.s.repository(project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			qs, err := repo.Questions(id)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(qs) != 1 {
 				return false
 			}
@@ -277,10 +277,10 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 		return true
 	})
 	_, err = f.c.Send(context.Background(), f.stream2, "Present the shared decision")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "one shared inbox decision", func() bool {
 		inbox, err := f.c.Inbox(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return len(inbox.Entries) == 1 && inbox.Entries[0].Workgroup == selected.Group
 	})
 	p.Run(chromedp.Reload())
@@ -310,7 +310,7 @@ func TestBrowserProjectPaneProductionDesignStartAndCrossRepoGraph(t *testing.T) 
 	})
 	f.wait(t, "the shared decision leaves the API inbox", func() bool {
 		inbox, err := f.c.Inbox(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return len(inbox.Entries) == 0
 	})
 }

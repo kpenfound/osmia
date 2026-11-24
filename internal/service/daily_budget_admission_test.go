@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,8 +25,8 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	f.stop(t)
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	configText, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, append(configText, []byte("\n[budget]\nper_day = \"1.00\"\n")...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(configText, []byte("\n[budget]\nper_day = \"1.00\"\n")...), 0600))
 	f.opts.Location = time.UTC
 	f.start(t)
 
@@ -63,7 +64,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 					return err
 				}
 				close(release)
-				timer := time.NewTimer(intakefixture.DemoTimeout)
+				timer := time.NewTimer(fixturekit.DemoTimeout)
 				defer timer.Stop()
 				tick := time.NewTicker(time.Millisecond)
 				defer tick.Stop()
@@ -100,7 +101,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	f.repository().WakeWorkflow()
 	select {
 	case <-checked:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("mason admission did not complete")
 	}
 	want := f.deferred(t, stream, "audit", UnitDispatch{Reason: DeferPaused, Pause: &runtime.Pause{Target: factoryTarget}, Message: "Waits while a factory pause is in force, set by daily-budget."})

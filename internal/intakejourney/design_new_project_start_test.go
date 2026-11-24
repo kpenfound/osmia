@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,14 +29,10 @@ import (
 
 const gadgetCharter = "1. Keep the repository small.\n2. Every change has a test.\n"
 
-// newProjectStart is a running service whose [projects] table is set, a fake
-// GitHub whose created repository is a local bare repository, and a fake
-// design agent that records the brief the test asks for. The tests set
-// GITHUB_TOKEN, so none of them runs in parallel.
 type newProjectStart struct {
-	opts     Options
-	s        *Service
-	c        *Client
+	opts     journey.Options
+	s        *journey.Service
+	c        *journey.Client
 	home     config.ProjectID
 	github   *servicetest.FakeGitHub
 	dir      string
@@ -41,21 +40,17 @@ type newProjectStart struct {
 	remote   string
 	readme   string
 	input    atomic.Pointer[map[string]any]
-	// crash, once it names a step and that step is reached, fails every later
-	// step as a process that died there would.
-	crash   atomic.Value
-	crashed atomic.Bool
+	crash    atomic.Value
+	crashed  atomic.Bool
 }
 
-// newNewProjectStartFixture starts the service. With creation false the
-// [projects] table is not configured.
 func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	t.Helper()
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
-	opts, clone, engine, _, _ := newArchitectOptions(t)
+	opts, clone, engine, _, _ := journey.NewArchitectOptions(t)
 	opts.Reconciliation.Now = nil
 	dir, err := os.MkdirTemp("", "os-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	f := &newProjectStart{dir: dir, cloneDir: filepath.Join(dir, "clones")}
 	f.github = servicetest.NewFakeGitHub(t, "Owner")
@@ -67,26 +62,25 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 		text += fmt.Sprintf("[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", f.cloneDir)
 	}
 	file, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = file.WriteString(text)
-	must(t, errors.Join(err, file.Close()))
-	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
+	fixturekit.Must(t, errors.Join(err, file.Close()))
+	opts = journey.Enforce(opts, service.Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
 	f.opts = opts
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.HasPrefix(req.SystemPrompt, designRolePrompt) {
-			// An architect turn: drafting for a member has begun.
+		if !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
 			return &agent.Result{ClaudeID: "architect", ResultText: "drafting"}, nil
 		}
 		input := f.input.Load()
 		if input == nil {
 			return nil, errors.New("the test recorded no brief to draft")
 		}
-		call := map[string]any{"content": productionBrief}
+		call := map[string]any{"content": intakefixture.ProductionBrief}
 		for k, v := range *input {
 			call[k] = v
 		}
-		out, err := callTool(ctx, tools, draftBriefToolName, call)
+		out, err := fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, call)
 		if err != nil || !strings.Contains(out, `"recorded":true`) {
 			return nil, fmt.Errorf("brief was not recorded: %s %v", out, err)
 		}
@@ -94,31 +88,28 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	}
 	engine.Mu.Unlock()
 	f.begin(t)
-	added, err := f.c.AddProject(context.Background(), request(clone))
-	must(t, err)
+	added, err := f.c.AddProject(context.Background(), fixturekit.Request(clone))
+	fixturekit.Must(t, err)
 	f.home = added.Project.ID
-	writeCharter(t, f.c, f.home, "1. Keep changes small.\n")
+	journey.WriteCharter(t, f.c, f.home, "1. Keep changes small.\n")
 	return f
 }
 
-// begin starts the service, armed with the crash hook.
 func (f *newProjectStart) begin(t *testing.T) {
 	t.Helper()
-	f.opts.boundary = func(_ context.Context, name string) error {
+	f.opts.Boundary = func(_ context.Context, name string) error {
 		if want, _ := f.crash.Load().(string); want != "" && (f.crashed.Load() || name == want) {
 			f.crashed.Store(true)
 			return fmt.Errorf("crash at %s", name)
 		}
 		return nil
 	}
-	f.s, f.c = start(t, f.opts)
+	f.s, f.c = journey.StartT(t, f.opts)
 }
 
-// restart stops the service, as a crash would leave it, and starts it again
-// without the crash.
 func (f *newProjectStart) restart(t *testing.T) {
 	t.Helper()
-	must(t, f.s.Close())
+	fixturekit.Must(t, f.s.Close())
 	f.crash.Store("")
 	f.crashed.Store(false)
 	f.begin(t)
@@ -132,52 +123,42 @@ func (f *newProjectStart) gadget(extra map[string]any) map[string]any {
 	return np
 }
 
-// draft has the design agent record a brief with the given fields, on a
-// session opened for a new project, and returns the session and the brief's
-// revision.
 func (f *newProjectStart) draft(t *testing.T, fields map[string]any) (config.WorkstreamID, int) {
 	t.Helper()
 	ctx := context.Background()
 	opened, err := f.c.OpenNewProjectDesign(ctx, "")
-	must(t, err)
+	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 	f.input.Store(&fields)
 	_, err = f.c.DesignMessage(ctx, stream, "Design the gadget project.")
-	must(t, err)
-	conversation := awaitDesignConversation(t, f.c, stream, func(r ConversationResponse) bool {
+	fixturekit.Must(t, err)
+	conversation := awaitDesignConversation(t, f.c, stream, func(r api.ConversationResponse) bool {
 		return len(r.Entries) > 0 && (r.Entries[len(r.Entries)-1].State == api.TurnFailed || r.Entries[len(r.Entries)-1].Kind == "response")
 	})
 	if last := conversation.Entries[len(conversation.Entries)-1]; last.State == api.TurnFailed {
 		t.Fatalf("the design turn failed: %+v", conversation)
 	}
 	view, err := f.c.Design(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return stream, view.Design.BriefRevision
 }
 
 func (f *newProjectStart) homeRepository(t *testing.T) *trace.Repository {
 	t.Helper()
-	r, err := f.s.repository(f.home)
-	must(t, err)
+	r, err := f.s.Repository(f.home)
+	fixturekit.Must(t, err)
 	return r
 }
 
-// await polls until done reports true.
 func (f *newProjectStart) await(t *testing.T, what string, done func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for !done() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	f.s.Until(t, what, done)
 }
 
 func (f *newProjectStart) startState(t *testing.T, stream config.WorkstreamID) string {
 	t.Helper()
 	state, err := f.homeRepository(t).Workflow(stream, intake.DesignStartSubject)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return state.Value
 }
 
@@ -189,7 +170,7 @@ func (f *newProjectStart) awaitComplete(t *testing.T, stream config.WorkstreamID
 func (f *newProjectStart) intent(t *testing.T, stream config.WorkstreamID) intake.DesignStartIntent {
 	t.Helper()
 	intent, found, err := intake.DesignStartIntentOf(f.homeRepository(t), stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the start recorded no intent")
 	}
@@ -203,16 +184,14 @@ func (f *newProjectStart) clone() string { return filepath.Join(f.cloneDir, "gad
 
 func (f *newProjectStart) git(t *testing.T, args ...string) string {
 	t.Helper()
-	return strings.TrimSpace(demoGit(t, f.dir, args...))
+	return strings.TrimSpace(fixturekit.DemoGit(t, f.dir, args...))
 }
 
-// assertNothingRecorded checks that a refused start recorded no intent or
-// handed input, left the session open and created nothing anywhere.
 func (f *newProjectStart) assertNothingRecorded(t *testing.T, stream config.WorkstreamID, existing ...string) {
 	t.Helper()
 	r := f.homeRepository(t)
 	docs, err := trace.Read[trace.Document](r, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
 		if d.ID == intake.HandedDocument || d.ID == intake.DesignSelectionDocument || d.ID == intake.DesignStartIntentDocument {
 			t.Fatalf("a refused start recorded %s", d.ID)
@@ -241,13 +220,11 @@ func (f *newProjectStart) assertNothingRecorded(t *testing.T, stream config.Work
 	if !slices.Equal(names, existing) {
 		t.Fatalf("clone directory holds %v, want %v", names, existing)
 	}
-	if ids := f.s.current().ProjectIDs(); !slices.Equal(ids, []config.ProjectID{f.home}) {
+	if ids := f.s.Current().ProjectIDs(); !slices.Equal(ids, []config.ProjectID{f.home}) {
 		t.Fatalf("projects: %v", ids)
 	}
 }
 
-// assertGadgetCreated checks the repository, clone and registration the start
-// made for the new project, and returns the project's ID.
 func (f *newProjectStart) assertGadgetCreated(t *testing.T, stream config.WorkstreamID) config.ProjectID {
 	t.Helper()
 	id := f.intent(t, stream).Creation
@@ -272,7 +249,7 @@ func (f *newProjectStart) assertGadgetCreated(t *testing.T, stream config.Workst
 	if got := f.git(t, "-C", f.clone(), "rev-parse", "HEAD"); got != f.readme {
 		t.Fatalf("the clone is at %s, not the README commit %s", got, f.readme)
 	}
-	cfg := f.s.current()
+	cfg := f.s.Current()
 	if !cfg.Active(id) {
 		t.Fatalf("project %s is not active: %v", id, cfg.ProjectIDs())
 	}
@@ -280,8 +257,8 @@ func (f *newProjectStart) assertGadgetCreated(t *testing.T, stream config.Workst
 	if p.Name != "Gadget" || p.Upstream != "owner/gadget" || p.Fork != "" || p.BaseBranch != "main" || p.Clone != f.clone() {
 		t.Fatalf("registered project: %+v", p)
 	}
-	r, err := f.s.repository(id)
-	must(t, err)
+	r, err := f.s.Repository(id)
+	fixturekit.Must(t, err)
 	revisions := intakefixture.DocumentRevisions(t, r, "charter")
 	if len(revisions) != 1 || revisions[0].Revision != 1 || revisions[0].Content != strings.TrimSpace(gadgetCharter) {
 		t.Fatalf("charter revisions: %+v", revisions)
@@ -290,20 +267,18 @@ func (f *newProjectStart) assertGadgetCreated(t *testing.T, stream config.Workst
 		t.Fatalf("the journal was kept: %v", err)
 	}
 	state, err := f.c.ProjectCreation(context.Background(), id)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if state.State != api.CreationComplete {
 		t.Fatalf("creation state: %+v", state)
 	}
 	return id
 }
 
-// assertAllocatedOnce checks that the new project is a member of exactly one
-// workgroup, once, and that its handed input opens with the fixed line.
 func (f *newProjectStart) assertAllocatedOnce(t *testing.T, stream config.WorkstreamID, id config.ProjectID, members int) intake.DesignSelection {
 	t.Helper()
 	r := f.homeRepository(t)
 	selected, found, err := intake.DesignSelectionOf(r, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found || len(selected.Members) != members {
 		t.Fatalf("selection: %+v", selected)
 	}
@@ -317,20 +292,20 @@ func (f *newProjectStart) assertAllocatedOnce(t *testing.T, stream config.Workst
 		t.Fatalf("the new project is a member %d times: %+v", count, selected)
 	}
 	groups, err := os.ReadDir(filepath.Join(f.opts.Config.Root, "workgroups"))
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(groups) != 1 || groups[0].Name() != string(selected.Group) {
 		t.Fatalf("workgroups: %v, want only %s", groups, selected.Group)
 	}
 	for _, m := range selected.Members {
-		member, err := f.s.repository(m.Repo)
-		must(t, err)
+		member, err := f.s.Repository(m.Repo)
+		fixturekit.Must(t, err)
 		handed, err := trace.Get[trace.Document](member, m.Workstream, intake.HandedDocument, 1)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if got := strings.HasPrefix(handed.Content, intake.NewProjectHandedLine+"\n\n"); got != (m.Repo == id) {
 			t.Fatalf("member %s handed input has the new-project line: %v", m.Repo, got)
 		}
 		docs, err := trace.Read[trace.Document](member, m.Workstream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		handedRecords := 0
 		for _, d := range docs {
 			if d.ID == intake.HandedDocument {
@@ -344,18 +319,12 @@ func (f *newProjectStart) assertAllocatedOnce(t *testing.T, stream config.Workst
 	return selected
 }
 
-// The whole path through the running service: a New project session records a
-// brief with a new_project, Start creates the repository once and private,
-// clones it with main checked out, registers the project with the drafted
-// charter, and allocates it as the workgroup's only member, whose drafting
-// begins. The conversation moves into the workgroup's records and only a
-// retired starting stub remains in the host project.
 func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	stream, revision := f.draft(t, map[string]any{"new_project": f.gadget(nil)})
 	view, err := f.c.Design(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if view.Design.NewProject == nil || view.Design.NewProject.Visibility != api.VisibilityPrivate || view.Design.NewProject.Repo != "gadget" {
 		t.Fatalf("the design view does not show the new project before Start: %+v", view.Design.NewProject)
 	}
@@ -363,7 +332,7 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 		t.Fatalf("GitHub was called before Start: %+v", got)
 	}
 	_, err = f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitComplete(t, stream)
 
 	id := f.assertGadgetCreated(t, stream)
@@ -377,10 +346,9 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 		t.Fatal("the new project's member is the host's conversation address")
 	}
 
-	// The conversation is in the workgroup's records; the host keeps a stub.
 	r := f.homeRepository(t)
-	chief, host, _, release, err := f.s.chiefRepository(ctx, r, stream)
-	must(t, err)
+	chief, host, _, release, err := f.s.ChiefRepository(ctx, r, stream)
+	fixturekit.Must(t, err)
 	defer release()
 	if _, shared := trace.WorkgroupProjectID(chief.Project()); !shared {
 		t.Fatalf("the conversation stayed in %s", chief.Project())
@@ -392,8 +360,7 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 		t.Fatalf("the host project keeps the conversation: %v", err)
 	}
 	streams, err := r.Workstreams()
-	must(t, err)
-	streams = slices.DeleteFunc(streams, func(w config.WorkstreamID) bool { return w == intake.LibrarianWorkstream(f.home) })
+	fixturekit.Must(t, err)
 	if !slices.Equal(streams, []config.WorkstreamID{stream}) {
 		t.Fatalf("host project workstreams: %v", streams)
 	}
@@ -401,23 +368,20 @@ func TestNewProjectStartCreatesTheProjectAndAllocatesIt(t *testing.T) {
 		t.Fatal("a started design accepted another brief turn")
 	}
 
-	// Its drafting begins.
-	memberRepo, err := f.s.repository(id)
-	must(t, err)
+	memberRepo, err := f.s.Repository(id)
+	fixturekit.Must(t, err)
 	f.await(t, "the new project's drafting to begin", func() bool {
 		th, err := memberRepo.Thread(member.Workstream, intake.ArchitectAgent)
 		return err == nil && len(th.Turns) > 0
 	})
 }
 
-// A brief naming an existing project and a new project allocates both as
-// members of one workgroup.
 func TestNewProjectStartAllocatesBesideAnExistingProject(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	stream, revision := f.draft(t, map[string]any{"projects": []config.ProjectID{f.home}, "new_project": f.gadget(nil)})
 	_, err := f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitComplete(t, stream)
 
 	id := f.assertGadgetCreated(t, stream)
@@ -427,24 +391,21 @@ func TestNewProjectStartAllocatesBesideAnExistingProject(t *testing.T) {
 	}
 	r := f.homeRepository(t)
 	groupID, err := r.CrossRepoWorkgroupOf(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if groupID != selected.Group {
 		t.Fatalf("the conversation is in %s, not %s", groupID, selected.Group)
 	}
 	for _, m := range selected.Members {
-		member, err := f.s.repository(m.Repo)
-		must(t, err)
+		member, err := f.s.Repository(m.Repo)
+		fixturekit.Must(t, err)
 		joined, err := member.CrossRepoWorkgroupOf(m.Workstream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if joined != selected.Group {
 			t.Fatalf("member %s joined %s, not %s", m.Repo, joined, selected.Group)
 		}
 	}
 }
 
-// Start is refused, recording nothing and sending no create call, when the
-// token's account is not repo_owner, the repo name is taken, the clone path
-// exists, or creation is not configured.
 func TestNewProjectStartRefusesBeforeRecordingAnything(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -458,7 +419,7 @@ func TestNewProjectStartRefusesBeforeRecordingAnything(t *testing.T) {
 		{name: "repo name taken", creation: true, message: "already exists on GitHub",
 			prepare: func(t *testing.T, f *newProjectStart) { f.github.AddRepo("Owner/gadget", f.remote, "main") }},
 		{name: "clone path exists", creation: true, existing: []string{"gadget"}, message: "already exists",
-			prepare: func(t *testing.T, f *newProjectStart) { must(t, os.MkdirAll(f.clone(), 0700)) }},
+			prepare: func(t *testing.T, f *newProjectStart) { fixturekit.Must(t, os.MkdirAll(f.clone(), 0700)) }},
 		{name: "creation off", creation: false, message: "projects.repo_owner"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -476,15 +437,12 @@ func TestNewProjectStartRefusesBeforeRecordingAnything(t *testing.T) {
 	}
 }
 
-// stallOnClone makes the clone fail, so the creation stays pending and the
-// owner's inbox holds it.
 func (f *newProjectStart) stallOnClone(t *testing.T) {
 	t.Helper()
 	later := filepath.Join(f.dir, "later.git")
 	f.github.Remote = func(string) string { return later }
 }
 
-// fixClone makes the clone source reachable.
 func (f *newProjectStart) fixClone(t *testing.T) {
 	t.Helper()
 	f.remote, f.readme = servicetest.SeedRemote(t, f.dir, "later", "main")
@@ -495,7 +453,7 @@ func (f *newProjectStart) creationEntry(t *testing.T) api.InboxEntry {
 	var entry api.InboxEntry
 	f.await(t, "the stuck creation in the inbox", func() bool {
 		inbox, err := f.c.Inbox(context.Background())
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range inbox.Entries {
 			if e.Kind == api.InboxProjectCreation {
 				entry = e
@@ -507,7 +465,6 @@ func (f *newProjectStart) creationEntry(t *testing.T) api.InboxEntry {
 	return entry
 }
 
-// retryRequest sends the entry's retry, which offers nothing but a retry.
 func (f *newProjectStart) retryRequest(t *testing.T, entry api.InboxEntry) error {
 	t.Helper()
 	if len(entry.Options) != 1 || entry.Options[0] != "retry" {
@@ -519,19 +476,16 @@ func (f *newProjectStart) retryRequest(t *testing.T, entry api.InboxEntry) error
 
 func (f *newProjectStart) retry(t *testing.T, entry api.InboxEntry) {
 	t.Helper()
-	must(t, f.retryRequest(t, entry))
+	fixturekit.Must(t, f.retryRequest(t, entry))
 }
 
-// A clone failure shows an inbox entry naming the host git credential. Once
-// the clone source is fixed the inbox retry reuses the repository, finishes
-// registration and allocates the workgroup.
 func TestNewProjectStartCloneFailureReachesTheInboxAndRetries(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	f.stallOnClone(t)
 	stream, revision := f.draft(t, map[string]any{"new_project": f.gadget(nil)})
 	_, err := f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	entry := f.creationEntry(t)
 	if !strings.Contains(entry.Question, "git credential") {
@@ -560,16 +514,14 @@ func TestNewProjectStartCloneFailureReachesTheInboxAndRetries(t *testing.T) {
 	}
 }
 
-// A creation begun from the API, not Start, that cannot finish appears in the
-// same inbox, without a workstream, and its retry finishes it.
 func TestProjectCreationFromTheAPIReachesTheInboxAndRetries(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	f.stallOnClone(t)
 	id, err := f.c.ReserveProjectCreation(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	req := api.ProjectCreateRequest{ID: id, Name: "Gadget", Repo: "gadget", Description: "A gadget.", Charter: gadgetCharter}
-	if _, err := f.c.CreateProject(ctx, req); !failed(err, Conflict) {
+	if _, err := f.c.CreateProject(ctx, req); !intakefixture.Failed(err, api.Conflict) {
 		t.Fatalf("a creation that cannot clone: %v", err)
 	}
 	entry := f.creationEntry(t)
@@ -579,26 +531,22 @@ func TestProjectCreationFromTheAPIReachesTheInboxAndRetries(t *testing.T) {
 	f.fixClone(t)
 	f.retry(t, entry)
 	state, err := f.c.ProjectCreation(ctx, id)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if state.State != api.CreationComplete || f.github.CreateCalls() != 1 {
 		t.Fatalf("state %+v after %d create calls", state, f.github.CreateCalls())
 	}
 }
 
-// A creation that stops because the repo's ownership could not be
-// established shows an inbox entry that says so and offers no adoption.
-// Nothing is cloned or registered.
 func TestNewProjectStartOwnershipNotEstablishedReachesTheInbox(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	f.github.OnCreate = func(g *servicetest.FakeGitHub, body map[string]any) (bool, int, any) {
-		// Someone else's repository of that name appears after the pre-check.
 		g.AddRepo("Owner/gadget", f.remote, "main")
 		return true, http.StatusUnprocessableEntity, servicetest.GitHubNameTaken
 	}
 	stream, revision := f.draft(t, map[string]any{"new_project": f.gadget(nil)})
 	_, err := f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	entry := f.creationEntry(t)
 	if !strings.Contains(entry.Question, "ownership could not be established") || !strings.Contains(entry.Question, "on GitHub") {
@@ -610,14 +558,13 @@ func TestNewProjectStartOwnershipNotEstablishedReachesTheInbox(t *testing.T) {
 	if _, err := os.Lstat(f.clone()); !os.IsNotExist(err) {
 		t.Fatalf("the repository was cloned: %v", err)
 	}
-	if ids := f.s.current().ProjectIDs(); !slices.Equal(ids, []config.ProjectID{f.home}) {
+	if ids := f.s.Current().ProjectIDs(); !slices.Equal(ids, []config.ProjectID{f.home}) {
 		t.Fatalf("projects: %v", ids)
 	}
 	if got := f.github.CreateCalls(); got != 1 {
 		t.Fatalf("%d create calls", got)
 	}
-	// Retrying while the other repository stays stops again and adopts nothing.
-	if err := f.retryRequest(t, entry); !failed(err, Conflict) {
+	if err := f.retryRequest(t, entry); !intakefixture.Failed(err, api.Conflict) {
 		t.Fatalf("the retry did not stop again: %v", err)
 	}
 	if _, err := os.Lstat(f.clone()); !os.IsNotExist(err) {
@@ -631,25 +578,22 @@ func TestNewProjectStartOwnershipNotEstablishedReachesTheInbox(t *testing.T) {
 	}
 }
 
-// A draft_brief recorded after Start, naming another repo, does not change
-// the repo that is created.
 func TestNewProjectStartIsPinnedToTheBriefRevision(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
 	f.stallOnClone(t)
 	stream, revision := f.draft(t, map[string]any{"new_project": f.gadget(nil)})
 	_, err := f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	entry := f.creationEntry(t)
 
-	// A later draft arrives while the creation is stuck.
 	r := f.homeRepository(t)
 	changed := api.NewProject{Name: "Other", Repo: "other", Visibility: api.VisibilityPublic, Charter: gadgetCharter}
 	h := intake.OwnerHeader(intake.DesignDraftDocument, r.Project(), stream, intake.DraftBriefToolName, time.Now().UTC())
 	h.Schema, h.Revision = "osmia.trace.document", revision+1
-	record, err := json.Marshal(intake.DesignBriefRecord{Content: productionBrief, Projects: []config.ProjectID{}, NewProject: &changed})
-	must(t, err)
-	must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(record)}}))
+	record, err := json.Marshal(intake.DesignBriefRecord{Content: intakefixture.ProductionBrief, Projects: []config.ProjectID{}, NewProject: &changed})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(record)}}))
 
 	f.fixClone(t)
 	f.retry(t, entry)
@@ -663,9 +607,6 @@ func TestNewProjectStartIsPinnedToTheBriefRevision(t *testing.T) {
 	}
 }
 
-// Interrupted at each handoff between the Start's records and the creation's,
-// a restart finishes the same creation: the same project ID, one create call
-// and the project allocated once in one workgroup.
 func TestNewProjectStartRecoversAtEachHandoff(t *testing.T) {
 	for _, tc := range []struct {
 		name, step string
@@ -707,7 +648,7 @@ func TestNewProjectStartRecoversAtEachHandoff(t *testing.T) {
 			f.restart(t)
 			f.awaitComplete(t, stream)
 			recovered := f.intent(t, stream)
-			if !equalJSONTest(recovered, pinned) {
+			if !intakefixture.EqualJSONTest(recovered, pinned) {
 				t.Fatalf("recovery rewrote the pinned intent: %+v", recovered)
 			}
 			id := f.assertGadgetCreated(t, stream)
@@ -715,10 +656,9 @@ func TestNewProjectStartRecoversAtEachHandoff(t *testing.T) {
 				t.Fatalf("created %s, want the recorded identity %s", id, pinned.Creation)
 			}
 			f.assertAllocatedOnce(t, stream, id, 2)
-			if ids := f.s.current().ProjectIDs(); len(ids) != 2 {
+			if ids := f.s.Current().ProjectIDs(); len(ids) != 2 {
 				t.Fatalf("projects: %v", ids)
 			}
-			// A second restart changes nothing.
 			f.restart(t)
 			f.awaitComplete(t, stream)
 			f.assertAllocatedOnce(t, stream, id, 2)

@@ -76,7 +76,7 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 	}
 
 	approved, err := j.approvePresented(p)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if approved.Description != p.Draft || !strings.Contains(approved.Description, briefBlock) {
 		t.Fatalf("the approved description:\n%s", approved.Description)
 	}
@@ -199,7 +199,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the new presentation: %+v\n%s", p.Brief, p.Draft)
 	}
 	approved, err := j.approvePresented(p)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	j.halt(t)
 	body := j.publish(t)
 	if body != approved.Description || !strings.Contains(body, "- "+current+"\n") || strings.Contains(body, earlier) || strings.Contains(body, "Old item") {
@@ -247,7 +247,7 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 		t.Fatalf("a brief without items changed the presentation: %+v\n%s\nwas:\n%s", unchanged.Brief, unchanged.Draft, read.Draft)
 	}
 	approved, err := j.approvePresented(read)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if approved.Description != read.Draft {
 		t.Fatalf("the approved description:\n%s", approved.Description)
 	}
@@ -268,7 +268,7 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	j.s.setSole(&activeProject{repository: repository})
 	second := j.secondMember(t, "group-second")
 	_, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{first, second}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	j.assemble(t, first, "internal/trace", "first-resume", "first-dedupe")
 	j.assemble(t, second, "internal/trace", "second-resume", "second-dedupe")
 	j.run(t)
@@ -296,7 +296,7 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 			t.Fatalf("%s's description does not carry its own items alone:\n%s", member, p.Draft)
 		}
 		approved, err := j.approvePresented(p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		bodies[member] = approved.Description
 	}
 	if bodies[first] == bodies[second] {
@@ -312,5 +312,5 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 func (j *briefJourney) secondMember(t *testing.T, key string) config.WorkstreamID {
 	t.Helper()
 	base := strings.TrimSpace(fixturekit.DemoGit(t, j.clone, "-C", j.clone, "rev-parse", "HEAD"))
-	return recordBuild(t, j.shedFixture, j.repository, key, intakefixture.ValidPlan, config.WorkspacesGit, base)
+	return recordBuild(t, j.shedFixture, j.repository, key, fixturekit.ValidPlan, config.WorkspacesGit, base)
 }

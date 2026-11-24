@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
@@ -23,12 +24,12 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	stream := j.stream
 
 	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
 	j.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
 	j.chief.plan(1, briefPlan{Calls: []briefCall{
@@ -126,7 +127,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("report %+v", report)
 	}
 	reader, err := j.live().Thread(stream, intake.CommitteeAgent(1))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt
 	for _, want := range []string{"Dagger Cloud ran the project's checks", "The result is passed.", fmt.Sprintf("pull request #%d, push 1, commit %s", pr.Number, firstCommit), "3 checks, 3 passed, 0 failed, 0 cancelled", "Flaky, failed and then passed on rerun: test:resume", fresh.TargetURL} {
 		if !strings.Contains(prompt, want) {
@@ -139,11 +140,11 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 
 	intakefixture.Eventually(t, "the chief of staff never triaged the finding", func() bool {
 		all, _, err := followup.ReadTriage(j.live(), stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return len(all) == 1
 	})
 	all, _, err := followup.ReadTriage(j.live(), stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if all[0].Finding != "finding-1" || all[0].Outcome != followup.TriageCode || all[0].ByJev() {
 		t.Fatalf("triage %+v (calls %q)", all, j.chief.calls(1))
 	}
@@ -191,7 +192,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	var presented api.DeliveryPresentation
 	intakefixture.Eventually(t, "the delivery card never showed the second review's brief and its description", func() bool {
 		p, err := j.c.Delivery(ctx, stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		presented = p
 		return p.Report.Review == 2 && p.Brief != nil && p.Brief.State == api.BriefRecorded && strings.Contains(p.Draft, briefBlock)
 	})
@@ -216,7 +217,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("pull requests %+v: %d created, %d ready calls, %d updates, %d pushes", j.pulls.Prs, j.pulls.Creates, j.pulls.Readies, j.pulls.Updates, j.pushCount(t))
 	}
 	ready, recorded, err := delivery.ReadyAt(j.live(), stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !recorded || ready.Source != api.ReadyByApproval || ready.PullRequest != pr.Number {
 		t.Fatalf("the ready record %+v", ready)
 	}
@@ -249,14 +250,14 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 func (j *flowJourney) reportOf(t *testing.T, review int) (api.FinalReport, bool) {
 	t.Helper()
 	report, found, err := delivery.LatestFinalReport(j.live(), j.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return report, found && report.Review == review
 }
 
 func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 	t.Helper()
 	entries, err := j.live().Outbox(j.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
 		if e.Event.ID == trace.EventID(fmt.Sprintf("final-review-%d-credential-notice", review), "chief") {
@@ -270,7 +271,7 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 	j := newFlowJourney(t)
 	stream := j.stream
 	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})

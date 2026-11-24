@@ -168,7 +168,7 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	rerunLog := filepath.Join(t.TempDir(), "rerun.log")
 	traceLog := filepath.Join(t.TempDir(), "trace.log")
 	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = cloud ] && [ \"$2\" = traces ]; then\n  printf '%%s\\n' \"$*\" >> '%s'\n  echo \"trace output of: $*\"\n  echo \"token: $DAGGER_CLOUD_TOKEN\"\n  exit 0\nfi\n{ printf 'args=%%s\\n' \"$*\"; printf 'pwd=%%s\\n' \"$(pwd -P)\"; printf 'token=%%s\\n' \"$DAGGER_CLOUD_TOKEN\"; } >> '%s'\n", traceLog, rerunLog)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0o700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0o700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv(flowTokenEnv, flowToken)
 
@@ -181,7 +181,7 @@ func newFlowJourney(t *testing.T) *flowJourney {
 	j.pulls.Statuses = j.host.CommitStatuses
 	j.received = filepath.Join(filepath.Dir(j.fork), "received")
 	hook := fmt.Sprintf("#!/bin/sh\necho push >> '%s'\n", j.received)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(j.fork, "hooks", "pre-receive"), []byte(hook), 0o700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(j.fork, "hooks", "pre-receive"), []byte(hook), 0o700))
 
 	b.opts.PullRequests = j.pulls
 	b.opts.FinalChecksWait = nil
@@ -202,7 +202,7 @@ func (j *flowJourney) start(t *testing.T) {
 	status := j.s.CheckSlots()
 	for i := range status.Limit {
 		release, err := InspectForTest(j.s).AcquireCheckSlot(context.Background(), service.CheckSlotRun{Project: j.project, Workstream: j.stream, Unit: fmt.Sprintf("held-%d", i)})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		j.held = append(j.held, release)
 	}
 }
@@ -227,7 +227,7 @@ func (j *flowJourney) live() *trace.Repository { return j.s.sole().repository }
 func (j *flowJourney) pushes(t *testing.T) []delivery.Push {
 	t.Helper()
 	pushes, err := delivery.Pushes(j.live(), j.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return pushes
 }
 
@@ -247,7 +247,7 @@ func (j *flowJourney) pushCount(t *testing.T) int {
 	if os.IsNotExist(err) {
 		return 0
 	}
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return strings.Count(string(data), "push")
 }
 
@@ -257,7 +257,7 @@ func (j *flowJourney) rerunCalls(t *testing.T) []string {
 	if os.IsNotExist(err) {
 		return nil
 	}
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return strings.Split(strings.TrimSpace(string(data)), "args=")[1:]
 }
 
@@ -267,14 +267,14 @@ func (j *flowJourney) traceCalls(t *testing.T) []string {
 	if os.IsNotExist(err) {
 		return nil
 	}
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
 func (j *flowJourney) finalOperation(t *testing.T, review int) (trace.OperationRecord, bool) {
 	t.Helper()
 	ops, err := j.live().Operations(j.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, o := range ops {
 		if o.Operation.Action != delivery.FinalReviewAction {
 			continue
@@ -330,7 +330,7 @@ func (j *flowJourney) checkRuns(t *testing.T, review int) []delivery.FinalCheckR
 	var runs []delivery.FinalCheckRun
 	for _, d := range intakefixture.StreamDocuments(t, j.live(), j.stream, delivery.FinalChecksDocument(review)) {
 		var run delivery.FinalCheckRun
-		intakefixture.Must(t, json.Unmarshal([]byte(d.Content), &run))
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &run))
 		runs = append(runs, run)
 	}
 	return runs
@@ -355,7 +355,7 @@ func (j *flowJourney) awaitReport(t *testing.T, review int) api.FinalReport {
 	var report api.FinalReport
 	intakefixture.Eventually(t, fmt.Sprintf("final review %d recorded no report", review), func() bool {
 		r, found, err := delivery.LatestFinalReport(j.live(), j.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		report = r
 		return found && r.Review == review && r.Outcome == delivery.FinalReviewed
 	})
@@ -365,7 +365,7 @@ func (j *flowJourney) awaitReport(t *testing.T, review int) api.FinalReport {
 func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 	t.Helper()
 	entries, err := j.live().Outbox(j.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, e := range entries {
 		if e.Event.ID == trace.EventID(fmt.Sprintf("final-checks-%d-push-%d-load-missing", review, push), "chief") {
@@ -378,7 +378,7 @@ func (j *flowJourney) loadMissingNotices(t *testing.T, review, push int) int {
 func (j *flowJourney) feature(t *testing.T) string {
 	t.Helper()
 	state, err := j.live().Workflow(j.stream, trace.FeatureSubject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return state.Value
 }
 

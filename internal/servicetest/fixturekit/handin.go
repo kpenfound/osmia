@@ -12,14 +12,12 @@ import (
 // memory and counts fetches, standing in for the real network call and the
 // GitHub issues API's own authentication, rate limiting and formatting,
 // which this leaves unverified. Its token stands in for a credential that
-// Must never leave the service.
+// must never leave the service.
 type FakeIssues struct {
-	Mu      sync.Mutex
-	Token   string
-	Text    map[issues.Ref]string
-	Fetches int
-	// block, when set, holds the first fetch until it is closed; started
-	// is signalled when that fetch begins.
+	Mu             sync.Mutex
+	Token          string
+	Text           map[issues.Ref]string
+	Fetches        int
 	Block, Started chan struct{}
 }
 

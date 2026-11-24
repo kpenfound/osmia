@@ -75,7 +75,7 @@ func newReporterRig(t *testing.T, text string, tune func(*ErrorReporterOptions))
 func (r *reporterRig) launch() {
 	r.t.Helper()
 	s, err := Start(context.Background(), r.opts)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	r.s, r.c, r.stopped = s, NewClient(s.Socket()), false
 }
 
@@ -100,7 +100,7 @@ func (r *reporterRig) reload(text string) {
 	r.t.Helper()
 	r.files.write(r.t, r.files.topText+text)
 	_, err := r.c.Reload(context.Background())
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 }
 
 func (r *reporterRig) apiError() {
@@ -164,7 +164,7 @@ func (r *reporterRig) quiet(repository string, n int) {
 func (r *reporterRig) state() *errorreport.State {
 	r.t.Helper()
 	st, err := errorreport.LoadState(r.statePath())
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	return st
 }
 
@@ -183,9 +183,9 @@ func (r *reporterRig) awaitResolved() {
 func (r *reporterRig) diagnostics() (configuration, status []string) {
 	r.t.Helper()
 	cfg, err := r.c.Configuration(context.Background())
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	st, err := r.c.Statuses(context.Background())
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	for _, d := range cfg.Diagnostics {
 		if d.Field == "error_reports" {
 			configuration = append(configuration, d.Message)

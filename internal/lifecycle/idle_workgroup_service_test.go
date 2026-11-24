@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
@@ -11,7 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -23,12 +23,12 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 	ctx := context.Background()
 	root := f.s.current().Root
 	wt, err := trace.OpenWorkgroupAuthority(root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	groups, _, err := trace.Workgroups(wt)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	g := groups[0]
 	spec, found, err := trace.ProjectSpecFor(wt, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("missing project spec")
 	}
@@ -37,8 +37,8 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 		{Project: f.project, Workstream: f.stream1, Record: json.RawMessage(`{}`)},
 		{Project: f.project2, Workstream: f.stream2, Record: json.RawMessage(`{}`)},
 	}}
-	intakefixture.Must(t, trace.RecordGroupApproval(ctx, wt, g.Members[0], approval, f.s.now(), intake.OwnerActor))
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, trace.RecordGroupApproval(ctx, wt, g.Members[0], approval, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, wt.Close())
 
 	members := []struct {
 		project config.ProjectID
@@ -50,11 +50,11 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 			repo := mustRepo(t, f.s, m.project)
 			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "idle-" + state, Revision: 1, Project: m.project, Workstream: m.stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 			_, err := repo.SetFeatureState(ctx, h, state, "fixture")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 		}
-		intakefixture.Must(t, f.s.refreshRuntime())
+		fixturekit.Must(t, f.s.refreshRuntime())
 	}
-	setFeature(intakefixture.BuildingState)
+	setFeature(intake.BuildingState)
 
 	type step struct {
 		name string
@@ -66,7 +66,7 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 		cfg, _ := f.s.runtimeOf(m.project)
 		repo := mustRepo(t, f.s, m.project)
 		stages, err := f.s.stages(cfg, repo)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, hook := range stages.Hooks {
 			if slices.Contains(idleSchedulerSteps, hook.Name) {
 				schedule = append(schedule, step{hook.Name, hook.Pass})
@@ -122,9 +122,9 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 		for _, m := range members {
 			repo := mustRepo(t, f.s, m.project)
 			states, err := repo.WorkflowStates(m.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			stored, err := repo.Workflow(m.stream, trace.FeatureSubject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if got := states[trace.FeatureSubject].Value; got != want || stored.Value != want {
 				t.Fatalf("member %s reports %q (stored %q), want %q", m.stream, got, stored.Value, want)
 			}
@@ -133,12 +133,12 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 	resolution := func(wantResolved bool) {
 		t.Helper()
 		authority, err := trace.OpenWorkgroupAuthority(root, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer authority.Close()
 		ids, revision, err := trace.ResolvedWorkgroups(authority)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		active, err := trace.ProjectSpecActive(authority, id)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if wantResolved {
 			if !slices.Equal(ids, []config.WorkgroupID{id}) || revision != 1 || active {
 				t.Fatalf("resolution=%v revision=%d active=%v", ids, revision, active)
@@ -172,7 +172,7 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 	}
 
 	bounded("building")
-	reported(intakefixture.BuildingState)
+	reported(intake.BuildingState)
 	resolution(false)
 
 	setFeature(intake.AbandonedState)
@@ -181,9 +181,9 @@ func TestIdleLargeSpecWorkgroupStaysBoundedThroughServicePasses(t *testing.T) {
 	resolution(true)
 
 	for _, m := range members {
-		intakefixture.Must(t, f.s.store.SetArchived(runtime.Archive{Project: m.project, Workstream: m.stream, Workgroup: id, Title: "Cancelled member", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.s.now()}))
+		fixturekit.Must(t, f.s.store.SetArchived(runtime.Archive{Project: m.project, Workstream: m.stream, Workgroup: id, Title: "Cancelled member", State: intake.AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: f.s.now()}))
 	}
-	intakefixture.Must(t, f.s.refreshRuntime())
+	fixturekit.Must(t, f.s.refreshRuntime())
 	bounded("archived")
 	reported(intake.AbandonedState)
 	resolution(true)

@@ -24,7 +24,7 @@ func setUpBusyReadsService(t *testing.T, blocking coreadapter.Reconciler) (*Serv
 	opts := testOptions(fixturekit.BusyReadsConfig(t))
 	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: blocking}
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
@@ -34,7 +34,7 @@ func setUpBusyReadsService(t *testing.T, blocking coreadapter.Reconciler) (*Serv
 func readFeed(t *testing.T, c *Client, id config.WorkstreamID) FeedResponse {
 	t.Helper()
 	var v FeedResponse
-	intakefixture.Must(t, c.Do(context.Background(), "GET", Prefix+"/feed/"+string(id), nil, &v))
+	fixturekit.Must(t, c.Do(context.Background(), "GET", Prefix+"/feed/"+string(id), nil, &v))
 	return v
 }
 
@@ -89,7 +89,7 @@ func awaitActivityEntry(t *testing.T, c *Client, match func(ActivityEntry) bool)
 	var found ActivityEntry
 	intakefixture.Soon(t, "a matching activity entry", func() bool {
 		out, err := c.Activity(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		i := slices.IndexFunc(out.Activity, match)
 		if i >= 0 {
 			found = out.Activity[i]
@@ -102,17 +102,17 @@ func awaitActivityEntry(t *testing.T, c *Client, match func(ActivityEntry) bool)
 func requestTurnOperation(t *testing.T, repository *trace.Repository, streamID config.WorkstreamID, eventID string) {
 	t.Helper()
 	event := trace.Event{ID: eventID, Kind: "local-effect", Body: "simulated agent turn"}
-	event.Operation = &coreadapter.Operation{ID: trace.OperationID(intakefixture.Project, streamID, event.ID), Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{}`)}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: eventID + "-start", Revision: 1, Project: intakefixture.Project, Workstream: streamID, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "owner"}
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(fixturekit.Project, streamID, event.ID), Boundary: coreadapter.RunnerBoundary, Action: thread.TurnAction, Input: json.RawMessage(`{}`)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: eventID + "-start", Revision: 1, Project: fixturekit.Project, Workstream: streamID, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "owner"}
 	_, err := repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: "fake-" + eventID, To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked(t *testing.T) {
 	t.Parallel()
 	blocking := fixturekit.NewBlockedFactoryOperation()
 	_, c, repository := setUpBusyReadsService(t, blocking)
-	fixturekit.RequestFactoryOperation(t, repository, intakefixture.Stream, "busy-reads-blocked")
+	fixturekit.RequestFactoryOperation(t, repository, fixturekit.Stream, "busy-reads-blocked")
 
 	select {
 	case <-blocking.Started:
@@ -121,7 +121,7 @@ func TestReadEndpointsStayResponsiveWhileAFactoryOperationIsBlocked(t *testing.T
 	}
 	defer close(blocking.Release)
 
-	assertCoreReadEndpointsRespondWithin(t, c, intakefixture.Stream, coreReadBound)
+	assertCoreReadEndpointsRespondWithin(t, c, fixturekit.Stream, coreReadBound)
 }
 
 func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
@@ -129,19 +129,19 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 	blocking := fixturekit.NewBlockedFactoryOperation()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.Close())
 
 	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: blocking}
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
-	requestTurnOperation(t, active.repository, intakefixture.Stream, "busy-reads-turn")
+	requestTurnOperation(t, active.repository, fixturekit.Stream, "busy-reads-turn")
 
 	select {
 	case <-blocking.Started:
@@ -150,7 +150,7 @@ func TestReadEndpointsStayResponsiveWhileAFakeAgentTurnIsBlocked(t *testing.T) {
 	}
 	defer close(blocking.Release)
 
-	assertCoreReadEndpointsRespondWithin(t, c, intakefixture.Stream, coreReadBound)
+	assertCoreReadEndpointsRespondWithin(t, c, fixturekit.Stream, coreReadBound)
 }
 
 func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
@@ -160,7 +160,7 @@ func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	workstream, repository := seedBuild(t, f, "stall-check", independentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repository, workstream, "resume", resumeReport)
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 
@@ -172,42 +172,42 @@ func TestReadEndpointsStayResponsiveWhileACheckRunIsBlocked(t *testing.T) {
 func featureTransition(t *testing.T, repository *trace.Repository, id config.WorkstreamID, to string, at time.Time) {
 	t.Helper()
 	state, err := repository.Workflow(id, trace.FeatureSubject)
-	intakefixture.Must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "feature-" + to, Revision: 1, Project: intakefixture.Project, Workstream: id, At: at, Actor: serviceActor, Cause: "owner"}
+	fixturekit.Must(t, err)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "feature-" + to, Revision: 1, Project: fixturekit.Project, Workstream: id, At: at, Actor: serviceActor, Cause: "owner"}
 	_, err = repository.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: state.Value, To: to, Reason: "because " + to}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.Close())
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
 	repository = active.repository
 
 	before, err := c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(before.Workstreams) != 1 || before.Workstreams[0].State != nil {
 		t.Fatalf("unexpected state before the factory operation finished: %+v", before.Workstreams)
 	}
 
-	featureTransition(t, repository, intakefixture.Stream, "pending", fixturekit.DemoStart.Add(time.Minute))
+	featureTransition(t, repository, fixturekit.Stream, "pending", fixturekit.DemoStart.Add(time.Minute))
 
 	after, err := c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if after.Workstreams[0].State == nil || *after.Workstreams[0].State != "pending" {
 		t.Fatalf("workstream list did not show the new state: %+v", after.Workstreams[0])
 	}
-	feed := readFeed(t, c, intakefixture.Stream)
+	feed := readFeed(t, c, fixturekit.Stream)
 	if !slices.ContainsFunc(feed.Entries, func(e FeedEntry) bool {
 		return e.Kind == "transition" && e.Transition != nil && e.Transition.To == "pending"
 	}) {
@@ -220,7 +220,7 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 		if name == "status-agents" {
 			attempts++
 			raceOnce.Do(func() {
-				featureTransition(t, repository, intakefixture.Stream, "building", fixturekit.DemoStart.Add(2*time.Minute))
+				featureTransition(t, repository, fixturekit.Stream, "building", fixturekit.DemoStart.Add(2*time.Minute))
 			})
 		}
 		return nil
@@ -228,7 +228,7 @@ func TestWorkstreamListAndFeedShowTheNewStateAfterACommitFinishes(t *testing.T) 
 	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if attempts < 2 {
 		t.Fatalf("the racing commit did not force the workstream list read to retry: attempts=%d", attempts)
 	}
@@ -241,13 +241,13 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 	t.Parallel()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.Close())
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
@@ -258,7 +258,7 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 		if name == "status-agents" {
 			attempts++
 			raceOnce.Do(func() {
-				if err := s.store.SetArchived(runtime.Archive{Project: intakefixture.Project, Workstream: intakefixture.Stream, ArchivedAt: s.now()}); err != nil {
+				if err := s.store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: s.now()}); err != nil {
 					t.Error(err)
 				}
 			})
@@ -268,11 +268,11 @@ func TestWorkstreamListDoesNotMixRuntimeArchiveStateAcrossGenerations(t *testing
 	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if attempts < 2 {
 		t.Fatalf("the racing runtime mutation did not force the workstream list read to retry: attempts=%d", attempts)
 	}
-	idx := slices.IndexFunc(raced.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == intakefixture.Stream })
+	idx := slices.IndexFunc(raced.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == fixturekit.Stream })
 	if idx == -1 || !raced.Workstreams[idx].Archived {
 		t.Fatalf("workstream list returned a stale or inconsistent archived flag after a racing runtime mutation: %+v", raced.Workstreams)
 	}
@@ -282,13 +282,13 @@ func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.Close())
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
@@ -299,7 +299,7 @@ func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 		if name == "inbox-decisions" {
 			attempts++
 			raceOnce.Do(func() {
-				pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Source: runtime.PauseLoopGuard, Reason: "loop guard engaged", SetAt: s.now()}
+				pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}, Mode: "soft", Source: runtime.PauseLoopGuard, Reason: "loop guard engaged", SetAt: s.now()}
 				if err := s.store.SetPause(pause); err != nil {
 					t.Error(err)
 				}
@@ -310,11 +310,11 @@ func TestInboxDoesNotMixRuntimeStateAcrossGenerations(t *testing.T) {
 	defer func() { s.setBoundary(nil) }()
 
 	raced, err := c.Inbox(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if attempts < 2 {
 		t.Fatalf("the racing runtime mutation did not force the inbox read to retry: attempts=%d", attempts)
 	}
-	if !slices.ContainsFunc(raced.Entries, func(e InboxEntry) bool { return e.Kind == InboxLoop && e.Workstream == intakefixture.Stream }) {
+	if !slices.ContainsFunc(raced.Entries, func(e InboxEntry) bool { return e.Kind == InboxLoop && e.Workstream == fixturekit.Stream }) {
 		t.Fatalf("inbox returned a stale or inconsistent view after a racing runtime mutation, missing the loop guard entry: %+v", raced.Entries)
 	}
 }
@@ -326,20 +326,20 @@ func TestOwnerActionOnAnotherWorkstreamDoesNotWaitForBlockedFactoryWork(t *testi
 	blocking := fixturekit.NewBlockedFactoryOperation()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), secondStream, fixturekit.DemoStart, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), secondStream, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, repository.Close())
 
 	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: blocking}
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
-	fixturekit.RequestFactoryOperation(t, active.repository, intakefixture.Stream, "isolation-blocked")
+	fixturekit.RequestFactoryOperation(t, active.repository, fixturekit.Stream, "isolation-blocked")
 
 	select {
 	case <-blocking.Started:

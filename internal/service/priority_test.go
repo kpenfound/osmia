@@ -53,31 +53,31 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "pr-")
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
-	intakefixture.Must(t, errors.Join(err, configFile.Close()))
+	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 
 	r := &priorityRig{t: t, ctx: ctx, results: map[string][]string{}, prompts: map[string]string{},
 		delivered: "w_1111111111111111111111111111111d", gone: "w_2222222222222222222222222222222a", unknown: "w_3333333333333333333333333333333f"}
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for w, state := range map[config.WorkstreamID]string{r.delivered: DeliveredState, r.gone: AbandonedState} {
-		intakefixture.Must(t, repo.CreateWorkstream(ctx, w, fixturekit.DemoStart, ownerActor))
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "end", Revision: 1, Project: intakefixture.Project, Workstream: w, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "end"}
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, w, fixturekit.DemoStart, ownerActor))
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "end", Revision: 1, Project: fixturekit.Project, Workstream: w, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "end"}
 		_, err := repo.SetFeatureState(ctx, h, state, "ended")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
-	_, err = repo.EnsureChiefOfStaff(ctx, intakefixture.Stream, fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
+	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, serviceActor)
+	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{
-		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
+		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
 		SystemPrompt: "You are the chief of staff.", Prompt: "A service event."})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.Close())
 
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]intakefixture.DemoTurn{}}
+	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 	r.opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
 
@@ -86,8 +86,8 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		defer close(seeded)
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		r.prioritise(ctx, session, "event", []string{string(intakefixture.Quiet), string(intakefixture.Stream)})
-		out, err := intakefixture.CallTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
+		r.prioritise(ctx, session, "event", []string{string(intakefixture.Quiet), string(fixturekit.Stream)})
+		out, err := fixturekit.CallTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
 		if err != nil || !strings.Contains(out, "only an owner message") {
 			r.problems = append(r.problems, fmt.Sprintf("event pause: %s %v", out, err))
 		}
@@ -95,7 +95,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 			requestChangeTool: {"key": "event-change", "kind": "cancel", "scope": "workgroup", "change": "Cancel without an owner request"},
 			decideChangeTool:  {"id": "event-change", "revision": 1, "decision": "approve", "pull_requests": "close"},
 		} {
-			out, err := intakefixture.CallTool(ctx, session, name, input)
+			out, err := fixturekit.CallTool(ctx, session, name, input)
 			if err != nil || !strings.Contains(out, "only an owner message") {
 				r.problems = append(r.problems, fmt.Sprintf("event %s: %s %v", name, out, err))
 			}
@@ -124,14 +124,14 @@ func newPriorityRig(t *testing.T) *priorityRig {
 				r.prioritise(ctx, session, "invalid", ids)
 			}
 		case priorityValidPrompt:
-			r.prioritise(ctx, session, "valid", []string{string(intakefixture.Quiet), string(intakefixture.Stream)})
+			r.prioritise(ctx, session, "valid", []string{string(intakefixture.Quiet), string(fixturekit.Stream)})
 		case priorityPausePrompt:
-			out, err := intakefixture.CallTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
+			out, err := fixturekit.CallTool(ctx, session, pauseTool, map[string]any{"scope": "factory", "reason": "travel"})
 			if err != nil || out != `{"recorded":true}` {
 				r.problems = append(r.problems, fmt.Sprintf("owner pause: %s %v", out, err))
 			}
 		case priorityResumePrompt:
-			out, err := intakefixture.CallTool(ctx, session, resumeTool, map[string]any{"scope": "factory"})
+			out, err := fixturekit.CallTool(ctx, session, resumeTool, map[string]any{"scope": "factory"})
 			if err != nil || out != `{"recorded":true}` {
 				r.problems = append(r.problems, fmt.Sprintf("owner resume: %s %v", out, err))
 			}
@@ -144,15 +144,15 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	r.s, r.c = start(t, r.opts)
 	select {
 	case <-seeded:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the service's chief-of-staff turn did not run")
 	}
-	mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: intakefixture.Project, Workstreams: []config.WorkstreamID{intakefixture.Stream}})
+	mutation(t, r.c, "PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}})
 	return r
 }
 
 func (r *priorityRig) prioritise(ctx context.Context, session *mcp.ClientSession, step string, order []string) {
-	out, err := intakefixture.CallTool(ctx, session, prioritiseTool, map[string]any{"workstreams": order})
+	out, err := fixturekit.CallTool(ctx, session, prioritiseTool, map[string]any{"workstreams": order})
 	if err != nil {
 		r.problems = append(r.problems, fmt.Sprint(step, ": ", err))
 	}
@@ -161,8 +161,8 @@ func (r *priorityRig) prioritise(ctx context.Context, session *mcp.ClientSession
 
 func (r *priorityRig) send(prompt string) ConversationEntry {
 	r.t.Helper()
-	sent, err := r.c.Send(r.ctx, intakefixture.Stream, prompt)
-	intakefixture.Must(r.t, err)
+	sent, err := r.c.Send(r.ctx, fixturekit.Stream, prompt)
+	fixturekit.Must(r.t, err)
 	r.sends++
 	awaitConversation(r.t, r.c, func(l ConversationResponse) bool {
 		return len(l.Entries) == 2*r.sends && l.Entries[len(l.Entries)-1].State == TurnDone
@@ -182,9 +182,9 @@ func (r *priorityRig) requireNoProblems() {
 func (r *priorityRig) order() []config.WorkstreamID {
 	r.t.Helper()
 	rt, err := r.c.Runtime(r.ctx)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	for _, p := range rt.Effective.Priorities {
-		if p.Project == intakefixture.Project {
+		if p.Project == fixturekit.Project {
 			return p.Workstreams
 		}
 	}
@@ -194,14 +194,14 @@ func (r *priorityRig) order() []config.WorkstreamID {
 func (r *priorityRig) pauses() []runtime.Pause {
 	r.t.Helper()
 	rt, err := r.c.Runtime(r.ctx)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	return rt.Effective.Pauses
 }
 
 func (r *priorityRig) changes() []trace.PriorityChange {
 	r.t.Helper()
-	out, err := trace.Read[trace.PriorityChange](r.s.sole().repository, intakefixture.Stream)
-	intakefixture.Must(r.t, err)
+	out, err := trace.Read[trace.PriorityChange](r.s.sole().repository, fixturekit.Stream)
+	fixturekit.Must(r.t, err)
 	return out
 }
 
@@ -255,7 +255,7 @@ func TestChiefRefusesInvalidPriorityOrders(t *testing.T) {
 	if got := r.results["invalid"]; !slices.Equal(got, want) {
 		t.Fatalf("tool results:\n%v\nwant:\n%v", got, want)
 	}
-	if got := r.order(); !slices.Equal(got, []config.WorkstreamID{intakefixture.Stream}) {
+	if got := r.order(); !slices.Equal(got, []config.WorkstreamID{fixturekit.Stream}) {
 		t.Fatalf("refused orders changed the priority to %v", got)
 	}
 	if got := r.changes(); len(got) != 0 {
@@ -268,8 +268,8 @@ func TestChiefSetsPriorityOrderForTheOwner(t *testing.T) {
 	r := newPriorityRig(t)
 	sent := r.send(priorityValidPrompt)
 	r.requireNoProblems()
-	want := []config.WorkstreamID{intakefixture.Quiet, intakefixture.Stream}
-	if got := r.results["valid"]; !slices.Equal(got, []string{`{"recorded":true,"workstreams":["` + string(intakefixture.Quiet) + `","` + string(intakefixture.Stream) + `"]}`}) {
+	want := []config.WorkstreamID{intakefixture.Quiet, fixturekit.Stream}
+	if got := r.results["valid"]; !slices.Equal(got, []string{`{"recorded":true,"workstreams":["` + string(intakefixture.Quiet) + `","` + string(fixturekit.Stream) + `"]}`}) {
 		t.Fatalf("tool results: %v", got)
 	}
 	if got := r.order(); !slices.Equal(got, want) {
@@ -328,11 +328,11 @@ func TestPriorityOrderAndChiefPauseSurviveARestart(t *testing.T) {
 	sent := r.send(priorityValidPrompt)
 	r.send(priorityPausePrompt)
 	r.requireNoProblems()
-	want := []config.WorkstreamID{intakefixture.Quiet, intakefixture.Stream}
+	want := []config.WorkstreamID{intakefixture.Quiet, fixturekit.Stream}
 	paused := r.pauses()
 
 	r.c.Close()
-	intakefixture.Must(t, r.s.Close())
+	fixturekit.Must(t, r.s.Close())
 	r.s, r.c = start(t, r.opts)
 	if got := r.order(); !slices.Equal(got, want) {
 		t.Fatalf("runtime priority after restart %v, want %v", got, want)
@@ -342,7 +342,7 @@ func TestPriorityOrderAndChiefPauseSurviveARestart(t *testing.T) {
 	}
 	r.requireRecordedFor(sent, want)
 	st, _ := r.s.store.Effective()
-	if !reflect.DeepEqual(st.Priorities, []runtime.Priority{{Project: intakefixture.Project, Workstreams: want}}) {
+	if !reflect.DeepEqual(st.Priorities, []runtime.Priority{{Project: fixturekit.Project, Workstreams: want}}) {
 		t.Fatalf("scheduler priorities %+v", st.Priorities)
 	}
 }

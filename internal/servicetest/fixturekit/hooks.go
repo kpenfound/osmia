@@ -13,12 +13,9 @@ import (
 
 // HooksPost is one request a fake Hearsay connectors listener received.
 type HooksPost struct {
-	// Source is the Hearsay source the request was posted to.
 	Source string
-	// Raw is the request body as sent.
-	Raw string
-	// Body is the request body decoded.
-	Body map[string]any
+	Raw    string
+	Body   map[string]any
 }
 
 // Str returns a string field of the post's body, empty when it has none.
@@ -43,8 +40,6 @@ func NewHooks(t *testing.T) *Hooks {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/hooks/") || json.Unmarshal(raw, &post.Body) != nil {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		// Hearsay answers 400 to a decision whose decider is missing or is not
-		// one of these.
 		if post.Body["kind"] == "decision" && !slices.Contains([]string{"owner", "chief_of_staff", "committee"}, post.Str("decider")) {
 			t.Errorf("a decision carries decider %q, which Hearsay's connector contract refuses: %s", post.Str("decider"), raw)
 		}

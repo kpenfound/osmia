@@ -1,80 +1,46 @@
 package intakejourney
 
 import (
-	"bytes"
 	"context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/doctor"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/seal"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// newJevJourney is a debate fixture of one member in one round whose service
-// asks p for Jev's answers, with Jev's key set when on.
-func newJevJourney(t *testing.T, p *jevfixture.Provider, on bool) *shedFixture {
+func newJevJourney(t *testing.T, p *jevfixture.Provider, on bool) *journey.ShedFixture {
 	t.Helper()
 	key := jevfixture.Key(t, on)
-	return newDebateFixtureWith(t, 1, 1, jevfixture.Config(key), func(o *Options) {
+	return journey.NewDebateFixtureWith(t, 1, 1, jevfixture.Config(key), func(o *journey.Options) {
 		if p != nil {
 			o.JevProvider = p.Factory()
 		}
 	})
 }
 
-// reachJevPacket hands in a design whose debate concludes by consensus and
-// returns once the shed has concluded. Nobody ratifies it.
-func (f *shedFixture) reachJevPacket(t *testing.T) config.WorkstreamID {
-	t.Helper()
-	f.upstream(t)
-	faults := &intakefixture.Faults{}
-	f.member(1, 1, 1, intakefixture.Concedes(faults))
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "concluded-1")
-	faults.Check(t)
-	return stream
-}
-
-// runCLI runs an osmia command against the service of the fixture.
-func (f *shedFixture) runCLI(t *testing.T, args ...string) string {
-	t.Helper()
-	root, err := config.ResolveRoot(f.opts.Config.Root, "")
-	must(t, err)
-	var out, diag bytes.Buffer
-	code := cli.Run(context.Background(), append([]string{"--root", root.String()}, args...), strings.NewReader(""), &out, &diag)
-	if code != 0 || diag.Len() != 0 {
-		t.Fatalf("%v: code=%d stdout=%s stderr=%s", args, code, out.String(), diag.String())
-	}
-	return out.String()
-}
-
-// A confident Jev ratifies the packet with no owner command. No client reads
-// the inbox before the build is under way. The workstream is sealed and built
-// as after the owner's ratification, and every surface that shows the
-// decision, the ratification record, the workstream's transitions, the trace
-// through the API and the trace through the CLI, says Jev made it. Delivery
-// approval is never asked of Jev.
 func TestAConfidentJevRatifiesAndTheWorkstreamBuilds(t *testing.T) {
 	t.Parallel()
 	p := &jevfixture.Provider{Confidence: 0.97}
 	f := newJevJourney(t, p, true)
-	defer f.stop(t)
+	defer f.Stop(t)
 	ctx := context.Background()
 
-	stream := f.reachJevPacket(t)
-	f.scenario().AwaitFeature(t, stream, intake.BuildingState)
+	stream := f.ReachJevPacket(t)
+	f.Scenario().AwaitFeature(t, stream, intake.BuildingState)
 
-	if runtime, err := f.c.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeReady {
+	if runtime, err := f.C.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeReady {
 		t.Fatalf("Jev in the status: %+v %v", runtime.Jev, err)
 	}
 	requests := p.Decisions()
@@ -82,21 +48,21 @@ func TestAConfidentJevRatifiesAndTheWorkstreamBuilds(t *testing.T) {
 		t.Fatalf("decision requests: %d, options %v", len(requests), requests)
 	}
 
-	docs := f.documents(t, stream, shed.RatificationDocumentID(1))
+	docs := f.Documents(t, stream, shed.RatificationDocumentID(1))
 	if len(docs) != 1 || docs[0].Actor != trace.JevActor {
 		t.Fatalf("ratification records: %+v", docs)
 	}
 	record, err := shed.ParseRatification([]byte(docs[0].Content))
-	must(t, err)
+	fixturekit.Must(t, err)
 	if record.DecidedBy != trace.DecidedByJev || record.Judgment == "" || record.Revision != (shed.Pin{Spec: 1, Plan: 1}) {
 		t.Fatalf("ratification %+v", record)
 	}
-	if sealed := f.documents(t, stream, seal.DocumentID); len(sealed) != 1 {
+	if sealed := f.Documents(t, stream, seal.DocumentID); len(sealed) != 1 {
 		t.Fatalf("seal records: %+v", sealed)
 	}
 
 	var ratified trace.Transition
-	for _, tr := range f.transitions(t, stream) {
+	for _, tr := range f.Transitions(t, stream) {
 		if tr.Subject == intake.OwnerSubject && tr.To == "ratified-1" {
 			ratified = tr
 		}
@@ -105,18 +71,17 @@ func TestAConfidentJevRatifiesAndTheWorkstreamBuilds(t *testing.T) {
 		t.Fatalf("the ratification transition: %+v", ratified)
 	}
 
-	criterion, err := f.c.TraceCriterion(ctx, stream, "spec#1")
-	must(t, err)
+	criterion, err := f.C.TraceCriterion(ctx, stream, "spec#1")
+	fixturekit.Must(t, err)
 	if len(criterion.Rulings) == 0 || criterion.Rulings[0].Kind != "ratification" || criterion.Rulings[0].DecidedBy != trace.DecidedByJev || criterion.Rulings[0].Judgment != record.Judgment {
 		t.Fatalf("trace rulings: %+v", criterion.Rulings)
 	}
-	if out := f.runCLI(t, "trace", string(stream), "criterion", "spec#1"); !strings.Contains(out, "ratification: ratified (decided by Jev)\n") {
+	if out := f.RunCLI(t, "trace", string(stream), "criterion", "spec#1"); !strings.Contains(out, "ratification: ratified (decided by Jev)\n") {
 		t.Fatalf("the CLI's trace lacks the label:\n%s", out)
 	}
 
-	// Reading the inbox now shows no ratification card and asks Jev nothing.
 	before := len(p.Requests())
-	if entries := f.inboxEntries(t, stream, InboxRatification); len(entries) != 0 {
+	if entries := f.InboxEntries(t, stream, api.InboxRatification); len(entries) != 0 {
 		t.Fatalf("a ratification card remains: %+v", entries)
 	}
 	if len(p.Requests()) != before {
@@ -131,35 +96,31 @@ func TestAConfidentJevRatifiesAndTheWorkstreamBuilds(t *testing.T) {
 	}
 }
 
-// With Jev unconfigured the same packet reaches the owner as a card with the
-// recommendation the packet gives, and nothing ratifies it until the owner
-// does. The service started, status shows Jev unconfigured, no request went
-// out, and osmia doctor fails its Jev check.
 func TestWithJevUnconfiguredTheRatificationReachesTheOwner(t *testing.T) {
 	t.Parallel()
 	p := &jevfixture.Provider{Confidence: 0.97}
 	f := newJevJourney(t, p, false)
-	defer f.stop(t)
+	defer f.Stop(t)
 	ctx := context.Background()
 
-	stream := f.reachJevPacket(t)
-	f.awaitPacket(t, stream, "ratify: no objection stands")
-	entries := f.inboxEntries(t, stream, InboxRatification)
+	stream := f.ReachJevPacket(t)
+	f.AwaitPacket(t, stream, "ratify: no objection stands")
+	entries := f.InboxEntries(t, stream, api.InboxRatification)
 	if len(entries) != 1 || entries[0].Recommendation != "ratify: no objection stands" || !slices.Equal(entries[0].Options, []string{"ratify"}) {
 		t.Fatalf("the ratification card: %+v", entries)
 	}
-	if state, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || state.Value != intake.InShedState {
+	if state, err := f.Repository().Workflow(stream, trace.FeatureSubject); err != nil || state.Value != intake.InShedState {
 		t.Fatalf("the workstream is %q, want it to wait for the owner: %v", state.Value, err)
 	}
-	if runtime, err := f.c.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeUnconfigured || runtime.Jev.Reason != jev.ReasonUnconfigured {
+	if runtime, err := f.C.Runtime(ctx); err != nil || runtime.Jev.Mode != jev.ModeUnconfigured || runtime.Jev.Reason != jev.ReasonUnconfigured {
 		t.Fatalf("Jev in the status: %+v %v", runtime.Jev, err)
 	}
 	if len(p.Requests()) != 0 {
 		t.Fatalf("%d requests went out with no key", len(p.Requests()))
 	}
 
-	root, err := config.ResolveRoot(f.opts.Config.Root, "")
-	must(t, err)
+	root, err := config.ResolveRoot(f.Opts.Config.Root, "")
+	fixturekit.Must(t, err)
 	checks := doctor.Run(ctx, doctor.Options{
 		Root:     root,
 		LookPath: func(name string) (string, error) { return "/bin/" + name, nil },
@@ -177,12 +138,11 @@ func TestWithJevUnconfiguredTheRatificationReachesTheOwner(t *testing.T) {
 		t.Fatalf("doctor's Jev check: %+v", found)
 	}
 
-	// The owner ratifies, and the workstream builds as it always has.
-	if _, err := f.c.Ratify(ctx, stream, 1, 1); err != nil {
+	if _, err := f.C.Ratify(ctx, stream, 1, 1); err != nil {
 		t.Fatal(err)
 	}
-	f.scenario().AwaitFeature(t, stream, intake.BuildingState)
-	if record := f.ratification(t, stream, 1); record.DecidedBy == trace.DecidedByJev || record.Judgment != "" {
+	f.Scenario().AwaitFeature(t, stream, intake.BuildingState)
+	if record := f.Ratification(t, stream, 1); record.DecidedBy == trace.DecidedByJev || record.Judgment != "" {
 		t.Fatalf("the owner's ratification %+v", record)
 	}
 }

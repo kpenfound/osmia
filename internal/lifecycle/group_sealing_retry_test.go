@@ -32,7 +32,7 @@ func TestRatifyingAgainSealsAGroupMemberWhoseSealingFailed(t *testing.T) {
 	repo2 := mustRepo(t, f.s, f.project2)
 	intakefixture.Eventually(t, "the second member's sealing fails", func() bool {
 		state, err := repo2.Workflow(f.stream2, intake.SealSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return state.Value == "failed-1"
 	})
 	repo1 := mustRepo(t, f.s, f.project)
@@ -40,7 +40,7 @@ func TestRatifyingAgainSealsAGroupMemberWhoseSealingFailed(t *testing.T) {
 		t.Fatalf("group approval completed with a failed member: %v %v", approved, err)
 	}
 	outbox, err := repo2.Outbox(f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	body := ""
 	for _, e := range outbox {
 		if e.TransitionID == "seal-1-failed" {
@@ -63,11 +63,11 @@ func TestRatifyingAgainSealsAGroupMemberWhoseSealingFailed(t *testing.T) {
 	}
 	intakefixture.Eventually(t, "the group approval completes", func() bool {
 		approved, err := repo1.GroupApproved(f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return approved
 	})
 	sealed, _, found, err := seal.Latest(repo2, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || sealed.Seal != 2 || sealed.Branch != branch {
 		t.Fatalf("the second member's seal: %+v", sealed)
 	}

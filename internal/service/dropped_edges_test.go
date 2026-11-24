@@ -7,7 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -24,14 +23,14 @@ func TestWorkgroupViewNamesTheEdgesTheirDependentDropped(t *testing.T) {
 		{From: kept, To: fixturekit.Stream, Type: trace.EdgeHardBlock},
 	}}
 	s := &Service{}
-	intakefixture.Must(t, s.markDroppedEdges(f.repo, fixturekit.Stream, group))
+	fixturekit.Must(t, s.markDroppedEdges(f.repo, fixturekit.Stream, group))
 	if len(group.Dropped) != 0 {
 		t.Fatalf("an edge nobody dropped is shown as dropped: %+v", group.Dropped)
 	}
 
 	recordWaiver(t, f, lifecycle.EdgeWaiver{Upstream: dropped, Type: trace.EdgeHardBlock, Ended: "abandoned", Reason: "dropped", DecidedBy: trace.DecidedByOwner, At: fixturekit.DemoStart.Add(time.Minute)},
 		trace.Routing{DecidedBy: trace.DecidedByOwner, DefaultTo: lifecycle.DependencyKept})
-	intakefixture.Must(t, s.markDroppedEdges(f.repo, fixturekit.Stream, group))
+	fixturekit.Must(t, s.markDroppedEdges(f.repo, fixturekit.Stream, group))
 	if len(group.Dropped) != 1 || group.Dropped[0].From != dropped || len(group.Edges) != 2 {
 		t.Fatalf("the dropped edge is not the only one marked, or the graph changed: dropped=%+v edges=%+v", group.Dropped, group.Edges)
 	}

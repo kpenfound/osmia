@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -74,7 +73,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				d := drifter{fm}
 				awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "its mason's resolution of resume.go")
 				w := resolutionWorkspace(t, p.shedFixture, p.stream)
-				intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "resume.go"), []byte("package demo\n// Upstream resume and feature resume.\n"), 0600))
+				fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "resume.go"), []byte("package demo\n// Upstream resume and feature resume.\n"), 0600))
 				completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftMasonAgent, resolvedDone("Combined resume behavior"))
 				awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "review 1 of candidate")
 				if tip, _ := p.forkBranch(t); tip != before {
@@ -88,26 +87,26 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			}
 			p.reopen(t)
 			pending, err := lifecycle.UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !pending {
 				t.Fatal("maintenance lost after restart")
 			}
 			reviewer := &finalReviewer{s: p.s, repository: p.repository}
-			intakefixture.Must(t, reviewer.Pass(ctx))
+			fixturekit.Must(t, reviewer.Pass(ctx))
 			op := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.DeliveryReviewAction)
 			in, err := delivery.DecodeFinalReview(op)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
+				_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
 				return err
 			})
 			result = settleOperation(t, p.s, p.repository, p.stream, op, reviewer)
 			if result.Outcome != "succeeded" {
 				t.Fatal(result)
 			}
-			intakefixture.Must(t, p.publisher().Pass(ctx))
+			fixturekit.Must(t, p.publisher().Pass(ctx))
 			all, err := p.repository.Operations(p.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, o := range all {
 				if o.Operation.Action == lifecycle.PublishUpstreamAction {
 					t.Fatal("published without new approval")
@@ -122,7 +121,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			}
 			description := "Updated drift delivery\n\nApproved after rebase."
 			p.approve(t, &description)
-			intakefixture.Must(t, p.publisher().Pass(ctx))
+			fixturekit.Must(t, p.publisher().Pass(ctx))
 			publish := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.PublishUpstreamAction)
 			p.pulls.Lose = true
 			if _, err := p.publisher().Apply(ctx, publish); err == nil {
@@ -138,7 +137,7 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 				t.Fatalf("delivery tip %s creates %d state %s", tip, p.pulls.Creates, p.feature(t))
 			}
 			pending, err = lifecycle.UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if pending {
 				t.Fatal("publication did not finish maintenance")
 			}
@@ -150,13 +149,13 @@ func TestDeliveredDriftRequiresApprovalAndUpdatesExistingPR(t *testing.T) {
 			drifts := driftOperations(t, p.repository, p.stream)
 			settleOperation(t, p.s, p.repository, p.stream, drifts[len(drifts)-1].Operation, drifter{fm})
 			pending, err = lifecycle.UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if pending {
 				t.Fatal("unchanged base requested another delivery")
 			}
 
 			result, err = p.publisher().Apply(ctx, publish)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if result.Outcome != "succeeded" || p.pulls.Creates != 1 {
 				t.Fatal("retry duplicated publication")
 			}
@@ -189,7 +188,7 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	d := drifter{fm}
 	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "its mason's resolution of shared.go")
 	w := resolutionWorkspace(t, p.shedFixture, p.stream)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, "shared.go"), []byte("package demo\n// Upstream and feature shared helper.\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "shared.go"), []byte("package demo\n// Upstream and feature shared helper.\n"), 0600))
 	completeDriftTurn(t, p.shedFixture, p.repository, p.stream, service.TestDriftMasonAgent, resolvedDone("Combined shared helper"))
 	awaitResolution(t, p.s, d, p.stream, ops[0].Operation, "review 1 of candidate")
 	if tip, _ := p.forkBranch(t); tip != before {
@@ -204,24 +203,24 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 		t.Fatal("the rebase pushed the pull request on its own")
 	}
 	pending, err := lifecycle.UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !pending {
 		t.Fatal("the resolved drift did not request a delivery review")
 	}
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
-	intakefixture.Must(t, reviewer.Pass(ctx))
+	fixturekit.Must(t, reviewer.Pass(ctx))
 	op := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.DeliveryReviewAction)
 	in, err := delivery.DecodeFinalReview(op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready after drift", "findings": []any{}})
 		return err
 	})
 	result = settleOperation(t, p.s, p.repository, p.stream, op, reviewer)
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	intakefixture.Must(t, p.publisher().Pass(ctx))
+	fixturekit.Must(t, p.publisher().Pass(ctx))
 	if tip, _ := p.forkBranch(t); tip != before {
 		t.Fatal("remote changed before the owner's approval")
 	}
@@ -231,7 +230,7 @@ func TestDeliveredDriftConflictOutsideUnitFootprintCompletesEndToEnd(t *testing.
 	}
 	description := "Updated drift delivery\n\nApproved after rebase outside unit footprints."
 	p.approve(t, &description)
-	intakefixture.Must(t, p.publisher().Pass(ctx))
+	fixturekit.Must(t, p.publisher().Pass(ctx))
 	publish := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.PublishUpstreamAction)
 	result = settleOperation(t, p.s, p.repository, p.stream, publish, p.publisher())
 	if result.Outcome != "succeeded" {
@@ -262,7 +261,7 @@ func TestDeliveredDriftClosedPRStopsBeforeRebase(t *testing.T) {
 			op := driftOperations(t, p.repository, p.stream)[0].Operation
 			settleOperation(t, p.s, p.repository, p.stream, op, drifter{fm})
 			finished, err := delivery.OwnPullRequestFinished(p.repository, p.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !finished {
 				t.Fatal("closure not recorded")
 			}

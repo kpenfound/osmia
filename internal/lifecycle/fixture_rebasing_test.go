@@ -45,7 +45,7 @@ func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 }
 func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()
-	return captureTurn(t, f, repository, stream, intakefixture.MasonAgent(unit), outcome)
+	return captureTurn(t, f, repository, stream, intake.MasonAgent(unit), outcome)
 }
 func captureTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()

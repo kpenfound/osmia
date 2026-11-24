@@ -3,10 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
-
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestDeliveryBriefItemsChangeTheDraftHashAndRefuseAnEarlierApproval(t *testing.T) {
@@ -53,7 +52,7 @@ func TestDeliveryBriefItemsChangeTheDraftHashAndRefuseAnEarlierApproval(t *testi
 	}
 	refused(second, first.DraftHash)
 	messages, err := json.Marshal(second.Messages)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, text := range []string{mainText, "Set UPLOAD_KEY"} {
 		if strings.Contains(second.Title, text) || strings.Contains(string(messages), text) || strings.Contains(strings.ReplaceAll(second.Draft, "- Set UPLOAD_KEY", ""), text) {
 			t.Fatalf("%q reached the title, body or commit messages", text)

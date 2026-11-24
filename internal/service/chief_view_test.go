@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -23,28 +22,28 @@ func TestChiefOfStaffViewStagesLatestDocuments(t *testing.T) {
 	home := t.TempDir()
 	opts := fixtureAt(t, home)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, fixturekit.DemoStart, owner)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, fixturekit.DemoStart, owner))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, owner))
 	document := func(id string, revision int, path, content string) trace.Document {
-		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: architectActor, Cause: "fixture", Depth: 1},
+		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: architectActor, Cause: "fixture", Depth: 1},
 			Path: path, Content: content}
 	}
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{
 		document(plan.SpecDocument, 1, plan.SpecPath, "# First draft\n"),
 		document(plan.PlanDocument, 1, plan.PlanPath, `{"version":1}`),
 		document("tool-call", 1, "tools/tool-call.json", `{"secret":"call"}`),
 		document("inspection-1", 1, "inspections/inspection-1.json", `{"secret":"inspection"}`),
 	}))
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{document(plan.SpecDocument, 2, plan.SpecPath, "# Second draft\n")}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{document(plan.SpecDocument, 2, plan.SpecPath, "# Second draft\n")}))
 
 	workspace := filepath.Join(home, "staged")
-	intakefixture.Must(t, os.MkdirAll(filepath.Join(workspace, "stale"), 0700))
-	paths, err := stageChiefDocuments(repo, intakefixture.Stream, workspace)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(workspace, "stale"), 0700))
+	paths, err := stageChiefDocuments(repo, fixturekit.Stream, workspace)
+	fixturekit.Must(t, err)
 	if !slices.Equal(paths, []string{plan.PlanPath, plan.SpecPath}) {
 		t.Fatalf("paths: %v", paths)
 	}

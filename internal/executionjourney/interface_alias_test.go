@@ -55,9 +55,9 @@ const amendmentRuled = intake.AmendmentRuled
 
 const EventInbox = api.EventInbox
 
-const demoSecret = intakefixture.DemoSecret
+const demoSecret = fixturekit.DemoSecret
 
-var workstreamRecords = intakefixture.WorkstreamRecords
+var workstreamRecords = fixturekit.WorkstreamRecords
 
 type SessionOpenRequest = api.SessionOpenRequest
 
@@ -87,13 +87,13 @@ type AmendmentDecisionRequest = api.AmendmentDecisionRequest
 
 var requestFactoryOperation = fixturekit.RequestFactoryOperation
 
-const committeeRole = intakefixture.CommitteeRole
+const committeeRole = intake.CommitteeRole
 
-const SketchedState = intakefixture.SketchedState
+const SketchedState = intake.SketchedState
 
 type FeedEntry = api.FeedEntry
 
-type draftStatus = intakefixture.DraftStatus
+type draftStatus = intake.DraftStatus
 
 type Code = api.Code
 
@@ -101,7 +101,7 @@ type drafter = intake.Drafter
 
 const RatifiedState = intake.RatifiedState
 
-const demoAgent = intakefixture.DemoAgent
+const demoAgent = fixturekit.DemoAgent
 
 type AnswerResponse = api.AnswerResponse
 
@@ -117,7 +117,7 @@ type SessionDestroyResponse = api.SessionDestroyResponse
 
 const NotFound = api.NotFound
 
-type demoTurn = intakefixture.DemoTurn
+type demoTurn = fixturekit.DemoTurn
 
 type TraceCriterion = api.TraceCriterion
 
@@ -169,7 +169,7 @@ type SendRequest = api.SendRequest
 
 const Malformed = api.Malformed
 
-type stagedWorkspaces = intakefixture.StagedWorkspaces
+type stagedWorkspaces = intake.StagedWorkspaces
 
 var assertGone = fixturekit.AssertGone
 
@@ -227,9 +227,9 @@ var amendmentDecisionID = intake.AmendmentDecisionID
 
 var failed = intakefixture.Failed
 
-var workstreamTraceDirectory = intakefixture.WorkstreamTraceDirectory
+var workstreamTraceDirectory = fixturekit.WorkstreamTraceDirectory
 
-const architectRole = intakefixture.ArchitectRole
+const architectRole = intake.ArchitectRole
 
 const Unsupported = api.Unsupported
 
@@ -239,13 +239,13 @@ const EventWorkstream = api.EventWorkstream
 
 var finalSystemPrompt = delivery.FinalSystemPrompt
 
-const draftValid = intakefixture.DraftValid
+const draftValid = intake.DraftValid
 
 type FeedFinalChecks = api.FeedFinalChecks
 
 type InboxAnswer = api.InboxAnswer
 
-const demoThread = intakefixture.DemoThread
+const demoThread = fixturekit.DemoThread
 
 var pauseOf = fixturekit.PauseOf
 
@@ -255,7 +255,7 @@ const InboxDelivery = api.InboxDelivery
 
 type SessionView = api.SessionView
 
-const handedDesign = intakefixture.HandedDesign
+const handedDesign = fixturekit.HandedDesign
 
 type TraceEvent = api.TraceEvent
 
@@ -263,7 +263,7 @@ type InboxQuestion = api.InboxQuestion
 
 type FeedCheckSelection = api.FeedCheckSelection
 
-var assertCode = intakefixture.AssertCode
+var assertCode = fixturekit.AssertCode
 
 type FeedFinalReview = api.FeedFinalReview
 

@@ -47,21 +47,21 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			}}, tc.edge, host)
 			defer f.stop(t)
 			up, err := f.s.repository(f.project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			down, err := f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: f.repos[0].Upstream, Fork: f.s.current().For(f.project).Project.PushRepository(), Branch: intake.FeatureBranch(f.stream1), Commit: "feature-head", PullRequest: 71, URL: "https://example.invalid/pull/71"}
 			recordUpstreamOwnPullRequest(t, f.s, up, f.stream1, publication)
 			if tc.edge == trace.EdgeHardBlock {
-				held, err := f.s.holds(f.project2, intake.LibrarianWorkstream(f.project2), down, scheduler.Candidate{Workstream: f.stream2, Thread: trace.Thread{Identity: trace.Agent{Role: intakefixture.MasonRole}}})
-				intakefixture.Must(t, err)
+				held, err := f.s.holds(f.project2, f.stream2, down, scheduler.Candidate{Workstream: f.stream2, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
+				fixturekit.Must(t, err)
 				if !held {
 					t.Fatal("hard block admitted a mason before merge")
 				}
 				threads, err := down.Threads(f.stream2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, thread := range threads {
-					if thread.Identity.Role == intakefixture.MasonRole {
+					if thread.Identity.Role == intake.MasonRole {
 						t.Fatal("hard block started a unit before merge")
 					}
 				}
@@ -72,7 +72,7 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 				host.Mu.Unlock()
 				lifecycleAwait(t, f, "own merge detection", func() bool {
 					o, rev, err := delivery.OwnPullRequestOutcomeAt(up, f.stream1)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					return rev > 0 && o.Outcome == delivery.OwnPullRequestOutcomeMerged
 				})
 			} else {
@@ -80,14 +80,14 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			}
 			lifecycleAwait(t, f, "edge merge read before persistence", observed.Load)
 			_, err = f.c.Archive(ctx, f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			cleanup.await(t)
 			a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
 			if !ok || a.MergeCommit != "merged-upstream" || a.MergeReference == "" {
 				t.Fatalf("archive lost merge identity: %+v", a)
 			}
 			before, _, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, edge := range before.Edges {
 				if edge.Merged {
 					t.Fatal("dependent observed merge before archive/restart")
@@ -104,29 +104,29 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 			interrupt.Store(false)
 			f.start(t)
 			down, err = f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			lifecycleAwait(t, f, "archived upstream edge resolution", func() bool {
 				obs, _, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				return len(obs.Edges) == 1 && obs.Edges[0].Merged
 			})
 			obs, revision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if obs.Edges[0].Commit != "merged-upstream" || obs.Edges[0].BuildBranch != "" || obs.Edges[0].Reference == "" {
 				t.Fatalf("wrong dependency identity: %+v", obs)
 			}
 			waiting, err := lifecycle.EdgeWaiting(down, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if waiting {
 				t.Fatal("hard block remained stuck after archived merge")
 			}
 			f.stop(t)
 			f.start(t)
 			sent, err := f.c.Send(ctx, f.stream2, "Report the dependency status after restart.")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			lifecycleAwait(t, f, "survivor chief dispatch after restart", func() bool {
 				conversation, err := f.c.Conversation(ctx, f.stream2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, entry := range conversation.Entries {
 					if entry.Turn == sent.Turn && entry.Kind == "response" && entry.State == api.TurnDone {
 						return true
@@ -135,16 +135,16 @@ func TestArchivedUpstreamMergeReleasesEdgeAcrossRestart(t *testing.T) {
 				return false
 			})
 			down, err = f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			after, afterRevision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if afterRevision != revision || len(after.Edges) != 1 || after.Edges[0] != obs.Edges[0] {
 				t.Fatalf("restart duplicated or changed merge receipt: %+v revision %d -> %d", after, revision, afterRevision)
 			}
 
 			if tc.cleaned {
 				gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !gone {
 					t.Fatal("edge lookup recreated archived history")
 				}
@@ -170,7 +170,7 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 			ctx := context.Background()
 			cfg, repo, host, refresh := ownPRFixture(t)
 			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer store.Close()
 			s := refresh.s
 			s.store = store
@@ -195,10 +195,10 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 					a.ResolutionEvidence = "cancelled"
 				}
 				if tc.cancelled {
-					intakefixture.Must(t, store.ClearArchived(fixturekit.Stream))
-					intakefixture.Must(t, store.SetArchived(a))
+					fixturekit.Must(t, store.ClearArchived(fixturekit.Stream))
+					fixturekit.Must(t, store.SetArchived(a))
 				} else {
-					intakefixture.Must(t, store.UpdateArchive(a))
+					fixturekit.Must(t, store.UpdateArchive(a))
 				}
 			}
 			host.Prs = []pulls.PullRequest{{Number: 41, Merged: true, MergeCommit: "wrong-pr", HeadRepository: p.Fork, Head: p.Branch}, {Number: 42, State: "open", Merged: tc.merged, MergeCommit: "current-merge", HeadRepository: p.Fork, Head: p.Branch}}
@@ -215,7 +215,7 @@ func TestArchivedUpstreamRequiresCurrentPullRequestMerge(t *testing.T) {
 				}
 				return
 			}
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if status.Merged != tc.merged {
 				t.Fatalf("archive released without current merge: %+v", status)
 			}

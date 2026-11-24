@@ -27,25 +27,25 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 	opts.boundary = gate.checkpoint
 	s, c := start(t, opts)
 	added, err := c.AddProject(ctx, fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repo := s.sole().repository
 	member := config.WorkstreamID("w_00000000000000000000000000000992")
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, member, s.now(), intake.OwnerActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, member, s.now(), intake.OwnerActor))
 	_, err = trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, s.now(), intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/osmia", Fork: "owner/fork", Base: "main", Branch: intake.FeatureBranch(member), Commit: "feature-tip", PullRequest: 7, URL: "https://github.com/owner/osmia/pull/7"}
 	resolutionDocument(t, repo, member, delivery.PublicationDocument, delivery.PublicationPath, publication)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered", Revision: 1, Project: added.Project.ID, Workstream: member, At: s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "pull request published")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, s.refreshRuntime())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.refreshRuntime())
 	host.Mu.Lock()
 	host.Prs = append(host.Prs, mergedPullRequest(publication, "solo-merge"))
 	host.Mu.Unlock()
 
 	changes, closeChanges := serviceChanges(t, s)
 	defer closeChanges()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	var a runtime.Archive
 	for {
 		var ok bool
@@ -68,12 +68,12 @@ func TestAutoArchiveSoloWorkstreamAndItsConversationUntilCleanup(t *testing.T) {
 	}
 
 	view, err := c.Status(ctx, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !view.Archived || view.ArchivedBy != api.ArchivedByChief {
 		t.Fatalf("status=%+v", view)
 	}
 	conversation, err := c.Conversation(ctx, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	entries := archiveEntries(conversation.Entries, member)
 	if len(entries) != 1 || entries[0].Kind != "action" || !strings.Contains(entries[0].Text, publication.URL) || !strings.Contains(entries[0].Text, "because its pull request merged") {
 		t.Fatalf("conversation before cleanup: %+v", conversation.Entries)

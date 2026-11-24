@@ -8,7 +8,6 @@ const (
   {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": ["resume"], "footprint": ["internal.trace"]}
 ]}
 `
-	// CyclicPlan has a dependency cycle and leaves criterion 2 unserved.
 	CyclicPlan = `{"version": 2, "units": [
   {"id": "resume", "task": "Resume from the last chunk.", "acceptance": ["TestResume passes"], "criteria": ["spec#1"], "depends_on": ["dedupe"], "footprint": ["internal.trace"]},
   {"id": "dedupe", "task": "Skip acknowledged chunks.", "acceptance": ["No chunk is sent twice"], "criteria": [], "depends_on": ["resume"], "footprint": ["internal.trace"]}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
@@ -14,14 +15,13 @@ import (
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func refusedNoticesOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []string {
 	t.Helper()
 	outbox, err := repo.Outbox(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out []string
 	for _, e := range outbox {
 		if strings.HasPrefix(e.TransitionID, "route-") && strings.HasSuffix(e.TransitionID, "-refused") {
@@ -34,7 +34,7 @@ func refusedNoticesOf(t *testing.T, repo *trace.Repository, stream config.Workst
 func refusedJudgmentsOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []jev.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	latest := map[string]trace.Document{}
 	for _, d := range docs {
 		if strings.HasPrefix(d.Path, "judgments/") && d.Revision > latest[d.ID].Revision {
@@ -44,7 +44,7 @@ func refusedJudgmentsOf(t *testing.T, repo *trace.Repository, stream config.Work
 	var out []jev.Record
 	for _, d := range latest {
 		var r jev.Record
-		intakefixture.Must(t, json.Unmarshal([]byte(d.Content), &r))
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &r))
 		if r.Refused != "" {
 			out = append(out, r)
 		}
@@ -59,14 +59,14 @@ func sendBackExit(t *testing.T, f *shedFixture, repo *trace.Repository, stream c
 		Default: UnitImplementing, Targets: []string{UnitImplementing, UnitChecking, UnitReviewing, UnitContested}, Actor: foremanActor,
 		ID: id, HeaderCause: cause, Reason: "check run 1 failed", Note: "check run 1 failed",
 		Events: []trace.Event{trace.Notice(id, "unit", "Unit resume checks failed: check run 1 failed.")}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return x, id
 }
 
 func unitStateOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) trace.WorkflowState {
 	t.Helper()
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return state
 }
 
@@ -144,8 +144,8 @@ func routeWhileJevAnswers(t *testing.T, limit, way string) *limitRoute {
 	x, id := sendBackExit(t, f, repo, stream, "checks-"+name)
 	r := &limitRoute{f: f, stream: stream, repo: repo, x: x, id: id, limit: l, way: way, before: unitStateOf(t, repo, stream), transitions: len(workTransitions(t, repo, stream))}
 	res, err := f.s.RouteExit(context.Background(), x)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, reachErr)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, reachErr)
 	r.res = res
 	return r
 }
@@ -188,7 +188,7 @@ func TestALimitReachedWhileJevAnswersRunsNoEffectOfTheTarget(t *testing.T) {
 	t.Parallel()
 	eachLimitAndAnswer(t, jevAnswers, func(t *testing.T, r *limitRoute) {
 		outbox, err := r.repo.Outbox(r.stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range outbox {
 			if e.TransitionID == r.id || strings.Contains(e.Event.Body, "checks failed") {
 				t.Fatalf("an effect of the target ran: %+v", e)
@@ -252,7 +252,7 @@ func approveRecoveryWhileLimited(t *testing.T, limit string) *limitedRecoveryApp
 	}
 	req := recoveryRequestOf(t, cards[0])
 	l.arm(t, m.f, m.repo, m.stream)
-	intakefixture.Must(t, l.reach(t, m.f, m.repo, m.stream))
+	fixturekit.Must(t, l.reach(t, m.f, m.repo, m.stream))
 	a := &limitedRecoveryApproval{m: m, p: p, l: l, req: req, before: m.state(t), transitions: len(workTransitions(t, m.repo, m.stream)), asked: len(p.Requests())}
 	_, a.fail = m.f.s.approveRecovery(context.Background(), string(m.stream), req)
 	return a
@@ -325,7 +325,7 @@ func TestApprovingTheRecoveryCardOnceTheLimitClearsMovesTheUnit(t *testing.T) {
 	eachLimit(t, func(t *testing.T, limit string) {
 		a := approveRecoveryWhileLimited(t, limit)
 		m := a.m
-		intakefixture.Must(t, m.f.s.store.ClearPause(workstreamTarget(m.f, m.stream), runtime.PauseOwner))
+		fixturekit.Must(t, m.f.s.store.ClearPause(workstreamTarget(m.f, m.stream), runtime.PauseOwner))
 		m.f.s.cfg.Loop.MaxSessions = 0
 		m.f.clock.Mu.Lock()
 		m.f.clock.At = m.f.clock.At.Add(time.Minute)

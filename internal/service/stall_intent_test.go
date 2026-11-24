@@ -19,26 +19,25 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func (f *stallFixture) stallDocument(id string, revision int) trace.Header {
-	return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: f.repo.Project(), Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: stallSeeder, Cause: "fixture"}
+	return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: stallSeeder, Cause: "fixture"}
 }
 
 func (f *stallFixture) sealWorkstream(t *testing.T, spec, planContent string) {
 	t.Helper()
 	if planContent == "" {
 		encoded, err := plan.Encode(plan.Plan{Version: plan.Version, Units: []plan.Unit{{ID: stallUnit, Title: "Stalled unit", Task: "Build it", Acceptance: []string{"It works."}, Criteria: []string{"spec#1"}}}})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		planContent = string(encoded)
 	}
 	sealed, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash(spec),
-		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: strings.Repeat("a", 40)}, Branch: "osmia/" + string(intakefixture.Stream), Workspace: "/nonexistent/" + string(intakefixture.Stream)})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{
+		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: strings.Repeat("a", 40)}, Branch: "osmia/" + string(fixturekit.Stream), Workspace: "/nonexistent/" + string(fixturekit.Stream)})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{
 		{Header: f.stallDocument(plan.SpecDocument, 1), Path: plan.SpecPath, Content: spec},
 		{Header: f.stallDocument(plan.PlanDocument, 1), Path: plan.PlanPath, Content: planContent},
 		{Header: f.stallDocument(seal.DocumentID, 1), Path: seal.Path, Content: string(sealed)},
@@ -47,18 +46,18 @@ func (f *stallFixture) sealWorkstream(t *testing.T, spec, planContent string) {
 
 func (f *stallFixture) finalReport(t *testing.T, report api.FinalReport) {
 	t.Helper()
-	existing, err := delivery.FinalReports(f.repo, intakefixture.Stream)
-	intakefixture.Must(t, err)
+	existing, err := delivery.FinalReports(f.repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	data, err := json.Marshal(report)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: f.stallDocument(delivery.FinalReportDocument, len(existing)+1), Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: f.stallDocument(delivery.FinalReportDocument, len(existing)+1), Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
 }
 
 func (f *stallFixture) move(t *testing.T, n int, note string) {
 	t.Helper()
 	data, err := json.Marshal(api.WorkstreamMove{Move: n, From: AssembledState, To: BuildingState, Note: note, By: "the chief of staff"})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: f.stallDocument(lifecycle.WorkstreamMoveDocument(n), 1), Path: lifecycle.WorkstreamMovePath(n), Content: string(data) + "\n"}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: f.stallDocument(lifecycle.WorkstreamMoveDocument(n), 1), Path: lifecycle.WorkstreamMovePath(n), Content: string(data) + "\n"}}))
 }
 
 func (f *stallFixture) stalledWorkstream(t *testing.T) (text, raw string) {
@@ -75,7 +74,7 @@ func (f *stallFixture) stalledWorkstream(t *testing.T) (text, raw string) {
 		t.Fatal("the watchdog raised no stalled exit for the workstream")
 	}
 	res, err := f.s.RouteExit(context.Background(), exit)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !res.Committed {
 		t.Fatalf("the stalled workstream did not route: %+v", res)
 	}
@@ -94,14 +93,14 @@ func (f *stallFixture) stalledWorkstream(t *testing.T) (text, raw string) {
 func requestOf(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	data, err := json.Marshal(r)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return string(data)
 }
 
 func summaryOf(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	state, err := json.Marshal(r.State)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var text string
 	if json.Unmarshal(state, &text) == nil {
 		state = []byte(text)
@@ -202,7 +201,7 @@ func TestAStalledWorkstreamExitOfLargeRecordsStaysBounded(t *testing.T) {
 		"BLOCKING-LAST", "MOVE-40", "[code omitted]", "30 oldest", "WATCHDOG-FAILURE", `"minutes_quiet":`)
 	requireStalledNotIn(t, text, code, "MOVE-1 ")
 	var answered bool
-	for _, rec := range routeRecordsOf(t, f.repo, intakefixture.Stream) {
+	for _, rec := range routeRecordsOf(t, f.repo, fixturekit.Stream) {
 		if rec.Trigger == intake.TriggerStalled {
 			answered = rec.Outcome != router.OutcomeFallback
 		}

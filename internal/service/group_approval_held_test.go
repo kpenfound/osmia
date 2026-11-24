@@ -14,7 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -85,7 +84,7 @@ func newHeldApprovalFixture(t *testing.T, count int, crossListed bool) *heldAppr
 	var repos []*trace.Repository
 	for _, p := range f.cfg.Projects {
 		r, err := trace.Open(f.cfg.Root, p)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(func() { r.Close() })
 		repos = append(repos, r)
 	}
@@ -98,17 +97,17 @@ func newHeldApprovalFixture(t *testing.T, count int, crossListed bool) *heldAppr
 			stream := f.streams[r.Project()]
 			if i > 0 {
 				stream = config.WorkstreamID(fmt.Sprintf("w_%02x%030x", i, j))
-				intakefixture.Must(t, r.CreateWorkstream(ctx, stream, fixturekit.DemoStart, ownerActor))
+				fixturekit.Must(t, r.CreateWorkstream(ctx, stream, fixturekit.DemoStart, ownerActor))
 			}
 			members = append(members, trace.CrossRepoMember{Project: r, Workstream: stream})
 			streams = append(streams, stream)
 			known[r.Project()] = append(known[r.Project()], stream)
 		}
 		chief, group, err := trace.CreateWorkgroupTrace(ctx, f.cfg.Root, members, fixturekit.DemoStart, ownerActor, "fixture")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(func() { chief.Close() })
 		for _, m := range members {
-			intakefixture.Must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "fixture"))
+			fixturekit.Must(t, m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "fixture"))
 		}
 		h.groups = append(h.groups, group)
 		h.streams = append(h.streams, streams)
@@ -121,7 +120,7 @@ func newHeldApprovalFixture(t *testing.T, count int, crossListed bool) *heldAppr
 		}
 	}
 	store, _, err := runtime.Open(runtime.Inputs{Config: f.cfg, Workstreams: known})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	h.s = &Service{cfg: f.cfg, options: f.opts, store: store, logger: slog.New(h.logs)}
 	for _, r := range repos {
@@ -144,13 +143,13 @@ func (h *heldApprovalFixture) pass(t *testing.T, ctx context.Context) error {
 func (h *heldApprovalFixture) passes(t *testing.T, n int) {
 	t.Helper()
 	for range n {
-		intakefixture.Must(t, h.pass(t, context.Background()))
+		fixturekit.Must(t, h.pass(t, context.Background()))
 	}
 }
 
 func (h *heldApprovalFixture) archive(t *testing.T, i, j int, project config.ProjectID, group config.WorkgroupID) {
 	t.Helper()
-	intakefixture.Must(t, h.s.store.SetArchived(runtime.Archive{Project: project, Workstream: h.streams[i][j], Workgroup: group, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, h.s.store.SetArchived(runtime.Archive{Project: project, Workstream: h.streams[i][j], Workgroup: group, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart}))
 }
 
 func (h *heldApprovalFixture) retire(t *testing.T, i int) {
@@ -164,7 +163,7 @@ func (h *heldApprovalFixture) reach(t *testing.T, i int) {
 	t.Helper()
 	for j, p := range h.s.projects {
 		streams, err := intake.NonSessionWorkstreams(p.repository)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !slices.Contains(streams, h.streams[i][j]) {
 			t.Fatalf("group %d member %s is not listed by project %s", i, h.streams[i][j], p.id)
 		}
@@ -179,15 +178,15 @@ func (h *heldApprovalFixture) assertUntouched(t *testing.T, i int) {
 	t.Helper()
 	id := h.groups[i].ID
 	authority, err := trace.OpenWorkgroupAuthority(h.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer authority.Close()
 	_, _, found, err := trace.ReadGroupApproval(authority, h.groups[i].Members[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if found {
 		t.Fatalf("group %d recorded an approval", i)
 	}
 	status, err := h.s.projects[0].repository.GroupApprovalStatusOf(id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if status.Complete {
 		t.Fatalf("group %d approval completed", i)
 	}
@@ -204,7 +203,7 @@ func TestGroupApprovalPassIsQuietForFullyRetiredWorkgroup(t *testing.T) {
 	h.retire(t, 0)
 	h.reach(t, 0)
 	retired, err := h.s.workgroupFullyRetired(context.Background(), h.groups[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !retired {
 		t.Fatal("fixture workgroup is not verifiably retired")
 	}
@@ -276,7 +275,7 @@ func TestGroupApprovalPassReportsAgainWhenUnverifiedStateRecurs(t *testing.T) {
 	h := newHeldApprovalFixture(t, 1, false)
 	id := h.groups[0].ID
 	mismatch := func() { h.archive(t, 0, 0, h.s.projects[0].id, otherWorkgroup) }
-	release := func() { intakefixture.Must(t, h.s.store.ClearArchived(h.streams[0][0])) }
+	release := func() { fixturekit.Must(t, h.s.store.ClearArchived(h.streams[0][0])) }
 	want := func(n int, why string) {
 		t.Helper()
 		if got := h.logs.held(id); len(got) != n {
@@ -318,7 +317,7 @@ func TestGroupApprovalPassReleasesHeldWorkgroupWhenApprovalCompletes(t *testing.
 		{Project: h.s.projects[0].id, Workstream: h.streams[0][0]},
 		{Project: h.s.projects[1].id, Workstream: h.streams[0][1]},
 	}
-	intakefixture.Must(t, trace.RecordGroupApproval(context.Background(), h.chiefs[0], h.groups[0].Members[0], trace.GroupApproval{Workgroup: id, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+	fixturekit.Must(t, trace.RecordGroupApproval(context.Background(), h.chiefs[0], h.groups[0].Members[0], trace.GroupApproval{Workgroup: id, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
 	h.passes(t, 2)
 	if _, held := heldGroupApprovals.Load(h.s.heldGroupApprovalKey(id)); held {
 		t.Fatal("a completed approval stayed recorded as unverified")

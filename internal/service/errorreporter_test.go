@@ -38,7 +38,7 @@ func TestErrorReporterFilesEachSourceOnTheConfiguredRepository(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo, `labels = ["bug", "auto"]`), nil)
 	before, err := r.c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	r.apiError()
 	r.opFail("workspace.draft", "draft failed")
 	r.githubFail("GET", "/repos/acme/private-repo/pulls/12", 502, "bad gateway")
@@ -66,7 +66,7 @@ func TestErrorReporterFilesEachSourceOnTheConfiguredRepository(t *testing.T) {
 	r.quiet(reportRepo, 3)
 
 	after, err := r.c.Statuses(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(after.Workstreams) != len(before.Workstreams) {
 		t.Fatalf("filing issues changed the workstreams: %d then %d", len(before.Workstreams), len(after.Workstreams))
 	}
@@ -399,9 +399,9 @@ func TestErrorReporterKeepsItsIssuesAcrossARestart(t *testing.T) {
 	}
 	cfg := r.s.current()
 	state, err := cfg.Root.ErrorReports()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ledger, err := cfg.Root.Notifications()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if state != r.statePath() || filepath.Dir(state) != filepath.Dir(ledger) {
 		t.Fatalf("state %s is not beside the notification ledger %s", state, ledger)
 	}

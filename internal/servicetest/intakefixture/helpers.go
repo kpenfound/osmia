@@ -43,8 +43,6 @@ import (
 
 	regexp "regexp"
 
-	jev "github.com/kpenfound/osmia/internal/jev"
-
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 
 	errors "errors"
@@ -61,52 +59,52 @@ import (
 	thread "github.com/kpenfound/osmia/internal/thread"
 )
 
-// step runs the amendment controller once on amendment 1 and checks the
+// Step runs the amendment controller once on amendment 1 and checks the
 // state it leaves it in.
-func Step(t *testing.T, a AmendmentDebate, stream config.WorkstreamID, req trace.Amendment, want string) {
+func Step(t *testing.T, a intake.AmendmentDebate, stream config.WorkstreamID, req trace.Amendment, want string) {
 	t.Helper()
-	Must(t, a.One(context.Background(), stream, req))
-	if state, err := a.Repository.Workflow(stream, AmendmentSubject(req.ID)); err != nil || state.Value != want {
+	fixturekit.Must(t, a.One(context.Background(), stream, req))
+	if state, err := a.Repository.Workflow(stream, intake.AmendmentSubject(req.ID)); err != nil || state.Value != want {
 		t.Fatalf("amendment %s is %+v, want %s: %v", req.ID, state, want, err)
 	}
 }
 
-// masonTurns returns the turns of the unit's mason thread with the given ID.
+// MasonTurns returns the turns of the unit's mason thread with the given ID.
 func MasonTurns(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit, turn string) []trace.QueuedTurn {
 	t.Helper()
-	th, err := repository.Thread(stream, MasonAgent(unit))
-	Must(t, err)
+	th, err := repository.Thread(stream, intake.MasonAgent(unit))
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(slices.Clone(th.Turns), func(q trace.QueuedTurn) bool { return q.Request.TurnID != turn })
 }
 
-// unitMoves returns the transitions of the unit's subject recorded for
+// UnitMoves returns the transitions of the unit's subject recorded for
 // amendment 1.
 func UnitMoves(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []trace.Transition {
 	t.Helper()
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(transitions, func(tr trace.Transition) bool {
 		return tr.Subject != trace.UnitSubject(unit) || !strings.HasSuffix(tr.ID, "_amendment_1")
 	})
 }
 
 var (
-	CheckpointSpec = strings.Replace(ValidSpec, "the last acknowledged chunk", "a durable checkpoint", 1)
-	RestartPlan    = strings.Replace(ValidPlan, "TestResume", "TestResumeAfterRestart", 1)
+	CheckpointSpec = strings.Replace(fixturekit.ValidSpec, "the last acknowledged chunk", "a durable checkpoint", 1)
+	RestartPlan    = strings.Replace(fixturekit.ValidPlan, "TestResume", "TestResumeAfterRestart", 1)
 )
 
-// parks has amendment 1's first attempt deliver the revised spec and ask
+// Parks has amendment 1's first attempt deliver the revised spec and ask
 // question 1.
-func Parks(p *Faults) FakeTurn {
+func Parks(p *Faults) fixturekit.FakeTurn {
 	return func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		return errors.Join(Delivers(p, plan.SpecPath, CheckpointSpec, DraftValid)(ctx, req, verified, tools), Asks(p, "1")(ctx, req, verified, tools))
+		return errors.Join(Delivers(p, plan.SpecPath, CheckpointSpec, intake.DraftValid)(ctx, req, verified, tools), Asks(p, "1")(ctx, req, verified, tools))
 	}
 }
 
 func AmendmentOp(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, action string) coreadapter.Operation {
 	t.Helper()
 	ops, err := repo.Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, op := range ops {
 		if op.Operation.Action == action {
 			return op.Operation
@@ -116,14 +114,14 @@ func AmendmentOp(t *testing.T, repo *trace.Repository, stream config.WorkstreamI
 	return coreadapter.Operation{}
 }
 
-// amendmentObjection is a committee record of round 1 of amendment 1 with one
+// AmendmentObjection is a committee record of round 1 of amendment 1 with one
 // objection of the given kind.
 func AmendmentObjection(kind shed.Kind) shed.Record {
 	citation, part := "spec#1", "plan"
 	if kind == shed.Charter {
 		citation, part = "charter#1", "spec#1"
 	}
-	member := CommitteeAgent(1)
+	member := intake.CommitteeAgent(1)
 	return shed.Record{Version: shed.Version, Round: 1, Member: member, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: "amend-1-round-1-" + member + "-1",
 		Objections: []shed.Objection{{ID: shed.ObjectionID(1, member, 1), Kind: kind, Part: part, Argument: "The proposal needs owner attention.", Citations: []string{citation}}}}
 }
@@ -131,7 +129,7 @@ func AmendmentObjection(kind shed.Kind) shed.Record {
 func ReadDocs(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()
 	all, err := trace.Read[trace.Document](repo, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var docs []trace.Document
 	for _, doc := range all {
 		if doc.ID == id {
@@ -141,22 +139,12 @@ func ReadDocs(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, 
 	return docs
 }
 
-type Code = api.Code
-
-type APIError = api.APIError
-
-type ErrorResponse = api.ErrorResponse
-
-type Diagnostic = api.Diagnostic
-
-type ConversationResponse = api.ConversationResponse
-
-// delivers makes the architect's turn deliver one draft file, which the tool
+// Delivers makes the architect's turn deliver one draft file, which the tool
 // must report with verdict for everything the attempt delivered so far.
-func Delivers(p *Faults, path, content, verdict string) FakeTurn {
+func Delivers(p *Faults, path, content, verdict string) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		got, err := CallTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content})
-		var status DraftStatus
+		got, err := fixturekit.CallTool(ctx, tools, intake.DraftTool, map[string]any{"path": path, "content": content})
+		var status intake.DraftStatus
 		if err == nil {
 			err = json.Unmarshal([]byte(got), &status)
 		}
@@ -167,9 +155,9 @@ func Delivers(p *Faults, path, content, verdict string) FakeTurn {
 	}
 }
 
-// asksThenWaits makes the architect's turn ask and then run until the service
+// AsksThenWaits makes the architect's turn ask and then run until the service
 // cancels it, signalling once it asked.
-func AsksThenWaits(p *Faults, asked chan<- struct{}) FakeTurn {
+func AsksThenWaits(p *Faults, asked chan<- struct{}) fixturekit.FakeTurn {
 	return func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		if err := Asks(p, "1")(ctx, req, verified, tools); err != nil {
 			return err
@@ -180,15 +168,15 @@ func AsksThenWaits(p *Faults, asked chan<- struct{}) FakeTurn {
 	}
 }
 
-func Sketched(feature, _ string) bool { return feature == SketchedState }
+func Sketched(feature, _ string) bool { return feature == intake.SketchedState }
 
 func DraftAt(value string) func(string, string) bool {
 	return func(_, draft string) bool { return draft == value }
 }
 
-// readTool reads a file through the turn's file_read tool.
+// ReadTool reads a file through the turn's file_read tool.
 func ReadTool(ctx context.Context, tools *mcp.ClientSession, path string) (string, error) {
-	got, err := CallTool(ctx, tools, "file_read", map[string]any{"path": path})
+	got, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": path})
 	if err != nil {
 		return "", err
 	}
@@ -197,7 +185,7 @@ func ReadTool(ctx context.Context, tools *mcp.ClientSession, path string) (strin
 	return text, err
 }
 
-// checkReadOnlyGrants asserts the grants core verified for a read-only turn:
+// CheckReadOnlyGrants asserts the grants core verified for a read-only turn:
 // the private view read-only, the session read-only with the scratch
 // directory the turn starts in, native reading tools and the backend's web
 // tools (with the guidance on how to use them) and the scoped MCP server, and
@@ -230,28 +218,28 @@ func CheckReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	}
 }
 
-// buildTransitions returns, in the order they were recorded, the
+// BuildTransitions returns, in the order they were recorded, the
 // transitions of the build subject, of the unit subjects and the move to
 // building.
 func BuildTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
 	var out []trace.Transition
 	for _, tr := range AllTransitions(t, root, project, stream) {
-		if tr.Actor == BuildingActor || tr.Subject == BuildSubject || tr.To == BuildingState {
+		if tr.Actor == intake.BuildingActor || tr.Subject == intake.BuildSubject || tr.To == intake.BuildingState {
 			out = append(out, tr)
 		}
 	}
 	return out
 }
 
-// allTransitions returns every transition of the workstream, in the order
+// AllTransitions returns every transition of the workstream, in the order
 // they were recorded.
 func AllTransitions(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
 	var out []trace.Transition
-	for _, body := range WorkstreamRecords(t, root, project, stream, "events.jsonl") {
+	for _, body := range fixturekit.WorkstreamRecords(t, root, project, stream, "events.jsonl") {
 		var tr trace.Transition
-		Must(t, json.Unmarshal(body, &tr))
+		fixturekit.Must(t, json.Unmarshal(body, &tr))
 		if tr.Schema == "osmia.trace.transition" && !router.IsJournal(tr.Subject) {
 			out = append(out, tr)
 		}
@@ -259,16 +247,16 @@ func AllTransitions(t *testing.T, root config.Root, project config.ProjectID, st
 	return out
 }
 
-// transitionMove is what one recorded transition says.
+// TransitionMove is what one recorded transition says.
 type TransitionMove struct{ ID, Subject, From, To, Cause, Reason string }
 
-// moves returns what the transitions say, checking that the building
+// Moves returns what the transitions say, checking that the building
 // controller recorded each.
 func Moves(t *testing.T, transitions []trace.Transition) []TransitionMove {
 	t.Helper()
 	var out []TransitionMove
 	for _, tr := range transitions {
-		if tr.Actor != BuildingActor {
+		if tr.Actor != intake.BuildingActor {
 			t.Fatalf("transition %s by %+v", tr.ID, tr.Actor)
 		}
 		out = append(out, TransitionMove{tr.ID, tr.Subject, tr.From, tr.To, tr.Cause, tr.Reason})
@@ -282,18 +270,16 @@ const (
 	CharterBefore = "# Charter\n\n1. Keep state in files.\n"
 )
 
-// charterSourcePath is the proposal the planted ruling's charter rule comes
-// from, and charterRulingPath the ruling.
 var (
-	CharterSourcePath = "workstreams/" + string(Stream) + "/questions/1/charter.json"
-	CharterRulingPath = "workstreams/" + string(Stream) + "/questions/1/rulings.jsonl"
+	CharterSourcePath = "workstreams/" + string(fixturekit.Stream) + "/questions/1/charter.json"
+	CharterRulingPath = "workstreams/" + string(fixturekit.Stream) + "/questions/1/rulings.jsonl"
 )
 
-// charterRevisions returns the recorded revisions of charter.md.
+// CharterRevisions returns the recorded revisions of charter.md.
 func CharterRevisions(t *testing.T, repo *trace.Repository) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, "")
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.Document
 	for _, d := range docs {
 		if d.Path == "charter.md" {
@@ -303,7 +289,7 @@ func CharterRevisions(t *testing.T, repo *trace.Repository) []trace.Document {
 	return out
 }
 
-// appended returns the charter revisions that appended the planted rule.
+// Appended returns the charter revisions that appended the planted rule.
 func Appended(t *testing.T, repo *trace.Repository) []trace.Document {
 	t.Helper()
 	var out []trace.Document
@@ -315,21 +301,21 @@ func Appended(t *testing.T, repo *trace.Repository) []trace.Document {
 	return out
 }
 
-// assemble returns the bundle a turn of the workstream receives.
+// Assemble returns the bundle a turn of the workstream receives.
 func Assemble(t *testing.T, repo *trace.Repository, ws config.WorkstreamID) bundle.Bundle {
 	t.Helper()
 	files := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }}
-	b, err := files.Assemble(context.Background(), Project, bundle.Scope{Workstream: ws})
-	Must(t, err)
+	b, err := files.Assemble(context.Background(), fixturekit.Project, bundle.Scope{Workstream: ws})
+	fixturekit.Must(t, err)
 	return b
 }
 
-// charterEvents returns the bodies of the workstream's outbox events raised
+// CharterEvents returns the bodies of the workstream's outbox events raised
 // by the charter proposal's decision or its recording in the charter.
 func CharterEvents(t *testing.T, repo *trace.Repository, ws config.WorkstreamID) []string {
 	t.Helper()
 	entries, err := repo.Outbox(ws)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []string
 	for _, e := range entries {
 		if strings.HasPrefix(e.TransitionID, trace.CharterSubject("1")+"_") {
@@ -339,28 +325,28 @@ func CharterEvents(t *testing.T, repo *trace.Repository, ws config.WorkstreamID)
 	return out
 }
 
-// withRule is the planted charter with the ratified rule appended as number.
+// WithRule is the planted charter with the ratified rule appended as number.
 func WithRule(before string, number int) string {
 	return before + "\n## Standing rulings\n\n" + string(rune('0'+number)) + ". " + CharterRule + " <!-- ratified from " + CharterRulingPath + " revision 1 -->\n"
 }
 
-// checkChartered checks that the planted rule is recorded once, as number in
+// CheckChartered checks that the planted rule is recorded once, as number in
 // the charter content want, that the proposal says so, and that every
 // workstream's bundle carries it as one notice.
 func CheckChartered(t *testing.T, repo *trace.Repository, want string, number int) {
 	t.Helper()
 	written := Appended(t, repo)
-	if len(written) != 1 || written[0].Content != want || written[0].Actor != CharterActor {
+	if len(written) != 1 || written[0].Content != want || written[0].Actor != intake.CharterActor {
 		t.Fatalf("charter revisions appending the rule: %+v", written)
 	}
 	proposals, err := repo.CharterProposals()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if len(proposals) != 1 || proposals[0].State.Value != trace.CharterChartered || proposals[0].Proposal.Number != number || proposals[0].Proposal.Charter != written[0].Revision || proposals[0].Proposal.Decision != trace.CharterRatify {
 		t.Fatalf("chartered proposal %+v", proposals)
 	}
-	for _, ws := range []config.WorkstreamID{Stream, Quiet} {
+	for _, ws := range []config.WorkstreamID{fixturekit.Stream, Quiet} {
 		b := Assemble(t, repo, ws)
-		wantNotice := []bundle.CharterNotice{{Source: CharterSourcePath, Workstream: Stream, Record: trace.CharterProposalID("1"), Revision: 3, At: proposals[0].Latest.At,
+		wantNotice := []bundle.CharterNotice{{Source: CharterSourcePath, Workstream: fixturekit.Stream, Record: trace.CharterProposalID("1"), Revision: 3, At: proposals[0].Latest.At,
 			Number: number, Rule: CharterRule, Charter: written[0].Revision, Ruling: CharterRulingPath, RulingRevision: 1, OwnerResponse: CharterRuling}}
 		if !reflect.DeepEqual(b.CharterNotices, wantNotice) {
 			t.Fatalf("charter notices of %s: %+v", ws, b.CharterNotices)
@@ -371,12 +357,12 @@ func CheckChartered(t *testing.T, repo *trace.Repository, want string, number in
 			t.Fatalf("bundle of %s:\n%s", ws, text)
 		}
 	}
-	if events := CharterEvents(t, repo, Stream); len(events) != 1 || !strings.HasPrefix(events[0], "Charter rule "+string(rune('0'+number))+" is recorded from the owner's ruling on question 1") {
+	if events := CharterEvents(t, repo, fixturekit.Stream); len(events) != 1 || !strings.HasPrefix(events[0], "Charter rule "+string(rune('0'+number))+" is recorded from the owner's ruling on question 1") {
 		t.Fatalf("chief of staff notices %q", events)
 	}
 }
 
-// faults collects what the fakes of one test found wrong: an error a fake
+// Faults collects what the fakes of one test found wrong: an error a fake
 // returns fails its turn instead of the test.
 type Faults struct {
 	Mu   sync.Mutex
@@ -398,8 +384,8 @@ func (p *Faults) Check(t *testing.T) {
 	}
 }
 
-// objects makes a member's turn raise one objection.
-func Objects(p *Faults, kind shed.Kind, part, citation string) FakeTurn {
+// Objects makes a member's turn raise one objection.
+func Objects(p *Faults, kind shed.Kind, part, citation string) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		if recorded, reason, err := ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": string(kind), "part": part, "argument": "It does not hold.", "citations": []string{citation}}); err != nil || !recorded {
 			p.Report("%s objection on %s: %q %v", kind, part, reason, err)
@@ -408,8 +394,8 @@ func Objects(p *Faults, kind shed.Kind, part, citation string) FakeTurn {
 	}
 }
 
-// concedes makes a member's turn concede its objections.
-func Concedes(p *Faults, ids ...string) FakeTurn {
+// Concedes makes a member's turn concede its objections.
+func Concedes(p *Faults, ids ...string) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		for _, id := range ids {
 			if recorded, reason, err := ShedTool(ctx, tools, shed.ConcedeTool, map[string]any{"objection": id, "reason": "The reply settles it."}); err != nil || !recorded {
@@ -422,8 +408,8 @@ func Concedes(p *Faults, ids ...string) FakeTurn {
 
 func Silent(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil }
 
-// answers makes the architect's turn answer objections.
-func Answers(p *Faults, text string, ids ...string) FakeTurn {
+// Answers makes the architect's turn answer objections.
+func Answers(p *Faults, text string, ids ...string) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 		for _, id := range ids {
 			if recorded, reason, err := ShedTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": id, "answer": text}); err != nil || !recorded {
@@ -434,7 +420,7 @@ func Answers(p *Faults, text string, ids ...string) FakeTurn {
 	}
 }
 
-// checkReplyBoundary makes the assertions from inside the architect's reply
+// CheckReplyBoundary makes the assertions from inside the architect's reply
 // turn: it reads the round and the draft, answers and redrafts, and holds
 // nothing that contributes as a member, writes or runs.
 func CheckReplyBoundary(ctx context.Context, p *Faults, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) {
@@ -448,15 +434,15 @@ func CheckReplyBoundary(ctx context.Context, p *Faults, req agent.Request, verif
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if want := []string{questions.AskTool, DraftTool, "file_read", "project_context", shed.ReplyTool}; !slices.Equal(names, want) {
+	if want := []string{questions.AskTool, intake.DraftTool, "file_read", "project_context", shed.ReplyTool}; !slices.Equal(names, want) {
 		p.Report("role tools %v, want %v", names, want)
 	}
 	for _, name := range []string{shed.ObjectTool, shed.ConcedeTool, "file_write", "shell", "fetch", "git_push", "notes_write", "set_status"} {
-		if _, err := CallTool(ctx, tools, name, map[string]any{"kind": "fit", "part": "spec", "argument": "x", "citations": []string{"charter#1"}, "objection": "x", "reason": "y"}); err == nil {
+		if _, err := fixturekit.CallTool(ctx, tools, name, map[string]any{"kind": "fit", "part": "spec", "argument": "x", "citations": []string{"charter#1"}, "objection": "x", "reason": "y"}); err == nil {
 			p.Report("the architect called %s", name)
 		}
 	}
-	for path, want := range map[string]string{"spec.md": ValidSpec, "plan.json": ValidPlan, "handed/stdin": HandedDesign, "charter.md": ShedCharter} {
+	for path, want := range map[string]string{"spec.md": fixturekit.ValidSpec, "plan.json": fixturekit.ValidPlan, "handed/stdin": fixturekit.HandedDesign, "charter.md": ShedCharter} {
 		if got, err := ReadTool(ctx, tools, path); err != nil || got != want {
 			p.Report("read %s: %q %v", path, got, err)
 		}
@@ -467,105 +453,47 @@ func CheckReplyBoundary(ctx context.Context, p *Faults, req agent.Request, verif
 		}
 	}
 	CheckReadOnlyGrants(req, verified, clone, p.Report)
-	if req.Profile.VCSAccess || req.Profile.Name != ArchitectRole {
+	if req.Profile.VCSAccess || req.Profile.Name != intake.ArchitectRole {
 		p.Report("request carries VCS access or another role: %+v", req.Profile)
 	}
 }
 
-// recordDesignDraft writes a draft document the same way draft_brief's tool
-// handler does, without running a real agent turn, so a test of
-// startDesignWorkgroup alone does not need a production enforcement
-// fixture.
+// RecordDesignDraft writes a draft document the same way draft_brief's tool
+// handler does, without running a real agent turn.
 func RecordDesignDraft(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, content string) error {
 	t.Helper()
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignDraftDocument, Revision: 1,
-		Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: ChiefActor, Cause: DraftBriefToolName}
-	data, err := json.Marshal(DesignBriefRecord{Content: content})
+	return RecordDesignDraftRevision(t, repository, stream, 1, content)
+}
+
+// RecordDesignDraftRevision records the revision of the stream's drafted
+// brief, as the draft_brief tool does.
+func RecordDesignDraftRevision(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, revision int, content string) error {
+	t.Helper()
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: intake.DesignDraftDocument, Revision: revision,
+		Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: intake.ChiefActor, Cause: intake.DraftBriefToolName}
+	data, err := json.Marshal(intake.DesignBriefRecord{Content: content})
 	if err != nil {
 		return err
 	}
-	return repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: DesignDraftPath, Content: string(data)}})
+	return repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(data)}})
 }
 
-func RecordDesignDraft2(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, content string) error {
+// ApiError checks that err is the service's error with the code and message.
+func ApiError(t *testing.T, err error, code api.Code, message string) {
 	t.Helper()
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: DesignDraftDocument, Revision: 2,
-		Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: ChiefActor, Cause: DraftBriefToolName}
-	data, err := json.Marshal(DesignBriefRecord{Content: content})
-	if err != nil {
-		return err
-	}
-	return repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: DesignDraftPath, Content: string(data)}})
-}
-
-// apiError checks that err is the service's error with the code and message.
-func ApiError(t *testing.T, err error, code Code, message string) {
-	t.Helper()
-	var api *APIError
+	var api *api.APIError
 	if !errors.As(err, &api) || api.Code != code || api.Message != message {
 		t.Fatalf("want %s %q, got %v", code, message, err)
 	}
 }
 
-type AmendmentDebate = intake.AmendmentDebate
-
-var AmendmentSubject = intake.AmendmentSubject
-
-const ArchitectRole = intake.ArchitectRole
-
-const SketchedState = intake.SketchedState
-
-const DraftTool = intake.DraftTool
-
-const DraftValid = intake.DraftValid
-
-type DraftStatus = intake.DraftStatus
-
-const BuildingState = intake.BuildingState
-
-const BuildSubject = intake.BuildSubject
-
-const UnitImplementing = intake.UnitImplementing
-
-const UnitWaiting = intake.UnitWaiting
-
-var BuildingActor = intake.BuildingActor
-
-var CharterActor = intake.CharterActor
-
-var ChiefActor = intake.ChiefActor
-
-const DraftBriefToolName = intake.DraftBriefToolName
-
-const DesignDraftDocument = intake.DesignDraftDocument
-
-const DesignDraftPath = intake.DesignDraftPath
-
-type DesignBriefRecord = intake.DesignBriefRecord
-
-type StagedWorkspaces = intake.StagedWorkspaces
-
-var MasonAgent = intake.MasonAgent
-
-const ReviewerRole = intake.ReviewerRole
-
-const CommitteeRole = intake.CommitteeRole
-
-var CommitteeAgent = intake.CommitteeAgent
-
-const MasonRole = intake.MasonRole
-
-type StreamWorkspaces = intake.StreamWorkspaces
-
 func DecideWith(t *testing.T, tool coreadapter.Tool, input string) string {
 	t.Helper()
 	out, err := tool.Handle(context.Background(), json.RawMessage(input))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return string(out)
 }
 
-// The four designs the owner hands in. The fakes tell the workstreams apart
-// by the first line of what was handed.
 const (
 	ExitDebated   = "# Resumable uploads\n\nUploads that drop resume where they stopped.\n"
 	ExitCapped    = "# Upload retention\n\nUploads are kept for thirty days.\n"
@@ -584,21 +512,21 @@ const (
 	ExitOverrule = "The reviewer's judgement is enough for retention."
 )
 
-// exitDemo holds the fake agents' scripts, keyed by the handed design's first
+// ExitDemo holds the fake agents' scripts, keyed by the handed design's first
 // line and then by turn name, and what they saw.
 type ExitDemo struct {
 	Mu       sync.Mutex
 	Trace    string
 	Root     config.Root
 	Project  config.ProjectID
-	Plays    map[string]map[string]DemoTurn
+	Plays    map[string]map[string]fixturekit.DemoTurn
 	Ran      map[string][]string
 	Prompts  map[string]string
 	Streams  map[string]config.WorkstreamID
 	Problems []string
 }
 
-// streamOf returns the workstream a design was handed in as, once the
+// StreamOf returns the workstream a design was handed in as, once the
 // hand-in has returned.
 func (d *ExitDemo) StreamOf(design string) (config.WorkstreamID, bool) {
 	d.Mu.Lock()
@@ -607,7 +535,7 @@ func (d *ExitDemo) StreamOf(design string) (config.WorkstreamID, bool) {
 	return stream, ok
 }
 
-// design names the workstream a turn belongs to by the first line of the
+// Design names the workstream a turn belongs to by the first line of the
 // design handed to it. Every turn's session directory is
 // <kind>/<project>/<workstream>/<turn or agent>/<session or turn>.
 func (d *ExitDemo) Design(req agent.Request) (string, error) {
@@ -616,7 +544,7 @@ func (d *ExitDemo) Design(req agent.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := LatestDocumentIn(dir, "workstreams/"+stream+"/documents.jsonl", "handed/stdin")
+	data, err := fixturekit.LatestDocumentIn(dir, "workstreams/"+stream+"/documents.jsonl", "handed/stdin")
 	if err != nil {
 		return "", fmt.Errorf("turn %s of workstream %s: %w", req.Name, stream, err)
 	}
@@ -659,9 +587,9 @@ func (d *ExitDemo) Runs(title string) []string {
 
 func ExitTitle(design string) string { title, _, _ := strings.Cut(design, "\n"); return title }
 
-// drafts makes an architect turn deliver the given files and answer the given
+// Drafts makes an architect turn deliver the given files and answer the given
 // objections.
-func (d *ExitDemo) Drafts(files map[string]string, answers map[string]string) DemoTurn {
+func (d *ExitDemo) Drafts(files map[string]string, answers map[string]string) fixturekit.DemoTurn {
 	return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, id := range slices.Sorted(maps.Keys(answers)) {
 			if recorded, reason, err := ShedTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": id, "answer": answers[id]}); err != nil || !recorded {
@@ -670,7 +598,7 @@ func (d *ExitDemo) Drafts(files map[string]string, answers map[string]string) De
 		}
 		for _, path := range []string{plan.SpecPath, plan.PlanPath} {
 			if content, ok := files[path]; ok {
-				if _, err := CallTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
+				if _, err := fixturekit.CallTool(ctx, tools, intake.DraftTool, map[string]any{"path": path, "content": content}); err != nil {
 					return nil, fmt.Errorf("deliver %s: %w", path, err)
 				}
 			}
@@ -679,15 +607,15 @@ func (d *ExitDemo) Drafts(files map[string]string, answers map[string]string) De
 	}
 }
 
-// objection is one objection a member's turn raises.
+// Objection is one objection a member's turn raises.
 type Objection struct {
 	Kind                     shed.Kind
 	Part, Argument, Citation string
 }
 
-// debates makes a member's turn raise the given objections and concede the
+// Debates makes a member's turn raise the given objections and concede the
 // given ones.
-func (d *ExitDemo) Debates(raise []Objection, concede ...string) DemoTurn {
+func (d *ExitDemo) Debates(raise []Objection, concede ...string) fixturekit.DemoTurn {
 	return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, o := range raise {
 			if recorded, reason, err := ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": string(o.Kind), "part": o.Part, "argument": o.Argument, "citations": []string{o.Citation}}); err != nil || !recorded {
@@ -703,7 +631,7 @@ func (d *ExitDemo) Debates(raise []Objection, concede ...string) DemoTurn {
 	}
 }
 
-// exitAttention is what the fake chief of staff puts in front of the owner for
+// ExitAttention is what the fake chief of staff puts in front of the owner for
 // a packet's recommendation, in words.
 func ExitAttention(recommendation string) string {
 	switch {
@@ -715,7 +643,7 @@ func ExitAttention(recommendation string) string {
 	return "Ratify the spec and plan: no objection stands."
 }
 
-// chief is the fake chief of staff. It escalates the committee's question,
+// Chief is the fake chief of staff. It escalates the committee's question,
 // relays the owner's ruling, and makes every packet it is told of the
 // attention item of its status.
 func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -724,7 +652,6 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 		return nil, err
 	}
 	if strings.HasPrefix(req.Name, "mason-") {
-		// A ratified plan's units start their masons, which build nothing here.
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Nothing built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	if !strings.HasPrefix(req.Name, "events_") {
@@ -734,7 +661,7 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 	d.Ran[title] = append(d.Ran[title], "events")
 	d.Mu.Unlock()
 	call := func(name string, args map[string]any) {
-		if out, err := CallTool(ctx, tools, name, args); err != nil || !strings.Contains(out, `"recorded":true`) && !strings.Contains(out, `"stored":true`) {
+		if out, err := fixturekit.CallTool(ctx, tools, name, args); err != nil || !strings.Contains(out, `"recorded":true`) && !strings.Contains(out, `"stored":true`) {
 			d.Problem("%s of %q: %s %v", name, title, out, err)
 		}
 	}
@@ -755,25 +682,7 @@ func (d *ExitDemo) Chief(ctx context.Context, req agent.Request, _ *agent.Turn, 
 
 const DoneTool = "done"
 
-// judgments returns the latest revision of every judgment record of the
-// workstream, by ID.
-func Judgments(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) map[string]jev.Record {
-	t.Helper()
-	documents, err := trace.Read[trace.Document](repository, stream)
-	Must(t, err)
-	out := map[string]jev.Record{}
-	for _, d := range documents {
-		if !strings.HasPrefix(d.Path, "judgments/") {
-			continue
-		}
-		var r jev.Record
-		Must(t, json.Unmarshal([]byte(d.Content), &r))
-		out[d.ID] = r
-	}
-	return out
-}
-
-// toolNames lists the tools a fake agent's session offers, sorted.
+// ToolNames lists the tools a fake agent's session offers, sorted.
 func ToolNames(ctx context.Context, tools *mcp.ClientSession) ([]string, error) {
 	listed, err := tools.ListTools(ctx, nil)
 	if err != nil {
@@ -796,11 +705,8 @@ const (
 	AskedAnswer   = "Yes: the store is a file under the root, and files survive restarts."
 	OwnerRuling   = "Yes, the store is durable; do not object on that account."
 	RelayedRuling = "The store keeps acknowledged chunks across a restart: it is durable."
-	// chiefRole runs the chief of staff in a container, like every other role
-	// of the shed fixtures.
-	ChiefRole = "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
-	// pinOne names the revision the fixtures' round 1 is pinned to.
-	PinOne = "spec.md revision 1 and plan.json revision 1"
+	ChiefRole     = "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	PinOne        = "spec.md revision 1 and plan.json revision 1"
 )
 
 var (
@@ -808,7 +714,7 @@ var (
 	OwnerRuled   = regexp.MustCompile(`The owner ruled on inbox entry \d+, \S+ \(questions ([^)]+)\): `)
 )
 
-// chief is the fake chief of staff of the asking fixtures. A committee
+// Chief is the fake chief of staff of the asking fixtures. A committee
 // question it was told to release it answers from the record, citing the
 // charter; one it was told to hold it answers the same way and then keeps the
 // turn open until the hold closes or the turn is cancelled; any other it
@@ -819,12 +725,10 @@ type Chief struct {
 	Mu       sync.Mutex
 	Released map[string]bool
 	Held     map[string]chan struct{}
-	// routes holds, by question ID, the citations, change and reason of
-	// the amendment the chief of staff routes that question to.
-	Routes map[string]map[string]any
+	Routes   map[string]map[string]any
 }
 
-// route has the chief of staff route question id to an amendment with the
+// Route has the chief of staff route question id to an amendment with the
 // given citations, change and reason.
 func (c *Chief) Route(id string, citations []string, change, reason string) {
 	c.Mu.Lock()
@@ -835,14 +739,14 @@ func (c *Chief) Route(id string, citations []string, change, reason string) {
 	c.Routes[id] = map[string]any{"question": id, "citations": citations, "change": change, "reason": reason}
 }
 
-// release has the chief of staff answer question id from the record.
+// Release has the chief of staff answer question id from the record.
 func (c *Chief) Release(id string) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	c.Released[id] = true
 }
 
-// hold has the chief of staff answer question id from the record and keep
+// Hold has the chief of staff answer question id from the record and keep
 // its turn open until the returned channel closes.
 func (c *Chief) Hold(id string) chan struct{} {
 	c.Mu.Lock()
@@ -853,7 +757,7 @@ func (c *Chief) Hold(id string) chan struct{} {
 
 func (c *Chief) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 
-	if strings.HasPrefix(req.Name, ReviewerRole+"-") {
+	if strings.HasPrefix(req.Name, intake.ReviewerRole+"-") {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -887,10 +791,10 @@ func (c *Chief) Turn(ctx context.Context, req agent.Request, _ *agent.Turn, tool
 	return QuestionResult(req, "session-chief", "Chosen"), nil
 }
 
-// choose calls one question tool and reports a refusal, except one saying the
+// Choose calls one question tool and reports a refusal, except one saying the
 // question was chosen for already: a prompt replays earlier events.
 func (c *Chief) Choose(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) {
-	got, err := CallTool(ctx, tools, name, args)
+	got, err := fixturekit.CallTool(ctx, tools, name, args)
 	if err != nil {
 
 		if ctx.Err() != nil {
@@ -912,22 +816,22 @@ func (c *Chief) Choose(ctx context.Context, tools *mcp.ClientSession, name strin
 	}
 }
 
-// asks makes a member's turn ask the question that gets number id and check
+// Asks makes a member's turn ask the question that gets number id and check
 // the tool's answer.
-func Asks(p *Faults, id string) FakeTurn {
+func Asks(p *Faults, id string) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		got, err := CallTool(ctx, tools, questions.AskTool, map[string]any{"question": AskedQuestion})
+		got, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": AskedQuestion})
 		if err != nil || got != `{"recorded":true,"question":"`+id+`","next":"End your turn now. The answer arrives as your next turn on this thread."}` {
 			p.Report("ask: %q %v", got, err)
 		}
-		if got, err := CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "And another?"}); err != nil || !strings.Contains(got, "this turn already asked question "+id) {
+		if got, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "And another?"}); err != nil || !strings.Contains(got, "this turn already asked question "+id) {
 			p.Report("a second question in the turn: %q %v", got, err)
 		}
 		return nil
 	}
 }
 
-// results renders acknowledged operations with their results, which %v
+// Results renders acknowledged operations with their results, which %v
 // prints as pointers.
 func Results(ops []trace.OperationRecord) []string {
 	var out []string
@@ -941,9 +845,9 @@ func Results(ops []trace.OperationRecord) []string {
 	return out
 }
 
-// held makes a member's turn report that it started and wait to be released,
+// Held makes a member's turn report that it started and wait to be released,
 // so the owner can act while the round runs.
-func Held(started chan<- struct{}, release <-chan struct{}) FakeTurn {
+func Held(started chan<- struct{}, release <-chan struct{}) fixturekit.FakeTurn {
 	return func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		close(started)
 		select {
@@ -959,14 +863,14 @@ func AwaitStart(t *testing.T, started <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-started:
-	case <-time.After(DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the member's turn did not start")
 	}
 }
 
-// failed reports whether err is an API error with that code.
-func Failed(err error, code Code) bool {
-	var api *APIError
+// Failed reports whether err is an API error with that code.
+func Failed(err error, code api.Code) bool {
+	var api *api.APIError
 	return errors.As(err, &api) && api.Code == code
 }
 
@@ -975,7 +879,7 @@ const ShedCharter = "1. Keep changes small.\n2. Every change has a test.\n"
 // tool calls object or concede and returns whether it was recorded, and the
 // objection ID or the reason.
 func ShedTool(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any) (bool, string, error) {
-	got, err := CallTool(ctx, tools, name, args)
+	got, err := fixturekit.CallTool(ctx, tools, name, args)
 	if err != nil {
 		return false, "", err
 	}
@@ -993,7 +897,7 @@ func ShedTool(ctx context.Context, tools *mcp.ClientSession, name string, args m
 	return false, result.Reason, nil
 }
 
-// barrier holds every member's turn until all of them are running, so a
+// Barrier holds every member's turn until all of them are running, so a
 // round that ran its members one after another never finishes.
 type Barrier struct {
 	Mu      sync.Mutex
@@ -1016,12 +920,12 @@ func (b *Barrier) Wait(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		return errors.New("the other members never started: the round does not run them in parallel")
 	}
 }
 
-// checkCommitteeBoundary makes the negative assertions from inside a member's
+// CheckCommitteeBoundary makes the negative assertions from inside a member's
 // turn: the role reads files, contributes and asks, and nothing carries
 // notes, write, execute, network or VCS access.
 func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) error {
@@ -1039,12 +943,12 @@ func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 	if want := []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool, "project_context"}; !slices.Equal(names, want) {
 		fail("role tools %v, want %v", names, want)
 	}
-	for _, name := range []string{"file_write", "shell", "exec", "fetch", "git_push", DraftTool, "set_status", "notes_read", "notes_write", "answer", "escalate", shed.ReplyTool} {
-		if _, err := CallTool(ctx, tools, name, map[string]any{"path": "x", "content": "y"}); err == nil {
+	for _, name := range []string{"file_write", "shell", "exec", "fetch", "git_push", intake.DraftTool, "set_status", "notes_read", "notes_write", "answer", "escalate", shed.ReplyTool} {
+		if _, err := fixturekit.CallTool(ctx, tools, name, map[string]any{"path": "x", "content": "y"}); err == nil {
 			fail("runtime called %s", name)
 		}
 	}
-	for path, want := range map[string]string{"spec.md": ValidSpec, "plan.json": ValidPlan, "handed/stdin": HandedDesign, "charter.md": ShedCharter, "repo/CODEOWNERS": "/internal/ @core\n", "repo/internal/trace/git.go": "package trace\n"} {
+	for path, want := range map[string]string{"spec.md": fixturekit.ValidSpec, "plan.json": fixturekit.ValidPlan, "handed/stdin": fixturekit.HandedDesign, "charter.md": ShedCharter, "repo/CODEOWNERS": "/internal/ @core\n", "repo/internal/trace/git.go": "package trace\n"} {
 		if got, err := ReadTool(ctx, tools, path); err != nil || got != want {
 			fail("read %s: %q %v", path, got, err)
 		}
@@ -1052,17 +956,17 @@ func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 	if bundle, err := ReadTool(ctx, tools, "context.md"); err != nil || !strings.Contains(bundle, "- charter#2: Every change has a test.") || !strings.Contains(bundle, "project_context") {
 		fail("context.md: %q %v", bundle, err)
 	}
-	for _, path := range []string{"repo/secret.env", "secret.env", "repo/.git/HEAD", ".git/HEAD", "../config.toml", filepath.Join(clone, "CODEOWNERS"), "kb/entities.json", "shed/round-1/" + CommitteeAgent(2) + ".json"} {
+	for _, path := range []string{"repo/secret.env", "secret.env", "repo/.git/HEAD", ".git/HEAD", "../config.toml", filepath.Join(clone, "CODEOWNERS"), "kb/entities.json", "shed/round-1/" + intake.CommitteeAgent(2) + ".json"} {
 		if _, err := ReadTool(ctx, tools, path); err == nil {
 			fail("runtime read %s", path)
 		}
 	}
 	CheckReadOnlyGrants(req, verified, clone, fail)
-	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || req.Profile.Name != CommitteeRole {
+	if req.Profile.VCSAccess || req.Workspace == nil || req.Workspace.VCS() != nil || len(req.VCSEnv) != 0 || req.Profile.Name != intake.CommitteeRole {
 		fail("request carries VCS access or another role: %+v", req.Profile)
 	}
 	for key, value := range req.Env {
-		if key != "OSMIA_MCP_TOKEN" || strings.Contains(value, DemoSecret) {
+		if key != "OSMIA_MCP_TOKEN" || strings.Contains(value, fixturekit.DemoSecret) {
 			fail("runtime environment exposes %s", key)
 		}
 	}
@@ -1080,7 +984,7 @@ func CheckCommitteeBoundary(ctx context.Context, req agent.Request, verified *ag
 	return errors.Join(problems...)
 }
 
-// asking wraps the fake masons' turn: in the workstream stream, or in every
+// Asking wraps the fake masons' turn: in the workstream stream, or in every
 // workstream when stream is empty, the turn asks the question that gets
 // number id before it writes its file.
 func (m *FakeMasons) Asking(p *Faults, stream config.WorkstreamID, id string) func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) (*agent.Result, error) {
@@ -1094,36 +998,19 @@ func (m *FakeMasons) Asking(p *Faults, stream config.WorkstreamID, id string) fu
 	}
 }
 
-// awaitAcknowledged polls fetch until it returns operations and the reconcile
-// controller has acknowledged every one of them. An operation's result and its
-// acknowledgement are committed after the state its Apply commits, so a test
-// that reached an operation through an awaited state must wait here before it
-// asserts on the operation's result, acknowledgement or history.
-var AwaitAcknowledged = fixturekit.AwaitAcknowledged
-
-// awaitPasses waits until passed, advanced once per completed reconciliation
-// pass by a schedulePassed hook a fixture's prepare func installed, has
-// counted at least n more passes than when this call began, then returns
-// what the counter observed. It fails at the deadline with the last count,
-// so a check that nothing more happened still runs against passes that
-// demonstrably ran, rather than a fixed sleep that might not have covered
-// any.
+// AwaitPasses waits until passed, which a fixture advances once per completed
+// reconciliation pass, has counted at least n more passes than when the call
+// began, then returns the count. It fails at the deadline with the last count.
 func AwaitPasses(t *testing.T, passed *atomic.Int64, n int64) int64 {
 	t.Helper()
 	target := passed.Load() + n
-	deadline := time.Now().Add(DemoTimeout)
-	for {
-		if got := passed.Load(); got >= target {
-			return got
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("passes %d, want at least %d", passed.Load(), target)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("%d reconciliation passes", target), wake, func() bool { return passed.Load() >= target })
+	return passed.Load()
 }
 
-// awaitTurn waits until the i-th turn of the agent's thread completed.
+// AwaitTurn waits until the i-th turn of the agent's thread completed.
 func AwaitTurn(t *testing.T, repository func() *trace.Repository, stream config.WorkstreamID, agent string, i int) trace.QueuedTurn {
 	t.Helper()
 	var q trace.QueuedTurn
@@ -1138,7 +1025,7 @@ func AwaitTurn(t *testing.T, repository func() *trace.Repository, stream config.
 	return q
 }
 
-// changeRaceGate stops only the selected production boundary after approval.
+// ChangeRaceGate stops only the selected production boundary after approval.
 type ChangeRaceGate struct {
 	Step        string
 	Armed       atomic.Bool
@@ -1148,49 +1035,49 @@ type ChangeRaceGate struct {
 	ReleaseOnce sync.Once
 }
 
-// chiefEvent reports whether e is an event the chief of staff receives as
+// ChiefEvent reports whether e is an event the chief of staff receives as
 // information: a notice or routine progress.
 func ChiefEvent(e trace.Event) bool {
 	return e.Kind == trace.NoticeKind || e.Kind == trace.ProgressKind
 }
 
-// deliver accepts an owner message and publishes the intent to run it.
+// Deliver accepts an owner message and publishes the intent to run it.
 func Deliver(t *testing.T, repo *trace.Repository, turn string, version uint64, at time.Time) trace.TurnRequest {
 	t.Helper()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: Project, Workstream: Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
-		AgentID: DemoAgent, ThreadID: DemoThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
+		AgentID: fixturekit.DemoAgent, ThreadID: fixturekit.DemoThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
 		SystemPrompt: "You are the mason.", Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(context.Background(), req)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	event := trace.EventID("deliver_"+turn, "turn")
-	op, err := thread.TurnOperation(Project, event, thread.TurnInput{Workstream: Stream, Agent: DemoAgent, Turn: turn})
-	Must(t, err)
+	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: fixturekit.DemoAgent, Turn: turn})
+	fixturekit.Must(t, err)
 	from := ""
 	if version > 0 {
 		from = "delivering"
 	}
 	tx := trace.Transaction{ExpectedVersion: version, Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: Project, Workstream: Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
 		Subject: "mason_inbox", From: from, To: "delivering", Reason: "Owner message accepted for the mason thread"},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
 	_, err = repo.Transact(context.Background(), tx)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return req
 }
 
-// documentCommit returns the commit that recorded the latest revision of the
+// DocumentCommit returns the commit that recorded the latest revision of the
 // document at path in stream's trace.
 func DocumentCommit(t *testing.T, root config.Root, project config.ProjectID, stream config.WorkstreamID, path string) string {
 	t.Helper()
-	rows := TraceQuery(t, WorkstreamTraceDirectory(t, root, project, stream), "SELECT CAST(commit_seq AS TEXT) FROM records WHERE path = ? AND schema = 'osmia.trace.document' AND json_extract(body, '$.path') = ? ORDER BY seq DESC LIMIT 1", "workstreams/"+string(stream)+"/documents.jsonl", path)
+	rows := fixturekit.TraceQuery(t, fixturekit.WorkstreamTraceDirectory(t, root, project, stream), "SELECT CAST(commit_seq AS TEXT) FROM records WHERE path = ? AND schema = 'osmia.trace.document' AND json_extract(body, '$.path') = ? ORDER BY seq DESC LIMIT 1", "workstreams/"+string(stream)+"/documents.jsonl", path)
 	if len(rows) != 1 {
 		t.Fatalf("workstream %s records no %s", stream, path)
 	}
 	return string(rows[0])
 }
 
-// done calls the done tool and returns whether the service accepted the
+// Done calls the done tool and returns whether the service accepted the
 // report, and its reason when it did not.
 func Done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (bool, string, error) {
 	for key, value := range map[string]string{"headline": ExampleCard.Headline, "happened": ExampleCard.Happened, "needs_you": ExampleCard.NeedsYou} {
@@ -1198,7 +1085,7 @@ func Done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (b
 			args[key] = value
 		}
 	}
-	text, err := CallTool(ctx, tools, DoneTool, args)
+	text, err := fixturekit.CallTool(ctx, tools, DoneTool, args)
 	if err != nil {
 		return false, err.Error(), nil
 	}
@@ -1213,33 +1100,29 @@ func Done(ctx context.Context, tools *mcp.ClientSession, args map[string]any) (b
 	return out.Recorded, out.Reason, nil
 }
 
-// errCrashTurn is what a fake mason's play returns to end its turn with an
+// ErrCrashTurn is what a fake mason's play returns to end its turn with an
 // infrastructure failure, which the runner retries.
 var ErrCrashTurn = errors.New("the turn crashes")
 
-// errFailTurn is what a fake mason's play returns to end its turn with a
+// ErrFailTurn is what a fake mason's play returns to end its turn with a
 // behavioural failure: it reports an outcome no mason may report, so the turn
 // is not retried.
 var ErrFailTurn = errors.New("the turn fails")
 
-// eventually polls cond until it holds, failing with what after demoTimeout.
+// Eventually polls cond until it holds, failing with what after DemoTimeout.
 func Eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatal(what)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, what, wake, cond)
 }
 
-// exchange sends one raw request through client and returns its status and
+// Exchange sends one raw request through client and returns its status and
 // body.
 func Exchange(t *testing.T, client *http.Client, method, url, contentType, body string, host string) (int, []byte) {
 	t.Helper()
 	req, err := http.NewRequest(method, url, strings.NewReader(body))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -1247,43 +1130,41 @@ func Exchange(t *testing.T, client *http.Client, method, url, contentType, body 
 		req.Host = host
 	}
 	resp, err := client.Do(req)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return resp.StatusCode, data
 }
 
-// fakeMasons is a fake model session standing in for the real mason's model
+// FakeMasons is a fake model session standing in for the real mason's model
 // backend: it never calls out to a live model, so a mason's own reasoning,
 // cost and latency are left unverified. Each turn checks that it holds its
 // view's file tools, ask and done, and no amend, records what it saw,
-// writes masonWrote into its view and then plays what play holds for the
-// turn, which ends the turn failed by returning errFailTurn or errCrashTurn.
+// writes MasonWrote into its view and then plays what play holds for the
+// turn, which ends the turn failed by returning ErrFailTurn or ErrCrashTurn.
 type FakeMasons struct {
 	Mu       sync.Mutex
 	Runs     map[string][]agent.Request
 	Problems []string
-	// play holds, by turn ID, what the turn does after writing masonWrote.
 	Play     map[string]func(context.Context, agent.Request, *mcp.ClientSession) error
 	Response map[string]string
-	// chief plays the fixture's chief-of-staff turns.
-	Chief *Chief
+	Chief    *Chief
 }
 
-// handle runs a tool's handler with input and returns its result.
+// Handle runs a tool's handler with input and returns its result.
 func Handle(t *testing.T, tool coreadapter.Tool, input string) string {
 	t.Helper()
 	out, err := tool.Handle(context.Background(), json.RawMessage(input))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return string(out)
 }
 
-// noticeOf returns the notice the transition raised for the chief of staff.
+// NoticeOf returns the notice the transition raised for the chief of staff.
 func NoticeOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, entry := range outbox {
 		if entry.TransitionID == transition && ChiefEvent(entry.Event) {
 			return entry.Event.Body
@@ -1293,8 +1174,8 @@ func NoticeOf(t *testing.T, repository *trace.Repository, stream config.Workstre
 	return ""
 }
 
-// providerOf returns the provider of the workstream's workspaces.
-func ProviderOf(t *testing.T, w StreamWorkspaces, stream config.WorkstreamID) workspace.Provider {
+// ProviderOf returns the provider of the workstream's workspaces.
+func ProviderOf(t *testing.T, w intake.StreamWorkspaces, stream config.WorkstreamID) workspace.Provider {
 	t.Helper()
 	g, err := w.Of(stream)
 	if err != nil {
@@ -1303,12 +1184,12 @@ func ProviderOf(t *testing.T, w StreamWorkspaces, stream config.WorkstreamID) wo
 	return g
 }
 
-// recordSpec records content as the owner's next revision of stream's spec
+// RecordSpec records content as the owner's next revision of stream's spec
 // directly in its trace, whatever the workstream's state.
 func RecordSpec(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, content string) {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var latest *trace.Document
 	for i := range docs {
 		if docs[i].Path == "spec.md" {
@@ -1321,17 +1202,17 @@ func RecordSpec(t *testing.T, repo *trace.Repository, stream config.WorkstreamID
 	next := *latest
 	next.Revision++
 	next.Content, next.At, next.Actor, next.Cause, next.Depth = content, latest.At.Add(time.Second), trace.Actor{Kind: "owner", ID: "local"}, "owner-edit", 0
-	Must(t, repo.RecordDocuments(context.Background(), []trace.Document{next}))
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{next}))
 }
 
-// requests returns the mason turns that ran in the workstream.
+// Requests returns the mason turns that ran in the workstream.
 func (m *FakeMasons) Requests(stream config.WorkstreamID) []agent.Request {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 	return slices.Clone(m.Runs[string(stream)])
 }
 
-// requireJJ skips the test when jj is not on PATH, and fails it there when
+// RequireJJ skips the test when jj is not on PATH, and fails it there when
 // OSMIA_REQUIRE_JJ says jj must be, as in the dagger test containers.
 func RequireJJ(t *testing.T) {
 	t.Helper()
@@ -1343,7 +1224,7 @@ func RequireJJ(t *testing.T) {
 	}
 }
 
-// retries counts the retries recorded for the operation.
+// Retries counts the retries recorded for the operation.
 func Retries(op trace.OperationRecord) int {
 	n := 0
 	for _, a := range op.History {
@@ -1354,7 +1235,7 @@ func Retries(op trace.OperationRecord) int {
 	return n
 }
 
-// sealOf is a seal of one unit per footprint, resolved against the map.
+// SealOf is a seal of one unit per footprint, resolved against the map.
 func SealOf(t *testing.T, k int, m kb.Map, footprints ...[]string) seal.Seal {
 	t.Helper()
 	var p plan.Plan
@@ -1368,19 +1249,19 @@ func SealOf(t *testing.T, k int, m kb.Map, footprints ...[]string) seal.Seal {
 	return seal.Seal{Seal: k, Footprints: resolved}
 }
 
-// seals returns every recorded revision of seal.json.
+// Seals returns every recorded revision of seal.json.
 func Seals(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []seal.Seal {
 	t.Helper()
 	var out []seal.Seal
 	for _, d := range StreamDocuments(t, repository, stream, seal.DocumentID) {
 		s, err := seal.Parse([]byte(d.Content))
-		Must(t, err)
+		fixturekit.Must(t, err)
 		out = append(out, s)
 	}
 	return out
 }
 
-// sessionStream returns the workstream of a thread turn, from its session
+// SessionStream returns the workstream of a thread turn, from its session
 // directory threads/<project>/<workstream>/...
 func SessionStream(req agent.Request) string {
 	parts := strings.Split(filepath.ToSlash(req.SessionDir), "/")
@@ -1390,14 +1271,11 @@ func SessionStream(req agent.Request) string {
 	return ""
 }
 
-// settle lets the service's loop run several more passes.
-func Settle() { time.Sleep(1500 * time.Millisecond) }
-
-// snapshot reads every file below dir, including VCS metadata.
+// Snapshot reads every file below dir, including VCS metadata.
 func Snapshot(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	files := map[string]string{}
-	Must(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	fixturekit.Must(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
@@ -1411,28 +1289,24 @@ func Snapshot(t *testing.T, dir string) map[string]string {
 // Soon polls ok until it holds, failing with what after DemoTimeout.
 func Soon(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(5 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, what, wake, ok)
 }
 
-// streamDocuments returns the recorded revisions of one workstream document.
+// StreamDocuments returns the recorded revisions of one workstream document.
 func StreamDocuments(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(docs, func(d trace.Document) bool { return d.ID != id })
 }
 
-// transitionByID returns the workstream's transition with the given ID.
+// TransitionByID returns the workstream's transition with the given ID.
 func TransitionByID(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string) trace.Transition {
 	t.Helper()
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == id })
 	if i < 0 {
 		t.Fatalf("workstream %s has no transition %s", stream, id)
@@ -1440,7 +1314,7 @@ func TransitionByID(t *testing.T, repository *trace.Repository, stream config.Wo
 	return transitions[i]
 }
 
-// turn is the ID queue gives a project's turn.
+// Turn is the ID queue gives a project's turn.
 func Turn(id config.ProjectID, name string) string { return string(id[len(id)-4:]) + "-" + name }
 
 const (
@@ -1449,31 +1323,11 @@ const (
 	Quiet       = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
 )
 
-const DemoAgent = fixturekit.DemoAgent
-
-const DemoSecret = fixturekit.DemoSecret
-
-const DemoThread = fixturekit.DemoThread
-
-const DemoTimeout = fixturekit.DemoTimeout
-
-const HandedDesign = fixturekit.HandedDesign
-
-const MasonWrote = fixturekit.MasonWrote
-
-const Project = fixturekit.Project
-
-const Stream = fixturekit.Stream
-
-const ValidPlan = fixturekit.ValidPlan
-
-const ValidSpec = fixturekit.ValidSpec
-
 func (g *ChangeRaceGate) Await(t *testing.T) {
 	t.Helper()
 	select {
 	case <-g.Reached:
-	case <-time.After(DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatalf("production checkpoint %s not reached", g.Step)
 	}
 }
@@ -1517,7 +1371,7 @@ func (m *FakeMasons) Turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 		m.Problems = append(m.Problems, fmt.Sprintf("mason tools %v", names))
 	}
 	view := req.Workspace.Directory()
-	if err := os.WriteFile(filepath.Join(view, MasonWrote), []byte("package trace\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(view, fixturekit.MasonWrote), []byte("package trace\n"), 0644); err != nil {
 		m.Problems = append(m.Problems, err.Error())
 	}
 	stream := SessionStream(req)
@@ -1540,7 +1394,7 @@ func (m *FakeMasons) Turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 
 func (w ProductionWorkerWorkspaces) Acquire(ctx context.Context, req coreadapter.WorkspaceRequest) (coreadapter.WorkspaceLease, error) {
 	if ProductionWorker(req.Scope) {
-		return StagedWorkspaces{}.Acquire(ctx, req)
+		return intake.StagedWorkspaces{}.Acquire(ctx, req)
 	}
 	return w.Production.Acquire(ctx, req)
 }
@@ -1548,36 +1402,20 @@ func (w ProductionWorkerWorkspaces) Acquire(ctx context.Context, req coreadapter
 func AcceptancePlan(t *testing.T, graph string, items ...string) string {
 	t.Helper()
 	p, err := plan.Parse([]byte(graph))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	p.Units[0].Acceptance = items
 	data, err := plan.Encode(p)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return string(data)
 }
-
-var AssertCode = fixturekit.AssertCode
 
 func Await(t *testing.T, what string, ch chan struct{}) {
 	t.Helper()
 	select {
 	case <-ch:
-	case <-time.After(DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatalf("%s did not happen", what)
 	}
-}
-
-func EntitiesWith(t *testing.T, seed kb.Map, alias string) string {
-	t.Helper()
-	m := kb.Map{Version: kb.Version}
-	for _, e := range seed.Entities {
-		if e.ID == "internal.trace" {
-			e.Aliases = append(e.Aliases, alias)
-		}
-		m.Entities = append(m.Entities, e)
-	}
-	data, err := kb.Encode(m)
-	Must(t, err)
-	return string(data)
 }
 
 func EqualJSONTest(a, b any) bool {
@@ -1586,10 +1424,10 @@ func EqualJSONTest(a, b any) bool {
 	return string(x) == string(y)
 }
 
-func ErrorCode(t *testing.T, body []byte) Code {
+func ErrorCode(t *testing.T, body []byte) api.Code {
 	t.Helper()
-	var out ErrorResponse
-	Must(t, json.Unmarshal(body, &out))
+	var out api.ErrorResponse
+	fixturekit.Must(t, json.Unmarshal(body, &out))
 	return out.Error.Code
 }
 
@@ -1597,7 +1435,7 @@ func FailMasonTurn(context.Context, agent.Request, *mcp.ClientSession) error {
 	return ErrFailTurn
 }
 
-func HasDiagnostic(ds []Diagnostic, code Code) bool {
+func HasDiagnostic(ds []api.Diagnostic, code api.Code) bool {
 	for _, d := range ds {
 		if d.Code == code {
 			return true
@@ -1607,22 +1445,22 @@ func HasDiagnostic(ds []Diagnostic, code Code) bool {
 }
 
 func Parked(unit, q string) TransitionMove {
-	return TransitionMove{trace.UnitSubject(unit) + "-waiting-" + q, trace.UnitSubject(unit), UnitImplementing, UnitWaiting, trace.QuestionSubject(q) + "_" + trace.QuestionOpen,
+	return TransitionMove{trace.UnitSubject(unit) + "-waiting-" + q, trace.UnitSubject(unit), intake.UnitImplementing, intake.UnitWaiting, trace.QuestionSubject(q) + "_" + trace.QuestionOpen,
 		"unit " + unit + " is waiting: its mason asked question " + q + "; the unit's workspace is kept and it takes no mason slot until the answer arrives"}
 }
 
 func ProductionWorker(scope coreadapter.Scope) bool {
-	return scope.Role == MasonRole && slices.Contains([]string{"worker_first", "worker_second", "worker_unaffected"}, scope.Thread)
+	return scope.Role == intake.MasonRole && slices.Contains([]string{"worker_first", "worker_second", "worker_unaffected"}, scope.Thread)
 }
 
 func Ptr(s string) *string { return &s }
 
 func Resumed(unit, q string) TransitionMove {
-	return TransitionMove{trace.UnitSubject(unit) + "-implementing-" + q, trace.UnitSubject(unit), UnitWaiting, UnitImplementing, trace.QuestionSubject(q) + "_" + trace.QuestionAnswered,
+	return TransitionMove{trace.UnitSubject(unit) + "-implementing-" + q, trace.UnitSubject(unit), intake.UnitWaiting, intake.UnitImplementing, trace.QuestionSubject(q) + "_" + trace.QuestionAnswered,
 		"unit " + unit + " resumes implementing: the answer to question " + q + " is its mason's next turn"}
 }
 
-func States(list ConversationResponse) []string {
+func States(list api.ConversationResponse) []string {
 	var out []string
 	for _, e := range list.Entries {
 		out = append(out, e.Kind+":"+string(e.State))
@@ -1633,7 +1471,7 @@ func States(list ConversationResponse) []string {
 func UnitState(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) string {
 	t.Helper()
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return state.Value
 }
 
@@ -1641,22 +1479,6 @@ func WebHTTP() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 }
 
-type DemoTurn = fixturekit.DemoTurn
-
-type FakeTurn = fixturekit.FakeTurn
-
 type ProductionWorkerWorkspaces struct{ Production coreadapter.Workspaces }
 
-var CallTool = fixturekit.CallTool
-
 var ExampleCard = coreadapter.Card{Headline: "Uploads resume", Happened: "The storage client resumes uploads from the last chunk.", NeedsYou: "Review the candidate."}
-
-var LatestDocumentIn = fixturekit.LatestDocumentIn
-
-var Must = fixturekit.Must
-
-var TraceQuery = fixturekit.TraceQuery
-
-var WorkstreamRecords = fixturekit.WorkstreamRecords
-
-var WorkstreamTraceDirectory = fixturekit.WorkstreamTraceDirectory

@@ -40,16 +40,16 @@ func TestDependentDeliveryMaintenanceCompletesAfterARestartFollowingIntegration(
 	ctx := context.Background()
 	p.reopen(t)
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
-	intakefixture.Must(t, reviewer.Pass(ctx))
+	fixturekit.Must(t, reviewer.Pass(ctx))
 	op := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.DeliveryReviewAction)
 	in, err := delivery.DecodeFinalReview(op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	p.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready upstream", "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Ready upstream", "findings": []any{}})
 		return err
 	})
 	result, err := reviewer.Apply(ctx, op)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
@@ -57,15 +57,15 @@ func TestDependentDeliveryMaintenanceCompletesAfterARestartFollowingIntegration(
 		t.Fatal("maintenance did not complete after the restart")
 	}
 	p.approve(t, nil)
-	intakefixture.Must(t, p.publisher().Pass(ctx))
+	fixturekit.Must(t, p.publisher().Pass(ctx))
 	publish := fixturekit.ActionOperation(t, p.repository, p.stream, lifecycle.PublishUpstreamAction)
 	result, err = p.publisher().Apply(ctx, publish)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" {
 		t.Fatalf("pull-request retargeting after the restart: %+v", result)
 	}
 	records, err := delivery.Publications(p.repository, p.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	last := records[len(records)-1]
 	if last.Upstream != p.s.cfg.Project.Upstream {
 		t.Fatalf("the dependent's pull request was not retargeted onto upstream after a restart: %+v", last)
@@ -79,25 +79,25 @@ func TestDriftRebaseKeepsSchedulingOnceBaseRefreshStopsForAnIntegratedDependency
 	f.stop(t)
 	ctx := context.Background()
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	base, _ := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 	dependent, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "building", Revision: 1, Project: repo.Project(), Workstream: dependent, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
-	_, err = repo.SetFeatureState(ctx, h, intakefixture.BuildingState, "Units are recorded")
-	intakefixture.Must(t, err)
+	_, err = repo.SetFeatureState(ctx, h, intake.BuildingState, "Units are recorded")
+	fixturekit.Must(t, err)
 
 	recordIntegration(t, repo, dependent, f.s.now(), "recorded-upstream-sha")
 	refresh := &baseRefresher{s: f.s, repository: repo}
-	intakefixture.Must(t, refresh.Pass(ctx))
+	fixturekit.Must(t, refresh.Pass(ctx))
 	if n := baseRefreshOperationCount(t, repo, dependent); n != 0 {
 		t.Fatalf("base-refresh was scheduled after integration was recorded: %d operations", n)
 	}
 
 	fm := cadenceForeman(f, repo, "6h")
 	fm.nextDrift = time.Time{}
-	intakefixture.Must(t, fm.drifts(ctx))
+	fixturekit.Must(t, fm.drifts(ctx))
 	checkDrifts(t, repo, dependent, 1, "once integration pinned the base observation onto upstream")
 	if reason := intakefixture.TransitionByID(t, repo, dependent, "drift-1").Reason; !strings.HasPrefix(reason, "the base workstream branch moved") {
 		t.Fatalf("drift rebase reason %q", reason)

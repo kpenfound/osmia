@@ -31,7 +31,7 @@ func projectDirectories(t *testing.T, root string) []string {
 	if os.IsNotExist(err) {
 		return nil
 	}
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var names []string
 	for _, e := range entries {
 		names = append(names, e.Name())
@@ -42,9 +42,9 @@ func projectDirectories(t *testing.T, root string) []string {
 func activeProjects(t *testing.T, root string) []string {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ids, err := projectstore.Open(resolved).Projects()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	out := []string{}
 	for _, id := range ids {
 		out = append(out, string(id))
@@ -55,18 +55,18 @@ func activeProjects(t *testing.T, root string) []string {
 func loadRegistered(t *testing.T, options config.Options) *config.Config {
 	t.Helper()
 	top, err := config.LoadTopLevel(options)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	cfg, err := projectstore.Open(top.Root).Apply(top, options.Home)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return cfg
 }
 
 func storedSettings(t *testing.T, root string, id config.ProjectID) string {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	revision, err := projectstore.Open(resolved).Current(id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return string(revision.Data)
 }
 
@@ -76,12 +76,12 @@ func TestZeroProjectStart(t *testing.T) {
 	s, c := start(t, opts)
 	ctx := context.Background()
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project != nil || cfg.Effective.Project.ID != "" || len(cfg.Effective.ActiveProjects) != 0 || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || intakefixture.HasDiagnostic(cfg.Diagnostics, api.RestartRequired) {
 		t.Fatalf("%+v", cfg)
 	}
 	rt, err := c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !intakefixture.HasDiagnostic(rt.Diagnostics, api.NoProject) || len(rt.Effective.Profiles) != 6 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
@@ -94,10 +94,10 @@ func TestZeroProjectStart(t *testing.T) {
 	fixturekit.AssertCode(t, c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: fixturekit.Project}, Mode: "soft", Source: "owner"}, nil), api.Validation)
 	mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: "owner"})
 	mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: "mason", Profile: "other"})
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	_, c = start(t, opts)
 	after, err := c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(after.Effective.Pauses) != 1 || after.Effective.Profiles["mason"] != "other" {
 		t.Fatalf("%+v", after)
 	}
@@ -126,13 +126,13 @@ func addProjectToFreshRoot(t *testing.T) *addedProject {
 		return &fixturekit.CompletedRunner{}, nil
 	}
 	s, c := start(t, opts)
-	intakefixture.Must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(clone, "internal", "trace"), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "CODEOWNERS"), []byte("/internal/ @core\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
 	fixturekit.DemoGit(t, filepath.Dir(clone), "-C", clone, "add", "internal", "CODEOWNERS")
 	cloneBefore := intakefixture.Snapshot(t, clone)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	root := opts.Config.Root
 	return &addedProject{s: s, c: c, opts: opts, clone: clone, root: root, traceDir: filepath.Join(root, "projects", string(added.Project.ID)), id: added.Project.ID, added: added, bound: bound, cloneBefore: cloneBefore}
 }
@@ -147,7 +147,7 @@ func TestProjectAddRegistersTheProjectInTheRegistryAndStore(t *testing.T) {
 		t.Fatalf("%+v", p.added)
 	}
 	text, err := os.ReadFile(filepath.Join(p.root, "config.toml"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(text) != fixturekit.CommentedConfig {
 		t.Fatalf("registration wrote the top-level file:\n%s", text)
 	}
@@ -171,7 +171,7 @@ func TestProjectAddSeedsTheCharterAndEntitiesWithoutTouchingTheClone(t *testing.
 	p := addProjectToFreshRoot(t)
 	s, id := p.s, p.id
 	charter, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, "charter.md")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(charter) != trace.CharterTemplate || osmiacharter.Guidance(trace.CharterTemplate) != "" {
 		t.Fatalf("charter: %q", charter)
 	}
@@ -179,9 +179,9 @@ func TestProjectAddSeedsTheCharterAndEntitiesWithoutTouchingTheClone(t *testing.
 		t.Fatal("clone changed")
 	}
 	entities, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, trace.EntitiesPath)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	seeded, err := kb.Parse(entities)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if e, ok := seeded.Lookup("internal.trace"); !ok || !reflect.DeepEqual(e.Owners, []string{"@core"}) || !reflect.DeepEqual(e.PartOf, []string{"internal"}) {
 		t.Fatalf("seeded entities:\n%s", entities)
 	}
@@ -195,7 +195,7 @@ func TestProjectAddActivatesTheProjectWithoutRestart(t *testing.T) {
 	t.Parallel()
 	p := addProjectToFreshRoot(t)
 	cfg, err := p.c.Configuration(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project == nil || cfg.Project.ID != p.id || cfg.Effective.Project.ID != p.id || len(cfg.Diagnostics) != 0 {
 		t.Fatalf("%+v", cfg)
 	}
@@ -213,7 +213,7 @@ func TestProjectAddedAtRuntimeAcceptsPausesAndPriorities(t *testing.T) {
 	mutation(t, p.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "project", Project: p.id}, Mode: "soft", Source: "owner"})
 	mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
 	rt, err := p.c.Runtime(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(rt.Effective.Pauses) != 1 || len(rt.Effective.Priorities) != 1 || len(rt.Diagnostics) != 0 || !reflect.DeepEqual(rt.Projects, []api.ProjectRuntime{{Project: p.id, ContextMode: bundle.ModeFile}}) {
 		t.Fatalf("%+v", rt)
 	}
@@ -224,7 +224,7 @@ func TestProjectAddIsIdempotentAndRefusesADifferentProjectWhileActive(t *testing
 	p := addProjectToFreshRoot(t)
 	ctx := context.Background()
 	again, err := p.c.AddProject(ctx, fixturekit.Request(p.clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if again.Project.ID != p.id {
 		t.Fatal(again)
 	}
@@ -258,12 +258,12 @@ func TestProjectRemoveRetainsTheTraceAndTheCloneAndClearsRuntimeState(t *testing
 	mutation(t, p.c, "PUT", "priority", api.PriorityRequest{Project: p.id, Workstreams: []config.WorkstreamID{}})
 	traceBefore := traceState(t, p.traceDir)
 	removed, err := p.c.RemoveProject(ctx, p.id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if removed.Project.ID != p.id || removed.Project.Trace != p.traceDir || !strings.Contains(removed.NextStep, p.traceDir) {
 		t.Fatalf("%+v", removed)
 	}
 	text, err := os.ReadFile(filepath.Join(p.root, "config.toml"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(text) != fixturekit.CommentedConfig {
 		t.Fatalf("configuration text after remove:\n%s", text)
 	}
@@ -271,12 +271,12 @@ func TestProjectRemoveRetainsTheTraceAndTheCloneAndClearsRuntimeState(t *testing
 		t.Fatal("remove changed the trace or the clone")
 	}
 	cfg, err := p.c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project != nil || cfg.Effective.HasProject() || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || intakefixture.HasDiagnostic(cfg.Diagnostics, api.RestartRequired) || p.s.sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
 	rt, err := p.c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(rt.Effective.Pauses) != 0 || len(rt.Effective.Priorities) != 0 || len(rt.Diagnostics) != 3 || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
@@ -288,14 +288,14 @@ func TestProjectAddedAgainAfterRemoveGetsANewIdentityAndSurvivesARestart(t *test
 	ctx := context.Background()
 	traceBefore := traceState(t, p.traceDir)
 	_, err := p.c.RemoveProject(ctx, p.id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resolved, err := config.ResolveRoot(p.root, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Open(resolved, config.Project{ID: p.id, Clone: p.clone})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 	readded, err := p.c.AddProject(ctx, fixturekit.Request(p.clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if readded.Project.ID == p.id || readded.Project.Trace == p.traceDir {
 		t.Fatalf("identity reused: %+v", readded)
 	}
@@ -308,10 +308,10 @@ func TestProjectAddedAgainAfterRemoveGetsANewIdentityAndSurvivesARestart(t *test
 	if got := activeProjects(t, p.root); !reflect.DeepEqual(got, []string{string(readded.Project.ID)}) {
 		t.Fatal(got)
 	}
-	intakefixture.Must(t, p.s.Close())
+	fixturekit.Must(t, p.s.Close())
 	s, c := start(t, p.opts)
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project == nil || cfg.Project.ID != readded.Project.ID || s.sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
@@ -325,11 +325,11 @@ func TestProjectAddValidation(t *testing.T) {
 	root := opts.Config.Root
 	home := filepath.Dir(root)
 	plain := filepath.Join(home, "plain")
-	intakefixture.Must(t, os.Mkdir(plain, 0700))
+	fixturekit.Must(t, os.Mkdir(plain, 0700))
 	inside := filepath.Join(root, "inside")
-	intakefixture.Must(t, os.Mkdir(inside, 0700))
-	intakefixture.Must(t, os.Mkdir(filepath.Join(inside, ".git"), 0700))
-	intakefixture.Must(t, os.Mkdir(filepath.Join(home, ".git"), 0700))
+	fixturekit.Must(t, os.Mkdir(inside, 0700))
+	fixturekit.Must(t, os.Mkdir(filepath.Join(inside, ".git"), 0700))
+	fixturekit.Must(t, os.Mkdir(filepath.Join(home, ".git"), 0700))
 	before := intakefixture.Snapshot(t, clone)
 	cases := []struct {
 		name   string
@@ -367,7 +367,7 @@ func TestProjectAddValidation(t *testing.T) {
 		t.Fatal("rejected registration journaled")
 	}
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project != nil {
 		t.Fatal("rejected registration activated")
 	}
@@ -412,8 +412,8 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 					}
 					journal.Project.ID = config.ProjectID(names[0])
 				} else {
-					intakefixture.Must(t, jerr)
-					intakefixture.Must(t, json.Unmarshal(data, &journal))
+					fixturekit.Must(t, jerr)
+					fixturekit.Must(t, json.Unmarshal(data, &journal))
 				}
 				id := journal.Project.ID
 				if len(names) == 1 && names[0] != string(id) {
@@ -421,17 +421,17 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				}
 				s.boundary = nil
 				if mode == "restart" {
-					intakefixture.Must(t, s.Close())
+					fixturekit.Must(t, s.Close())
 					s, c = start(t, opts)
 				} else {
 					result, err := c.AddProject(ctx, fixturekit.Request(clone))
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					if result.Project.ID != id {
 						t.Fatalf("retry created %s instead of finishing %s", result.Project.ID, id)
 					}
 				}
 				cfg, err := c.Configuration(ctx)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil || s.sole().repository.Project() != id {
 					t.Fatalf("not completed: %+v", cfg)
 				}
@@ -445,7 +445,7 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 					t.Fatal("journal retained")
 				}
 				charter, err := fixturekit.ProjectDocument(t, s.cfg.Root, id, "charter.md")
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if string(charter) != trace.CharterTemplate {
 					t.Fatalf("charter: %q", charter)
 				}
@@ -459,10 +459,10 @@ func TestProjectAddRecoversAtEachStep(t *testing.T) {
 				if len(documents) != 1 || documents[0].Revision != 1 {
 					t.Fatalf("entity map revisions: %+v", documents)
 				}
-				intakefixture.Must(t, s.Close())
+				fixturekit.Must(t, s.Close())
 				s, c = start(t, opts)
 				cfg, err = c.Configuration(ctx)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if cfg.Project == nil || cfg.Project.ID != id || len(cfg.Diagnostics) != 0 || s.sole() == nil {
 					t.Fatalf("after restart: %+v", cfg)
 				}
@@ -490,7 +490,7 @@ func TestInterruptedAddWithDifferentRequestIsRefused(t *testing.T) {
 	_, refused := c.AddProject(ctx, other)
 	fixturekit.AssertCode(t, refused, api.ProjectActive)
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project == nil || !strings.Contains(refused.Error(), string(cfg.Project.ID)) || cfg.Project.Name != "dagger" {
 		t.Fatalf("%v %+v", refused, cfg)
 	}
@@ -513,15 +513,15 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	}
 	_, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.AssertCode(t, err, api.Internal)
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	data, err := os.ReadFile(filepath.Join(root, "project-add.json"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var journal service.TestPendingProject
-	intakefixture.Must(t, json.Unmarshal(data, &journal))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(root, "projects"), []byte("blocked"), 0600))
+	fixturekit.Must(t, json.Unmarshal(data, &journal))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "projects"), []byte("blocked"), 0600))
 	s, c = start(t, opts)
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) {
 		t.Fatalf("%+v", cfg)
 	}
@@ -530,14 +530,14 @@ func TestStartupRecoveryFailureIsDiagnosed(t *testing.T) {
 	if !strings.Contains(err.Error(), string(journal.Project.ID)) {
 		t.Fatal(err)
 	}
-	intakefixture.Must(t, os.Remove(filepath.Join(root, "projects")))
+	fixturekit.Must(t, os.Remove(filepath.Join(root, "projects")))
 	result, err := c.AddProject(ctx, fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if result.Project.ID != journal.Project.ID || s.sole() == nil {
 		t.Fatalf("%+v", result)
 	}
 	cfg, err = c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(cfg.Diagnostics) != 0 {
 		t.Fatalf("%+v", cfg)
 	}
@@ -550,31 +550,31 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 	s, c := start(t, opts)
 	ctx := context.Background()
 	added, err := c.AddProject(ctx, fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	active := added.Project.ID
 	stale := config.Project{ID: "p_ffffffffffffffffffffffffffffffff", Version: 1, Name: "dagger", Upstream: "dagger/dagger", Fork: "owner/dagger", Clone: added.Project.Clone, BaseBranch: "main", Landing: "commit-per-unit"}
 	data, err := json.Marshal(service.TestPendingProject{Version: 1, Project: stale})
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(filepath.Join(root, "project-add.json"), data, 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "project-add.json"), data, 0600))
 	before, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.AssertCode(t, err, api.Internal)
 	if !strings.Contains(err.Error(), string(stale.ID)) || !strings.Contains(err.Error(), string(active)) {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(after) != string(before) || !reflect.DeepEqual(activeProjects(t, root), []string{string(active)}) {
 		t.Fatalf("configuration changed:\n%s", after)
 	}
 	if names := projectDirectories(t, root); !reflect.DeepEqual(names, []string{string(active)}) {
 		t.Fatal(names)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, c = start(t, opts)
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project == nil || cfg.Project.ID != active || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.sole() == nil {
 		t.Fatalf("%+v", cfg)
 	}
@@ -582,9 +582,9 @@ func TestJournalForAnotherProjectIsRefused(t *testing.T) {
 		t.Fatal("startup listed the journaled project")
 	}
 	_, err = c.RemoveProject(ctx, active)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	finished, err := c.AddProject(ctx, fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if finished.Project.ID != stale.ID || !reflect.DeepEqual(activeProjects(t, root), []string{string(stale.ID)}) {
 		t.Fatalf("%+v", finished)
 	}
@@ -604,12 +604,12 @@ func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 	}
 	_, err := c.AddProject(ctx, fixturekit.Request(clone))
 	fixturekit.AssertCode(t, err, api.Internal)
-	intakefixture.Must(t, s.Close())
-	intakefixture.Must(t, os.RemoveAll(clone))
-	intakefixture.Must(t, os.WriteFile(clone, []byte("not a directory"), 0600))
+	fixturekit.Must(t, s.Close())
+	fixturekit.Must(t, os.RemoveAll(clone))
+	fixturekit.Must(t, os.WriteFile(clone, []byte("not a directory"), 0600))
 	s, c = start(t, opts)
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Project != nil || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.NoProject) || !intakefixture.HasDiagnostic(cfg.Diagnostics, api.Internal) || s.sole() != nil {
 		t.Fatalf("%+v", cfg)
 	}
@@ -617,7 +617,7 @@ func TestStartupRecoveryReloadFailureIsDiagnosed(t *testing.T) {
 		t.Fatal(names)
 	}
 	top, err := config.LoadTopLevel(config.Options{Root: root})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := projectstore.Open(top.Root).Apply(top, ""); err == nil {
 		t.Fatal("stored settings loaded with a file as clone")
 	}

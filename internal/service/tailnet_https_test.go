@@ -97,9 +97,9 @@ func TestTailnetServesHTTPSAtTheNodeAddressByDefaultAndWhenEnabled(t *testing.T)
 func TestTailnetHTTPSStateIsTheSameInHealthStatusesAndConfiguration(t *testing.T) {
 	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
 		st, err := h.c.Statuses(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		cfg, err := h.c.Configuration(context.Background())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !cfg.Effective.Listen.TailnetHTTPS || !reflect.DeepEqual(st.Tailnet, h.status) || !reflect.DeepEqual(cfg.Tailnet, h.status) {
 			t.Fatalf("status/config: %+v %+v", st.Tailnet, cfg)
 		}
@@ -109,7 +109,7 @@ func TestTailnetHTTPSStateIsTheSameInHealthStatusesAndConfiguration(t *testing.T
 func TestTailnetHealthIsServedOverTLS(t *testing.T) {
 	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
 		response, err := h.secure.Get(httpsNodeAddress + "v1/health")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		response.Body.Close()
 		if response.StatusCode != 200 || response.TLS == nil {
 			t.Fatalf("TLS health: %+v", response)
@@ -145,7 +145,7 @@ func TestTailnetEndpointsAcceptWritesOnlyAsJSON(t *testing.T) {
 
 func TestTailnetShutdownClosesTLSAndLeavesTheNode(t *testing.T) {
 	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
-		intakefixture.Must(t, h.s.Close())
+		fixturekit.Must(t, h.s.Close())
 		if !h.node.HTTPSClosed() || !h.node.Left.Load() {
 			t.Fatal("shutdown did not close TLS and leave the node")
 		}
@@ -172,12 +172,12 @@ func TestTailnetHTTPSOptOutAndRestartRequired(t *testing.T) {
 	}
 	files.write(t, strings.Replace(files.topText, "tailnet_https = false", "tailnet_https = true", 1))
 	reloaded, err := c.Reload(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet_https"}) {
 		t.Fatalf("restart required: %+v", reloaded)
 	}
 	cfg, err := c.Configuration(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Effective.Listen.TailnetHTTPS || !hasCode(cfg.Diagnostics, "configuration", RestartRequired) {
 		t.Fatalf("effective config: %+v", cfg)
 	}
@@ -213,7 +213,7 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 			intakefixture.Soon(t, "HTTPS failure not reported", func() bool { return s.tailnetStatus(context.Background()).HTTPSReason == want })
 			status := awaitHTTPS(t, c, api.TailnetHTTPSUnavailable)
 			st, err := c.Statuses(context.Background())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !reflect.DeepEqual(st.Tailnet, status) || status.State != TailnetUp || status.HTTPSReason != want || status.HTTPSAddress != "" || (*joined).Left.Load() {
 				t.Fatalf("failure: %+v", status)
 			}
@@ -348,14 +348,14 @@ func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(first.HTTPSCertificate())
 	conn, err := tls.Dial("tcp", first.HTTPSAddr(), &tls.Config{RootCAs: pool, ServerName: httpsNodeName})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer conn.Close()
 	_, err = fmt.Fprintf(conn, "GET /v1/health HTTP/1.1\r\nHost: %s\r\n\r\n", httpsNodeName)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resp.Body.Close()
-	intakefixture.Must(t, first.Close())
+	fixturekit.Must(t, first.Close())
 	intakefixture.Soon(t, "node never replaced", func() bool { return joined.Load() != first && s.TailnetAddr() != "" })
 	awaitHTTPS(t, c, api.TailnetHTTPSUp)
 	if !first.HTTPSClosed() || !first.Left.Load() {
@@ -373,7 +373,7 @@ func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	if code, body := intakefixture.Exchange(t, nodeHTTPSClient(t, second), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("replacement TLS: %d %s", code, body)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if !second.HTTPSClosed() || !second.Left.Load() {
 		t.Fatal("current TLS listener not closed on shutdown")
 	}

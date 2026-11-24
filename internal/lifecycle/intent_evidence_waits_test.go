@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -56,8 +56,8 @@ func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	recordFinalReport(t, f.repository, f.upstream, at, api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "UPSTREAM-SUMMARY says the endpoint is done",
 		Findings: []api.FinalFinding{{Severity: delivery.FindingAdvisory, Finding: "The endpoint reads oddly."}}})
 	groups, _, err := trace.Workgroups(f.repository)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
 		Behavior:  "Downstream depends on upstream.",
 		Contracts: []trace.Contract{{Name: "widget-protocol", Text: "WIDGET-CONTRACT the upstream speaks widgets."}},
 		Graph:     []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}},
@@ -122,8 +122,8 @@ func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 		contracts = append(contracts, trace.Contract{Name: fmt.Sprintf("contract-%d", i), Text: long("clause", 500)})
 	}
 	groups, _, err := trace.Workgroups(f.repository)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
 		Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, intake.OwnerActor, "fixture"))
 
 	text := f.edgeWaitCleared(t, &jevfixture.Transitions{})
@@ -141,14 +141,14 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	routeJev(f.s, p)
 	repo, stream := parkAndRelease(t, f)
 	base, err := repo.WorkstreamBase(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var findings []api.FinalFinding
 	for i := 0; i < 100; i++ {
 		findings = append(findings, api.FinalFinding{Severity: delivery.FindingAdvisory, Finding: strings.Repeat("finding ", 400)})
 	}
 	recordFinalReport(t, repo, base.Base, f.s.now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
 
-	intakefixture.Must(t, f.s.baseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.s.baseWaitPass(context.Background(), repo))
 	requests := p.TransitionRequests()
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
@@ -157,7 +157,7 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 		t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
 	}
 	text := requestText(t, requests[0])
-	spec := plan.ParseSpec(intakefixture.ValidSpec)
+	spec := plan.ParseSpec(fixturekit.ValidSpec)
 	if len(spec.Criteria) == 0 {
 		t.Fatal("the fixture spec has no acceptance criteria")
 	}
@@ -165,14 +165,14 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 		requireIn(t, "the request", text, c.Text)
 	}
 	opening := ""
-	for _, line := range strings.Split(intakefixture.ValidSpec, "\n") {
+	for _, line := range strings.Split(fixturekit.ValidSpec, "\n") {
 		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
 			opening = line
 			break
 		}
 	}
-	graph, err := plan.Parse([]byte(intakefixture.ValidPlan))
-	intakefixture.Must(t, err)
+	graph, err := plan.Parse([]byte(fixturekit.ValidPlan))
+	fixturekit.Must(t, err)
 	if len(graph.Units) == 0 {
 		t.Fatal("the fixture plan has no units")
 	}

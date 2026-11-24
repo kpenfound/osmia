@@ -32,17 +32,17 @@ func newFollowUpKit(t *testing.T) *followUpKit {
 	ctx := context.Background()
 	base := t.TempDir()
 	root, err := config.ResolveRoot(filepath.Join(base, "osmia"), "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	project := config.Project{ID: "p_00000000000000000000000000000031", Clone: filepath.Join(base, "clone")}
 	fixturekit.DemoGit(t, base, "init", "-q", project.Clone)
 	k := &followUpKit{root: root, project: project, stream: "w_00000000000000000000000000000031", at: time.Now().UTC().Truncate(time.Second)}
 	k.repo, err = trace.Create(ctx, root, project, k.at, ownerActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { _ = k.repo.Close() })
-	intakefixture.Must(t, k.repo.CreateWorkstream(ctx, k.stream, k.at, ownerActor))
+	fixturekit.Must(t, k.repo.CreateWorkstream(ctx, k.stream, k.at, ownerActor))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: project.ID, Workstream: k.stream, At: k.at, Actor: ownerActor, Cause: "ratification"}
 	_, err = k.repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: BuildingState, Reason: "Owner ratified intent"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return k
 }
 
@@ -51,10 +51,10 @@ func (k *followUpKit) now() time.Time { return k.at }
 func (k *followUpKit) unit(t *testing.T, unit, state string) {
 	t.Helper()
 	st, err := k.repo.Workflow(k.stream, trace.UnitSubject(unit))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "unit-" + unit + "-" + state, Revision: 1, Project: k.project.ID, Workstream: k.stream, Unit: unit, At: k.at, Actor: ownerActor, Cause: "test"}
 	_, err = k.repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: st.Version, Transition: trace.Transition{Header: h, Subject: trace.UnitSubject(unit), From: st.Value, To: state, Reason: "test"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func (k *followUpKit) turn(t *testing.T, id, prompt string) coreadapter.Scope {
@@ -83,20 +83,20 @@ func (k *followUpKit) pass(t *testing.T) {
 	f := followUps{now: k.now, window: config.DefaultStallAfter, profile: func() (coreadapter.Profile, error) {
 		return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
 	}}
-	intakefixture.Must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
+	fixturekit.Must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
 }
 
 func (k *followUpKit) pending(t *testing.T) []followUp {
 	t.Helper()
 	recs, err := readFollowUps(k.repo, k.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return recs.pending()
 }
 
 func (k *followUpKit) followUpTurns(t *testing.T) []trace.QueuedTurn {
 	t.Helper()
 	th, err := k.repo.Thread(k.stream, trace.ChiefOfStaff)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.QueuedTurn
 	for _, q := range th.Turns {
 		if strings.HasPrefix(q.Request.TurnID, followUpTurnPrefix) {
@@ -116,7 +116,7 @@ type queuedResult struct {
 func decodeQueued(t *testing.T, raw string) queuedResult {
 	t.Helper()
 	var out queuedResult
-	intakefixture.Must(t, json.Unmarshal([]byte(raw), &out))
+	fixturekit.Must(t, json.Unmarshal([]byte(raw), &out))
 	return out
 }
 
@@ -134,9 +134,9 @@ func TestAFollowUpSurvivesARestartAndFiresOnce(t *testing.T) {
 	}
 	k.finish(t, "message_1")
 
-	intakefixture.Must(t, k.repo.Close())
+	fixturekit.Must(t, k.repo.Close())
 	reopened, err := trace.Open(k.root, k.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	k.repo = reopened
 	t.Cleanup(func() { _ = reopened.Close() })
 	pending := k.pending(t)
@@ -144,7 +144,7 @@ func TestAFollowUpSurvivesARestartAndFiresOnce(t *testing.T) {
 		t.Fatalf("pending follow-ups after reopening: %+v", pending)
 	}
 	context, err := renderFollowUps(k.repo, k.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(context, "## Pending follow-ups") || !strings.Contains(context, "Check that the upload unit landed.") {
 		t.Fatalf("project context: %s", context)
 	}
@@ -237,7 +237,7 @@ func TestAnActionResultReportsQueuedWorkAndAnInertOneSchedulesACheckBack(t *test
 	}
 	k.finish(t, "events_2")
 	recs, err := readFollowUps(k.repo, k.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if recs.turns["events_2"] {
 		t.Fatal("an action that queued work scheduled a check-back")
 	}
@@ -270,7 +270,7 @@ func TestAStallNoticeTurnThatEndsWithoutActionGetsACheckBack(t *testing.T) {
 		t.Fatalf("check-backs after a silent stall turn: %+v", pending)
 	}
 	recs, err := readFollowUps(k.repo, k.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if recs.revision[pending[0].ID] != 1 {
 		t.Fatalf("the check-back was recorded %d times", recs.revision[pending[0].ID])
 	}
@@ -297,15 +297,15 @@ func (k *followUpKit) endFollowUpTurn(t *testing.T, turn string, cancelled bool)
 	t.Helper()
 	ctx := context.Background()
 	q, err := k.repo.ClaimTurn(ctx, k.stream, trace.ChiefOfStaff, "token-"+turn, filepath.Join(t.TempDir(), "session"), k.at)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if q.Request.TurnID != turn {
 		t.Fatalf("claimed turn %s, want %s", q.Request.TurnID, turn)
 	}
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), k.at
 	result := coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At, IsError: true, Cancelled: cancelled}
-	intakefixture.Must(t, k.repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: result, Failure: "the backend failed"}))
-	intakefixture.Must(t, k.repo.CompleteTurn(ctx, k.stream, trace.ChiefOfStaff, turn, q.Claim.Token, k.at))
+	fixturekit.Must(t, k.repo.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: q.Request.ThreadID, TurnID: turn, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: result, Failure: "the backend failed"}))
+	fixturekit.Must(t, k.repo.CompleteTurn(ctx, k.stream, trace.ChiefOfStaff, turn, q.Claim.Token, k.at))
 }
 
 func TestAWholeWorkgroupFollowUpFiresPastAnArchivedMember(t *testing.T) {
@@ -327,22 +327,22 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	}
 	member := s.projects[len(s.projects)-1].repository
 	f := followUp{ID: followUpID(trace.ChiefOfStaff, ""), Reason: stallFollowUpReason, ScheduledAt: fixturekit.DemoStart, Due: fixturekit.DemoStart.Add(time.Minute), By: "service", Turn: "events_1", State: followUpPending}
-	intakefixture.Must(t, recordFollowUp(ctx, chief, host, 1, f, followUpActor, "test", fixturekit.DemoStart))
-	intakefixture.Must(t, s.store.SetArchived(runtime.Archive{Workgroup: g.ID, Project: member.Project(), Workstream: gone, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, f, followUpActor, "test", fixturekit.DemoStart))
+	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Workgroup: g.ID, Project: member.Project(), Workstream: gone, State: AbandonedState, Title: "Archived member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}))
 	_, err := member.MarkWorkstreamTraceForDeletion(gone)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.FinishWorkstreamTraceDeletion(s.cfg.Root, member.Project(), gone))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.FinishWorkstreamTraceDeletion(s.cfg.Root, member.Project(), gone))
 
 	now := fixturekit.DemoStart.Add(time.Hour)
 	pass := func(archived func(string) (runtime.Archive, bool)) {
 		t.Helper()
 		fu := followUps{now: func() time.Time { return now }, window: config.DefaultStallAfter, profile: followUpProfile, archived: archived}
-		intakefixture.Must(t, fu.pass(ctx, chief, []config.WorkstreamID{host}))
+		fixturekit.Must(t, fu.pass(ctx, chief, []config.WorkstreamID{host}))
 	}
 	prompts := func() []string {
 		t.Helper()
 		th, err := chief.Thread(host, trace.ChiefOfStaff)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var out []string
 		for _, q := range th.Turns {
 			if strings.HasPrefix(q.Request.TurnID, followUpTurnPrefix) {
@@ -357,7 +357,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 		t.Fatalf("whole-workgroup follow-up prompts: %q", got)
 	}
 	recs, err := readFollowUps(chief, host)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(recs.pending()) != 0 {
 		t.Fatalf("the follow-up is still pending: %+v", recs.pending())
 	}
@@ -366,7 +366,7 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 	}
 
 	named := followUp{ID: followUpID(trace.ChiefOfStaff, gone), Workstream: gone, Reason: "Check the archived member.", ScheduledAt: now, Due: now.Add(time.Minute), By: "chief", Turn: "message_1", State: followUpPending}
-	intakefixture.Must(t, recordFollowUp(ctx, chief, host, 1, named, followUpActor, "test", now))
+	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 1, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)
 	got = prompts()
@@ -374,9 +374,9 @@ func wholeWorkgroupFollowUpPastArchivedMember(t *testing.T, cross bool) {
 		t.Fatalf("named follow-up prompts: %q", got)
 	}
 
-	intakefixture.Must(t, s.store.ClearArchived(gone))
+	fixturekit.Must(t, s.store.ClearArchived(gone))
 	named.ScheduledAt, named.Due = now, now.Add(time.Minute)
-	intakefixture.Must(t, recordFollowUp(ctx, chief, host, 3, named, followUpActor, "test", now))
+	fixturekit.Must(t, recordFollowUp(ctx, chief, host, 3, named, followUpActor, "test", now))
 	now = now.Add(time.Hour)
 	pass(nil)
 	got = prompts()
@@ -410,7 +410,7 @@ func TestAFailingFollowUpDoesNotBlockALaterOne(t *testing.T) {
 	if turns, pending := k.followUpTurns(t), k.pending(t); len(turns) != 1 || len(pending) != 1 {
 		t.Fatalf("after one failing follow-up: %d turns, pending %+v", len(turns), pending)
 	}
-	intakefixture.Must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
+	fixturekit.Must(t, f.pass(context.Background(), k.repo, []config.WorkstreamID{k.stream}))
 	if turns, pending := k.followUpTurns(t), k.pending(t); len(turns) != 2 || len(pending) != 0 {
 		t.Fatalf("after the retry: %d turns, pending %+v", len(turns), pending)
 	}

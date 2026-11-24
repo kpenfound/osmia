@@ -20,23 +20,20 @@ type SessionReader interface {
 // AwaitAcknowledged waits until all returned operations are acknowledged.
 func AwaitAcknowledged(t *testing.T, fetch func(*testing.T) []trace.OperationRecord) []trace.OperationRecord {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
-		ops := fetch(t)
+	var ops []trace.OperationRecord
+	wake, release := Ticks(20 * time.Millisecond)
+	defer release()
+	Until(t, "the operations to be acknowledged", wake, func() bool {
+		ops = fetch(t)
 		acknowledged := len(ops) > 0
 		for _, o := range ops {
 			if !o.Acknowledged {
 				acknowledged = false
 			}
 		}
-		if acknowledged {
-			return ops
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("operations were not acknowledged: %+v", ops)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return acknowledged
+	})
+	return ops
 }
 
 // AssertCode requires an API error with the given code.
@@ -59,16 +56,39 @@ func AssertGone(t *testing.T, path string) {
 // AwaitSession polls a session until done accepts its view.
 func AwaitSession(t *testing.T, c SessionReader, id config.WorkstreamID, done func(api.SessionView) bool) api.SessionView {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
+	var view api.SessionView
+	wake, release := Ticks(20 * time.Millisecond)
+	defer release()
+	Until(t, "the session to settle", wake, func() bool {
 		resp, err := c.Session(context.Background(), id)
 		Must(t, err)
-		if done(resp.Session) {
-			return resp.Session
+		view = resp.Session
+		return done(view)
+	})
+	return view
+}
+
+// Until re-evaluates cond after every return of wake and fails with what once
+// DemoTimeout has passed.
+func Until(t testing.TB, what string, wake func() error, cond func() bool) {
+	t.Helper()
+	deadline := time.NewTimer(DemoTimeout)
+	defer deadline.Stop()
+	for !cond() {
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s", what)
+		default:
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("session did not settle: %+v", resp.Session)
+		if err := wake(); err != nil {
+			t.Fatalf("stopped waiting for %s: %v", what, err)
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// Ticks returns a wake func that returns every interval and the func that
+// releases it.
+func Ticks(interval time.Duration) (wake func() error, release func()) {
+	ticker := time.NewTicker(interval)
+	return func() error { <-ticker.C; return nil }, ticker.Stop
 }

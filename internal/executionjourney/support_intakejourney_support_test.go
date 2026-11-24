@@ -22,7 +22,7 @@ func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, st
 	return intakefixture.AttemptOperation(t, s.now(), foremanActor, repository, stream, op, r)
 }
 
-var callTool = intakefixture.CallTool
+var callTool = fixturekit.CallTool
 
 type changeRaceGate = intakefixture.ChangeRaceGate
 
@@ -32,14 +32,14 @@ var demoGit = fixturekit.DemoGit
 
 var demoStart = fixturekit.DemoStart
 
-const demoTimeout = intakefixture.DemoTimeout
+const demoTimeout = fixturekit.DemoTimeout
 
 func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, ready func() bool) {
 	t.Helper()
 	f.sharedDesign().LifecycleAwait(t, phase, ready)
 }
 
-var must = intakefixture.Must
+var must = fixturekit.Must
 
 func newConfiguredProductionDesignFixture(t *testing.T, configuration productionDesignConfiguration) *productionDesignFixture {
 	t.Helper()
@@ -110,9 +110,9 @@ var streamDocuments = intakefixture.StreamDocuments
 
 var transitionByID = intakefixture.TransitionByID
 
-const validPlan = intakefixture.ValidPlan
+const validPlan = fixturekit.ValidPlan
 
-const validSpec = intakefixture.ValidSpec
+const validSpec = fixturekit.ValidSpec
 
 var workstreamDocument = fixturekit.WorkstreamDocument
 
@@ -175,7 +175,7 @@ type demoSessions = fixturekit.DemoSessions
 
 type designInterruption = intakefixture.DesignInterruption
 
-type fakeTurn = intakefixture.FakeTurn
+type fakeTurn = fixturekit.FakeTurn
 
 type productionDesignRepo = intakefixture.ProductionDesignRepo
 
@@ -243,7 +243,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			_, event := landIDs("accept", 1)
 			return intakefixture.TryLanding(ctx, r, m, event, LandAction, landInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
-		LeastWorkstream: leastWorkstream, NextReadyTurn: nextReadyTurn, LibrarianWorkstream: librarianWorkstream,
+		LeastWorkstream: leastWorkstream, NextReadyTurn: nextReadyTurn,
 	}
 	if f.configuration.wait != nil {
 		shared.WaitMode = func(t *testing.T, phase string, done func() bool) { f.configuration.wait(t, f, phase, done) }

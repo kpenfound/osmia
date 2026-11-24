@@ -47,7 +47,7 @@ type StatusService struct {
 func DocumentRevisions(t *testing.T, repository *trace.Repository, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, "")
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.Document
 	for _, d := range docs {
 		if d.ID == id {
@@ -73,7 +73,7 @@ func PresentAmendmentForUnit(t *testing.T, repository *trace.Repository, project
 	repo := repository
 
 	sealed, sealDoc, found, err := seal.Latest(repo, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the workstream has no seal")
 	}
@@ -84,65 +84,60 @@ func PresentAmendmentForUnit(t *testing.T, repository *trace.Repository, project
 	header := func(schema, id string, by trace.Actor, cause string) trace.Header {
 		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, Unit: unit, At: at, Actor: by, Cause: cause}
 	}
-	Must(t, repo.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", requester, actor, "fixture"), Role: role, ThreadID: requester}))
+	fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", requester, actor, "fixture"), Role: role, ThreadID: requester}))
 	filing := header("osmia.trace.turn-request", "request_"+filingTurn, actor, "fixture")
 	filing.Depth = 1
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: filing, AgentID: requester, ThreadID: requester, TurnID: filingTurn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "requester system", Prompt: "Work on the unit."})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	subject := trace.UnitSubject(unit)
 	unitState, err := repo.Workflow(stream, subject)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unitState.Version, Transition: trace.Transition{Header: header("osmia.trace.transition", "fixture-"+stage+"-amendment-"+id, intake.OwnerActor, "fixture"), Subject: subject, From: unitState.Value, To: stage, Reason: "fixture"}})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: unitState.Version + 1, Transition: trace.Transition{Header: header("osmia.trace.transition", subject+"_waiting_amendment_"+id, trace.Actor{Kind: "service", ID: role}, "amendment_"+id+"_filed"), Subject: subject, From: stage, To: intake.UnitWaiting, Reason: "unit " + unit + " waits for amendment " + id}})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	request := trace.Amendment{Header: header("osmia.trace.amendment", id, trace.Actor{Kind: "agent", ID: requester}, "request_"+filingTurn), Requester: trace.Actor{Kind: "agent", ID: requester}, Role: role, Thread: requester, Turn: filingTurn,
 		Citations: []string{"spec#1"}, Change: "Resume from a durable checkpoint", Reason: "Acknowledgements are not durable", Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}
-	Must(t, repo.Append(ctx, request))
+	fixturekit.Must(t, repo.Append(ctx, request))
 	document := func(id, path, content string) trace.Document {
 		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: intake.ArchitectActor, Cause: "fixture"}, Path: path, Content: content}
 	}
-	sealedPlan, err := plan.Parse([]byte(ValidPlan))
-	Must(t, err)
+	sealedPlan, err := plan.Parse([]byte(fixturekit.ValidPlan))
+	fixturekit.Must(t, err)
 	proposedPlan, err := plan.Parse([]byte(graph))
-	Must(t, err)
-	affected, err := json.Marshal(intake.AffectedRevision(ValidSpec, spec, sealedPlan, proposedPlan))
-	Must(t, err)
+	fixturekit.Must(t, err)
+	affected, err := json.Marshal(intake.AffectedRevision(fixturekit.ValidSpec, spec, sealedPlan, proposedPlan))
+	fixturekit.Must(t, err)
 	docs := []trace.Document{document("amendment_"+id+"_spec", "amendments/"+id+"/spec.md", spec), document("amendment_"+id+"_plan", "amendments/"+id+"/plan.json", graph),
 		document("amendment_"+id+"_affected", "amendments/"+id+"/affected.json", string(affected)),
 		document("amendment-"+id+"-presented-packet", intake.AmendmentPacketPath(id), `{"round":1}`+"\n")}
 	for _, r := range records {
 		data, err := shed.Encode(r)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		docs = append(docs, document(fmt.Sprintf("amendment_%s_round_%d_%s", id, r.Round, r.Member), intake.AmendmentRoundPath(id, r.Round, r.Member), string(data)))
 	}
 	presented := header("osmia.trace.transition", "amendment-"+id+"-presented", intake.ShedActor, "fixture")
 	presented.Unit = ""
 	_, err = repo.RecordDocumentsWith(ctx, docs, trace.Transaction{Transition: trace.Transition{Header: presented, Subject: intake.AmendmentSubject(id), To: intake.AmendmentPresented, Reason: "presented"}})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return requester
 }
 
 func AwaitAmendment(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, want string) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("amendment 1 of %s to be %q", stream, want), wake, func() bool {
 		state, err := repository.Workflow(stream, intake.AmendmentSubject("1"))
-		Must(t, err)
-		if state.Value == want {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("amendment 1 stayed %q, want %q", state.Value, want)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		fixturekit.Must(t, err)
+		return state.Value == want
+	})
 }
 
 func AmendmentRuling(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, requester string) []trace.QueuedTurn {
 	t.Helper()
 	th, err := repository.Thread(stream, requester)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.QueuedTurn
 	for _, q := range th.Turns {
 		if q.Request.TurnID == intake.AmendmentRulingTurn("1") {
@@ -188,7 +183,7 @@ func Upstream(t *testing.T, clone string) string {
 	home := filepath.Dir(clone)
 	bare := filepath.Join(home, "remotes", "dagger", "dagger.git")
 	if _, err := os.Stat(bare); err != nil {
-		Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
+		fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 		fixturekit.DemoGit(t, home, "-C", clone, "branch", "-M", "main")
 
 		fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
@@ -200,7 +195,7 @@ func Upstream(t *testing.T, clone string) string {
 func Notice(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, transition string) string {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, entry := range outbox {
 		if entry.TransitionID == transition && ChiefEvent(entry.Event) {
 			return entry.Event.Body
@@ -210,20 +205,18 @@ func Notice(t *testing.T, repository *trace.Repository, stream config.Workstream
 	return ""
 }
 
-func Streams(t *testing.T, root config.Root, project config.ProjectID, librarian config.WorkstreamID) []config.WorkstreamID {
+func Streams(t *testing.T, root config.Root, project config.ProjectID) []config.WorkstreamID {
 	t.Helper()
 	base, err := root.WorkstreamTraces(project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	entries, err := os.ReadDir(base)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []config.WorkstreamID
 	for _, entry := range entries {
-		if id := config.WorkstreamID(entry.Name()); id != librarian {
-			out = append(out, id)
-		}
+		out = append(out, config.WorkstreamID(entry.Name()))
 	}
 	return out
 }
@@ -231,29 +224,27 @@ func Streams(t *testing.T, root config.Root, project config.ProjectID, librarian
 func Rule(t *testing.T, client OwnerQuestionClient, id string) {
 	t.Helper()
 	ctx := context.Background()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, "question "+id+" to be escalated", wake, func() bool {
 		inbox, err := client.Inbox(ctx)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range inbox.Entries {
 			if slices.ContainsFunc(e.Asked, func(q api.InboxQuestion) bool { return q.ID == id }) {
 				if _, err := client.Answer(ctx, e.Number, OwnerRuling, ""); err != nil {
 					t.Fatalf("rule on inbox entry %d: %v", e.Number, err)
 				}
-				return
+				return true
 			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("question %s was never escalated: %+v", id, inbox.Entries)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return false
+	})
 }
 
 func Question(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id string) trace.QuestionState {
 	t.Helper()
 	asked, err := repository.Questions(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, q := range asked {
 		if q.Asked.ID == id {
 			return q
@@ -265,41 +256,40 @@ func Question(t *testing.T, repository *trace.Repository, stream config.Workstre
 
 func AwaitQuestion(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, id, state string) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for Question(t, repository, stream, id).State != state {
-		if time.Now().After(deadline) {
-			t.Fatalf("question %s never became %s: %+v", id, state, Question(t, repository, stream, id))
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("question %s to be %s", id, state), wake, func() bool {
+		return Question(t, repository, stream, id).State == state
+	})
 }
 
 func Thread(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, member string) trace.Thread {
 	t.Helper()
 	th, err := repository.Thread(stream, member)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return th
 }
 
 func AwaitNamedTurn(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, member, turn string) trace.QueuedTurn {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for {
+	var found trace.QueuedTurn
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("the thread of %s to hold turn %s", member, turn), wake, func() bool {
 		th := Thread(t, repository, stream, member)
-		if i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn }); i >= 0 {
-			return th.Turns[i]
+		i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == turn })
+		if i >= 0 {
+			found = th.Turns[i]
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("thread of %s never held turn %s: %+v", member, turn, th.Turns)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return i >= 0
+	})
+	return found
 }
 
 func CheckUnits(t *testing.T, client UnitStatusClient, checkError func(*testing.T, error, time.Duration), wait func(), stream config.WorkstreamID, want []api.UnitStatus) {
 	t.Helper()
 	ctx := context.Background()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		started := time.Now()
 		one, err := client.Status(ctx, stream)
@@ -312,7 +302,6 @@ func CheckUnits(t *testing.T, client UnitStatusClient, checkError func(*testing.
 		}
 		wait()
 	}
-	// The detail endpoint and the cached list settle independently.
 	for {
 		started := time.Now()
 		list, err := client.Statuses(ctx)
@@ -346,7 +335,7 @@ func CheckStatusError(t *testing.T, state StatusService, err error, elapsed time
 	}
 }
 
-func Answer(engine *fixturekit.DemoEngine, id string, run FakeTurn) string {
+func Answer(engine *fixturekit.DemoEngine, id string, run fixturekit.FakeTurn) string {
 	turn := questions.TurnID(id)
 	engine.Mu.Lock()
 	defer engine.Mu.Unlock()

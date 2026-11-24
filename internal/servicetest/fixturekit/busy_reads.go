@@ -42,10 +42,9 @@ func (b *BlockedFactoryOperation) Apply(ctx context.Context, op coreadapter.Oper
 }
 
 // RequestFactoryOperation durably records a RepositoryBoundary operation of
-// streamID, under an action the service does not reserve for sealing,
-// building, landing, rebasing, drift or publishing, so the reconcile
-// controller routes it to the test's own fake adapter (sealing.go,
-// repositoryAdapter.Apply) rather than to a real one.
+// streamID, under an action the service reserves for none of its own
+// operations, so the reconcile controller routes it to the test's fake
+// repository adapter.
 func RequestFactoryOperation(t *testing.T, repository *trace.Repository, streamID config.WorkstreamID, eventID string) {
 	t.Helper()
 	event := trace.Event{ID: eventID, Kind: "local-effect", Body: "simulated factory work"}

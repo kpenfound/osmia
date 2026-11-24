@@ -4,6 +4,9 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	slices "slices"
 	strings "strings"
 	testing "testing"
@@ -18,7 +21,7 @@ func TestDesignReadinessOwnerOverridesAssumptionBeforeBriefHandoff(t *testing.T)
 	s, c, project, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
 	opened, err := c.OpenDesign(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 
 	const request = "Add resumable uploads while preserving the public API."
@@ -43,7 +46,7 @@ func TestDesignReadinessOwnerOverridesAssumptionBeforeBriefHandoff(t *testing.T)
 		if !strings.Contains(req.Prompt, answer) {
 			return &agent.Result{ClaudeID: "design-readiness", ResultText: readiness}, nil
 		}
-		out, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": brief})
+		out, err := fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": brief})
 		if err != nil || !strings.Contains(out, `"recorded":true`) {
 			return nil, fmt.Errorf("record answered readiness brief: %s %v", out, err)
 		}
@@ -51,23 +54,23 @@ func TestDesignReadinessOwnerOverridesAssumptionBeforeBriefHandoff(t *testing.T)
 	}
 
 	_, err = c.DesignMessage(ctx, stream, request)
-	must(t, err)
-	awaitDesignConversation(t, c, stream, func(r ConversationResponse) bool {
-		return slices.ContainsFunc(r.Entries, func(e ConversationEntry) bool { return e.Kind == "response" && e.Text == readiness })
+	fixturekit.Must(t, err)
+	awaitDesignConversation(t, c, stream, func(r api.ConversationResponse) bool {
+		return slices.ContainsFunc(r.Entries, func(e api.ConversationEntry) bool { return e.Kind == "response" && e.Text == readiness })
 	})
 	if _, err := c.DesignStart(ctx, stream); err == nil {
 		t.Fatal("readiness questions without a brief permitted handoff")
 	}
-	docs, err := trace.Read[trace.Document](s.sole().repository, stream)
-	must(t, err)
-	if slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == designDraftDocument }) {
+	docs, err := trace.Read[trace.Document](s.Sole().Repository, stream)
+	fixturekit.Must(t, err)
+	if slices.ContainsFunc(docs, func(d trace.Document) bool { return d.ID == intake.DesignDraftDocument }) {
 		t.Fatal("a brief was recorded before the owner answered readiness")
 	}
 
 	_, err = c.DesignMessage(ctx, stream, answer)
-	must(t, err)
-	conversation := awaitDesignConversation(t, c, stream, func(r ConversationResponse) bool {
-		return slices.ContainsFunc(r.Entries, func(e ConversationEntry) bool { return e.Kind == "response" && e.Text == brief })
+	fixturekit.Must(t, err)
+	conversation := awaitDesignConversation(t, c, stream, func(r api.ConversationResponse) bool {
+		return slices.ContainsFunc(r.Entries, func(e api.ConversationEntry) bool { return e.Kind == "response" && e.Text == brief })
 	})
 	var texts []string
 	for _, e := range conversation.Entries {
@@ -76,27 +79,27 @@ func TestDesignReadinessOwnerOverridesAssumptionBeforeBriefHandoff(t *testing.T)
 	if want := []string{request, readiness, answer, brief}; !slices.Equal(texts, want) {
 		t.Fatalf("readiness, override and brief order: got %q, want %q", texts, want)
 	}
-	docs, err = trace.Read[trace.Document](s.sole().repository, stream)
-	must(t, err)
+	docs, err = trace.Read[trace.Document](s.Sole().Repository, stream)
+	fixturekit.Must(t, err)
 	var drafts []trace.Document
 	for _, d := range docs {
-		if d.ID == designDraftDocument {
+		if d.ID == intake.DesignDraftDocument {
 			drafts = append(drafts, d)
 		}
 	}
 	if len(drafts) != 1 {
 		t.Fatalf("want one brief after readiness, got %+v", drafts)
 	}
-	var recorded designBriefRecord
-	must(t, json.Unmarshal([]byte(drafts[0].Content), &recorded))
+	var recorded intake.DesignBriefRecord
+	fixturekit.Must(t, json.Unmarshal([]byte(drafts[0].Content), &recorded))
 	if recorded.Content != brief {
 		t.Fatalf("recorded brief lost the owner's decisions: %q", recorded.Content)
 	}
 	_, err = c.DesignStart(ctx, stream)
-	must(t, err)
-	handed, err := trace.Get[trace.Document](s.sole().repository, stream, handedDocument, 1)
-	must(t, err)
-	if !strings.HasPrefix(handed.Content, brief+"\n"+designTranscriptHeading) {
+	fixturekit.Must(t, err)
+	handed, err := trace.Get[trace.Document](s.Sole().Repository, stream, intake.HandedDocument, 1)
+	fixturekit.Must(t, err)
+	if !strings.HasPrefix(handed.Content, brief+"\n"+intake.DesignTranscriptHeading) {
 		t.Fatalf("handoff did not put the answered brief ahead of its reference transcript: %q", handed.Content)
 	}
 }

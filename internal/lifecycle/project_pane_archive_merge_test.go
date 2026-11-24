@@ -26,25 +26,25 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 	defer f.stop(t)
 	publications := deliverResolutionMembers(t, f)
 	initial, err := f.c.Status(ctx, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	group := initial.Workgroup
 	if group == nil || group.Conversation == nil || group.Conversation.Workstream != f.origin || !slices.Equal(group.Members, []config.WorkstreamID{f.stream1, f.stream2}) {
 		t.Fatalf("original group=%+v", group)
 	}
 	conversation, err := f.c.Conversation(ctx, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(conversation.Entries) == 0 {
 		t.Fatal("design conversation is empty")
 	}
 	groupResolution := func() ([]config.WorkgroupID, int, bool) {
 		t.Helper()
 		authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer authority.Close()
 		ids, revision, err := trace.ResolvedWorkgroups(authority)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		active, err := trace.ProjectSpecActive(authority, group.ID)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return ids, revision, active
 	}
 	check := func(merged, resolved bool) {
@@ -55,7 +55,7 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 			wantWait = fmt.Sprintf("archived member %s has no pinned merge or cancel evidence; workgroup remains unresolved", f.stream1)
 		}
 		list, err := f.c.Statuses(ctx)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(list.Workstreams) != 2 {
 			t.Fatalf("pane membership=%+v", list.Workstreams)
 		}
@@ -76,12 +76,12 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 			t.Fatalf("pane lost or duplicated a member: %v", counts)
 		}
 		row, err := f.c.Status(ctx, f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !row.Archived || !row.TraceDeleted || row.DisplayState != wantState || row.Wait != wantWait || !reflect.DeepEqual(row.Workgroup, group) {
 			t.Fatalf("archived drill-down=%+v", row)
 		}
 		original, err := f.c.Conversation(ctx, f.origin)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(original.Entries) < len(conversation.Entries) || !slices.Equal(original.Entries[:len(conversation.Entries)], conversation.Entries) {
 			t.Fatal("the shared conversation lost its original entries")
 		}
@@ -103,13 +103,13 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		}
 		if !resolved {
 			current, err := f.c.Conversation(ctx, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !slices.Equal(current.Entries, original.Entries) {
 				t.Fatal("survivor no longer reads the original shared conversation")
 			}
 		}
 		gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !gone {
 			t.Fatal("pane read recreated cleaned upstream history")
 		}
@@ -123,7 +123,7 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		}
 	}
 	_, err = f.c.Archive(ctx, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lifecycleAwait(t, f, "unmerged upstream cleanup", func() bool {
 		a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
 		return ok && !a.CleanedAt.IsZero()
@@ -139,15 +139,15 @@ func TestProjectPanePostCleanupMergeAcrossRestart(t *testing.T) {
 		{Number: p.PullRequest, State: "closed", Head: p.Branch, HeadRepository: p.Fork},
 	} {
 		down, err := f.s.repository(f.project2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		_, revision, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		host.Mu.Lock()
 		host.Prs = []pulls.PullRequest{candidate}
 		host.Mu.Unlock()
 		lifecycleAwait(t, f, "non-merge provider observation", func() bool {
 			observed, next, _, err := lifecycle.EdgeObservationAt(down, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if slices.ContainsFunc(observed.Edges, func(e lifecycle.EdgeMergeStatus) bool { return e.Merged }) {
 				t.Fatalf("non-merge candidate released edge: %+v", observed)
 			}

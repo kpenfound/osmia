@@ -2,6 +2,7 @@ package intakejourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -13,9 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// takenAfterStart reports the gadget repository taken on GitHub from the
-// first read after the one Start's own check makes, until it is freed: the
-// repo name was taken between Start and its creation.
 type takenAfterStart struct {
 	pulls.Repositories
 	armed, free atomic.Bool
@@ -33,11 +31,6 @@ func (r *takenAfterStart) Repository(ctx context.Context, owner, name string) (p
 	return repo, found, err
 }
 
-// A new project refused after Start checked it is recorded once with its
-// reason: the owner's inbox shows it and the chief of staff of the design's
-// conversation is told, every pass tries the creation again without
-// recording or telling it again, and once the cause is gone the start goes
-// on.
 func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T) {
 	f := newNewProjectStartFixture(t, true)
 	ctx := context.Background()
@@ -47,7 +40,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T
 	stream, revision := f.draft(t, map[string]any{"new_project": f.gadget(nil)})
 	repos.armed.Store(true)
 	_, err := f.c.DesignStartWithBriefRevision(ctx, stream, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	entry := f.creationEntry(t)
 	if entry.Workstream != stream || entry.Project != f.home || !strings.Contains(entry.Question, "already exists on GitHub") || !strings.Contains(entry.Question, "tries again on every pass") {
@@ -58,7 +51,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T
 	}
 	refusalTurns := func() []trace.QueuedTurn {
 		th, err := f.homeRepository(t).Thread(stream, trace.ChiefOfStaff)
-		must(t, err)
+		fixturekit.Must(t, err)
 		return slices.DeleteFunc(slices.Clone(th.Turns), func(q trace.QueuedTurn) bool {
 			return !strings.HasPrefix(q.Request.TurnID, "design-project-refused-")
 		})
@@ -73,7 +66,7 @@ func TestNewProjectStartRefusedAfterStartReachesTheInboxAndTheChief(t *testing.T
 	seen := repos.reads.Load()
 	f.await(t, "more passes over the refused creation", func() bool { return repos.reads.Load() >= seen+3 })
 	transitions, err := trace.Read[trace.Transition](f.homeRepository(t), stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	refusals := 0
 	for _, tr := range transitions {
 		if tr.Subject == intake.DesignCreationRefusalSubject {

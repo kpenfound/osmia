@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"sync"
 	"testing"
@@ -63,16 +64,16 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 			var viewErr, traceErr error
 			tracePath = "final/checks-1-traces/" + checkrun.TraceDocumentID("abc123", "test:resume") + ".json"
 			j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				content, err := intakefixture.CallTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
+				content, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
 				var traced string
 				var terr error
 				if c.failed != "" {
-					traced, terr = intakefixture.CallTool(ctx, tools, "file_read", map[string]any{"path": tracePath})
+					traced, terr = fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": tracePath})
 				}
 				mu.Lock()
 				viewed, viewErr, traceViewed, traceErr = content, err, traced, terr
 				mu.Unlock()
-				_, err = intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+				_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				return err
 			})
 			j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
@@ -127,7 +128,7 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 			j.awaitReport(t, 1)
 
 			reader, err := j.live().Thread(stream, intake.CommitteeAgent(1))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt
 			section, view, criteria := strings.Index(prompt, "Check result:\n"), strings.Index(prompt, "Your view holds:"), strings.Index(prompt, "Every criterion and the merged units")
 			if section < 0 || view < 0 || criteria < 0 || section > criteria {

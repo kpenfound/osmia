@@ -11,7 +11,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -50,7 +49,7 @@ func decodeSetup[T any](t *testing.T, out MemorySetup, name string) []T {
 		t.Fatalf("missing fragment %s in %v", name, out.Files)
 	}
 	var v []T
-	intakefixture.Must(t, json.Unmarshal(raw, &v))
+	fixturekit.Must(t, json.Unmarshal(raw, &v))
 	return v
 }
 
@@ -59,9 +58,9 @@ func TestMemorySetupIsLocalAndRatifiesOnlyTheOwnerSource(t *testing.T) {
 	opts, clone := projectFixture(t)
 	_, c := start(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var setup MemorySetup
-	intakefixture.Must(t, c.Do(context.Background(), http.MethodGet, Prefix+"/projects/memory/"+string(added.Project.ID), nil, &setup))
+	fixturekit.Must(t, c.Do(context.Background(), http.MethodGet, Prefix+"/projects/memory/"+string(added.Project.ID), nil, &setup))
 	if len(setup.Files) != 4 || setup.Scope != "work:"+setup.WorkSource+":"+string(added.Project.ID) {
 		t.Fatalf("setup %+v", setup)
 	}
@@ -82,7 +81,7 @@ func TestMemorySetupIsLocalAndRatifiesOnlyTheOwnerSource(t *testing.T) {
 		t.Fatalf("authority is not the owner source's alone: %+v", policies)
 	}
 	var again MemorySetup
-	intakefixture.Must(t, c.Do(context.Background(), http.MethodGet, Prefix+"/projects/memory/"+string(added.Project.ID), nil, &again))
+	fixturekit.Must(t, c.Do(context.Background(), http.MethodGet, Prefix+"/projects/memory/"+string(added.Project.ID), nil, &again))
 	first, _ := json.Marshal(setup)
 	second, _ := json.Marshal(again)
 	if string(first) != string(second) {
@@ -94,7 +93,7 @@ func TestMemorySetupFollowsPublishSettings(t *testing.T) {
 	t.Parallel()
 	_, cfg := conversationFixture(t, "setup-publish-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	cfg.Hearsay.Principal = "kyle"
 	cfg.Hearsay.TokenEnv = "KYLE_TOKEN"
@@ -105,7 +104,7 @@ func TestMemorySetupFollowsPublishSettings(t *testing.T) {
 	}
 	cfg.Hearsay.Publish = &config.HearsayPublish{WorkSource: "projects", OwnerSource: "projects-owner", HooksURL: "https://hooks.example", Agent: "publisher", TokenEnv: "PUB_TOKEN"}
 	out, err := buildMemorySetup(cfg, repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	project := string(repo.Project())
 	if out.WorkSource != "projects" || out.OwnerSource != "projects-owner" || out.Publisher != "publisher" || out.Principal != "kyle" || out.Scope != "work:projects:"+project {
 		t.Fatalf("setup %+v", out)
@@ -157,11 +156,11 @@ func TestMemorySetupScopeOverrideIsGranted(t *testing.T) {
 	t.Parallel()
 	_, cfg := conversationFixture(t, "setup-override-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	cfg.Project.HearsayScope = "work:other:shared"
 	out, err := buildMemorySetup(cfg, repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if out.Scope != "work:other:shared" {
 		t.Fatalf("scope %q", out.Scope)
 	}
@@ -178,19 +177,19 @@ func TestMemorySetupMatchesConnectorConfigurationContract(t *testing.T) {
 	t.Parallel()
 	_, cfg := conversationFixture(t, "setup-contract-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	out, err := buildMemorySetup(cfg, repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fixture, err := os.ReadFile("testdata/memory-setup.json")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var expected MemorySetup
-	intakefixture.Must(t, json.Unmarshal(fixture, &expected))
+	fixturekit.Must(t, json.Unmarshal(fixture, &expected))
 	actual, _ := json.Marshal(out)
 	want, _ := json.Marshal(expected)
 	var a, b any
-	intakefixture.Must(t, json.Unmarshal(actual, &a))
-	intakefixture.Must(t, json.Unmarshal(want, &b))
+	fixturekit.Must(t, json.Unmarshal(actual, &a))
+	fixturekit.Must(t, json.Unmarshal(want, &b))
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("setup contract differs:\n%s\nwant:\n%s", actual, want)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/instrumentation"
@@ -14,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// A marker is found wherever a span carries text to a collector, and a span
-// without it is clean.
 func TestLeaksFindsAMarkerInEveryPlaceASpanCarriesText(t *testing.T) {
 	const marker = "zq-marker"
 	carrying := map[string]tracetest.SpanStub{
@@ -55,8 +54,6 @@ func TestSpansSelectByNameAndAttribute(t *testing.T) {
 	}
 }
 
-// The refusing exporter fails every export at once; the hanging one blocks
-// until released, whatever its context says.
 func TestFailingExporters(t *testing.T) {
 	refusing := &RefusingExporter{}
 	if err := refusing.ExportSpans(context.Background(), nil); err != ErrCollectorRefused || refusing.Calls() != 1 {
@@ -65,10 +62,13 @@ func TestFailingExporters(t *testing.T) {
 	hanging := NewHangingExporter()
 	done := make(chan struct{})
 	go func() { hanging.ExportSpans(context.Background(), nil); close(done) }()
+	wake, releaseWake := fixturekit.Ticks(time.Millisecond)
+	defer releaseWake()
+	fixturekit.Until(t, "the export to start", wake, func() bool { return hanging.Calls() == 1 })
 	select {
 	case <-done:
 		t.Fatal("a hanging export returned")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	hanging.Release()
 	select {
@@ -78,8 +78,6 @@ func TestFailingExporters(t *testing.T) {
 	}
 }
 
-// poolSpan is a span of the given name over [start, end] for the pool, bounded
-// by limit or unbounded when limit is zero.
 func poolSpan(name, pool string, limit int, start, end time.Time) tracetest.SpanStub {
 	sp := tracetest.SpanStub{Name: name, StartTime: start, EndTime: end, Attributes: []attribute.KeyValue{attribute.String("osmia.pool.id", pool)}}
 	if limit > 0 {
@@ -90,11 +88,6 @@ func poolSpan(name, pool string, limit int, start, end time.Time) tracetest.Span
 	return sp
 }
 
-// Two mason slots held for an hour while the limit rises from 2 to 4 halfway
-// are at capacity for half an hour; a pool that did no work is idle for the
-// whole window; unbounded pools are busy or idle, never at capacity. These are
-// the figures the capacity query in docs/telemetry.md reports for the same
-// spans.
 func TestPoolTimesFollowLimitChangesWhileSlotsStayHeld(t *testing.T) {
 	at := func(hm string) time.Time {
 		v, err := time.Parse("2006-01-02 15:04", "2026-11-14 "+hm)
@@ -134,7 +127,6 @@ func TestPoolTimesFollowLimitChangesWhileSlotsStayHeld(t *testing.T) {
 			t.Errorf("%s: got %+v, want %+v", pool, got[pool], w)
 		}
 	}
-	// A window inside the hour is clipped to it.
 	if mason := spans.PoolTimes(at("10:15"), at("10:45"))["mason"]; mason != (PoolTime{Running: 30 * m, AtCapacity: 15 * m, Busy: 30 * m}) {
 		t.Errorf("mason over 10:15 to 10:45: %+v", mason)
 	}

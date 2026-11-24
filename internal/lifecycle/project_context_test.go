@@ -4,13 +4,13 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	strings "strings"
 	testing "testing"
 
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -19,16 +19,16 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	f, stream, repo, _ := newFinalFixture(t, "project-context")
 	ctx := context.Background()
 	_, err := repo.EnsureChiefOfStaff(ctx, stream, f.s.now(), intake.OwnerActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, ID: "request_context", Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "context", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read context"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "context-claim", "/owned/context", f.s.now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "context", Role: trace.ChiefOfStaff}
 	notice := func(text string) string {
 		data, err := json.Marshal(trace.ProjectNotice{Text: text})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return string(data)
 	}
 	var docs []trace.Document
@@ -43,17 +43,17 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	docs = append(docs, trace.Document{Header: dh, Path: "kb/topic-00.md", Content: "old-prose-secret"})
 	dh.ID = "kb-sources"
 	docs = append(docs, trace.Document{Header: dh, Path: "kb/sources.json", Content: "[\"old-prose-secret\"]\n"})
-	intakefixture.Must(t, repo.RecordDocuments(ctx, docs))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, docs))
 	tool := service.TestProjectContext(repo, scope)
 	call := func(in string) map[string]any {
 		t.Helper()
 		raw, err := tool.Handle(ctx, json.RawMessage(in))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(raw) > 20000 || strings.Contains(string(raw), "private-secret") || strings.Contains(string(raw), "old-prose-secret") {
 			t.Fatalf("unbounded or private output: %d bytes", len(raw))
 		}
 		var got map[string]any
-		intakefixture.Must(t, json.Unmarshal(raw, &got))
+		fixturekit.Must(t, json.Unmarshal(raw, &got))
 		return got
 	}
 	first := call(`{"prefix":"notices/topic-"}`)
@@ -73,7 +73,7 @@ func TestProjectContextPagesNoticesWithoutExposingPrivateRecordsOrProse(t *testi
 	updated := docs[0]
 	updated.Revision = 2
 	updated.Content = notice("Current consolidated notice.")
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{updated}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{updated}))
 	if current := call(`{"path":"notices/topic-00.json"}`); current["content"] != updated.Content || current["revision"] != float64(2) {
 		t.Fatalf("stale current notice: %+v", current)
 	}

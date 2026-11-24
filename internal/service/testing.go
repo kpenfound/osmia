@@ -116,11 +116,16 @@ func (a TestAccess) RefreshRuntime() error { return a.s.refreshRuntime() }
 // Changes subscribes before the caller's first read. The wait must be released.
 // Notifications are hints; a timer also wakes reads of unannounced trace state.
 func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
+	return a.ChangesEvery(time.Second)
+}
+
+// ChangesEvery is Changes with a fallback timer of the given period.
+func (a TestAccess) ChangesEvery(fallback time.Duration) (wait func() error, release func(), ok bool) {
 	sub, ok := a.s.hub.Subscribe()
 	if !ok {
 		return nil, nil, false
 	}
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(fallback)
 	return func() error {
 		select {
 		case <-sub.Wake():

@@ -42,7 +42,7 @@ func TestGroupApprovalRequiresLiveMemberTraceAndHonorsShutdown(t *testing.T) {
 	if err := s.prepareGroupApproval(context.Background(), decision); !errors.Is(err, intake.ErrNoTrace) {
 		t.Fatalf("live missing trace was not reported: %v", err)
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if err := s.prepareGroupApproval(s.lifetime, decision); !errors.Is(err, context.Canceled) {
 		t.Fatalf("shutdown resolution was not cancellation: %v", err)
 	}
@@ -73,20 +73,20 @@ func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)
 	f := newArchitectFixture(t, configure...)
 	home := filepath.Dir(f.clone)
 	clone2 := filepath.Join(home, "clone2")
-	intakefixture.Must(t, os.Mkdir(clone2, 0700))
+	fixturekit.Must(t, os.Mkdir(clone2, 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", clone2)
-	intakefixture.Must(t, os.MkdirAll(filepath.Join(clone2, "internal", "trace"), 0700))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(clone2, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(clone2, "internal", "trace"), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(clone2, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", clone2, "add", "internal")
 	fixturekit.DemoGit(t, home, "-C", clone2, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	added, err := f.c.AddProject(context.Background(), api.ProjectAddRequest{Name: "other", Upstream: "owner/other", Fork: "owner/other-fork", Clone: clone2})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n")
 	cf := &crossRepoRatifyFixture{architectFixture: f, project2: added.Project.ID}
 	handIn := func(project config.ProjectID, key string) config.WorkstreamID {
 		content := "Build " + key
 		out, err := cf.c.HandIn(context.Background(), api.HandInRequest{Project: project, Key: key, Stdin: &content, SkipDebate: skipDebate})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return out.Workstream
 	}
 	cf.stream1 = intake.HandInWorkstream(cf.project, "upload-server")
@@ -101,7 +101,7 @@ func crossRepoFixture(t *testing.T, skipDebate bool, configure ...func(*Options)
 	close(draftsReady)
 	for _, project := range []config.ProjectID{cf.project, cf.project2} {
 		repo, err := cf.s.repository(project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		repo.WakeWorkflow()
 	}
 	return cf
@@ -116,23 +116,23 @@ func (f *crossRepoRatifyFixture) awaitProjectSpec(t *testing.T) {
 	t.Helper()
 	wait, closeWait := serviceChanges(t, f.s)
 	defer closeWait()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		repo1, err := f.s.repository(f.project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		repo2, err := f.s.repository(f.project2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		_, _, found, err := repo1.ProjectSpecOf(f.stream1)
 		if err != nil && !errors.Is(err, trace.ErrLocked) {
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 		}
 		if found {
 			return
 		}
 		feature1, err := repo1.Workflow(f.stream1, trace.FeatureSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		feature2, err := repo2.Workflow(f.stream2, trace.FeatureSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if time.Now().After(deadline) {
 			t.Fatalf("project spec not recorded; member states are %q and %q", feature1.Value, feature2.Value)
 		}
@@ -144,7 +144,7 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 	t.Helper()
 	wait, closeWait := serviceChanges(t, f.s)
 	defer closeWait()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		var packets [2]api.PacketResponse
 		ready := true
@@ -155,9 +155,9 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 				project = f.project2
 			}
 			repo, err := f.s.repository(project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			feature, err := repo.Workflow(member, trace.FeatureSubject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			packet, err := f.c.Packet(context.Background(), member)
 			if err != nil && !intakefixture.Failed(err, api.NotFound) {
 				t.Fatalf("member %s packet: %v", member, err)
@@ -167,14 +167,14 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 				ready = false
 			} else {
 				pin, err := intake.LatestPin(repo, member)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if packet.Project != project || packet.Workstream != member || packet.Revision < 1 || packet.Packet.Revision != pin {
 					t.Fatalf("member %s packet does not pin the published draft: %+v; latest=%+v", member, packet, pin)
 				}
 				packets[i] = packet
 			}
 			threads, err := repo.Threads(member)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, th := range threads {
 				if th.Identity.Role != intake.ArchitectRole && th.Identity.Role != intake.CommitteeRole {
 					continue
@@ -185,7 +185,7 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 				}
 			}
 			ops, err := repo.Operations(member)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, op := range ops {
 				if op.Operation.Action == intake.DraftAction || op.Operation.Action == intake.RoundAction || op.Operation.Action == intake.ReplyAction {
 					fmt.Fprintf(&diagnostic, "operation=%s action=%s acknowledged=%v result=%+v history=%+v\n", op.Operation.ID, op.Operation.Action, op.Acknowledged, op.Result, op.History)
@@ -195,16 +195,16 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 		}
 		if ready {
 			repo, err := f.s.repository(f.project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			wt, g, err := f.s.approvalTrace(context.Background(), repo, group)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			state, err := wt.Workflow(g.Members[0], lifecycle.ProjectSpecDraftSubject)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			th, err := wt.Thread(g.Members[0], intake.ArchitectAgent)
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, wt.Close())
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, wt.Close())
 			fmt.Fprintf(&diagnostic, "group=%s draft=%s thread=%+v\n", group, state.Value, th)
 			ready = state.Value == "drafted" && th.Active == "" && len(th.Turns) > 0
 			for _, turn := range th.Turns {
@@ -224,9 +224,9 @@ func (f *crossRepoRatifyFixture) awaitDecisionPackets(t *testing.T) [2]api.Packe
 func (f *crossRepoRatifyFixture) assertApprovalRefused(t *testing.T, group config.WorkgroupID, defective trace.Document) {
 	t.Helper()
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wt, g, err := f.s.approvalTrace(context.Background(), repo, group)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer wt.Close()
 	if got := projectSpecDocument(t, wt); !intakefixture.EqualJSONTest(got, defective) {
 		t.Fatalf("ratify did not read the pinned defective project-spec revision: got=%+v want=%+v", got, defective)
@@ -240,7 +240,7 @@ func (f *crossRepoRatifyFixture) assertApprovalRefused(t *testing.T, group confi
 			project = f.project2
 		}
 		repo, err := f.s.repository(project)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if decision, found, err := intake.LatestRatification(repo, member); err != nil || found {
 			t.Fatalf("refused draft ratified member %s: decision=%+v found=%v error=%v", member, decision, found, err)
 		}
@@ -248,9 +248,9 @@ func (f *crossRepoRatifyFixture) assertApprovalRefused(t *testing.T, group confi
 			t.Fatalf("refused draft prepared member %s's seal: seal=%+v found=%v error=%v", member, prepared, found, err)
 		}
 		state, err := repo.Workflow(member, intake.SealSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		ops, err := repo.Operations(member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if state.Value != "" {
 			t.Fatalf("refused draft requested member %s's seal: %+v", member, state)
 		}
@@ -264,7 +264,7 @@ func (f *crossRepoRatifyFixture) assertApprovalRefused(t *testing.T, group confi
 func projectSpecDocument(t *testing.T, wt *trace.Repository) trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](wt, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var latest trace.Document
 	for _, doc := range docs {
 		if doc.ID == trace.ProjectSpecsDocument && doc.Revision > latest.Revision {
@@ -289,9 +289,9 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 	packets := f.awaitDecisionPackets(t)
 
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	spec, workgroup, found, err := repo1.ProjectSpecOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || workgroup != id {
 		t.Fatalf("project spec not recorded for workgroup %s: found=%v workgroup=%s", id, found, workgroup)
 	}
@@ -311,7 +311,7 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 	}
 
 	out, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(out.Members) != 2 {
 		t.Fatalf("ratify did not seal every member: %+v", out)
 	}
@@ -321,7 +321,7 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 			repo = repo1
 		} else {
 			repo, err = f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 		}
 		if _, ratified, err := intake.LatestRatification(repo, m); err != nil || !ratified {
 			t.Fatalf("workstream %s is not ratified: err=%v ratified=%v", m, err, ratified)
@@ -329,12 +329,12 @@ func TestCrossRepoWorkgroupDraftAndRatify(t *testing.T) {
 	}
 
 	b, err := f.s.Context().Assemble(ctx, f.project, bundle.Scope{Role: "chief_of_staff", Workstream: f.stream1})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if b.ProjectSpec == nil || b.ProjectSpec.Workgroup != id || b.ProjectSpec.Slice == nil || b.ProjectSpec.Slice.Workstream != f.stream1 {
 		t.Fatalf("chief of staff's context of member1 does not carry the ratified project spec: %+v", b.ProjectSpec)
 	}
 	b2, err := f.s.Context().Assemble(ctx, f.project2, bundle.Scope{Role: "chief_of_staff", Workstream: f.stream2})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if b2.ProjectSpec == nil || b2.ProjectSpec.Workgroup != id || b2.ProjectSpec.Slice == nil || b2.ProjectSpec.Slice.Workstream != f.stream2 {
 		t.Fatalf("chief of staff's context of member2 does not carry the ratified project spec: %+v", b2.ProjectSpec)
 	}
@@ -352,19 +352,19 @@ func TestRatifyWorkgroupRefusesAnInvalidGraphWithNothingRecorded(t *testing.T) {
 	packets := f.awaitDecisionPackets(t)
 
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	spec, workgroup, _, err := repo1.ProjectSpecOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	spec.Graph = []trace.Edge{{From: f.stream1, To: f.stream2, Type: trace.EdgeContract}, {From: f.stream2, To: f.stream1, Type: trace.EdgeContract}}
 	wt, err := trace.OpenWorkgroupTrace(f.s.current().Root, workgroup, []trace.CrossRepoMember{{Workstream: f.stream1, Project: repo1}, {Workstream: f.stream2, Project: mustRepo(t, f.s, f.project2)}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	valid := projectSpecDocument(t, wt)
 	writeCorruptedProjectSpec(t, wt, workgroup, spec)
 	defective := projectSpecDocument(t, wt)
 	if defective.Revision != valid.Revision+1 {
 		t.Fatalf("defective graph not recorded as the next revision: valid=%+v defective=%+v", valid, defective)
 	}
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, wt.Close())
 
 	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, defective.Revision); !intakefixture.Failed(err, api.Validation) || !strings.Contains(err.Error(), "project spec graph is invalid") {
 		t.Fatalf("ratify did not refuse the defective graph: %v", err)
@@ -384,23 +384,23 @@ func TestRatifyWorkgroupRefusesWhenAMemberHasNoSlice(t *testing.T) {
 	packets := f.awaitDecisionPackets(t)
 
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	spec, workgroup, _, err := repo1.ProjectSpecOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	g := trace.Workgroup{ID: workgroup, Members: []config.WorkstreamID{f.stream1, f.stream2}}
 	spec.Slices = spec.Slices[:1]
 	wt, err := trace.OpenWorkgroupTrace(f.s.current().Root, workgroup, []trace.CrossRepoMember{{Workstream: f.stream1, Project: repo1}, {Workstream: f.stream2, Project: mustRepo(t, f.s, f.project2)}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	valid := projectSpecDocument(t, wt)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, wt, g, spec, f.s.now(), intake.OwnerActor, "drop-slice"))
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, wt, g, spec, f.s.now(), intake.OwnerActor, "drop-slice"))
 	defective := projectSpecDocument(t, wt)
 	if defective.Revision != valid.Revision+1 {
 		t.Fatalf("missing slice not recorded as the next revision: valid=%+v defective=%+v", valid, defective)
 	}
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, wt.Close())
 
 	current, _, found, err := repo1.ProjectSpecOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || !intakefixture.EqualJSONTest(current, spec) || len(current.Slices) != 1 || current.Slices[0].Workstream != f.stream1 {
 		t.Fatalf("ratify's project-spec lookup does not see the missing-slice revision: %+v", current)
 	}
@@ -425,7 +425,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 	}()
 	select {
 	case <-hook.Reached:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("member preparation was not interrupted")
 	}
 	f.assertBarrier(t)
@@ -434,7 +434,7 @@ func TestRatifyWorkgroupInterruptedBetweenMembersCompletesOnRetry(t *testing.T) 
 	f.start(t)
 	f.awaitApproved(t)
 	out, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(out.Members) != 2 || out.Sealing != "succeeded" {
 		t.Fatalf("retry: %+v", out)
 	}
@@ -456,9 +456,9 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 	}
 
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repo2, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if id, err := repo1.CrossRepoWorkgroupOf(f.stream1); err != nil || id != "" {
 		t.Fatalf("member1 was left pointing at a cross-repo workgroup after a refused readiness check: id=%q err=%v", id, err)
 	}
@@ -466,12 +466,12 @@ func TestDraftWorkgroupRefusesReadinessWithNothingRecordedOnAnyMember(t *testing
 		t.Fatalf("member2, which was ready, was still joined to a workgroup after the whole call was refused: id=%q err=%v", id, err)
 	}
 	groups1, _, err := trace.Workgroups(repo1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, ok := trace.WorkgroupOf(groups1, f.stream1); !ok {
 		t.Fatal("member1's own one-workstream workgroup was retracted despite the refused join")
 	}
 	groups2, _, err := trace.Workgroups(repo2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, ok := trace.WorkgroupOf(groups2, f.stream2); !ok {
 		t.Fatal("member2's workgroup was retracted despite the refused join")
 	}
@@ -493,9 +493,9 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 	defer f.stop(t)
 	ctx := context.Background()
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repo2, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	resolved := []trace.CrossRepoMember{{Workstream: f.stream1, Project: repo1}, {Workstream: f.stream2, Project: repo2}}
 	f.s.boundary = func(name string) error {
@@ -510,12 +510,12 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 	}
 	f.s.clearBoundary()
 	joinedID, err := repo1.CrossRepoWorkgroupOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if joinedID == "" {
 		t.Fatal("first member was not joined before interruption")
 	}
 	_, g, _, err := repo1.CrossRepoProjectSpec(joinedID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if entries, apiFault := f.s.workgroupInbox(ctx, repo1, joinedID); apiFault != nil || len(entries) != 0 {
 		t.Fatalf("half-joined workgroup inbox: %+v %v", entries, apiFault)
 	}
@@ -543,15 +543,15 @@ func TestDraftWorkgroupInterruptedBetweenMembersCompletesOnRetryWithNoSecondWork
 		t.Fatalf("member2 still has its own chief-of-staff thread after joining: %v", err)
 	}
 	reopened, err := trace.OpenWorkgroupTrace(f.s.current().Root, g.ID, resolved)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer reopened.Close()
 	groups, _, err := trace.Workgroups(reopened)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(groups) != 1 {
 		t.Fatalf("the retry recorded more than one workgroup: %+v", groups)
 	}
 	entries, err := os.ReadDir(filepath.Join(f.s.current().Root.String(), "workgroups"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(entries) != 1 {
 		t.Fatalf("retry created another workgroup trace: %v", entries)
 	}
@@ -572,7 +572,7 @@ func TestDraftWorkgroupRetryAfterCreationBeforeAnyMemberJoins(t *testing.T) {
 	}
 	f.s.clearBoundary()
 	before, err := os.ReadDir(filepath.Join(f.s.current().Root.String(), "workgroups"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(before) != 1 {
 		t.Fatalf("workgroup traces: %v", before)
 	}
@@ -594,26 +594,26 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 	f.awaitProjectSpec(t)
 
 	sent1, err := f.c.Send(ctx, f.stream1, "Where does the acknowledgment live?")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	repo1, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 	repo2, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
 	sent2, err := f.c.Send(ctx, f.stream2, "Does the client ever see the offset?")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	checkSharedConversation := func(t *testing.T) {
 		t.Helper()
 		for _, m := range []config.WorkstreamID{f.stream1, f.stream2} {
 			list, err := f.c.Conversation(ctx, m)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(list.Entries) != 2 || list.Entries[0].Turn != sent1.Turn || list.Entries[1].Turn != sent2.Turn {
 				t.Fatalf("workstream %s's shared conversation: %+v", m, list.Entries)
 			}
@@ -625,12 +625,12 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 	f.start(t)
 	checkSharedConversation(t)
 	repo1, err = f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 	repo2, err = f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestCrossRepoWorkgroupSharesOneChiefOfStaffAcrossARestart(t *testing.T) {
 func mustRepo(t *testing.T, s *Service, project config.ProjectID) *trace.Repository {
 	t.Helper()
 	repo, err := s.repository(project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return repo
 }
 

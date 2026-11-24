@@ -11,7 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// answerChief captures final as the response of the workstream's claimed
+// AnswerChief captures final as the response of the workstream's claimed
 // chief-of-staff turn and completes it, as a finished turn of the chief of
 // staff would.
 func AnswerChief(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, turn, final string) {

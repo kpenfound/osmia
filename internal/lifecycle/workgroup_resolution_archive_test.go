@@ -24,9 +24,9 @@ func rewriteLegacyResolutionArchive(t *testing.T, f *productionDesignFixture, me
 	t.Helper()
 	path := filepath.Join(f.opts.Config.Root, "runtime.json")
 	data, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var state map[string]any
-	intakefixture.Must(t, json.Unmarshal(data, &state))
+	fixturekit.Must(t, json.Unmarshal(data, &state))
 	for _, raw := range state["archived"].([]any) {
 		a := raw.(map[string]any)
 		if a["workstream"] == string(member) {
@@ -35,8 +35,8 @@ func rewriteLegacyResolutionArchive(t *testing.T, f *productionDesignFixture, me
 		}
 	}
 	data, err = json.Marshal(state)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, data, 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, data, 0600))
 }
 func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 	t.Parallel()
@@ -49,17 +49,17 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 			defer f.stop(t)
 			deliverResolutionMembers(t, f)
 			second, err := f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			recordResolutionMerge(t, second, f.stream2)
 			first, err := f.s.repository(f.project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if name == "owner-merged" {
 				recordResolutionMerge(t, first, f.stream1)
 			} else if name == "own-pr-merged" {
 				resolutionDocument(t, first, f.stream1, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: 101, Outcome: delivery.OwnPullRequestOutcomeMerged, MergeCommit: "merged-upstream"})
 			}
 			_, err = f.c.Archive(context.Background(), f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			gate.await(t)
 			checkArchive := func(boundary string) {
 				t.Helper()
@@ -68,7 +68,7 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 					t.Fatalf("%s archive=%+v", boundary, a)
 				}
 				view, err := f.c.Status(context.Background(), f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if (view.DisplayState == "delivered (merged)") != merged {
 					t.Fatalf("%s label=%s", boundary, view.DisplayState)
 				}
@@ -103,7 +103,7 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 					t.Fatalf("deleted evidence=%+v", a)
 				}
 				view, err := f.c.Status(context.Background(), f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if (view.DisplayState == "delivered (merged)") != merged {
 					t.Fatalf("deleted label=%s", view.DisplayState)
 				}
@@ -111,12 +111,12 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 					t.Fatal("deleted member lost its resolution hold diagnostic")
 				}
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, a.Workgroup)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				defer authority.Close()
 				ids, rev, err := trace.ResolvedWorkgroups(authority)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				active, err := trace.ProjectSpecActive(authority, a.Workgroup)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if merged {
 					if !slices.Equal(ids, []config.WorkgroupID{a.Workgroup}) || rev != 1 || active {
 						t.Fatal("merged archived member did not resolve once")
@@ -125,7 +125,7 @@ func TestDesignProductionArchiveRequiresPinnedMergeEvidence(t *testing.T) {
 					t.Fatal("retirement or legacy boolean granted resolution")
 				}
 				gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !gone {
 					t.Fatal("deleted member history was recreated")
 				}
@@ -149,7 +149,7 @@ func TestSingleMemberResolutionAndDeliveryCleanup(t *testing.T) {
 		completeMasonTurn(t, f, repo, member, unit, "built "+unit)
 	}
 	groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{member}, f.s.now(), intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(groups) == 0 {
 		t.Fatal("missing one-member group")
 	}
@@ -157,22 +157,22 @@ func TestSingleMemberResolutionAndDeliveryCleanup(t *testing.T) {
 	resolutionDocument(t, repo, member, delivery.PublicationDocument, delivery.PublicationPath, p)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "ready-delivered", Revision: 1, Project: repo.Project(), Workstream: member, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "ready PR published")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resolver := &workgroupResolver{s: f.s, repository: repo}
-	intakefixture.Must(t, resolver.Pass(ctx))
+	fixturekit.Must(t, resolver.Pass(ctx))
 	ids, revision, err := trace.ResolvedWorkgroups(repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(ids) != 0 || revision != 0 {
 		t.Fatal("one-member ready PR resolved")
 	}
 	state := intake.DeliveredState
 	view := api.WorkstreamStatus{Project: repo.Project(), Workstream: member, State: &state}
-	intakefixture.Must(t, f.s.presentWorkstream(repo, &view))
+	fixturekit.Must(t, f.s.presentWorkstream(repo, &view))
 	if view.DisplayState != "PR open" {
 		t.Fatalf("live label=%s", view.DisplayState)
 	}
 	cleanup := newCleanup(f, repo)
-	intakefixture.Must(t, cleanup.Pass(ctx))
+	fixturekit.Must(t, cleanup.Pass(ctx))
 	if len(cleanup.failures) != 0 {
 		t.Fatalf("delivery cleanup=%v", cleanup.failures)
 	}
@@ -181,10 +181,10 @@ func TestSingleMemberResolutionAndDeliveryCleanup(t *testing.T) {
 		assertUnitWorkspace(t, f, repo, member, unit, false)
 	}
 	recordResolutionMerge(t, repo, member)
-	intakefixture.Must(t, resolver.Pass(ctx))
-	intakefixture.Must(t, resolver.Pass(ctx))
+	fixturekit.Must(t, resolver.Pass(ctx))
+	fixturekit.Must(t, resolver.Pass(ctx))
 	ids, revision, err = trace.ResolvedWorkgroups(repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(ids) != 1 || revision != 1 {
 		t.Fatalf("one-member merge resolution=%v revision=%d", ids, revision)
 	}
@@ -197,40 +197,40 @@ func TestSingleMemberReadyArchivePinsUnresolved(t *testing.T) {
 	t.Cleanup(gate.release)
 	opts.boundary = gate.checkpoint
 	s, c := start(t, opts)
-	defer func() { intakefixture.Must(t, s.Close()) }()
+	defer func() { fixturekit.Must(t, s.Close()) }()
 	added, err := c.AddProject(ctx, fixturekit.Request(clone))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	repo := s.sole().repository
 	member := config.WorkstreamID("w_00000000000000000000000000000991")
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, member, s.now(), intake.OwnerActor))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, member, s.now(), intake.OwnerActor))
 	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, s.now(), intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resolutionDocument(t, repo, member, delivery.PublicationDocument, delivery.PublicationPath, api.DeliveryPublication{Status: delivery.PublicationOpened, PullRequest: 42, URL: "https://example.invalid/pull/42"})
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered", Revision: 1, Project: added.Project.ID, Workstream: member, At: s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "ready PR published")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, s.refreshRuntime())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.refreshRuntime())
 	_, err = c.Archive(ctx, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	gate.await(t)
 	a, ok := intakefixture.ArchiveRecord(t, s.store, member)
 	if !ok || a.Resolved || a.ResolutionEvidence != "unresolved" {
 		t.Fatalf("one-member archive=%+v", a)
 	}
 	view, err := c.Status(ctx, member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if view.DisplayState != "blocked" || !strings.Contains(view.Wait, "no pinned merge or cancel evidence") {
 		t.Fatalf("archived label=%s", view.DisplayState)
 	}
 	ids, _, err := trace.ResolvedWorkgroups(repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(ids, g.ID) {
 		t.Fatal("one-member archive resolved an unmerged PR")
 	}
 	gate.release()
 	changes, closeChanges := serviceChanges(t, s)
 	defer closeChanges()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		a, _ = intakefixture.ArchiveRecord(t, s.store, member)
 		if !a.CleanedAt.IsZero() {
@@ -242,7 +242,7 @@ func TestSingleMemberReadyArchivePinsUnresolved(t *testing.T) {
 		changes()
 	}
 	ids, _, err = trace.ResolvedWorkgroups(repo)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(ids, g.ID) {
 		t.Fatal("one-member cleanup resolved an unmerged PR")
 	}

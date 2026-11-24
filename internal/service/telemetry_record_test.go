@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/projectstore"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -17,30 +17,30 @@ func TestServiceSendsWorkstreamSpansAndTheRootOnArchive(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	created := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, created, serviceActor)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), intakefixture.Stream, created, serviceActor))
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, created, serviceActor))
+	fixturekit.Must(t, repository.Close())
 	s, c := startTelemetry(t, opts, TestHooks{TelemetryExporter: exporter})
-	_, active := s.runtimeOf(intakefixture.Project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
-	featureTransition(t, active.repository, intakefixture.Stream, "pending", created.Add(time.Minute))
-	featureTransition(t, active.repository, intakefixture.Stream, "delivered", created.Add(time.Hour))
-	if _, err := c.Archive(context.Background(), intakefixture.Stream); err != nil {
+	featureTransition(t, active.repository, fixturekit.Stream, "pending", created.Add(time.Minute))
+	featureTransition(t, active.repository, fixturekit.Stream, "delivered", created.Add(time.Hour))
+	if _, err := c.Archive(context.Background(), fixturekit.Stream); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	var archivedAt time.Time
 	state, _ := s.store.Snapshot()
 	for _, a := range state.Archived {
-		if a.Workstream == intakefixture.Stream {
+		if a.Workstream == fixturekit.Stream {
 			archivedAt = a.ArchivedAt
 		}
 	}
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	spans := exporter.GetSpans()
 	states := named(spans, "osmia.workstream.state")
@@ -62,14 +62,14 @@ func TestServiceSendsWorkstreamSpansAndTheRootOnArchive(t *testing.T) {
 		}
 	}
 	root := roots[0]
-	if root.Parent.IsValid() || root.SpanContext.SpanID() != telemetry.WorkstreamRoot(intakefixture.Stream) || !root.StartTime.Equal(created) || !root.EndTime.Equal(archivedAt) {
+	if root.Parent.IsValid() || root.SpanContext.SpanID() != telemetry.WorkstreamRoot(fixturekit.Stream) || !root.StartTime.Equal(created) || !root.EndTime.Equal(archivedAt) {
 		t.Fatalf("root span %+v, archived at %v", root, archivedAt)
 	}
 	for _, s := range spans {
 		if factoryTrace := telemetry.FactoryTrace("service"); s.SpanContext.TraceID() == factoryTrace {
 			continue
 		}
-		if s.SpanContext.TraceID() != telemetry.WorkstreamTrace(intakefixture.Stream) {
+		if s.SpanContext.TraceID() != telemetry.WorkstreamTrace(fixturekit.Stream) {
 			t.Errorf("span %s is not in the workstream's trace", s.Name)
 		}
 	}

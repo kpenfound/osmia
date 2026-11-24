@@ -18,7 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -44,21 +43,21 @@ func (f *edgeGraphFixture) resolvePasses(t *testing.T) {
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	intakefixture.Must(t, f.s.edgeResolverPass(context.Background(), f.repository))
-	intakefixture.Must(t, f.s.edgeWaitPass(context.Background(), f.repository))
+	fixturekit.Must(t, f.s.edgeResolverPass(context.Background(), f.repository))
+	fixturekit.Must(t, f.s.edgeWaitPass(context.Background(), f.repository))
 }
 
 func (f *edgeGraphFixture) holdsMason(t *testing.T, stream config.WorkstreamID) bool {
 	t.Helper()
-	held, err := f.s.holds(f.project, intake.LibrarianWorkstream(f.project), f.repository, scheduler.Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: intakefixture.MasonRole}}})
-	intakefixture.Must(t, err)
+	held, err := f.s.holds(f.project, intake.LibrarianWorkstream(f.project), f.repository, scheduler.Candidate{Workstream: stream, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}})
+	fixturekit.Must(t, err)
 	return held
 }
 
 func (f *edgeGraphFixture) inboxLen(t *testing.T) int {
 	t.Helper()
 	entries, err := f.repository.Inbox()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return len(entries)
 }
 
@@ -66,15 +65,15 @@ func (f *edgeGraphFixture) recordOwnerMerge(t *testing.T, stream config.Workstre
 	t.Helper()
 	ctx := context.Background()
 	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err = f.repository.MoveFeatureState(ctx, h, feature.Value, intake.DeliveredState, "fixture delivery")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	record := api.DeliveryMerge{Branch: intake.FeatureBranch(stream), Commit: commit, Upstream: seal.Base{Remote: "upstream", Branch: "main", Commit: commit}}
 	data, err := json.Marshal(record)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.MergeDocument, Revision: 1, Project: f.repository.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}, Path: delivery.MergePath, Content: string(data)}
-	intakefixture.Must(t, f.repository.RecordDocuments(ctx, []trace.Document{doc}))
+	fixturekit.Must(t, f.repository.RecordDocuments(ctx, []trace.Document{doc}))
 }
 
 func TestEdgeGraphRefusesACycle(t *testing.T) {
@@ -129,7 +128,7 @@ func TestHardBlockEdgeHoldsNoUnitUntilRecordedMergeNeverOnAgentOutcome(t *testin
 
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "assemble", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
 	_, err := f.repository.SetFeatureState(ctx, h, intake.AssembledState, "fixture assembly")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.resolvePasses(t)
 	if !f.holdsMason(t, f.downstream) {
 		t.Fatal("an agent outcome with no recorded merge released the hard-blocked dependent")
@@ -166,7 +165,7 @@ func TestMergeOrderEdgeLetsBothBuildButHoldsReadinessUntilMerge(t *testing.T) {
 		t.Fatalf("merge-order edge showed no wait before the upstream merged: %q, %v", wait, err)
 	}
 	observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(observed.Edges) != 1 || observed.Edges[0].Merged || observed.Edges[0].BuildBranch == "" {
 		t.Fatalf("edge observation = %+v; want one unmerged edge naming a build branch", observed.Edges)
 	}
@@ -191,12 +190,12 @@ func TestEdgeResolverPassPollsGitHubAndNeverResolvesOnAnAgentOutcome(t *testing.
 
 	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/dagger", Fork: "owner/dagger-fork", Branch: intake.FeatureBranch(f.upstream), Commit: "c1d2e3f4a5b6c1d2e3f4a5b6c1d2e3f4a5b6c1d2", PullRequest: 42, URL: "https://example.invalid/pull/42"}
 	data, err := json.Marshal(publication)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
-	intakefixture.Must(t, f.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
+	fixturekit.Must(t, f.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.PublicationPath, Content: string(data)}}))
 	deliver := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.repository.Project(), Workstream: f.upstream, At: f.s.now(), Actor: service.TestForemanActor, Cause: "fixture"}
 	_, err = f.repository.SetFeatureState(ctx, deliver, intake.DeliveredState, "fixture delivery")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	fake := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, MergeCommit: "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12", Base: "main"}}}
 	f.s.mu.Lock()
@@ -216,7 +215,7 @@ func TestEdgeResolverPassPollsGitHubAndNeverResolvesOnAnAgentOutcome(t *testing.
 		t.Fatalf("unresolvedMergeOrderEdge after the poll found it merged = %q, %v, %v; want resolved", reference, waiting, err)
 	}
 	observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if observed.Edges[0].Commit != fake.Prs[0].MergeCommit || observed.Edges[0].Commit == publication.Commit {
 		t.Fatalf("dependency pins published head instead of merged commit: %+v", observed.Edges)
 	}
@@ -225,19 +224,19 @@ func TestHardBlockedBuildStartsNoUnitBeforeMerge(t *testing.T) {
 	t.Parallel()
 	f := newDebateFixture(t, 1, 1)
 	base := f.upstream(t)
-	downstream, repository := seedBuild(t, f, "hard-block", intakefixture.ValidPlan, config.WorkspacesGit, base)
+	downstream, repository := seedBuild(t, f, "hard-block", fixturekit.ValidPlan, config.WorkspacesGit, base)
 	ctx := context.Background()
 	upstream := config.WorkstreamID("w_00000000000000000000000000000b01")
-	intakefixture.Must(t, repository.CreateWorkstream(ctx, upstream, f.s.now(), intake.RegistrationActor))
+	fixturekit.Must(t, repository.CreateWorkstream(ctx, upstream, f.s.now(), intake.RegistrationActor))
 	group, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{upstream, downstream}, f.s.now(), intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, repository, group, trace.ProjectSpec{Behavior: "Wait for the upstream merge.", Graph: []trace.Edge{{From: upstream, To: downstream, Type: trace.EdgeHardBlock}}}, f.s.now(), intake.OwnerActor, "fixture"))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, repository, group, trace.ProjectSpec{Behavior: "Wait for the upstream merge.", Graph: []trace.Edge{{From: upstream, To: downstream, Type: trace.EdgeHardBlock}}}, f.s.now(), intake.OwnerActor, "fixture"))
 	build := &masons{s: f.s, cfg: f.s.about(repository), repository: repository}
 	before, err := repository.WorkflowStates(downstream)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, build.Pass(ctx))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, build.Pass(ctx))
 	states, err := repository.WorkflowStates(downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, unit := range []string{"resume", "dedupe"} {
 		if !reflect.DeepEqual(states[trace.UnitSubject(unit)], before[trace.UnitSubject(unit)]) {
 			t.Fatalf("hard-blocked unit %s started before even the first observation: %+v", unit, states)
@@ -245,9 +244,9 @@ func TestHardBlockedBuildStartsNoUnitBeforeMerge(t *testing.T) {
 	}
 	for _, unit := range []string{"resume", "dedupe"} {
 		threads, err := repository.Threads(downstream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, thread := range threads {
-			if thread.Identity.Unit == unit && thread.Identity.Role == intakefixture.MasonRole {
+			if thread.Identity.Unit == unit && thread.Identity.Role == intake.MasonRole {
 				t.Fatal("hard block queued a mason thread")
 			}
 		}
@@ -269,7 +268,7 @@ func TestEdgeWaitIsStatusWithoutInboxOrWebhookNotification(t *testing.T) {
 		t.Fatal(apiFault)
 	}
 	data, err := json.Marshal(statuses)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(data), `"wait":"waiting on owner: owner/repo-a#123 merge"`) {
 		t.Fatalf("status API omits the merge wait: %s", data)
 	}

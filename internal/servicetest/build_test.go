@@ -13,7 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
+func TestServiceFixtureOpensTheWebListenerAndRunsSchedulerPasses(t *testing.T) {
 	t.Parallel()
 	f := NewProject(t)
 	f.Stop(t)
@@ -34,6 +34,11 @@ func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("scheduler never completed a pass")
 	}
+}
+
+func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
+	t.Parallel()
+	f := NewProject(t)
 	graph := `{"version":1,"units":[{"id":"resume","title":"Resume uploads","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":[]}]}`
 	streams := f.SeedBuildingPaused(t, runtime.Target{Scope: "factory"}, graph, "live")
 	assertBuild := func(repo *trace.Repository, id config.WorkstreamID) {

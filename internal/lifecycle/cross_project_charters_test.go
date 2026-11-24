@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,13 +96,13 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	f.s.setSole(runtimeFor(repo))
 	ctx := context.Background()
 	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	change, apiFault := f.s.requestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
 	if apiFault != nil {
 		t.Fatal(apiFault)
 	}
 	change.State = "drafting"
-	intakefixture.Must(t, f.s.saveChange(ctx, repo, &change))
+	fixturekit.Must(t, f.s.saveChange(ctx, repo, &change))
 	tool := f.s.deltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, field := range []string{"behavior", "contract"} {
 		for _, citation := range []string{"charter#999", "p_missing/charter#1"} {
@@ -112,9 +113,9 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 				after.Contracts = []trace.Contract{{Name: "journal", Text: "Follow " + citation}}
 			}
 			raw, err := json.Marshal(after)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			out, err := tool.Handle(ctx, raw)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 				t.Fatalf("invalid %s citation %s accepted: %s", field, citation, out)
 			}
@@ -127,9 +128,9 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	after := change.Before
 	after.Behavior = "Follow charter#1."
 	raw, err := json.Marshal(after)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, stream, change.ID).State != "debating" {
 		t.Fatalf("valid charter citation refused: %s", out)
 	}
@@ -147,7 +148,7 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	writeCharter(t, f.c, f.project, "1. Keep changes small.\n\n2. A alone has this rule.\n")
 	writeCharter(t, f.c, f.project2, "1. Keep changes small.\n\n3. B alone has this rule.\n")
@@ -156,16 +157,16 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 		t.Fatal(apiFault)
 	}
 	wt, _, _, close, err := f.s.changeContext(ctx, string(f.stream2))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer close()
 	tool := f.s.deltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, citation := range []string{"charter#2", string(f.project) + "/charter#3", "p_missing/charter#1"} {
 		after := change.Before
 		after.Behavior = "Follow " + citation
 		raw, err := json.Marshal(after)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		out, err := tool.Handle(ctx, raw)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 			t.Fatalf("invalid citation %s accepted: %s", citation, out)
 		}
@@ -179,9 +180,9 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	after.Contracts = append([]trace.Contract(nil), after.Contracts...)
 	after.Contracts[0].Text += " Follow " + string(f.project) + "/charter#2."
 	raw, err := json.Marshal(after)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, f.stream2, change.ID).State != "debating" {
 		t.Fatalf("valid local and qualified citations refused: %s", out)
 	}

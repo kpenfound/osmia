@@ -1,12 +1,12 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/runtime"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestProjectPaneStatesRequireRecordedMerge(t *testing.T) {
@@ -49,8 +49,8 @@ func TestArchivedProjectPaneRequiresPinnedResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, repo, _, _ := ownPRFixture(t)
 			a := runtime.Archive{State: tc.state, ResolutionEvidence: tc.evidence, Resolved: tc.resolved, DeliveryLink: tc.link}
-			w := WorkstreamStatus{Project: repo.Project(), Workstream: intakefixture.Stream, State: &tc.state}
-			intakefixture.Must(t, presentArchivedWorkstream(repo, &w, a))
+			w := WorkstreamStatus{Project: repo.Project(), Workstream: fixturekit.Stream, State: &tc.state}
+			fixturekit.Must(t, presentArchivedWorkstream(repo, &w, a))
 			if w.DisplayState != tc.want {
 				t.Fatalf("label=%s want=%s", w.DisplayState, tc.want)
 			}

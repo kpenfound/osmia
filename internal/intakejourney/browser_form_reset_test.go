@@ -2,6 +2,15 @@ package intakejourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/browsertest"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	testing "testing"
 	time "time"
 
@@ -12,75 +21,62 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// The escalation, contested-unit and amendment cards clear their decision
-// back to its default value as soon as their submission succeeds. The
-// contested card is reused when its unit is contested again, and still
-// shows no value from the ruling before it.
 func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *testing.T) {
 	t.Parallel()
-	p := openBrowser(t)
-	f := newPageFixture(t)
+	p := browsertest.OpenBrowser(t)
+	f := journey.NewPageFixture(t)
 	ctx := context.Background()
-	live := f.s.sole().repository
+	live := f.S.Sole().Repository
 	at := time.Now().UTC()
 	header := func(schema, id string, actor trace.Actor) trace.Header {
-		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, At: at, Actor: actor, Cause: "planted"}
+		return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: actor, Cause: "planted"}
 	}
 	move := func(subject, id, to string, actor trace.Actor, docs ...trace.Document) {
 		t.Helper()
-		state, err := live.Workflow(stream, subject)
-		must(t, err)
+		state, err := live.Workflow(fixturekit.Stream, subject)
+		fixturekit.Must(t, err)
 		tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: header("osmia.trace.transition", id, actor), Subject: subject, From: state.Value, To: to, Reason: "moved to " + to}}
 		if len(docs) > 0 {
 			_, err = live.RecordDocumentsWith(ctx, docs, tx)
 		} else {
 			_, err = live.Transact(ctx, tx)
 		}
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
 
-	// An escalated question, a contested unit and a presented amendment are
-	// all open at once.
-	must(t, live.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", demoAgent, ownerActor), Role: demoRole, ThreadID: demoThread}))
-	asked, err := live.Ask(ctx, demoAgent, claimTurn(t, live, t.TempDir(), stream, demoAgent, demoThread, "build_"+demoAgent, at), "Where does upload state live?", at)
-	must(t, err)
-	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{asked.ID}, Rephrasing: "Where should upload state live?",
+	fixturekit.Must(t, live.CreateThread(ctx, trace.Agent{Header: header("osmia.trace.agent", fixturekit.DemoAgent, intake.OwnerActor), Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}))
+	asked, err := live.Ask(ctx, fixturekit.DemoAgent, fixturekit.ClaimTurn(t, live, t.TempDir(), fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread, "build_"+fixturekit.DemoAgent, at), "Where does upload state live?", at)
+	fixturekit.Must(t, err)
+	_, err = live.EscalateQuestions(ctx, trace.ChiefOfStaff, f.Chief, trace.EscalationRequest{Questions: []string{asked.ID}, Rephrasing: "Where should upload state live?",
 		Blocked: "The upload unit.", Recommendation: "Keep it in files."}, at)
-	must(t, err)
-	plantReport(t, live, stream, "index", at)
-	move(trace.UnitSubject("index"), "index-reviewing", UnitReviewing, foremanActor)
-	move(trace.UnitSubject("index"), "index-contested-1", UnitContested, reviewerActor)
-	raiseFixtureContest(t, live, stream, "index")
-	sealed, sealDoc, _, err := seal.Latest(live, stream)
-	must(t, err)
-	_, err = live.FileBudgetAmendment(ctx, stream, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.",
+	fixturekit.Must(t, err)
+	plantReport(t, live, fixturekit.Stream, "index", at)
+	move(trace.UnitSubject("index"), "index-reviewing", intake.UnitReviewing, service.TestForemanActor)
+	move(trace.UnitSubject("index"), "index-contested-1", intake.UnitContested, execution.ReviewerActor)
+	journey.RaiseFixtureContest(t, live, fixturekit.Stream, "index")
+	sealed, sealDoc, _, err := seal.Latest(live, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	_, err = live.FileBudgetAmendment(ctx, fixturekit.Stream, trace.AmendmentRequest{Citations: []string{"spec#1"}, Change: "Raise the per-unit budget.", Reason: "The upload unit needs more turns.",
 		Seal: sealed.Seal, SealRevision: sealDoc.Revision, SpecHash: sealed.SpecHash}, at)
-	must(t, err)
-	// Filing the amendment only records its request; the inbox shows it once
-	// the shed presents its packet, as the shed debate does in practice.
-	packet := trace.Document{Header: header("osmia.trace.document", "amendment-1-presented-packet", shedActor), Path: amendmentPacketPath("1"),
+	fixturekit.Must(t, err)
+	packet := trace.Document{Header: header("osmia.trace.document", "amendment-1-presented-packet", intake.ShedActor), Path: intake.AmendmentPacketPath("1"),
 		Content: `{"round":1,"recommendation":"approve: no objection stands"}` + "\n"}
-	move(amendmentSubject("1"), "amendment-1-presented", amendmentPresented, shedActor, packet)
+	move(intake.AmendmentSubject("1"), "amendment-1-presented", intake.AmendmentPresented, intake.ShedActor, packet)
 
-	// Each entry is read through the same inbox the page polls, so the test
-	// waits for it to show up rather than assuming it is there already.
-	firstOf := func(kind string) InboxEntry {
+	firstOf := func(kind string) api.InboxEntry {
 		t.Helper()
-		var entries []InboxEntry
-		soon(t, "the "+kind+" inbox entry", func() bool {
-			entries = entriesOf(t, f.c, kind)
+		var entries []api.InboxEntry
+		intakefixture.Soon(t, "the "+kind+" inbox entry", func() bool {
+			entries = intakefixture.EntriesOf(t, f.C, kind)
 			return len(entries) > 0
 		})
 		return entries[0]
 	}
-	escalation := decisionCard(firstOf(InboxEscalation))
-	contestedEntry := firstOf(InboxContested)
-	contested := decisionCard(contestedEntry)
-	amendment := decisionCard(firstOf(InboxAmendment))
+	escalation := intakefixture.DecisionCard(firstOf(api.InboxEscalation))
+	contestedEntry := firstOf(api.InboxContested)
+	contested := intakefixture.DecisionCard(contestedEntry)
+	amendment := intakefixture.DecisionCard(firstOf(api.InboxAmendment))
 
-	// Observe the page consuming an inbox that no longer lists this contest.
-	// pruneInbox maps the entries during render; the microtask runs after
-	// that synchronous render has cleared the card's dismissal.
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`(() => {
 			window.ruledContestRead = false;
@@ -91,7 +87,7 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 					const json = response.json.bind(response);
 					response.json = async () => {
 						const body = await json();
-						if (!body.entries.some(e => e.kind === 'contested' && e.workstream === ` + quote(string(stream)) + ` && e.unit === 'index')) {
+						if (!body.entries.some(e => e.kind === 'contested' && e.workstream === ` + browsertest.Quote(string(fixturekit.Stream)) + ` && e.unit === 'index')) {
 							const map = body.entries.map.bind(body.entries);
 							body.entries.map = (...args) => {
 								const result = map(...args);
@@ -107,50 +103,40 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 		})()`).Do(ctx)
 		return err
 	}))
-	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
-	p.SelectWorkstream(stream)
+	p.SelectWorkstream(fixturekit.Stream)
 	p.AwaitText(escalation+"[data-field=kind]", "Question")
 
-	// The escalation's answer clears once it is sent. Answering it resolves
-	// the entry, so the page may remove its card, taking the answer with it,
-	// before the test next reads it; either outcome leaves no stale answer
-	// showing.
 	p.TypeInto(escalation+"textarea", "State lives in the upload log.")
 	p.Click(escalation + "button[type=submit]")
 	p.AwaitOutcome("Answered inbox entry")
 	p.AwaitCleared(escalation + "textarea")
 
-	// The contested unit's ruling clears once it is recorded, and the same
-	// card, reused when the unit is contested again, still shows none of it.
 	noteField := contested + `input[name=note]`
 	p.TypeInto(noteField, "The reviewer's sandbox failed; review it again.")
 	p.Click(contested + `[data-decision-choice="review"]`)
 	p.AwaitOutcome("Ruled review on unit index.")
 	p.AwaitCleared(noteField)
 	p.AwaitGone("the ruled unit", contested)
-	// Optimistic removal alone does not clear the dismissal. The server
-	// must resolve this contest and the page must read that resolved inbox
-	// before another contest can reuse the same card identity.
-	soon(t, "the ruled contest to leave the inbox API", func() bool {
-		for _, entry := range entriesOf(t, f.c, InboxContested) {
-			if entry.Workstream == stream && entry.Unit == "index" {
+	intakefixture.Soon(t, "the ruled contest to leave the inbox API", func() bool {
+		for _, entry := range intakefixture.EntriesOf(t, f.C, api.InboxContested) {
+			if entry.Workstream == fixturekit.Stream && entry.Unit == "index" {
 				return false
 			}
 		}
 		return true
 	})
 	p.Await("the page to process the ruled contest's removal", `window.ruledContestRead === true`)
-	move(trace.UnitSubject("index"), "index-contested-2", UnitContested, reviewerActor)
-	raiseFixtureContest(t, live, stream, "index")
+	move(trace.UnitSubject("index"), "index-contested-2", intake.UnitContested, execution.ReviewerActor)
+	journey.RaiseFixtureContest(t, live, fixturekit.Stream, "index")
 	p.AwaitText(contested+"[data-field=kind]", "Contested unit")
 	var note string
-	p.Eval(`document.querySelector(`+quote(noteField)+`).value`, &note)
+	p.Eval(`document.querySelector(`+browsertest.Quote(noteField)+`).value`, &note)
 	if note != "" {
 		t.Fatalf("the reused contested card note: %q", note)
 	}
 
-	// The amendment's decision clears once it is recorded.
 	amendmentNote := amendment + `input[name=note]`
 	p.TypeInto(amendmentNote, "Keep the acknowledged-chunk contract.")
 	p.Click(amendment + `[data-decision-choice="reject"]`)
@@ -158,35 +144,31 @@ func TestBrowserPageResetsEscalationContestedAndAmendmentFormsAfterSuccess(t *te
 	p.AwaitCleared(amendmentNote)
 }
 
-// The ratification card may be decided more than once as objections are
-// disposed of; it clears its note back to its default as
-// soon as each decision succeeds, so deciding the next objection on the same
-// card never shows a value from the decision before it.
 func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *testing.T) {
 	t.Parallel()
-	p := openBrowser(t)
-	f := newDebateFixtureWith(t, 2, 1, listenWeb, nil)
-	t.Cleanup(func() { f.stop(t) })
-	faults := &faults{}
-	veto := shed.ObjectionID(1, committeeAgent(1), 1)
-	size := shed.ObjectionID(1, committeeAgent(2), 1)
-	f.member(1, 1, 1, objects(faults, shed.Charter, "spec#2", "charter#1"))
-	f.member(1, 2, 1, objects(faults, shed.Size, "plan#resume", "spec#1"))
-	f.script(replyTurnID(1, 1), nil, answers(faults, "Kept as it is.", veto, size))
-	ws := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, ws, "concluded-1")
+	p := browsertest.OpenBrowser(t)
+	f := journey.NewDebateFixtureWith(t, 2, 1, servicetest.ListenWeb, nil)
+	t.Cleanup(func() { f.Stop(t) })
+	faults := &intakefixture.Faults{}
+	veto := shed.ObjectionID(1, intake.CommitteeAgent(1), 1)
+	size := shed.ObjectionID(1, intake.CommitteeAgent(2), 1)
+	f.Member(1, 1, 1, intakefixture.Objects(faults, shed.Charter, "spec#2", "charter#1"))
+	f.Member(1, 2, 1, intakefixture.Objects(faults, shed.Size, "plan#resume", "spec#1"))
+	f.Script(intake.ReplyTurnID(1, 1), nil, intakefixture.Answers(faults, "Kept as it is.", veto, size))
+	ws := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, ws, "concluded-1")
 	faults.Check(t)
-	f.chiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
-	f.chiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
-	var entries []InboxEntry
-	soon(t, "the ratification entry", func() bool {
-		entries = f.inboxEntries(t, ws, InboxRatification)
+	f.ChiefDecides(t, ws, veto, shed.Escalate, "The veto cites the small-changes rule.")
+	f.ChiefDecides(t, ws, size, shed.Escalate, "Splitting the unit is a judgement call.")
+	var entries []api.InboxEntry
+	intakefixture.Soon(t, "the ratification entry", func() bool {
+		entries = f.InboxEntries(t, ws, api.InboxRatification)
 		return len(entries) > 0
 	})
-	card := decisionCard(entries[0])
+	card := intakefixture.DecisionCard(entries[0])
 	noteField := card + `input[name=note]`
 
-	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+"[data-field=kind]", "Ratification")
@@ -196,8 +178,6 @@ func TestBrowserPageResetsTheRatificationFormAfterEachSuccessfulDecision(t *test
 	p.AwaitOutcome("I accept the risk.")
 	p.AwaitCleared(noteField)
 
-	// The same card, reused for the next objection, still shows no value
-	// from the decision before it.
 	p.TypeInto(noteField, "Split the resume unit.")
 	p.Click(card + `[data-decision-choice="sustain ` + size + `"]`)
 	p.AwaitText(card+`[data-objection="`+size+`"] [data-field=standing]`, "blocking, sustained")

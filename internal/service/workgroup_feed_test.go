@@ -20,7 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -28,24 +27,24 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 	t.Helper()
 	opts, cfg := conversationFixture(t, "workgroup-feed-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	members := []trace.CrossRepoMember{{Workstream: intakefixture.Stream, Project: repo}}
+	members := []trace.CrossRepoMember{{Workstream: fixturekit.Stream, Project: repo}}
 	if count > 1 {
 		members = append(members, trace.CrossRepoMember{Workstream: fixturekit.Quiet, Project: repo})
 	}
 	if cross {
 		_, err := repo.MarkWorkstreamTraceForDeletion(fixturekit.Quiet)
-		intakefixture.Must(t, err)
-		intakefixture.Must(t, trace.FinishWorkstreamTraceDeletion(cfg.Root, repo.Project(), fixturekit.Quiet))
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, trace.FinishWorkstreamTraceDeletion(cfg.Root, repo.Project(), fixturekit.Quiet))
 		p := cfg.Project
 		p.ID = "p_00000000000000000000000000000022"
 		p.Clone = filepath.Join(t.TempDir(), "clone")
 		fixturekit.DemoGit(t, filepath.Dir(p.Clone), "init", "-q", p.Clone)
 		r, err := trace.Create(context.Background(), cfg.Root, p, fixturekit.DemoStart, ownerActor)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(func() { r.Close() })
-		intakefixture.Must(t, r.CreateWorkstream(context.Background(), fixturekit.Quiet, fixturekit.DemoStart, ownerActor))
+		fixturekit.Must(t, r.CreateWorkstream(context.Background(), fixturekit.Quiet, fixturekit.DemoStart, ownerActor))
 		cfg.Projects = append(cfg.Projects, p)
 		cfg.ActiveProjects = append(cfg.ActiveProjects, string(p.ID))
 		members[1].Project = r
@@ -54,13 +53,13 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 	chief := repo
 	if cross {
 		chief, group, err = trace.CreateWorkgroupTrace(context.Background(), cfg.Root, members, fixturekit.DemoStart, ownerActor, "test")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(func() { chief.Close() })
 		for _, m := range members {
 			if len(pending) > 0 && pending[0] && m.Workstream == fixturekit.Quiet {
 				continue
 			}
-			intakefixture.Must(t, m.Project.JoinCrossRepoWorkgroup(context.Background(), m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "test"))
+			fixturekit.Must(t, m.Project.JoinCrossRepoWorkgroup(context.Background(), m.Workstream, group.ID, fixturekit.DemoStart, ownerActor, "test"))
 		}
 	} else {
 		ids := []config.WorkstreamID{}
@@ -68,14 +67,14 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 			ids = append(ids, m.Workstream)
 		}
 		group, err = trace.CreateWorkgroup(context.Background(), repo, ids, fixturekit.DemoStart, ownerActor, "test")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	streams := map[config.ProjectID][]config.WorkstreamID{}
 	for _, m := range members {
 		streams[m.Project.Project()] = append(streams[m.Project.Project()], m.Workstream)
 	}
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: streams})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts, projects: []*activeProject{{id: repo.Project(), repository: repo}}}
 	if cross {
@@ -85,7 +84,7 @@ func workgroupFeedFixture(t *testing.T, cross bool, count int, pending ...bool) 
 		s.installMemberLifecycle(m.Project)
 	}
 	_, err = chief.EnsureChiefOfStaff(context.Background(), group.Members[0], fixturekit.DemoStart, serviceActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return s, chief, group
 }
 
@@ -93,11 +92,11 @@ func finishFeedChief(t *testing.T, chief *trace.Repository, host config.Workstre
 	t.Helper()
 	ctx := context.Background()
 	q, err := chief.ClaimTurn(ctx, host, trace.ChiefOfStaff, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := q.Request.Header
 	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), fixturekit.DemoStart.Add(2*time.Minute)
-	intakefixture.Must(t, chief.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
-	intakefixture.Must(t, chief.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, h.At))
+	fixturekit.Must(t, chief.CaptureTurn(ctx, q.Claim.Token, trace.TurnResponse{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "chief-session"}, StartedAt: q.Claim.At, SessionDirectory: q.Claim.SessionDirectory, FinalResponse: "Shared reply"}}))
+	fixturekit.Must(t, chief.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, h.At))
 	return q
 }
 
@@ -116,7 +115,7 @@ func feedHTTP(t *testing.T, s *Service, method, path, text string, output any) i
 		t.Logf("HTTP %s %s: %s", method, path, w.Body.String())
 	}
 	if output != nil {
-		intakefixture.Must(t, json.Unmarshal(w.Body.Bytes(), output))
+		fixturekit.Must(t, json.Unmarshal(w.Body.Bytes(), output))
 	}
 	return w.Code
 }
@@ -152,47 +151,47 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 		t.Fatalf("send status %d: %+v", code, accepted)
 	}
 	th, err := chief.ChiefOfStaffThread(g.Members[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	groupTurns := th.Turns
 	q := finishFeedChief(t, chief, g.Members[0])
 	scope := coreadapter.Scope{Project: string(chief.Project()), Workstream: string(g.Members[0]), Thread: trace.ChiefOfStaff, Turn: q.Request.TurnID, Role: trace.ChiefOfStaff}
 	scope.Turn = "status-turn"
 	_, err = chief.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request-status", Project: chief.Project(), Workstream: g.Members[0], At: fixturekit.DemoStart.Add(3 * time.Minute), Actor: serviceActor, Cause: "test"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: scope.Turn, Profile: q.Request.Profile, Prompt: "status"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = chief.ClaimTurn(ctx, g.Members[0], trace.ChiefOfStaff, "status-token", filepath.Join(t.TempDir(), "status"), fixturekit.DemoStart.Add(3*time.Minute))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = chief.SetStatus(ctx, trace.ChiefOfStaff, scope, trace.StatusContent{Goal: "Shared goal", Note: "Working", Agents: []string{}}, fixturekit.DemoStart.Add(4*time.Minute), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	member := fixturekit.Quiet
 	second, api := s.send(ctx, string(member), SendRequest{Text: "About this member"})
 	if api != nil {
 		t.Fatal(api)
 	}
 	th, err = chief.ChiefOfStaffThread(member)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	memberPrompt := th.Turns[len(th.Turns)-1].Request.SystemPrompt
 	_, _, repo, api := s.conversationTrace(string(member))
 	if api != nil {
 		t.Fatal(api)
 	}
-	if repo.Project() == intakefixture.Project {
+	if repo.Project() == fixturekit.Project {
 		fixturekit.QueueRoleTurn(t, repo, member, "worker", masonRole, "upload", fixturekit.DemoStart)
 	} else {
-		intakefixture.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: "worker", Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "test"}, Role: masonRole, ThreadID: "worker"}))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: "worker", Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "test"}, Role: masonRole, ThreadID: "worker"}))
 		_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request-worker", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: ownerActor, Cause: "test"}, AgentID: "worker", ThreadID: "worker", TurnID: "worker-turn", Profile: q.Request.Profile, Prompt: "work"})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	_, err = repo.ClaimTurn(ctx, member, "worker", "worker-token", filepath.Join(t.TempDir(), "worker"), fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	question, err := repo.Ask(ctx, "worker", coreadapter.Scope{Project: string(repo.Project()), Workstream: string(member), Thread: "worker", Turn: "worker-turn", Unit: "upload", Role: masonRole}, "Which retry budget?", fixturekit.DemoStart.Add(5*time.Minute))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	batch, err := chief.EscalateQuestions(ctx, trace.ChiefOfStaff, scope, trace.EscalationRequest{Questions: []string{string(member) + ":" + question.ID}, Rephrasing: "Which retry budget?", Blocked: "Upload retry", Recommendation: "Use three retries"}, fixturekit.DemoStart.Add(6*time.Minute))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fixturekit.FeedDocument(t, repo, member, checkDocumentID("upload", 1), "units/upload/checks-1.json", 1, fixturekit.DemoStart, UnitCheckRun{Unit: "upload", Run: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, member, "final-checks-1", "final/checks-1.json", 1, fixturekit.DemoStart, FinalCheckRun{Review: 1, Attempt: 1, Status: ChecksPassed, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart})
 	fixturekit.FeedDocument(t, repo, member, finalReportDocument, finalReportPath, 1, fixturekit.DemoStart, FinalReport{Review: 1, Outcome: finalReviewed, Reader: "reader", Turn: "review"})
 	data, _ := json.Marshal(ChiefContestDecision{Decision: "revise", Note: "Retry the check", Turn: "contest-turn"})
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, ID: "contest", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: chiefActor, Cause: "test"}, Path: "units/unit-upload/chief-decision.json", Content: string(data)}}))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, ID: "contest", Project: repo.Project(), Workstream: member, Unit: "upload", At: fixturekit.DemoStart, Actor: chiefActor, Cause: "test"}, Path: "units/unit-upload/chief-decision.json", Content: string(data)}}))
 	var feed WorkgroupFeedResponse
 	if code := feedHTTP(t, s, http.MethodGet, Prefix+"/workgroups/"+string(g.ID)+"/feed", "", &feed); code != 200 {
 		t.Fatalf("feed status %d: %+v", code, feed)
@@ -264,7 +263,7 @@ func TestTheWorkgroupFeedNamesTheMemberAndRepositoryOfEachMemberEntry(t *testing
 func TestAMemberFeedHoldsItsOwnActivityAndNoSharedEntries(t *testing.T) {
 	t.Parallel()
 	eachWorkgroupShape(t, func(t *testing.T, w *workgroupFeedScenario) {
-		for _, member := range []config.WorkstreamID{intakefixture.Stream, fixturekit.Quiet} {
+		for _, member := range []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet} {
 			activity, api := w.s.feedList(string(member))
 			if api != nil {
 				t.Fatal(api)
@@ -296,7 +295,7 @@ func TestAMemberConversationIsUnchangedByTheWorkgroupActivity(t *testing.T) {
 			t.Fatal(api)
 		}
 		expected, err := conversationEntries(w.chief, w.member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(before.Entries, expected) {
 			t.Fatal("member conversation changed")
 		}
@@ -312,15 +311,15 @@ func TestMemberFeedChiefSessionsFollowMembership(t *testing.T) {
 				t.Fatal(api)
 			}
 			if completed {
-				finishFeedChief(t, chief, intakefixture.Stream)
+				finishFeedChief(t, chief, fixturekit.Stream)
 			} else {
-				_, err := chief.ClaimTurn(context.Background(), intakefixture.Stream, trace.ChiefOfStaff, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
-				intakefixture.Must(t, err)
+				_, err := chief.ClaimTurn(context.Background(), fixturekit.Stream, trace.ChiefOfStaff, "chief-token", filepath.Join(t.TempDir(), "chief"), fixturekit.DemoStart.Add(time.Minute))
+				fixturekit.Must(t, err)
 			}
-			fixturekit.QueueRoleTurn(t, chief, intakefixture.Stream, "worker", masonRole, "upload", fixturekit.DemoStart)
-			_, err := chief.ClaimTurn(context.Background(), intakefixture.Stream, "worker", "worker-token", filepath.Join(t.TempDir(), "worker"), fixturekit.DemoStart)
-			intakefixture.Must(t, err)
-			single, api := s.feedList(string(intakefixture.Stream))
+			fixturekit.QueueRoleTurn(t, chief, fixturekit.Stream, "worker", masonRole, "upload", fixturekit.DemoStart)
+			_, err := chief.ClaimTurn(context.Background(), fixturekit.Stream, "worker", "worker-token", filepath.Join(t.TempDir(), "worker"), fixturekit.DemoStart)
+			fixturekit.Must(t, err)
+			single, api := s.feedList(string(fixturekit.Stream))
 			if api != nil {
 				t.Fatal(api)
 			}
@@ -331,10 +330,10 @@ func TestMemberFeedChiefSessionsFollowMembership(t *testing.T) {
 					t.Fatalf("single-member %s missing", kind)
 				}
 			}
-			intakefixture.Must(t, chief.RetractWorkgroup(context.Background(), intakefixture.Stream, fixturekit.DemoStart, ownerActor, "draft-workgroup"))
-			g, err = trace.CreateWorkgroup(context.Background(), chief, []config.WorkstreamID{intakefixture.Stream, fixturekit.Quiet}, fixturekit.DemoStart, ownerActor, "test")
-			intakefixture.Must(t, err)
-			multi, api := s.feedList(string(intakefixture.Stream))
+			fixturekit.Must(t, chief.RetractWorkgroup(context.Background(), fixturekit.Stream, fixturekit.DemoStart, ownerActor, "draft-workgroup"))
+			g, err = trace.CreateWorkgroup(context.Background(), chief, []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet}, fixturekit.DemoStart, ownerActor, "test")
+			fixturekit.Must(t, err)
+			multi, api := s.feedList(string(fixturekit.Stream))
 			if api != nil {
 				t.Fatal(api)
 			}
@@ -365,12 +364,12 @@ func TestWorkgroupMemberArchiveSummaryUsesPinnedIdentity(t *testing.T) {
 	s, chief, g := workgroupFeedFixture(t, false, 2)
 	state := AbandonedState
 	a := runtime.Archive{Workgroup: g.ID, Project: chief.Project(), Workstream: fixturekit.Quiet, State: state, Title: "Archived member", DeliveryLink: "https://example.invalid/pull/4", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}
-	intakefixture.Must(t, s.store.SetArchived(a))
+	fixturekit.Must(t, s.store.SetArchived(a))
 	dir, err := s.cfg.Root.WorkstreamTrace(chief.Project(), a.Workstream)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.RemoveAll(dir))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.RemoveAll(dir))
 	summary, err := s.workgroupMemberSummary(trace.CrossRepoMember{Workstream: a.Workstream, Project: chief})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !summary.Archived || summary.PRLink != a.DeliveryLink || summary.DisplayState != "cancelled" || *summary.State != state || len(summary.Units) != 0 || summary.Running {
 		t.Fatalf("archive summary: %+v", summary)
 	}
@@ -378,19 +377,19 @@ func TestWorkgroupMemberArchiveSummaryUsesPinnedIdentity(t *testing.T) {
 
 func assertWorkgroupHandleReleased(t *testing.T, s *Service, g trace.Workgroup, chief *trace.Repository) {
 	t.Helper()
-	intakefixture.Must(t, chief.Close())
+	fixturekit.Must(t, chief.Close())
 	for _, p := range s.projects {
-		intakefixture.Must(t, p.repository.ReleaseWorkgroupTraces())
+		fixturekit.Must(t, p.repository.ReleaseWorkgroupTraces())
 	}
 	dir, err := s.cfg.Root.WorkgroupTrace(g.ID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lock, err := os.OpenFile(filepath.Join(dir, "osmia.lock"), os.O_RDWR, 0600)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatalf("workgroup handle leaked: %v", err)
 	}
-	intakefixture.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_UN))
+	fixturekit.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_UN))
 }
 
 var workgroupEndpointScenarios = []string{"success", "read-error", "joining", "half-joined", "unpublished-membership", "retired", "locked"}
@@ -403,29 +402,29 @@ func arrangeWorkgroupEndpoints(t *testing.T, scenario string) (s *Service, chief
 	s, chief, g = workgroupFeedFixture(t, true, 2, scenario == "joining")
 	ctx := context.Background()
 	if scenario == "unpublished-membership" {
-		intakefixture.Must(t, chief.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 2, ID: trace.WorkgroupsDocument, Project: chief.Project(), At: fixturekit.DemoStart, Actor: ownerActor, Cause: "test"}, Path: trace.WorkgroupsPath, Content: `{"version":1,"workgroups":[]}`}}))
+		fixturekit.Must(t, chief.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 2, ID: trace.WorkgroupsDocument, Project: chief.Project(), At: fixturekit.DemoStart, Actor: ownerActor, Cause: "test"}, Path: trace.WorkgroupsPath, Content: `{"version":1,"workgroups":[]}`}}))
 	}
 	if scenario == "half-joined" {
 		_, err := trace.CreateWorkgroup(ctx, s.projects[1].repository, []config.WorkstreamID{fixturekit.Quiet}, fixturekit.DemoStart, ownerActor, "test")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	if scenario == "retired" {
 		pins := []trace.GroupMemberApproval{}
-		for i, member := range []config.WorkstreamID{intakefixture.Stream, fixturekit.Quiet} {
+		for i, member := range []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet} {
 			pins = append(pins, trace.GroupMemberApproval{Project: s.projects[i].id, Workstream: member})
 		}
-		intakefixture.Must(t, trace.RecordGroupApproval(ctx, chief, g.Members[0], trace.GroupApproval{Workgroup: g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+		fixturekit.Must(t, trace.RecordGroupApproval(ctx, chief, g.Members[0], trace.GroupApproval{Workgroup: g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
 		for _, pin := range pins {
-			intakefixture.Must(t, s.store.SetArchived(runtime.Archive{Project: pin.Project, Workstream: pin.Workstream, Workgroup: g.ID, State: AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart}))
+			fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: pin.Project, Workstream: pin.Workstream, Workgroup: g.ID, State: AbandonedState, Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart}))
 		}
 	}
 	if scenario == "locked" {
-		intakefixture.Must(t, chief.Close())
+		fixturekit.Must(t, chief.Close())
 		dir, err := s.cfg.Root.WorkgroupTrace(g.ID)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		lock, err := os.OpenFile(filepath.Join(dir, "osmia.lock"), os.O_RDWR, 0600)
-		intakefixture.Must(t, err)
-		intakefixture.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 		t.Cleanup(func() {
 			syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 			lock.Close()
@@ -483,15 +482,15 @@ func TestWorkgroupEndpointsReleaseTheGroupsTraceWhateverTheyAnswer(t *testing.T)
 func TestWorkgroupFeedKeepsCleanedMemberCard(t *testing.T) {
 	s, chief, g := workgroupFeedFixture(t, true, 2)
 	ctx := context.Background()
-	pins := []trace.GroupMemberApproval{{Project: s.projects[0].id, Workstream: intakefixture.Stream}, {Project: s.projects[1].id, Workstream: fixturekit.Quiet}}
-	intakefixture.Must(t, trace.RecordGroupApproval(ctx, chief, g.Members[0], trace.GroupApproval{Workgroup: g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+	pins := []trace.GroupMemberApproval{{Project: s.projects[0].id, Workstream: fixturekit.Stream}, {Project: s.projects[1].id, Workstream: fixturekit.Quiet}}
+	fixturekit.Must(t, trace.RecordGroupApproval(ctx, chief, g.Members[0], trace.GroupApproval{Workgroup: g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
 	repo := s.projects[1].repository
-	intakefixture.Must(t, chief.PreserveMemberQuestions(ctx, g, trace.CrossRepoMember{Workstream: fixturekit.Quiet, Project: repo}, fixturekit.DemoStart, serviceActor))
+	fixturekit.Must(t, chief.PreserveMemberQuestions(ctx, g, trace.CrossRepoMember{Workstream: fixturekit.Quiet, Project: repo}, fixturekit.DemoStart, serviceActor))
 	a := runtime.Archive{Workgroup: g.ID, Project: repo.Project(), Workstream: fixturekit.Quiet, State: AbandonedState, Title: "Archived member", DeliveryLink: "https://example.invalid/pull/4", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}
-	intakefixture.Must(t, s.store.SetArchived(a))
+	fixturekit.Must(t, s.store.SetArchived(a))
 	_, err := repo.MarkWorkstreamTraceForDeletion(a.Workstream)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.FinishWorkstreamTraceDeletion(s.cfg.Root, a.Project, a.Workstream))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.FinishWorkstreamTraceDeletion(s.cfg.Root, a.Project, a.Workstream))
 	feed, api := s.workgroupFeed(ctx, string(g.ID))
 	if api != nil {
 		t.Fatal(api)
@@ -505,7 +504,7 @@ func TestWorkgroupFeedKeepsCleanedMemberCard(t *testing.T) {
 		}
 	}
 	dir, err := s.cfg.Root.WorkstreamTrace(a.Project, a.Workstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("deleted history was recreated: %v", err)
 	}
@@ -515,20 +514,20 @@ func TestWorkgroupFeedKeepsCleanedMemberCard(t *testing.T) {
 func TestWorkgroupFeedSummaryProjectsMemberFacts(t *testing.T) {
 	s, repo, g := workgroupFeedFixture(t, false, 2)
 	p := overlapPlanted{t: t, clock: &fixturekit.FixedClock{At: fixturekit.DemoStart}}
-	p.plant(repo, intakefixture.Stream, 1)
-	p.feature(repo, intakefixture.Stream, BuildingState)
+	p.plant(repo, fixturekit.Stream, 1)
+	p.feature(repo, fixturekit.Stream, BuildingState)
 	ctx := context.Background()
 	for _, transition := range []struct{ subject, to, reason string }{{trace.UnitSubject("work"), UnitContested, "Review disagreed"}, {"base-wait", "waiting", "waiting on owner: dependency merge"}} {
-		_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: transition.subject + "-state", Project: repo.Project(), Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "test"}, Subject: transition.subject, To: transition.to, Reason: transition.reason}})
-		intakefixture.Must(t, err)
+		_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: transition.subject + "-state", Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "test"}, Subject: transition.subject, To: transition.to, Reason: transition.reason}})
+		fixturekit.Must(t, err)
 	}
-	fixturekit.FeedDocument(t, repo, intakefixture.Stream, publicationDocument, "final/publication.json", 1, fixturekit.DemoStart, DeliveryPublication{Status: publicationOpened, PullRequest: 42, URL: "https://example.invalid/pull/42"})
+	fixturekit.FeedDocument(t, repo, fixturekit.Stream, publicationDocument, "final/publication.json", 1, fixturekit.DemoStart, DeliveryPublication{Status: publicationOpened, PullRequest: 42, URL: "https://example.invalid/pull/42"})
 	feed, api := s.workgroupFeed(ctx, string(g.ID))
 	if api != nil {
 		t.Fatal(api)
 	}
 	m := feed.Members[0]
-	if m.Workstream != intakefixture.Stream || m.Repo != repo.Project() || m.State == nil || *m.State != BuildingState || m.Units[UnitContested] != 1 || m.Wait != "waiting on owner: dependency merge" || m.PRLink != "https://example.invalid/pull/42" || m.Archived || m.Running {
+	if m.Workstream != fixturekit.Stream || m.Repo != repo.Project() || m.State == nil || *m.State != BuildingState || m.Units[UnitContested] != 1 || m.Wait != "waiting on owner: dependency merge" || m.PRLink != "https://example.invalid/pull/42" || m.Archived || m.Running {
 		t.Fatalf("member facts: %+v", m)
 	}
 }

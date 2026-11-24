@@ -25,13 +25,13 @@ func fakeTraceProgram(t *testing.T, body string) (program string, calls func() i
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	program = filepath.Join(dir, "dagger")
-	intakefixture.Must(t, os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log+"'\n"+body), 0700))
+	fixturekit.Must(t, os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log+"'\n"+body), 0700))
 	return program, func() int {
 		raw, err := os.ReadFile(log)
 		if os.IsNotExist(err) {
 			return 0
 		}
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return strings.Count(string(raw), "\n")
 	}
 }
@@ -54,7 +54,7 @@ type traceResult struct {
 func callTrace(t *testing.T, tool coreadapter.Tool, input string) traceResult {
 	t.Helper()
 	var out traceResult
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
 	return out
 }
 
@@ -143,7 +143,7 @@ func TestFactoryContextListsEachRecordedTraceOnce(t *testing.T) {
 		paths[f.fetch(t, input).Path] = true
 	}
 	var listed map[string]int
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"traces"}`)), &listed))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"traces"}`)), &listed))
 	if len(listed) != len(paths) || len(paths) != 5 {
 		t.Fatalf("listed %v for %v", listed, paths)
 	}
@@ -161,9 +161,9 @@ func TestRecordedTraceHoldsItsTraceCheckFetchTimeAndOutput(t *testing.T) {
 	var doc struct {
 		Content string `json:"content"`
 	}
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"`+a.Path+`"}`)), &doc))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"`+a.Path+`"}`)), &doc))
 	var record checks.TraceRecord
-	intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &record))
+	fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &record))
 	if record.TraceID != "t2" || record.Check != "test:a" || record.WholeTrace || record.Truncated || !record.FetchedAt.Equal(fixturekit.DemoStart) || record.Output != a.Output || record.Size != a.Size {
 		t.Fatalf("record %+v", record)
 	}
@@ -173,7 +173,7 @@ func TestTraceCitationsResolveOnlyForRecordedTraces(t *testing.T) {
 	t.Parallel()
 	f := newTraceFetch(t)
 	a := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`)
-	intakefixture.Must(t, questions.Resolve(context.Background(), f.c.repo, f.c.stream, a.Citation))
+	fixturekit.Must(t, questions.Resolve(context.Background(), f.c.repo, f.c.stream, a.Citation))
 	if err := questions.Resolve(context.Background(), f.c.repo, f.c.stream, "trace#t9-all"); err == nil {
 		t.Fatal("an unrecorded trace citation resolved")
 	}
@@ -184,7 +184,7 @@ func TestRecordedTracesNeverHoldTheCloudToken(t *testing.T) {
 	f := newTraceFetch(t)
 	f.fetch(t, `{"trace_id":"t1"}`)
 	docs, err := trace.Read[trace.Document](f.c.repo, f.c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
 		if strings.Contains(d.Content, cloudTraceToken) {
 			t.Fatalf("%s holds the token", d.Path)
@@ -211,7 +211,7 @@ func TestFetchCloudTraceRefusesBadValuesWithoutRunningTheCLI(t *testing.T) {
 		t.Fatalf("the CLI ran %d times", calls())
 	}
 	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
 		if strings.HasPrefix(d.Path, "traces/") {
 			t.Fatalf("a refused request recorded %s", d.Path)
@@ -278,12 +278,12 @@ func TestFetchCloudTraceFailuresAreResultsNotErrors(t *testing.T) {
 				t.Fatalf("the failure ended the turn: %v", err)
 			}
 			var got traceResult
-			intakefixture.Must(t, json.Unmarshal(raw, &got))
+			fixturekit.Must(t, json.Unmarshal(raw, &got))
 			if got.Fetched || got.Reason != string(tc.reason) || got.Message == "" || got.Output != "" || strings.Contains(string(raw), cloudTraceToken) {
 				t.Fatalf("result %s", raw)
 			}
 			docs, err := trace.Read[trace.Document](c.repo, c.stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			for _, d := range docs {
 				if strings.HasPrefix(d.Path, "traces/") {
 					t.Fatalf("a failed fetch recorded %s", d.Path)
@@ -311,7 +311,7 @@ func TestFetchCloudTraceBoundsAndRecordsLargeOutput(t *testing.T) {
 		t.Fatalf("returned %d bytes, truncated %v, size %d (want %d)", len(got.Output), got.Truncated, got.Size, full)
 	}
 	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var doc trace.Document
 	for _, d := range docs {
 		if d.Path == got.Path {
@@ -319,7 +319,7 @@ func TestFetchCloudTraceBoundsAndRecordsLargeOutput(t *testing.T) {
 		}
 	}
 	var record checks.TraceRecord
-	intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &record))
+	fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &record))
 	if len(record.Output) > checks.MaxTraceOutput || !record.Truncated || record.Size != full || record.Output != got.Output {
 		t.Fatalf("the record holds %d bytes, truncated %v, size %d", len(record.Output), record.Truncated, record.Size)
 	}

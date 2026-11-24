@@ -55,9 +55,9 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 	f := &productionSliceFixture{debate: [2]chan struct{}{make(chan struct{}), make(chan struct{})}}
 	f.crossRepoRatifyFixture = crossRepoFixture(t, false, func(o *Options) {
 		file, err := os.OpenFile(filepath.Join(o.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		_, err = file.WriteString("[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 1\n[shed]\nmax_rounds = 1\n")
-		intakefixture.Must(t, errors.Join(err, file.Close()))
+		fixturekit.Must(t, errors.Join(err, file.Close()))
 		o.boundary = func(ctx context.Context, step string) error {
 			b := f.hook.Load()
 			if b == nil || b.step != step {
@@ -93,11 +93,11 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 	prepareSliceUpstreams(t, f.crossRepoRatifyFixture)
 	f.drafted = refreshDocument(t, f.crossRepoRatifyFixture, id)
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var found bool
 	f.design, found, err = trace.ProjectSpecFor(wt, id)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 	if !found {
 		t.Fatal("initial project spec missing")
 	}
@@ -132,7 +132,7 @@ func newProductionSliceFixture(t *testing.T, contract bool) *productionSliceFixt
 			spec = strings.Replace(crossSpec1, "chunk's offset.", "chunk's byte offset.", 1)
 		}
 		for _, doc := range []struct{ path, content string }{{plan.SpecPath, spec}, {plan.PlanPath, graph}} {
-			got, err := intakefixture.CallTool(ctx, tools, intake.DraftTool, map[string]any{"path": doc.path, "content": doc.content})
+			got, err := fixturekit.CallTool(ctx, tools, intake.DraftTool, map[string]any{"path": doc.path, "content": doc.content})
 			if err != nil {
 				return nil, err
 			}
@@ -161,7 +161,7 @@ func prepareSliceUpstreams(t *testing.T, f *crossRepoRatifyFixture) {
 	home := filepath.Dir(f.clone)
 	clone := filepath.Join(home, "clone2")
 	bare := filepath.Join(home, "remotes", "owner", "other.git")
-	intakefixture.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "-C", clone, "branch", "-M", "main")
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	fixturekit.DemoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
@@ -170,7 +170,7 @@ func (f *productionSliceFixture) awaitPacket(t *testing.T, member config.Workstr
 	t.Helper()
 	wait, closeWait := serviceChanges(t, f.s)
 	defer closeWait()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		packet, err := f.c.Packet(context.Background(), member)
 		if err == nil && packet.ProjectSpec != nil && packet.ProjectSpecRevision == revision {
@@ -179,7 +179,7 @@ func (f *productionSliceFixture) awaitPacket(t *testing.T, member config.Workstr
 				t.Fatal(apiFault)
 			}
 			pin, pinErr := intake.LatestPin(repo, member)
-			intakefixture.Must(t, pinErr)
+			fixturekit.Must(t, pinErr)
 			if packet.Packet.Revision == pin {
 				return packet
 			}
@@ -217,11 +217,11 @@ func (f *productionSliceFixture) assertDebated(t *testing.T) {
 		}
 		repo := mustRepo(t, f.s, project)
 		records, err := shed.Records(repo, member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		replies, err := shed.Replies(repo, member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		packet, err := f.c.Packet(context.Background(), member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(records) != 1 || records[0].Failure != "" || len(records[0].Objections) != 1 || len(replies) != 1 || replies[0].Failure != "" || replies[0].Redraft == nil || packet.Packet.Skipped || packet.Packet.Revision != (shed.Pin{Spec: 2, Plan: 2}) {
 			t.Fatalf("member did not debate and revise through the shed: records=%+v replies=%+v packet=%+v", records, replies, packet)
 		}
@@ -239,7 +239,7 @@ func (f *productionSliceFixture) assertMechanical(t *testing.T, packet api.Packe
 					t.Fatal(apiFault)
 				}
 				spec, graph, err := lifecycle.MemberSpecAndPlan(repo, member)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				expected.Slices[i].Spec, expected.Slices[i].Plan = spec, graph
 			}
 		}
@@ -248,10 +248,10 @@ func (f *productionSliceFixture) assertMechanical(t *testing.T, packet api.Packe
 		t.Fatalf("mechanical refresh changed design or missed slices: got=%+v want=%+v", packet.ProjectSpec, expected)
 	}
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, f.group)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer wt.Close()
 	old, err := trace.Get[trace.Document](wt, "", trace.ProjectSpecsDocument, f.drafted.Revision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(old, f.drafted) {
 		t.Fatal("refresh rewrote project-spec history")
 	}
@@ -260,10 +260,10 @@ func (f *productionSliceFixture) awaitApproval(t *testing.T, packet api.PacketRe
 	t.Helper()
 	wait, closeWait := serviceChanges(t, f.s)
 	defer closeWait()
-	deadline := time.Now().Add(intakefixture.DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		decision, found, err := mustRepo(t, f.s, f.project).GroupApprovalOf(f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if found && decision.Complete {
 			if decision.ProjectSpecRevision != packet.ProjectSpecRevision || !reflect.DeepEqual(decision.ProjectSpec, *packet.ProjectSpec) || len(decision.Members) != 2 {
 				t.Fatalf("approval differs from displayed project spec: %+v", decision)
@@ -284,7 +284,7 @@ func (f *productionSliceFixture) awaitApproval(t *testing.T, packet api.PacketRe
 func (f *productionSliceFixture) ratify(t *testing.T, packet api.PacketResponse) {
 	t.Helper()
 	_, err := f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproval(t, packet)
 }
 func TestProjectSpecProductionDebateRefreshAndStaleOtherMember(t *testing.T) {
@@ -308,7 +308,7 @@ func TestProjectSpecProductionDebateRefreshAndStaleOtherMember(t *testing.T) {
 	}
 	f.assertApprovalRefused(t, f.group, before)
 	reread, err := f.c.Packet(context.Background(), f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.ratify(t, reread)
 }
 func TestProjectSpecProductionContractDebateRedraft(t *testing.T) {
@@ -393,22 +393,22 @@ func TestProjectSpecProductionRepairsRecordedStaleSlices(t *testing.T) {
 		repo := mustRepo(t, f.s, project)
 		for _, change := range []struct{ id, content string }{{plan.SpecDocument, spec}, {plan.PlanDocument, graph}} {
 			doc, err := trace.Get[trace.Document](repo, member, change.id, 1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			doc.Revision, doc.Content, doc.Cause = 2, change.content, "member-revision"
-			intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
+			fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
 		}
-		intakefixture.Must(t, (&intake.Debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
+		fixturekit.Must(t, (&intake.Debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
 		var err error
 		memberRecords[i], err = trace.Read[trace.Record](repo, member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	wt, g, err := f.s.approvalTrace(context.Background(), mustRepo(t, f.s, f.project), group)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	before, err := trace.Read[trace.Record](wt, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	hostBefore, err := trace.Read[trace.Record](wt, g.Members[0])
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 	f.stop(t)
 	var reads, appends atomic.Int32
 	f.opts.boundary = func(_ context.Context, step string) error {
@@ -429,13 +429,13 @@ func TestProjectSpecProductionRepairsRecordedStaleSlices(t *testing.T) {
 		t.Fatalf("stale group did not repair in one pass: packets=%+v reads=%d appends=%d", packets, reads.Load(), appends.Load())
 	}
 	wt, err = trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	after, err := trace.Read[trace.Record](wt, "")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	hostAfter, err := trace.Read[trace.Record](wt, g.Members[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fresh := projectSpecDocument(t, wt)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, wt.Close())
 	if len(after) != len(before)+1 || !reflect.DeepEqual(after[:len(before)], before) || !reflect.DeepEqual(after[len(before)], fresh) || !reflect.DeepEqual(hostAfter, hostBefore) {
 		t.Fatal("repair changed records beyond one appended project-spec revision")
 	}
@@ -445,7 +445,7 @@ func TestProjectSpecProductionRepairsRecordedStaleSlices(t *testing.T) {
 			project = f.project2
 		}
 		records, err := trace.Read[trace.Record](mustRepo(t, f.s, project), member)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(records, memberRecords[i]) {
 			t.Fatalf("repair rewrote or appended member %s's records", member)
 		}
@@ -475,7 +475,7 @@ func TestProjectSpecProductionRecoversRefreshedMemberApprovals(t *testing.T) {
 		}
 	}
 	_, found, err := mustRepo(t, f.s, f.project).GroupApprovalOf(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if found {
 		t.Fatal("individual approvals unexpectedly recorded a group decision")
 	}

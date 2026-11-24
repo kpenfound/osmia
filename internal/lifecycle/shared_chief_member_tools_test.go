@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
 	"strings"
@@ -26,14 +27,14 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	repo, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "member building", func() bool {
 		feature, err := repo.Workflow(f.stream2, trace.FeatureSubject)
-		intakefixture.Must(t, err)
-		return feature.Value == intakefixture.BuildingState
+		fixturekit.Must(t, err)
+		return feature.Value == intake.BuildingState
 	})
 
 	member := string(f.stream2)
@@ -57,7 +58,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 			return fallback(ctx, req, verified, tools)
 		}
 		for i, c := range calls {
-			result, err := intakefixture.CallTool(ctx, tools, c.tool, c.input)
+			result, err := fixturekit.CallTool(ctx, tools, c.tool, c.input)
 			if err != nil {
 				result = fmt.Sprintf("%s failed: %v", c.tool, err)
 			}
@@ -67,10 +68,10 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	}
 	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.stream1, marker)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.wait(t, "shared chief member turn completion", func() bool {
 		entries, err := f.c.Conversation(ctx, f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range entries.Entries {
 			if e.Turn == sent.Turn && e.State == api.TurnDone {
 				return true
@@ -80,7 +81,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	})
 
 	docs, err := trace.Read[trace.Document](repo, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var listed map[string]int
 	_ = json.Unmarshal([]byte(results[0]), &listed)
 	var units []string
@@ -88,7 +89,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	for _, d := range docs {
 		if d.Path == plan.PlanPath {
 			graph, err := plan.Parse([]byte(d.Content))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			units = units[:0]
 			for _, u := range graph.Units {
 				units = append(units, u.ID)
@@ -125,10 +126,10 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	}
 
 	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, f.stream2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	hosted, err := trace.Read[trace.Document](authority, host)
 	closeAuthority()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range hosted {
 		if strings.HasPrefix(d.Path, "discoveries/") {
 			t.Fatalf("the member's discovery was recorded on the host: %s", d.Path)

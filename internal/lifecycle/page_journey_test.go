@@ -354,7 +354,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p.Click("#confirm-cancel")
 	p.Await("the dialog closed and focus back on the menu button", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
 	statuses, err := j.c.Statuses(t.Context())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, w := range statuses.Workstreams {
 		if w.Workstream == other && (w.State == nil || *w.State == intake.AbandonedState) {
 			t.Fatalf("cancelling the dialog left the workstream %v", w.State)
@@ -368,7 +368,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p.Await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
 	intakefixture.Eventually(t, "the service never abandoned the workstream the dialog confirmed", func() bool {
 		statuses, err := j.c.Statuses(t.Context())
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, w := range statuses.Workstreams {
 			if w.Workstream == other {
 				return w.State != nil && *w.State == intake.AbandonedState
@@ -402,6 +402,6 @@ func previewPicture(t *testing.T) []byte {
 		fill(image.Rect(180, top+22, progress, top+28), color.RGBA{0x5b, 0xa4, 0xe8, 0xff})
 	}
 	var data bytes.Buffer
-	intakefixture.Must(t, png.Encode(&data, picture))
+	fixturekit.Must(t, png.Encode(&data, picture))
 	return data.Bytes()
 }

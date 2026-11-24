@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -25,7 +24,7 @@ func TestSecondLifetimeSeesNoWorkFromTheFirst(t *testing.T) {
 	f.start(t)
 	select {
 	case <-started:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the blocking pass never started")
 	}
 	head := fixturekit.TraceCommits(t, f.trace)
@@ -41,8 +40,8 @@ func TestSecondLifetimeSeesNoWorkFromTheFirst(t *testing.T) {
 		t.Fatalf("the trace moved after stop returned: %d commits, was %d", got, head)
 	}
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 
 	ran := make(chan struct{}, 1)
 	f.opts.Reconciliation.Schedule = func(ctx context.Context) error {
@@ -55,7 +54,7 @@ func TestSecondLifetimeSeesNoWorkFromTheFirst(t *testing.T) {
 	f.start(t)
 	select {
 	case <-ran:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the second lifetime's own pass never ran")
 	}
 }

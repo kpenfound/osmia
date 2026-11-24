@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -25,7 +26,7 @@ func archivedMemberFixture(t *testing.T) (*productionDesignFixture, config.Works
 	deliverResolutionMembers(t, f)
 	archived, survivor := f.stream1, f.stream2
 	repo, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	recordResolutionMerge(t, repo, archived)
 	if _, err := f.c.Archive(ctx, archived); err != nil {
 		if _, found := intakefixture.ArchiveRecord(t, f.s.store, archived); !found {
@@ -142,24 +143,24 @@ func TestArchivedMemberLeavesSurvivorAmendmentToApply(t *testing.T) {
 		t.Fatal("published project spec changed the archived member's slice")
 	}
 	repo, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, survivor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	revised := false
 	for _, doc := range docs {
 		if doc.ID != amendment.DocumentID("group-"+c.ID) {
 			continue
 		}
 		var app amendment.Application
-		intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &app))
+		fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &app))
 		revised = slices.Equal(app.Added, []string{"diagnostics"}) && app.To.Seal == app.From.Seal+1
 	}
 	if !revised {
 		t.Fatal("survivor did not receive its revision")
 	}
 	feature, err := repo.Workflow(survivor, trace.FeatureSubject)
-	intakefixture.Must(t, err)
-	if feature.Value != intakefixture.BuildingState {
+	fixturekit.Must(t, err)
+	if feature.Value != intake.BuildingState {
 		t.Fatalf("survivor did not return to building for its open pull request: %s", feature.Value)
 	}
 }
@@ -198,9 +199,9 @@ func TestArchivedMemberLeavesSurvivorCancellationToApply(t *testing.T) {
 		t.Fatalf("applied cancellation: applied=%v retired=%v", c.Applied, c.Retired)
 	}
 	repo, err := f.s.repository(f.project2)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	feature, err := repo.Workflow(survivor, trace.FeatureSubject)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if feature.Value != intake.AbandonedState {
 		t.Fatalf("survivor was not cancelled: %s", feature.Value)
 	}
@@ -213,7 +214,7 @@ func TestHeldChangeReportsHeldToTheChief(t *testing.T) {
 		t.Fatalf("held change reported %+v", held)
 	}
 	data, err := json.Marshal(held)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(data), `"state":"held"`) || strings.Contains(string(data), `"state":"drafting"`) {
 		t.Fatalf("held change JSON: %s", data)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepar
 			prepare(opts)
 		}
 	})
-	f.script("draft-1-1", map[string]string{plan.SpecPath: intakefixture.ValidSpec, plan.PlanPath: drafted}, nil)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
 	return f, intakefixture.ScriptMasons(f.engine, masonTurnID)
 }

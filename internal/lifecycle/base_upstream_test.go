@@ -33,21 +33,21 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			f.stop(t)
 			ctx := context.Background()
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer repo.Close()
 			base, held := sealDependent(t, f, repo, backend, "", map[string]string{"base.go": "base\n"})
 			stream, _ := sealDependent(t, f, repo, backend, base, map[string]string{"dependent.go": "dependent\n"})
 			cfg := f.s.about(repo)
 			g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 
 			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
 				t.Fatalf("an unparked workstream moved onto upstream: %v", apiFault)
 			}
 			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
 			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 			entry := parkedBaseEntry(t, repo, stream)
 			if entry.Kind != api.InboxBase || !slices.Equal(entry.Options, []string{api.BaseDecisionUpstream}) || entry.Answer.Path != api.Prefix+"/base/"+string(stream)+"/upstream" || entry.Answer.Body["base"] != string(base) {
 				t.Fatalf("the parked base's inbox entry %+v", entry)
@@ -86,7 +86,7 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			if observed, _, err := lifecycle.BaseObservationAt(repo, stream); err != nil || observed.Base != want || observed.Unavailable {
 				t.Fatalf("the base observation %+v: %v", observed, err)
 			}
-			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+			fixturekit.Must(t, f.s.baseWaitPass(ctx, repo))
 			if state, err := repo.Workflow(stream, lifecycle.BaseWaitSubject); err != nil || state.Value != "available" || state.Version != 2 {
 				t.Fatalf("the base wait after its next pass %+v: %v", state, err)
 			}
@@ -98,15 +98,15 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 			}
 
 			h.Workstream, h.ID = stream, "building"
-			_, err = repo.SetFeatureState(ctx, h, intakefixture.BuildingState, "Units are recorded")
-			intakefixture.Must(t, err)
+			_, err = repo.SetFeatureState(ctx, h, intake.BuildingState, "Units are recorded")
+			fixturekit.Must(t, err)
 			d := drifter{&foreman{masons: newMasonController(f.s, repo)}}
 			op := requestDrift(t, d, stream)
 			if result := settleOperation(t, f.s, repo, stream, op, d); result.Outcome != "succeeded" {
 				t.Fatalf("the drift rebase %+v", result)
 			}
 			tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if parentOf(t, f, tip) != upstream || fileAt(t, f, tip, "dependent.go") != "dependent\n" || fileAt(t, f, tip, "base.go") != "base\n" {
 				t.Fatalf("the feature branch is at %s, not its own commit replayed onto %s", tip, upstream)
 			}
@@ -128,7 +128,7 @@ func TestBaseUpstreamRefusesAWorkstreamThatIsNotParked(t *testing.T) {
 func parkedBaseEntries(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
 	t.Helper()
 	statuses, err := repo.Statuses()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, w := range statuses {
 		if w.Workstream != stream {
@@ -146,13 +146,13 @@ func parkedBaseEntries(t *testing.T, repo *trace.Repository, stream config.Works
 func parkedBaseEntry(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) api.InboxEntry {
 	t.Helper()
 	statuses, err := repo.Statuses()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, w := range statuses {
 		if w.Workstream != stream {
 			continue
 		}
 		e, open, err := service.TestBaseEntry(repo, w)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if open {
 			return e
 		}

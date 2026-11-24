@@ -46,7 +46,7 @@ func newDecideKit(t *testing.T, p *gateJev, role string) *decideKit {
 	chief := claimThread(t, f.repo, f.now(), "chief", trace.ChiefOfStaff, "chief1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(context.Background(), "asker", asker, "Should uploads resume after a restart?", f.now())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	k := &decideKit{f: f, p: p, chief: chief}
 	k.turn(t, "chief", chief)
 	return k
@@ -58,7 +58,7 @@ func (k *decideKit) turn(t *testing.T, agent string, scope coreadapter.Scope) {
 	controls.service.Store(k.f.s)
 	k.decide = controls.decide(k.f.repo, scope)
 	list, err := questions.Tools(k.f.repo, agent, scope, k.f.now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	k.tools = map[string]coreadapter.Tool{}
 	for _, tool := range list {
 		k.tools[tool.Name] = tool
@@ -68,7 +68,7 @@ func (k *decideKit) turn(t *testing.T, agent string, scope coreadapter.Scope) {
 func (k *decideKit) call(t *testing.T, tool coreadapter.Tool, input string) map[string]any {
 	t.Helper()
 	out := map[string]any{}
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
 	return out
 }
 
@@ -116,7 +116,7 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 		t.Fatalf("%d requests", len(p.Requests()))
 	}
 	states, err := k.f.repo.Questions(fixturekit.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	judgment, _, _ := decisionJudgment(t, k.f.repo, fixturekit.Stream, jev.KindQuestionRouting, jev.QuestionKey("1"))
 	if r := states[0].Ruling; states[0].State != trace.QuestionAnswered || r == nil || r.Actor != trace.JevActor || r.DecidedBy != trace.DecidedByJev || r.Judgment != judgment || r.ReturnedAnswer != "Resume from the last chunk." {
 		t.Fatalf("question %+v", states[0])
@@ -260,7 +260,7 @@ func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	}
 	judgment, _, _ := decisionJudgment(t, c.repo, c.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
 	transitions, err := trace.Read[trace.Transition](c.repo, c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	found := false
 	for _, tr := range transitions {
 		if tr.Subject == trace.UnitSubject("resume") && tr.From == UnitContested && tr.To == UnitReviewing && tr.Actor == trace.JevActor && strings.Contains(tr.Reason, "Check the verdict file.") {

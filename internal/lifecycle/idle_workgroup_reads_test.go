@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -43,16 +42,16 @@ func (f *changePassFixture) idleGroup(t *testing.T, locals []config.WorkstreamID
 		members = append(members, trace.CrossRepoMember{Workstream: stream, Project: f.local})
 	}
 	wt, g, err := trace.CreateWorkgroupTrace(ctx, f.controller.Current().Root, members, fixturekit.DemoStart, intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, member := range members {
-		intakefixture.Must(t, member.Project.JoinCrossRepoWorkgroup(ctx, member.Workstream, g.ID, fixturekit.DemoStart, intake.OwnerActor, "fixture"))
+		fixturekit.Must(t, member.Project.JoinCrossRepoWorkgroup(ctx, member.Workstream, g.ID, fixturekit.DemoStart, intake.OwnerActor, "fixture"))
 	}
 	approval := trace.GroupApproval{Workgroup: g.ID, ProjectSpec: idleSpec(g, specBytes), Complete: true}
 	for _, member := range members {
 		approval.Members = append(approval.Members, trace.GroupMemberApproval{Project: member.Project.Project(), Workstream: member.Workstream, Record: json.RawMessage(`{}`)})
 	}
-	intakefixture.Must(t, trace.RecordGroupApproval(ctx, wt, g.Members[0], approval, fixturekit.DemoStart, intake.OwnerActor))
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, trace.RecordGroupApproval(ctx, wt, g.Members[0], approval, fixturekit.DemoStart, intake.OwnerActor))
+	fixturekit.Must(t, wt.Close())
 	return g
 }
 
@@ -68,23 +67,23 @@ func (f *changePassFixture) setFeature(t *testing.T, stream config.WorkstreamID,
 	repo := f.repositoryOf(stream)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "fixture-" + state, Revision: 1, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "fixture"}
 	_, err := repo.SetFeatureState(context.Background(), h, state, "fixture")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func (f *changePassFixture) feature(t *testing.T, stream config.WorkstreamID) string {
 	t.Helper()
 	states, err := f.repositoryOf(stream).WorkflowStates(stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return states[trace.FeatureSubject].Value
 }
 
 func (f *changePassFixture) recordResolved(t *testing.T, g trace.Workgroup) {
 	t.Helper()
 	wt, err := trace.OpenWorkgroupAuthority(f.controller.Current().Root, g.ID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = trace.MarkWorkgroupsResolved(context.Background(), wt, []trace.Workgroup{{ID: g.ID, Members: g.Members[1:]}}, func(config.WorkstreamID) (bool, error) { return true, nil }, fixturekit.DemoStart, intake.OwnerActor, "fixture")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, wt.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, wt.Close())
 }
 
 func priorIncomingMergeEdges(repo *trace.Repository, stream config.WorkstreamID) ([]trace.Edge, error) {
@@ -141,13 +140,13 @@ func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t 
 	g := f.idleGroup(t, locals, 120_000)
 	real := g.Members[1:]
 	for _, stream := range real {
-		f.setFeature(t, stream, intakefixture.BuildingState)
+		f.setFeature(t, stream, intake.BuildingState)
 	}
 	for _, stream := range real {
 		want, err := priorIncomingMergeEdges(f.repositoryOf(stream), stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		got, err := lifecycle.IncomingMergeEdges(f.repositoryOf(stream), stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("building member %s edges = %v, want %v", stream, got, want)
 		}
@@ -210,8 +209,8 @@ func TestTerminalMembersOfAResolvedWorkgroupReadNeitherApprovalNorProjectSpec(t 
 			edgeCallers(t, f.local, stream)
 		}
 		edgeCallers(t, f.remote, otherStream)
-		intakefixture.Must(t, f.controller.EdgeWaitPass(ctx, f.local))
-		intakefixture.Must(t, f.controller.EdgeWaitPass(ctx, f.remote))
+		fixturekit.Must(t, f.controller.EdgeWaitPass(ctx, f.local))
+		fixturekit.Must(t, f.controller.EdgeWaitPass(ctx, f.remote))
 	}
 	if after := readsOf(g.ID); after != before {
 		t.Fatalf("a resolved workgroup's passes read the approval or project spec: %+v -> %+v", before, after)
@@ -236,7 +235,7 @@ func newIdleWorkgroup(t *testing.T, specBytes int) *idleWorkgroup {
 	locals := append([]config.WorkstreamID{passFirst, passSecond, passThird}, f.extra...)
 	g := f.idleGroup(t, locals, specBytes)
 	for _, stream := range g.Members[1:] {
-		f.setFeature(t, stream, intakefixture.BuildingState)
+		f.setFeature(t, stream, intake.BuildingState)
 	}
 	return &idleWorkgroup{f: f, g: g, locals: locals, resolve: &lifecycle.WorkgroupResolver{S: f.controller, Repository: f.local}}
 }

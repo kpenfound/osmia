@@ -16,7 +16,7 @@ func TestClientTimeoutBudgetsAndTransportMessages(t *testing.T) {
 	t.Parallel()
 	socket := filepath.Join(t.TempDir(), "service.sock")
 	listener, err := net.Listen("unix", socket)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(80 * time.Millisecond)
 		w.Write([]byte("{}"))
@@ -55,7 +55,7 @@ func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
 	opts, clone := projectFixture(t)
 	opts.WriteTimeout = 20 * time.Millisecond
 	s, c := start(t, opts)
-	c.addProjectTimeout = intakefixture.DemoTimeout
+	c.addProjectTimeout = fixturekit.DemoTimeout
 	entered := make(chan struct{})
 	handler := s.server.Handler
 	s.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

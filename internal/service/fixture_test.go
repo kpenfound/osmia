@@ -14,14 +14,14 @@ import (
 const unreachableGitHub = "http://127.0.0.1:1"
 
 func testOptions(cfg config.Options) Options {
-	return Options{Config: cfg, Build: Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{intakefixture.Stream}, ShutdownTimeout: 100 * time.Millisecond,
+	return Options{Config: cfg, Build: Identity{Version: "test", Commit: "abc"}, Workstreams: []config.WorkstreamID{fixturekit.Stream}, ShutdownTimeout: 100 * time.Millisecond,
 		ErrorReporter: ErrorReporterOptions{BaseURL: unreachableGitHub}}
 }
 
 func awaitConversation(t *testing.T, c *Client, done func(ConversationResponse) bool) ConversationResponse {
 	t.Helper()
 	return intakefixture.AwaitView(t, func() (ConversationResponse, error) {
-		return c.Conversation(context.Background(), intakefixture.Stream)
+		return c.Conversation(context.Background(), fixturekit.Stream)
 	}, done, "conversation did not settle: %+v")
 }
 

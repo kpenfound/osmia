@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,7 +25,7 @@ import (
 func holdDrift(t *testing.T, f *shedFixture, d drifter, stream config.WorkstreamID, op coreadapter.Operation, owners string) {
 	t.Helper()
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	intakefixture.Must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(owners), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(owners), 0600))
 	completeDriftTurn(t, f, d.repository, stream, service.TestDriftMasonAgent, resolvedDone("Resolved"))
 	awaitResolution(t, f.s, d, stream, op, "review 1")
 	completeDriftTurn(t, f, d.repository, stream, service.TestDriftReviewerAgent, driftVerdict(t, rejectedResolution))
@@ -56,7 +57,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	handBack := func(input string) string {
 		t.Helper()
 		out, err := tool.Handle(ctx, json.RawMessage(input))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return string(out)
 	}
 	if out := handBack(`{"note":"Keep both owners.","owner_decided":true}`); !strings.Contains(out, "only for a handback the owner asked for") {
@@ -70,7 +71,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 		t.Fatalf("a second handback of one held drift rebase: %s", out)
 	}
 	statuses, err := repository.Statuses()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(statuses, func(w trace.WorkstreamStatus) bool { return w.Workstream == stream })
 	if decisions, err := f.s.openDecisions(ctx, repository, statuses[i]); err != nil || slices.ContainsFunc(decisions, func(e api.InboxEntry) bool { return e.Kind == api.InboxDrift }) {
 		t.Fatalf("the inbox lists the drift rebase handed back: %+v %v", decisions, err)
@@ -83,7 +84,7 @@ func TestChiefOfStaffHandsAHeldDriftRebaseBack(t *testing.T) {
 	op = requestDrift(t, d, stream)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
 	th, err := repository.Thread(stream, service.TestDriftMasonAgent)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if resolve := th.Turns[len(th.Turns)-1]; resolve.Request.TurnID != lifecycle.DriftResolveTurnID(2, 1) || !strings.Contains(resolve.Request.Prompt, "Drift rebase 1 was held for the owner, and the chief of staff handed it back with this note, which this drift rebase answers: "+note) {
 		t.Fatalf("the resolve turn %s:\n%s", resolve.Request.TurnID, resolve.Request.Prompt)
 	}

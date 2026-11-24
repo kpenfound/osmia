@@ -12,7 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -45,7 +44,7 @@ func postsOf(posts []hooksPost, kind, field, value string) []hooksPost {
 func (f *publisherFixture) jevAmendmentDecision(stream config.WorkstreamID, id string, revision int, verdict, note string, when time.Time) {
 	f.t.Helper()
 	data, err := json.Marshal(api.AmendmentDecision{Decision: verdict, Note: note, Round: 1, Packet: 1, Spec: 2, Plan: 2, SealRevision: 1, Actor: trace.DecidedByJev, Judgment: jevJudgment})
-	intakefixture.Must(f.t, err)
+	fixturekit.Must(f.t, err)
 	f.document(stream, "amendment_"+id+"_decision", revision, "amendments/"+id+"/decision.json", string(data), when, trace.JevActor)
 }
 
@@ -57,14 +56,14 @@ func (f *publisherFixture) ratify(stream config.WorkstreamID, byJev bool, when t
 		r.DecidedBy, r.Judgment, actor = trace.DecidedByJev, jevJudgment, trace.JevActor
 	}
 	data, err := json.Marshal(r)
-	intakefixture.Must(f.t, err)
+	fixturekit.Must(f.t, err)
 	f.document(stream, shed.RatificationDocumentID(1), 1, shed.RatificationPath(1), string(data), when, actor)
 }
 
 func (f *publisherFixture) applied(stream config.WorkstreamID, id string, n int, when time.Time) {
 	f.t.Helper()
 	data, err := json.Marshal(amendment.Application{Amendment: id, To: amendment.Pin{Seal: n, SealRevision: n, Spec: n, Plan: 1}})
-	intakefixture.Must(f.t, err)
+	fixturekit.Must(f.t, err)
 	f.document(stream, amendment.DocumentID(id), 1, amendment.Path(id), string(data), when, trace.Actor{Kind: "service", ID: "amendments"})
 }
 
@@ -167,7 +166,7 @@ func TestPublishJevDiscoveryDispositionSaysJevDecidedIt(t *testing.T) {
 	id := fmt.Sprintf("discovery-%064x", 7)
 	record := func(revision int, w workDiscovery, when time.Time, actor trace.Actor) {
 		data, err := json.Marshal(w)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, actor)
 	}
 	record(1, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "open"}, hr(1), chiefActor)

@@ -82,7 +82,7 @@ func newBuildFixture(t *testing.T, key string) *buildFixture {
 	must(t, err)
 	acquired, err := provider.Acquire(ctx, vcs.Request{Name: string(stream), Ref: u.base, Branch: featureBranch(stream)})
 	must(t, err)
-	fixturekit.RecordBuild(t, u.repository, fixturekit.BuildInput{Stream: stream, At: demoStart, Key: key, Graph: independentPlan, Spec: intakefixture.ValidSpec, Branch: featureBranch(stream), Workspace: acquired.Directory(), Base: u.base, BaseBranch: u.cfg.Project.BaseBranch})
+	fixturekit.RecordBuild(t, u.repository, fixturekit.BuildInput{Stream: stream, At: demoStart, Key: key, Graph: independentPlan, Spec: fixturekit.ValidSpec, Branch: featureBranch(stream), Workspace: acquired.Directory(), Base: u.base, BaseBranch: u.cfg.Project.BaseBranch})
 	return f
 }
 

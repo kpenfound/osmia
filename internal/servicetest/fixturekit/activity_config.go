@@ -10,9 +10,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// activityFixture opens a fresh Project trace under its own home directory,
-// without starting a service, so the caller can seed workstreams and
-// activity before the first start.
+// Activity opens a fresh Project trace under its own home directory without
+// starting a service, so the caller can seed workstreams and activity first.
 func Activity(t *testing.T) (config.Options, *config.Config, *trace.Repository) {
 	t.Helper()
 	ctx := context.Background()

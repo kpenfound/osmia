@@ -21,7 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -29,14 +28,14 @@ import (
 func recordSealed(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, spec string, units []plan.Unit) {
 	t.Helper()
 	encoded, err := plan.Encode(plan.Plan{Version: plan.Version, Units: units})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	sealed, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash(spec),
 		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: strings.Repeat("a", 40)}, Branch: "osmia/" + string(stream), Workspace: "/nonexistent/" + string(stream)})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	header := func(id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: intake.OwnerActor, Cause: "fixture"}
 	}
-	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{
 		{Header: header(plan.SpecDocument), Path: plan.SpecPath, Content: spec},
 		{Header: header(plan.PlanDocument), Path: plan.PlanPath, Content: string(encoded)},
 		{Header: header(seal.DocumentID), Path: seal.Path, Content: string(sealed)},
@@ -46,17 +45,17 @@ func recordSealed(t *testing.T, repo *trace.Repository, stream config.Workstream
 func recordFinalReport(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, report api.FinalReport) {
 	t.Helper()
 	existing, err := delivery.FinalReports(repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	data, err := json.Marshal(report)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: len(existing) + 1, Project: repo.Project(), Workstream: stream, At: at, Actor: intake.OwnerActor, Cause: "fixture"}
-	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
 }
 
 func requestText(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	state, err := json.Marshal(r.State)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var summary string
 	if json.Unmarshal(state, &summary) == nil {
 		state = []byte(summary)
@@ -67,7 +66,7 @@ func requestText(t *testing.T, r systemone.Request) string {
 func requestJSON(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	data, err := json.Marshal(r)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return string(data)
 }
 
@@ -112,8 +111,8 @@ func TestADependencyExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	recordFinalReport(t, f.repository, f.upstream, at, api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "UPSTREAM-SUMMARY says the endpoint is unfinished",
 		Findings: []api.FinalFinding{{Severity: delivery.FindingBlocking, Finding: "The endpoint is unfinished."}}})
 	groups, _, err := trace.Workgroups(f.repository)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
 		Behavior:  "Downstream depends on upstream.",
 		Contracts: []trace.Contract{{Name: "widget-protocol", Text: "WIDGET-CONTRACT the upstream speaks widgets."}},
 		Graph:     []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}},
@@ -285,8 +284,8 @@ func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 			contracts = append(contracts, trace.Contract{Name: fmt.Sprintf("contract-%d", i), Text: long("clause", 500)})
 		}
 		groups, _, err := trace.Workgroups(f.repository)
-		intakefixture.Must(t, err)
-		intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
 			Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, intake.OwnerActor, "fixture"))
 
 		p := &jevfixture.Transitions{}

@@ -8,7 +8,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -17,26 +16,26 @@ func TestConversationQueueSkipsUnreadableWorkstream(t *testing.T) {
 	t.Parallel()
 	opts, cfg := conversationFixture(t, "conversation-scan-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	broken := config.WorkstreamID("w_00000000000000000000000000000000")
 	dir, err := cfg.Root.WorkstreamTrace(cfg.Project.ID, broken)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.MkdirAll(dir, 0700))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.MkdirAll(dir, 0700))
 	profile, err := cfg.NamedProfile("default")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ctx := context.Background()
-	q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_scan", Project: repo.Project(), Workstream: intakefixture.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_scan", Profile: profile, Prompt: "Hello"})
-	intakefixture.Must(t, err)
+	q, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_scan", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_scan", Profile: profile, Prompt: "Hello"})
+	fixturekit.Must(t, err)
 	p := &conversationPath{s: &Service{options: opts}, repository: repo}
-	intakefixture.Must(t, p.queue(ctx, repo))
-	records, err := repo.Operations(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, p.queue(ctx, repo))
+	records, err := repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(records) != 1 {
 		t.Fatalf("published operations: %+v", records)
 	}
 	in, err := thread.DecodeTurn(records[0].Operation)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if in.Turn != q.Request.TurnID {
 		t.Fatalf("published turn: %+v", in)
 	}
@@ -49,8 +48,8 @@ func TestConversationRecoveryOrdersPendingHooksByThreadSequence(t *testing.T) {
 		{Request: trace.TurnRequest{TurnID: "later"}},
 	}}
 	operation := func(turn string) trace.OperationRecord {
-		op, err := thread.TurnOperation(intakefixture.Project, turn, thread.TurnInput{Workstream: intakefixture.Stream, Agent: trace.ChiefOfStaff, Turn: turn})
-		intakefixture.Must(t, err)
+		op, err := thread.TurnOperation(fixturekit.Project, turn, thread.TurnInput{Workstream: fixturekit.Stream, Agent: trace.ChiefOfStaff, Turn: turn})
+		fixturekit.Must(t, err)
 		return trace.OperationRecord{Operation: op}
 	}
 	records := []trace.OperationRecord{operation("later"), operation("earlier")}
@@ -101,18 +100,18 @@ func TestConversationScanAfterDrainPublishesNothing(t *testing.T) {
 	t.Parallel()
 	opts, cfg := conversationFixture(t, "conversation-drain-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	profile, err := cfg.NamedProfile("default")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	ctx := context.Background()
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_drain", Project: repo.Project(), Workstream: intakefixture.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_drain", Profile: profile, Prompt: "Hello"})
-	intakefixture.Must(t, err)
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_drain", Project: repo.Project(), Workstream: fixturekit.Stream, At: opts.Reconciliation.Now(), Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_drain", Profile: profile, Prompt: "Hello"})
+	fixturekit.Must(t, err)
 	p := &conversationPath{s: &Service{options: opts}, repository: repo, drain: make(chan struct{})}
 	p.Quiesce()
-	intakefixture.Must(t, p.scan(ctx, nil))
-	records, err := repo.Operations(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, p.scan(ctx, nil))
+	records, err := repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(records) != 0 {
 		t.Fatalf("drained path published: %+v", records)
 	}

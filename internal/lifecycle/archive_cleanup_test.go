@@ -35,7 +35,7 @@ func awaitArchiveCleaned(t *testing.T, ctx context.Context, repo *trace.Reposito
 	t.Helper()
 	var cleaned runtime.Archive
 	intakefixture.Eventually(t, "archive of workstream "+string(stream)+" was never marked clean", func() bool {
-		intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+		fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 		state, _ := store.Snapshot()
 		for _, a := range state.Archived {
 			if a.Workstream == stream && !a.CleanedAt.IsZero() {
@@ -54,14 +54,14 @@ func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			opts, cfg := conversationFixture(t, "archive-idle-")
 			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream}}})
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			t.Cleanup(func() { store.Close() })
 			if scenario != "no archives" {
 				a := runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, Title: "Archived work", State: intake.AbandonedState, ArchivedAt: fixturekit.DemoStart}
 				if scenario == "already cleaned" {
 					a.CleanedAt = fixturekit.DemoStart.Add(time.Second)
 				}
-				intakefixture.Must(t, store.SetArchived(a))
+				fixturekit.Must(t, store.SetArchived(a))
 			}
 			s := &Service{cfg: cfg, store: store, options: opts}
 			s.activity = activity.New(s.now)
@@ -72,7 +72,7 @@ func TestArchiveCleanupIdlePassDoesNotAnnounceActivity(t *testing.T) {
 			}
 			cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, now: s.now}}
 			for range 3 {
-				intakefixture.Must(t, cleanup.Pass(context.Background()))
+				fixturekit.Must(t, cleanup.Pass(context.Background()))
 			}
 			if notifications != 0 {
 				t.Fatalf("idle cleanup announced %d activity changes", notifications)
@@ -89,13 +89,13 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-cleanup-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	_, err = repo.Charter(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	input := runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream, fixturekit.Quiet}}}
 	store, _, err := runtime.Open(input)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
 	s.setSole(runtimeFor(repo))
@@ -103,32 +103,32 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 		return trace.Header{Schema: "osmia.trace." + kind, Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	}
 	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, intake.ServiceActor)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", Profile: coreadapter.Profile{Name: "fake", Backend: "fake", Model: "fake"}, Prompt: "Set title"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	session := t.TempDir()
 	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "title-token", session, fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.SetStatus(ctx, trace.ChiefOfStaff, coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "title"}, trace.StatusContent{Goal: "Preserved workstream title", Note: "Sensitive detail", Agents: []string{}}, fixturekit.DemoStart, func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h("document", "full-check-output"), Path: "units/u/checks-1-output.txt", Content: "sensitive stdout and stderr"}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h("document", "full-check-output"), Path: "units/u/checks-1-output.txt", Content: "sensitive stdout and stderr"}}))
 	_, err = repo.SetWorkstreamBase(ctx, fixturekit.Quiet, fixturekit.Stream, 0, fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.SetFeatureState(ctx, h("transition", "done"), intake.AbandonedState, "done")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	temp := filepath.Join(cfg.Root.String(), "threads", string(fixturekit.Project), string(fixturekit.Stream))
-	intakefixture.Must(t, os.MkdirAll(temp, 0700))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(temp, "output.log"), []byte("session output"), 0600))
+	fixturekit.Must(t, os.MkdirAll(temp, 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(temp, "output.log"), []byte("session output"), 0600))
 	before := fixturekit.TraceCommits(t, mustProjectTrace(t, cfg))
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	list, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.Contains(list, fixturekit.Stream) {
 		t.Fatal("terminal workstream lost before archive")
 	}
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	raw, _ := store.Snapshot()
 	if len(raw.Archived) != 1 || raw.Archived[0].Title != "Preserved workstream title" || !raw.Archived[0].CleanedAt.IsZero() {
 		t.Fatalf("title not preserved before waiting: %+v", raw.Archived)
@@ -141,23 +141,23 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 	if strings.Contains(logged.String(), "Sensitive detail") || strings.Contains(logged.String(), "sensitive stdout and stderr") {
 		t.Fatalf("log carries sensitive status or document content: %s", logged.String())
 	}
-	intakefixture.Must(t, repo.CaptureTurn(ctx, "title-token", trace.TurnResponse{Header: h("turn-response", "response-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", RequestID: "request-title", RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "test-session"}, SessionDirectory: session, StartedAt: fixturekit.DemoStart, FinalResponse: "Done"}}))
-	intakefixture.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "title", "title-token", fixturekit.DemoStart))
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.CaptureTurn(ctx, "title-token", trace.TurnResponse{Header: h("turn-response", "response-title"), AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "title", RequestID: "request-title", RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "test-session"}, SessionDirectory: session, StartedAt: fixturekit.DemoStart, FinalResponse: "Done"}}))
+	fixturekit.Must(t, repo.CompleteTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "title", "title-token", fixturekit.DemoStart))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	raw, _ = store.Snapshot()
 	if !raw.Archived[0].CleanedAt.IsZero() {
 		t.Fatal("purged a required base")
 	}
 	logged.Reset()
 	_, err = repo.SetWorkstreamBase(ctx, fixturekit.Quiet, "", 1, fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	clean := awaitArchiveCleaned(t, ctx, repo, cleanup, store, fixturekit.Stream)
 	if clean.Title != "Preserved workstream title" || clean.State != intake.AbandonedState {
 		t.Fatalf("archive record after cleanup: %+v", clean)
 	}
 	fixturekit.AssertGone(t, temp)
 	list, err = repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(list, fixturekit.Stream) {
 		t.Fatalf("workstream trace repository not removed: %v", list)
 	}
@@ -170,7 +170,7 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 	if after := fixturekit.TraceCommits(t, mustProjectTrace(t, cfg)); after != before {
 		t.Fatalf("archive cleanup committed to the project trace: %d commits, was %d", after, before)
 	}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	raw, _ = store.Snapshot()
 	if len(raw.Archived) != 1 || raw.Archived[0].Title != "Preserved workstream title" || raw.Archived[0].CleanedAt.IsZero() {
 		t.Fatalf("repeated pass changed the archive record: %+v", raw.Archived)
@@ -194,14 +194,14 @@ func TestArchiveCleanupRetainsTheTitleAndDefersForABusyWorkstream(t *testing.T) 
 func mustProjectTrace(t *testing.T, cfg *config.Config) string {
 	t.Helper()
 	dir, err := cfg.Root.ProjectTrace(cfg.Project.ID)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return dir
 }
 
 func deletingDir(t *testing.T, cfg *config.Config) string {
 	t.Helper()
 	dir, err := cfg.Root.WorkstreamDeleting(fixturekit.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return dir
 }
 func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *testing.T) {
@@ -209,33 +209,33 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "archive-batch-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	descendant := config.WorkstreamID("w_00000000000000000000000000000004")
 	independent := config.WorkstreamID("w_00000000000000000000000000000005")
 	for _, id := range []config.WorkstreamID{descendant, independent} {
-		intakefixture.Must(t, repo.CreateWorkstream(ctx, id, fixturekit.DemoStart, intake.ServiceActor))
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, id, fixturekit.DemoStart, intake.ServiceActor))
 	}
 	_, err = repo.SetWorkstreamBase(ctx, fixturekit.Quiet, fixturekit.Stream, 0, fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.SetWorkstreamBase(ctx, descendant, fixturekit.Quiet, 0, fixturekit.DemoStart)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	all := []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet, descendant, independent}
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: all}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	for _, id := range all {
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: fixturekit.Project, Workstream: id, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 		_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "done")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if id != descendant {
-			intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: id, ArchivedAt: fixturekit.DemoStart}))
+			fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: id, ArchivedAt: fixturekit.DemoStart}))
 		}
 	}
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	state, _ := store.Snapshot()
 	independentClean, streamClean, quietClean := false, false, false
 	for _, a := range state.Archived {
@@ -258,14 +258,14 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 		awaitArchiveCleaned(t, ctx, repo, cleanup, store, independent)
 	}
 	remaining, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.Contains(remaining, fixturekit.Stream) || !slices.Contains(remaining, fixturekit.Quiet) {
 		t.Fatalf("a base still depended on by a retained descendant was removed: %v", remaining)
 	}
 	if slices.Contains(remaining, independent) {
 		t.Fatalf("an independent archived workstream with no base was not removed: %v", remaining)
 	}
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: descendant, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: descendant, ArchivedAt: fixturekit.DemoStart}))
 	streamClean2 := awaitArchiveCleaned(t, ctx, repo, cleanup, store, fixturekit.Stream)
 	if streamClean2.CleanedAt.IsZero() {
 		t.Fatal("stream not cleaned once its retained descendant is archived too")
@@ -279,7 +279,7 @@ func TestArchiveCleanupBatchesDependenciesAndWaitsForRetainedDescendants(t *test
 		t.Fatal("descendant not cleaned")
 	}
 	remaining, err = repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, id := range all {
 		if slices.Contains(remaining, id) {
 			t.Fatalf("workstream %s's trace repository was not removed: %v", id, remaining)
@@ -293,20 +293,20 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 	logged, logger := captureLog(t)
 	opts, cfg := conversationFixture(t, "archive-pending-op-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts, logger: logger}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "done")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fixturekit.RequestFactoryOperation(t, repo, fixturekit.Stream, "pending-work")
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	raw, _ := store.Snapshot()
 	if raw.Archived[0].Title == "" || !raw.Archived[0].CleanedAt.IsZero() {
 		t.Fatalf("cleaned with an unresulted operation pending: %+v", raw.Archived)
@@ -331,7 +331,7 @@ func TestArchiveCleanupDefersForAPendingOperationThenProceeds(t *testing.T) {
 		}
 		return a.Record(ctx, a.Action("acknowledge", s.now()))
 	})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	logged.Reset()
 	clean := awaitArchiveCleaned(t, ctx, repo, cleanup, store, fixturekit.Stream)
 	if clean.CleanedAt.IsZero() {
@@ -344,17 +344,17 @@ func TestArchiveCleanupDeletionResumesAfterInterruption(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "archive-interrupt-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "done")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
 	interrupted := false
 	cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}, finish: func(root config.Root, p config.ProjectID, w config.WorkstreamID) error {
 		if !interrupted {
@@ -363,13 +363,13 @@ func TestArchiveCleanupDeletionResumesAfterInterruption(t *testing.T) {
 		}
 		return trace.FinishWorkstreamTraceDeletion(root, p, w)
 	}}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	intakefixture.Eventually(t, "trace never moved aside for deletion", func() bool {
 		_, err := os.Lstat(filepath.Join(deletingDir(t, cfg), string(fixturekit.Stream)))
 		return err == nil
 	})
 	list, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.Contains(list, fixturekit.Stream) {
 		t.Fatal("a workstream whose trace moved aside for deletion is still listed as live")
 	}
@@ -391,17 +391,17 @@ func TestArchiveCleanupLargeDeletionDoesNotDelayReadsOrOtherWrites(t *testing.T)
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "archive-responsive-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream, fixturekit.Quiet}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "finish", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 	_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "done")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
 	hold := make(chan struct{})
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -417,17 +417,17 @@ func TestArchiveCleanupLargeDeletionDoesNotDelayReadsOrOtherWrites(t *testing.T)
 		}
 		return trace.FinishWorkstreamTraceDeletion(root, p, w)
 	}}
-	intakefixture.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
+	fixturekit.Must(t, repo.Serialize(func() error { return cleanup.Pass(ctx) }))
 	select {
 	case <-started:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the background removal never started")
 	}
 	begin := time.Now()
 	if _, _, apiFault := s.statuses(); apiFault != nil {
 		t.Fatalf("status read failed while a deletion was in flight: %v", apiFault)
 	}
-	intakefixture.Must(t, repo.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "note", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Quiet, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}, Path: "handed/note.json", Content: "unrelated workstream progress"}))
+	fixturekit.Must(t, repo.Append(ctx, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "note", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Quiet, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}, Path: "handed/note.json", Content: "unrelated workstream progress"}))
 	if elapsed := time.Since(begin); elapsed > time.Second {
 		t.Fatalf("a status read and an unrelated workstream's write waited %s on a deletion in flight", elapsed)
 	}
@@ -443,21 +443,21 @@ func TestArchiveRecordsOutcomeAndPullRequestLinkThenCleansUp(t *testing.T) {
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "archive-record-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream}}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	const pullRequestURL = "https://github.com/owner/osmia/pull/7"
 	record := api.DeliveryPublication{Approval: 1, Operation: "publish-1", Status: delivery.PublicationOpened, Style: "commit-per-unit", Fork: "owner/fork", Remote: "origin", Branch: intake.FeatureBranch(fixturekit.Stream), Commit: "0123456789abcdef0123456789abcdef01234567", PullRequest: 7, URL: pullRequestURL, Title: "Ship it", Description: "a change", DescriptionHash: "hash"}
 	data, err := json.Marshal(record)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.PublicationDocument, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "publish-1"}, Path: delivery.PublicationPath, Content: string(data)}
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "publish-1"}
 	_, err = repo.RecordDocumentsWith(ctx, []trace.Document{doc}, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: "", To: intake.DeliveredState, Reason: "delivered for the test"}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	resp, apiFault := s.archive(string(fixturekit.Stream))
 	if apiFault != nil || !resp.Archived {
 		t.Fatalf("archive: %+v %v", resp, apiFault)
@@ -495,23 +495,23 @@ func TestArchiveCleanupKeepsPendingPublicationWithoutReachingHearsay(t *testing.
 				cfg.Projects[0] = cfg.Project
 			}
 			repo, err := trace.Open(cfg.Root, cfg.Project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			t.Cleanup(func() { repo.Close() })
 			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{fixturekit.Project: {fixturekit.Stream}}})
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			t.Cleanup(func() { store.Close() })
 			s := &Service{cfg: cfg, store: store, options: opts}
 			s.setSole(runtimeFor(repo))
 			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandon", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}
 			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "No longer needed.")
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: fixturekit.Stream, ArchivedAt: fixturekit.DemoStart}))
 			cleanup := &archiveCleanup{s: s, workspaces: &workspaceCleanup{cfg: cfg, repository: repo, now: s.now}}
 			if clean := awaitArchiveCleaned(t, ctx, repo, cleanup, store, fixturekit.Stream); clean.CleanedAt.IsZero() {
 				t.Fatal("cleanup did not complete")
 			}
 			kept, err := repo.HearsayKept()
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !publishing {
 				if len(kept) != 0 {
 					t.Fatalf("kept %v without publishing configured", kept)
@@ -524,7 +524,7 @@ func TestArchiveCleanupKeepsPendingPublicationWithoutReachingHearsay(t *testing.
 					Key      string
 					Versions []struct{ State, Status, Description string }
 				}
-				intakefixture.Must(t, json.Unmarshal(k.Data, &rec))
+				fixturekit.Must(t, json.Unmarshal(k.Data, &rec))
 				if rec.Key == "workstream/"+string(fixturekit.Stream) && !k.Released && len(rec.Versions) == 1 {
 					v := rec.Versions[0]
 					found = v.State == "abandoned" && v.Status == "abandoned" && strings.Contains(v.Description, "Cancelled: No longer needed.")

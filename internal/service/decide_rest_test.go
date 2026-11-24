@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 func restDocuments(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.Document
 	for _, d := range docs {
 		if d.ID == id {
@@ -44,7 +45,7 @@ func newAmendmentKit(t *testing.T, p *gateJev, spec, graph string) *amendmentKit
 	presentAmendment(t, f, stream, masonRole, spec, graph)
 	f.stop(t)
 	repo, err := trace.Open(f.s.current().Root, f.s.current().Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { _ = repo.Close() })
 	f.s.setSole(&activeProject{repository: repo})
 	f.s.jev = gateJudge(f.clock.Now, p)
@@ -77,7 +78,7 @@ func (k *amendmentKit) decisions(t *testing.T) []trace.Document {
 func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
-	k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
+	k := newAmendmentKit(t, p, fixturekit.ValidSpec, amendedPlan)
 	if out := intakefixture.Handle(t, k.amend, approveAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 		t.Fatalf("decide_amendment before decide: %s", out)
 	}
@@ -116,7 +117,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 		t.Fatalf("decision records %+v", docs)
 	}
 	var recorded struct{ Decision, Actor, Judgment, Note string }
-	intakefixture.Must(t, json.Unmarshal([]byte(docs[0].Content), &recorded))
+	fixturekit.Must(t, json.Unmarshal([]byte(docs[0].Content), &recorded))
 	if recorded.Decision != "approve" || recorded.Actor != trace.DecidedByJev || recorded.Judgment != judgment || judgment == "" || !strings.Contains(recorded.Note, "preserves the approved upload outcome") {
 		t.Fatalf("decision %+v (judgment %q)", recorded, judgment)
 	}
@@ -131,7 +132,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
-	k := newAmendmentKit(t, p, amendedSpec, intakefixture.ValidPlan)
+	k := newAmendmentKit(t, p, amendedSpec, fixturekit.ValidPlan)
 	_, before := judgments(t, k.repo, k.stream)
 	out := intakefixture.Handle(t, k.decide, decideAmendmentInput)
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "owner") {
@@ -157,7 +158,7 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
+			k := newAmendmentKit(t, p, fixturekit.ValidSpec, amendedPlan)
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("decide_amendment before decide: %s", out)
 			}
@@ -178,7 +179,7 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T
 func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
-	k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
+	k := newAmendmentKit(t, p, fixturekit.ValidSpec, amendedPlan)
 	if _, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1"); err != nil || open {
 		t.Fatalf("the chief of staff's amendment is listed for the owner: %v %v", open, err)
 	}
@@ -186,7 +187,7 @@ func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 		t.Fatalf("decide: %s", out)
 	}
 	judgment, _, _ := decisionJudgment(t, k.repo, k.stream, jev.KindPlanAmendment, jev.AmendmentKey("1"))
-	intakefixture.Must(t, k.f.s.jev.Refuse(context.Background(), k.repo, k.stream, judgment, "the sealed plan moved"))
+	fixturekit.Must(t, k.f.s.jev.Refuse(context.Background(), k.repo, k.stream, judgment, "the sealed plan moved"))
 	card, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1")
 	if err != nil || !open || card.Jev == nil || !card.Jev.Binding || card.Jev.Pick != "approve" || card.Jev.Judgment != judgment {
 		t.Fatalf("card %+v open %v: %v", card, open, err)
@@ -218,7 +219,7 @@ func newDiscoveryKit(t *testing.T, key string, p *gateJev) *discoveryKit {
 	c.f.s.jev = gateJudge(c.f.clock.Now, p)
 	k := &discoveryKit{c: c, record: recordDiscovery(c.repo, c.scope, c.f.s.now), decide: c.controls.decide(c.repo, c.scope), provider: p}
 	var created struct{ ID string }
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, k.record, `{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`)), &created))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, k.record, `{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`)), &created))
 	k.id = created.ID
 	return k
 }
@@ -242,7 +243,7 @@ func (k *discoveryKit) requests() int {
 func (k *discoveryKit) discovery(t *testing.T) workDiscovery {
 	t.Helper()
 	all, err := discoveries(k.c.repo, k.c.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return all[k.id]
 }
 

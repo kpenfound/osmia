@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"testing"
 	"time"
@@ -29,18 +30,18 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 			active.controller.Drain()
 			select {
 			case err := <-active.done:
-				intakefixture.Must(t, err)
-			case <-time.After(intakefixture.DemoTimeout):
+				fixturekit.Must(t, err)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("controller did not drain")
 			}
-			intakefixture.Must(t, f.s.store.ClearPause(factoryTarget, "owner"))
+			fixturekit.Must(t, f.s.store.ClearPause(factoryTarget, "owner"))
 			pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner", Reason: "Hold the higher-priority workstream"}
 			if change == "unpause" {
-				intakefixture.Must(t, f.s.store.SetPause(pause))
+				fixturekit.Must(t, f.s.store.SetPause(pause))
 			}
 			m := &masons{s: f.s, cfg: active.pipeline.current.Load().cfg, repository: f.repository()}
 			b, found, err := m.read(hi)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("building workstream missing")
 			}
@@ -67,7 +68,7 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 				return f.s.store.ClearPause(pause.Target, "owner")
 			})
 			defer func() { f.s.setBoundary(nil) }()
-			intakefixture.Must(t, m.Pass(context.Background()))
+			fixturekit.Must(t, m.Pass(context.Background()))
 			if !changed {
 				t.Fatal("pause did not change during the mason scan")
 			}
@@ -76,7 +77,7 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 				wantState, wantDecision = UnitReady, "deferred priority"
 			}
 			state, err := f.repository().Workflow(lo, trace.UnitSubject("resume"))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if state.Value != wantState {
 				t.Fatalf("lower-priority unit is %s after %s, want %s", state.Value, change, wantState)
 			}

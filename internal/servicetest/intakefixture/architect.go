@@ -127,7 +127,6 @@ func (f *ArchitectScenario) Transitions(t *testing.T, stream config.WorkstreamID
 	t.Helper()
 	all, err := trace.Read[trace.Transition](f.Repository(), stream)
 	fixturekit.Must(t, err)
-	// The router's journal is its own bookkeeping, not a transition of the work.
 	return slices.DeleteFunc(all, func(tr trace.Transition) bool { return router.IsJournal(tr.Subject) })
 }
 
@@ -149,7 +148,7 @@ func (f *ArchitectScenario) DraftOperations(t *testing.T, stream config.Workstre
 // them is acknowledged, for assertions reached through an awaited state.
 func (f *ArchitectScenario) AcknowledgedDraftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.DraftOperations(t, stream) })
+	return fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.DraftOperations(t, stream) })
 }
 
 func (f *ArchitectScenario) ArchitectThread(t *testing.T, stream config.WorkstreamID) trace.Thread {
@@ -220,5 +219,5 @@ func (f *ArchitectScenario) RoundOperations(t *testing.T, stream config.Workstre
 // them is acknowledged, for assertions reached through an awaited state.
 func (f *ArchitectScenario) AcknowledgedRoundOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.RoundOperations(t, stream) })
+	return fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.RoundOperations(t, stream) })
 }

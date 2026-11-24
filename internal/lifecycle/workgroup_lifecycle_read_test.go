@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"sync"
@@ -32,16 +33,16 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			f.awaitApproved(t)
 			var escalated atomic.Bool
 			f.engine.Mu.Lock()
 			f.engine.Turns["lifecycle-read-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": req.Prompt})
+				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": req.Prompt})
 				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
 			}
 			f.engine.Turns["lifecycle-read-next"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-read-cleanup"})
+				_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "survivor-after-read-cleanup"})
 				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
 			}
 			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -67,7 +68,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 						return nil, err
 					}
 					if len(left) == 1 && len(right) == 1 && escalated.CompareAndSwap(false, true) {
-						_, err = intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"}, "rephrasing": "One original decision held across cleanup.", "blocked": "Both original asking turns.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
+						_, err = fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"}, "rephrasing": "One original decision held across cleanup.", "blocked": "Both original asking turns.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 						if err != nil {
 							return nil, err
 						}
@@ -75,27 +76,27 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				}
 				for _, q := range right {
 					if q.State == trace.QuestionOpen && q.Asked.Question == "survivor-after-read-cleanup" {
-						_, err := intakefixture.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream2) + ":" + q.Asked.ID, "text": "Keep the acknowledged offset.", "citations": []string{"spec#1"}})
+						_, err := fixturekit.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream2) + ":" + q.Asked.ID, "text": "Keep the acknowledged offset.", "citations": []string{"spec#1"}})
 						if err != nil {
 							return nil, err
 						}
 					}
 				}
-				_, err = intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority remains available.", "agents": []string{}})
+				_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Keep the contract.", "note": "Original authority remains available.", "agents": []string{}})
 				return intakefixture.QuestionResult(req, "session-chief", "Read original authority."), err
 			}
 			f.engine.Mu.Unlock()
 			lifecycleWorker(t, f, f.project, f.stream1, "worker_first", "lifecycle-read-ask", "first-read-origin")
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "lifecycle-read-ask", "second-read-origin")
 			rightRepo, err := f.s.repository(f.project2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			target, host, _, releaseTarget, err := f.s.chiefRepository(ctx, rightRepo, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer releaseTarget()
 			var original trace.InboxEntry
 			lifecycleAwait(t, f, "original read batch", func() bool {
 				entries, err := target.Inbox()
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if len(entries) == 1 && len(entries[0].Questions) == 2 && entries[0].Workstream == f.stream1 && entries[0].Hold == "" {
 					for _, q := range entries[0].Questions {
 						if q.Asked.ID == "" {
@@ -108,19 +109,19 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				return false
 			})
 			_, err = f.c.Answer(ctx, original.Number, "Keep the original contract.", target.Project())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			_, err = f.c.Abandon(ctx, f.stream1, "Owner cancelled the source member.")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			lifecycleAwait(t, f, "settled source retirement", func() bool {
 				source, err := f.s.repository(f.project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				sourceBusy, sourceChief, err := (&workspaceCleanup{repository: source}).busy(f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if len(sourceBusy) != 0 || sourceChief {
 					return false
 				}
 				operations, err := source.Operations(f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, op := range operations {
 					if op.Result == nil || !op.Acknowledged {
 						return false
@@ -131,14 +132,14 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 					stream  config.WorkstreamID
 				}{{f.project, f.stream1}, {f.project2, f.stream2}} {
 					repo, err := f.s.repository(member.project)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					skipped, err := intake.ChiefOfStaffSkip(repo)(member.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					if skipped {
 						continue
 					}
 					outbox, err := repo.Outbox(member.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					for _, e := range outbox {
 						if e.Event.Operation == nil && !e.Acknowledged {
 							return false
@@ -146,11 +147,11 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 					}
 				}
 				chief, err := target.Thread(host, trace.ChiefOfStaff)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				return !slices.ContainsFunc(chief.Turns, func(turn trace.QueuedTurn) bool { return turn.CompletedAt.IsZero() })
 			})
 			before, err := target.Inbox()
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if len(before) != 1 || before[0].State != trace.QuestionRuled || before[0].Questions[0].Ruling == nil {
 				t.Fatalf("original owner ruling was not recorded: %+v", before)
 			}
@@ -159,8 +160,8 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			var releaseOnce sync.Once
 			release := func() { releaseOnce.Do(func() { close(resume) }) }
 			defer release()
-			defer func() { intakefixture.Must(t, target.SetQuestionReadBoundary(nil)) }()
-			intakefixture.Must(t, target.SetQuestionReadBoundary(func(stream config.WorkstreamID) error {
+			defer func() { fixturekit.Must(t, target.SetQuestionReadBoundary(nil)) }()
+			fixturekit.Must(t, target.SetQuestionReadBoundary(func(stream config.WorkstreamID) error {
 				if stream != f.stream1 || !armed.CompareAndSwap(false, true) {
 					return nil
 				}
@@ -186,7 +187,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			}()
 			select {
 			case <-reached:
-			case <-time.After(intakefixture.DemoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("read did not resolve the live child")
 			}
 			select {
@@ -195,12 +196,12 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			default:
 			}
 			_, err = f.c.Archive(ctx, f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			select {
 			case <-cleanup.reached:
 			case <-time.After(time.Minute):
 				source, err := f.s.repository(f.project)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				busy, chief, err := (&workspaceCleanup{repository: source}).busy(f.stream1)
 				t.Logf("source cleanup busy=%v chief=%v error=%v", busy, chief, err)
 				for _, scope := range []struct {
@@ -208,7 +209,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 					stream config.WorkstreamID
 				}{{source, f.stream1}, {target, host}} {
 					operations, err := scope.repo.Operations(scope.stream)
-					intakefixture.Must(t, err)
+					fixturekit.Must(t, err)
 					for _, op := range operations {
 						if op.Result == nil || !op.Acknowledged {
 							t.Logf("cleanup scope project=%s workstream=%s operation=%s action=%s input=%s claim=%+v effect=%v result=%+v ack=%v retry=%v history=%+v", scope.repo.Project(), scope.stream, op.Operation.ID, op.Operation.Action, op.Operation.Input, op.Claim, op.EffectStarted, op.Result, op.Acknowledged, op.RetryAt, op.History)
@@ -217,7 +218,7 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 					f.logTurns(t, scope.repo, scope.stream)
 				}
 				threads, err := source.Threads(f.stream1)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, thread := range threads {
 					for _, turn := range thread.Turns {
 						if turn.CompletedAt.IsZero() || turn.Request.TurnID == thread.Active {
@@ -233,15 +234,15 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 				return ok && !a.CleanedAt.IsZero()
 			})
 			gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !gone {
 				t.Fatal("production cleanup did not remove the resolved child")
 			}
 			release()
 			select {
 			case err := <-finished:
-				intakefixture.Must(t, err)
-			case <-time.After(intakefixture.DemoTimeout):
+				fixturekit.Must(t, err)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("resolved-child read did not resume")
 			}
 			if read == "inbox" {
@@ -258,16 +259,16 @@ func TestDesignProductionLifecycleReadAcrossArchiveCleanup(t *testing.T) {
 			lifecycleWorker(t, f, f.project2, f.stream2, "worker_second", "lifecycle-read-next", "survivor-after-read-cleanup")
 			lifecycleAwait(t, f, "survivor event and answer after held read", func() bool {
 				qs, err := rightRepo.Questions(f.stream2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				if !slices.ContainsFunc(qs, func(q trace.QuestionState) bool {
 					return q.Asked.Question == "survivor-after-read-cleanup" && q.State == trace.QuestionAnswered
 				}) {
 					return false
 				}
 				outbox, err := rightRepo.Outbox(f.stream2)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				chief, err := target.Thread(host, trace.ChiefOfStaff)
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 				for _, e := range outbox {
 					if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "survivor-after-read-cleanup") {
 						continue

@@ -12,7 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/telemetry"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -41,10 +40,10 @@ func newReservationRig(t *testing.T) *reservationRig {
 	s.setSole(runtimeFor(repo))
 	exporter := tracetest.NewInMemoryExporter()
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { sink.Close() })
 	ledger, err := cfg.Root.SlotIntervals()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	r := &reservationRig{t: t, s: s, repo: repo, cfg: cfg, exporter: exporter, sink: sink, clock: &spanClock{now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}, ledger: ledger}
 	s.telemetry = sink
 	r.start()
@@ -66,17 +65,17 @@ func (r *reservationRig) restart() {
 
 func (r *reservationRig) seedOperation(event string) coreadapter.Operation {
 	r.t.Helper()
-	op := coreadapter.Operation{ID: trace.OperationID(intakefixture.Project, intakefixture.Stream, event), Boundary: coreadapter.RunnerBoundary, Action: FinalReviewAction, Input: json.RawMessage(`{}`)}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin-" + event, Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "handin"}
+	op := coreadapter.Operation{ID: trace.OperationID(fixturekit.Project, fixturekit.Stream, event), Boundary: coreadapter.RunnerBoundary, Action: FinalReviewAction, Input: json.RawMessage(`{}`)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin-" + event, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "handin"}
 	_, err := r.repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: HandedState, Reason: "Handed in"}, Events: []trace.Event{{ID: event, Kind: "turn", Body: "Review the feature", Operation: &op}}})
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	return op
 }
 
 func (r *reservationRig) hold() {
 	r.t.Helper()
-	release, admitted, err := r.s.pool.TryReserve(r.repo, intakefixture.Stream, committeeRole, "holder", &r.cfg.Capacity)
-	intakefixture.Must(r.t, err)
+	release, admitted, err := r.s.pool.TryReserve(r.repo, fixturekit.Stream, committeeRole, "holder", &r.cfg.Capacity)
+	fixturekit.Must(r.t, err)
 	if !admitted {
 		r.t.Fatal("the committee slot was refused")
 	}
@@ -101,7 +100,7 @@ func (r *reservationRig) open() []slotspans.Interval {
 
 func (r *reservationRig) waits() []tracetest.SpanStub {
 	r.t.Helper()
-	intakefixture.Must(r.t, r.sink.Flush(context.Background()))
+	fixturekit.Must(r.t, r.sink.Flush(context.Background()))
 	var out []tracetest.SpanStub
 	for _, sp := range r.exporter.GetSpans() {
 		if sp.Name == "osmia.slot.wait" {
@@ -114,10 +113,10 @@ func (r *reservationRig) waits() []tracetest.SpanStub {
 func (r *reservationRig) acknowledge() {
 	r.t.Helper()
 	c, err := reconcile.New(r.repo, reconcile.Options{Worker: "test", Now: r.clock.Now, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: reviewedAdapter{}}})
-	intakefixture.Must(r.t, err)
-	intakefixture.Must(r.t, c.Pass(context.Background()))
-	records, err := r.repo.Operations(intakefixture.Stream)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
+	fixturekit.Must(r.t, c.Pass(context.Background()))
+	records, err := r.repo.Operations(fixturekit.Stream)
+	fixturekit.Must(r.t, err)
 	if len(records) != 1 || !records[0].Acknowledged {
 		r.t.Fatalf("the operation was not completed: %+v", records)
 	}
@@ -189,7 +188,7 @@ func TestReservationWaitSurvivesARestartAndIsGrantedOnce(t *testing.T) {
 		t.Fatalf("%d wait spans, want exactly one for the operation", len(waits))
 	}
 	sp := waits[0]
-	if !sp.StartTime.Equal(firstRefusal) || !sp.EndTime.Equal(grantedAt) || sp.SpanContext.SpanID() != id || sp.SpanContext.TraceID() != telemetry.WorkstreamTrace(intakefixture.Stream) || sp.Parent.SpanID() != telemetry.WorkstreamRoot(intakefixture.Stream) {
+	if !sp.StartTime.Equal(firstRefusal) || !sp.EndTime.Equal(grantedAt) || sp.SpanContext.SpanID() != id || sp.SpanContext.TraceID() != telemetry.WorkstreamTrace(fixturekit.Stream) || sp.Parent.SpanID() != telemetry.WorkstreamRoot(fixturekit.Stream) {
 		t.Fatalf("wait span %+v, want %s to %s with span %s", sp, firstRefusal, grantedAt, id)
 	}
 	if a := spanAttrs(sp); a["osmia.outcome"] != "granted" || a["osmia.wait_reason"] != "capacity" || a["osmia.role"] != "committee" {
@@ -216,7 +215,7 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 	}{
 		{"workstream removed", "removed", func(r *reservationRig) time.Time {
 			gone, err := config.NewWorkstreamID()
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			start := r.clock.Now()
 			r.s.slots.Begin(reservationWaitOf(gone, start))
 			return start
@@ -224,12 +223,12 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 		{"operation completed elsewhere", "completed", refusedOperation, func(r *reservationRig) { r.acknowledge() }},
 		{"workstream canceled", "canceled", refusedOperation, func(r *reservationRig) {
 			r.acknowledge()
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede", Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "supersede"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "supersede"}
 			_, err := r.repo.SetFeatureState(ctx, h, AbandonedState, "Replaced by another workstream")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 		}},
 		{"workstream paused", "blocked", refusedOperation, func(r *reservationRig) {
-			intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Reason: "Looking at it", Source: runtime.PauseOwner, SetAt: r.clock.Now()}))
+			fixturekit.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}, Mode: "soft", Reason: "Looking at it", Source: runtime.PauseOwner, SetAt: r.clock.Now()}))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -269,7 +268,7 @@ func refusedOperation(r *reservationRig) time.Time {
 }
 
 func reservationWaitOf(workstream config.WorkstreamID, start time.Time) slotspans.Interval {
-	iv := slotspans.Interval{Kind: slotspans.Wait, Source: slotspans.SourceReservation, Pool: committeeRole, Role: committeeRole, Project: intakefixture.Project, Workstream: workstream, Agent: committeeAgent(1), Work: committeeAgent(1), Start: start, Reason: slotspans.ReasonCapacity}
+	iv := slotspans.Interval{Kind: slotspans.Wait, Source: slotspans.SourceReservation, Pool: committeeRole, Role: committeeRole, Project: fixturekit.Project, Workstream: workstream, Agent: committeeAgent(1), Work: committeeAgent(1), Start: start, Reason: slotspans.ReasonCapacity}
 	iv.Bound(1, true)
 	return iv
 }

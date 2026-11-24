@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -20,7 +20,7 @@ func publishThrough(t *testing.T, s *Service, repo *trace.Repository) []hooksPos
 	cfg.Hearsay = config.Hearsay{URL: "https://memory.example", Principal: "owner", TokenEnv: "PUBLISH_TEST_OWNER",
 		Publish: &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}}
 	res, err := s.publishPass(context.Background(), repo, &cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(res.Failures) != 0 || res.Unreachable {
 		t.Fatalf("pass: %+v", res)
 	}

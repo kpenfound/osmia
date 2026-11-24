@@ -48,7 +48,7 @@ func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
 	cfg.Projects[0].HearsayScope = "project"
 	cfg.Project = cfg.Projects[0]
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	s := &Service{cfg: cfg, memory: hearsay.Health{}}
 	run := func(want string) {
 		t.Helper()
@@ -57,23 +57,23 @@ func TestMemoryWatchResumesCursorAndDeduplicatesAfterRestart(t *testing.T) {
 		go func() { done <- s.watchMemory(ctx, repo) }()
 		intakefixture.Soon(t, "the memory cursor to reach "+want, func() bool {
 			cursor, err := repo.MemoryCursor(memoryWatchKey(cfg))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			return cursor == want
 		})
 		cancel()
-		intakefixture.Must(t, <-done)
+		fixturekit.Must(t, <-done)
 	}
 	run("cursor-1")
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	run("cursor-2")
 	if first, second := <-requests, <-requests; first != "" || second != "cursor-1" {
 		t.Fatalf("watch cursors %q %q", first, second)
 	}
-	events, err := repo.Outbox(intakefixture.Stream)
-	intakefixture.Must(t, err)
+	events, err := repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	count := 0
 	for _, event := range events {
 		if strings.HasPrefix(event.TransitionID, "watch-notice-") {

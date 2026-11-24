@@ -3,6 +3,12 @@ package intakejourney
 import (
 	context "context"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	slices "slices"
 	strings "strings"
 	testing "testing"
@@ -15,20 +21,17 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestAmendmentDemonstration follows a mason's question, routed to an
-// amendment by the chief of staff, through drafting,
-// one shed round, the owner gate, recovery, and the next unit turns.
 func TestAmendmentDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newParallelMasonFixture(t, 2, 2, parallelPlan)
-	defer f.stop(t)
-	f.script("amend-1-1", map[string]string{plan.SpecPath: amendedSpec}, nil)
-	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
-	f.script("amend-1-reply-1", nil, nil)
+	f, masons := journey.NewParallelMasonFixture(t, 2, 2, journey.ParallelPlan)
+	defer f.Stop(t)
+	f.Script("amend-1-1", map[string]string{plan.SpecPath: journey.AmendedSpec}, nil)
+	f.Script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
+	f.Script("amend-1-reply-1", nil, nil)
 	for _, unit := range []string{"upload", "audit"} {
-		masons.Play[masonTurnID(unit)] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-			recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Proof recorded"})
+		masons.Play[service.TestMasonTurnID(unit)] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+			recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Proof recorded"})
 			if err != nil || !recorded {
 				return fmt.Errorf("%s done: %s: %v", unit, reason, err)
 			}
@@ -36,82 +39,55 @@ func TestAmendmentDemonstration(t *testing.T) {
 		}
 	}
 	masons.Chief.Route("1", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
-	masons.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable. Should the spec say a durable checkpoint?"})
+	masons.Play[service.TestMasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable. Should the spec say a durable checkpoint?"})
 		return err
 	}
-	stream, _ := f.builtAs(t, "amendment")
-	f.awaitUnit(t, stream, "resume", UnitWaiting)
-	f.awaitMasonRan(t, stream, "audit")
-	f.awaitAmendment(t, stream, amendmentPresented)
-	view, err := f.c.Amendment(ctx, stream, "1")
-	must(t, err)
+	stream, _ := f.BuiltAs(t, "amendment")
+	f.AwaitUnit(t, stream, "resume", intake.UnitWaiting)
+	f.AwaitMasonRan(t, stream, "audit")
+	f.AwaitAmendment(t, stream, intake.AmendmentPresented)
+	view, err := f.C.Amendment(ctx, stream, "1")
+	fixturekit.Must(t, err)
 	if view.Round != 1 || view.Revision != 1 || !strings.Contains(string(view.Packet), "durable checkpoint") {
 		t.Fatalf("owner packet %+v", view)
 	}
-	before, _, _, err := seal.Latest(f.repository(), stream)
-	must(t, err)
+	before, _, _, err := seal.Latest(f.Repository(), stream)
+	fixturekit.Must(t, err)
 
-	f.stop(t)
-	f.start(t)
-	again, err := f.c.Amendment(ctx, stream, "1")
-	must(t, err)
+	f.Stop(t)
+	f.Start(t)
+	again, err := f.C.Amendment(ctx, stream, "1")
+	fixturekit.Must(t, err)
 	if again.Round != 1 || again.Revision != 1 || !slices.Equal(again.Packet, view.Packet) {
 		t.Fatalf("round duplicated across restart: before %+v, after %+v", view, again)
 	}
-	_, err = f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentApprove, Packet: again.Revision, Note: "Owner ruling for the requester."})
-	must(t, err)
-	f.awaitAmendment(t, stream, amendmentRuled)
-	ruling := f.ruling(t, stream, masonAgent("resume"))
+	_, err = f.C.DecideAmendment(ctx, stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Packet: again.Revision, Note: "Owner ruling for the requester."})
+	fixturekit.Must(t, err)
+	f.AwaitAmendment(t, stream, intake.AmendmentRuled)
+	ruling := f.Ruling(t, stream, intake.MasonAgent("resume"))
 	if len(ruling) != 1 || !strings.Contains(ruling[0].Request.Prompt, "Owner ruling for the requester.") {
 		t.Fatalf("requester ruling %+v", ruling)
 	}
-	after, _, _, err := seal.Latest(f.repository(), stream)
-	must(t, err)
-	if after.Seal != before.Seal+1 || !slices.Equal(f.revisions(t, stream, plan.SpecDocument), []int{1, 2}) {
-		t.Fatalf("approved amendment left seal %+v, spec revisions %v", after, f.revisions(t, stream, plan.SpecDocument))
+	after, _, _, err := seal.Latest(f.Repository(), stream)
+	fixturekit.Must(t, err)
+	if after.Seal != before.Seal+1 || !slices.Equal(f.Revisions(t, stream, plan.SpecDocument), []int{1, 2}) {
+		t.Fatalf("approved amendment left seal %+v, spec revisions %v", after, f.Revisions(t, stream, plan.SpecDocument))
 	}
-	f.awaitTransition(t, stream, amendmentUnitID("upload", "1", true), UnitReviewing, UnitImplementing)
-	if state, err := f.unitState(stream, "audit"); err != nil || state != UnitReviewing {
+	f.AwaitTransition(t, stream, intake.AmendmentUnitID("upload", "1", true), intake.UnitReviewing, intake.UnitImplementing)
+	if state, err := f.UnitState(stream, "audit"); err != nil || state != intake.UnitReviewing {
 		t.Fatalf("unaffected audit unit: %s, %v", state, err)
 	}
-	if moves := unitMoves(t, f.repository(), stream, "audit"); len(moves) != 0 {
+	if moves := intakefixture.UnitMoves(t, f.Repository(), stream, "audit"); len(moves) != 0 {
 		t.Fatalf("unaffected audit unit was reconsidered: %+v", moves)
 	}
-	if moved := f.transition(t, stream, trace.UnitSubject("resume")+"_resumed_amendment_1"); moved.To != UnitImplementing {
+	if moved := f.Transition(t, stream, trace.UnitSubject("resume")+"_resumed_amendment_1"); moved.To != intake.UnitImplementing {
 		t.Fatalf("requester did not resume: %+v", moved)
 	}
 	masons.Check(t)
-	f.stop(t)
-	f.start(t)
-	if turns := f.ruling(t, stream, masonAgent("resume")); len(turns) != 1 {
+	f.Stop(t)
+	f.Start(t)
+	if turns := f.Ruling(t, stream, intake.MasonAgent("resume")); len(turns) != 1 {
 		t.Fatalf("requester ruling after restart %+v", turns)
-	}
-}
-
-// TestCharterDemonstration starts with a chief-of-staff proposal made from
-// an owner ruling and checks the next bundle of another live workstream.
-func TestCharterDemonstration(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	f := newCharterFixture(t)
-	f.start(t)
-	defer f.stop(t)
-	proposal, err := f.c.CharterProposal(ctx, stream, "1")
-	must(t, err)
-	if proposal.State != trace.CharterProposed || proposal.Rule != charterRule {
-		t.Fatalf("chief's proposal %+v", proposal)
-	}
-	_, err = f.c.DecideCharter(ctx, stream, "1", CharterDecisionRequest{Decision: trace.CharterRatify, Note: "Make this a standing rule."})
-	must(t, err)
-	f.settle(t)
-	proposal, err = f.c.CharterProposal(ctx, stream, "1")
-	must(t, err)
-	if proposal.State != trace.CharterChartered || proposal.Charter == 0 {
-		t.Fatalf("ratified rule %+v", proposal)
-	}
-	other := assemble(t, f.s.sole().repository, quiet)
-	if len(other.CharterNotices) != 1 || other.CharterNotices[0].Rule != charterRule || other.CharterNotices[0].OwnerResponse != charterRuling {
-		t.Fatalf("other workstream's next bundle %+v", other.CharterNotices)
 	}
 }

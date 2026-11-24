@@ -67,7 +67,7 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 	ctx := context.Background()
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
 	base := f.upstream(t)
-	stream, repository := seedBuild(t, f, "restored-drift", intakefixture.ValidPlan, config.WorkspacesJujutsu, base)
+	stream, repository := seedBuild(t, f, "restored-drift", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	moveFeature(t, f, stream, map[string]string{"internal/trace/resume.go": "package trace\n"})
 	g := intakefixture.ProviderOf(t, featureWorkspaces(f.s.cfg, repository), stream)
@@ -77,12 +77,12 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 		upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM-" + step + ".md": "upstream\n"})
 		op := requestDrift(t, d, stream)
 		requested, err := d.driver().RequestedAt(stream, op.ID)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if _, err := d.Apply(stopAt(t, f.s, step), op); err == nil || !strings.Contains(err.Error(), "the service stopped") {
 			t.Fatalf("the drift rebase was not cut short at %s: %v", step, err)
 		}
 		entry, changed := interrupted(t, f, branchesDirectory)
-		intakefixture.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+		fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
 		restoredTo(t, f, branchesDirectory, entry, changed)
 		if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
 			t.Fatalf("the retried drift rebase %+v", result)
@@ -96,7 +96,7 @@ func TestJujutsuDriftRebaseCutShortIsRestoredAndRebasesOnce(t *testing.T) {
 			t.Fatalf("drift rebase %d cut short at %s left the branch at %s, not %s", k, step, tip, want)
 		}
 		w, found, err := g.Workspace(ctx, string(stream))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !found {
 			t.Fatal("the feature branch has no workspace")
 		}
@@ -122,12 +122,12 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	ctx := context.Background()
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) { onWorkspaces(t, *opts, config.WorkspacesJujutsu) })
 	base := f.upstream(t)
-	stream, repository := seedBuild(t, f, "restored-resolution", intakefixture.ValidPlan, config.WorkspacesJujutsu, base)
+	stream, repository := seedBuild(t, f, "restored-resolution", fixturekit.ValidPlan, config.WorkspacesJujutsu, base)
 	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
 	before, upstream, op := conflictedDrift(t, f, d, stream)
 	awaitResolution(t, f.s, d, stream, op, "its mason's resolution of CODEOWNERS")
 	resolved := "/internal/ @upstream @feature\n"
-	intakefixture.Must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(resolved), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(resolutionWorkspace(t, f, stream).Path, "CODEOWNERS"), []byte(resolved), 0600))
 	completeDriftTurn(t, f, repository, stream, driftMasonAgent, resolvedDone("Kept both owners"))
 
 	cutShort := func(step string) (feature, resolution bool) {
@@ -137,7 +137,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 		}
 		features, feature := interrupted(t, f, branchesDirectory)
 		resolutions, resolution := interrupted(t, f, driftsDirectory)
-		intakefixture.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+		fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
 		restoredTo(t, f, branchesDirectory, features, feature)
 		restoredTo(t, f, driftsDirectory, resolutions, resolution)
 		return feature, resolution
@@ -181,7 +181,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 	}
 	features := intakefixture.ProviderOf(t, featureWorkspaces(f.s.cfg, repository), stream)
 	w, found, err := features.Workspace(ctx, string(stream))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the feature branch has no workspace")
 	}
@@ -194,7 +194,7 @@ func TestJujutsuDriftResolutionCutShortIsRestoredAndResolvesOnce(t *testing.T) {
 		t.Fatalf("the drift rebase's last record %+v", last)
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if n := len(slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.ID != "drift-1-rebased" })); n != 1 {
 		t.Fatalf("the drift rebase recorded its outcome %d times", n)
 	}
@@ -219,7 +219,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			lands := &foreman{masons: newMasonController(f.s, repository)}
 			for _, stream := range []config.WorkstreamID{a, b} {
 				review, result := approvedReview(t, repository, stream, "resume")
-				intakefixture.Must(t, lands.request(ctx, stream, "resume", review, result))
+				fixturekit.Must(t, lands.request(ctx, stream, "resume", review, result))
 			}
 			aOp := landOperations(t, repository, a)[0].Operation
 			bOp := landOperations(t, repository, b)[0].Operation
@@ -249,16 +249,16 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 			bCommit := featureTip(t, f, b)
 			bProvider := intakefixture.ProviderOf(t, featureWorkspaces(f.s.cfg, repository), b)
 			bWorkspace, found, err := bProvider.Workspace(ctx, string(b))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("B has no workspace")
 			}
 			metadataPath := filepath.Join(bWorkspace.Path, ".jj", "osmia.json")
 			before, err := os.ReadFile(metadataPath)
-			intakefixture.Must(t, err)
-			intakefixture.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
 			observed, err := lands.Inspect(ctx, bOp)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if observed.State != coreadapter.EffectCompleted || observed.Result == nil || !reflect.DeepEqual(*observed.Result, bResult) {
 				t.Fatalf("B inspect: %+v", observed)
 			}
@@ -277,7 +277,7 @@ func TestJujutsuLocalStepInterleavingKeepsCompletedLanding(t *testing.T) {
 				t.Fatalf("A repeated its settled local effect %d times", commits)
 			}
 			after, err := os.ReadFile(metadataPath)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !bytes.Equal(before, after) || featureTip(t, f, b) != bCommit {
 				t.Fatal("B's metadata or branch changed during A recovery")
 			}
@@ -296,15 +296,15 @@ func TestJujutsuCapturedFilesSurviveAnotherLocalStepRecovery(t *testing.T) {
 	f, stream, repository := newApprovedFixtureOn(t, "captured-files", config.WorkspacesJujutsu)
 	units := newUnitWorkspaces(f.s.cfg, repository)
 	w, _, found, err := units.find(ctx, stream, "resume")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("no unit workspace")
 	}
 	g := intakefixture.ProviderOf(t, units.streamWorkspaces, stream)
 	view := t.TempDir()
-	intakefixture.Must(t, mirror(w.Path, view))
-	intakefixture.Must(t, os.WriteFile(filepath.Join(view, "CAPTURED.md"), []byte("completed turn output\n"), 0600))
-	intakefixture.Must(t, captureFiles(ctx, g, view, w.Path))
+	fixturekit.Must(t, mirror(w.Path, view))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(view, "CAPTURED.md"), []byte("completed turn output\n"), 0600))
+	fixturekit.Must(t, captureFiles(ctx, g, view, w.Path))
 	stopped, cancel := context.WithCancel(ctx)
 	defer cancel()
 	err = workspace.LocalStep(stopped, "another-step", f.s.now(), []workspace.Provider{g}, func(local context.Context) error {
@@ -317,7 +317,7 @@ func TestJujutsuCapturedFilesSurviveAnotherLocalStepRecovery(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("local step: %v", err)
 	}
-	intakefixture.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+	fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
 	if data, err := os.ReadFile(filepath.Join(w.Path, "CAPTURED.md")); err != nil || string(data) != "completed turn output\n" {
 		t.Fatalf("captured files after recovery: %q: %v", data, err)
 	}
@@ -355,37 +355,37 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			base := featureTip(t, f, stream)
 			if directory == driftsDirectory {
 				_, err := g.Acquire(ctx, vcs.Request{Name: name, Branch: lifecycle.DriftBranch(stream, 1), Ref: base})
-				intakefixture.Must(t, err)
+				fixturekit.Must(t, err)
 			}
 			w, found, err := g.Workspace(ctx, name)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("copy target is missing")
 			}
 			m := newMasonController(f.s, repository)
-			intakefixture.Must(t, (drifter{&foreman{masons: m}}).ensureThread(ctx, stream, agent, masonRole))
+			fixturekit.Must(t, (drifter{&foreman{masons: m}}).ensureThread(ctx, stream, agent, masonRole))
 			th, err := repository.Thread(stream, masonAgent("resume"))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			req := th.Turns[0].Request
 			req.ID, req.TurnID = "request-copy-recovery", "copy-recovery"
 			req.AgentID, req.ThreadID, req.At = agent, agent, f.s.now()
 			_, err = repository.EnqueueTurn(ctx, req)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			root := execution.TurnViews(f.s.cfg, repository.Project(), stream, agent, req.TurnID)
-			intakefixture.Must(t, os.MkdirAll(root, 0700))
+			fixturekit.Must(t, os.MkdirAll(root, 0700))
 			paths, err := viewPaths(w.Path)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			view, err := (isolation.Views{Directory: root}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer view.Release(ctx)
-			intakefixture.Must(t, os.WriteFile(filepath.Join(root, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
-			intakefixture.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "CAPTURED.md"), []byte("surviving turn output\n"), 0600))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(root, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "CAPTURED.md"), []byte("surviving turn output\n"), 0600))
 			_, err = repository.ClaimTurn(ctx, stream, agent, "copying", filepath.Join(f.s.cfg.Root.String(), "threads", string(stream), agent, req.TurnID), f.s.now())
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			jj, err := exec.LookPath("jj")
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			wrapper := filepath.Join(t.TempDir(), "jj")
-			intakefixture.Must(t, os.WriteFile(wrapper, []byte("#!/bin/sh\ncase \" $* \" in\n *' log --no-graph --revisions @ '*) kill -KILL \"$PPID\"; exit 0;;\nesac\nexec \""+jj+"\" \"$@\"\n"), 0700))
+			fixturekit.Must(t, os.WriteFile(wrapper, []byte("#!/bin/sh\ncase \" $* \" in\n *' log --no-graph --revisions @ '*) kill -KILL \"$PPID\"; exit 0;;\nesac\nexec \""+jj+"\" \"$@\"\n"), 0700))
 			childCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			child := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestJujutsuCopyCrashHelper$")
@@ -399,25 +399,25 @@ func TestJujutsuInterruptedCopyRecoversFromTurnView(t *testing.T) {
 			if left := checkpoints(t, f, directory); len(left) != 1 {
 				t.Fatalf("crash left checkpoints %v", left)
 			}
-			intakefixture.Must(t, repository.Close())
+			fixturekit.Must(t, repository.Close())
 			repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			defer repository.Close()
 			m.repository = repository
-			intakefixture.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
+			fixturekit.Must(t, f.s.recoverWorkspaces(ctx, f.s.cfg))
 			if _, err := os.Stat(filepath.Join(w.Path, "CAPTURED.md")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("interrupted copy was not restored: %v", err)
 			}
 			for range 2 {
-				intakefixture.Must(t, m.driver().RecoverView(ctx, stream, agent, func() (string, error) { return w.Path, nil }))
+				fixturekit.Must(t, m.driver().RecoverView(ctx, stream, agent, func() (string, error) { return w.Path, nil }))
 			}
 			data, err := os.ReadFile(filepath.Join(w.Path, "CAPTURED.md"))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if string(data) != "surviving turn output\n" {
 				t.Fatalf("recovered copy: %q", data)
 			}
 			th, err = repository.Thread(stream, agent)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			last := th.Turns[len(th.Turns)-1]
 			if th.Active != "" || last.Request.TurnID != req.TurnID || last.Status() != "interrupted" {
 				t.Fatalf("copy recovery did not settle its original claim: %+v", th)

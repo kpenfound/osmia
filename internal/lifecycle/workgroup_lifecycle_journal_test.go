@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,19 +30,19 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	f, gate := newLifecycleDesignFixture(t)
 	defer f.stop(t)
 	configFile, err := os.OpenFile(filepath.Join(f.s.current().Root.String(), "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = configFile.WriteString("[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, configFile.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, configFile.Close())
 	f.stop(t)
 	f.start(t)
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err = f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.awaitApproved(t)
 	origin, err := f.s.repository(f.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer func() {
 		if t.Failed() {
 			t.Logf("cleanup checkpoint clock=%v", f.clock.Now())
@@ -49,10 +50,10 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 		}
 	}()
 	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, origin, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	approval, pins, found, err := trace.ReadGroupApproval(authority, host)
 	closeAuthority()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found || !approval.Complete {
 		t.Fatal("production group did not reach effective seals")
 	}
@@ -68,7 +69,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	var routed atomic.Bool
 	f.engine.Mu.Lock()
 	f.engine.Turns["lifecycle-project-journal"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the cross-repo acknowledgment contract change?"})
+		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "May the cross-repo acknowledgment contract change?"})
 		return intakefixture.QuestionResult(req, "session-journal-worker", "Asked the original shared chief."), err
 	}
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -85,7 +86,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 				if q.State != trace.QuestionOpen {
 					continue
 				}
-				result, err := intakefixture.CallTool(ctx, tools, questions.RouteAmendmentTool, map[string]any{"question": string(f.stream1) + ":" + q.Asked.ID, "citations": []string{citation}, "change": "Revise the shared acknowledgment contract.", "reason": "The original member raised a contract gap."})
+				result, err := fixturekit.CallTool(ctx, tools, questions.RouteAmendmentTool, map[string]any{"question": string(f.stream1) + ":" + q.Asked.ID, "citations": []string{citation}, "change": "Revise the shared acknowledgment contract.", "reason": "The original member raised a contract gap."})
 				if err != nil {
 					return nil, err
 				}
@@ -95,72 +96,72 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 				routed.Store(true)
 			}
 		}
-		_, err = intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Preserve the pending project decision.", "note": "The contract request remains pending.", "agents": []string{}})
+		_, err = fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Preserve the pending project decision.", "note": "The contract request remains pending.", "agents": []string{}})
 		return intakefixture.QuestionResult(req, "session-journal-chief", "The pending request remains in the original authority."), err
 	}
 	f.engine.Mu.Unlock()
 	lifecycleAwait(t, f, "production member admission", func() bool {
 		state, err := origin.Workflow(f.stream1, trace.UnitSubject("accept"))
-		intakefixture.Must(t, err)
-		if state.Value != intakefixture.UnitImplementing {
+		fixturekit.Must(t, err)
+		if state.Value != intake.UnitImplementing {
 			return false
 		}
-		_, err = origin.Thread(f.stream1, intakefixture.MasonAgent("accept"))
+		_, err = origin.Thread(f.stream1, intake.MasonAgent("accept"))
 		if errors.Is(err, os.ErrNotExist) {
 			return false
 		}
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return true
 	})
-	worker, err := origin.Thread(f.stream1, intakefixture.MasonAgent("accept"))
-	intakefixture.Must(t, err)
+	worker, err := origin.Thread(f.stream1, intake.MasonAgent("accept"))
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_lifecycle_project_journal", Project: f.project, Workstream: f.stream1, Unit: "accept", At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "workstream_created"}
 	_, err = origin.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: worker.Identity.ID, ThreadID: worker.Identity.ThreadID, TurnID: "lifecycle-project-journal", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the admitted member mason.", Prompt: "May the cross-repo acknowledgment contract change?"})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	lifecycleAwait(t, f, "production contract routing", func() bool {
 		qs, err := origin.Questions(f.stream1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return routed.Load() && len(qs) == 1 && qs[0].State == trace.QuestionRouted
 	})
 	authority, err = trace.OpenWorkgroupAuthority(f.s.current().Root, approval.Workgroup)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	pending, revision, err := trace.ProjectAmendments(authority)
 	closeErr := authority.Close()
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, closeErr)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, closeErr)
 	if len(pending) != 1 || revision != 1 || pending[0].Origin != f.stream1 || pending[0].QuestionID != "1" || !slices.Equal(pending[0].Citations, []string{citation}) {
 		t.Fatalf("production did not record the original request: %+v", pending)
 	}
 	asking, err := origin.Questions(f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Abandon(ctx, f.stream1, "Owner cancelled the requesting member.")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.c.Archive(ctx, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	gate.await(t, f)
 	check := func(boundary string) {
 		t.Helper()
 		journal, err := trace.OpenWorkgroupAuthority(f.s.current().Root, approval.Workgroup)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer journal.Close()
 		got, gotRevision, err := trace.ProjectAmendments(journal)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		decision, document, found, err := trace.ReadGroupApproval(journal, host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !intakefixture.EqualJSONTest(got, pending) || gotRevision != revision || !found || !intakefixture.EqualJSONTest(decision, approval) || !intakefixture.EqualJSONTest(document, pins) {
 			t.Fatalf("%s changed pending journal or exact approval pins", boundary)
 		}
 		live, err := f.s.repository(f.project2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		target, _, _, release, err := f.s.chiefRepository(ctx, live, f.stream2)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		defer release()
 		saved, err := trace.Get[trace.Document](target, host, "member-questions-"+string(f.stream1), 1)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var snapshot struct {
 			Questions []trace.QuestionState `json:"questions"`
 		}
-		intakefixture.Must(t, json.Unmarshal([]byte(saved.Content), &snapshot))
+		fixturekit.Must(t, json.Unmarshal([]byte(saved.Content), &snapshot))
 		if !intakefixture.EqualJSONTest(snapshot.Questions, asking) {
 			t.Fatalf("%s changed original routed asking links", boundary)
 		}
@@ -168,16 +169,16 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 			t.Fatalf("%s unavailable origin did not retain a recoverable hold: %v", boundary, err)
 		}
 		sent, err := f.c.Send(ctx, f.stream2, "Report the pending project request at "+boundary)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		lifecycleAwait(t, f, "pending journal owner response "+boundary, func() bool {
 			conversation, err := f.c.Conversation(ctx, f.stream2)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
 				return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone
 			})
 		})
 		got, gotRevision, err = trace.ProjectAmendments(journal)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if !intakefixture.EqualJSONTest(got, pending) || gotRevision != revision {
 			t.Fatal("group access changed or discarded an unapplied request")
 		}
@@ -193,7 +194,7 @@ func TestDesignProductionLifecyclePreservesPendingProjectJournal(t *testing.T) {
 	f.start(t)
 	check("restarted")
 	gone, err := trace.WorkstreamTraceGone(f.s.current().Root, f.project, f.stream1)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !gone {
 		t.Fatal("journal recovery recreated retired history")
 	}

@@ -93,8 +93,8 @@ func withTranscribe(t *testing.T, opts Options, body string) {
 	t.Helper()
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, append(top, []byte("\n[transcribe]\n"+body)...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(top, []byte("\n[transcribe]\n"+body)...), 0600))
 }
 
 func transcribeFixture(t *testing.T, keys map[string]string, tune func(*Options)) (*fakeWhisper, *Service, *Client, Options, *fixturekit.SyncBuffer) {
@@ -142,7 +142,7 @@ func TestTranscribeForwardsTheClipAsMultipart(t *testing.T) {
 			t.Parallel()
 			whisper, _, c, _, _ := transcribeFixture(t, nil, nil)
 			out, err := c.Transcribe(context.Background(), clipRequest(tc.mimeType, []byte(clipBytes)))
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if out.Text != whisperText {
 				t.Fatalf("text %q", out.Text)
 			}
@@ -169,7 +169,7 @@ func TestTranscribeSendsTheBearerKeyOnlyWhenSet(t *testing.T) {
 	t.Parallel()
 	whisper, _, c, _, _ := transcribeFixture(t, map[string]string{"WHISPER_API_KEY": whisperKey}, nil)
 	_, err := c.Transcribe(context.Background(), clipRequest("audio/webm", []byte(clipBytes)))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || calls[0].auth != "Bearer "+whisperKey {
 		t.Fatalf("calls %+v", calls)
 	}
@@ -182,7 +182,7 @@ func TestTranscribeSendsTheBearerKeyOnlyWhenSet(t *testing.T) {
 	}
 	_, c = start(t, opts)
 	_, err = c.Transcribe(context.Background(), clipRequest("audio/webm", []byte(clipBytes)))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || calls[0].auth != "Bearer other-key" || calls[0].model != "whisper-1" {
 		t.Fatalf("calls %+v", calls)
 	}
@@ -214,29 +214,29 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 	files.write(t, strings.Replace(files.topText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1))
 	reloadFails(t, c, files.top, "transcribe.url")
 	out, err := c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if out.Text != whisperText || len(first.received()) != 1 {
 		t.Fatalf("after a failed reload: %q %d", out.Text, len(first.received()))
 	}
 
 	files.write(t, strings.Replace(files.topText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n")
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	out, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	calls := second.received()
 	if out.Text != "from the second server" || len(calls) != 1 || calls[0].model != "whisper-1" || len(first.received()) != 1 {
 		t.Fatalf("after a reload: %q %+v", out.Text, calls)
 	}
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Effective.Transcribe.URL != second.url() || cfg.Effective.Transcribe.Model != "whisper-1" {
 		t.Fatalf("effective %+v", cfg.Effective.Transcribe)
 	}
 
 	files.write(t, strings.Replace(files.topText, first.url(), "", 1))
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
 	transcribeError(t, err, TranscriptionOff)
 	if len(second.received()) != 1 {
@@ -335,7 +335,7 @@ func TestTranscribeRefusesBadUploadsWithoutForwarding(t *testing.T) {
 		}
 	}
 	_, err := c.Transcribe(ctx, clipRequest("audio/webm", big[:1024]))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || len(calls[0].file) != 1024 {
 		t.Fatalf("the server received %d requests", len(calls))
 	}
@@ -389,7 +389,7 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 	s, _ := start(t, opts)
 	web, base := intakefixture.WebHTTP(), "http://"+s.WebAddr()+Prefix+"/transcribe"
 	valid, err := json.Marshal(clipRequest("audio/webm", []byte(clipBytes)))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	for _, tc := range []struct{ name, contentType, body, host string }{
 		{"foreign host", "application/json", string(valid), "osmia.example.com"},
@@ -412,7 +412,7 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 
 	code, body := intakefixture.Exchange(t, web, "POST", base, "application/json; charset=utf-8", string(valid), "")
 	var out TranscribeResponse
-	intakefixture.Must(t, json.Unmarshal(body, &out))
+	fixturekit.Must(t, json.Unmarshal(body, &out))
 	if code != 200 || out.Text != whisperText || len(whisper.received()) != 1 {
 		t.Fatalf("a JSON request over the web listener: %d %s", code, body)
 	}
@@ -428,7 +428,7 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString(clip)
 	for range 2 {
 		out, err := c.Transcribe(ctx, clipRequest("audio/webm;codecs=opus", clip))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if out.Text != whisperText {
 			t.Fatalf("text %q", out.Text)
 		}
@@ -438,13 +438,13 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 	transcribeError(t, err, TranscriptionFailed)
 
 	cfg, err := c.Configuration(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	config, err := json.Marshal(cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	status, err := c.Statuses(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	statusJSON, err := json.Marshal(status)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Contains(string(config)+string(statusJSON), whisperKey) {
 		t.Fatal("the key is in the configuration or status response")
 	}
@@ -454,8 +454,8 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 			t.Fatalf("%q reached the log: %s", secret, log.String())
 		}
 	}
-	intakefixture.Must(t, s.Close())
-	intakefixture.Must(t, filepath.WalkDir(filepath.Dir(opts.Config.Root), func(path string, d fs.DirEntry, err error) error {
+	fixturekit.Must(t, s.Close())
+	fixturekit.Must(t, filepath.WalkDir(filepath.Dir(opts.Config.Root), func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}

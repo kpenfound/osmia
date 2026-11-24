@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func (f *shedFixture) awaitDrift(t *testing.T, stream config.WorkstreamID, want 
 	t.Helper()
 	intakefixture.Eventually(t, "drift of "+string(stream)+" never reached "+want, func() bool {
 		state, err := f.repository().Workflow(stream, lifecycle.DriftSubject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return state.Value == want
 	})
 }
@@ -68,8 +69,8 @@ func appendMasonConfig(t *testing.T, opts *Options, extra string) {
 	t.Helper()
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, os.WriteFile(path, append(data, []byte(extra)...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(data, []byte(extra)...), 0600))
 }
 
 type continuationGate struct {
@@ -118,12 +119,12 @@ func (f *shedFixture) awaitQueuedFollowUp(t *testing.T, stream config.Workstream
 	var th trace.Thread
 	intakefixture.Eventually(t, "the mason of "+unit+" in "+string(stream)+" never had a follow-up queued", func() bool {
 		var err error
-		th, err = f.repository().Thread(stream, intakefixture.MasonAgent(unit))
+		th, err = f.repository().Thread(stream, intake.MasonAgent(unit))
 		if err != nil || len(th.Turns) == 0 {
 			return false
 		}
 		last := th.Turns[len(th.Turns)-1]
-		return last.CompletedAt.IsZero() && last.Claim == nil && strings.HasPrefix(last.Request.TurnID, intakefixture.MasonAgent(unit)+"-clarify-")
+		return last.CompletedAt.IsZero() && last.Claim == nil && strings.HasPrefix(last.Request.TurnID, intake.MasonAgent(unit)+"-clarify-")
 	})
 	return th
 }
@@ -131,14 +132,16 @@ func (f *shedFixture) awaitQueuedFollowUp(t *testing.T, stream config.Workstream
 func TestDriftCadenceDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
+	var passed atomic.Int64
 	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 2\n", independentPlan, func(opts *Options) {
 		appendMasonConfig(t, opts, "\n[mason]\nmax_clean_turns = 5\n")
+		opts.schedulePassed = func() { passed.Add(1) }
 	})
 	defer func() { f.stop(t) }()
 	continuations := newContinuationGate()
 	f.engine.Mu.Lock()
 	for i := 1; i <= 6; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-continue-%d", intakefixture.MasonAgent("resume"), i)] = continuations.turn
+		f.engine.Turns[fmt.Sprintf("%s-continue-%d", intake.MasonAgent("resume"), i)] = continuations.turn
 	}
 	f.engine.Mu.Unlock()
 
@@ -160,14 +163,14 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 		continuations.awaitRunning(t, stream)
 		sealed[stream] = intakefixture.Seals(t, f.repository(), stream)[0].Base.Commit
 		st, err := f.c.Status(ctx, stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if st.Drift != nil {
 			t.Fatalf("status of %s before any drift rebase: %+v", stream, st.Drift)
 		}
 	}
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
 
-	intakefixture.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: runtime.Target{Scope: "role", Role: intakefixture.MasonRole}, Mode: "soft", Reason: "hold mason turns", Source: "owner"}, nil))
+	fixturekit.Must(t, f.c.Do(ctx, "PUT", api.Prefix+"/runtime/pause", api.PauseRequest{Target: runtime.Target{Scope: "role", Role: intake.MasonRole}, Mode: "soft", Reason: "hold mason turns", Source: "owner"}, nil))
 	close(continuations.release)
 	for _, stream := range streams {
 		th := f.awaitQueuedFollowUp(t, stream, "resume")
@@ -176,7 +179,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 				t.Fatalf("a mason turn of resume in %s still runs when its drift rebase becomes due: %+v", stream, q.Request.TurnID)
 			}
 		}
-		if state, err := f.unitState(stream, "resume"); err != nil || state != intakefixture.UnitImplementing {
+		if state, err := f.unitState(stream, "resume"); err != nil || state != intake.UnitImplementing {
 			t.Fatalf("resume of %s is %s before its drift rebase: %v", stream, state, err)
 		}
 	}
@@ -186,7 +189,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 	for _, stream := range streams {
 		f.awaitDrift(t, stream, "rebased-1")
 	}
-	intakefixture.Settle()
+	intakefixture.AwaitFurtherPasses(t, &passed, 3)
 	masons.Check(t)
 	for _, stream := range streams {
 		repository := f.repository()
@@ -207,16 +210,16 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 		}
 
 		rebases := unitRebases(t, repository, stream, "resume")
-		if len(rebases) != 1 || rebases[0].Onto != tip || rebases[0].State != intakefixture.UnitImplementing || len(rebases[0].Conflicts) != 0 {
+		if len(rebases) != 1 || rebases[0].Onto != tip || rebases[0].State != intake.UnitImplementing || len(rebases[0].Conflicts) != 0 {
 			t.Fatalf("resume's rebases in %s: %+v", stream, rebases)
 		}
 		workspace := filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(stream), "resume")
-		for name, want := range map[string]string{intakefixture.MasonWrote: "package trace\n", "UPSTREAM.md": "upstream\n"} {
+		for name, want := range map[string]string{fixturekit.MasonWrote: "package trace\n", "UPSTREAM.md": "upstream\n"} {
 			if data, err := os.ReadFile(filepath.Join(workspace, name)); err != nil || string(data) != want {
 				t.Fatalf("resume's workspace of %s holds %s %q: %v", stream, name, data, err)
 			}
 		}
-		if state, err := f.unitState(stream, "resume"); err != nil || state != intakefixture.UnitImplementing {
+		if state, err := f.unitState(stream, "resume"); err != nil || state != intake.UnitImplementing {
 			t.Fatalf("resume of %s is %s: %v", stream, state, err)
 		}
 		records := driftRecords(t, repository, stream)
@@ -233,7 +236,7 @@ func TestDriftCadenceDemonstration(t *testing.T) {
 		}
 		rebased := intakefixture.TransitionByID(t, repository, stream, "drift-1-rebased")
 		st, err := f.c.Status(ctx, stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if want := (&api.DriftStatus{Drift: 1, Outcome: lifecycle.DriftRebased, At: rebased.At, Reason: rebased.Reason, Moved: []string{}}); !reflect.DeepEqual(st.Drift, want) {
 			t.Fatalf("status drift of %s %+v, want %+v", stream, st.Drift, want)
 		}
@@ -285,7 +288,7 @@ func (d *driftDemo) review(ctx context.Context, unit string, req agent.Request, 
 }
 
 func (d *driftDemo) resolve(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-	path := filepath.Join(req.Workspace.Directory(), intakefixture.MasonWrote)
+	path := filepath.Join(req.Workspace.Directory(), fixturekit.MasonWrote)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -310,14 +313,14 @@ func (d *driftDemo) resolve(ctx context.Context, req agent.Request, _ *agent.Tur
 }
 
 func (d *driftDemo) recover(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	data, err := os.ReadFile(filepath.Join(req.Workspace.Directory(), intakefixture.MasonWrote))
+	data, err := os.ReadFile(filepath.Join(req.Workspace.Directory(), fixturekit.MasonWrote))
 	if err != nil {
 		return nil, err
 	}
 	d.mu.Lock()
 	d.recovered = string(data)
 	d.mu.Unlock()
-	body, err := intakefixture.CallTool(ctx, tools, execution.DoneTool, map[string]any{"outcome": "Combined the feature's file with the upstream reservation"})
+	body, err := fixturekit.CallTool(ctx, tools, execution.DoneTool, map[string]any{"outcome": "Combined the feature's file with the upstream reservation"})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift done %s: %v", body, err)
 	}
@@ -335,13 +338,13 @@ func (d *driftDemo) reviewDrift(ctx context.Context, req agent.Request, _ *agent
 	d.mu.Lock()
 	d.reviewedTip, d.reviewPrompt = tip, req.Prompt
 	d.mu.Unlock()
-	if body, err := intakefixture.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "resolution", "paths": []string{intakefixture.MasonWrote}}); err != nil || !strings.Contains(body, "+// resume uses the upstream reservation") {
+	if body, err := fixturekit.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "resolution", "paths": []string{fixturekit.MasonWrote}}); err != nil || !strings.Contains(body, "+// resume uses the upstream reservation") {
 		return nil, fmt.Errorf("resolution diff %s: %v", body, err)
 	}
-	if body, err := intakefixture.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+intakefixture.MasonWrote+`"`) {
+	if body, err := fixturekit.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"change": "feature", "files_only": true}); err != nil || !strings.Contains(body, `"path":"`+fixturekit.MasonWrote+`"`) {
 		return nil, fmt.Errorf("feature files %s: %v", body, err)
 	}
-	body, err := intakefixture.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
+	body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("drift verdict %s: %v", body, err)
 	}
@@ -386,14 +389,14 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	demo.stream = stream
 	demo.mu.Unlock()
 	from := intakefixture.Seals(t, f.repository(), stream)[0].Base.Commit
-	upstream := advanceUpstream(t, f, map[string]string{intakefixture.MasonWrote: upstreamWrote})
+	upstream := advanceUpstream(t, f, map[string]string{fixturekit.MasonWrote: upstreamWrote})
 
 	f.awaitMerged(t, stream, "resume")
 	var resume api.UnitLanding
-	intakefixture.Must(t, json.Unmarshal([]byte(landingByUnit(t, f.repository(), stream)["resume"].Content), &resume))
+	fixturekit.Must(t, json.Unmarshal([]byte(landingByUnit(t, f.repository(), stream)["resume"].Content), &resume))
 	select {
 	case <-demo.resolving:
-	case <-time.After(intakefixture.DemoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the drift mason never started resolving")
 	}
 	f.awaitUnit(t, stream, "audit", intake.UnitApproved)
@@ -408,7 +411,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if requested := intakefixture.TransitionByID(t, repository, stream, "drift-1"); !strings.HasPrefix(requested.Reason, "the owner asked for a drift rebase at ") {
 		t.Fatalf("drift rebase 1 asked for with %q", requested.Reason)
 	}
-	if conflicted := intakefixture.TransitionByID(t, repository, stream, "drift-1-conflicted"); conflicted.To != "conflicted-1" || !strings.Contains(conflicted.Reason, intakefixture.MasonWrote+" conflicted") {
+	if conflicted := intakefixture.TransitionByID(t, repository, stream, "drift-1-conflicted"); conflicted.To != "conflicted-1" || !strings.Contains(conflicted.Reason, fixturekit.MasonWrote+" conflicted") {
 		t.Fatalf("the conflict %+v", conflicted)
 	}
 	if tip := featureTip(t, f, stream); tip != resume.Commit {
@@ -427,13 +430,13 @@ func TestDriftConflictDemonstration(t *testing.T) {
 		t.Fatalf("the drift mason's view holds %q", marked)
 	}
 	th := f.thread(t, stream, service.TestDriftMasonAgent)
-	for _, want := range []string{"- " + intakefixture.MasonWrote + "\n", "conflict markers", "## Sealed spec: spec.md"} {
+	for _, want := range []string{"- " + fixturekit.MasonWrote + "\n", "conflict markers", "## Sealed spec: spec.md"} {
 		if !strings.Contains(th.Turns[0].Request.Prompt, want) {
 			t.Fatalf("the resolve turn lacks %q:\n%s", want, th.Turns[0].Request.Prompt)
 		}
 	}
 	st, err := f.c.Status(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if st.Drift == nil || st.Drift.Drift != 1 || st.Drift.Outcome != lifecycle.DriftConflicted || len(st.Drift.Moved) != 1 {
 		t.Fatalf("status while the conflict is open %+v", st.Drift)
 	}
@@ -471,7 +474,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if reviewedTip != resume.Commit || !strings.Contains(reviewPrompt, resolved) || !strings.Contains(reviewPrompt, "## Sealed spec: spec.md") || !strings.Contains(reviewPrompt, `Change "resolution"`) || strings.Contains(reviewPrompt, "+// resume uses the upstream reservation") {
 		t.Fatalf("the drift reviewer read %s with the feature branch at %s", resolved, reviewedTip)
 	}
-	if parentOf(t, f, resolved) != upstream || fileAt(t, f, resolved, intakefixture.MasonWrote) != resolvedWrote {
+	if parentOf(t, f, resolved) != upstream || fileAt(t, f, resolved, fixturekit.MasonWrote) != resolvedWrote {
 		t.Fatalf("the approved candidate %s is not resume's landing resolved onto %s", resolved, upstream)
 	}
 	if all := intakefixture.Seals(t, repository, stream); len(all) != 2 || all[0].Base.Commit != from || all[1].Base.Commit != upstream {
@@ -485,7 +488,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if len(rebases) != 1 || rebases[0].State != intake.UnitApproved || rebases[0].Base != resume.Commit || rebases[0].Onto != resolved || len(rebases[0].Conflicts) != 0 {
 		t.Fatalf("audit's rebases %+v", rebases)
 	}
-	if got := fileAt(t, f, rebases[0].Commit, intakefixture.MasonWrote); got != resolvedWrote {
+	if got := fileAt(t, f, rebases[0].Commit, fixturekit.MasonWrote); got != resolvedWrote {
 		t.Fatalf("audit's carried candidate replaced the reviewed drift resolution with %q", got)
 	}
 	if got := fileAt(t, f, rebases[0].Commit, "internal/trace/audit.go"); got != "package trace\n// audit\n" {
@@ -500,7 +503,7 @@ func TestDriftConflictDemonstration(t *testing.T) {
 		t.Fatalf("audit's reviews %+v after rebase %+v", reviews, rebases[0])
 	}
 	var audit api.UnitLanding
-	intakefixture.Must(t, json.Unmarshal([]byte(landingByUnit(t, repository, stream)["audit"].Content), &audit))
+	fixturekit.Must(t, json.Unmarshal([]byte(landingByUnit(t, repository, stream)["audit"].Content), &audit))
 	if audit.Base != resolved || audit.Candidate != reviews[1].Candidate.Revision || featureTip(t, f, stream) != audit.Commit {
 		t.Fatalf("audit landed %+v on the branch at %s", audit, featureTip(t, f, stream))
 	}
@@ -516,11 +519,11 @@ func TestDriftConflictDemonstration(t *testing.T) {
 	if len(moved) != 2 || moved[0].TransitionID != "drift-1-conflicted" || moved[1].TransitionID != back.ID {
 		t.Fatalf("upstream moved events %+v", moved)
 	}
-	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in "+intakefixture.MasonWrote)
+	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in "+fixturekit.MasonWrote)
 	checkMoved(t, moved[1], stream, move, "unit audit's approval no longer holds")
 	f.awaitEventTurns(t, stream, moved[0].Event.Body, moved[1].Event.Body)
 	st, err = f.c.Status(ctx, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if want := (&api.DriftStatus{Drift: 1, Outcome: lifecycle.DriftRebased, At: rebased.At, Reason: rebased.Reason, Moved: []string{moved[0].Event.Body, moved[1].Event.Body}}); !reflect.DeepEqual(st.Drift, want) {
 		t.Fatalf("status drift %+v, want %+v", st.Drift, want)
 	}

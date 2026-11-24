@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/skills"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -28,7 +28,7 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	opts := fixture(t)
 	runnerIntent(t, opts)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	chief := cfg.Roles[trace.ChiefOfStaff]
 	chief.Sandbox, chief.Image, chief.Skills = "container", "loaded-image", []string{"https://github.com/acme/skills#skills/triage"}
 	cfg.Roles[trace.ChiefOfStaff] = chief
@@ -36,15 +36,15 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 	mason.Sandbox, mason.Skills = "sbx", []string{"https://github.com/acme/skills#skills/tdd"}
 	cfg.Roles[masonRole] = mason
 	cfg.Dagger = config.DaggerConfig{Version: "v0.20.5", Engine: "tcp://127.0.0.1:1234"}
-	intakefixture.Must(t, os.WriteFile(filepath.Join(opts.Config.Root, "config.toml"), []byte("not toml ["), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(opts.Config.Root, "config.toml"), []byte("not toml ["), 0600))
 
 	zone := time.FixedZone("east", 5*60*60)
 	opts.Reconciliation.Now = func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, zone) }
 	repository, err := trace.Open(cfg.Root, cfg.Project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
 	bound, err := Enforce(opts, Enforcement{}).Threads(repository, cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	dispatcher, ok := bound.(thread.Dispatcher)
 	if !ok {
 		t.Fatalf("threads reconciler %T", bound)
@@ -53,9 +53,9 @@ func TestEnforceThreadsUseLoadedConfiguration(t *testing.T) {
 		t.Fatalf("thread clock %v is not UTC", now)
 	}
 	turns := dispatcher.Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
-	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(intakefixture.Stream), Role: trace.ChiefOfStaff}
+	scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(fixturekit.Stream), Role: trace.ChiefOfStaff}
 	selection, err := turns.Select(context.Background(), scope)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if selection.Execution.Mode != "container" || selection.Execution.Image != "loaded-image" || selection.Execution.Dagger != nil || !slices.Equal(selection.Execution.Skills, chief.Skills) {
 		t.Fatalf("execution %+v", selection.Execution)
 	}
@@ -89,7 +89,7 @@ func TestSkillCacheFollowsLoadedRefreshPolicy(t *testing.T) {
 	}
 	files.write(t, files.topText+"[skills]\nrefresh = \"never\"\n")
 	_, err := c.Reload(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if got := cache.Refresh(); got != "never" {
 		t.Fatalf("refresh after reload %q", got)
 	}
@@ -102,7 +102,7 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 	f, stream, repository := newReviewFixture(t, "chief-grant")
 	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Role: trace.ChiefOfStaff, Thread: trace.ChiefOfStaff, Turn: "turn"}
 	tools, err := chiefTools(f.s.cfg, repository, &runtimeControls{}, scope, time.Now)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	tools = append(tools, (&runtimeControls{}).preview(f.s.cfg, repository, scope, previewView(t), time.Now))
 	var names []string
 	for _, tool := range tools {
@@ -122,12 +122,12 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		t.Errorf("ordinary chief handlers %v, want %v", registered, want)
 	}
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
 	wrapped, err := turns.Scoped(context.Background(), scope)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	viewTools, err := turns.ViewTools(context.Background(), scope, previewView(t))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	wrapped = append(wrapped, viewTools...)
 	var wrappedNames []string
 	for _, tool := range wrapped {

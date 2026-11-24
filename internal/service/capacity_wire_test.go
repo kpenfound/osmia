@@ -8,7 +8,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -18,16 +17,16 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	f.opts.Threads = nil
 	s, c := start(t, f.opts)
 	ctx := context.Background()
-	repo, err := s.repository(intakefixture.Project)
-	intakefixture.Must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, intakefixture.Stream, fixturekit.DemoStart, ownerActor)
-	intakefixture.Must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
+	repo, err := s.repository(fixturekit.Project)
+	fixturekit.Must(t, err)
+	_, err = repo.EnsureChiefOfStaff(ctx, fixturekit.Stream, fixturekit.DemoStart, ownerActor)
+	fixturekit.Must(t, err)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
 	_, err = repo.EnqueueTurn(ctx, req)
-	intakefixture.Must(t, err)
-	_, err = repo.ClaimTurn(ctx, intakefixture.Stream, trace.ChiefOfStaff, "claim", "/owned/capacity", fixturekit.DemoStart)
-	intakefixture.Must(t, err)
-	scope := coreadapter.Scope{Project: string(intakefixture.Project), Workstream: string(intakefixture.Stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
+	fixturekit.Must(t, err)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "claim", "/owned/capacity", fixturekit.DemoStart)
+	fixturekit.Must(t, err)
+	scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 
@@ -38,11 +37,11 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 		}
 	}
 	out, err := tool.Handle(ctx, json.RawMessage(`{}`))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	fromTool := fixturekit.CapacityWire(t, out)
 
 	var status json.RawMessage
-	intakefixture.Must(t, c.Do(ctx, "GET", Prefix+"/status", nil, &status))
+	fixturekit.Must(t, c.Do(ctx, "GET", Prefix+"/status", nil, &status))
 	fromStatus := fixturekit.CapacityWire(t, status)
 
 	cfg := s.current().Capacity
@@ -54,9 +53,9 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 		}
 	}
 	toolJSON, err := json.Marshal(fromTool)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	statusJSON, err := json.Marshal(fromStatus)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if string(toolJSON) != string(statusJSON) {
 		t.Fatalf("tool and status capacity differ:\n%s\n%s", toolJSON, statusJSON)
 	}

@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -22,12 +22,12 @@ func TestAChiefMoveReturnsAReopenedWorkstreamToDelivered(t *testing.T) {
 		t.Fatalf("the first publication %+v", result)
 	}
 	p.pulls.SyncHead = true
-	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intakefixture.BuildingState, Note: "Repair it on this pull request."}); apiFault != nil {
+	if _, apiFault := p.s.ownerMoveWorkstream(ctx, string(p.stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Repair it on this pull request."}); apiFault != nil {
 		t.Fatal(apiFault.Message)
 	}
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
-	intakefixture.Must(t, reviewer.Pass(ctx))
-	if p.feature(t) != intakefixture.BuildingState {
+	fixturekit.Must(t, reviewer.Pass(ctx))
+	if p.feature(t) != intake.BuildingState {
 		t.Fatalf("the reopened workstream is %s", p.feature(t))
 	}
 	jev := &jevfixture.Transitions{}

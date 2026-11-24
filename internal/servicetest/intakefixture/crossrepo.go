@@ -29,9 +29,8 @@ const (
 
 func ScriptCrossRepoDrafts(t *testing.T, engine *fixturekit.DemoEngine, members func() (config.WorkstreamID, config.WorkstreamID)) {
 	t.Helper()
-	// verdict calls the tool and requires the verdict it returns.
 	verdict := func(ctx context.Context, tools *mcp.ClientSession, name string, args map[string]any, want string) error {
-		got, err := CallTool(ctx, tools, name, args)
+		got, err := fixturekit.CallTool(ctx, tools, name, args)
 		if err != nil {
 			return err
 		}
@@ -83,8 +82,6 @@ func ScriptCrossRepoDrafts(t *testing.T, engine *fixturekit.DemoEngine, members 
 				{"workstream": string(stream2), "contract_criteria": []int{1}},
 			},
 		}
-		// A delivery without its intended behaviour is reported invalid and
-		// replaced by the next one.
 		behavior := args["behavior"]
 		args["behavior"] = " "
 		if err := verdict(ctx, tools, "deliver_project_spec", args, intake.DraftInvalid); err != nil {

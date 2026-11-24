@@ -25,7 +25,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	failFinalReview(t, f, repository, stream, a, 1, op)
 	sealed, doc, found, err := seal.Latest(repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the workstream has no seal")
 	}
@@ -33,7 +33,7 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 	assemblies := func() []string {
 		t.Helper()
 		transitions, err := trace.Read[trace.Transition](repository, stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		var ids []string
 		for _, tr := range transitions {
 			if tr.Subject == trace.FeatureSubject && tr.To == intake.AssembledState {
@@ -43,19 +43,19 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 		return ids
 	}
 	for k, want := range []string{"assembled-2", "assembled-3"} {
-		if _, apiFault := f.s.ownerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intakefixture.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
+		if _, apiFault := f.s.ownerMoveWorkstream(ctx, string(stream), api.WorkstreamMoveRequest{To: intake.BuildingState, Note: "Reopen it for repair units."}); apiFault != nil {
 			t.Fatalf("reopen %d: %s", k+1, apiFault.Message)
 		}
-		intakefixture.Must(t, a.Pass(ctx))
-		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intakefixture.BuildingState {
+		fixturekit.Must(t, a.Pass(ctx))
+		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.BuildingState {
 			t.Fatalf("reopen %d reassembled before any revision: %+v %v", k+1, feature, err)
 		}
 		recordPlanOnlyRevision(t, repository, stream, sealed, doc.Revision, k+1)
-		intakefixture.Must(t, a.Pass(ctx))
+		fixturekit.Must(t, a.Pass(ctx))
 		if feature, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AssembledState {
 			t.Fatalf("reopen %d did not reassemble: %+v %v", k+1, feature, err)
 		}
-		if moved := lastOn(t, repository, stream, trace.FeatureSubject); moved.ID != want || moved.From != intakefixture.BuildingState {
+		if moved := lastOn(t, repository, stream, trace.FeatureSubject); moved.ID != want || moved.From != intake.BuildingState {
 			t.Fatalf("reassembly %d recorded %+v", k+1, moved)
 		}
 		if body := intakefixture.NoticeOf(t, repository, stream, want); body == "" {
@@ -66,8 +66,8 @@ func TestPlanOnlyReopensUnderOneSealEachReassemble(t *testing.T) {
 		}
 	}
 
-	intakefixture.Must(t, a.Pass(ctx))
-	intakefixture.Must(t, a.Pass(ctx))
+	fixturekit.Must(t, a.Pass(ctx))
+	fixturekit.Must(t, a.Pass(ctx))
 	if ids := assemblies(); !slices.Equal(ids, []string{intake.AssembledState, "assembled-2", "assembled-3"}) {
 		t.Fatalf("moves to assembled %q", ids)
 	}
@@ -78,7 +78,7 @@ func recordPlanOnlyRevision(t *testing.T, repository *trace.Repository, stream c
 	ctx := context.Background()
 	id := "repair_" + string(rune('0'+k))
 	h := trace.Header{Schema: "osmia.trace.amendment", Version: trace.Version, ID: id, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: trace.Actor{Kind: "agent", ID: "chief"}, Cause: "fixture"}
-	intakefixture.Must(t, repository.Append(ctx, trace.Amendment{Header: h, Requester: h.Actor, Role: trace.ChiefOfStaff, Thread: "chief", Turn: "filing_" + id, Citations: []string{"spec#1"}, Change: "Add a repair unit.", Reason: "The final review found a gap.", Seal: sealed.Seal, SealRevision: sealRevision, SpecHash: sealed.SpecHash}))
+	fixturekit.Must(t, repository.Append(ctx, trace.Amendment{Header: h, Requester: h.Actor, Role: trace.ChiefOfStaff, Thread: "chief", Turn: "filing_" + id, Citations: []string{"spec#1"}, Change: "Add a repair unit.", Reason: "The final review found a gap.", Seal: sealed.Seal, SealRevision: sealRevision, SpecHash: sealed.SpecHash}))
 	for i, to := range []string{"filed", intake.AmendmentApplied} {
 		from := ""
 		if i > 0 {
@@ -86,6 +86,6 @@ func recordPlanOnlyRevision(t *testing.T, repository *trace.Repository, stream c
 		}
 		h.Schema, h.ID = "osmia.trace.transition", "amendment_"+id+"_"+to
 		_, err := repository.Transact(ctx, trace.Transaction{ExpectedVersion: uint64(i), Transition: trace.Transition{Header: h, Subject: intake.AmendmentSubject(id), From: from, To: to, Reason: to}})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 }

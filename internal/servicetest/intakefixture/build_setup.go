@@ -2,6 +2,7 @@ package intakefixture
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -19,14 +20,14 @@ type BuildFixture struct {
 func (f BuildFixture) SeedGit(t *testing.T, key string) (config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	base := f.Upstream(t)
-	return f.Seed(t, key, ValidPlan, config.WorkspacesGit, base)
+	return f.Seed(t, key, fixturekit.ValidPlan, config.WorkspacesGit, base)
 }
 
 // Amendment starts a building workstream on seal 1 for amendment scenarios.
 func (f BuildFixture) Amendment(t *testing.T) config.WorkstreamID {
 	t.Helper()
 	stream, repository := f.SeedGit(t, "amendment")
-	Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.Start(t)
 	return stream
 }
@@ -48,6 +49,6 @@ func LandingReason[R any](t *testing.T, stream config.WorkstreamID, unit string,
 	candidate := identity(result).Candidate
 	in := LandingApproval{Unit: unit, Review: review.Revision, Candidate: candidate.Revision, Base: candidate.BaseRevision}
 	reason, err := current(context.Background(), stream, in, result)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return reason
 }

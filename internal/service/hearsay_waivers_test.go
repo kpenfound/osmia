@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -18,13 +17,13 @@ func recordWaiver(t *testing.T, f *publisherFixture, waiver lifecycle.EdgeWaiver
 	t.Helper()
 	ctx := context.Background()
 	data, err := json.Marshal(lifecycle.EdgeWaivers{Waivers: []lifecycle.EdgeWaiver{waiver}})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.EdgeWaiverDocument, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: fixturekit.OwnerActor, Cause: "fixture"}, Path: lifecycle.EdgeWaiverPath, Content: string(data)}
 	subject := lifecycle.DependencySubject(waiver.Upstream, waiver.Type)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject + "-1", Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "upstream-abandoned"}
 	tx := trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, To: lifecycle.DependencyWaived, Reason: waiver.Reason, DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
 	_, err = f.repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {

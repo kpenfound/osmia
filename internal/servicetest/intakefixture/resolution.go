@@ -23,7 +23,7 @@ func (f *ProductionDesign) ScriptResolution(t *testing.T, edge, draftTool string
 		if edge != "" {
 			graph = append(graph, map[string]any{"from": string(*f.Stream1), "to": string(*f.Stream2), "type": edge})
 		}
-		_, err := CallTool(ctx, tools, draftTool, map[string]any{
+		_, err := fixturekit.CallTool(ctx, tools, draftTool, map[string]any{
 			"behavior":  "The server stores chunks with an acknowledgment; the client resumes from that offset.",
 			"contracts": []map[string]any{{"name": "acknowledgment", "text": "Stored chunks are acknowledged with their offset."}},
 			"graph":     graph,
@@ -55,24 +55,24 @@ func (f *ProductionDesign) DeliverResolutionMembers(t *testing.T, publicationDoc
 		stream  config.WorkstreamID
 	}{{*f.Project, *f.Stream1}, {*f.Project2, *f.Stream2}} {
 		repo, err := f.Repository(m.project)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		f.LifecycleAwait(t, "member build recorded before delivery", func() bool {
 			transitions, err := trace.Read[trace.Transition](repo, m.stream)
-			Must(t, err)
+			fixturekit.Must(t, err)
 			var state string
 			for _, transition := range transitions {
 				if transition.Subject == trace.FeatureSubject {
 					state = transition.To
 				}
 			}
-			return state == BuildingState
+			return state == intake.BuildingState
 		})
 		cfg := f.Config().For(m.project)
 		p := api.DeliveryPublication{Status: "opened", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: "main", Branch: intake.FeatureBranch(m.stream), Commit: "feature-tip", PullRequest: 101 + i, URL: fmt.Sprintf("https://example.invalid/pull/%d", 101+i)}
 		fixturekit.ResolutionDocument(t, repo, m.stream, publicationDocument, publicationPath, p, fixturekit.DemoStart, fixturekit.OwnerActor)
 		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered-for-resolution", Revision: 1, Project: m.project, Workstream: m.stream, At: f.Clock.Now(), Actor: fixturekit.OwnerActor, Cause: "fixture"}
 		_, err = repo.SetFeatureState(context.Background(), h, intake.DeliveredState, "Owner-approved ready PR published")
-		Must(t, err)
+		fixturekit.Must(t, err)
 		out = append(out, p)
 	}
 	return out

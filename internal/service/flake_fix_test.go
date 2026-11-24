@@ -34,7 +34,7 @@ type flakeFixLive struct {
 func startFlakeFixLive(t *testing.T, key string, outcomes ...fixturekit.CheckOutcome) *flakeFixLive {
 	t.Helper()
 	f, stream, repository := newFlakeFixture(t, key, outcomes...)
-	intakefixture.Must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	l := &flakeFixLive{shedFixture: f, stream: stream, group: flakes.GroupFlaky(nil, []string{flakyTraceTest})[0].Group}
@@ -46,9 +46,9 @@ func (l *flakeFixLive) setting(t *testing.T, on bool) {
 	t.Helper()
 	ctx := context.Background()
 	got, err := l.c.ProjectConfig(ctx, l.project)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	saved, err := l.c.SaveProjectConfig(ctx, l.project, ProjectConfigEdit{Pin: got.Pin, Set: changes(func(v *ProjectConfigEditValues) { v.FlakeFixes = yes(on) })})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if saved.Outcome != ProjectConfigApplied {
 		t.Fatalf("saving flake_fixes = %v: %+v", on, saved)
 	}
@@ -84,7 +84,7 @@ func (l *flakeFixLive) awaitNoticeOf(t *testing.T, stream config.WorkstreamID, i
 func (l *flakeFixLive) groupOf(t *testing.T, o flakes.Occurrence) string {
 	t.Helper()
 	groups, err := flakeStoreOf(l.repository()).Groups()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, g := range groups {
 		if _, ok := g.Find(o.Run); ok {
 			return g.Group
@@ -120,9 +120,9 @@ func (l *flakeFixLive) chief(t *testing.T, stream config.WorkstreamID, name stri
 		h := func(schema, hid string) trace.Header {
 			return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: hid, Revision: 1, Project: repo.Project(), Workstream: stream, At: now, Actor: ownerActor, Cause: "flake-fix-test"}
 		}
-		intakefixture.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.ChiefOfStaff, ThreadID: thread}))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agentID), Role: trace.ChiefOfStaff, ThreadID: thread}))
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request_"+turn), AgentID: agentID, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work"})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if _, err := repo.ClaimTurn(ctx, stream, agentID, "token_"+id, "/owned/"+id, now); err != nil {
 			if attempt < 5 {
 				continue
@@ -146,7 +146,7 @@ type flakeFixAnswer struct {
 func callFlakeFix(t *testing.T, tool coreadapter.Tool, input string) flakeFixAnswer {
 	t.Helper()
 	var out flakeFixAnswer
-	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
 	return out
 }
 
@@ -166,10 +166,10 @@ func recordUnitFlakyRun(t *testing.T, repository *trace.Repository, stream confi
 	record := UnitCheckRun{Unit: unit, Run: run, Status: ChecksPassed, Flaky: links, Output: output, StartedAt: at, FinishedAt: at,
 		Evidence: &api.CheckEvidence{Engine: api.CheckEngineLocal, CoRun: links, Parallelism: 4}}
 	data, err := json.MarshalIndent(record, "", "  ")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	path := execution.CheckPath(unit, run)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("%s-checks-%d", trace.UnitSubject(unit), run), Revision: 1, Project: repository.Project(), Workstream: stream, Unit: unit, At: at, Actor: trace.Actor{Kind: "service", ID: "checks"}, Cause: "fixture"}
-	intakefixture.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: string(data) + "\n"}}))
+	fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: string(data) + "\n"}}))
 	return path
 }
 
@@ -185,16 +185,16 @@ func recordCloudFinalRun(t *testing.T, repository *trace.Repository, stream conf
 				{Item: api.CheckItemParallelism, Engine: api.CheckEngineCloud, Where: "dagger trace trace-final"},
 			}}}
 	data, err := json.MarshalIndent(run, "", "  ")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalChecksDocument(review), Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "final-review"}, Cause: "final-review-op"}
-	intakefixture.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalChecksPath(review), Content: string(data) + "\n"}}))
+	fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalChecksPath(review), Content: string(data) + "\n"}}))
 	return delivery.FinalChecksPath(review)
 }
 
 func handedText(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) string {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
 		if d.ID == intake.HandedDocument {
 			return d.Content
@@ -303,7 +303,7 @@ func TestOpeningAFlakeFixRecordsTheChiefsHandInWithoutSkippingTheDebate(t *testi
 	t.Parallel()
 	o := openFlakeFix(t)
 	transitions, err := trace.Read[trace.Transition](o.repository(), o.want)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var handedIn bool
 	for _, tr := range transitions {
 		switch {
@@ -361,7 +361,7 @@ func TestLaterFlakesOfTheGroupJoinTheOpenedWorkstreamAndSurfaceInIt(t *testing.T
 	o := openFlakeFix(t)
 	repo := o.repository()
 	streamsBefore, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	siblingRun := recordUnitFlakyRun(t, repo, o.stream, "extra", 1, flakyTraceOther)
 	cloudRun := recordCloudFinalRun(t, repo, o.stream, 1, flakyCloudTest)
 	intakefixture.Soon(t, "the later occurrences to be noticed", func() bool {
@@ -419,7 +419,7 @@ func TestFlakeFixConcurrentOpensOfOneGroupYieldOneWorkstream(t *testing.T) {
 	l := startFlakeFixLive(t, "flake-fix-concurrent", flakyOutcome(flakyTraceTest))
 	repo := l.repository()
 	other := config.WorkstreamID("w_ffffffffffffffffffffffffffffffff")
-	intakefixture.Must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
+	fixturekit.Must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 	otherRun := recordUnitFlakyRun(t, repo, other, "resume", 1, flakyTraceOther)
 	first, second := l.occurrence(t, l.stream, "units/resume/checks-1.json"), l.occurrence(t, other, otherRun)
 	l.awaitNoticeOf(t, l.stream, first.ID)
@@ -429,7 +429,7 @@ func TestFlakeFixConcurrentOpensOfOneGroupYieldOneWorkstream(t *testing.T) {
 		t.Fatalf("occurrences %+v and %+v", first, second)
 	}
 	before, err := repo.Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	tools := []coreadapter.Tool{l.chief(t, l.stream, "a"), l.chief(t, other, "b")}
 	occurrences := []flakes.Occurrence{first, second}
@@ -467,7 +467,7 @@ func TestFlakeFixConcurrentOpensOfOneGroupYieldOneWorkstream(t *testing.T) {
 		t.Fatalf("answers %+v: %d opened and %d joined", answers, opened, joined)
 	}
 	after, err := l.repository().Workstreams()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(after) != len(before)+1 || !slices.Contains(after, want) {
 		t.Fatalf("workstreams %v after %v", after, before)
 	}
@@ -487,7 +487,7 @@ func TestFlakeFixReplayAfterAbandonAndRestartOpensNothingAndTheNextFlakeOpensThe
 	}
 
 	_, err := l.c.Abandon(context.Background(), want, "the owner dropped it")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	l.restart(t)
 
 	replay := callFlakeFix(t, l.chief(t, l.stream, "replay"), openInput(occ.ID, "replayed"))
@@ -500,7 +500,7 @@ func TestFlakeFixReplayAfterAbandonAndRestartOpensNothingAndTheNextFlakeOpensThe
 
 	intakefixture.Soon(t, "the group to close", func() bool {
 		g, found, err := flakeStoreOf(l.repository()).Group(l.group)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return found && g.Open == nil && g.Generation == 1
 	})
 	nextRun := recordUnitFlakyRun(t, l.repository(), l.stream, "extra", 1, flakyTraceOther)
@@ -595,7 +595,7 @@ func TestFlakeFixDeclineNeedsAReasonAndNotifiesAgainOnTheNextFlake(t *testing.T)
 		t.Fatalf("the decision is %+v", o.Decision)
 	}
 	transitions, err := trace.Read[trace.Transition](l.repository(), l.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(transitions, func(tr trace.Transition) bool {
 		return strings.HasPrefix(tr.Subject, "flake-decision-") && tr.To == "declined" && strings.Contains(tr.Reason, reason) && tr.Actor == chiefActor
 	}) {
@@ -645,7 +645,7 @@ func TestFlakeFixRefusals(t *testing.T) {
 
 	ownRun := flakes.RunKey(l.stream, "units/own/checks-1.json")
 	_, _, err := flakeStoreOf(l.repository()).Record(context.Background(), flakes.OccurrenceInput{Group: l.group, Run: ownRun, Source: flakes.Source{Workstream: l.stream, Unit: "own"}, Links: []string{flakyTraceOther}, FromFlakeFix: true})
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	own := flakes.OccurrenceID(ownRun, l.group)
 	refused("an occurrence of a flake-fix run", openInput(own, ""), "flake-fix workstream's own run")
 

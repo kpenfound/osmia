@@ -27,7 +27,7 @@ import (
 func attachmentPNG(t *testing.T) []byte {
 	t.Helper()
 	var b bytes.Buffer
-	intakefixture.Must(t, png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 3, 2))))
+	fixturekit.Must(t, png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 3, 2))))
 	return b.Bytes()
 }
 
@@ -53,18 +53,18 @@ func newImageRig(t *testing.T) *imageRig {
 	}
 	t.Cleanup(func() { s.hub.Unsubscribe(sub) })
 	sub.Take()
-	h := trace.Header{Project: repo.Project(), Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "image"}
+	h := trace.Header{Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "image"}
 	v, err := repo.RecordImage(context.Background(), h, "preview-key", "image/png", data, "turn")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return &imageRig{s: s, repo: repo, data: data, image: v, events: sub.Take()}
 }
 
 func TestRecordingTheSameImageTwiceKeepsItsID(t *testing.T) {
 	t.Parallel()
 	r := newImageRig(t)
-	h := trace.Header{Project: r.repo.Project(), Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "image"}
+	h := trace.Header{Project: r.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "image"}
 	again, err := r.repo.RecordImage(context.Background(), h, "preview-key", "image/png", r.data, "turn")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if again.ID != r.image.ID {
 		t.Fatal("retry changed ID")
 	}
@@ -73,7 +73,7 @@ func TestRecordingTheSameImageTwiceKeepsItsID(t *testing.T) {
 func TestRecordingAnImageAnnouncesAnImageEvent(t *testing.T) {
 	t.Parallel()
 	r := newImageRig(t)
-	if !slices.Contains(r.events, api.Event{Kind: api.EventImage, Project: r.repo.Project(), Workstream: intakefixture.Stream}) {
+	if !slices.Contains(r.events, api.Event{Kind: api.EventImage, Project: r.repo.Project(), Workstream: fixturekit.Stream}) {
 		t.Fatalf("no image event: %+v", r.events)
 	}
 }
@@ -81,7 +81,7 @@ func TestRecordingAnImageAnnouncesAnImageEvent(t *testing.T) {
 func TestTheFeedShowsAnImageOnceWithoutReorderingEqualTimestampEntries(t *testing.T) {
 	t.Parallel()
 	r := newImageRig(t)
-	feed, apiErr := r.s.feedList(string(intakefixture.Stream))
+	feed, apiErr := r.s.feedList(string(fixturekit.Stream))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
@@ -96,7 +96,7 @@ func TestTheFeedShowsAnImageOnceWithoutReorderingEqualTimestampEntries(t *testin
 		}
 		if entry.Kind == "image" {
 			n++
-			if entry.Image == nil || entry.Image.URL != imageURL(intakefixture.Stream, r.image.ID) {
+			if entry.Image == nil || entry.Image.URL != imageURL(fixturekit.Stream, r.image.ID) {
 				t.Fatalf("image: %+v", entry)
 			}
 		}
@@ -121,14 +121,14 @@ func TestTheImageEndpointServesTheImageOnlyToHostsOfTheListener(t *testing.T) {
 		{"http://" + s.TailnetAddr(), "osmia", intakefixture.WebHTTP(), true},
 		{"http://" + s.TailnetAddr(), "evil.invalid", intakefixture.WebHTTP(), false},
 	} {
-		req, err := http.NewRequest(http.MethodGet, c.base+imageURL(intakefixture.Stream, r.image.ID), nil)
-		intakefixture.Must(t, err)
+		req, err := http.NewRequest(http.MethodGet, c.base+imageURL(fixturekit.Stream, r.image.ID), nil)
+		fixturekit.Must(t, err)
 		req.Host = c.host
 		resp, err := c.client.Do(req)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if c.allow {
 			if resp.StatusCode != 200 || !bytes.Equal(body, r.data) || resp.Header.Get("Content-Type") != "image/png" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
 				t.Fatalf("image response: %d %v", resp.StatusCode, resp.Header)
@@ -143,7 +143,7 @@ func TestTheImageEndpointAnswersNotFoundForAnUnknownImage(t *testing.T) {
 	t.Parallel()
 	r := newImageRig(t)
 	rec := httptest.NewRecorder()
-	r.s.handle(rec, httptest.NewRequest(http.MethodGet, imageURL(intakefixture.Stream, "unknown"), nil))
+	r.s.handle(rec, httptest.NewRequest(http.MethodGet, imageURL(fixturekit.Stream, "unknown"), nil))
 	if rec.Code != 404 {
 		t.Fatalf("unknown: %d", rec.Code)
 	}
@@ -152,13 +152,13 @@ func TestTheImageEndpointAnswersNotFoundForAnUnknownImage(t *testing.T) {
 func TestImageBytesNeverAppearInTheFeedEventsOrConfiguration(t *testing.T) {
 	t.Parallel()
 	r := newImageRig(t)
-	feed, apiErr := r.s.feedList(string(intakefixture.Stream))
+	feed, apiErr := r.s.feedList(string(fixturekit.Stream))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	for _, value := range []any{feed, r.events, r.s.configuration()} {
 		payload, err := json.Marshal(value)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if bytes.Contains(payload, r.data) || strings.Contains(string(payload), base64.StdEncoding.EncodeToString(r.data)) {
 			t.Fatal("bytes in metadata")
 		}
@@ -194,13 +194,13 @@ func newGroupImage(t *testing.T, cross bool) *groupImage {
 	data := attachmentPNG(t)
 	h := trace.Header{Project: repo.Project(), Workstream: member, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}
 	v, err := repo.RecordImage(ctx, h, "preview", "image/png", data, "turn")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	host, err := chief.ChiefOfStaffHost(g.Members[0])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	h.Project, h.Workstream = chief.Project(), host
 	for range 2 {
 		_, err = chief.PublishImageReference(ctx, h, member, v.ID, "turn")
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 	}
 	return &groupImage{s: s, chief: chief, g: g, repo: repo, member: member, host: host, header: h, image: v, data: data}
 }
@@ -226,15 +226,15 @@ func (i *groupImage) archiveMember(t *testing.T, cross bool) runtime.Archive {
 	t.Helper()
 	ctx := context.Background()
 	if cross {
-		pins := []trace.GroupMemberApproval{{Project: i.s.projects[0].id, Workstream: intakefixture.Stream}, {Project: i.repo.Project(), Workstream: i.member}}
-		intakefixture.Must(t, trace.RecordGroupApproval(ctx, i.chief, i.g.Members[0], trace.GroupApproval{Workgroup: i.g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
-		intakefixture.Must(t, i.chief.PreserveMemberQuestions(ctx, i.g, trace.CrossRepoMember{Workstream: i.member, Project: i.repo}, fixturekit.DemoStart, serviceActor))
+		pins := []trace.GroupMemberApproval{{Project: i.s.projects[0].id, Workstream: fixturekit.Stream}, {Project: i.repo.Project(), Workstream: i.member}}
+		fixturekit.Must(t, trace.RecordGroupApproval(ctx, i.chief, i.g.Members[0], trace.GroupApproval{Workgroup: i.g.ID, Members: pins, Complete: true}, fixturekit.DemoStart, ownerActor))
+		fixturekit.Must(t, i.chief.PreserveMemberQuestions(ctx, i.g, trace.CrossRepoMember{Workstream: i.member, Project: i.repo}, fixturekit.DemoStart, serviceActor))
 	}
 	a := runtime.Archive{Project: i.repo.Project(), Workstream: i.member, Workgroup: i.g.ID, State: AbandonedState, Title: "member", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: fixturekit.DemoStart, CleanupStartedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart}
-	intakefixture.Must(t, i.s.store.SetArchived(a))
+	fixturekit.Must(t, i.s.store.SetArchived(a))
 	_, err := i.repo.MarkWorkstreamTraceForDeletion(i.member)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, trace.FinishWorkstreamTraceDeletion(i.s.cfg.Root, i.repo.Project(), i.member))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.FinishWorkstreamTraceDeletion(i.s.cfg.Root, i.repo.Project(), i.member))
 	return a
 }
 
@@ -256,7 +256,7 @@ func TestPublishingAnImageReferenceTwiceKeepsOneReference(t *testing.T) {
 	eachGroupKind(t, func(t *testing.T, cross bool) {
 		i := newGroupImage(t, cross)
 		refs, err := trace.Read[trace.ImageReference](i.chief, i.host)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if len(refs) != 1 {
 			t.Fatalf("refs %d", len(refs))
 		}
@@ -266,7 +266,7 @@ func TestPublishingAnImageReferenceTwiceKeepsOneReference(t *testing.T) {
 func TestACrossProjectWorkgroupHoldsNoImageBytes(t *testing.T) {
 	i := newGroupImage(t, true)
 	images, err := trace.Read[trace.Image](i.chief, i.host)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(images) != 0 {
 		t.Fatal("bytes in group")
 	}
@@ -305,7 +305,7 @@ func TestTheArchiveRecordOfAMemberPinsNoImageBytes(t *testing.T) {
 	eachGroupKind(t, func(t *testing.T, cross bool) {
 		i := newGroupImage(t, cross)
 		payload, err := json.Marshal(i.archiveMember(t, cross))
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if strings.Contains(string(payload), base64.StdEncoding.EncodeToString(i.data)) {
 			t.Fatal("archive pinned bytes")
 		}
@@ -321,19 +321,19 @@ func TestImagesDoNotEnterMemoryKnowledgeOrNotifications(t *testing.T) {
 	s, _ := startNotifying(t, opts, inbox)
 	repo := s.sole().repository
 	data := attachmentPNG(t)
-	_, err := repo.RecordImage(context.Background(), trace.Header{Project: repo.Project(), Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, "preview", "image/png", data, "turn")
-	intakefixture.Must(t, err)
+	_, err := repo.RecordImage(context.Background(), trace.Header{Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, "preview", "image/png", data, "turn")
+	fixturekit.Must(t, err)
 	noBytes := func(label string, value any) {
 		t.Helper()
 		payload, err := json.Marshal(value)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		if bytes.Contains(payload, data) || strings.Contains(string(payload), base64.StdEncoding.EncodeToString(data)) {
 			t.Fatalf("%s contains image bytes", label)
 		}
 	}
 	local := bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return repo, nil }}
-	knowledge, err := local.Assemble(context.Background(), repo.Project(), bundle.Scope{Role: sessionRole, Workstream: intakefixture.Stream})
-	intakefixture.Must(t, err)
+	knowledge, err := local.Assemble(context.Background(), repo.Project(), bundle.Scope{Role: sessionRole, Workstream: fixturekit.Stream})
+	fixturekit.Must(t, err)
 	noBytes("file context", knowledge)
 	var requests [][]byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,8 +354,8 @@ func TestImagesDoNotEnterMemoryKnowledgeOrNotifications(t *testing.T) {
 	provider := hearsay.Provider{Local: local, Config: func() *config.Config { return &cfg }, Client: func(h config.Hearsay) hearsay.Client {
 		return hearsay.Client{Config: h, LookupEnv: func(string) string { return "test-token" }}
 	}}
-	_, err = provider.Assemble(context.Background(), repo.Project(), bundle.Scope{Role: sessionRole, Workstream: intakefixture.Stream})
-	intakefixture.Must(t, err)
+	_, err = provider.Assemble(context.Background(), repo.Project(), bundle.Scope{Role: sessionRole, Workstream: fixturekit.Stream})
+	fixturekit.Must(t, err)
 	if len(requests) == 0 {
 		t.Fatal("Hearsay was not exercised")
 	}

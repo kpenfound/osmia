@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -37,8 +37,8 @@ func TestNotifyLandingOnceNamingTheLandedCommitAndBaseBranch(t *testing.T) {
 	const commit = "0123456789abcdef0123456789abcdef01234567"
 	landing := delivery.DeliveryLanding{Push: 1, Review: 1, Branch: "osmia/" + string(stream), Commit: commit, Reviewed: "r", Remote: "upstream", Upstream: "acme/widgets", BaseBranch: "main", BaseBefore: "b", Confirmed: commit, At: time.Now().UTC(), DecidedBy: trace.DecidedByJev, Judgment: "judgment_1"}
 	content, err := json.Marshal(landing)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.LandingDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: landing.At, Actor: ownerActor, Cause: "test"}, Path: delivery.LandingPath, Content: string(content)}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.LandingDocument, Revision: 1, Project: repository.Project(), Workstream: stream, At: landing.At, Actor: ownerActor, Cause: "test"}, Path: delivery.LandingPath, Content: string(content)}}))
 	n.pass(ctx)
 	got := hook.received()
 	if len(got) != 1 {

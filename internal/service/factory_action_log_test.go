@@ -82,21 +82,21 @@ func runFactoryLogScenario(t *testing.T) factoryLogRun {
 	t.Helper()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "fal-")
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
 	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	intakefixture.Must(t, err)
-	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.DemoAgent, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: intakefixture.DemoThread}
-	intakefixture.Must(t, repo.CreateThread(ctx, identity))
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply)}
@@ -121,14 +121,14 @@ func runFactoryLogScenario(t *testing.T) factoryLogRun {
 		t.Helper()
 		select {
 		case ticks <- clock.Now():
-		case <-time.After(intakefixture.DemoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("reconciliation pass did not finish")
 		}
 	}
 	awaitPasses := func(n int64) {
 		t.Helper()
 		base := passed.Load()
-		deadline := time.Now().Add(intakefixture.DemoTimeout)
+		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for passed.Load()-base < n {
 			if time.Now().After(deadline) {
 				t.Fatalf("only %d of %d further reconciliation passes completed", passed.Load()-base, n)
@@ -138,24 +138,24 @@ func runFactoryLogScenario(t *testing.T) factoryLogRun {
 	}
 
 	_, err = c.Health(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
-	target := runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}
+	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
 	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
 
 	_, err = c.Reload(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 
 	queueTurn(t, repo, "build", clock.Now())
 	awaitPasses(2)
 	intakefixture.Soon(t, "the queued turn to complete", func() bool {
-		th, err := repo.Thread(intakefixture.Stream, intakefixture.DemoAgent)
-		intakefixture.Must(t, err)
+		th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+		fixturekit.Must(t, err)
 		return len(th.Turns) == 1 && !th.Turns[0].CompletedAt.IsZero()
 	})
 
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	return factoryLogRun{records: decodeFactoryLog(t, buf.String()), version: opts.Build.Version, root: root}
 }
@@ -167,8 +167,8 @@ func TestFactoryActionLogRecordsTheServiceStartingAndStopping(t *testing.T) {
 	if started["version"] != run.version || started["root"] != run.root {
 		t.Fatalf("service started record: %+v", started)
 	}
-	requireFactoryLog(t, run.records, "project started", map[string]any{"project": string(intakefixture.Project)})
-	requireFactoryLog(t, run.records, "project stopped", map[string]any{"project": string(intakefixture.Project), "reason": "service stopped"})
+	requireFactoryLog(t, run.records, "project started", map[string]any{"project": string(fixturekit.Project)})
+	requireFactoryLog(t, run.records, "project stopped", map[string]any{"project": string(fixturekit.Project), "reason": "service stopped"})
 	requireFactoryLog(t, run.records, "service stopped", map[string]any{"reason": "stopped"})
 }
 
@@ -182,8 +182,8 @@ func TestFactoryActionLogRecordsEachAPIRequest(t *testing.T) {
 func TestFactoryActionLogRecordsPausesSetAndCleared(t *testing.T) {
 	t.Parallel()
 	run := runFactoryLogScenario(t)
-	requireFactoryLog(t, run.records, "pause set", map[string]any{"scope": "workstream", "project": string(intakefixture.Project), "workstream": string(intakefixture.Stream), "mode": "soft"})
-	requireFactoryLog(t, run.records, "pause cleared", map[string]any{"scope": "workstream", "project": string(intakefixture.Project), "workstream": string(intakefixture.Stream)})
+	requireFactoryLog(t, run.records, "pause set", map[string]any{"scope": "workstream", "project": string(fixturekit.Project), "workstream": string(fixturekit.Stream), "mode": "soft"})
+	requireFactoryLog(t, run.records, "pause cleared", map[string]any{"scope": "workstream", "project": string(fixturekit.Project), "workstream": string(fixturekit.Stream)})
 }
 
 func TestFactoryActionLogRecordsASuccessfulReload(t *testing.T) {
@@ -194,7 +194,7 @@ func TestFactoryActionLogRecordsASuccessfulReload(t *testing.T) {
 func TestFactoryActionLogRecordsAnAgentTurnDispatchedWithItsProfile(t *testing.T) {
 	t.Parallel()
 	run := runFactoryLogScenario(t)
-	dispatched := requireFactoryLog(t, run.records, "agent turn dispatched", map[string]any{"project": string(intakefixture.Project), "workstream": string(intakefixture.Stream), "role": fixturekit.DemoRole})
+	dispatched := requireFactoryLog(t, run.records, "agent turn dispatched", map[string]any{"project": string(fixturekit.Project), "workstream": string(fixturekit.Stream), "role": fixturekit.DemoRole})
 	if dispatched["profile"] != "default" {
 		t.Fatalf("agent turn dispatched record: %+v", dispatched)
 	}
@@ -203,7 +203,7 @@ func TestFactoryActionLogRecordsAnAgentTurnDispatchedWithItsProfile(t *testing.T
 func TestFactoryActionLogRecordsAnAgentTurnFinishedWithItsOutcomeAndDuration(t *testing.T) {
 	t.Parallel()
 	run := runFactoryLogScenario(t)
-	finished := requireFactoryLog(t, run.records, "agent turn finished", map[string]any{"project": string(intakefixture.Project), "workstream": string(intakefixture.Stream), "role": fixturekit.DemoRole})
+	finished := requireFactoryLog(t, run.records, "agent turn finished", map[string]any{"project": string(fixturekit.Project), "workstream": string(fixturekit.Stream), "role": fixturekit.DemoRole})
 	if finished["outcome"] == nil || finished["duration"] == nil {
 		t.Fatalf("agent turn finished record: %+v", finished)
 	}
@@ -217,7 +217,7 @@ func TestFactoryActionLogDoesNotChangeOutcomeWhenTheWriterFails(t *testing.T) {
 	target := runtime.Target{Scope: "factory"}
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Investigating", Source: "owner"})
 	health, err := c.Health(context.Background())
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !health.Ready {
 		t.Fatal(health)
 	}
@@ -251,17 +251,17 @@ func TestFactoryActionLogRecordsNotificationAttemptWithoutTheWebhookURL(t *testi
 	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
 	hook.await(t, 1)
 	intakefixture.Soon(t, "the notification recorded as sent", func() bool {
-		rec := readLedger(t, opts).Notifications[notificationKey(intakefixture.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
+		rec := readLedger(t, opts).Notifications[notificationKey(fixturekit.Project, fixturekit.NotificationEntry(InboxEscalation, 1))]
 		return rec != nil && rec.State == notificationSent
 	})
-	intakefixture.Must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	text := buf.String()
 	if strings.Contains(text, hook.hook()) || strings.Contains(text, hook.URL) {
 		t.Fatalf("log output carries the webhook URL: %s", text)
 	}
 	records := decodeFactoryLog(t, buf.String())
-	requireFactoryLog(t, records, "notification post attempt succeeded", map[string]any{"kind": InboxEscalation, "workstream": string(intakefixture.Stream)})
+	requireFactoryLog(t, records, "notification post attempt succeeded", map[string]any{"kind": InboxEscalation, "workstream": string(fixturekit.Stream)})
 }
 
 type failingWriter struct{}

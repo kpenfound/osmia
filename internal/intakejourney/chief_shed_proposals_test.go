@@ -2,6 +2,8 @@ package intakejourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// After the debate concluded, the chief of staff's request for a redraft or
-// another round is its own decision: a pinned move that asks for the redraft or
-// the round with the chief of staff's note recorded, as the owner's command
-// records it, and asks Jev nothing.
 func TestAChiefRequestAfterTheDebateConcludesIsPinned(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -34,31 +32,31 @@ func TestAChiefRequestAfterTheDebateConcludesIsPinned(t *testing.T) {
 			t.Parallel()
 			asked := &triggersAsked{reply: jevfixture.DefaultFits}
 			p := &jevfixture.Provider{Confidence: 0.1, Transition: asked.script}
-			f := newDebateFixtureWith(t, 1, 2, jevfixture.Config(jevfixture.Key(t, true)), func(o *Options) { o.JevProvider = p.Factory() })
-			defer f.stop(t)
-			stream := f.reachJevPacket(t)
-			core := f.s.core()
+			f := journey.NewDebateFixtureWith(t, 1, 2, jevfixture.Config(jevfixture.Key(t, true)), func(o *journey.Options) { o.JevProvider = p.Factory() })
+			defer f.Stop(t)
+			stream := f.ReachJevPacket(t)
+			core := f.S.Core()
 			controller := service.InspectForTest(core).Intake()
 			ctx := context.Background()
 			note := "The standing dissent needs " + c.name + "."
-			x, api := controller.ShedProposalExit(string(stream), intake.ShedProposal{Redraft: c.redraft, Note: note, Actor: intake.ChiefActor, At: time.Now().UTC()})
-			if api != nil {
-				t.Fatal(api.Message)
+			x, apiErr := controller.ShedProposalExit(string(stream), intake.ShedProposal{Redraft: c.redraft, Note: note, Actor: intake.ChiefActor, At: time.Now().UTC()})
+			if apiErr != nil {
+				t.Fatal(apiErr.Message)
 			}
 			res, err := core.RouteExit(ctx, x)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !res.Committed || res.Target != c.target || res.Outcome != router.OutcomeFollowed || res.Rule != "pinned" {
 				t.Fatalf("the chief's request: %+v", res)
 			}
-			moved := f.awaitSubjectMove(t, stream, intake.OwnerSubject, c.moved)
+			moved := f.AwaitSubjectMove(t, stream, intake.OwnerSubject, c.moved)
 			if moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
 				t.Fatalf("the request's transition %+v", moved)
 			}
-			rec, ok := f.routeOf(t, stream, intake.TriggerMoveProposal)
+			rec, ok := f.RouteOf(t, stream, intake.TriggerMoveProposal)
 			if !ok || rec.Authority != router.AuthorityChief || rec.Actor != intake.ChiefActor {
 				t.Fatalf("route %+v (found %v)", rec, ok)
 			}
-			docs := f.documents(t, stream, c.doc(1))
+			docs := f.Documents(t, stream, c.doc(1))
 			if len(docs) == 0 {
 				t.Fatalf("the request is not recorded: %+v", docs)
 			}

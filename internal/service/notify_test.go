@@ -102,25 +102,25 @@ func TestNotifyReadsTheServiceInbox(t *testing.T) {
 	p := repository.Project()
 	escalating := config.WorkstreamID("w_" + strings.Repeat("1", 32))
 	at := time.Now().UTC()
-	intakefixture.Must(t, repository.CreateWorkstream(ctx, escalating, at, ownerActor))
-	header := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: intakefixture.DemoAgent, Revision: 1, Project: p, Workstream: escalating, At: at, Actor: ownerActor, Cause: "test"}
-	intakefixture.Must(t, repository.CreateThread(ctx, trace.Agent{Header: header, Role: fixturekit.DemoRole, ThreadID: intakefixture.DemoThread}))
+	fixturekit.Must(t, repository.CreateWorkstream(ctx, escalating, at, ownerActor))
+	header := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: fixturekit.DemoAgent, Revision: 1, Project: p, Workstream: escalating, At: at, Actor: ownerActor, Cause: "test"}
+	fixturekit.Must(t, repository.CreateThread(ctx, trace.Agent{Header: header, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}))
 	claim := func(agent, thread, turn string) coreadapter.Scope {
 		t.Helper()
 		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: p, Workstream: escalating, At: at, Actor: ownerActor, Cause: "test"}
 		_, err := repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "other", Backend: "codex", Model: "other"}, Prompt: "Work"})
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		_, err = repository.ClaimTurn(ctx, escalating, agent, "token_"+turn, filepath.Join(t.TempDir(), turn), at)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		th, err := repository.Thread(escalating, agent)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		return coreadapter.Scope{Project: string(p), Workstream: string(escalating), Thread: thread, Turn: turn, Role: th.Identity.Role}
 	}
-	_, err := repository.Ask(ctx, intakefixture.DemoAgent, claim(intakefixture.DemoAgent, intakefixture.DemoThread, "build"), "Where does state live?", at)
-	intakefixture.Must(t, err)
+	_, err := repository.Ask(ctx, fixturekit.DemoAgent, claim(fixturekit.DemoAgent, fixturekit.DemoThread, "build"), "Where does state live?", at)
+	fixturekit.Must(t, err)
 	_, err = repository.EscalateQuestions(ctx, trace.ChiefOfStaff, claim(trace.ChiefOfStaff, trace.ChiefOfStaff, "events"),
 		trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Where should state live?", Blocked: "The unit.", Options: []string{"Files"}, Recommendation: "In files."}, at)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n.pass(ctx)
 	want := fmt.Sprintf("Osmia needs your decision.\nProject: %s\nWorkstream: %s\nKind: escalation\nQuestion: Where should state live?\nRecommendation: In files.\n", p, escalating)
 	if got := hook.received(); len(got) != 1 || got[0] != want {
@@ -156,11 +156,11 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 		t.Fatalf("posts without a pause: %q", got)
 	}
 
-	appendDayCost(t, repo, intakefixture.Stream, "spent", clock.Now(), 1.25, true)
-	intakefixture.Must(t, daily.Pass(ctx))
+	appendDayCost(t, repo, fixturekit.Stream, "spent", clock.Now(), 1.25, true)
+	fixturekit.Must(t, daily.Pass(ctx))
 	n.pass(ctx)
 	n.pass(ctx)
-	want := fmt.Sprintf("Osmia paused dispatch: the daily budget is reached.\nProject: %s\nSpend: USD 1.25\nLimit: USD 1.00\nClears: 2026-09-17T00:00:00-07:00\n", intakefixture.Project)
+	want := fmt.Sprintf("Osmia paused dispatch: the daily budget is reached.\nProject: %s\nSpend: USD 1.25\nLimit: USD 1.00\nClears: 2026-09-17T00:00:00-07:00\n", fixturekit.Project)
 	if got := hook.received(); len(got) != 1 || got[0] != want {
 		t.Fatalf("posts for the pause\n%q\nwant\n%q", got, want)
 	}
@@ -172,17 +172,17 @@ func TestNotifyDailyBudgetPauseOncePerPause(t *testing.T) {
 	}
 
 	fixturekit.Jump(clock, time.Date(2026, 9, 17, 7, 0, 0, 0, time.UTC))
-	intakefixture.Must(t, daily.Pass(ctx))
+	fixturekit.Must(t, daily.Pass(ctx))
 	n.pass(ctx)
 	appendDayCost(t, repo, sibling, "next-day", clock.Now(), 1, true)
-	intakefixture.Must(t, daily.Pass(ctx))
+	fixturekit.Must(t, daily.Pass(ctx))
 	hook.respond(http.StatusBadGateway)
 	n.pass(ctx)
 	if got := hook.received(); len(got) != 2 || !strings.Contains(got[1], "Spend: USD 1\n") || !strings.Contains(got[1], "Clears: 2026-09-18T00:00:00-07:00") {
 		t.Fatalf("posts for the next day's pause: %q", got)
 	}
 
-	intakefixture.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
+	fixturekit.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
 	hook.respond(http.StatusOK)
 	time.Sleep(20 * time.Millisecond)
 	n.pass(ctx)
@@ -206,8 +206,8 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	ctx := context.Background()
 	hook := newFakeWebhook(t)
 	s, _, repo, clock := dailyBudgetService(t, 0, nil)
-	appendDayCost(t, repo, intakefixture.Stream, "spent", clock.Now(), 1.25, true)
-	intakefixture.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	appendDayCost(t, repo, fixturekit.Stream, "spent", clock.Now(), 1.25, true)
+	fixturekit.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 	n, inbox := budgetNotifier(t, s, hook.hook())
 	n.pass(ctx)
 	if got := hook.received(); len(got) != 0 {
@@ -238,7 +238,7 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 	if got := hook.received(); len(got) != 1 {
 		t.Fatalf("posts with no daily budget configured: %q", got)
 	}
-	if rec := n.ledger.Notifications[notificationKey(intakefixture.Project, e)]; rec == nil || rec.State != notificationPending {
+	if rec := n.ledger.Notifications[notificationKey(fixturekit.Project, e)]; rec == nil || rec.State != notificationPending {
 		t.Fatalf("the decided entry with no daily budget configured: %+v", rec)
 	}
 	if d := n.diagnostics(); !slices.ContainsFunc(d, func(d Diagnostic) bool {
@@ -247,9 +247,9 @@ func TestNotifyDailyBudgetPauseBeforeTheWebhookAndUnreadableSpend(t *testing.T) 
 		t.Fatalf("diagnostics %+v", d)
 	}
 
-	intakefixture.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
+	fixturekit.Must(t, s.store.ClearPause(factoryTarget, runtime.PauseDailyBudget))
 	n.pass(ctx)
-	if rec := n.ledger.Notifications[notificationKey(intakefixture.Project, e)]; rec.State != notificationDropped {
+	if rec := n.ledger.Notifications[notificationKey(fixturekit.Project, e)]; rec.State != notificationDropped {
 		t.Fatalf("the decided entry after the pause cleared: %+v", rec)
 	}
 }
@@ -274,8 +274,8 @@ func TestNotifyWakesOnRuntimeChanges(t *testing.T) {
 	})
 	s.hub.Publish(Event{Kind: EventSpend})
 	intakefixture.Soon(t, "the pending resync consumed", s.hub.Idle)
-	appendDayCost(t, repo, intakefixture.Stream, "spent", clock.Now(), 1.25, true)
-	intakefixture.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	appendDayCost(t, repo, fixturekit.Stream, "spent", clock.Now(), 1.25, true)
+	fixturekit.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 	if got := hook.await(t, 1); !strings.Contains(got[0], "Spend: USD 1.25") {
 		t.Fatalf("post %q", got)
 	}

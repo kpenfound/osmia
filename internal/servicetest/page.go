@@ -34,14 +34,11 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	_, err = configFile.WriteString("[capacity]\nmasons = 1\n[listen]\nweb = \"127.0.0.1:0\"\n")
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, configFile.Close())
-	// The loop passes only when the workflow changes.
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	at := fixturekit.SeedPage(t, cfg)
 
 	s, c := Start(t, opts)
 	f := &PageFixture{S: s, C: c}
-	// The service abandons claimed chief-of-staff turns when it starts, so
-	// the turns are claimed once it runs.
 	live := service.InspectForTest(s).SoleRepository()
 	_, err = live.EnsureChiefOfStaff(ctx, fixturekit.Stream, at, trace.Actor{Kind: "service", ID: "osmia"})
 	fixturekit.Must(t, err)
@@ -50,9 +47,6 @@ func NewPageFixture(t *testing.T) *PageFixture {
 	_, err = live.ClaimTurn(ctx, fixturekit.Stream, "agent_mason_upload", "token_upload", t.TempDir(), at)
 	fixturekit.Must(t, err)
 	fixturekit.QueueRoleTurn(t, live, fixturekit.Stream, "agent_mason_audit", "mason", "audit", at)
-	// Reconciliation is held, so the project's scheduler passes once to
-	// publish the slot the upload's mason takes and the audit's turn waiting
-	// for it.
 	fixturekit.Must(t, service.InspectForTest(s).Schedule(ctx, live))
 	f.Status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "A mason is building the upload unit.", Agents: []string{"A mason builds upload."}})
 	Mutation(t, c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: config.WorkstreamID("w_fedcba9876543210fedcba9876543210")}, Mode: "soft", Reason: "The owner is travelling", Source: runtime.PauseOwner})

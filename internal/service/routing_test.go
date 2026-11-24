@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -19,25 +19,25 @@ const transitionUnit = "u1"
 func transitionFixture(t *testing.T) Options {
 	t.Helper()
 	opts, _, repo := activityFixture(t)
-	intakefixture.Must(t, repo.CreateWorkstream(context.Background(), intakefixture.Stream, time.Now(), ownerActor))
-	intakefixture.Must(t, repo.Close())
+	fixturekit.Must(t, repo.CreateWorkstream(context.Background(), fixturekit.Stream, time.Now(), ownerActor))
+	fixturekit.Must(t, repo.Close())
 	return opts
 }
 
 func transitionExit(t *testing.T, repo *trace.Repository) router.Exit {
 	t.Helper()
 	subject := trace.UnitSubject(transitionUnit)
-	state, err := repo.Workflow(intakefixture.Stream, subject)
-	intakefixture.Must(t, err)
+	state, err := repo.Workflow(fixturekit.Stream, subject)
+	fixturekit.Must(t, err)
 	if state.Value == "" {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "routing-seed", Revision: 1, Project: repo.Project(), Workstream: intakefixture.Stream, Unit: transitionUnit, At: time.Now(), Actor: trace.Actor{Kind: "service", ID: "checks"}, Cause: "seed"}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "routing-seed", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, Unit: transitionUnit, At: time.Now(), Actor: trace.Actor{Kind: "service", ID: "checks"}, Cause: "seed"}
 		_, err := repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: subject, To: "checking", Reason: "seeded"}})
-		intakefixture.Must(t, err)
-		state, err = repo.Workflow(intakefixture.Stream, subject)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
+		state, err = repo.Workflow(fixturekit.Stream, subject)
+		fixturekit.Must(t, err)
 	}
 	return router.Exit{
-		Repo: repo, Project: repo.Project(), Workstream: intakefixture.Stream, Unit: transitionUnit, Machine: "fixture", Subject: subject, From: state.Value, Version: state.Version,
+		Repo: repo, Project: repo.Project(), Workstream: fixturekit.Stream, Unit: transitionUnit, Machine: "fixture", Subject: subject, From: state.Value, Version: state.Version,
 		Trigger: "unit.checks_passed", Cause: "checks-1", Actor: trace.Actor{Kind: "service", ID: "checks"}, Default: "reviewing",
 		Targets: []router.Target{
 			{Name: "reviewing", Description: "Start the independent review of the candidate."},
@@ -69,12 +69,12 @@ func TestTheServiceRoutesExitsAndShowsJevDegraded(t *testing.T) {
 
 	x := transitionExit(t, repo)
 	res, err := s.RouteExit(ctx, x)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !res.Committed || res.Outcome != "followed" || res.State != "reviewing" {
 		t.Fatalf("result = %+v", res)
 	}
 	runtime, err := c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if runtime.Jev.Mode != jev.ModeReady {
 		t.Fatalf("status = %+v", runtime.Jev)
 	}
@@ -83,12 +83,12 @@ func TestTheServiceRoutesExitsAndShowsJevDegraded(t *testing.T) {
 	y := transitionExit(t, repo)
 	y.Trigger, y.Default = "unit.review_needs_checks", "checking"
 	res, err = s.RouteExit(ctx, y)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if !res.Committed || res.Outcome != "fallback" || res.State != "checking" {
 		t.Fatalf("result = %+v", res)
 	}
 	runtime, err = c.Runtime(ctx)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if runtime.Jev.Mode != jev.ModeDegraded {
 		t.Fatalf("status = %+v", runtime.Jev)
 	}
@@ -117,13 +117,13 @@ func TestTheServiceRoutesSubmittedExitsBesideTheCaller(t *testing.T) {
 	done := make(chan router.Result, 1)
 	x := transitionExit(t, repo)
 	if !s.SubmitExit(x, func(r router.Result, err error) {
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		done <- r
 	}) {
 		t.Fatal("the exit was not accepted")
 	}
-	state, err := repo.Workflow(intakefixture.Stream, x.Subject)
-	intakefixture.Must(t, err)
+	state, err := repo.Workflow(fixturekit.Stream, x.Subject)
+	fixturekit.Must(t, err)
 	if state.Version != x.Version {
 		t.Fatalf("the unit moved before Jev answered: %+v", state)
 	}

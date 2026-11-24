@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/reconcile"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -32,25 +32,25 @@ func newBudgetRig(t *testing.T) *budgetRig {
 func (r *budgetRig) appendCost(id string, amount float64, known bool) {
 	r.t.Helper()
 	f, stream, ctx := r.f, r.stream, context.Background()
-	intakefixture.Must(r.t, r.f.repository().Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "budget-fixture"}, Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: "thread", Turn: id, Role: "mason"}, AttemptID: id, At: f.clock.Now(), Usage: coreadapter.Usage{CostUSD: amount, CostKnown: known, Turns: 1}}}))
+	fixturekit.Must(r.t, r.f.repository().Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "service", ID: "thread-runner"}, Cause: "budget-fixture"}, Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: "thread", Turn: id, Role: "mason"}, AttemptID: id, At: f.clock.Now(), Usage: coreadapter.Usage{CostUSD: amount, CostKnown: known, Turns: 1}}}))
 }
 
 func (r *budgetRig) pass() {
 	r.t.Helper()
-	intakefixture.Must(r.t, r.signal.Pass(context.Background()))
+	fixturekit.Must(r.t, r.signal.Pass(context.Background()))
 }
 
 func (r *budgetRig) requests() []trace.Amendment {
 	r.t.Helper()
 	got, err := trace.Read[trace.Amendment](r.f.repository(), r.stream)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	return got
 }
 
 func (r *budgetRig) unknownCostAttempts() int {
 	r.t.Helper()
 	baseline, err := trace.Read[trace.Cost](r.f.repository(), r.stream)
-	intakefixture.Must(r.t, err)
+	fixturekit.Must(r.t, err)
 	unknown := 1
 	for _, cost := range baseline {
 		if !cost.Entry.Usage.CostKnown {
@@ -103,7 +103,7 @@ func TestBudgetAmendmentDoesNotParkTheUnit(t *testing.T) {
 	r.overspend()
 	r.pass()
 	state, err := r.f.repository().Workflow(r.stream, trace.UnitSubject("resume"))
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if state.Value == UnitWaiting {
 		t.Fatal("budget request parked the unit")
 	}

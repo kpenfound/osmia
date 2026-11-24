@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -15,36 +16,35 @@ import (
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func recoveryEntriesOf(t *testing.T, s *Service, repo *trace.Repository, stream config.WorkstreamID) []InboxEntry {
 	t.Helper()
 	statuses, err := repo.Statuses()
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(statuses, func(w trace.WorkstreamStatus) bool { return w.Workstream == stream })
 	if i < 0 {
 		t.Fatalf("workstream %s has no status", stream)
 	}
 	entries, err := s.recoveryEntries(repo, statuses[i])
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return entries
 }
 
 func recoveryRequestOf(t *testing.T, e InboxEntry) RecoveryRequest {
 	t.Helper()
 	data, err := json.Marshal(e.Answer.Body)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var req RecoveryRequest
-	intakefixture.Must(t, json.Unmarshal(data, &req))
+	fixturekit.Must(t, json.Unmarshal(data, &req))
 	return req
 }
 
 func lastTransitionOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, subject string) trace.Transition {
 	t.Helper()
 	all, err := trace.Read[trace.Transition](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	var out trace.Transition
 	for _, tr := range all {
 		if tr.Subject == subject {
@@ -57,21 +57,21 @@ func lastTransitionOf(t *testing.T, repo *trace.Repository, stream config.Workst
 func workTransitions(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []trace.Transition {
 	t.Helper()
 	all, err := trace.Read[trace.Transition](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(all, func(tr trace.Transition) bool { return router.IsJournal(tr.Subject) })
 }
 
 func routeRecordsOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []router.Record {
 	t.Helper()
 	records, err := router.Records(repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return records
 }
 
 func recoveryDocuments(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, d := range docs {
 		if strings.HasPrefix(d.Path, "recovery/") {
@@ -93,13 +93,13 @@ func TestAStallNeitherJevNorTheChiefClearedOpensOneRecoveryCard(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 0 {
+	if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a stall the router has just decided has %d cards", len(got))
 	}
 
 	f.quietFor(46*time.Minute + 30*time.Minute)
 	f.pass(t, w)
-	if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 0 {
+	if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a stall inside the further window has %d cards", len(got))
 	}
 
@@ -109,47 +109,47 @@ func TestAStallNeitherJevNorTheChiefClearedOpensOneRecoveryCard(t *testing.T) {
 			t.Fatalf("a decided stall raised %d more exits", len(raised))
 		}
 	}
-	cards := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream)
+	cards := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream)
 	if len(cards) != 1 {
 		t.Fatalf("the stalled unit has %d recovery cards, want 1: %+v", len(cards), cards)
 	}
 	card := cards[0]
 	m := card.Recovery
-	if card.Kind != InboxRecovery || card.Unit != stallUnit || card.Workstream != intakefixture.Stream || m == nil {
+	if card.Kind != InboxRecovery || card.Unit != stallUnit || card.Workstream != fixturekit.Stream || m == nil {
 		t.Fatalf("the card %+v", card)
 	}
 	if m.Subject != trace.UnitSubject(stallUnit) || m.From != UnitImplementing || m.Version != 1 || m.Target != UnitImplementing || m.Origin != api.RecoveryStall || m.Machine != execution.UnitMachine || m.Reason == "" {
 		t.Fatalf("the pinned move %+v", m)
 	}
-	if card.Answer.Method != http.MethodPost || card.Answer.Path != Prefix+"/recovery/"+string(intakefixture.Stream) || !slices.Equal(card.Options, []string{api.RecoveryApprove}) {
+	if card.Answer.Method != http.MethodPost || card.Answer.Path != Prefix+"/recovery/"+string(fixturekit.Stream) || !slices.Equal(card.Options, []string{api.RecoveryApprove}) {
 		t.Fatalf("the answer %+v options %v", card.Answer, card.Options)
 	}
 	req := recoveryRequestOf(t, card)
 	if req.Occurrence != m.Occurrence || req.Subject != m.Subject || req.From != m.From || req.Version != m.Version || req.Target != m.Target || req.Unit != stallUnit {
 		t.Fatalf("the answer body %+v does not pin the move %+v", req, m)
 	}
-	if n := recoveryDocuments(t, f.repo, intakefixture.Stream); n != 1 {
+	if n := recoveryDocuments(t, f.repo, fixturekit.Stream); n != 1 {
 		t.Fatalf("the card is recorded %d times", n)
 	}
 
 	f.quietFor(46*time.Minute + 3*time.Hour)
 	f.pass(t, w)
-	if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 1 || recoveryDocuments(t, f.repo, intakefixture.Stream) != 1 {
-		t.Fatalf("later passes made %d cards and %d records", len(got), recoveryDocuments(t, f.repo, intakefixture.Stream))
+	if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 1 || recoveryDocuments(t, f.repo, fixturekit.Stream) != 1 {
+		t.Fatalf("later passes made %d cards and %d records", len(got), recoveryDocuments(t, f.repo, fixturekit.Stream))
 	}
 
-	feed, err := f.s.feedRecoveries(f.repo, intakefixture.Stream)
-	intakefixture.Must(t, err)
+	feed, err := f.s.feedRecoveries(f.repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(feed) != 1 || feed[0].Kind != "recovery" || feed[0].Recovery == nil || feed[0].Recovery.State != recoveryOpen || feed[0].Recovery.Occurrence != m.Occurrence || feed[0].Recovery.Unit != stallUnit {
 		t.Fatalf("the feed entry %+v", feed)
 	}
 
 	f.transition(t, "stall-moved-on", trace.UnitSubject(stallUnit), UnitImplementing, UnitChecking, stallUnit, ownerActor, f.clock.Now())
-	if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 0 {
+	if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a unit that moved on still has %d cards", len(got))
 	}
-	feed, err = f.s.feedRecoveries(f.repo, intakefixture.Stream)
-	intakefixture.Must(t, err)
+	feed, err = f.s.feedRecoveries(f.repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(feed) != 1 || feed[0].Recovery.State != recoveryStale {
 		t.Fatalf("the feed entry of a stale card %+v", feed)
 	}
@@ -170,7 +170,7 @@ func TestARecoveryCardIsNotOpenedWithTheWatchdogOff(t *testing.T) {
 	f.quietFor(3 * time.Hour)
 	off := f.watch("0")
 	f.pass(t, off)
-	if got := recoveryEntriesOf(t, f.s, f.repo, intakefixture.Stream); len(got) != 0 {
+	if got := recoveryEntriesOf(t, f.s, f.repo, fixturekit.Stream); len(got) != 0 {
 		t.Fatalf("a watchdog that is off opened %d cards", len(got))
 	}
 }
@@ -222,7 +222,7 @@ func TestAnOwnerBoundProposalOpensOneRecoveryCard(t *testing.T) {
 		}
 	}
 	feed, err := m.f.s.feedRecoveries(m.repo, m.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(feed) != 1 || feed[0].Recovery.State != recoveryOpen || feed[0].Recovery.Target != UnitApproved {
 		t.Fatalf("the feed %+v", feed)
 	}
@@ -264,7 +264,7 @@ func TestApprovingARecoveryCardAppliesThePinnedMoveAsTheOwner(t *testing.T) {
 		t.Fatalf("an approved card is still open: %+v", got)
 	}
 	feed, err := m.f.s.feedRecoveries(m.repo, m.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(feed) != 1 || feed[0].Recovery.State != recoveryApproved {
 		t.Fatalf("the feed %+v", feed)
 	}
@@ -304,7 +304,7 @@ func TestApprovingAStaleRecoveryCardIsRefused(t *testing.T) {
 		t.Fatalf("a refused approval asked Jev")
 	}
 	feed, err := m.f.s.feedRecoveries(m.repo, m.stream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(feed) != 1 || feed[0].Recovery.State != recoveryStale {
 		t.Fatalf("the feed %+v", feed)
 	}
@@ -345,7 +345,7 @@ func TestTheRecoveryEndpointApprovesAndRefusesAStaleCard(t *testing.T) {
 	m := newMoveRecoveryFixture(t, "recovery-endpoint")
 	card := m.cards(t)[0]
 	body, err := json.Marshal(card.Answer.Body)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	post := func() *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, card.Answer.Path, strings.NewReader(string(body)))
@@ -358,7 +358,7 @@ func TestTheRecoveryEndpointApprovesAndRefusesAStaleCard(t *testing.T) {
 		t.Fatalf("the endpoint answered %d: %s", rec.Code, rec.Body)
 	}
 	var out RecoveryResponse
-	intakefixture.Must(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	fixturekit.Must(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	if out.Target != UnitApproved || out.Subject != trace.UnitSubject("resume") || out.Workstream != m.stream {
 		t.Fatalf("the endpoint's response %+v", out)
 	}

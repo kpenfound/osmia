@@ -58,16 +58,16 @@ func (f *edgeGraphFixture) build(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	b := &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: f.repository}
-	intakefixture.Must(t, b.Pass(ctx))
+	fixturekit.Must(t, b.Pass(ctx))
 	for _, stream := range []config.WorkstreamID{f.upstream, f.downstream} {
 		ops, err := f.repository.Operations(stream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, op := range ops {
 			if op.Operation.Action != intake.BuildAction || op.Result != nil {
 				continue
 			}
 			result, err := b.Apply(ctx, op.Operation)
-			intakefixture.Must(t, err)
+			fixturekit.Must(t, err)
 			if result.Outcome != "succeeded" {
 				t.Fatalf("building %s: %+v", stream, result)
 			}
@@ -78,8 +78,8 @@ func (f *edgeGraphFixture) build(t *testing.T) {
 func (f *edgeGraphFixture) dependentWork(t *testing.T) (state string, turns int) {
 	t.Helper()
 	unit, err := f.repository.Workflow(f.downstream, trace.UnitSubject("resume"))
-	intakefixture.Must(t, err)
-	th, err := f.repository.Thread(f.downstream, intakefixture.MasonAgent("resume"))
+	fixturekit.Must(t, err)
+	th, err := f.repository.Thread(f.downstream, intake.MasonAgent("resume"))
 	if err == nil {
 		turns = len(th.Turns)
 	}
@@ -90,7 +90,7 @@ func (f *edgeGraphFixture) publish(t *testing.T, hooks *fixturekit.Hooks) []fixt
 	t.Helper()
 	os.Setenv(service.RoutingPublishTokenEnv, "journey-publisher-token")
 	res, err := service.InspectForTest(f.s.core()).PublishToHearsay(context.Background(), f.repository, hooks.URL)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if res.Unreachable {
 		t.Fatalf("the publish pass: %+v", res)
 	}
@@ -108,13 +108,13 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.now())
 	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.now())
 	specBefore, _, _, err := f.repository.ProjectSpecOf(f.downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	f.build(t)
 	m := newMasonController(f.s, f.repository)
 	hooks := fixturekit.NewHooks(t)
 
 	f.resolvePasses(t)
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	if state, turns := f.dependentWork(t); state != "ready" || turns != 0 || !f.holdsMason(t, f.downstream) {
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
@@ -134,7 +134,7 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		t.Fatalf("route spans %+v", got)
 	}
 	waivers, revision, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if revision != 1 || len(waivers.Waivers) != 1 || waivers.Waivers[0].Upstream != f.upstream || waivers.Waivers[0].DecidedBy != trace.DecidedByJev || waivers.Waivers[0].Judgment != dropped.Judgment {
 		t.Fatalf("waivers %+v at revision %d", waivers, revision)
 	}
@@ -154,24 +154,24 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 			t.Fatalf("%s: the dependent's first unit is %q with %d mason turns, want implementing and 1", when, state, turns)
 		}
 		observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
-		intakefixture.Must(t, err)
+		fixturekit.Must(t, err)
 		for _, e := range observed.Edges {
 			if e.Merged {
 				t.Fatalf("%s: a waiver was recorded as a merge: %+v", when, e)
 			}
 		}
 	}
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	check("after the drop")
 	for range 3 {
 		f.resolvePasses(t)
-		intakefixture.Must(t, m.Pass(ctx))
+		fixturekit.Must(t, m.Pass(ctx))
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
 	m = newMasonController(f.s, f.repository)
 	f.resolvePasses(t)
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	check("after a restart")
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times for one piece of evidence", n)
@@ -220,7 +220,7 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 	hooks := fixturekit.NewHooks(t)
 
 	f.resolvePasses(t)
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	if state, turns := f.dependentWork(t); state != "ready" || turns != 0 || !f.holdsMason(t, f.downstream) {
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
@@ -236,7 +236,7 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 		t.Fatalf("route spans %+v", got)
 	}
 	observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	if len(observed.Edges) != 1 || !observed.Edges[0].Merged || observed.Edges[0].Commit != merged {
 		t.Fatalf("the observation %+v", observed)
 	}
@@ -256,17 +256,17 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 			t.Fatalf("%s: the dependent's first unit is %q with %d mason turns, want implementing and 1", when, state, turns)
 		}
 	}
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	check("after the exit")
 	for range 3 {
 		f.resolvePasses(t)
-		intakefixture.Must(t, m.Pass(ctx))
+		fixturekit.Must(t, m.Pass(ctx))
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
 	m = newMasonController(f.s, f.repository)
 	f.resolvePasses(t)
-	intakefixture.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	check("after a restart")
 
 	for _, d := range f.publish(t, hooks) {

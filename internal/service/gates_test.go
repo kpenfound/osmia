@@ -18,7 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -154,7 +153,7 @@ func (f *gateFixture) gate(kind jev.DecisionKind, key string, options ...string)
 func (f *gateFixture) result(t *testing.T, g *fakeGate) jev.Result {
 	t.Helper()
 	res, err := f.s.jev.Lookup(f.repo, g.gate.Stream, g.gate.Kind, g.gate.Key)
-	intakefixture.Must(t, err)
+	fixturekit.Must(t, err)
 	return res
 }
 
