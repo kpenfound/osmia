@@ -4,6 +4,11 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	io "io"
 	slog "log/slog"
 	os "os"
@@ -32,13 +37,9 @@ const (
 	fakeChecklist     = "1. The candidate keeps its promises.\n"
 	notGivenMarkdown  = "---\nname: other-skill\ndescription: A skill the reviewer was not given.\n---\n"
 
-	// codexReviewerRoles runs the unit reviewer on the Codex profile of the
-	// fixture's configuration, with the one fake skill.
-	codexReviewerRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nprofile = \"other\"\nsandbox = \"container\"\nimage = \"fixture-image\"\nskills = [\"" + fakeSkillRef + "\"]\n"
+	codexReviewerRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nprofile = \"other\"\nsandbox = \"container\"\nimage = \"fixture-image\"\nskills = [\"" + fakeSkillRef + "\"]\n"
 )
 
-// skillClones stands in for git: it clones a repository by copying the fixture
-// directory its URL names, so preparing skills reaches no network.
 type skillClones map[string]string
 
 func (c skillClones) run(_ context.Context, _ string, args ...string) (string, error) {
@@ -53,10 +54,8 @@ func (c skillClones) run(_ context.Context, _ string, args ...string) (string, e
 	return "", os.CopyFS(dest, os.DirFS(source))
 }
 
-// skillEngine is the fixture's fake engine with the skill preparation of the
-// service's real skill manager, which clones from skillClones.
 type skillEngine struct {
-	*demoEngine
+	*fixturekit.DemoEngine
 	manager *skills.Manager
 }
 
@@ -70,13 +69,10 @@ func (e skillEngine) PrepareSkills(ctx context.Context, refs []string) ([]string
 
 func putFile(t *testing.T, path, content string) {
 	t.Helper()
-	must(t, os.MkdirAll(filepath.Dir(path), 0700))
-	must(t, os.WriteFile(path, []byte(content), 0600))
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(path), 0700))
+	fixturekit.Must(t, os.WriteFile(path, []byte(content), 0600))
 }
 
-// newSkillReviewFixture is newReviewFixture for a reviewer role that runs on
-// Codex with fakeSkillRef. Its skill cache holds the clone of a repository with
-// two skills, only one of which the role is given.
 func newSkillReviewFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository, *skills.Manager) {
 	t.Helper()
 	repo := t.TempDir()
@@ -90,26 +86,25 @@ func newSkillReviewFixture(t *testing.T, key string) (*shedFixture, config.Works
 	manager.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	f := newDebateFixtureWith(t, 1, 1, codexReviewerRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
-		engine := skillEngine{opts.Committee.Engine.(*demoEngine), manager}
-		enforced := Enforce(*opts, Enforcement{Engine: engine, Hosts: opts.Committee.Hosts})
+		engine := skillEngine{opts.Committee.Engine.(*fixturekit.DemoEngine), manager}
+		enforced := Enforce(*opts, service.Enforcement{Engine: engine, Hosts: opts.Committee.Hosts})
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
 		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, config.WorkspacesGit, "masons = 1\n", opts.Threads)
 	})
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: independentPlan}, nil)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: independentPlan}, nil)
 	f.upstream(t)
-	intakefixture.ScriptMasons(f.engine, masonTurnID)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	intakefixture.ScriptMasons(f.engine, service.TestMasonTurnID)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
 	seedReview(t, f, repository, stream, "resume", resumeReport)
 	return f, stream, repository, manager
 }
 
-// skillFile returns the path of name in the one skill a prepared plugin holds.
 func skillFile(t *testing.T, plugin, name string) string {
 	t.Helper()
 	for _, pattern := range []string{filepath.Join(plugin, "skills", name), filepath.Join(plugin, "skills", "*", name)} {
 		matches, err := filepath.Glob(pattern)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if len(matches) == 1 {
 			return matches[0]
 		}
@@ -118,7 +113,6 @@ func skillFile(t *testing.T, plugin, name string) string {
 	return ""
 }
 
-// reviewerReads is what the reviewer's turn saw through its own tools.
 type reviewerReads struct {
 	request  agent.Request
 	skillMD  string
@@ -127,21 +121,12 @@ type reviewerReads struct {
 	refusals map[string]string
 }
 
-// A unit review turn of a reviewer role that runs on Codex and configures a
-// skill is run through the service's own turn path: the role's configuration,
-// the review enqueued for the candidate, the thread dispatcher, the isolation
-// that selects the turn's view and tools, and the execution boundary, into a
-// fake engine. The request that reaches the engine carries the role's skill,
-// the skill cache mounted read-only and the unit reviewer's system prompt, and
-// the turn's own file_read reads the skill's SKILL.md and the file it references
-// at their mounted paths, and refuses every path outside the view and the
-// skill's directory.
 func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, manager := newSkillReviewFixture(t, "codex-skills")
 	ctx := context.Background()
 	plugins, err := manager.Prepare(ctx, []string{fakeSkillRef})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(plugins) != 1 {
 		t.Fatalf("prepared skill directories %v", plugins)
 	}
@@ -149,7 +134,7 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	mentioned := regexp.MustCompile(`references/[\w/-]+\.md`).FindString(fakeSkillMarkdown)
 	checklist := filepath.Join(filepath.Dir(skillMD), filepath.FromSlash(mentioned))
 	notGiven, err := filepath.Glob(filepath.Join(manager.Dir, "repos", "*", "other-skill", "SKILL.md"))
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(notGiven) != 1 {
 		t.Fatalf("the clone holds %v for the skill the role was not given", notGiven)
 	}
@@ -166,18 +151,18 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 
 	r := &reviewers{masons: newMasonController(f.s, repository)}
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
-	must(t, err)
-	must(t, r.one(ctx, stream, "resume", state, false))
-	reviewer := reviewerAgent("resume")
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, r.one(ctx, stream, "resume", state, false))
+	reviewer := intake.ReviewerAgent("resume")
 	th, err := repository.Thread(stream, reviewer)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 {
 		t.Fatalf("review turns %+v", th.Turns)
 	}
 	queued := th.Turns[0].Request
 
 	read := func(ctx context.Context, tools *mcp.ClientSession, path string) (string, error) {
-		body, err := callTool(ctx, tools, "file_read", map[string]any{"path": path})
+		body, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": path})
 		if err != nil {
 			return "", err
 		}
@@ -198,7 +183,7 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		if seen.checked, err = read(ctx, tools, checklist); err != nil {
 			return nil, err
 		}
-		if seen.view, err = read(ctx, tools, masonWrote); err != nil {
+		if seen.view, err = read(ctx, tools, fixturekit.MasonWrote); err != nil {
 			return nil, err
 		}
 		for name, path := range refused {
@@ -209,8 +194,8 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 			}
 			seen.refusals[name] = ""
 		}
-		v := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{}}
-		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
+		v := service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []api.ReviewFinding{}}
+		body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 		if err != nil || !strings.Contains(body, `"recorded":true`) {
 			return nil, fmt.Errorf("verdict %s: %v", body, err)
 		}
@@ -219,9 +204,9 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	f.engine.Mu.Unlock()
 
 	bound, err := f.s.options.Threads(repository, f.s.cfg)
-	must(t, err)
+	fixturekit.Must(t, err)
 	op, err := thread.TurnOperation(f.project, "codex-skills-review", thread.TurnInput{Workstream: stream, Agent: reviewer, Turn: queued.TurnID})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if _, err := bound.Apply(ctx, op); err != nil {
 		t.Fatalf("the review turn: %v", err)
 	}
@@ -230,8 +215,6 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		t.Fatalf("the engine ran %q, not the review turn %q", req.Name, queued.TurnID)
 	}
 
-	// The request carries the role's skill and the skill cache, read-only, on a
-	// Codex turn that keeps Codex's own tools and no write or shell grant.
 	if req.Profile.Agent != agent.AgentCodex {
 		t.Errorf("the reviewer ran on %q, not Codex", req.Profile.Agent)
 	}
@@ -260,8 +243,6 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		t.Errorf("a Codex turn is allowed Claude's Skill tool: %v", req.Profile.AllowedTools)
 	}
 
-	// Its system prompt is the unit reviewer's: the protocol and the materiality
-	// rule, with how to review left to the role's skills.
 	if !strings.HasPrefix(req.SystemPrompt, queued.SystemPrompt) {
 		t.Errorf("the engine's system prompt is not the enqueued one:\n%s", req.SystemPrompt)
 	}
@@ -286,8 +267,6 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		}
 	}
 
-	// The turn's own file_read reads the skill and what it references at their
-	// mounted paths, and the candidate's files in the view as before.
 	if seen.skillMD != fakeSkillMarkdown {
 		t.Errorf("file_read of %s returned %q", skillMD, seen.skillMD)
 	}
@@ -295,7 +274,7 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 		t.Errorf("file_read of %s returned %q", checklist, seen.checked)
 	}
 	if !strings.Contains(seen.view, "package trace") {
-		t.Errorf("file_read of the candidate's %s in the view returned %q", masonWrote, seen.view)
+		t.Errorf("file_read of the candidate's %s in the view returned %q", fixturekit.MasonWrote, seen.view)
 	}
 	for name := range refused {
 		if got, ok := seen.refusals[name]; !ok || got != "" {
@@ -307,8 +286,8 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	}
 
 	done, err := repository.Thread(stream, reviewer)
-	must(t, err)
-	if out := done.Turns[0].Response; out == nil || out.Result.Outcome == nil || out.Result.Outcome.Status != verdictOutcome {
+	fixturekit.Must(t, err)
+	if out := done.Turns[0].Response; out == nil || out.Result.Outcome == nil || out.Result.Outcome.Status != execution.VerdictOutcome {
 		t.Fatalf("the review turn recorded %+v, not a verdict", out)
 	}
 }

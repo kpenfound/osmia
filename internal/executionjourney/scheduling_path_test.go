@@ -6,6 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -29,7 +33,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// pathGate holds a service boundary until release or lifetime cancellation.
 type pathGate struct {
 	entered   chan struct{}
 	release   chan struct{}
@@ -57,7 +60,7 @@ func pathAwait(t *testing.T, s *Service, what string, ready func() bool) {
 	t.Helper()
 	wait, stop := serviceChanges(t, s)
 	defer stop()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for !ready() {
 		if time.Now().After(deadline) {
 			t.Fatal(what)
@@ -94,18 +97,18 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 	ctx := context.Background()
 	session := config.WorkstreamID("w_00000000000000000000000000000119")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "snapshot", "Session", demoStart, ownerActor))
-	_, err = ensureSessionThread(ctx, repo, cfg.Project.ID, session, demoStart)
-	must(t, err)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "snapshot", "Session", fixturekit.DemoStart, intake.OwnerActor))
+	_, err = service.TestEnsureSessionThread(ctx, repo, cfg.Project.ID, session, fixturekit.DemoStart)
+	fixturekit.Must(t, err)
 	profile, err := cfg.NamedProfile("default")
-	must(t, err)
-	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_crashed", Project: cfg.Project.ID, Workstream: session, At: demoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: sessionAgentID, ThreadID: sessionAgentID, TurnID: "crashed", Profile: profile, Prompt: "Continue"})
-	must(t, err)
-	must(t, setSessionState(ctx, repo, cfg.Project.ID, session, demoStart, "session-working-crashed", "session-turn-started", trace.SessionWorking))
-	_, err = repo.ClaimTurn(ctx, session, sessionAgentID, "previous-service", "previous-session", demoStart)
-	must(t, err)
-	must(t, repo.Close())
+	fixturekit.Must(t, err)
+	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_crashed", Project: cfg.Project.ID, Workstream: session, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner-message"}, AgentID: service.TestSessionAgentID, ThreadID: service.TestSessionAgentID, TurnID: "crashed", Profile: profile, Prompt: "Continue"})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, service.TestSetSessionState(ctx, repo, cfg.Project.ID, session, fixturekit.DemoStart, "session-working-crashed", "session-turn-started", trace.SessionWorking))
+	_, err = repo.ClaimTurn(ctx, session, service.TestSessionAgentID, "previous-service", "previous-session", fixturekit.DemoStart)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.Close())
 	backend, scan := newPathGate(t), newPathGate(t)
 	var armed atomic.Bool
 	var scans atomic.Int32
@@ -126,7 +129,7 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 		return nil
 	}
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Now: opts.Reconciliation.Now, Turns: turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Now: opts.Reconciliation.Now, Turns: fixturekit.TurnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			calls.Add(1)
 			if err := backend.hold(ctx); err != nil {
 				return coreadapter.SessionResult{}, err
@@ -135,38 +138,37 @@ func TestSessionRecoveryQueueSnapshotCannotRestoreWorking(t *testing.T) {
 		})}, Prepare: func(context.Context, thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: t.TempDir()}, nil
 		}, Relay: func(ctx context.Context, th trace.Thread, q trace.QueuedTurn) error {
-			return sessionRelay(ctx, r, opts.Reconciliation.Now, th, q)
+			return service.TestSessionRelay(ctx, r, opts.Reconciliation.Now, th, q)
 		}}, nil
 	}
 	s, _ := start(t, opts)
-	awaitPollSignal(t, backend.entered)
+	fixturekit.AwaitPollSignal(t, backend.entered)
 	armed.Store(true)
 	InspectForTest(s).WakeConversations()
-	awaitPollSignal(t, scan.entered)
+	fixturekit.AwaitPollSignal(t, scan.entered)
 	backend.open()
 	pathAwait(t, s, "recovery did not acknowledge", func() bool { return pathAcknowledged(s.sole().repository, session, "session-recover-1") })
 	scan.open()
-	// A following scan gives a deterministic barrier after the stale snapshot.
+
 	InspectForTest(s).WakeConversations()
-	awaitPollSignal(t, settled)
+	fixturekit.AwaitPollSignal(t, settled)
 	armed.Store(false)
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	state, err := repo.Workflow(session, trace.SessionSubject)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if state.Value != trace.SessionIdle || calls.Load() != 1 {
 		t.Fatalf("recovery state=%s backend calls=%d", state.Value, calls.Load())
 	}
-	th, err := repo.Thread(session, sessionAgentID)
-	must(t, err)
+	th, err := repo.Thread(session, service.TestSessionAgentID)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].CompletedAt.IsZero() || th.Turns[1].Status() != "idle" {
 		t.Fatalf("recovery turns: %+v", th.Turns)
 	}
 }
 
-// pathLog records structured scheduling diagnostics without racing readers.
 type pathLog struct {
 	mu      sync.Mutex
 	records []slog.Record
@@ -199,12 +201,10 @@ func (l *pathLog) steps(project config.ProjectID, name string) int {
 	return count
 }
 
-// Approved state and local repositories are seeded while stopped. All
-// admission, reconciliation, Git effects and conversation dispatch run in Start.
 func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	t.Parallel()
 	f, a, repo := newApprovedFixture(t, "held-path")
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	landing, step := newPathGate(t), newPathGate(t)
 	var armed atomic.Bool
 	logs := &pathLog{}
@@ -220,28 +220,28 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 		return nil
 	}
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		return op.Action != LandAction && !conversationOperation(op)
+		return op.Action != service.LandAction && !service.TestConversationOperation(op)
 	}
 	f.start(t)
 	defer f.stop(t)
-	awaitPollSignal(t, landing.entered)
+	fixturekit.AwaitPollSignal(t, landing.entered)
 	design, err := f.c.OpenDesign(context.Background(), f.project)
-	must(t, err)
-	session, err := f.c.OpenSession(context.Background(), SessionOpenRequest{Project: f.project, Profile: "default"})
-	must(t, err)
+	fixturekit.Must(t, err)
+	session, err := f.c.OpenSession(context.Background(), api.SessionOpenRequest{Project: f.project, Profile: "default"})
+	fixturekit.Must(t, err)
 	armed.Store(true)
 	f.repository().WakeWorkflow()
-	awaitPollSignal(t, step.entered)
+	fixturekit.AwaitPollSignal(t, step.entered)
 	chief, err := f.c.Send(context.Background(), a, "Chief message")
-	must(t, err)
+	fixturekit.Must(t, err)
 	designed, err := f.c.DesignMessage(context.Background(), design.Design.Workstream, "Design message")
-	must(t, err)
+	fixturekit.Must(t, err)
 	messaged, err := f.c.SessionMessage(context.Background(), session.Session.Workstream, "Session message")
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, q := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session.Session.Workstream, sessionAgentID, messaged.Turn}} {
+	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session.Session.Workstream, service.TestSessionAgentID, messaged.Turn}} {
 		pathAwait(t, f.s, "conversation waited for landing or scheduling", func() bool { return pathTurnDone(f.repository(), q.stream, q.agent, q.turn) })
 	}
 	select {
@@ -264,14 +264,14 @@ func TestServiceIndependentLandingDraftAndChat(t *testing.T) {
 	t.Parallel()
 	f, a, repo := newApprovedFixture(t, "path-a")
 	c := approvedStream(t, f, repo, "path-c", config.WorkspacesGit)
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	landing, draft := newPathGate(t), newPathGate(t)
 	var allowC atomic.Bool
 	f.opts.Reconciliation.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
-		if conversationOperation(op) || op.Action == DraftAction {
+		if service.TestConversationOperation(op) || op.Action == service.DraftAction {
 			return false
 		}
-		return op.Action != LandAction || (stream == c && !allowC.Load())
+		return op.Action != service.LandAction || (stream == c && !allowC.Load())
 	}
 	var landCalls atomic.Int32
 	f.opts.boundary = func(ctx context.Context, name string) error {
@@ -285,26 +285,26 @@ func TestServiceIndependentLandingDraftAndChat(t *testing.T) {
 	})
 	f.start(t)
 	defer f.stop(t)
-	awaitPollSignal(t, landing.entered)
-	b := f.handIn(t, "path-b", handedDesign)
-	awaitPollSignal(t, draft.entered)
+	fixturekit.AwaitPollSignal(t, landing.entered)
+	b := f.handIn(t, "path-b", fixturekit.HandedDesign)
+	fixturekit.AwaitPollSignal(t, draft.entered)
 	allowC.Store(true)
 	f.repository().WakeWorkflow()
 	pathAwait(t, f.s, "C did not merge beside A and B", func() bool {
 		state, _ := f.repository().Workflow(c, trace.UnitSubject("resume"))
-		return state.Value == UnitMerged
+		return state.Value == intake.UnitMerged
 	})
 	sent, err := f.c.Send(context.Background(), a, "Reply while A and B are held")
-	must(t, err)
+	fixturekit.Must(t, err)
 	pathAwait(t, f.s, "chief did not reply", func() bool { return pathTurnDone(f.repository(), a, trace.ChiefOfStaff, sent.Turn) })
 	state, err := f.repository().Workflow(a, trace.UnitSubject("resume"))
-	must(t, err)
-	if state.Value != UnitApproved {
+	fixturekit.Must(t, err)
+	if state.Value != intake.UnitApproved {
 		t.Fatalf("A=%s", state.Value)
 	}
 	state, err = f.repository().Workflow(b, trace.FeatureSubject)
-	must(t, err)
-	if state.Value != HandedState {
+	fixturekit.Must(t, err)
+	if state.Value != intake.HandedState {
 		t.Fatalf("B=%s", state.Value)
 	}
 	landing.open()
@@ -315,11 +315,11 @@ func TestServiceTwoWorkstreamsLandAtOnce(t *testing.T) {
 	t.Parallel()
 	f, a, repo := newApprovedFixture(t, "two-land-a")
 	b := approvedStream(t, f, repo, "two-land-b", config.WorkspacesGit)
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	gate := newPathGate(t)
 	entered := make(chan struct{}, 2)
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		return op.Action != LandAction && !conversationOperation(op)
+		return op.Action != service.LandAction && !service.TestConversationOperation(op)
 	}
 	f.opts.boundary = func(ctx context.Context, name string) error {
 		if name == "land-committing" {
@@ -330,13 +330,13 @@ func TestServiceTwoWorkstreamsLandAtOnce(t *testing.T) {
 	}
 	f.start(t)
 	defer f.stop(t)
-	awaitPollSignal(t, entered)
-	awaitPollSignal(t, entered)
+	fixturekit.AwaitPollSignal(t, entered)
+	fixturekit.AwaitPollSignal(t, entered)
 	gate.open()
 	for _, stream := range []config.WorkstreamID{a, b} {
 		pathAwait(t, f.s, "concurrent landing did not merge", func() bool {
 			state, _ := f.repository().Workflow(stream, trace.UnitSubject("resume"))
-			return state.Value == UnitMerged
+			return state.Value == intake.UnitMerged
 		})
 	}
 }
@@ -344,17 +344,17 @@ func TestServiceTwoWorkstreamsLandAtOnce(t *testing.T) {
 func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 	t.Parallel()
 	f, _ := newParallelMasonFixture(t, 2, 2, disjointPlan)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repo := seedBuild(t, f, "worker-workflow", disjointPlan, config.WorkspacesGit, base)
 	seedReview(t, f, repo, stream, "resume", resumeReport)
 	approveDirectly(t, f.s, repo, stream, "resume", "spec#1")
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	landing, workers := newPathGate(t), newPathGate(t)
 	entered := make(chan struct{}, 2)
 	var active, peak atomic.Int32
 	f.engine.Mu.Lock()
 	for _, unit := range []string{"upload", "audit"} {
-		f.engine.Turns[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		f.engine.Turns[service.TestMasonTurnID(unit)] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 			n := active.Add(1)
 			defer active.Add(-1)
 			for old := peak.Load(); n > old; old = peak.Load() {
@@ -372,7 +372,7 @@ func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 	f.engine.Mu.Unlock()
 	var allowWorkers atomic.Bool
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		if conversationOperation(op) || op.Action == LandAction {
+		if service.TestConversationOperation(op) || op.Action == service.LandAction {
 			return false
 		}
 		return !allowWorkers.Load()
@@ -385,20 +385,20 @@ func TestServiceTwoMasonsRunDuringOwnLanding(t *testing.T) {
 	}
 	f.start(t)
 	defer f.stop(t)
-	awaitPollSignal(t, landing.entered)
+	fixturekit.AwaitPollSignal(t, landing.entered)
 	allowWorkers.Store(true)
 	f.repository().WakeWorkflow()
-	awaitPollSignal(t, entered)
-	awaitPollSignal(t, entered)
+	fixturekit.AwaitPollSignal(t, entered)
+	fixturekit.AwaitPollSignal(t, entered)
 	if active.Load() != 2 || peak.Load() != 2 {
 		t.Fatalf("mason concurrency active=%d peak=%d", active.Load(), peak.Load())
 	}
-	if used := InspectForTest(f.s).Pool().Slots(nil).Used[masonRole]; used != 2 {
+	if used := InspectForTest(f.s).Pool().Slots(nil).Used[intake.MasonRole]; used != 2 {
 		t.Fatalf("mason capacity=%d", used)
 	}
 	for _, unit := range []string{"upload", "audit"} {
-		th, err := f.repository().Thread(stream, masonAgent(unit))
-		must(t, err)
+		th, err := f.repository().Thread(stream, intake.MasonAgent(unit))
+		fixturekit.Must(t, err)
 		if len(th.Turns) != 1 || th.Turns[0].Claim == nil || !th.Turns[0].CompletedAt.IsZero() {
 			t.Fatalf("mason %s not running: %+v", unit, th)
 		}
@@ -423,23 +423,23 @@ func TestServiceSealAndBuildEffectsSurviveRestart(t *testing.T) {
 			})
 			f.upstream(t)
 			stream, _ := f.scenario().Ratified(t)
-			awaitPollSignal(t, gate.entered)
+			fixturekit.AwaitPollSignal(t, gate.entered)
 			f.stop(t)
 			f.opts.boundary = nil
-			jump(f.clock, f.clock.Now().Add(2*time.Second))
+			fixturekit.Jump(f.clock, f.clock.Now().Add(2*time.Second))
 			f.start(t)
 			pathAwait(t, f.s, "seal/build did not reconcile", func() bool {
 				state, _ := f.repository().Workflow(stream, trace.FeatureSubject)
-				if state.Value != BuildingState {
+				if state.Value != intake.BuildingState {
 					return false
 				}
 				records, _ := f.repository().Operations(stream)
 				var seals, builds int
 				for _, r := range records {
-					if r.Operation.Action == SealAction && r.Acknowledged {
+					if r.Operation.Action == service.SealAction && r.Acknowledged {
 						seals++
 					}
-					if r.Operation.Action == BuildAction && r.Acknowledged {
+					if r.Operation.Action == service.BuildAction && r.Acknowledged {
 						builds++
 					}
 				}
@@ -447,15 +447,15 @@ func TestServiceSealAndBuildEffectsSurviveRestart(t *testing.T) {
 			})
 			assertEffects := func() {
 				t.Helper()
-				docs := streamDocuments(t, f.repository(), stream, seal.DocumentID)
+				docs := intakefixture.StreamDocuments(t, f.repository(), stream, seal.DocumentID)
 				if len(docs) != 1 {
 					t.Fatalf("seal revisions=%d", len(docs))
 				}
 				transitions, err := trace.Read[trace.Transition](f.repository(), stream)
-				must(t, err)
+				fixturekit.Must(t, err)
 				seen := map[string]int{}
 				for _, tr := range transitions {
-					if tr.Actor == intake.BuildingActor || tr.Actor == sealingActor {
+					if tr.Actor == intake.BuildingActor || tr.Actor == intake.SealingActor {
 						seen[tr.ID]++
 					}
 				}
@@ -464,7 +464,7 @@ func TestServiceSealAndBuildEffectsSurviveRestart(t *testing.T) {
 						t.Fatalf("effect %s recorded %d times", id, n)
 					}
 				}
-				for _, id := range []string{BuildingState, "unit-resume-planned", "unit-resume-ready", "unit-dedupe-planned"} {
+				for _, id := range []string{intake.BuildingState, "unit-resume-planned", "unit-resume-ready", "unit-dedupe-planned"} {
 					if seen[id] != 1 {
 						t.Fatalf("missing build effect %s: %v", id, seen)
 					}
@@ -484,22 +484,22 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
-				requireJJ(t)
+				intakefixture.RequireJJ(t)
 			}
 			t.Parallel()
 			f, a, repo := newApprovedFixtureOn(t, "restart-a", backend)
 			b := approvedStream(t, f, repo, "restart-b", backend)
-			must(t, repo.Close())
+			fixturekit.Must(t, repo.Close())
 			remote := newPathGate(t)
 			var allowB atomic.Bool
 			f.opts.Reconciliation.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
-				if conversationOperation(op) {
+				if service.TestConversationOperation(op) {
 					return false
 				}
-				if op.Action != LandAction {
+				if op.Action != service.LandAction {
 					return true
 				}
-				in, err := decodeLand(op)
+				in, err := execution.DecodeLand(op)
 				return err != nil || in.Unit != "resume" || (stream == b && !allowB.Load())
 			}
 			gate := newPathGate(t)
@@ -514,7 +514,7 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 				return nil
 			}
 			f.start(t)
-			awaitPollSignal(t, remote.entered)
+			fixturekit.AwaitPollSignal(t, remote.entered)
 			allowB.Store(true)
 			f.repository().WakeWorkflow()
 			pathAwait(t, f.s, "B did not finish before A", func() bool {
@@ -522,36 +522,35 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 				return len(records) == 1 && records[0].Acknowledged
 			})
 			beforeRecords, err := json.Marshal(landOperations(t, f.repository(), b))
-			must(t, err)
+			fixturekit.Must(t, err)
 			bTip := featureTip(t, f, b)
-			g := providerOf(t, featureWorkspaces(f.s.cfg, f.repository()), b)
+			g := intakefixture.ProviderOf(t, intake.FeatureWorkspaces(f.s.cfg, f.repository()), b)
 			bWorkspace, found, err := g.Workspace(context.Background(), string(b))
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("B workspace missing")
 			}
-			bFile, err := os.ReadFile(filepath.Join(bWorkspace.Path, trackedFile))
-			must(t, err)
+			bFile, err := os.ReadFile(filepath.Join(bWorkspace.Path, intakefixture.TrackedFile))
+			fixturekit.Must(t, err)
 
 			if backend == config.WorkspacesJujutsu {
-				// Stop A before its local step, then crash the next service lifetime
-				// with that step's checkpoint open. B's effect is already settled.
+
 				f.stop(t)
 				crashAt := f.clock.Now().Add(time.Hour)
 				pathCrashJJService(t, f.opts.Config.Root, crashAt)
-				jump(f.clock, crashAt.Add(time.Hour))
-				if len(checkpoints(t, f, branchesDirectory)) != 1 {
+				fixturekit.Jump(f.clock, crashAt.Add(time.Hour))
+				if len(checkpoints(t, f, intake.BranchesDirectory)) != 1 {
 					t.Fatal("crash left no outstanding local-step checkpoint")
 				}
 			} else {
 				armed.Store(true)
 				remote.open()
 				f.repository().WakeWorkflow()
-				awaitPollSignal(t, gate.entered)
+				fixturekit.AwaitPollSignal(t, gate.entered)
 				f.stop(t)
 			}
 			f.opts.boundary = nil
-			jump(f.clock, f.clock.Now().Add(2*time.Second))
+			fixturekit.Jump(f.clock, f.clock.Now().Add(2*time.Second))
 			f.start(t)
 			pathAwait(t, f.s, "A landing did not recover", func() bool {
 				records := landOperations(t, f.repository(), a)
@@ -559,28 +558,28 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 			})
 			f.stop(t)
 			repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			defer repo.Close()
 			afterRecords, err := json.Marshal(landOperations(t, repo, b))
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !bytes.Equal(beforeRecords, afterRecords) || featureTip(t, f, b) != bTip {
 				t.Fatal("B's completed operation or branch was changed by A recovery")
 			}
-			afterFile, err := os.ReadFile(filepath.Join(bWorkspace.Path, trackedFile))
-			must(t, err)
+			afterFile, err := os.ReadFile(filepath.Join(bWorkspace.Path, intakefixture.TrackedFile))
+			fixturekit.Must(t, err)
 			if !bytes.Equal(bFile, afterFile) {
 				t.Fatal("B's workspace changed")
 			}
 			if backend == config.WorkspacesJujutsu {
-				onCommit(t, g, bWorkspace, bTip)
-				if paths := checkpoints(t, f, branchesDirectory); len(paths) != 0 {
+				intakefixture.OnCommit(t, g, bWorkspace, bTip)
+				if paths := checkpoints(t, f, intake.BranchesDirectory); len(paths) != 0 {
 					t.Fatalf("outstanding checkpoints after recovery: %v", paths)
 				}
 			} else {
-				if head := strings.TrimSpace(demoGit(t, f.clone, "-C", bWorkspace.Path, "rev-parse", "HEAD")); head != bTip {
+				if head := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", bWorkspace.Path, "rev-parse", "HEAD")); head != bTip {
 					t.Fatalf("B workspace head=%s, want %s", head, bTip)
 				}
-				if status := strings.TrimSpace(demoGit(t, f.clone, "-C", bWorkspace.Path, "status", "--porcelain")); status != "" {
+				if status := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", bWorkspace.Path, "status", "--porcelain")); status != "" {
 					t.Fatalf("B workspace dirty: %s", status)
 				}
 			}
@@ -589,18 +588,18 @@ func TestServiceLandingRestartPreservesCompletedCloneWork(t *testing.T) {
 				if len(records) != 1 || records[0].Result == nil || records[0].Result.Outcome != "succeeded" {
 					t.Fatalf("landing results: %+v", records)
 				}
-				docs := streamDocuments(t, repo, stream, landingDocument("resume"))
+				docs := intakefixture.StreamDocuments(t, repo, stream, execution.LandingDocument("resume"))
 				if len(docs) != 1 {
 					t.Fatalf("landing effects=%d", len(docs))
 				}
-				in, err := decodeLand(records[0].Operation)
-				must(t, err)
+				in, err := execution.DecodeLand(records[0].Operation)
+				fixturekit.Must(t, err)
 				if commits := f.landedCommits(t, stream, in.Base); len(commits) != 1 {
 					t.Fatalf("landing commits: %v", commits)
 				}
 				state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
-				must(t, err)
-				if state.Value != UnitMerged {
+				fixturekit.Must(t, err)
+				if state.Value != intake.UnitMerged {
 					t.Fatalf("unit state=%s", state.Value)
 				}
 			}
@@ -614,10 +613,10 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
-			demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "config", "core.logAllRefUpdates", "true")
+			fixturekit.DemoGit(t, filepath.Dir(p.fork), "-C", p.fork, "config", "core.logAllRefUpdates", "true")
 			p.publishDraft(t)
 			p.approve(t, nil)
-			must(t, p.repository.Close())
+			fixturekit.Must(t, p.repository.Close())
 			gate := newPathGate(t)
 			p.opts.PullRequests = p.pulls
 			p.opts.boundary = func(ctx context.Context, name string) error {
@@ -627,19 +626,19 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 				return nil
 			}
 			p.start(t)
-			awaitPollSignal(t, gate.entered)
+			fixturekit.AwaitPollSignal(t, gate.entered)
 			pushed, found := p.forkBranch(t)
 			if !found || pushed != p.pushed {
 				t.Fatal("push did not reach fork")
 			}
 			p.stop(t)
 			p.opts.boundary = nil
-			jump(p.clock, p.clock.Now().Add(2*time.Second))
+			fixturekit.Jump(p.clock, p.clock.Now().Add(2*time.Second))
 			p.start(t)
 			pathAwait(t, p.s, "publication did not recover", func() bool {
 				records, _ := p.shedFixture.repository().Operations(p.stream)
 				for _, r := range records {
-					if r.Operation.Action == PublishAction {
+					if r.Operation.Action == delivery.PublishAction {
 						return r.Acknowledged && r.Result != nil && r.Result.Outcome == "succeeded"
 					}
 				}
@@ -651,7 +650,7 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 			if tip, _ := p.forkBranch(t); tip != pushed {
 				t.Fatalf("published commit changed %s -> %s", pushed, tip)
 			}
-			updates := strings.Fields(demoGit(t, filepath.Dir(p.fork), "-C", p.fork, "reflog", "show", "--format=%H", "refs/heads/"+featureBranch(p.stream)))
+			updates := strings.Fields(fixturekit.DemoGit(t, filepath.Dir(p.fork), "-C", p.fork, "reflog", "show", "--format=%H", "refs/heads/"+intake.FeatureBranch(p.stream)))
 			if len(updates) != 1 || updates[0] != pushed {
 				t.Fatalf("push effects: %v", updates)
 			}
@@ -661,11 +660,11 @@ func TestServicePublicationEffectsSurviveRestart(t *testing.T) {
 				t.Fatalf("PR effects creates=%d updates=%d readies=%d PRs=%d", p.pulls.Creates, p.pulls.Updates, p.pulls.Readies, len(p.pulls.Prs))
 			}
 			repo, err := trace.Open(p.s.cfg.Root, p.s.cfg.Project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			defer repo.Close()
-			pubs, err := publications(repo, p.stream)
-			must(t, err)
-			if len(pubs) != 2 || pubs[1].Status != publicationOpened || pubs[1].Commit != pushed {
+			pubs, err := delivery.Publications(repo, p.stream)
+			fixturekit.Must(t, err)
+			if len(pubs) != 2 || pubs[1].Status != delivery.PublicationOpened || pubs[1].Commit != pushed {
 				t.Fatalf("publication effects: %+v", pubs)
 			}
 		})
@@ -677,22 +676,22 @@ func TestServiceRebaseEffectSurvivesRestart(t *testing.T) {
 	f, stream, repo := newRebaseFixture(t, "service-rebase")
 	units := newUnitWorkspaces(f.s.cfg, repo)
 	w, _, found, err := units.find(context.Background(), stream, "resume")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("unit workspace missing")
 	}
-	must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
 	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	gate := newPathGate(t)
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		if conversationOperation(op) {
+		if service.TestConversationOperation(op) {
 			return false
 		}
-		if op.Action != RebaseAction {
+		if op.Action != service.RebaseAction {
 			return true
 		}
-		in, err := decodeRebase(op)
+		in, err := execution.DecodeRebase(op)
 		return err != nil || in.Unit != "resume"
 	}
 	f.opts.boundary = func(ctx context.Context, name string) error {
@@ -702,10 +701,10 @@ func TestServiceRebaseEffectSurvivesRestart(t *testing.T) {
 		return nil
 	}
 	f.start(t)
-	awaitPollSignal(t, gate.entered)
+	fixturekit.AwaitPollSignal(t, gate.entered)
 	f.stop(t)
 	f.opts.boundary = nil
-	jump(f.clock, f.clock.Now().Add(2*time.Second))
+	fixturekit.Jump(f.clock, f.clock.Now().Add(2*time.Second))
 	f.start(t)
 	pathAwait(t, f.s, "rebase did not recover", func() bool {
 		records := rebaseOperations(t, f.repository(), stream, "resume")
@@ -715,7 +714,7 @@ func TestServiceRebaseEffectSurvivesRestart(t *testing.T) {
 	pathStartAndPass(t, f)
 	f.stop(t)
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	rebases := unitRebases(t, repo, stream, "resume")
 	if len(rebases) != 1 || rebases[0].Onto != landed {
@@ -723,12 +722,12 @@ func TestServiceRebaseEffectSurvivesRestart(t *testing.T) {
 	}
 	for file, want := range map[string]string{"RESUME.md": "resume\n", "LANDED.md": "landed\n"} {
 		data, err := os.ReadFile(filepath.Join(w.Path, file))
-		must(t, err)
+		fixturekit.Must(t, err)
 		if string(data) != want {
 			t.Fatalf("workspace %s=%q", file, data)
 		}
 	}
-	if count := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-list", "--count", landed+".."+unitBranch(stream, "resume"))); count != "1" {
+	if count := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-list", "--count", landed+".."+execution.UnitBranch(stream, "resume"))); count != "1" {
 		t.Fatalf("rebase commits=%s", count)
 	}
 }
@@ -738,11 +737,11 @@ func TestServiceDriftEffectSurvivesRestart(t *testing.T) {
 	f, stream, repo, _ := newFinalFixture(t, "service-drift")
 	before := moveFeature(t, f, stream, map[string]string{"FEATURE.md": "feature\n"})
 	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	gate := newPathGate(t)
 	var replays atomic.Int32
 	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		return op.Action != DriftAction && !conversationOperation(op)
+		return op.Action != service.DriftAction && !service.TestConversationOperation(op)
 	}
 	f.opts.boundary = func(ctx context.Context, name string) error {
 		if name == "drift-replaying" {
@@ -755,8 +754,8 @@ func TestServiceDriftEffectSurvivesRestart(t *testing.T) {
 	}
 	f.start(t)
 	_, err := f.c.RebaseWorkstream(context.Background(), stream)
-	must(t, err)
-	awaitPollSignal(t, gate.entered)
+	fixturekit.Must(t, err)
+	fixturekit.AwaitPollSignal(t, gate.entered)
 	f.stop(t)
 	f.opts.boundary = func(_ context.Context, name string) error {
 		if name == "drift-replaying" {
@@ -764,7 +763,7 @@ func TestServiceDriftEffectSurvivesRestart(t *testing.T) {
 		}
 		return nil
 	}
-	jump(f.clock, f.clock.Now().Add(2*time.Second))
+	fixturekit.Jump(f.clock, f.clock.Now().Add(2*time.Second))
 	f.start(t)
 	pathAwait(t, f.s, "drift did not recover", func() bool {
 		records := driftOperations(t, f.repository(), stream)
@@ -774,16 +773,16 @@ func TestServiceDriftEffectSurvivesRestart(t *testing.T) {
 	pathStartAndPass(t, f)
 	f.stop(t)
 	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	records := driftRecords(t, repo, stream)
-	if len(records) != 2 || records[0].Outcome != driftReplayed || records[1].Outcome != driftRebased || replays.Load() != 1 {
+	if len(records) != 2 || records[0].Outcome != service.TestDriftReplayed || records[1].Outcome != service.TestDriftRebased || replays.Load() != 1 {
 		t.Fatalf("drift effects=%+v replays=%d", records, replays.Load())
 	}
 	if tip := featureTip(t, f, stream); tip == before || parentOf(t, f, tip) != upstream {
 		t.Fatalf("drift tip=%s upstream=%s", tip, upstream)
 	}
-	if seals := seals(t, repo, stream); len(seals) != 2 || seals[1].Base.Commit != upstream {
+	if seals := intakefixture.Seals(t, repo, stream); len(seals) != 2 || seals[1].Base.Commit != upstream {
 		t.Fatalf("drift seals=%+v", seals)
 	}
 }
@@ -801,24 +800,20 @@ func pathStartAndPass(t *testing.T, f *shedFixture) {
 	}
 	f.start(t)
 	f.opts.schedulePassed = previous
-	awaitPollSignal(t, passed)
+	fixturekit.AwaitPollSignal(t, passed)
 }
 
-// TestServiceJJCrashProcess runs only as a child of the clone recovery fixture.
-// The parent kills the process after a real foreman has advanced the branch
-// inside LocalStep, leaving its checkpoint for Start's workspace recovery.
-func TestServiceJJCrashProcess(t *testing.T) {
-	t.Parallel()
+func serviceStuckAtTheLandingStep() int {
 	root := os.Getenv("OSMIA_TEST_CRASH_ROOT")
-	if root == "" {
-		t.Skip("service crash subprocess")
-	}
 	at, err := time.Parse(time.RFC3339Nano, os.Getenv("OSMIA_TEST_CRASH_AT"))
-	must(t, err)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	opts := Options{Options: service.Options{Config: config.Options{Root: root}}}
 	opts.Reconciliation.Now = func() time.Time { return at }
 	opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		in, err := decodeLand(op)
+		in, err := execution.DecodeLand(op)
 		return err != nil || in.Unit != "resume"
 	}
 	opts.boundary = func(ctx context.Context, step string) error {
@@ -830,22 +825,29 @@ func TestServiceJJCrashProcess(t *testing.T) {
 		return nil
 	}
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	defer s.Close()
-	must(t, s.Wait())
+	if err := s.Wait(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }
 
 func pathCrashJJService(t *testing.T, root string, at time.Time) {
 	t.Helper()
 	exe, err := os.Executable()
-	must(t, err)
-	cmd := exec.Command(exe, "-test.run=^TestServiceJJCrashProcess$", "-test.timeout=2m")
+	fixturekit.Must(t, err)
+	cmd := exec.Command(exe, "-test.timeout=2m")
 	cmd.Env = append(os.Environ(), "OSMIA_TEST_CRASH_ROOT="+root, "OSMIA_TEST_CRASH_AT="+at.Format(time.RFC3339Nano))
 	var logs bytes.Buffer
 	cmd.Stderr = &logs
 	output, err := cmd.StdoutPipe()
-	must(t, err)
-	must(t, cmd.Start())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, cmd.Start())
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
 			cmd.Process.Kill()
@@ -869,12 +871,12 @@ func pathCrashJJService(t *testing.T, root string, at time.Time) {
 			cmd.Wait()
 			t.Fatalf("service crash checkpoint not reached: %s", logs.String())
 		}
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		cmd.Process.Kill()
 		cmd.Wait()
 		t.Fatalf("service crash checkpoint timed out: %s", logs.String())
 	}
-	must(t, cmd.Process.Kill())
+	fixturekit.Must(t, cmd.Process.Kill())
 	if err := cmd.Wait(); err == nil {
 		t.Fatal("crashed service returned successfully")
 	}
@@ -885,28 +887,27 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	opts, _ := conversationFixture(t, "event-profile-")
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(data, []byte("\n[roles.chief_of_staff]\nevents_profile = \"other\"\n")...), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, append(data, []byte("\n[roles.chief_of_staff]\nevents_profile = \"other\"\n")...), 0600))
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	must(t, err)
-	clock := &fixedClock{At: demoStart}
+	fixturekit.Must(t, err)
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts.Reconciliation.Now = clock.Now
 	var passes atomic.Int32
 	opts.schedulePassed = func() { passes.Add(1) }
-	turns := &chiefTurns{}
+	turns := &fixturekit.ChiefTurns{}
 	runChief(&opts, cfg, turns)
 	s, c := start(t, opts)
 	repo := s.sole().repository
-	// An informational notice uses the ordinary event window, not the
-	// longer progress window. Neither queue nor dispatch may move it early.
-	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "profile-notice", Project: cfg.Project.ID, Workstream: stream, At: clock.Now(), Actor: serviceActor, Cause: "profile-notice"}
+
+	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "profile-notice", Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: clock.Now(), Actor: intake.ServiceActor, Cause: "profile-notice"}
 	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: "profile-notice", To: "ready", Reason: "profile notice"}, Events: []trace.Event{{ID: "profile-notice-event", Kind: "notice", Body: "Profile notice"}}})
-	must(t, err)
+	fixturekit.Must(t, err)
 	before := passes.Load()
 	repo.WakeWorkflow()
 	pathAwait(t, s, "event window pass did not finish", func() bool { return passes.Load() > before })
-	th, err := repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	for _, q := range th.Turns {
 		if strings.Contains(q.Request.Prompt, "Profile notice") {
 			t.Fatalf("event delivered before window: %+v", q)
@@ -915,7 +916,7 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 	clock.Advance(cfg.EventWindow())
 	repo.WakeWorkflow()
 	pathAwait(t, s, "event profile turn did not finish", func() bool {
-		th, _ := repo.ChiefOfStaffThread(stream)
+		th, _ := repo.ChiefOfStaffThread(fixturekit.Stream)
 		for _, q := range th.Turns {
 			if strings.Contains(q.Request.Prompt, "Profile notice") {
 				return !q.CompletedAt.IsZero()
@@ -923,22 +924,22 @@ func TestServiceEventProfileKeepsItsWindowAndOwnerProfile(t *testing.T) {
 		}
 		return false
 	})
-	th, err = repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err = repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	eventProfile, err := InspectForTest(s).ChiefEventsProfile(cfg)()
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, q := range th.Turns {
 		if strings.Contains(q.Request.Prompt, "Profile notice") && q.Request.Profile.Name != eventProfile.Name {
 			t.Fatalf("event profile=%s selector=%s", q.Request.Profile.Name, eventProfile.Name)
 		}
 	}
-	sent, err := c.Send(context.Background(), stream, "Owner profile")
-	must(t, err)
-	pathAwait(t, s, "owner message did not finish", func() bool { return pathTurnDone(repo, stream, trace.ChiefOfStaff, sent.Turn) })
-	th, err = repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	sent, err := c.Send(context.Background(), fixturekit.Stream, "Owner profile")
+	fixturekit.Must(t, err)
+	pathAwait(t, s, "owner message did not finish", func() bool { return pathTurnDone(repo, fixturekit.Stream, trace.ChiefOfStaff, sent.Turn) })
+	th, err = repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	_, ownerProfile, err := InspectForTest(s).ChiefOverride(cfg)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, q := range th.Turns {
 		if q.Request.TurnID == sent.Turn && q.Request.Profile.Name != ownerProfile.Name {
 			t.Fatalf("owner profile=%s role=%s", q.Request.Profile.Name, ownerProfile.Name)

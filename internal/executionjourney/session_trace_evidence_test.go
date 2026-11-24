@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -23,10 +25,6 @@ const (
 	sessionTraceC     = "https://dagger.cloud/example/traces/cccc3333"
 )
 
-// installTraceDagger puts a fake dagger CLI on PATH whose `dagger check`
-// behaves as the mode file next to it says, and returns the function that
-// sets the mode. It prints Dagger's trace link line on stderr, with or
-// without a Cloud token, the way a setup prompt would.
 func installTraceDagger(t *testing.T) func(mode string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -56,15 +54,11 @@ case "$(cat %q)" in
   exit 1 ;;
 esac
 `, modeFile)
-	must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(script), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(script), 0700))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return func(mode string) { must(t, os.WriteFile(modeFile, []byte(mode), 0600)) }
+	return func(mode string) { fixturekit.Must(t, os.WriteFile(modeFile, []byte(mode), 0600)) }
 }
 
-// sessionTraceFixture is a session service whose checks run the fake dagger
-// CLI through the production composition. A token configures the Dagger
-// Cloud token the checks receive; dagger holds further keys of the [dagger]
-// table.
 func sessionTraceFixture(t *testing.T, token, dagger string) (*Service, *Client, Options, config.ProjectID, config.WorkstreamID) {
 	t.Helper()
 	extra := ""
@@ -84,15 +78,14 @@ func sessionTraceFixture(t *testing.T, token, dagger string) (*Service, *Client,
 func sessionFeedRaw(t *testing.T, c *Client, w config.WorkstreamID) []byte {
 	t.Helper()
 	var raw json.RawMessage
-	must(t, c.Do(t.Context(), "GET", api.Prefix+"/feed/"+string(w), nil, &raw))
+	fixturekit.Must(t, c.Do(t.Context(), "GET", api.Prefix+"/feed/"+string(w), nil, &raw))
 	return raw
 }
 
-// sessionCheckEntries returns the feed's session_checks entries by run.
 func sessionCheckEntries(t *testing.T, c *Client, w config.WorkstreamID) map[int]api.FeedSessionChecks {
 	t.Helper()
 	var feed api.FeedResponse
-	must(t, json.Unmarshal(sessionFeedRaw(t, c, w), &feed))
+	fixturekit.Must(t, json.Unmarshal(sessionFeedRaw(t, c, w), &feed))
 	out := map[int]api.FeedSessionChecks{}
 	for _, e := range feed.Entries {
 		if e.SessionChecks != nil {
@@ -107,24 +100,21 @@ func sessionCheckEntries(t *testing.T, c *Client, w config.WorkstreamID) map[int
 
 func awaitSessionCheckEntry(t *testing.T, c *Client, w config.WorkstreamID, run int, ok func(api.FeedSessionChecks) bool) api.FeedSessionChecks {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if e, found := sessionCheckEntries(t, c, w)[run]; found && ok(e) {
-			return e
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no matching session_checks entry for run %d: %s", run, sessionFeedRaw(t, c, w))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	var entry api.FeedSessionChecks
+	intakefixture.Soon(t, fmt.Sprintf("a matching session_checks entry for run %d", run), func() bool {
+		e, found := sessionCheckEntries(t, c, w)[run]
+		entry = e
+		return found && ok(e)
+	})
+	return entry
 }
 
 func sessionTraceDocuments(t *testing.T, s *Service, project config.ProjectID, w config.WorkstreamID) map[string]trace.Document {
 	t.Helper()
 	repo, err := s.repository(project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
-	must(t, err)
+	fixturekit.Must(t, err)
 	out := map[string]trace.Document{}
 	for _, d := range docs {
 		if strings.HasPrefix(d.Path, "session-checks/") && d.Revision >= out[d.Path].Revision {
@@ -134,7 +124,6 @@ func sessionTraceDocuments(t *testing.T, s *Service, project config.ProjectID, w
 	return out
 }
 
-// Serial: the fake dagger CLI is on the process PATH.
 func TestSessionCheckLinkOfAnInterruptedRunStaysInTheFeedAcrossRestart(t *testing.T) {
 	mode := installTraceDagger(t)
 	s, c, opts, project, w := sessionTraceFixture(t, "session-trace-secret", "")
@@ -148,7 +137,7 @@ func TestSessionCheckLinkOfAnInterruptedRunStaysInTheFeedAcrossRestart(t *testin
 	if err := <-done; err == nil {
 		t.Fatal("a cancelled request returned a result")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, c = start(t, opts)
 	service.InspectForTest(s.core()).SetReviewChecks(nil)
 
@@ -163,41 +152,40 @@ func TestSessionCheckLinkOfAnInterruptedRunStaysInTheFeedAcrossRestart(t *testin
 	}
 	mode("pass")
 	run, err := c.SessionCheck(t.Context(), w)
-	must(t, err)
-	if run.Run != 2 || run.Status != ChecksPassed || run.TraceURL != sessionTraceB {
+	fixturekit.Must(t, err)
+	if run.Run != 2 || run.Status != checks.ChecksPassed || run.TraceURL != sessionTraceB {
 		t.Fatalf("the run after the restart: %+v", run)
 	}
 	entries := sessionCheckEntries(t, c, w)
 	if len(entries) != 2 || entries[1].TraceURL != sessionTraceA || entries[1].State != "running" || entries[1].FinishedAt != nil || entries[1].StartedAt != first.StartedAt {
 		t.Fatalf("the interrupted run's entry changed: %s", sessionFeedRaw(t, c, w))
 	}
-	if e := entries[2]; e.State != ChecksPassed || e.TraceURL != sessionTraceB || e.FinishedAt == nil {
+	if e := entries[2]; e.State != checks.ChecksPassed || e.TraceURL != sessionTraceB || e.FinishedAt == nil {
 		t.Fatalf("the new run's entry: %+v", e)
 	}
 }
 
-// Serial: the fake dagger CLI is on the process PATH.
 func TestSessionCheckResultCarriesTheLatestPrintedLinkAndSupersedesTheEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, dagger, status, link string
 	}{
-		{"passed", "pass", "", ChecksPassed, sessionTraceB},
-		{"failed", "fail", "", ChecksFailed, sessionTraceA},
-		{"incomplete after the cloud fallback", "fallback", "check_fallback = 'cloud'\n", ChecksIncomplete, sessionTraceC},
-		{"incomplete without the cloud fallback", "fallback", "", ChecksIncomplete, sessionTraceA},
+		{"passed", "pass", "", checks.ChecksPassed, sessionTraceB},
+		{"failed", "fail", "", checks.ChecksFailed, sessionTraceA},
+		{"incomplete after the cloud fallback", "fallback", "check_fallback = 'cloud'\n", checks.ChecksIncomplete, sessionTraceC},
+		{"incomplete without the cloud fallback", "fallback", "", checks.ChecksIncomplete, sessionTraceA},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mode := installTraceDagger(t)
 			s, c, _, project, w := sessionTraceFixture(t, "session-trace-secret", tc.dagger)
 			mode(tc.mode)
 			run, err := c.SessionCheck(t.Context(), w)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if run.Status != tc.status || run.TraceURL != tc.link {
 				t.Fatalf("result: %+v", run)
 			}
 			docs := sessionTraceDocuments(t, s, project, w)
 			var stored api.SessionCheckRun
-			must(t, json.Unmarshal([]byte(docs["session-checks/checks-1.json"].Content), &stored))
+			fixturekit.Must(t, json.Unmarshal([]byte(docs["session-checks/checks-1.json"].Content), &stored))
 			if stored.TraceURL != tc.link || stored.Status != tc.status {
 				t.Fatalf("result record: %+v", stored)
 			}
@@ -209,14 +197,13 @@ func TestSessionCheckResultCarriesTheLatestPrintedLinkAndSupersedesTheEvidence(t
 	}
 }
 
-// Serial: the fake dagger CLI is on the process PATH.
 func TestSessionCheckWithoutACloudTokenRecordsNoLink(t *testing.T) {
 	mode := installTraceDagger(t)
 	s, c, _, project, w := sessionTraceFixture(t, "", "")
 	mode("pass")
 	run, err := c.SessionCheck(t.Context(), w)
-	must(t, err)
-	if run.Status != ChecksPassed || run.TraceURL != "" {
+	fixturekit.Must(t, err)
+	if run.Status != checks.ChecksPassed || run.TraceURL != "" {
 		t.Fatalf("result: %+v", run)
 	}
 	for path := range sessionTraceDocuments(t, s, project, w) {
@@ -234,17 +221,16 @@ func TestSessionCheckResultIsRecordedWhenTheRequestIsCancelledAfterTheRunEnds(t 
 	s, c, _, _, w, _, _ := newSessionControlsFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	service.InspectForTest(s.core()).SetReviewChecks(checkFunc(func(checkCtx context.Context, dir string) (CheckResult, error) {
-		// The run finishes cleanly, but only once the cancellation has reached
-		// the service: the result is written with the request already gone.
+	service.InspectForTest(s.core()).SetReviewChecks(fixturekit.CheckFunc(func(checkCtx context.Context, dir string) (api.CheckResult, error) {
+
 		cancel()
 		<-checkCtx.Done()
-		return CheckResult{Output: passedReport}, nil
+		return api.CheckResult{Output: fixturekit.PassedReport}, nil
 	}))
 	if _, err := c.SessionCheck(ctx, w); err == nil {
 		t.Fatal("a cancelled request returned a result")
 	}
-	e := awaitSessionCheckEntry(t, c, w, 1, func(e api.FeedSessionChecks) bool { return e.State == ChecksPassed })
+	e := awaitSessionCheckEntry(t, c, w, 1, func(e api.FeedSessionChecks) bool { return e.State == checks.ChecksPassed })
 	if e.FinishedAt == nil {
 		t.Fatalf("entry: %+v", e)
 	}

@@ -5,6 +5,11 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
@@ -12,7 +17,6 @@ import (
 	sync "sync"
 	atomic "sync/atomic"
 	testing "testing"
-	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -36,17 +40,17 @@ var landingUnits = map[string]struct{ criterion, file string }{
 
 type landingDemo struct {
 	mu      sync.Mutex
-	reviews map[string][]UnitReviewIdentity
+	reviews map[string][]service.UnitReviewIdentity
 }
 
-func (d *landingDemo) reviewed(unit string) []UnitReviewIdentity {
+func (d *landingDemo) reviewed(unit string) []service.UnitReviewIdentity {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.reviews[unit])
 }
 
 func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
-	return intakefixture.LandingReview(ctx, unit, req, tools, func(unit string, identity UnitReviewIdentity) {
+	return intakefixture.LandingReview(ctx, unit, req, tools, func(unit string, identity service.UnitReviewIdentity) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		d.reviews[unit] = append(d.reviews[unit], identity)
@@ -55,7 +59,7 @@ func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request
 
 func landingByUnit(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) map[string]trace.Document {
 	t.Helper()
-	return intakefixture.LandingByUnit(t, repository, stream, landingDocument)
+	return intakefixture.LandingByUnit(t, repository, stream, execution.LandingDocument)
 }
 
 func TestLandingDemonstration(t *testing.T) {
@@ -65,26 +69,26 @@ func TestLandingDemonstration(t *testing.T) {
 	defer f.stop(t)
 
 	for unit, u := range landingUnits {
-		masons.Play[masonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[service.TestMasonTurnID(unit)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if u.file != "" {
 				if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), u.file), []byte("package trace\n// "+unit+"\n"), 0644); err != nil {
 					return err
 				}
 			}
-			recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Built " + unit})
+			recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Built " + unit})
 			if err != nil || !recorded {
 				return fmt.Errorf("done refused: %q %v", reason, err)
 			}
 			return nil
 		}
 	}
-	demo := &landingDemo{reviews: map[string][]UnitReviewIdentity{}}
+	demo := &landingDemo{reviews: map[string][]service.UnitReviewIdentity{}}
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("audit")] = masons.Turn
+	f.engine.Turns[service.TestMasonTurnID("audit")] = masons.Turn
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for unit := range landingUnits {
-			if strings.HasPrefix(req.Name, reviewerAgent(unit)+"-review-") {
+			if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
 				return demo.review(ctx, unit, req, tools)
 			}
 		}
@@ -107,20 +111,13 @@ func TestLandingDemonstration(t *testing.T) {
 		return nil
 	}
 	stream, _ := f.builtAs(t, "landing-demo")
-	base := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-parse", featureBranch(stream)))
-	f.awaitUnit(t, stream, "resume", UnitApproved)
-	f.awaitUnit(t, stream, "audit", UnitApproved)
-	deadline := time.Now().Add(demoTimeout)
-	for {
+	base := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "rev-parse", intake.FeatureBranch(stream)))
+	f.awaitUnit(t, stream, "resume", intake.UnitApproved)
+	f.awaitUnit(t, stream, "audit", intake.UnitApproved)
+	intakefixture.Soon(t, "the first landing to be interrupted", func() bool {
 		ops := landOperations(t, f.repository(), stream)
-		if len(ops) == 1 && slices.ContainsFunc(ops[0].History, func(a trace.OperationAction) bool { return a.Kind == "retry" }) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the first landing was never interrupted: %+v", ops)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return len(ops) == 1 && slices.ContainsFunc(ops[0].History, func(a trace.OperationAction) bool { return a.Kind == "retry" })
+	})
 	f.stop(t)
 	if got := f.landedCommits(t, stream, base); len(got) != 0 {
 		t.Fatalf("an interrupted landing moved the feature branch: %v", got)
@@ -131,10 +128,10 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	ops := landOperations(t, repository, stream)
-	first, err := decodeLand(ops[0].Operation)
-	must(t, err)
+	first, err := execution.DecodeLand(ops[0].Operation)
+	fixturekit.Must(t, err)
 	if first.Unit != "resume" || first.Base != base {
 		t.Fatalf("the first landing is %+v, not resume's on %s", first, base)
 	}
@@ -142,7 +139,7 @@ func TestLandingDemonstration(t *testing.T) {
 	if _, err := (&foreman{masons: newMasonController(f.s, repository)}).Apply(ctx, ops[0].Operation); err == nil || err.Error() != afterMoved {
 		t.Fatalf("the interrupted landing: %v", err)
 	}
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	moved := f.landedCommits(t, stream, base)
 	if len(moved) != 1 {
 		t.Fatalf("the feature branch holds %v", moved)
@@ -154,10 +151,10 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 	masons.Check(t)
 	landings := landingByUnit(t, f.repository(), stream)
-	decoded := map[string]UnitLanding{}
+	decoded := map[string]api.UnitLanding{}
 	for unit, d := range landings {
-		var l UnitLanding
-		must(t, json.Unmarshal([]byte(d.Content), &l))
+		var l api.UnitLanding
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &l))
 		decoded[unit] = l
 	}
 
@@ -176,7 +173,7 @@ func TestLandingDemonstration(t *testing.T) {
 			t.Fatalf("the first landing's retry %+v", a)
 		}
 	}
-	if message := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%B", resume.Commit)); message != strings.TrimSpace(resume.Message) || !strings.Contains(message, "Osmia-Candidate: "+resume.Candidate) || !strings.Contains(message, landingTrailer+": "+resume.Operation) {
+	if message := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%B", resume.Commit)); message != strings.TrimSpace(resume.Message) || !strings.Contains(message, "Osmia-Candidate: "+resume.Candidate) || !strings.Contains(message, execution.LandingTrailer+": "+resume.Operation) {
 		t.Fatalf("resume's landing commit message:\n%s", message)
 	}
 
@@ -195,7 +192,7 @@ func TestLandingDemonstration(t *testing.T) {
 		if order[unit] > 0 {
 			parent = commits[order[unit]-1]
 		}
-		if l.Base != parent || l.Branch != featureBranch(stream) || !slices.Equal(l.Criteria, []string{landingUnits[unit].criterion}) {
+		if l.Base != parent || l.Branch != intake.FeatureBranch(stream) || !slices.Equal(l.Criteria, []string{landingUnits[unit].criterion}) {
 			t.Fatalf("unit %s landed %+v on %v", unit, l, commits)
 		}
 		reviews := demo.reviewed(unit)
@@ -207,26 +204,26 @@ func TestLandingDemonstration(t *testing.T) {
 		t.Fatalf("dedupe landed before resume: %v", order)
 	}
 
-	transitions := allTransitions(t, f.s.cfg.Root, f.project, stream)
-	merged := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("resume")+"-"+UnitMerged })
-	ready := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("dedupe")+"-"+UnitReady })
+	transitions := intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream)
+	merged := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("resume")+"-"+intake.UnitMerged })
+	ready := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("dedupe")+"-"+intake.UnitReady })
 	started := slices.IndexFunc(transitions, func(tr trace.Transition) bool {
-		return tr.Subject == trace.UnitSubject("dedupe") && tr.To == UnitImplementing
+		return tr.Subject == trace.UnitSubject("dedupe") && tr.To == intake.UnitImplementing
 	})
 	if merged < 0 || ready < merged || started < ready || transitions[ready].Cause != resume.Operation || transitions[merged].Cause != resume.Operation {
 		t.Fatalf("resume merged at %d, dedupe ready at %d and started at %d", merged, ready, started)
 	}
 
 	rebases := unitRebases(t, f.repository(), stream, "audit")
-	if len(rebases) == 0 || rebases[0].State != UnitApproved || rebases[0].Onto != resume.Commit || rebases[0].Snapshot != approvedAudit[0].Candidate.Revision || len(rebases[0].Conflicts) != 0 {
+	if len(rebases) == 0 || rebases[0].State != intake.UnitApproved || rebases[0].Onto != resume.Commit || rebases[0].Snapshot != approvedAudit[0].Candidate.Revision || len(rebases[0].Conflicts) != 0 {
 		t.Fatalf("audit's rebases %+v", rebases)
 	}
 	back := slices.IndexFunc(transitions, func(tr trace.Transition) bool { return tr.ID == trace.UnitSubject("audit")+"-checking-rebase-1" })
-	if back < merged || transitions[back].From != UnitApproved || !strings.HasPrefix(transitions[back].Reason, "the approval no longer holds: ") {
+	if back < merged || transitions[back].From != intake.UnitApproved || !strings.HasPrefix(transitions[back].Reason, "the approval no longer holds: ") {
 		t.Fatalf("audit's return to review at %d: %+v", back, transitions[max(back, 0)])
 	}
 	reviews := demo.reviewed("audit")
-	if len(reviews) < 2 || staleReview(approvedAudit[0], reviews[1]) == "" || reviews[1].Candidate.Revision != rebases[0].Commit || reviews[1].Candidate.BaseRevision != resume.Commit {
+	if len(reviews) < 2 || execution.StaleReview(approvedAudit[0], reviews[1]) == "" || reviews[1].Candidate.Revision != rebases[0].Commit || reviews[1].Candidate.BaseRevision != resume.Commit {
 		t.Fatalf("audit's reviews %+v after rebase %+v", reviews, rebases[0])
 	}
 	if audit := decoded["audit"]; audit.Candidate == approvedAudit[0].Candidate.Revision || audit.Base == base {
@@ -234,12 +231,12 @@ func TestLandingDemonstration(t *testing.T) {
 	}
 
 	st, err := f.c.Status(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(st.Units) != 3 {
 		t.Fatalf("status units %+v", st.Units)
 	}
 	for _, u := range st.Units {
-		if u.State != UnitMerged || u.Landing == nil || u.Landing.Commit != decoded[u.Unit].Commit || u.Landing.Candidate != decoded[u.Unit].Candidate || u.Landing.Approval != decoded[u.Unit].Approval || !slices.Equal(u.Landing.Criteria, decoded[u.Unit].Criteria) {
+		if u.State != intake.UnitMerged || u.Landing == nil || u.Landing.Commit != decoded[u.Unit].Commit || u.Landing.Candidate != decoded[u.Unit].Candidate || u.Landing.Approval != decoded[u.Unit].Approval || !slices.Equal(u.Landing.Criteria, decoded[u.Unit].Criteria) {
 			t.Fatalf("status of unit %s: %+v", u.Unit, u)
 		}
 	}

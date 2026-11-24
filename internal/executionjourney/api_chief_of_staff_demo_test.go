@@ -5,6 +5,9 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	maps "maps"
 	os "os"
 	filepath "path/filepath"
@@ -30,8 +33,6 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// chiefDemoRoles runs every role of the demonstration in a container, the
-// only sandbox the fake engine's boundary check accepts, with one mason slot.
 const chiefDemoRoles = `[capacity]
 masons = 1
 [roles.chief_of_staff]
@@ -55,40 +56,32 @@ const (
 	chiefDemoQuestion = "May I change the upload API's response?"
 )
 
-// chiefDemoStatus is the status the fake chief of staff writes, with no
-// identifier in any field.
-var chiefDemoStatus = StatusView{
+var chiefDemoStatus = api.StatusView{
 	Goal:      "Ship resumable uploads.",
 	Attention: "",
 	Note:      "Two masons and a reviewer are at work on the upload unit.",
 	Agents:    []string{"The first mason is building the upload unit.", "The second mason is building the index unit.", "The reviewer is reviewing the upload unit."},
 }
 
-// chiefDemoAgents maps each worker thread of the demonstration to its agent.
-var chiefDemoAgents = map[string]string{demoThread: demoAgent, "thread_mason2": "agent_mason2", "thread_reviewer": "agent_reviewer"}
+var chiefDemoAgents = map[string]string{fixturekit.DemoThread: fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_reviewer": "agent_reviewer"}
 
 func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// An onboarded project: added through the API, with its charter written by
-	// the owner.
 	lf := newCloneFixture(t)
 	opts, engine, sessions := lf.opts, lf.engine, lf.sessions
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = configFile.WriteString(chiefDemoRoles)
-	must(t, errors.Join(err, configFile.Close()))
-	// Every backend session can be resumed, so a thread's next turn names the
-	// session of its previous one.
+	fixturekit.Must(t, errors.Join(err, configFile.Close()))
+
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
 
-	// The clock stands still, so an event window closes only when the test
-	// advances it.
-	clock := &fixedClock{At: demoStart}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts.Reconciliation.Now = clock.Now
 	lives := make(chan *trace.Repository, 1)
-	opts = Enforce(opts, Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}}})
+	opts = Enforce(opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}}})
 	production := opts.Threads
 	opts.Threads = func(r *trace.Repository, cfg *config.Config) (coreadapter.Reconciler, error) {
 		bound, err := production(r, cfg)
@@ -100,17 +93,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		default:
 		}
 		lives <- r
-		// The service grants thread turns to the chief of staff alone. The
-		// fake workers are added here with their ask tool; the chief of staff
-		// keeps the service's grant and tools.
-		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
+
+		turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
 		turns.Grants = maps.Clone(turns.Grants)
 		for _, role := range []string{"mason", "reviewer"} {
 			turns.Grants[role] = coreadapter.Capabilities{Tools: []string{questions.AskTool}}
 		}
-		// The fake workers build no unit: each works in an empty directory of
-		// its own, with no workspace to copy back to.
-		turns.Workspaces, turns.Capture = stagedWorkspaces{}, nil
+
+		turns.Workspaces, turns.Capture = intake.StagedWorkspaces{}, nil
 		selectChief := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			if scope.Role == trace.ChiefOfStaff {
@@ -132,43 +122,40 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 
 	s, c := start(t, opts)
-	added, err := c.AddProject(ctx, request(lf.clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(lf.clone))
+	fixturekit.Must(t, err)
 	id := added.Project.ID
 	writeCharter(t, c, added.Project.ID, chiefDemoCharter)
 	onboarded, err := c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if cs := onboarded.Project.CharterState; cs == nil || cs.Rules != 1 {
 		t.Fatalf("charter: %+v", cs)
 	}
 	cfg := s.current()
 	c.Close()
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	// The test fixture creates the workstream: two masons and a reviewer, each
-	// with one queued turn.
 	repo, err := trace.Open(cfg.Root, cfg.For(id).Project)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), ownerActor))
-	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: id, Workstream: stream, At: clock.Now(), Actor: architectActor, Cause: "fixture", Depth: 1},
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), intake.OwnerActor))
+	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: plan.SpecDocument, Revision: 1, Project: id, Workstream: fixturekit.Stream, At: clock.Now(), Actor: intake.ArchitectActor, Cause: "fixture", Depth: 1},
 		Path: plan.SpecPath, Content: chiefDemoSpec}}))
 	for _, w := range []struct{ agent, thread, role, turn string }{
-		{demoAgent, demoThread, "mason", "build"}, {"agent_mason2", "thread_mason2", "mason", "build2"}, {"agent_reviewer", "thread_reviewer", "reviewer", "review"},
+		{fixturekit.DemoAgent, fixturekit.DemoThread, "mason", "build"}, {"agent_mason2", "thread_mason2", "mason", "build2"}, {"agent_reviewer", "thread_reviewer", "reviewer", "review"},
 	} {
-		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: w.agent, Project: id, Workstream: stream, At: clock.Now(), Actor: ownerActor, Cause: "workstream_created"}
-		must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: w.role, ThreadID: w.thread}))
+		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: w.agent, Project: id, Workstream: fixturekit.Stream, At: clock.Now(), Actor: intake.OwnerActor, Cause: "workstream_created"}
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h, Role: w.role, ThreadID: w.thread}))
 		h.Schema, h.ID, h.Cause, h.Depth = "osmia.trace.turn-request", "request_"+w.turn, "message_"+w.turn, 1
 		_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: w.agent, ThreadID: w.thread, TurnID: w.turn,
 			Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the " + w.role + ".", Prompt: "Work: " + w.turn})
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	select {
 	case <-lives:
 	default:
 	}
 
-	// From here on a pass runs only when the test sends a tick.
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Ticks = ticks
 	var passes atomic.Uint64
@@ -176,7 +163,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	lifetime := func() (*Service, *Client, *trace.Repository) {
 		t.Helper()
 		s, err := Start(ctx, opts)
-		must(t, err)
+		fixturekit.Must(t, err)
 		c := NewClient(s.Socket())
 		t.Cleanup(func() {
 			c.Close()
@@ -189,7 +176,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			return s, c, r
 		case <-s.done:
 			t.Fatalf("service stopped before opening the trace: %v", s.Wait())
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("service did not open the trace")
 		}
 		return nil, nil, nil
@@ -197,30 +184,28 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	stop := func(s *Service, c *Client) {
 		t.Helper()
 		c.Close()
-		must(t, s.Close())
+		fixturekit.Must(t, s.Close())
 	}
 
-	// The fake agents. Each records what it saw wrong under mu, and the test
-	// fails on it at the end.
 	var mu sync.Mutex
 	var problems []string
 	results := map[string][]string{}
 	prompts := map[string]agent.Request{}
 	problem := func(args ...any) { problems = append(problems, fmt.Sprintln(args...)) }
 	use := func(ctx context.Context, tools *mcp.ClientSession, step, name string, args map[string]any) {
-		out, err := callTool(ctx, tools, name, args)
+		out, err := fixturekit.CallTool(ctx, tools, name, args)
 		if err != nil {
 			problem(step, err)
 		}
 		results[step] = append(results[step], out)
 	}
 	tools := func(ctx context.Context, name string, session *mcp.ClientSession, want ...string) {
-		if got, err := toolNames(ctx, session); err != nil || !slices.Equal(got, want) {
+		if got, err := intakefixture.ToolNames(ctx, session); err != nil || !slices.Equal(got, want) {
 			problem("tools of", name, got, err)
 		}
 	}
 	var current *trace.Repository
-	worker := func(question string) demoTurn {
+	worker := func(question string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -228,14 +213,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			tools(ctx, req.Name, session, questions.AskTool)
 			if question != "" {
 				use(ctx, session, req.Name, questions.AskTool, map[string]any{"question": question})
-				return questionResult(req, "session-"+req.Name, "Asked"), nil
+				return intakefixture.QuestionResult(req, "session-"+req.Name, "Asked"), nil
 			}
-			// The second mason runs while the first waits for its answer.
-			th, err := current.Thread(stream, demoAgent)
+
+			th, err := current.Thread(fixturekit.Stream, fixturekit.DemoAgent)
 			if err != nil || !th.Parked() {
 				problem("second mason ran before the first parked", err)
 			}
-			return questionResult(req, "session-"+req.Name, "Built"), nil
+			return intakefixture.QuestionResult(req, "session-"+req.Name, "Built"), nil
 		}
 	}
 	engine.Turns["build"] = worker("Where does state live?")
@@ -258,9 +243,9 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		defer mu.Unlock()
 		prompts[req.Name] = req
 		tools(ctx, req.Name, session, questions.AskTool)
-		return questionResult(req, "session-"+req.Name, "Continued"), nil
+		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
 	}
-	var sent []ConversationEntry
+	var sent []api.ConversationEntry
 	events := map[string]int{}
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, session *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
@@ -269,24 +254,22 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		tools(ctx, req.Name, session, "answer", "ask_owner_about_checks", "capacity", "decide", "decide_amendment", "decide_change", "decide_charter", "drop_dependency", "escalate", "factory_context", "file_read", "flake_fix", "follow_up", "hand_back_drift", "inspect_code", "log_assumption", "move_unit", "move_workstream", "notify", "pause", "preview", "prioritise", "project_context", "propose_charter", "pull_request_checks", "read_cloud_trace", "read_remote_file", "record_delivery_brief", "record_discovery", "relay_ruling", "request_change", "resolve_contested", "resolve_objection", "resume", "retry_change", "route_amendment", "set_status", "triage_finding")
 		switch {
 		case len(sent) > 0 && req.Name == sent[0].Turn:
-			// The chief of staff reads the workstream's documents in its view.
-			if listed, err := readTool(ctx, session, "."); err != nil || listed != plan.SpecPath {
+
+			if listed, err := intakefixture.ReadTool(ctx, session, "."); err != nil || listed != plan.SpecPath {
 				problem("chief of staff view lists", listed, err)
 			}
-			if spec, err := readTool(ctx, session, plan.SpecPath); err != nil || spec != chiefDemoSpec {
+			if spec, err := intakefixture.ReadTool(ctx, session, plan.SpecPath); err != nil || spec != chiefDemoSpec {
 				problem("chief of staff reads spec", spec, err)
 			}
-			// A status naming an agent by its ID is refused; one in words is
-			// stored.
-			refused := map[string]any{"goal": chiefDemoStatus.Goal, "note": chiefDemoStatus.Note, "agents": []string{demoAgent + " is building."}}
+
+			refused := map[string]any{"goal": chiefDemoStatus.Goal, "note": chiefDemoStatus.Note, "agents": []string{fixturekit.DemoAgent + " is building."}}
 			use(ctx, session, "status", "set_status", refused)
 			use(ctx, session, "status", "set_status", map[string]any{"goal": chiefDemoStatus.Goal, "attention": chiefDemoStatus.Attention, "note": chiefDemoStatus.Note, "agents": chiefDemoStatus.Agents})
-			return questionResult(req, "session-chief", chiefDemoReply), nil
+			return intakefixture.QuestionResult(req, "session-chief", chiefDemoReply), nil
 		case len(sent) > 1 && req.Name != sent[0].Turn && !strings.HasPrefix(req.Name, "events_"):
-			return questionResult(req, "session-chief", "The upload API stays as it is."), nil
+			return intakefixture.QuestionResult(req, "session-chief", "The upload API stays as it is."), nil
 		case !strings.HasPrefix(req.Name, "events_"):
-		// Prompts replay nothing here: a resumed session receives only the new
-		// events, so each case matches one event turn.
+
 		case strings.Contains(req.Prompt, "asked by the mason: Where does state live?"):
 			events["questions"]++
 			if !strings.Contains(req.Prompt, "asked by the reviewer: "+chiefDemoQuestion) {
@@ -298,14 +281,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			use(ctx, session, "chief", "answer", map[string]any{"question": "1", "text": chiefDemoAnswer, "citations": []string{"charter#1"}})
 			use(ctx, session, "chief", "escalate", map[string]any{"questions": []string{"2"}, "rephrasing": "May the upload API's response change?",
 				"blocked": "The reviewer's review of the upload unit.", "options": []string{"Change it", "Keep it and add an endpoint"}, "recommendation": "Keep it and add an endpoint."})
-			return questionResult(req, "session-chief", "Answered one, escalated one"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Answered one, escalated one"), nil
 		case strings.Contains(req.Prompt, ", escalation_2 (questions 2): "+chiefDemoRuling):
 			events["ruling"]++
 			use(ctx, session, "chief", "relay_ruling", map[string]any{"question": "2", "text": chiefDemoRelayed, "scope": "notify"})
-			return questionResult(req, "session-chief", "Relayed"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
 		}
 		problem("unexpected chief-of-staff turn", req.Name, req.Prompt)
-		return questionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	engine.Turns["answer_1"], engine.Turns["answer_2"] = resumed, resumed
 	runs := func() map[string]int {
@@ -325,8 +308,8 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 	question := func(r *trace.Repository, id string) trace.QuestionState {
 		t.Helper()
-		list, err := r.Questions(stream)
-		must(t, err)
+		list, err := r.Questions(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		for _, q := range list {
 			if q.Asked.ID == id {
 				return q
@@ -337,8 +320,8 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	}
 	threadOf := func(r *trace.Repository, agent string) trace.Thread {
 		t.Helper()
-		th, err := r.Thread(stream, agent)
-		must(t, err)
+		th, err := r.Thread(fixturekit.Stream, agent)
+		fixturekit.Must(t, err)
 		return th
 	}
 	turnDone := func(r *trace.Repository, agent, turn, status string) bool {
@@ -357,14 +340,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		}
 		return false
 	}
-	ownerDone := func(r *trace.Repository, entry ConversationEntry) bool {
-		chief, err := r.ChiefOfStaffThread(stream)
-		must(t, err)
+	ownerDone := func(r *trace.Repository, entry api.ConversationEntry) bool {
+		chief, err := r.ChiefOfStaffThread(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		return turnDone(r, chief.Identity.ID, entry.Turn, "idle")
 	}
 	quiescent := func(r *trace.Repository) bool {
-		threads, err := r.Threads(stream)
-		must(t, err)
+		threads, err := r.Threads(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		for _, th := range threads {
 			if th.Active != "" {
 				return false
@@ -375,8 +358,8 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 				}
 			}
 		}
-		operations, err := r.Operations(stream)
-		must(t, err)
+		operations, err := r.Operations(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		for _, op := range operations {
 			if op.Operation.Action == thread.TurnAction && !op.Acknowledged {
 				return false
@@ -391,14 +374,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			t.Fatalf("%s: cannot subscribe to stopped service: %v", phase, s.Wait())
 		}
 		defer service.InspectForTest(s.core()).Hub().Unsubscribe(sub)
-		deadline := time.NewTimer(demoTimeout)
+		deadline := time.NewTimer(fixturekit.DemoTimeout)
 		defer deadline.Stop()
 		poll := time.NewTicker(time.Second)
 		defer poll.Stop()
 		diagnose := func(reason string) {
 			t.Helper()
-			threads, err := r.Threads(stream)
-			t.Logf("PHASE %s project=%s workstream=%s reason=%s now=%s passes=%d threads_error=%v", phase, id, stream, reason, clock.Now(), passes.Load(), err)
+			threads, err := r.Threads(fixturekit.Stream)
+			t.Logf("PHASE %s project=%s workstream=%s reason=%s now=%s passes=%d threads_error=%v", phase, id, fixturekit.Stream, reason, clock.Now(), passes.Load(), err)
 			for _, th := range threads {
 				t.Logf("worker=%s thread=%s active=%s status=%s parked=%v", th.Identity.ID, th.Identity.ThreadID, th.Active, th.Status, th.Parked())
 				for _, q := range th.Turns {
@@ -412,7 +395,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 					}
 				}
 			}
-			operations, err := r.Operations(stream)
+			operations, err := r.Operations(fixturekit.Stream)
 			t.Logf("operations_error=%v", err)
 			for _, op := range operations {
 				if op.Operation.Action != thread.TurnAction {
@@ -461,41 +444,39 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		}
 	}
 
-	// 1. The owner sends a message; the chief of staff replies and writes the
-	// workstream's status.
 	s, c, repo = lifetime()
 	mu.Lock()
 	current = repo
-	message, err := c.Send(ctx, stream, "Where do we stand?")
+	message, err := c.Send(ctx, fixturekit.Stream, "Where do we stand?")
 	sent = append(sent, message)
 	mu.Unlock()
-	must(t, err)
-	if message.State != TurnQueued {
+	fixturekit.Must(t, err)
+	if message.State != api.TurnQueued {
 		t.Fatalf("sent: %+v", message)
 	}
 	await(s, repo, "owner reply and both questions with the second mason completed", func() bool {
-		// The reviewer asks only after the mason owns the original question.
-		asked, err := repo.Questions(stream)
-		must(t, err)
+
+		asked, err := repo.Questions(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		for _, q := range asked {
-			if q.Asked.ID == "1" && q.Asked.Thread == demoThread && q.Asked.Question == "Where does state live?" {
+			if q.Asked.ID == "1" && q.Asked.Thread == fixturekit.DemoThread && q.Asked.Question == "Where does state live?" {
 				releaseReviewer()
 			}
 		}
-		if !ownerDone(repo, message) || !turnDone(repo, demoAgent, "build", "waiting") ||
+		if !ownerDone(repo, message) || !turnDone(repo, fixturekit.DemoAgent, "build", "waiting") ||
 			!turnDone(repo, "agent_reviewer", "review", "waiting") || !turnDone(repo, "agent_mason2", "build2", "idle") {
 			return false
 		}
-		return threadOf(repo, demoAgent).Parked() && threadOf(repo, "agent_reviewer").Parked() &&
+		return threadOf(repo, fixturekit.DemoAgent).Parked() && threadOf(repo, "agent_reviewer").Parked() &&
 			question(repo, "1").State == trace.QuestionOpen && question(repo, "2").State == trace.QuestionOpen && quiescent(repo)
 	})
-	list, err := c.Conversation(ctx, stream)
-	must(t, err)
-	if got := states(list); !slices.Equal(got, []string{"message:done", "response:done"}) || list.Entries[0].Text != "Where do we stand?" || list.Entries[1].Text != chiefDemoReply {
+	list, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if got := intakefixture.States(list); !slices.Equal(got, []string{"message:done", "response:done"}) || list.Entries[0].Text != "Where do we stand?" || list.Entries[1].Text != chiefDemoReply {
 		t.Fatalf("conversation: %+v", list)
 	}
-	st, err := c.Status(ctx, stream)
-	must(t, err)
+	st, err := c.Status(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if st.Project != id || st.Status == nil {
 		t.Fatalf("status: %+v", st)
 	}
@@ -505,16 +486,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("status %+v, want %+v", st.Status, chiefDemoStatus)
 	}
 	for _, text := range append([]string{written.Goal, written.Attention, written.Note}, written.Agents...) {
-		for _, identifier := range []string{string(id), string(stream), "agent_", "thread_", "session-", "message_", "events_", "fixture-image"} {
+		for _, identifier := range []string{string(id), string(fixturekit.Stream), "agent_", "thread_", "session-", "message_", "events_", "fixture-image"} {
 			if strings.Contains(text, identifier) {
 				t.Fatalf("status field %q carries %q", text, identifier)
 			}
 		}
 	}
 
-	// 2. The first mason and the reviewer ask and park. The mason's slot goes
-	// to the queued second mason in the meantime.
-	for _, agent := range []string{demoAgent, "agent_reviewer"} {
+	for _, agent := range []string{fixturekit.DemoAgent, "agent_reviewer"} {
 		th := threadOf(repo, agent)
 		if !th.Parked() || len(th.Turns) != 1 {
 			t.Fatalf("%s: parked %v, turns %+v", agent, th.Parked(), th.Turns)
@@ -523,7 +502,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			t.Fatalf("%s asking turn outcome: %+v", agent, o)
 		}
 	}
-	if q := question(repo, "1"); q.State != trace.QuestionOpen || q.Asked.Thread != demoThread || q.Asked.Question != "Where does state live?" {
+	if q := question(repo, "1"); q.State != trace.QuestionOpen || q.Asked.Thread != fixturekit.DemoThread || q.Asked.Question != "Where does state live?" {
 		t.Fatalf("question 1: %+v", q)
 	}
 	if q := question(repo, "2"); q.State != trace.QuestionOpen || q.Asked.Thread != "thread_reviewer" {
@@ -536,15 +515,12 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("runs after asking: %v", got)
 	}
 
-	// 3. Once the event window closes, the chief of staff answers the
-	// mason's question with a citation and escalates the reviewer's. The
-	// mason resumes on its own thread.
 	clock.Advance(time.Minute)
 	await(s, repo, "cited answer and escalation", func() bool {
-		return turnDone(repo, demoAgent, "answer_1", "idle") && question(repo, "1").State == trace.QuestionAnswered &&
+		return turnDone(repo, fixturekit.DemoAgent, "answer_1", "idle") && question(repo, "1").State == trace.QuestionAnswered &&
 			question(repo, "2").State == trace.QuestionEscalated && threadOf(repo, "agent_reviewer").Parked() && quiescent(repo)
 	})
-	mason := threadOf(repo, demoAgent)
+	mason := threadOf(repo, fixturekit.DemoAgent)
 	if mason.Parked() || len(mason.Turns) != 2 || mason.Turns[1].Request.TurnID != "answer_1" || mason.Turns[1].Status() != "idle" {
 		t.Fatalf("mason after the answer: parked %v, turns %+v", mason.Parked(), mason.Turns)
 	}
@@ -555,22 +531,20 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("escalated question: %+v", q)
 	}
 
-	// 4. The escalation is in the inbox, and still there, once, after a
-	// restart.
 	inbox, err := c.Inbox(ctx)
-	must(t, err)
-	want := InboxEntry{Kind: InboxEscalation, Project: repo.Project(), Number: 1, Workstream: stream, Batch: "escalation_2", Question: "May the upload API's response change?", Blocked: "The reviewer's review of the upload unit.",
-		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", QuickReply: "Keep it and add an endpoint.", OpenedAt: clock.Now(), Answer: InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(repo.Project())}},
-		Asked: []InboxQuestion{{ID: "2", AskedBy: "agent_reviewer", Question: chiefDemoQuestion}}}
+	fixturekit.Must(t, err)
+	want := api.InboxEntry{Kind: api.InboxEscalation, Project: repo.Project(), Number: 1, Workstream: fixturekit.Stream, Batch: "escalation_2", Question: "May the upload API's response change?", Blocked: "The reviewer's review of the upload unit.",
+		Options: []string{"Change it", "Keep it and add an endpoint"}, Recommendation: "Keep it and add an endpoint.", QuickReply: "Keep it and add an endpoint.", OpenedAt: clock.Now(), Answer: api.InboxAnswer{Method: "POST", Path: "/v1/inbox/1", Body: map[string]any{"project": string(repo.Project())}},
+		Asked: []api.InboxQuestion{{ID: "2", AskedBy: "agent_reviewer", Question: chiefDemoQuestion}}}
 	if len(inbox.Entries) != 1 || !reflect.DeepEqual(inbox.Entries[0], want) {
 		t.Fatalf("inbox:\n%+v\nwant\n%+v", inbox.Entries, want)
 	}
-	wantAction := ConversationEntry{Turn: want.Batch, Kind: "action", State: TurnDone, At: want.OpenedAt,
+	wantAction := api.ConversationEntry{Turn: want.Batch, Kind: "action", State: api.TurnDone, At: want.OpenedAt,
 		Text: "Question for you: " + want.Question + "\nBlocked: " + want.Blocked +
 			"\nOptions: " + strings.Join(want.Options, "; ") + "\nRecommendation: " + want.Recommendation}
-	escalatedConversation, err := c.Conversation(ctx, stream)
-	must(t, err)
-	if got := states(escalatedConversation); !slices.Equal(got, []string{"message:done", "response:done", "action:done"}) ||
+	escalatedConversation, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if got := intakefixture.States(escalatedConversation); !slices.Equal(got, []string{"message:done", "response:done", "action:done"}) ||
 		!reflect.DeepEqual(escalatedConversation.Entries[2], wantAction) {
 		t.Fatalf("conversation after escalation: %+v", escalatedConversation)
 	}
@@ -583,24 +557,24 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	mu.Unlock()
 	await(s, repo, "escalation restart reconciliation", func() bool { return passes.Load() > beforePass && quiescent(repo) })
 	again, err := c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(again, inbox) {
 		t.Fatalf("inbox after the restart:\n%+v\nwant\n%+v", again, inbox)
 	}
 	if got := runs(); !reflect.DeepEqual(got, before) {
 		t.Fatalf("the restart ran %v, had run %v", got, before)
 	}
-	afterRestart, err := c.Conversation(ctx, stream)
-	must(t, err)
+	afterRestart, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterRestart, escalatedConversation) {
 		t.Fatalf("conversation duplicated or changed the escalation after restart: %+v", afterRestart)
 	}
 	clock.Advance(time.Second)
 	mu.Lock()
-	openMessage, err := c.Send(ctx, stream, "What is waiting on me?")
+	openMessage, err := c.Send(ctx, fixturekit.Stream, "What is waiting on me?")
 	sent = append(sent, openMessage)
 	mu.Unlock()
-	must(t, err)
+	fixturekit.Must(t, err)
 	await(s, repo, "owner reply with the open escalation", func() bool { return ownerDone(repo, openMessage) && quiescent(repo) })
 	mu.Lock()
 	openPrompt := prompts[openMessage.Turn].SystemPrompt
@@ -621,21 +595,18 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		}
 	}
 
-	// 5. The owner rules. The chief of staff rephrases the ruling as a
-	// project notice, the reviewer resumes with it, and the next message's
-	// context carries the notice.
 	answered, err := c.Answer(ctx, want.Number, chiefDemoRuling, "")
-	must(t, err)
-	if !reflect.DeepEqual(answered, AnswerResponse{Number: 1, Workstream: stream, Batch: "escalation_2", Questions: []string{"2"}, Ruling: chiefDemoRuling, At: clock.Now()}) {
+	fixturekit.Must(t, err)
+	if !reflect.DeepEqual(answered, api.AnswerResponse{Number: 1, Workstream: fixturekit.Stream, Batch: "escalation_2", Questions: []string{"2"}, Ruling: chiefDemoRuling, At: clock.Now()}) {
 		t.Fatalf("answer: %+v", answered)
 	}
 	if inbox, err := c.Inbox(ctx); err != nil || len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after the ruling: %+v %v", inbox, err)
 	}
-	wantRuling := ConversationEntry{Turn: "ruling_" + want.Batch, Kind: "action", State: TurnDone,
+	wantRuling := api.ConversationEntry{Turn: "ruling_" + want.Batch, Kind: "action", State: api.TurnDone,
 		Text: "You ruled: " + chiefDemoRuling, At: answered.At}
-	ruledConversation, err := c.Conversation(ctx, stream)
-	must(t, err)
+	ruledConversation, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(ruledConversation.Entries) != len(afterRestart.Entries)+3 ||
 		!reflect.DeepEqual(ruledConversation.Entries[5], wantRuling) {
 		t.Fatalf("conversation immediately after the owner answer: %+v; want ruling %+v", ruledConversation, wantRuling)
@@ -649,14 +620,14 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("reviewer after the ruling: parked %v, turns %+v", reviewer.Parked(), reviewer.Turns)
 	}
 	mu.Lock()
-	message, err = c.Send(ctx, stream, "Did the upload API change?")
+	message, err = c.Send(ctx, fixturekit.Stream, "Did the upload API change?")
 	sent = append(sent, message)
 	mu.Unlock()
-	must(t, err)
+	fixturekit.Must(t, err)
 	await(s, repo, "owner reply after the ruling", func() bool { return ownerDone(repo, message) && quiescent(repo) })
-	list, err = c.Conversation(ctx, stream)
-	must(t, err)
-	if got := states(list); !slices.Equal(got, []string{"message:done", "response:done", "action:done", "message:done", "response:done", "action:done", "message:done", "response:done"}) ||
+	list, err = c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if got := intakefixture.States(list); !slices.Equal(got, []string{"message:done", "response:done", "action:done", "message:done", "response:done", "action:done", "message:done", "response:done"}) ||
 		!reflect.DeepEqual(list.Entries[2], wantAction) || !reflect.DeepEqual(list.Entries[5], wantRuling) ||
 		!reflect.DeepEqual(list.Entries[:6], ruledConversation.Entries) {
 		t.Fatalf("conversation after the ruling: %+v", list)
@@ -684,23 +655,21 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	beforePass = passes.Load()
 	s, c, repo = lifetime()
 	await(s, repo, "ruling restart reconciliation", func() bool { return passes.Load() > beforePass && quiescent(repo) })
-	afterRulingRestart, err := c.Conversation(ctx, stream)
-	must(t, err)
+	afterRulingRestart, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterRulingRestart, list) {
 		t.Fatalf("conversation duplicated or changed the escalation after ruling and restart: %+v", afterRulingRestart)
 	}
 	stop(s, c)
 
-	// 6. Only the chief of staff received event turns, and the trace holds
-	// the question, the choice, the ruling and what was sent back.
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"message": 3, "build": 1, "build2": 1, "review": 1, "events": 2, "answer_1": 1, "answer_2": 1}) {
 		t.Fatalf("runs: %v", got)
 	}
 	repo, err = trace.Open(cfg.Root, cfg.For(id).Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	threads, err := repo.Threads(stream)
-	must(t, err)
+	threads, err := repo.Threads(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	eventTurns := 0
 	for _, th := range threads {
 		for _, q := range th.Turns {
@@ -731,7 +700,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		"questions/1/question.jsonl": {"Where does state live?"},
 		"questions/1/rulings.jsonl":  {`"returned_answer":"` + chiefDemoAnswer, `"citations":["charter#1"]`},
 	} {
-		committed := string(bytes.Join(workstreamRecords(t, cfg.Root, id, stream, path), []byte("\n")))
+		committed := string(bytes.Join(fixturekit.WorkstreamRecords(t, cfg.Root, id, fixturekit.Stream, path), []byte("\n")))
 		for _, w := range wants {
 			if !strings.Contains(committed, w) {
 				t.Fatalf("committed %s lacks %q:\n%s", path, w, committed)
@@ -741,7 +710,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	// Each asker resumed its own backend session with the answer.
+
 	for turn, w := range map[string]struct{ session, prompt string }{
 		"answer_1": {"session-build", questions.Prompt(trace.Question{Header: trace.Header{ID: "1"}, Question: "Where does state live?"}, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: chiefDemoAnswer, Citations: []string{"charter#1"}})},
 		"answer_2": {"session-review", questions.Prompt(trace.Question{Header: trace.Header{ID: "2"}, Question: chiefDemoQuestion}, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: chiefDemoRuling, ReturnedAnswer: chiefDemoRelayed})},
@@ -754,7 +723,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice := "## Notices\n- workstreams/" + string(stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(stream) + ")\n" + section
+	notice := "## Notices\n- workstreams/" + string(fixturekit.Stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(fixturekit.Stream) + ")\n" + section
 	if first := prompts[sent[0].Turn].SystemPrompt; strings.Contains(first, "questions/2/rulings.jsonl") || !strings.Contains(first, "The owner edited charter.md") {
 		t.Fatalf("a notice before the ruling:\n%s", first)
 	}
@@ -770,7 +739,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 			`{"next":"The ruling is delivered to each asker as its next turn.","questions":["2"],"queued":[{"role":"reviewer","what":"the answer to question 2 is delivered as the asker's next turn"}],"recorded":true,"scope":"notify"}`,
 		},
 	}
-	if st := results["status"]; len(st) != 2 || st[0] != `{"stored":false,"reason":"agents[0] contains an Osmia or backend identifier (\"`+demoAgent+`\"); refer to the work or the agent in words"}` || st[1] != `{"stored":true,"revision":1}` {
+	if st := results["status"]; len(st) != 2 || st[0] != `{"stored":false,"reason":"agents[0] contains an Osmia or backend identifier (\"`+fixturekit.DemoAgent+`\"); refer to the work or the agent in words"}` || st[1] != `{"stored":true,"revision":1}` {
 		t.Fatalf("set_status results: %v", st)
 	}
 	delete(results, "status")
@@ -778,9 +747,7 @@ func TestChiefOfStaffQuestionsAndInbox(t *testing.T) {
 		t.Fatalf("decide results: %v", d)
 	}
 	delete(results, "decide")
-	// The scheduler queues the asker's answer turn concurrently with the
-	// chief's call, so the call names the queued answer as a delivery owed or
-	// as the turn already queued.
+
 	if chief := results["chief"]; len(chief) > 0 {
 		chief[0] = strings.Replace(chief[0], `"what":"queued mason turn"`, `"what":"the answer to question 1 is delivered as the asker's next turn"`, 1)
 	}

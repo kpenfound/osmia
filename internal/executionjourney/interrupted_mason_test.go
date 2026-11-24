@@ -2,6 +2,11 @@ package executionjourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,8 +29,8 @@ import (
 )
 
 var interruptedEdits = map[string]string{
-	trackedFile:              "package trace\n\n// changed before the interruption\n",
-	"internal/trace/kept.go": "package trace\n\n// kept\n",
+	intakefixture.TrackedFile: "package trace\n\n// changed before the interruption\n",
+	"internal/trace/kept.go":  "package trace\n\n// kept\n",
 }
 
 const keptOnJujutsu = "Your workspace includes the files left by %s, which changed internal/trace/git.go, internal/trace/kept.go."
@@ -69,16 +74,11 @@ func inCommit(f *shedFixture, commit string) func(string) (string, error) {
 
 func checkReviewedEdits(t *testing.T, f *shedFixture, stream config.WorkstreamID, unit string) {
 	t.Helper()
-	f.awaitUnit(t, stream, unit, UnitReviewing)
+	f.awaitUnit(t, stream, unit, intake.UnitReviewing)
 	_, report := latestReport(t, f.repository(), stream, unit)
 	if report.Candidate == "" || !holdsEdits(inCommit(f, report.Candidate)) {
 		t.Fatalf("unit %s's candidate %q does not hold the interrupted turn's edits", unit, report.Candidate)
 	}
-}
-
-func awaitFurtherPasses(t *testing.T, passed *atomic.Int64, n int64) {
-	t.Helper()
-	intakefixture.AwaitFurtherPasses(t, passed, n)
 }
 
 func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) {
@@ -87,18 +87,18 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
 			var passed atomic.Int64
-			f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", validPlan, func(opts *Options) {
+			f, _ := newMasonFixtureWith(t, backend, "masons = 1\n", fixturekit.ValidPlan, func(opts *Options) {
 				opts.schedulePassed = func() { passed.Add(1) }
 			})
 			defer func() { f.stop(t) }()
-			recoverTurn := masonAgent("resume") + "-recover-1"
+			recoverTurn := intake.MasonAgent("resume") + "-recover-1"
 			entered := make(chan struct{})
 			var mu sync.Mutex
 			var continuation, resumed string
 			var sawEdits bool
 			f.engine.Mu.Lock()
 			f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil }
-			f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 				if err := writeEdits(req.Workspace.Directory()); err != nil {
 					return nil, err
 				}
@@ -110,44 +110,44 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 				mu.Lock()
 				continuation, resumed, sawEdits = req.Prompt, req.ResumeID, holdsEdits(inDirectory(req.Workspace.Directory()))
 				mu.Unlock()
-				if err := reportDone("Continued")(ctx, req, tools); err != nil {
+				if err := intakefixture.ReportDone("Continued")(ctx, req, tools); err != nil {
 					return nil, err
 				}
 				return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Continued", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
 			f.engine.Mu.Unlock()
 
-			stream := f.seedBuilding(t, "stopped-"+backend, validPlan)
+			stream := f.seedBuilding(t, "stopped-"+backend, fixturekit.ValidPlan)
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
 			select {
 			case <-entered:
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("the mason did not start")
 			}
 			target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-			mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-			stopped := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
-			checkPauseStop(t, stopped, "workstream", "Stop the mason")
-			awaitFurtherPasses(t, &passed, 2)
-			workspace := filepath.Join(f.opts.Config.Root, unitsDirectory, string(f.project), string(stream), "resume")
+			mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
+			stopped := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+			intakefixture.CheckPauseStop(t, stopped, "workstream", "Stop the mason")
+			intakefixture.AwaitFurtherPasses(t, &passed, 2)
+			workspace := filepath.Join(f.opts.Config.Root, intake.UnitsDirectory, string(f.project), string(stream), "resume")
 			if !holdsEdits(inDirectory(workspace)) {
 				t.Fatal("the stopped turn's edits are not in the unit's workspace")
 			}
-			if state, err := f.unitState(stream, "resume"); err != nil || state != UnitImplementing {
+			if state, err := f.unitState(stream, "resume"); err != nil || state != intake.UnitImplementing {
 				t.Fatalf("stopped unit is %q: %v", state, err)
 			}
 			ops, err := f.repository().Operations(stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			for _, op := range ops {
 				in, err := thread.DecodeTurn(op.Operation)
-				if err != nil || in.Agent != masonAgent("resume") {
+				if err != nil || in.Agent != intake.MasonAgent("resume") {
 					continue
 				}
 				switch in.Turn {
-				case masonTurnID("resume"):
-					checkNoRetry(t, op, "interrupted")
+				case service.TestMasonTurnID("resume"):
+					intakefixture.CheckNoRetry(t, op, "interrupted")
 				case recoverTurn:
 					t.Fatal("the continuation was dispatched under the hard pause")
 				}
@@ -161,7 +161,7 @@ func TestStoppedMasonTurnKeepsItsEditsAndTheContinuationNamesThem(t *testing.T) 
 
 			mutation(t, f.c, "DELETE", "pause", target)
 			checkReviewedEdits(t, f, stream, "resume")
-			next := f.awaitCompleted(t, stream, masonAgent("resume"), recoverTurn)
+			next := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), recoverTurn)
 			if next.Request.ThreadID != stopped.Request.ThreadID || !strings.HasPrefix(next.Request.Prompt, stopped.Request.Prompt) {
 				t.Fatalf("continuation request %+v", next.Request)
 			}
@@ -186,13 +186,13 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan)
+			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", fixturekit.ValidPlan)
 			defer func() { f.stop(t) }()
 			var mu sync.Mutex
 			var prompts []string
 			var sawEdits bool
 			f.engine.Mu.Lock()
-			f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+			f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				mu.Lock()
 				prompts = append(prompts, req.Prompt)
 				first := len(prompts) == 1
@@ -206,19 +206,19 @@ func TestTimedOutMasonAttemptKeepsItsEditsAndTheRetryNamesThem(t *testing.T) {
 					}
 					return &agent.Result{ClaudeID: "session-timed-out", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, TimedOut: true}, nil
 				}
-				if err := reportDone("Built")(ctx, req, tools); err != nil {
+				if err := intakefixture.ReportDone("Built")(ctx, req, tools); err != nil {
 					return nil, err
 				}
 				return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Built", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
 			f.engine.Mu.Unlock()
 
-			stream := f.seedBuilding(t, "timed-out-"+backend, validPlan)
+			stream := f.seedBuilding(t, "timed-out-"+backend, fixturekit.ValidPlan)
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
 			checkReviewedEdits(t, f, stream, "resume")
-			q := f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume"))
+			q := f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
 			if len(q.Attempts) != 2 || q.Attempts[0].Result == nil || !q.Attempts[0].Result.TimedOut || q.Attempts[0].FailureClass != coreadapter.Infrastructure {
 				t.Fatalf("the turn's attempts %+v", q.Attempts)
 			}
@@ -240,19 +240,19 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			t.Parallel()
-			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", validPlan)
+			f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", fixturekit.ValidPlan)
 			defer func() { f.stop(t) }()
-			stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "restart-"+backend)[0]
+			stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, fixturekit.ValidPlan, "restart-"+backend)[0]
 			if got := backendOf(t, f, stream); got != backend {
 				t.Fatalf("the workstream is on %s", got)
 			}
 			f.stop(t)
 			ctx := context.Background()
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			m := newMasonController(f.s, repo)
 			b, found, err := m.read(stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("building workstream missing")
 			}
@@ -261,48 +261,47 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 			}
 
 			units := newUnitWorkspaces(f.s.cfg, repo)
-			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: masonAgent("resume"), Turn: masonTurnID("resume"), Role: masonRole}
+			scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "resume", Thread: intake.MasonAgent("resume"), Turn: service.TestMasonTurnID("resume"), Role: intake.MasonRole}
 			selection, err := units.selection(ctx, scope, coreadapter.ExecutionSettings{})
-			must(t, err)
+			fixturekit.Must(t, err)
 			w, _, found, err := units.find(ctx, stream, "resume")
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !found {
 				t.Fatal("unit workspace missing")
 			}
-			viewRoot := turnViews(f.s.cfg, f.project, stream, masonAgent("resume"), masonTurnID("resume"))
-			must(t, os.MkdirAll(viewRoot, 0700))
-			// A Dagger-enabled mason's view holds an empty repository; the
-			// interrupted turn left a file in it.
+			viewRoot := execution.TurnViews(f.s.cfg, f.project, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume"))
+			fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
+
 			view, err := (isolation.Views{Directory: viewRoot}).CreateFor(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, selection.Paths, coreadapter.ExecutionSettings{Dagger: &agent.Dagger{}})
-			must(t, err)
-			must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
-			must(t, writeEdits(view.Workspace().Directory))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
+			fixturekit.Must(t, writeEdits(view.Workspace().Directory))
 			const leftInRepository = "left in the view's repository"
-			must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "left-by-the-turn"), []byte(leftInRepository), 0600))
-			must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "hooks-left-by-the-turn"), []byte(leftInRepository), 0600))
-			_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume")), f.clock.Now())
-			must(t, err)
-			must(t, repo.Close())
+			fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "left-by-the-turn"), []byte(leftInRepository), 0600))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, ".git", "hooks-left-by-the-turn"), []byte(leftInRepository), 0600))
+			_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), f.clock.Now())
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, repo.Close())
 
 			repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			defer repo.Close()
 			m.repository = repo
-			must(t, m.Pass(ctx))
-			must(t, m.Pass(ctx))
-			th, err := repo.Thread(stream, masonAgent("resume"))
-			must(t, err)
+			fixturekit.Must(t, m.Pass(ctx))
+			fixturekit.Must(t, m.Pass(ctx))
+			th, err := repo.Thread(stream, intake.MasonAgent("resume"))
+			fixturekit.Must(t, err)
 			want := "The service stopped during your last turn. Your workspace includes the files left by that turn. Continue from those files"
 			if backend == config.WorkspacesJujutsu {
 				want = "The service stopped during your last turn. " + strings.Replace(keptOnJujutsu, "%s", "that turn", 1) + " Continue from those files"
 			}
-			if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != masonAgent("resume")+"-recover-1" || !strings.Contains(th.Turns[1].Request.Prompt, want) {
+			if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != intake.MasonAgent("resume")+"-recover-1" || !strings.Contains(th.Turns[1].Request.Prompt, want) {
 				t.Fatalf("recovered mason thread %+v, want a continuation saying %q", th.Turns, want)
 			}
 			if !holdsEdits(inDirectory(w.Path)) {
 				t.Fatal("the interrupted turn's edits are not in the unit's workspace")
 			}
-			must(t, filepath.WalkDir(w.Path, func(name string, entry os.DirEntry, err error) error {
+			fixturekit.Must(t, filepath.WalkDir(w.Path, func(name string, entry os.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
@@ -318,13 +317,13 @@ func TestMasonTurnInterruptedByARestartKeepsItsEditsAndTheContinuationNamesThem(
 func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	t.Parallel()
 	var passed atomic.Int64
-	f, _ := newMasonFixtureWith(t, config.WorkspacesJujutsu, "masons = 1\n", validPlan, func(opts *Options) {
+	f, _ := newMasonFixtureWith(t, config.WorkspacesJujutsu, "masons = 1\n", fixturekit.ValidPlan, func(opts *Options) {
 		opts.schedulePassed = func() { passed.Add(1) }
 	})
 	defer func() { f.stop(t) }()
 	entered := make(chan struct{})
 	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+	f.engine.Turns[service.TestMasonTurnID("resume")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
 		if err := writeEdits(req.Workspace.Directory()); err != nil {
 			return nil, err
 		}
@@ -333,21 +332,21 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 		return &agent.Result{ClaudeID: "session-stopped", ResultText: "Half built", SessionDir: req.SessionDir, NumTurns: 1, IsError: true, Signal: 15}, nil
 	}
 	f.engine.Mu.Unlock()
-	stream := f.seedBuilding(t, "stopped-rebase", validPlan)
+	stream := f.seedBuilding(t, "stopped-rebase", fixturekit.ValidPlan)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the mason did not start")
 	}
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: stream}
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
-	checkPauseStop(t, f.awaitCompleted(t, stream, masonAgent("resume"), masonTurnID("resume")), "workstream", "Stop the mason")
-	awaitFurtherPasses(t, &passed, 2)
+	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: target, Mode: "hard", Reason: "Stop the mason", Source: "owner"})
+	intakefixture.CheckPauseStop(t, f.awaitCompleted(t, stream, intake.MasonAgent("resume"), service.TestMasonTurnID("resume")), "workstream", "Stop the mason")
+	intakefixture.AwaitFurtherPasses(t, &passed, 2)
 	f.stop(t)
 
 	ctx := context.Background()
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
 	lands := &foreman{masons: newMasonController(f.s, repository)}
 	if writing, err := lands.writing(stream, "resume", nil); err != nil || writing {
@@ -355,7 +354,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 	}
 	const landedFile = "internal/landed/landed.go"
 	landed := moveFeature(t, f, stream, map[string]string{landedFile: "package landed\n"})
-	must(t, lands.requestRebase(ctx, stream, "resume", landed))
+	fixturekit.Must(t, lands.requestRebase(ctx, stream, "resume", landed))
 	asked := rebaseOperations(t, repository, stream, "resume")
 	if len(asked) != 1 {
 		t.Fatalf("rebases asked: %+v", asked)
@@ -373,7 +372,7 @@ func TestJujutsuRebaseCarriesTheEditsOfAStoppedMasonTurn(t *testing.T) {
 		}
 	}
 	w, _, found, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "resume")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found || !holdsEdits(inDirectory(w.Path)) {
 		t.Fatalf("the rebased workspace %s does not hold the stopped turn's edits", w.Path)
 	}

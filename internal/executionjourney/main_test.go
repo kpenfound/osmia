@@ -10,6 +10,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("OSMIA_TEST_CRASH_ROOT") != "" {
+		os.Exit(serviceStuckAtTheLandingStep())
+	}
 	if !flag.Parsed() {
 		flag.Parse()
 	}

@@ -3,13 +3,15 @@ package executionjourney
 import (
 	context "context"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
 	filepath "path/filepath"
 	slices "slices"
 	strings "strings"
 	sync "sync"
 	testing "testing"
-	time "time"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
@@ -25,9 +27,6 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// handoverChief is the fake chief of staff for the hand-in demonstration. It
-// records the prompt of every event turn and, once a turn tells it a
-// workstream was sketched, writes that workstream's status.
 type handoverChief struct {
 	mu      sync.Mutex
 	prompts map[string][]string
@@ -51,7 +50,7 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 	h.prompts[stream] = append(h.prompts[stream], req.Prompt)
 	h.mu.Unlock()
 	if strings.Contains(req.Prompt, "Workstream state changed from handed to sketched") {
-		out, err := callTool(ctx, tools, status.ToolName, map[string]any{
+		out, err := fixturekit.CallTool(ctx, tools, status.ToolName, map[string]any{
 			"goal": "Ship resumable uploads.",
 			"note": "The architect's plan passed validation.", "agents": []string{"The architect is idle."}})
 		if err != nil {
@@ -64,8 +63,6 @@ func (h *handoverChief) turn(ctx context.Context, req agent.Request, _ *agent.Tu
 	return &agent.Result{ClaudeID: "session-chief", ResultText: "Noted", SessionDir: req.SessionDir, NumTurns: 1}, nil
 }
 
-// TestHandInToSketchedPlan demonstrates feature hand-in: see
-// docs/hand-in-demonstration.md.
 func TestHandInToSketchedPlan(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -74,12 +71,12 @@ func TestHandInToSketchedPlan(t *testing.T) {
 	root := opts.Config.Root
 	ref := issues.Ref{Owner: "owner", Repo: "repo", Number: 3}
 	const issueBody = "# Resumable uploads\r\n\nFrom the issue tracker.\n"
-	opts.Issues = &fakeIssues{Token: "ghp_architect_secret", Text: map[issues.Ref]string{ref: issueBody}}
+	opts.Issues = &fixturekit.FakeIssues{Token: "ghp_architect_secret", Text: map[issues.Ref]string{ref: issueBody}}
 
 	chief := &handoverChief{prompts: map[string][]string{}, written: map[string]string{}}
 	engine.Turns["*"] = chief.turn
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		turns := &isolation.Turns{Workspaces: stagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
+		turns := &isolation.Turns{Workspaces: intake.StagedWorkspaces{}, Views: isolation.Views{Directory: filepath.Join(root, "views")}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{trace.ChiefOfStaff: {Tools: []string{status.ToolName}}},
 			Select: func(_ context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				workspace := filepath.Join(root, "chief", scope.Workstream, scope.Turn)
@@ -92,7 +89,7 @@ func TestHandInToSketchedPlan(t *testing.T) {
 				set, err := status.Tool(r, trace.ChiefOfStaff, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -101,55 +98,52 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			}}, nil
 	}
 
-	// Draft 1 has a dependency cycle and leaves criterion 2 unaddressed;
-	// draft 2 is told why and delivers a valid plan.
 	problems := "- spec#2: no unit serves this criterion\n- unit \"dedupe\": dependency cycle dedupe -> resume -> dedupe"
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan}, nil)
-	f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan},
+	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.CyclicPlan}, nil)
+	f.script("draft-2-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan},
 		func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
 			if !strings.Contains(req.Prompt, "Draft 1 was not accepted:\ndraft 1 of the spec and plan is invalid:\n"+problems) {
 				return fmt.Errorf("prompt lacks the problems:\n%s", req.Prompt)
 			}
-			if got, err := readTool(ctx, tools, "draft/plan.json"); err != nil || got != cyclicPlan {
+			if got, err := intakefixture.ReadTool(ctx, tools, "draft/plan.json"); err != nil || got != fixturekit.CyclicPlan {
 				return fmt.Errorf("previous plan: %q %v", got, err)
 			}
 			return nil
 		})
 	f.start(t)
 	defer f.stop(t)
-	added, err := f.c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := f.c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
 
 	design := filepath.Join(home, "design.md")
-	must(t, os.WriteFile(design, []byte(handedDesign), 0600))
+	fixturekit.Must(t, os.WriteFile(design, []byte(fixturekit.HandedDesign), 0600))
 	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 
-	// Each hand-in copies its input unchanged under handed/.
 	stdin := "# Resumable uploads\n\n\tFrom stdin, with a tab and é.\n"
 	inputs := []struct {
-		req            HandInRequest
+		req            api.HandInRequest
 		source, handed string
 		content        string
 	}{
-		{HandInRequest{Key: "file", Path: design}, "file:" + design, "design.md", handedDesign},
-		{HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/3"}, "https://github.com/owner/repo/issues/3", "issue-3.md", issueBody},
-		{HandInRequest{Key: "stdin", Stdin: &stdin}, "stdin", "stdin", stdin},
+		{api.HandInRequest{Key: "file", Path: design}, "file:" + design, "design.md", fixturekit.HandedDesign},
+		{api.HandInRequest{Key: "url", URL: "https://github.com/owner/repo/issues/3"}, "https://github.com/owner/repo/issues/3", "issue-3.md", issueBody},
+		{api.HandInRequest{Key: "stdin", Stdin: &stdin}, "stdin", "stdin", stdin},
 	}
 	var streams []config.WorkstreamID
 	for _, in := range inputs {
 		in.req.Project = f.project
 		out, err := f.c.HandIn(ctx, in.req)
-		must(t, err)
-		if out.Project != f.project || out.State != HandedState || out.Source != in.source {
+		fixturekit.Must(t, err)
+		if out.Project != f.project || out.State != intake.HandedState || out.Source != in.source {
 			t.Fatalf("hand-in %s: %+v", in.req.Key, out)
 		}
-		if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, out.Workstream, "handed/"+in.handed); err != nil || string(data) != in.content {
+		if data, err := fixturekit.WorkstreamDocument(t, f.s.cfg.Root, f.project, out.Workstream, "handed/"+in.handed); err != nil || string(data) != in.content {
 			t.Fatalf("handed copy %s: %q %v", in.handed, data, err)
 		}
-		docs := f.documents(t, out.Workstream, handedDocument)
-		if len(docs) != 1 || docs[0].Content != in.content || docs[0].Source != in.source || docs[0].Path != "handed/"+in.handed || docs[0].Actor != ownerActor {
+		docs := f.documents(t, out.Workstream, intake.HandedDocument)
+		if len(docs) != 1 || docs[0].Content != in.content || docs[0].Source != in.source || docs[0].Path != "handed/"+in.handed || docs[0].Actor != intake.OwnerActor {
 			t.Fatalf("handed document %s: %+v", in.req.Key, docs)
 		}
 		streams = append(streams, out.Workstream)
@@ -160,8 +154,8 @@ func TestHandInToSketchedPlan(t *testing.T) {
 
 	sketches := map[config.WorkstreamID]string{}
 	for _, stream := range streams {
-		f.await(t, stream, sketched)
-		// Draft 1 is recorded and sent back; draft 2 moves the workstream.
+		f.await(t, stream, intakefixture.Sketched)
+
 		ops := f.acknowledgedDraftOperations(t, stream)
 		if len(ops) != 2 || ops[0].Result == nil || ops[0].Result.Outcome != "failed" || ops[1].Result == nil || ops[1].Result.Outcome != "succeeded" {
 			t.Fatalf("draft operations of %s: %+v", stream, ops)
@@ -171,59 +165,50 @@ func TestHandInToSketchedPlan(t *testing.T) {
 			byID[tr.ID] = tr
 		}
 		invalid := byID["draft-1-invalid"]
-		if invalid.Subject != draftSubject || invalid.To != "invalid-1" || invalid.Actor != draftingActor || invalid.Reason != "draft 1 of the spec and plan is invalid:\n"+problems || ops[0].Result.Evidence != invalid.Reason {
+		if invalid.Subject != intake.DraftSubject || invalid.To != "invalid-1" || invalid.Actor != intake.DraftingActor || invalid.Reason != "draft 1 of the spec and plan is invalid:\n"+problems || ops[0].Result.Evidence != invalid.Reason {
 			t.Fatalf("invalid draft of %s: %+v", stream, invalid)
 		}
 		if again := byID["draft-2"]; again.From != "invalid-1" || again.To != "drafting-2" || again.Cause != "draft-1-invalid" {
 			t.Fatalf("second draft request of %s: %+v", stream, again)
 		}
-		for id, want := range map[string][]string{plan.SpecDocument: {validSpec, validSpec}, plan.PlanDocument: {cyclicPlan, validPlan}} {
+		for id, want := range map[string][]string{plan.SpecDocument: {fixturekit.ValidSpec, fixturekit.ValidSpec}, plan.PlanDocument: {fixturekit.CyclicPlan, fixturekit.ValidPlan}} {
 			docs := f.documents(t, stream, id)
 			if len(docs) != 2 {
 				t.Fatalf("%s revisions of %s: %+v", id, stream, docs)
 			}
 			for i, doc := range docs {
-				if doc.Revision != i+1 || doc.Content != want[i] || doc.Actor != architectActor || doc.Cause != ops[i].Operation.ID {
+				if doc.Revision != i+1 || doc.Content != want[i] || doc.Actor != intake.ArchitectActor || doc.Cause != ops[i].Operation.ID {
 					t.Fatalf("%s revision %d of %s: %+v", id, i+1, stream, doc)
 				}
 			}
 		}
 		sketch := byID["sketched"]
-		if sketch.Subject != trace.FeatureSubject || sketch.From != HandedState || sketch.To != SketchedState || sketch.Actor != draftingActor || sketch.Cause != ops[1].Operation.ID ||
+		if sketch.Subject != trace.FeatureSubject || sketch.From != intake.HandedState || sketch.To != intake.SketchedState || sketch.Actor != intake.DraftingActor || sketch.Cause != ops[1].Operation.ID ||
 			sketch.Reason != "the architect's draft 2 passed validation: spec.md revision 2 with 2 acceptance criteria and plan.json revision 2 with 2 units" {
 			t.Fatalf("sketched transition of %s: %+v", stream, sketch)
 		}
 		sketches[stream] = sketch.Reason
-		if events := allTransitions(t, f.s.cfg.Root, f.project, stream); !slices.ContainsFunc(events, func(tr trace.Transition) bool { return tr.From == "handed" && tr.To == "sketched" }) {
+		if events := intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream); !slices.ContainsFunc(events, func(tr trace.Transition) bool { return tr.From == "handed" && tr.To == "sketched" }) {
 			t.Fatalf("transitions of %s: %+v", stream, events)
 		}
 	}
 
-	// The chief of staff hears of the hand-in and of the sketch, and its
-	// status shows every new workstream.
-	deadline := time.Now().Add(demoTimeout)
-	for {
+	intakefixture.Soon(t, "every workstream to carry a status", func() bool {
 		list, err := f.c.Statuses(ctx)
-		must(t, err)
+		fixturekit.Must(t, err)
 		ready := len(list.Workstreams) == 3
 		for _, st := range list.Workstreams {
 			ready = ready && st.Status != nil
 		}
-		if ready {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("statuses: %+v", list)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+		return ready
+	})
 	chief.mu.Lock()
 	defer chief.mu.Unlock()
 	for i, stream := range streams {
 		got, err := f.c.Status(ctx, stream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		st := got.Status
-		if got.Workstream != stream || got.Project != f.project || got.State == nil || *got.State != SketchedState || st == nil ||
+		if got.Workstream != stream || got.Project != f.project || got.State == nil || *got.State != intake.SketchedState || st == nil ||
 			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Revision != 1 {
 			t.Fatalf("status of %s: %+v %+v", stream, got, st)
 		}

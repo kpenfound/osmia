@@ -2,6 +2,12 @@ package executionjourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,8 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// heldPoll supplies a lookup that cannot finish until shutdown and an explicit
-// exit gate. Later lookups provide exact merge evidence for restart recovery.
 type heldPoll struct {
 	pulls.Client
 	once      sync.Once
@@ -38,17 +42,15 @@ func (p *heldPoll) Find(ctx context.Context, _, fork, branch string) ([]pulls.Pu
 	return []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "merged-tip", State: "closed", Head: branch, HeadRepository: fork}}, nil
 }
 
-var awaitPollSignal = fixturekit.AwaitPollSignal
-
 func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 	t.Parallel()
 	for _, archived := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own-pr", true: "archive"}[archived], func(t *testing.T) {
 			ctx := context.Background()
 			opts, cfg := conversationFixture(t, "network-poll-")
-			clock := &fixedClock{At: demoStart}
+			clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 			opts.Reconciliation.Now = clock.Now
-			turns := &chiefTurns{}
+			turns := &fixturekit.ChiefTurns{}
 			runChief(&opts, cfg, turns)
 			host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 			var exit sync.Once
@@ -59,37 +61,37 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			t.Cleanup(func() { exit.Do(func() { close(host.exit) }) })
 			repo := s.sole().repository
 			design, err := client.OpenDesign(ctx, cfg.Project.ID)
-			must(t, err)
+			fixturekit.Must(t, err)
 			session := config.WorkstreamID("w_00000000000000000000000000000111")
-			must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-test", "Session", s.now(), ownerActor))
-			_, err = ensureSessionThread(ctx, repo, cfg.Project.ID, session, s.now())
-			must(t, err)
-			publication := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), PullRequest: 42}
+			fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", "base", "session-test", "Session", s.now(), intake.OwnerActor))
+			_, err = service.TestEnsureSessionThread(ctx, repo, cfg.Project.ID, session, s.now())
+			fixturekit.Must(t, err)
+			publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(fixturekit.Stream), PullRequest: 42}
 			if archived {
-				must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: DeliveredState, ArchivedAt: demoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: publication.Upstream, Fork: publication.Fork, Branch: publication.Branch, PullRequest: 42}}))
+				fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: fixturekit.Stream, State: intake.DeliveredState, ArchivedAt: fixturekit.DemoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: publication.Upstream, Fork: publication.Fork, Branch: publication.Branch, PullRequest: 42}}))
 				InspectForTest(s).WakeConversations()
 			} else {
-				recordUpstreamOwnPullRequest(t, s, repo, stream, publication)
+				recordUpstreamOwnPullRequest(t, s, repo, fixturekit.Stream, publication)
 			}
-			awaitPollSignal(t, host.entered)
+			fixturekit.AwaitPollSignal(t, host.entered)
 			before := passes.Load()
 			repo.WakeWorkflow()
-			conversationAwait(t, func() bool { return passes.Load() > before })
-			chiefStream := stream
+			fixturekit.ConversationAwait(t, func() bool { return passes.Load() > before })
+			chiefStream := fixturekit.Stream
 			if archived {
-				chiefStream = quiet
+				chiefStream = fixturekit.Quiet
 			}
 			chief, err := client.Send(ctx, chiefStream, "Chief message")
-			must(t, err)
+			fixturekit.Must(t, err)
 			designed, err := client.DesignMessage(ctx, design.Design.Workstream, "Design message")
-			must(t, err)
+			fixturekit.Must(t, err)
 			messaged, err := client.SessionMessage(ctx, session, "Session message")
-			must(t, err)
+			fixturekit.Must(t, err)
 			for _, want := range []struct {
 				stream      config.WorkstreamID
 				agent, turn string
-			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, sessionAgentID, messaged.Turn}} {
-				conversationAwait(t, func() bool {
+			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.TestSessionAgentID, messaged.Turn}} {
+				fixturekit.ConversationAwait(t, func() bool {
 					th, err := repo.Thread(want.stream, want.agent)
 					if err != nil {
 						return false
@@ -102,38 +104,38 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 					return false
 				})
 			}
-			// Close must cancel the client and still join it before closing trace.
+
 			closed := make(chan error, 1)
 			go func() { closed <- s.Close() }()
-			awaitPollSignal(t, host.cancelled)
+			fixturekit.AwaitPollSignal(t, host.cancelled)
 			select {
 			case err := <-closed:
 				t.Fatalf("service closed before the poll exited: %v", err)
 			default:
 			}
 			_, err = repo.Workstreams()
-			must(t, err)
+			fixturekit.Must(t, err)
 			exit.Do(func() { close(host.exit) })
 			select {
 			case err := <-closed:
-				must(t, err)
-			case <-time.After(demoTimeout):
+				fixturekit.Must(t, err)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("shutdown did not join the poll")
 			}
-			// The interrupted lookup supplied no evidence. A restart repeats it.
+
 			clock.Advance(time.Second)
 			s, _ = start(t, opts)
 			repo = s.sole().repository
-			conversationAwait(t, func() bool {
+			fixturekit.ConversationAwait(t, func() bool {
 				if archived {
-					a, found := archiveRecord(t, s.store, stream)
-					return found && archiveResolved(a) && a.MergeCommit == "merged-tip"
+					a, found := intakefixture.ArchiveRecord(t, s.store, fixturekit.Stream)
+					return found && lifecycle.ArchiveResolved(a) && a.MergeCommit == "merged-tip"
 				}
-				out, revision, err := ownPullRequestOutcomeAt(repo, stream)
-				must(t, err)
+				out, revision, err := delivery.OwnPullRequestOutcomeAt(repo, fixturekit.Stream)
+				fixturekit.Must(t, err)
 				return revision == 1 && out.PullRequest == 42 && out.MergeCommit == "merged-tip"
 			})
-			must(t, s.Close())
+			fixturekit.Must(t, s.Close())
 			if host.calls.Load() != 2 {
 				t.Fatalf("lookups=%d, want interrupted lookup and restart lookup", host.calls.Load())
 			}
@@ -145,13 +147,13 @@ func TestBaseRefreshBypassesOwnWorkflow(t *testing.T) {
 	t.Parallel()
 	cfg, repo, host, refresh := ownPRFixture(t)
 	ctx := context.Background()
-	// Reserve a workflow on the same workstream without running its effect.
+
 	event := "held-network-workflow"
-	op := coreadapter.Operation{ID: trace.OperationID(cfg.Project.ID, stream, event), Boundary: coreadapter.RepositoryBoundary, Action: event, Input: []byte(`{}`)}
-	_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: event, Revision: 1, Project: cfg.Project.ID, Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "fixture"}, Subject: event, To: "held", Reason: "Hold workflow"}, Events: []trace.Event{{ID: event, Kind: event, Body: "Hold workflow", Operation: &op}}})
-	must(t, err)
-	attempt, _, err := repo.BeginOperation(ctx, stream, event, trace.WorkflowOperation, serviceActor, refresh.s.now)
-	must(t, err)
+	op := coreadapter.Operation{ID: trace.OperationID(cfg.Project.ID, fixturekit.Stream, event), Boundary: coreadapter.RepositoryBoundary, Action: event, Input: []byte(`{}`)}
+	_, err := repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: event, Revision: 1, Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "fixture"}, Subject: event, To: "held", Reason: "Hold workflow"}, Events: []trace.Event{{ID: event, Kind: event, Body: "Hold workflow", Operation: &op}}})
+	fixturekit.Must(t, err)
+	attempt, _, err := repo.BeginOperation(ctx, fixturekit.Stream, event, trace.WorkflowOperation, intake.ServiceActor, refresh.s.now)
+	fixturekit.Must(t, err)
 	if attempt == nil {
 		t.Fatal("workflow was not reserved")
 	}
@@ -159,13 +161,13 @@ func TestBaseRefreshBypassesOwnWorkflow(t *testing.T) {
 	sealStream(t, repo)
 	p := deliverWithPullRequest(t, repo, cfg, 42)
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "merged-tip", Head: p.Branch, HeadRepository: p.Fork}}
-	must(t, refresh.Pass(ctx))
-	controller, err := reconcile.New(repo, reconcile.Options{Worker: "poll-test", Now: refresh.s.now, Concurrent: concurrentOperation, Class: operationClass, Limit: InspectForTest(refresh.s).GitOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: refresh}})
-	must(t, err)
-	must(t, controller.Pass(ctx))
-	must(t, controller.Wait())
-	out, rev, err := ownPullRequestOutcomeAt(repo, stream)
-	must(t, err)
+	fixturekit.Must(t, refresh.Pass(ctx))
+	controller, err := reconcile.New(repo, reconcile.Options{Worker: "poll-test", Now: refresh.s.now, Concurrent: service.TestConcurrentOperation, Class: service.TestOperationClass, Limit: InspectForTest(refresh.s).GitOperationLimit(repo, nil), Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: refresh}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, controller.Pass(ctx))
+	fixturekit.Must(t, controller.Wait())
+	out, rev, err := delivery.OwnPullRequestOutcomeAt(repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if rev != 1 || out.MergeCommit != "merged-tip" {
 		t.Fatalf("poll waited for its workflow: %+v rev=%d", out, rev)
 	}
@@ -175,7 +177,7 @@ func TestWorkgroupChangePollingKeepsSchedulingRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, cfg := conversationFixture(t, "change-network-")
-	opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
+	opts.Reconciliation.Now = (&fixturekit.FixedClock{At: fixturekit.DemoStart}).Now
 	host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 	var exit sync.Once
 	opts.PullRequests = host
@@ -184,34 +186,33 @@ func TestWorkgroupChangePollingKeepsSchedulingRunning(t *testing.T) {
 	s, _ := start(t, opts)
 	t.Cleanup(func() { exit.Do(func() { close(host.exit) }) })
 	repo := s.sole().repository
-	// A publication on a member that is not terminal reaches the change
-	// observer without the delivered-member own-PR observer taking the gate.
-	resolutionDocument(t, repo, stream, publicationDocument, publicationPath, DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), PullRequest: 42})
-	c, api := s.requestChange(ctx, string(stream), ChangeRequest{Key: "blocked-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel the workgroup"})
-	if api != nil {
-		t.Fatal(api)
+
+	resolutionDocument(t, repo, fixturekit.Stream, delivery.PublicationDocument, delivery.PublicationPath, api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(fixturekit.Stream), PullRequest: 42})
+	c, apiErr := s.requestChange(ctx, string(fixturekit.Stream), lifecycle.ChangeRequest{Key: "blocked-cancel", Kind: "cancel", Scope: "workgroup", Change: "Cancel the workgroup"})
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	conversationAwait(t, func() bool { return currentChange(t, s, stream, c.ID).State == "presented" })
-	c = currentChange(t, s, stream, c.ID)
-	_, api = s.decideChange(ctx, string(stream), c.ID, ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "close"})
-	if api != nil {
-		t.Fatal(api)
+	fixturekit.ConversationAwait(t, func() bool { return currentChange(t, s, fixturekit.Stream, c.ID).State == "presented" })
+	c = currentChange(t, s, fixturekit.Stream, c.ID)
+	_, apiErr = s.decideChange(ctx, string(fixturekit.Stream), c.ID, service.ChangeDecision{Revision: c.Revision, Decision: "approve", PullRequests: "close"})
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	awaitPollSignal(t, host.entered)
+	fixturekit.AwaitPollSignal(t, host.entered)
 	before := passes.Load()
 	repo.WakeWorkflow()
-	conversationAwait(t, func() bool { return passes.Load() > before })
-	if held, err := changeHeld(repo, stream); err != nil || !held {
+	fixturekit.ConversationAwait(t, func() bool { return passes.Load() > before })
+	if held, err := lifecycle.ChangeHeld(repo, fixturekit.Stream); err != nil || !held {
 		t.Fatalf("change boundary lost during lookup: held=%v err=%v", held, err)
 	}
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
-	awaitPollSignal(t, host.cancelled)
+	fixturekit.AwaitPollSignal(t, host.cancelled)
 	exit.Do(func() { close(host.exit) })
 	select {
 	case err := <-closed:
-		must(t, err)
-	case <-time.After(demoTimeout):
+		fixturekit.Must(t, err)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("change observer did not drain")
 	}
 }
@@ -219,35 +220,35 @@ func TestWorkgroupChangePollingKeepsSchedulingRunning(t *testing.T) {
 func TestNetworkPollingStopsOnProjectRemoval(t *testing.T) {
 	t.Parallel()
 	opts, cfg := conversationFixture(t, "remove-network-")
-	opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
+	opts.Reconciliation.Now = (&fixturekit.FixedClock{At: fixturekit.DemoStart}).Now
 	host := &heldPoll{entered: make(chan struct{}), cancelled: make(chan struct{}), exit: make(chan struct{})}
 	opts.PullRequests = host
 	s, client := start(t, opts)
 	var exit sync.Once
 	t.Cleanup(func() { exit.Do(func() { close(host.exit) }) })
 	repo := s.sole().repository
-	must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: DeliveredState, ArchivedAt: demoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), PullRequest: 42}}))
+	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: fixturekit.Stream, State: intake.DeliveredState, ArchivedAt: fixturekit.DemoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(fixturekit.Stream), PullRequest: 42}}))
 	InspectForTest(s).WakeConversations()
-	awaitPollSignal(t, host.entered)
+	fixturekit.AwaitPollSignal(t, host.entered)
 	_, err := client.RemoveProject(context.Background(), cfg.Project.ID)
-	assertCode(t, err, Validation)
-	_, err = client.Abandon(context.Background(), quiet, "Owner cancelled the other member before removing its project")
-	must(t, err)
-	state, err := repo.Workflow(stream, trace.FeatureSubject)
-	must(t, err)
+	fixturekit.AssertCode(t, err, api.Validation)
+	_, err = client.Abandon(context.Background(), fixturekit.Quiet, "Owner cancelled the other member before removing its project")
+	fixturekit.Must(t, err)
+	state, err := repo.Workflow(fixturekit.Stream, trace.FeatureSubject)
+	fixturekit.Must(t, err)
 	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-before-project-removal", Revision: 1, Project: cfg.Project.ID, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "owner"},
-		Subject: trace.FeatureSubject, From: state.Value, To: AbandonedState, Reason: "Owner cancelled the archived member before removing its project",
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resolve-before-project-removal", Revision: 1, Project: cfg.Project.ID, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: intake.OwnerActor, Cause: "owner"},
+		Subject: trace.FeatureSubject, From: state.Value, To: intake.AbandonedState, Reason: "Owner cancelled the archived member before removing its project",
 	}})
-	must(t, err)
-	must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: AbandonedState, ArchivedAt: demoStart, Resolved: true, ResolutionEvidence: "cancelled"}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: cfg.Project.ID, Workstream: fixturekit.Stream, State: intake.AbandonedState, ArchivedAt: fixturekit.DemoStart, Resolved: true, ResolutionEvidence: "cancelled"}))
 	removed := make(chan error, 1)
 	go func() { _, err := client.RemoveProject(context.Background(), cfg.Project.ID); removed <- err }()
 	select {
 	case <-host.cancelled:
 	case err := <-removed:
 		t.Fatalf("project removal refused before cancelling its poll: %v", err)
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("project removal did not cancel its poll")
 	}
 	select {
@@ -256,12 +257,12 @@ func TestNetworkPollingStopsOnProjectRemoval(t *testing.T) {
 	default:
 	}
 	_, err = repo.Workstreams()
-	must(t, err)
+	fixturekit.Must(t, err)
 	exit.Do(func() { close(host.exit) })
 	select {
 	case err := <-removed:
-		must(t, err)
-	case <-time.After(demoTimeout):
+		fixturekit.Must(t, err)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("project removal did not finish")
 	}
 }

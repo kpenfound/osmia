@@ -1,6 +1,8 @@
 package executionjourney
 
 import (
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
 	"github.com/chromedp/chromedp"
@@ -14,7 +16,7 @@ func TestBrowserDeliveredWorkstreamCanCheckForDrift(t *testing.T) {
 	if result.Outcome != "succeeded" {
 		t.Fatal(result)
 	}
-	must(t, f.repository.Close())
+	fixturekit.Must(t, f.repository.Close())
 	f.opts.PullRequests = f.pulls
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
@@ -27,8 +29,8 @@ func TestBrowserDeliveredWorkstreamCanCheckForDrift(t *testing.T) {
 	p.Await("delivered drift action", `!document.querySelector('[data-workstream-action="rebase"]').hidden`)
 	p.Click(`[data-workstream-action="rebase"]`)
 	p.AwaitOutcome("Drift rebase 1")
-	state, err := f.s.sole().repository.Workflow(f.stream, driftRequestSubject)
-	must(t, err)
+	state, err := f.s.sole().repository.Workflow(f.stream, lifecycle.DriftRequestSubject)
+	fixturekit.Must(t, err)
 	if state.Value != "requested-1" {
 		t.Fatalf("drift request: %+v", state)
 	}

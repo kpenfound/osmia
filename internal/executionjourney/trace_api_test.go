@@ -2,6 +2,9 @@ package executionjourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	http "net/http"
 	httptest "net/http/httptest"
 	reflect "reflect"
@@ -16,7 +19,7 @@ func traceService(t *testing.T, f *walkFixture) *Service {
 	t.Helper()
 	opts := fixture(t)
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return &Service{cfg: cfg, projects: []*activeProject{runtimeFor(f.repo)}}
 }
 
@@ -32,32 +35,32 @@ func TestTraceAPIAndClient(t *testing.T) {
 	c := &Client{Client: service.ClientForTest(&http.Client{Transport: traceTransport{s}})}
 	ctx := context.Background()
 
-	summary, err := c.Trace(ctx, stream)
-	must(t, err)
-	if summary.Feature != DeliveredState || !summary.Complete || len(summary.Criteria) != 3 || len(summary.Units) != 2 || summary.Spec.Revision != 1 || summary.Delivery.Publication.Revision != 1 {
+	summary, err := c.Trace(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if summary.Feature != intake.DeliveredState || !summary.Complete || len(summary.Criteria) != 3 || len(summary.Units) != 2 || summary.Spec.Revision != 1 || summary.Delivery.Publication.Revision != 1 {
 		t.Fatalf("summary %+v", summary)
 	}
-	unit, err := c.TraceUnit(ctx, stream, "a")
-	must(t, err)
+	unit, err := c.TraceUnit(ctx, fixturekit.Stream, "a")
+	fixturekit.Must(t, err)
 	if unit.Definition.ID != "plan" || len(unit.Reviews) != 2 || unit.Reviews[1].Ref.Revision != 4 || unit.Landings[0].Commit != sha('a') {
 		t.Fatalf("unit %+v", unit)
 	}
-	criterion, err := c.TraceCriterion(ctx, stream, "spec#1")
-	must(t, err)
+	criterion, err := c.TraceCriterion(ctx, fixturekit.Stream, "spec#1")
+	fixturekit.Must(t, err)
 	if criterion.Spec.Revision != 1 || criterion.Units[0].Reports[1].Ref.Revision != 2 || criterion.Delivery.Publication == nil {
 		t.Fatalf("criterion %+v", criterion)
 	}
-	commit, err := c.TraceCommit(ctx, stream, sha('a'))
-	must(t, err)
+	commit, err := c.TraceCommit(ctx, fixturekit.Stream, sha('a'))
+	fixturekit.Must(t, err)
 	if len(commit.Landings) != 1 || commit.Landings[0].Review.Ref.Revision != 4 || commit.Landings[0].Criteria[0].Criterion != "spec#1" {
 		t.Fatalf("commit %+v", commit)
 	}
 	if !reflect.DeepEqual(before, f.snapshot()) {
 		t.Fatal("API trace walk changed repository")
 	}
-	for _, path := range []string{"bad", string(stream) + "/unit/missing", string(stream) + "/criterion/spec%239", string(stream) + "/commit/" + sha('8'), string(stream) + "/other/a", string(stream) + "/unit"} {
-		var response ErrorResponse
-		err := c.Do(ctx, http.MethodGet, Prefix+"/trace/"+path, nil, &response)
+	for _, path := range []string{"bad", string(fixturekit.Stream) + "/unit/missing", string(fixturekit.Stream) + "/criterion/spec%239", string(fixturekit.Stream) + "/commit/" + sha('8'), string(fixturekit.Stream) + "/other/a", string(fixturekit.Stream) + "/unit"} {
+		var response api.ErrorResponse
+		err := c.Do(ctx, http.MethodGet, service.Prefix+"/trace/"+path, nil, &response)
 		if err == nil {
 			t.Fatalf("%s accepted", path)
 		}
@@ -72,9 +75,6 @@ func (tr traceTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return w.Result(), nil
 }
 
-// The trace API refuses malformed selectors, unknown kinds and workstreams
-// with a validation error and a missing unit as not found, and reports an
-// unreadable trace repository as internal without its record content.
 func TestTraceAPIErrors(t *testing.T) {
 	t.Parallel()
 	f := newWalkFixture(t)
@@ -82,24 +82,23 @@ func TestTraceAPIErrors(t *testing.T) {
 	s := traceService(t, f)
 	for _, test := range []struct {
 		kind, selector string
-		code           Code
-	}{{"criterion", "bad", Validation}, {"commit", "bad", Validation}, {"commit", strings.Repeat("a", 40) + ") | all()", Validation}, {"unit", "missing", NotFound}, {"other", "a", Validation}} {
-		_, api := s.traceView(context.Background(), string(stream), test.kind, test.selector)
-		if api == nil || api.Code != test.code {
-			t.Fatalf("%s %s: %+v", test.kind, test.selector, api)
+		code           api.Code
+	}{{"criterion", "bad", api.Validation}, {"commit", "bad", api.Validation}, {"commit", strings.Repeat("a", 40) + ") | all()", api.Validation}, {"unit", "missing", api.NotFound}, {"other", "a", api.Validation}} {
+		_, apiErr := s.traceView(context.Background(), string(fixturekit.Stream), test.kind, test.selector)
+		if apiErr == nil || apiErr.Code != test.code {
+			t.Fatalf("%s %s: %+v", test.kind, test.selector, apiErr)
 		}
 	}
-	_, api := s.traceView(context.Background(), "bad", "", "")
-	if api == nil || api.Code != Validation {
-		t.Fatalf("workstream error %+v", api)
+	_, apiErr := s.traceView(context.Background(), "bad", "", "")
+	if apiErr == nil || apiErr.Code != api.Validation {
+		t.Fatalf("workstream error %+v", apiErr)
 	}
-	// A trace read failure is returned without record content: a damaged
-	// record stored beside the open handle's.
-	streamDir, err := f.root.WorkstreamTrace(project, stream)
-	must(t, err)
-	traceExec(t, streamDir, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'damaged', 1, 'secret damaged content')", "workstreams/"+string(stream)+"/documents.jsonl")
-	_, api = s.traceView(context.Background(), string(stream), "", "")
-	if api == nil || api.Code != Internal || !strings.Contains(api.Message, "trace repository") {
-		t.Fatalf("unavailable trace %+v", api)
+
+	streamDir, err := f.root.WorkstreamTrace(fixturekit.Project, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	fixturekit.TraceExec(t, streamDir, "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.document', 'damaged', 1, 'secret damaged content')", "workstreams/"+string(fixturekit.Stream)+"/documents.jsonl")
+	_, apiErr = s.traceView(context.Background(), string(fixturekit.Stream), "", "")
+	if apiErr == nil || apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "trace repository") {
+		t.Fatalf("unavailable trace %+v", apiErr)
 	}
 }

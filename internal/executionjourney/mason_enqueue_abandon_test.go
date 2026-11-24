@@ -2,6 +2,10 @@ package executionjourney
 
 import (
 	context "context"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	os "os"
 	filepath "path/filepath"
 	testing "testing"
@@ -14,7 +18,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 	for _, step := range []string{"mason-implementing", "mason-turn-queued"} {
 		t.Run(step, func(t *testing.T) {
 			ctx := context.Background()
-			gate := &changeRaceGate{Step: step, Reached: make(chan struct{}), Released: make(chan struct{})}
+			gate := &intakefixture.ChangeRaceGate{Step: step, Reached: make(chan struct{}), Released: make(chan struct{})}
 			cleanup := &lifecycleCleanupGate{reached: make(chan struct{}), released: make(chan struct{})}
 			t.Cleanup(gate.Release)
 			t.Cleanup(cleanup.release)
@@ -22,10 +26,10 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 				wait: lifecycleAwait,
 				options: func(opts *Options) {
 					file, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-					must(t, err)
+					fixturekit.Must(t, err)
 					_, err = file.WriteString("[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n")
-					must(t, err)
-					must(t, file.Close())
+					fixturekit.Must(t, err)
+					fixturekit.Must(t, file.Close())
 				},
 				checkpoint: func(ctx context.Context, step string) error {
 					if err := gate.Checkpoint(ctx, step); err != nil {
@@ -41,43 +45,43 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			gate.Step = step + ":" + string(address) + ":" + unit
 			gate.Armed.Store(true)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			must(t, err)
+			fixturekit.Must(t, err)
 			gate.Await(t)
 			repo, err := f.s.repository(f.project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			state, err := repo.Workflow(address, trace.UnitSubject(unit))
-			must(t, err)
-			if state.Value != UnitImplementing {
+			fixturekit.Must(t, err)
+			if state.Value != intake.UnitImplementing {
 				t.Fatal("checkpoint preceded the implementing transition")
 			}
 			if step == "mason-implementing" {
-				if _, err := repo.Thread(address, masonAgent(unit)); !os.IsNotExist(err) {
+				if _, err := repo.Thread(address, intake.MasonAgent(unit)); !os.IsNotExist(err) {
 					t.Fatalf("first request already exists before enqueue: %v", err)
 				}
 			} else {
-				th, err := repo.Thread(address, masonAgent(unit))
-				must(t, err)
+				th, err := repo.Thread(address, intake.MasonAgent(unit))
+				fixturekit.Must(t, err)
 				if len(th.Turns) != 1 || th.Turns[0].Claim != nil || th.Turns[0].Response != nil || len(th.Turns[0].Attempts) != 0 {
 					t.Fatalf("checkpoint did not hold an unclaimed request: %+v", th)
 				}
 			}
 			_, err = f.c.Abandon(ctx, address, "Owner cancelled the member at its enqueue boundary.")
-			must(t, err)
+			fixturekit.Must(t, err)
 			_, err = f.c.Archive(ctx, address)
-			must(t, err)
+			fixturekit.Must(t, err)
 			gate.Release()
 			cleanup.await(t)
-			th, err := repo.Thread(address, masonAgent(unit))
-			must(t, err)
+			th, err := repo.Thread(address, intake.MasonAgent(unit))
+			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 {
 				t.Fatalf("late enqueue duplicated the request: %+v", th)
 			}
 			q := th.Turns[0]
-			if q.Request.TurnID != masonTurnID(unit) || q.CompletedAt.IsZero() || q.Response == nil || !q.Response.Result.Cancelled || q.Response.Actor != abandonActor || q.Response.Failure != cancelReason || len(q.Attempts) != 0 || th.Active != "" {
+			if q.Request.TurnID != service.TestMasonTurnID(unit) || q.CompletedAt.IsZero() || q.Response == nil || !q.Response.Result.Cancelled || q.Response.Actor != intake.AbandonActor || q.Response.Failure != intake.CancelReason || len(q.Attempts) != 0 || th.Active != "" {
 				t.Fatalf("late request did not settle as cancelled in the same session: %+v", th)
 			}
 			responses, err := trace.Read[trace.TurnResponse](repo, address)
-			must(t, err)
+			fixturekit.Must(t, err)
 			count := 0
 			for _, response := range responses {
 				if response.TurnID == q.Request.TurnID && response.AgentID == q.Request.AgentID {
@@ -89,7 +93,7 @@ func TestDesignProductionAbandonAcrossMasonEnqueue(t *testing.T) {
 			}
 			cleanup.release()
 			lifecycleAwait(t, f, "same-session late-request archive cleanup", func() bool {
-				a, found := archiveRecord(t, f.s.store, address)
+				a, found := intakefixture.ArchiveRecord(t, f.s.store, address)
 				return found && !a.CleanedAt.IsZero()
 			})
 			project := repo.Project()

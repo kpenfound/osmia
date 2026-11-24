@@ -3,6 +3,9 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// spanLog collects the route spans the router sends.
 type spanLog struct {
 	mu    sync.Mutex
 	spans []router.SpanRoute
@@ -33,8 +35,6 @@ func (l *spanLog) all() []router.SpanRoute {
 	return append([]router.SpanRoute(nil), l.spans...)
 }
 
-// routeThrough makes the service's router ask a Jev that answers as p does, and
-// collects the route spans it sends.
 func routeThrough(s *Service, p *jevfixture.Transitions) *spanLog {
 	service.InspectForTest(s.core()).SetJudge(jevfixture.TransitionJudge(s.now, p))
 	log := &spanLog{}
@@ -42,12 +42,10 @@ func routeThrough(s *Service, p *jevfixture.Transitions) *spanLog {
 	return log
 }
 
-// routeRecords returns the route journal of the workstream's exits, the latest
-// revision of each.
 func routeRecords(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []router.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	latest := map[string]trace.Document{}
 	var order []string
 	for _, d := range docs {
@@ -64,7 +62,7 @@ func routeRecords(t *testing.T, repo *trace.Repository, stream config.Workstream
 	var out []router.Record
 	for _, id := range order {
 		var rec router.Record
-		must(t, json.Unmarshal([]byte(latest[id].Content), &rec))
+		fixturekit.Must(t, json.Unmarshal([]byte(latest[id].Content), &rec))
 		out = append(out, rec)
 	}
 	return out
@@ -92,24 +90,22 @@ func latestOf(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, 
 	return out
 }
 
-// With the fixture Jev that finds the default fits, a unit's exit commits its
-// default as it always has, and the transition records the default it took.
 func TestAUnitExitThatFitsItsDefaultCommitsItAndRecordsIt(t *testing.T) {
 	t.Parallel()
-	f, stream, repo := newChecksFixture(t, "route-default", &fakeChecks{Outcomes: passing()})
+	f, stream, repo := newChecksFixture(t, "route-default", &fixturekit.FakeChecks{Outcomes: fixturekit.Passing()})
 	p := &jevfixture.Transitions{}
 	log := routeThrough(f.s, p)
 	runChecks(t, f.s, repo, stream)
 
 	moved := latestOf(t, repo, stream, trace.UnitSubject("resume"))
-	if moved.To != UnitReviewing || moved.DefaultTo != UnitReviewing || moved.DecidedBy != trace.DecidedByCode || moved.Departed() || moved.Judgment == "" {
+	if moved.To != intake.UnitReviewing || moved.DefaultTo != intake.UnitReviewing || moved.DecidedBy != trace.DecidedByCode || moved.Departed() || moved.Judgment == "" {
 		t.Fatalf("the unit's move to reviewing %+v", moved)
 	}
-	if !strings.HasPrefix(moved.ID, trace.UnitSubject("resume")+"-"+UnitReviewing+"-checks-") || strings.Contains(moved.Reason, "decide-transition") {
+	if !strings.HasPrefix(moved.ID, trace.UnitSubject("resume")+"-"+intake.UnitReviewing+"-checks-") || strings.Contains(moved.Reason, "decide-transition") {
 		t.Fatalf("a default that was followed reads as the controller wrote it: %+v", moved)
 	}
 	rec := routeOf(t, repo, stream, "unit.checks_passed")
-	if rec.State != router.StateCommitted || rec.Outcome != router.OutcomeFollowed || rec.Default != UnitReviewing || rec.Target != UnitReviewing {
+	if rec.State != router.StateCommitted || rec.Outcome != router.OutcomeFollowed || rec.Default != intake.UnitReviewing || rec.Target != intake.UnitReviewing {
 		t.Fatalf("route %+v", rec)
 	}
 	if len(p.TransitionRequests()) != 1 {
@@ -121,13 +117,11 @@ func TestAUnitExitThatFitsItsDefaultCommitsItAndRecordsIt(t *testing.T) {
 			span = &s
 		}
 	}
-	if span == nil || span.Outcome != router.OutcomeFollowed || span.Default != UnitReviewing || span.Chosen != UnitReviewing || span.Unit != "resume" {
+	if span == nil || span.Outcome != router.OutcomeFollowed || span.Default != intake.UnitReviewing || span.Chosen != intake.UnitReviewing || span.Unit != "resume" {
 		t.Fatalf("route span %+v", span)
 	}
 }
 
-// A satisfactory verdict for the unit's current candidate reaches approved
-// through the router, which records the verdict as its authority.
 func TestASatisfactoryVerdictApprovesThroughTheRouter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -137,21 +131,21 @@ func TestASatisfactoryVerdictApprovesThroughTheRouter(t *testing.T) {
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	state := workflowOf(t, repo, stream, "resume")
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
-	must(t, err)
-	result := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version), Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
+	fixturekit.Must(t, err)
+	result := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	recordVerdict(t, repo, stream, result)
 
-	must(t, r.applyReview(ctx, stream, "resume", state, result))
+	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, result))
 
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != UnitApproved {
+	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitApproved {
 		t.Fatalf("the unit is %s", got.Value)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("resume"))
-	if moved.To != UnitApproved || moved.DecidedBy != trace.DecidedByReviewer || moved.DefaultTo != UnitApproved || moved.Departed() {
+	if moved.To != intake.UnitApproved || moved.DecidedBy != trace.DecidedByReviewer || moved.DefaultTo != intake.UnitApproved || moved.Departed() {
 		t.Fatalf("the move to approved %+v", moved)
 	}
 	rec := routeOf(t, repo, stream, "unit.review_approved")
-	if rec.Authority != router.AuthorityReviewer || !strings.HasPrefix(rec.AuthorityRef, reviewDocument("resume")+" revision ") || rec.State != router.StateCommitted {
+	if rec.Authority != router.AuthorityReviewer || !strings.HasPrefix(rec.AuthorityRef, service.TestReviewDocument("resume")+" revision ") || rec.State != router.StateCommitted {
 		t.Fatalf("the approval's authority is not the reviewer's verdict: %+v", rec)
 	}
 	if _, _, ok, err := (&foreman{masons: r.masons}).approval(stream, "resume", 0); err != nil || !ok {
@@ -159,9 +153,6 @@ func TestASatisfactoryVerdictApprovesThroughTheRouter(t *testing.T) {
 	}
 }
 
-// A verdict that a later review replaced does not approve the unit, whichever
-// way the router is asked: approved is not offered, and the unit is held with
-// one notice.
 func TestAVerdictForASupersededCandidateDoesNotApprove(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -170,17 +161,17 @@ func TestAVerdictForASupersededCandidateDoesNotApprove(t *testing.T) {
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	state := workflowOf(t, repo, stream, "resume")
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
-	must(t, err)
-	old := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version), Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
+	fixturekit.Must(t, err)
+	old := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Verdict: service.UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}}
 	recordVerdict(t, repo, stream, old)
-	// A later review of the unit replaces the verdict before it is applied.
-	newer := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version) + "-recover-1", Verdict: UnitVerdict{Decision: "material_findings", Summary: reviewSummary,
-		Findings: []ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}}, Bounces: 1}
+
+	newer := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version) + "-recover-1", Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary,
+		Findings: []api.ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}}, Bounces: 1}
 	recordVerdict(t, repo, stream, newer)
 
-	must(t, r.applyReview(ctx, stream, "resume", state, old))
+	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, old))
 
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != UnitReviewing || got.Version != state.Version {
+	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitReviewing || got.Version != state.Version {
 		t.Fatalf("a superseded verdict moved the unit to %+v", got)
 	}
 	rec := routeOf(t, repo, stream, "unit.review_approved")
@@ -189,7 +180,7 @@ func TestAVerdictForASupersededCandidateDoesNotApprove(t *testing.T) {
 	}
 	notices := 0
 	outbox, err := repo.Outbox(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, e := range outbox {
 		if e.Event.Kind == trace.NoticeKind && strings.HasPrefix(e.TransitionID, "route-") {
 			notices++
@@ -200,65 +191,59 @@ func TestAVerdictForASupersededCandidateDoesNotApprove(t *testing.T) {
 	}
 }
 
-// recordVerdict records result as the next revision of the unit's review.
-func recordVerdict(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, result UnitReviewResult) {
+func recordVerdict(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, result service.UnitReviewResult) {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument("resume") {
+		if d.ID == service.TestReviewDocument("resume") {
 			latest = d
 		}
 	}
 	data, err := json.MarshalIndent(result, "", "  ")
-	must(t, err)
+	fixturekit.Must(t, err)
 	latest.Revision++
 	latest.Content = string(data) + "\n"
 	latest.Cause = result.Turn
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{latest}))
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{latest}))
 }
 
-// A scripted departure from a unit exit: the review's send-backs reached their
-// bound, so the default is to contest the unit, and Jev sends the work back to
-// the mason instead. The departed state commits with its effects, the mason's
-// fresh allowance among them, and the departure is recorded, spanned, shown in
-// the feed and nowhere else.
 func TestAScriptedDepartureSendsTheWorkBackToTheMasonInsteadOfContesting(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repo := newReviewFixture(t, "route-departure")
 	p := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
-		return jevfixture.Departs(a, UnitImplementing, 0.95, 0.95)
+		return jevfixture.Departs(a, intake.UnitImplementing, 0.95, 0.95)
 	}}
 	log := routeThrough(f.s, p)
 	r := &reviewers{masons: newMasonController(f.s, repo)}
 	state := workflowOf(t, repo, stream, "resume")
 	_, identity, err := r.prepareUnitReview(ctx, stream, "resume")
-	must(t, err)
-	reported := lastTurn(t, repo, stream, masonAgent("resume"))
-	findings := []ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}
-	result := UnitReviewResult{Identity: identity, Turn: reviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
+	fixturekit.Must(t, err)
+	reported := lastTurn(t, repo, stream, intake.MasonAgent("resume"))
+	findings := []api.ReviewFinding{{Severity: "material", Evidence: "The retry fails", Action: "Handle the retry token"}}
+	result := service.UnitReviewResult{Identity: identity, Turn: service.TestReviewTurnID("resume", state.Version), Bounces: f.s.cfg.Shed.MaxBounces, Verdict: service.UnitVerdict{Decision: "material_findings", Summary: reviewSummary, Findings: findings}}
 
-	must(t, r.applyReview(ctx, stream, "resume", state, result))
+	fixturekit.Must(t, r.applyReview(ctx, stream, "resume", state, result))
 
-	if got := workflowOf(t, repo, stream, "resume"); got.Value != UnitImplementing {
+	if got := workflowOf(t, repo, stream, "resume"); got.Value != intake.UnitImplementing {
 		t.Fatalf("the unit is %s, want implementing", got.Value)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("resume"))
-	if moved.To != UnitImplementing || moved.DefaultTo != UnitContested || moved.DecidedBy != trace.DecidedByJev || moved.Judgment == "" || !moved.Departed() {
+	if moved.To != intake.UnitImplementing || moved.DefaultTo != intake.UnitContested || moved.DecidedBy != trace.DecidedByJev || moved.Judgment == "" || !moved.Departed() {
 		t.Fatalf("the departure %+v", moved)
 	}
-	if !isMove(moved, "resume") || !strings.Contains(moved.Reason, "decide-transition table") {
+	if !execution.IsMove(moved, "resume") || !strings.Contains(moved.Reason, "decide-transition table") {
 		t.Fatalf("the departure is entered through the shared effects of a move: %+v", moved)
 	}
-	ruling, found, err := latestMasonRuling(repo, stream, "resume")
-	must(t, err)
+	ruling, found, err := execution.LatestMasonRuling(repo, stream, "resume")
+	fixturekit.Must(t, err)
 	if !found || ruling.ResetTurn != reported.Sequence {
 		t.Fatalf("the mason's fresh allowance %+v", ruling)
 	}
 	rec := routeOf(t, repo, stream, "unit.review_rejected")
-	if rec.Outcome != router.OutcomeDeparted || rec.DecidedBy != trace.DecidedByJev || rec.Judgment != moved.Judgment || rec.Default != UnitContested || rec.Target != UnitImplementing {
+	if rec.Outcome != router.OutcomeDeparted || rec.DecidedBy != trace.DecidedByJev || rec.Judgment != moved.Judgment || rec.Default != intake.UnitContested || rec.Target != intake.UnitImplementing {
 		t.Fatalf("route %+v", rec)
 	}
 	var span *router.SpanRoute
@@ -267,19 +252,19 @@ func TestAScriptedDepartureSendsTheWorkBackToTheMasonInsteadOfContesting(t *test
 			span = &s
 		}
 	}
-	if span == nil || span.Outcome != router.OutcomeDeparted || span.Default != UnitContested || span.Chosen != UnitImplementing || span.Judgment != moved.Judgment {
+	if span == nil || span.Outcome != router.OutcomeDeparted || span.Default != intake.UnitContested || span.Chosen != intake.UnitImplementing || span.Judgment != moved.Judgment {
 		t.Fatalf("route span %+v", span)
 	}
 	f.s.setSole(&activeProject{repository: repo})
-	feed, api := service.InspectForTest(f.s.core()).Feed(string(stream))
-	if api != nil {
-		t.Fatal(api.Message)
+	feed, apiErr := service.InspectForTest(f.s.core()).Feed(string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr.Message)
 	}
 	departed := 0
 	for _, e := range feed.Entries {
 		if e.Transition != nil && e.Transition.Departed {
 			departed++
-			if e.Transition.DecidedBy != trace.DecidedByJev || e.Transition.DefaultTo != UnitContested || e.Transition.To != UnitImplementing {
+			if e.Transition.DecidedBy != trace.DecidedByJev || e.Transition.DefaultTo != intake.UnitContested || e.Transition.To != intake.UnitImplementing {
 				t.Fatalf("feed entry %+v", e.Transition)
 			}
 		}
@@ -292,24 +277,21 @@ func TestAScriptedDepartureSendsTheWorkBackToTheMasonInsteadOfContesting(t *test
 	}
 }
 
-// An owner approving a unit without independent review is a pinned move: it
-// commits exactly approved with the approval record, names the owner as the
-// decider, and asks Jev nothing.
 func TestAnOwnerApprovalIsAPinnedMove(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repo := newCheckingFixture(t, "route-owner-approval")
 	p := &jevfixture.Transitions{}
 	routeThrough(f.s, p)
-	out, api := f.s.ownerMove(ctx, string(stream), "resume", UnitMoveRequest{To: UnitApproved, Note: "The owner read the candidate."})
-	if api != nil {
-		t.Fatal(api.Message)
+	out, apiErr := f.s.ownerMove(ctx, string(stream), "resume", api.UnitMoveRequest{To: intake.UnitApproved, Note: "The owner read the candidate."})
+	if apiErr != nil {
+		t.Fatal(apiErr.Message)
 	}
-	if out.Move.To != UnitApproved || out.Move.By != "owner" {
+	if out.Move.To != intake.UnitApproved || out.Move.By != "owner" {
 		t.Fatalf("move %+v", out.Move)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("resume"))
-	if moved.To != UnitApproved || moved.DecidedBy != trace.DecidedByOwner || moved.DefaultTo != UnitApproved || moved.Departed() {
+	if moved.To != intake.UnitApproved || moved.DecidedBy != trace.DecidedByOwner || moved.DefaultTo != intake.UnitApproved || moved.Departed() {
 		t.Fatalf("the owner's approval %+v", moved)
 	}
 	rec := routeOf(t, repo, stream, "unit.move_owner")
@@ -324,9 +306,6 @@ func TestAnOwnerApprovalIsAPinnedMove(t *testing.T) {
 	}
 }
 
-// A move of the chief of staff's own is no owner decision: approved is never
-// offered on it, so the router commits nothing, leaves the move as a pending
-// owner decision and the unit does not move.
 func TestAChiefMoveToApprovedIsNeverLegal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -334,10 +313,10 @@ func TestAChiefMoveToApprovedIsNeverLegal(t *testing.T) {
 	routeThrough(f.s, &jevfixture.Transitions{})
 	before := workflowOf(t, repo, stream, "resume")
 	x, err := f.s.execution().UnitExit(execution.UnitExitInput{Repo: repo, Stream: stream, Unit: "resume", Trigger: "unit.move_proposal", Cause: "chief-proposal-1",
-		Default: UnitApproved, Note: "Looks fine.", Actor: chiefActor, Active: true})
-	must(t, err)
+		Default: intake.UnitApproved, Note: "Looks fine.", Actor: intake.ChiefActor, Active: true})
+	fixturekit.Must(t, err)
 	res, err := f.s.core().RouteExit(ctx, x)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if res.Committed || res.Outcome != router.OutcomeHeld || res.Hold != router.HoldGate || res.Journal != router.StateOwner {
 		t.Fatalf("the router entered approved on a chief proposal: %+v", res)
 	}

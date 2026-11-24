@@ -2,6 +2,7 @@ package executionjourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -12,13 +13,9 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-type repositoryPulls = fixturekit.RepositoryPulls
-
 func maintenanceFixture(t *testing.T) *publicationFixture {
 	t.Helper()
-	// The draft is pushed inside the fixture's Approve step, after the
-	// fixture has pointed the upstream at the fork, so the delivery is the
-	// fork's own and not a delivery against the canonical upstream.
+
 	p := newUnpushedPublicationFixture(t, "commit-per-unit", "")
 	intakefixture.PrepareDeliveryMaintenance(t, intakefixture.DeliveryMaintenance{
 		Config: p.s.cfg, Repository: p.repository, Stream: p.stream, Clone: p.clone, Now: p.s.now,
@@ -28,15 +25,15 @@ func maintenanceFixture(t *testing.T) *publicationFixture {
 		},
 		AdvanceUpstream: func(files map[string]string) { advanceUpstream(t, p.shedFixture, files) },
 		ForkTip:         func() string { tip, _ := p.forkBranch(t); return tip },
-		Refresh: func(host *fakePulls, upstream string) coreadapter.OperationResult {
-			p.s.options.PullRequests = repositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
+		Refresh: func(host *fixturekit.FakePulls, upstream string) coreadapter.OperationResult {
+			p.s.options.PullRequests = fixturekit.RepositoryPulls{upstream: host, p.s.cfg.Project.Fork: p.pulls}
 			refresh := &baseRefresher{s: p.s, repository: p.repository}
-			must(t, refresh.Pass(context.Background()))
-			op := actionOperation(t, p.repository, p.stream, baseRefreshAction)
+			fixturekit.Must(t, refresh.Pass(context.Background()))
+			op := fixturekit.ActionOperation(t, p.repository, p.stream, service.TestBaseRefreshAction)
 			return settleOperation(t, p.s, p.repository, p.stream, op, refresh)
 		},
 		Observation: func(r *trace.Repository, w config.WorkstreamID) (seal.Base, bool, int, error) {
-			o, rev, err := baseObservationAt(r, w)
+			o, rev, err := service.TestBaseObservationAt(r, w)
 			return o.Base, o.Unavailable, rev, err
 		},
 	})

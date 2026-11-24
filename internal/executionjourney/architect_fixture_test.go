@@ -2,19 +2,17 @@ package executionjourney
 
 import (
 	context "context"
-	sync "sync"
-	testing "testing"
-
 	agent "github.com/kpenfound/agentcore/agent"
 	config "github.com/kpenfound/osmia/internal/config"
 	jevfixture "github.com/kpenfound/osmia/internal/jev/jevfixture"
 	service "github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	sync "sync"
+	testing "testing"
 )
-
-var readTool = intakefixture.ReadTool
 
 type architectFixture struct {
 	opts        Options
@@ -24,15 +22,15 @@ type architectFixture struct {
 	project     config.ProjectID
 	trace       string
 	clone       string
-	engine      *demoEngine
-	sessions    *demoSessions
-	clock       *demoClock
+	engine      *fixturekit.DemoEngine
+	sessions    *fixturekit.DemoSessions
+	clock       *fixturekit.DemoClock
 
 	scenarioOnce  sync.Once
 	scenarioState *intakefixture.ArchitectScenario
 }
 
-func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessions, *demoClock) {
+func newArchitectOptions(t *testing.T) (Options, string, *fixturekit.DemoEngine, *fixturekit.DemoSessions, *fixturekit.DemoClock) {
 	t.Helper()
 	opts, clone := projectFixture(t)
 	engine, sessions, clock, architect, issues := intakefixture.ArchitectExecution(t, opts.Config, clone)
@@ -48,8 +46,7 @@ func (f *architectFixture) start(t *testing.T) {
 			c.Client.SetTimeoutForTest(c.defaultTimeout)
 		}
 	})
-	// The router of a running fixture asks a Jev that finds every default fits and
-	// whose answers cost nothing, so that the spend a test reads is its own.
+
 	service.InspectForTest(f.s.core()).SetRouterJudge(jevfixture.TransitionJudge(f.s.now, &jevfixture.Transitions{Free: true}))
 }
 
@@ -69,4 +66,24 @@ func (f *architectFixture) scenario() *intakefixture.ArchitectScenario {
 		f.scenarioState = &intakefixture.ArchitectScenario{Client: func() intakefixture.WorkflowClient { return f.c }, Engine: f.engine, Repository: f.repository, Changes: func(t *testing.T) (func(), func()) { return serviceChanges(t, f.s) }}
 	})
 	return f.scenarioState
+}
+
+func (f *architectFixture) upstream(t *testing.T) string {
+	t.Helper()
+	return intakefixture.Upstream(t, f.clone)
+}
+
+func (f *architectFixture) awaitFeature(t *testing.T, stream config.WorkstreamID, want string) {
+	t.Helper()
+	f.scenario().AwaitFeature(t, stream, want)
+}
+
+func (f *architectFixture) notice(t *testing.T, stream config.WorkstreamID, transition string) string {
+	t.Helper()
+	return intakefixture.Notice(t, f.repository(), stream, transition)
+}
+
+func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want func(feature, draft string) bool) {
+	t.Helper()
+	f.scenario().Await(t, stream, want)
 }

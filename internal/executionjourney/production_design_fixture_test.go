@@ -2,61 +2,52 @@ package executionjourney
 
 import (
 	context "context"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
-
+	"github.com/kpenfound/osmia/internal/api"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	scheduler "github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/service"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	sync "sync"
+	atomic "sync/atomic"
+	testing "testing"
+	time "time"
 )
 
 func attemptOperation(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation, r coreadapter.Reconciler) (coreadapter.OperationResult, error) {
 	t.Helper()
-	return intakefixture.AttemptOperation(t, s.now(), foremanActor, repository, stream, op, r)
+	return intakefixture.AttemptOperation(t, s.now(), service.TestForemanActor, repository, stream, op, r)
 }
-
-var callTool = fixturekit.CallTool
-
-type changeRaceGate = intakefixture.ChangeRaceGate
-
-var chiefEvent = intakefixture.ChiefEvent
-
-var demoGit = fixturekit.DemoGit
-
-var demoStart = fixturekit.DemoStart
-
-const demoTimeout = fixturekit.DemoTimeout
 
 func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, ready func() bool) {
 	t.Helper()
 	f.sharedDesign().LifecycleAwait(t, phase, ready)
 }
 
-var must = fixturekit.Must
-
 func newConfiguredProductionDesignFixture(t *testing.T, configuration productionDesignConfiguration) *productionDesignFixture {
 	t.Helper()
-	return intakefixture.NewProductionDesign(t, func(clock *fixedClock) intakefixture.ProductionDesignStart[*productionDesignFixture] {
+	return intakefixture.NewProductionDesign(t, func(clock *fixturekit.FixedClock) intakefixture.ProductionDesignStart[*productionDesignFixture] {
 		opts, clone, engine, sessions, _ := newArchitectOptions(t)
 		intakefixture.ConfigureProductionDesign(t, opts.Config.Root)
 		opts.Reconciliation.Now = clock.Now
-		opts = Enforce(opts, Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
+		opts = Enforce(opts, service.Enforcement{Engine: engine, Hosts: opts.Architect.Hosts})
 		if configuration.options != nil {
 			configuration.options(&opts)
 		}
 		af := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions}
-		f := &productionDesignFixture{crossRepoRatifyFixture: &crossRepoRatifyFixture{architectFixture: af}, clock: clock, dispatch: &productionChiefDispatch{}, configuration: configuration}
+		f := &productionDesignFixture{crossRepoRatifyFixture: &crossRepoRatifyFixture{architectFixture: af}, clock: clock, dispatch: &intakefixture.ProductionChiefDispatch{}, configuration: configuration}
 		return intakefixture.ProductionDesignStart[*productionDesignFixture]{
 			Fixture: f, Scenario: f.sharedDesign(), Threads: opts.Threads, Hooks: &f.hook,
 			Unwrap: func(turns coreadapter.Turns) *isolation.Turns {
-				return turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
+				return turns.(*questions.Turns).Turns.(*service.TestVerdictTurns).Turns.(*service.TestReportingTurns).Turns.(*service.TestRetriedTurns).Turns.(*isolation.Turns)
 			},
 			Bind: func(threads func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error), boundary func(context.Context, string) error) {
 				af.opts.Threads, af.opts.boundary = threads, boundary
@@ -66,8 +57,6 @@ func newConfiguredProductionDesignFixture(t *testing.T, configuration production
 	}, configuration.handIn, configuration.checkpoint)
 }
 
-var noticeOf = intakefixture.NoticeOf
-
 type productionDesignConfiguration struct {
 	options    func(*Options)
 	wait       func(*testing.T, *productionDesignFixture, string, func() bool)
@@ -75,17 +64,13 @@ type productionDesignConfiguration struct {
 	handIn     bool
 }
 
-var providerOf = intakefixture.ProviderOf
-
 func raiseFixtureContest(t *testing.T, r *trace.Repository, stream config.WorkstreamID, unit string) {
 	t.Helper()
 	intakefixture.RaiseFixtureContest(t, r, stream, unit, func() (trace.Header, bool, error) {
-		c, found, err := unitContest(r, stream, unit)
+		c, found, err := service.TestUnitContest(r, stream, unit)
 		return c.Header, found, err
-	}, chiefActor, escalateContest, chiefContestPath)
+	}, intake.ChiefActor, execution.EscalateContest, execution.ChiefContestPath)
 }
-
-var recordSpec = intakefixture.RecordSpec
 
 func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
 	t.Helper()
@@ -101,20 +86,10 @@ func seedChecking(t *testing.T, f *shedFixture, repository *trace.Repository, st
 
 func seedReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome string) {
 	t.Helper()
-	intakefixture.SeedReview(t, repository, stream, unit, outcome, UnitReviewing, func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) {
+	intakefixture.SeedReview(t, repository, stream, unit, outcome, intake.UnitReviewing, func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) {
 		seedChecking(t, f, r, w, u, o)
 	}, func(t *testing.T, r *trace.Repository, w config.WorkstreamID) { runChecks(t, f.s, r, w) })
 }
-
-var streamDocuments = intakefixture.StreamDocuments
-
-var transitionByID = intakefixture.TransitionByID
-
-const validPlan = fixturekit.ValidPlan
-
-const validSpec = fixturekit.ValidSpec
-
-var workstreamDocument = fixturekit.WorkstreamDocument
 
 type crossRepoRatifyFixture struct {
 	*architectFixture
@@ -122,29 +97,25 @@ type crossRepoRatifyFixture struct {
 	stream1, stream2 config.WorkstreamID
 }
 
-type fixedClock = fixturekit.FixedClock
-
-type productionChiefDispatch = intakefixture.ProductionChiefDispatch
-
 type productionDesignFixture struct {
 	*crossRepoRatifyFixture
 	origin        config.WorkstreamID
 	before        trace.Thread
 	handed        trace.Document
-	clock         *fixedClock
-	hook          atomic.Pointer[designInterruption]
-	repos         []productionDesignRepo
-	owner         ConversationEntry
+	clock         *fixturekit.FixedClock
+	hook          atomic.Pointer[intakefixture.DesignInterruption]
+	repos         []intakefixture.ProductionDesignRepo
+	owner         api.ConversationEntry
 	ownerAddress  config.WorkstreamID
-	dispatch      *productionChiefDispatch
+	dispatch      *intakefixture.ProductionChiefDispatch
 	configuration productionDesignConfiguration
 }
 
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
 	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)
-	must(t, err)
-	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: validSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
+	fixturekit.Must(t, err)
+	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: fixturekit.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
 
 func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.WorkstreamID {
@@ -157,9 +128,9 @@ func (f *shedFixture) seedBuilding(t *testing.T, key, graph string) config.Works
 	}, f.s.refreshRuntime)
 }
 
-func (f *shedFixture) unitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[building] {
+func (f *shedFixture) unitSeedDriver(repository *trace.Repository) intakefixture.UnitSeedDriver[execution.Building] {
 	m := newMasonController(f.s, repository)
-	return intakefixture.UnitSeedDriver[building]{Read: m.read, Start: m.start, Finish: m.finish,
+	return intakefixture.UnitSeedDriver[execution.Building]{Read: m.read, Start: m.start, Finish: m.finish,
 		Open: newUnitWorkspaces(f.s.current(), repository).open,
 		Complete: func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u, o string) trace.QueuedTurn {
 			return completeMasonTurn(t, f, r, w, u, o)
@@ -167,19 +138,7 @@ func (f *shedFixture) unitSeedDriver(repository *trace.Repository) intakefixture
 	}
 }
 
-type demoClock = fixturekit.DemoClock
-
-type demoEngine = fixturekit.DemoEngine
-
-type demoSessions = fixturekit.DemoSessions
-
-type designInterruption = intakefixture.DesignInterruption
-
-type fakeTurn = fixturekit.FakeTurn
-
-type productionDesignRepo = intakefixture.ProductionDesignRepo
-
-func (f *productionDesignFixture) awaitPacket(t *testing.T) PacketResponse {
+func (f *productionDesignFixture) awaitPacket(t *testing.T) api.PacketResponse {
 	t.Helper()
 	return f.sharedDesign().AwaitPacket(t)
 }
@@ -200,11 +159,11 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			})
 		},
 		LastEdgePoll: func(p config.ProjectID, w config.WorkstreamID) (time.Time, bool) {
-			attempt, ok := f.s.polls.last(p, w, edgePoll)
+			attempt, ok := f.s.polls.last(p, w, lifecycle.EdgePoll)
 			return attempt.at, ok
 		},
 		EdgeObservationAt: func(r *trace.Repository, w config.WorkstreamID) (int, time.Time, error) {
-			_, rev, at, err := edgeObservationAt(r, w)
+			_, rev, at, err := lifecycle.EdgeObservationAt(r, w)
 			return rev, at, err
 		},
 
@@ -218,7 +177,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 		ChiefRepository: func(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
 			return f.s.chiefRepository(ctx, r, w)
 		},
-		Feed:  func(w string) (FeedResponse, *APIError) { return f.s.feedList(w) },
+		Feed:  func(w string) (api.FeedResponse, *api.APIError) { return f.s.feedList(w) },
 		Ready: func() bool { return f.s.ready.Load() }, Done: func() <-chan struct{} { return f.s.done },
 		Lifetime: func() context.Context { return f.s.lifetime }, Error: func() error { return f.s.testError() }, Runs: f.runs,
 		LogHook: func(t *testing.T) {
@@ -227,7 +186,7 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 			}
 		},
 		WriteCharter: func(t *testing.T, p config.ProjectID, text string) { writeCharter(t, f.c, p, text) },
-		Upstream:     f.upstream, Script: f.script, ScriptDrafts: f.scriptDrafts, Workspaces: workspaces,
+		Upstream:     f.upstream, Script: f.script, ScriptDrafts: f.scriptDrafts, Workspaces: intake.Workspaces,
 		ReadBuilding: func(r *trace.Repository, w config.WorkstreamID) (bool, error) {
 			_, ok, err := (&masons{s: f.s, repository: r}).read(w)
 			return ok, err
@@ -235,15 +194,15 @@ func (f *productionDesignFixture) sharedDesign() *intakefixture.ProductionDesign
 		Holds: func(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
 			return f.s.holds(p, w, r, c)
 		},
-		EdgeWaiting: edgeWaiting,
+		EdgeWaiting: service.TestEdgeWaiting,
 		Builder: func(r *trace.Repository) coreadapter.Reconciler {
-			return &builder{S: f.s.intake().BuilderDependencies(), Repository: r}
+			return &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: r}
 		},
 		Land: func(ctx context.Context, r *trace.Repository, m config.WorkstreamID) (coreadapter.OperationResult, error) {
-			_, event := landIDs("accept", 1)
-			return intakefixture.TryLanding(ctx, r, m, event, LandAction, landInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
+			_, event := execution.LandIDs("accept", 1)
+			return intakefixture.TryLanding(ctx, r, m, event, service.LandAction, service.TestLandInput{Unit: "accept", Review: 1, Candidate: "candidate", Base: "base"}, (&foreman{masons: &masons{s: f.s, repository: r}}).Apply)
 		},
-		LeastWorkstream: leastWorkstream, NextReadyTurn: nextReadyTurn,
+		LeastWorkstream: lifecycle.LeastWorkstream, NextReadyTurn: lifecycle.NextReadyTurn,
 	}
 	if f.configuration.wait != nil {
 		shared.WaitMode = func(t *testing.T, phase string, done func() bool) { f.configuration.wait(t, f, phase, done) }
@@ -256,6 +215,36 @@ func (f *architectFixture) sharedTurns() *intakefixture.TurnScenario {
 		Root: func() config.Root { return f.s.current().Root }, Project: f.project,
 		Now: f.clock.Now, Repository: f.repository,
 		Changes: func(t *testing.T) (func(), func()) { return serviceChanges(t, f.s) },
-		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: foremanActor,
+		Done:    func() <-chan struct{} { return f.s.done }, WaitError: f.s.Wait, ForemanActor: service.TestForemanActor,
 	}
+}
+
+func (f *productionDesignFixture) start(t *testing.T) {
+	t.Helper()
+	f.architectFixture.start(t)
+	f.checkRepos(t)
+}
+
+func (f *productionDesignFixture) checkRepos(t *testing.T) {
+	t.Helper()
+	f.sharedDesign().CheckRepos(t)
+}
+
+type lifecycleCleanupGate struct {
+	reached                chan struct{}
+	released               chan struct{}
+	reachOnce, releaseOnce sync.Once
+}
+
+func (g *lifecycleCleanupGate) checkpoint(ctx context.Context, step string) error {
+	return intakefixture.CleanupCheckpoint(ctx, step, g.reached, g.released, &g.reachOnce)
+}
+
+func (g *lifecycleCleanupGate) release() {
+	g.releaseOnce.Do(func() { close(g.released) })
+}
+
+func (g *lifecycleCleanupGate) await(t *testing.T) {
+	t.Helper()
+	intakefixture.AwaitCleanup(t, g.reached)
 }

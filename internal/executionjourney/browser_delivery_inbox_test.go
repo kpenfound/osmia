@@ -5,6 +5,11 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/browsertest"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	reflect "reflect"
 	sync "sync"
 	testing "testing"
@@ -17,31 +22,17 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// listenWeb is the configuration that opens the web listener on a free
-// loopback port.
 const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
 
-var decisionCard = intakefixture.DecisionCard
-
-var entriesOf = intakefixture.EntriesOf
-
-// The page shows a delivery with its final report's criteria and the drafted
-// description in a read-only preview, and offers the approval only while the
-// report and draft the entry pins are the ones it shows: not before the
-// presentation is read, not while a read of it fails, and not while a newer
-// report's read is pending. The page sends only the identity the entry pins,
-// so each approval records the draft as presented, as osmia approve without
-// a description file does; each approval takes the entry out.
 func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	t.Parallel()
 	f, ws, repository, report := deliveryFixtureWith(t, listenWeb)
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	p := openBrowser(t)
 	ctx := context.Background()
-	// Keep the stream's last events for a failed delivery wait. The service
-	// currently sends no SSE id, so retain the transport request and kind too.
+
 	var eventMu sync.Mutex
 	var deliveryEvents []string
 	chromedp.ListenTarget(p.Ctx, func(event any) {
@@ -77,54 +68,49 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		p.Eval(`window.deliveryInboxReads`, &inboxReads)
 		t.Logf("page inbox reads: %+v", inboxReads)
 	}()
-	// Publication waits while the workstream is paused.
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
-	// recordReport records the next revision of the final report, keeping
-	// its criteria and commit, and returns its presentation. Neither the
-	// title nor the drafted body is derived from the final report's
-	// summary (spec#1, spec#3), so a later revision of the same report
-	// presents the same title and draft; what the entry pins is the new
-	// review revision.
-	recordReport := func(revision int) DeliveryPresentation {
+
+	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: ws}, Mode: "soft", Reason: "Hold the publication", Source: runtime.PauseOwner})
+
+	recordReport := func(revision int) api.DeliveryPresentation {
 		t.Helper()
 		content, err := json.Marshal(report)
-		must(t, err)
-		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: revision, Project: f.project, Workstream: ws, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}
-		must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: h, Path: finalReportPath, Content: string(content)}}))
+		fixturekit.Must(t, err)
+		h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: revision, Project: f.project, Workstream: ws, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}
+		fixturekit.Must(t, f.repository().RecordDocuments(ctx, []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(content)}}))
 		out, err := f.c.Delivery(ctx, ws)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if out.ReviewRevision != revision {
 			t.Fatalf("presentation of report revision %d: %+v", revision, out)
 		}
 		return out
 	}
 	first, err := f.c.Delivery(ctx, ws)
-	must(t, err)
-	entries := entriesOf(t, f.c, InboxDelivery)
+	fixturekit.Must(t, err)
+	entries := intakefixture.EntriesOf(t, f.c, api.InboxDelivery)
 	if len(entries) != 1 {
 		t.Fatalf("delivery entries %+v", entries)
 	}
-	card := decisionCard(entries[0])
+	card := intakefixture.DecisionCard(entries[0])
 	preview := card + "[data-field=preview] [data-field=description]"
 	approve := card + "button[type=submit]"
-	pins := func(revision int, presented DeliveryPresentation) string {
+	pins := func(revision int, presented api.DeliveryPresentation) string {
 		return fmt.Sprintf("final review 1, report revision %d, commit %s, draft %s", revision, report.Commit[:12], presented.DraftHash[:12])
 	}
-	drafted := func(presented DeliveryPresentation) {
+	drafted := func(presented api.DeliveryPresentation) {
 		t.Helper()
-		p.Await("the drafted description", `document.querySelector(`+quote(preview)+`)?.textContent === `+quote(presented.Draft))
-		p.Await("the approval enabled", `!document.querySelector(`+quote(approve)+`).disabled`)
+		p.Await("the drafted description", `document.querySelector(`+browsertest.Quote(preview)+`)?.textContent === `+browsertest.Quote(presented.Draft))
+		p.Await("the approval enabled", `!document.querySelector(`+browsertest.Quote(approve)+`).disabled`)
 	}
 	disabled := func() {
 		t.Helper()
 		var off bool
-		p.Eval(`document.querySelector(`+quote(approve)+`).disabled`, &off)
+		p.Eval(`document.querySelector(`+browsertest.Quote(approve)+`).disabled`, &off)
 		if !off {
 			t.Fatal("The approval is offered while the page does not show the draft it pins")
 		}
 	}
-	// resync reconnects the page, whose new stream reads the inbox again.
-	link := newLinkProxy(t, f.s.WebAddr())
+
+	link := browsertest.NewLinkProxy(t, f.s.WebAddr())
 	resync := func() {
 		t.Helper()
 		link.Cut()
@@ -132,7 +118,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		link.Restore()
 		p.Await("the live connection again", `document.body.dataset.connection === 'live'`)
 	}
-	// sent is the body of the page's last approval.
+
 	sent := func() map[string]any {
 		t.Helper()
 		var out map[string]any
@@ -140,8 +126,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		return out
 	}
 
-	// The presentation cannot be read at first.
-	gate := p.Gate("*" + Prefix + "/delivery/*")
+	gate := p.Gate("*" + service.Prefix + "/delivery/*")
 	gate.Set(true)
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateScale(3), chromedp.EmulateMobile), chromedp.Navigate("http://"+link.Listener.Addr().String()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
@@ -172,18 +157,14 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.AwaitText(card+"[data-field=pins]", pins(1, first))
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()
-	// The next read of the inbox reads the presentation again.
+
 	gate.Set(false)
 	resync()
 	p.AwaitText(card+`[data-criterion="spec#2"]`, "dedupe.go and TestDedupe")
-	// The presentation shows the title to be published alongside the
-	// drafted body (spec#7).
+
 	p.AwaitText(card+"[data-field=title]", "Pull request title: "+first.Title)
 	drafted(first)
 
-	// A new report is recorded while its presentation cannot be read: the
-	// entry pins its new review revision, and the page still holds the
-	// earlier one.
 	gate.Set(true)
 	second := recordReport(2)
 	if second.ReviewRevision != 2 || second.DraftHash != first.DraftHash {
@@ -193,7 +174,7 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	p.AwaitText(card+"[data-field=reading]", "The final report is unavailable.")
 	disabled()
 	var shown string
-	p.Eval(`document.querySelector(`+quote(preview)+`).textContent`, &shown)
+	p.Eval(`document.querySelector(`+browsertest.Quote(preview)+`).textContent`, &shown)
 	if shown != first.Draft {
 		t.Fatalf("the description changed without a read of the new draft: %q", shown)
 	}
@@ -201,34 +182,28 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 	resync()
 	drafted(second)
 
-	// The draft as it stands is approved as drafted, and the page sends
-	// the pinned identity alone.
 	p.Click(approve)
 	p.AwaitOutcome("Approved marking final review 1")
 	p.AwaitGone("the approved delivery", card)
-	pinned := func(revision int, presented DeliveryPresentation) map[string]any {
+	pinned := func(revision int, presented api.DeliveryPresentation) map[string]any {
 		return map[string]any{"review": 1.0, "review_revision": float64(revision), "commit": report.Commit, "draft_hash": presented.DraftHash}
 	}
 	if body := sent(); !reflect.DeepEqual(body, pinned(2, second)) {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
 	after, err := f.c.Delivery(ctx, ws)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != second.Draft || !reflect.DeepEqual(after.Approval.Messages, second.Messages) || after.Approval.ReviewRevision != 2 || after.Approval.DraftHash != second.DraftHash {
 		t.Fatalf("the approval of the draft %+v", after.Approval)
 	}
 
-	// A submitted card disappears optimistically. Observe the accepted
-	// approval in the page's inbox before the fixture records another report
-	// with the same decision identity.
 	resync()
 	p.Await("the processed approval in the live inbox", `window.deliveryInboxReads?.at(-1)?.entries &&
-		!window.deliveryInboxReads.at(-1).entries.some(e => e.kind === 'delivery' && e.workstream === `+quote(string(ws))+`)`)
+		!window.deliveryInboxReads.at(-1).entries.some(e => e.kind === 'delivery' && e.workstream === `+browsertest.Quote(string(ws))+`)`)
 	eventMu.Lock()
 	deliveryEvents = nil
 	eventMu.Unlock()
-	// A newer report asks for approval again and is approved as drafted
-	// too.
+
 	third := recordReport(3)
 	p.AwaitText(card+"[data-field=pins]", pins(3, third))
 	drafted(third)
@@ -239,46 +214,42 @@ func TestBrowserPageApprovesADeliveryAsShown(t *testing.T) {
 		t.Fatalf("the approval the page sent: %v", body)
 	}
 	after, err = f.c.Delivery(ctx, ws)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if after.Approval == nil || after.Approval.Description != third.Draft || !reflect.DeepEqual(after.Approval.Messages, third.Messages) || after.Approval.Review != 1 || after.Approval.ReviewRevision != 3 || after.Approval.DraftHash != third.DraftHash {
 		t.Fatalf("the approval %+v", after.Approval)
 	}
 	p.Await("the same document", `window.notReloaded === true`)
 }
 
-// The page lists a publication the host keeps refusing with its last
-// failure and what it waits on, and offers no answer: it closes once an
-// attempt publishes.
 func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	t.Parallel()
 	f := newPublicationFixtureWith(t, "commit-per-unit", listenWeb)
 	ws, repository := f.stream, f.repository
 	ctx := context.Background()
-	presented, api := f.s.deliveryPresentation(ctx, string(ws))
-	if api != nil {
-		t.Fatal(api)
+	presented, apiErr := f.s.deliveryPresentation(ctx, string(ws))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	if _, api := f.s.approveDelivery(ctx, string(ws), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}); api != nil {
-		t.Fatal(api)
+	if _, apiErr := f.s.approveDelivery(ctx, string(ws), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash}); apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	refusal := "GitHub answered 403: Resource not accessible by personal access token"
 	f.pulls.FindErr = errors.New(refusal)
 	f.opts.PullRequests = f.pulls
 	f.start(t)
 	t.Cleanup(func() { f.stop(t) })
 	p := openBrowser(t)
-	var entry InboxEntry
-	for deadline := time.Now().Add(browserTimeout); ; time.Sleep(100 * time.Millisecond) {
-		if entries := entriesOf(t, f.c, InboxPublication); len(entries) == 1 {
-			entry = entries[0]
-			break
+	var entry api.InboxEntry
+	intakefixture.Soon(t, "the failing publication to reach the inbox", func() bool {
+		entries := intakefixture.EntriesOf(t, f.c, api.InboxPublication)
+		if len(entries) != 1 {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("the failing publication never reached the inbox")
-		}
-	}
-	card := decisionCard(entry)
+		entry = entries[0]
+		return true
+	})
+	card := intakefixture.DecisionCard(entry)
 	p.Run(chromedp.Navigate("http://" + f.s.WebAddr() + "/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(ws)
@@ -288,7 +259,7 @@ func TestBrowserPageShowsAFailingPublication(t *testing.T) {
 	p.AwaitText(card+"[data-field=blocked]", "Waiting on it: Marking the pull request ready for review.")
 	p.AwaitText(card+"[data-field=options]", "Options: none until what blocks it is resolved")
 	var answerable bool
-	p.Eval(`document.querySelector(`+quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+quote(card+"[data-field=pins]")+`) !== null`, &answerable)
+	p.Eval(`document.querySelector(`+browsertest.Quote(card+"[data-field=answer]")+`) !== null || document.querySelector(`+browsertest.Quote(card+"[data-field=pins]")+`) !== null`, &answerable)
 	if answerable {
 		t.Fatal("the page offers an answer to a failing publication")
 	}

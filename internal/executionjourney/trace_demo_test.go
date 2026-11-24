@@ -3,6 +3,9 @@ package executionjourney
 import (
 	context "context"
 	json "encoding/json"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	net "net"
 	http "net/http"
 	exec "os/exec"
@@ -14,22 +17,20 @@ import (
 	plan "github.com/kpenfound/osmia/internal/plan"
 )
 
-// TestTraceNavigationDemonstration follows one local workstream through
-// unfinished work and delivery using both the API and the command line.
 func TestTraceNavigationDemonstration(t *testing.T) {
 	t.Parallel()
 	f := newWalkFixture(t)
 	f.sealed()
 	f.buildA()
-	f.unit("b", UnitImplementing)
+	f.unit("b", intake.UnitImplementing)
 
 	s := traceService(t, f)
 	socket := filepath.Join(t.TempDir(), "trace.sock")
 	listener, err := net.Listen("unix", socket)
-	must(t, err)
+	fixturekit.Must(t, err)
 	server := &http.Server{Handler: http.HandlerFunc(s.handle)}
 	go server.Serve(listener)
-	t.Cleanup(func() { must(t, server.Close()) })
+	t.Cleanup(func() { fixturekit.Must(t, server.Close()) })
 	client := NewClient(socket)
 	t.Cleanup(func() { client.Close() })
 	ctx := context.Background()
@@ -40,19 +41,19 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build osmia: %v\n%s", err, out)
 	}
-	checkCLI := func(api any, selector ...string) string {
+	checkCLI := func(apiErr any, selector ...string) string {
 		t.Helper()
-		args := append([]string{"--root", t.TempDir(), "--socket", socket, "trace", string(stream)}, selector...)
+		args := append([]string{"--root", t.TempDir(), "--socket", socket, "trace", string(fixturekit.Stream)}, selector...)
 		cmd := exec.Command(bin, append(args, "--json")...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("osmia trace %v: %v\n%s", selector, err, out)
 		}
-		encoded, err := json.Marshal(api)
-		must(t, err)
+		encoded, err := json.Marshal(apiErr)
+		fixturekit.Must(t, err)
 		var fromAPI, fromCLI any
-		must(t, json.Unmarshal(encoded, &fromAPI))
-		must(t, json.Unmarshal(out, &fromCLI))
+		fixturekit.Must(t, json.Unmarshal(encoded, &fromAPI))
+		fixturekit.Must(t, json.Unmarshal(out, &fromCLI))
 		if !reflect.DeepEqual(fromAPI, fromCLI) {
 			t.Fatalf("CLI and API differ for %v\nAPI: %s\nCLI: %s", selector, encoded, out)
 		}
@@ -64,9 +65,9 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 		return string(out)
 	}
 
-	active, err := client.TraceCriterion(ctx, stream, "spec#2")
-	must(t, err)
-	if active.Complete || len(active.Units) != 1 || gapStates(active.Units[0].Gaps)["units/b/report.json"] != LinkUnfinished {
+	active, err := client.TraceCriterion(ctx, fixturekit.Stream, "spec#2")
+	fixturekit.Must(t, err)
+	if active.Complete || len(active.Units) != 1 || gapStates(active.Units[0].Gaps)["units/b/report.json"] != service.LinkUnfinished {
 		t.Fatalf("active criterion %+v", active)
 	}
 	if out := checkCLI(active, "criterion", "spec#2"); !strings.Contains(out, "Gap: units/b/report.json [unfinished]") {
@@ -74,17 +75,17 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 	}
 
 	f.report("b", sha('3'), sha('a'))
-	f.unit("b", UnitReviewing)
+	f.unit("b", intake.UnitReviewing)
 	f.review("b", 1, sha('3'), sha('a'), "satisfactory", 0)
-	f.unit("b", UnitApproved)
+	f.unit("b", intake.UnitApproved)
 	f.land("b", 2, sha('3'), sha('a'), sha('b'), "spec#2", "spec#3")
-	f.unit("b", UnitMerged)
+	f.unit("b", intake.UnitMerged)
 	f.deliver()
-	// A later edit does not change the revisions governing delivered work.
+
 	f.doc(plan.SpecDocument, plan.SpecPath, "", strings.Replace(walkSpec, "Specs parse.", "Specs parse strictly.", 1))
 
-	criterion, err := client.TraceCriterion(ctx, stream, "spec#1")
-	must(t, err)
+	criterion, err := client.TraceCriterion(ctx, fixturekit.Stream, "spec#1")
+	fixturekit.Must(t, err)
 	if !criterion.Complete || criterion.Text != "Specs parse." || criterion.Spec.Revision != 1 || criterion.Plan.Revision != 1 ||
 		criterion.Units[0].Acceptance[0] != "TestParse covers numbered criteria" || len(criterion.Units[0].Reports) != 2 ||
 		criterion.Units[0].Reviews[1].Decision != "satisfactory" || criterion.Units[0].Reviews[1].Summary == "" ||
@@ -96,8 +97,8 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 		t.Fatal(out)
 	}
 
-	commit, err := client.TraceCommit(ctx, stream, sha('a'))
-	must(t, err)
+	commit, err := client.TraceCommit(ctx, fixturekit.Stream, sha('a'))
+	fixturekit.Must(t, err)
 	if !commit.Complete || len(commit.Landings) != 1 {
 		t.Fatalf("landing commit %+v", commit)
 	}
@@ -112,8 +113,8 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 		t.Fatal(out)
 	}
 
-	unit, err := client.TraceUnit(ctx, stream, "a")
-	must(t, err)
+	unit, err := client.TraceUnit(ctx, fixturekit.Stream, "a")
+	fixturekit.Must(t, err)
 	if !unit.Complete || unit.CostUSD != 0.25 || len(unit.Turns) != 1 || unit.Turns[0].Request.ID == "" || unit.Turns[0].Response == nil || len(unit.History) == 0 {
 		t.Fatalf("unit history %+v", unit)
 	}
@@ -134,15 +135,15 @@ func TestTraceNavigationDemonstration(t *testing.T) {
 	if out := checkCLI(unit, "unit", "a"); !strings.Contains(out, "Cost: $0.2500") {
 		t.Fatal(out)
 	}
-	published, err := client.TraceCommit(ctx, stream, sha('d'))
-	must(t, err)
+	published, err := client.TraceCommit(ctx, fixturekit.Stream, sha('d'))
+	fixturekit.Must(t, err)
 	if !published.Complete || published.Delivery.Published != sha('d') || len(published.Landings) != 2 {
 		t.Fatalf("published commit %+v", published)
 	}
 	checkCLI(published, "commit", sha('d'))
-	summary, err := client.Trace(ctx, stream)
-	must(t, err)
-	if !summary.Complete || summary.Feature != DeliveredState || len(summary.Units) != 2 {
+	summary, err := client.Trace(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if !summary.Complete || summary.Feature != intake.DeliveredState || len(summary.Units) != 2 {
 		t.Fatalf("summary %+v", summary)
 	}
 	checkCLI(summary)

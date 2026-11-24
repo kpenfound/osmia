@@ -3,6 +3,9 @@ package executionjourney
 import (
 	context "context"
 	errors "errors"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	slog "log/slog"
 	os "os"
 	filepath "path/filepath"
@@ -27,22 +30,22 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 	t.Helper()
 	ctx := context.Background()
 	_, err := c.Session(ctx, stream)
-	assertCode(t, err, NotFound)
+	fixturekit.AssertCode(t, err, api.NotFound)
 	_, err = c.Design(ctx, stream)
-	assertCode(t, err, NotFound)
+	fixturekit.AssertCode(t, err, api.NotFound)
 	_, err = c.DesignConversation(ctx, stream)
-	assertCode(t, err, NotFound)
+	fixturekit.AssertCode(t, err, api.NotFound)
 	_, err = c.Status(ctx, stream)
-	assertCode(t, err, NotFound)
+	fixturekit.AssertCode(t, err, api.NotFound)
 	list, err := c.Sessions(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, v := range list.Sessions {
 		if v.Workstream == stream {
 			t.Fatal("destroyed session listed")
 		}
 	}
 	designs, err := c.Designs(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, v := range designs.Designs {
 		if v.Workstream == stream {
 			t.Fatal("destroyed design listed")
@@ -50,30 +53,30 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 	}
 	root := s.current().Root
 	gone, err := trace.WorkstreamTraceGone(root, project, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !gone {
 		t.Fatal("trace remains")
 	}
-	for _, kind := range append(slices.Clone(turnDirectories), "design", sessionsDirectory, "session-models") {
-		assertGone(t, filepath.Join(root.String(), kind, string(project), string(stream)))
+	for _, kind := range append(slices.Clone(service.TestTurnDirectories), "design", service.TestSessionsDirectory, "session-models") {
+		fixturekit.AssertGone(t, filepath.Join(root.String(), kind, string(project), string(stream)))
 	}
 	intents, err := trace.PendingSessionDestroys(root, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, v := range intents {
 		if v.Workstream == stream {
 			t.Fatal("destroy intent remains")
 		}
 	}
 	repository, err := s.repository(project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	groups, _, err := trace.Workgroups(repository)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if _, found := trace.WorkgroupOf(groups, stream); found {
 		t.Fatal("workgroup still names the session")
 	}
 	cfg := s.current().For(project)
-	_, exists, err := sessionGit(cfg).Branch(ctx, sessionBranch(stream))
-	must(t, err)
+	_, exists, err := service.TestSessionGit(cfg).Branch(ctx, service.TestSessionBranch(stream))
+	fixturekit.Must(t, err)
 	if exists {
 		t.Fatal("local session branch remains")
 	}
@@ -105,22 +108,22 @@ func assertDestroyedSession(t *testing.T, s *Service, c *Client, project config.
 			t.Fatal("priority remains")
 		}
 	}
-	must(t, (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: repository}).Pass(ctx))
-	must(t, repository.Serialize(func() error { return service.InspectForTest(s.core()).Schedule(ctx, repository) }))
+	fixturekit.Must(t, (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: repository}).Pass(ctx))
+	fixturekit.Must(t, repository.Serialize(func() error { return service.InspectForTest(s.core()).Schedule(ctx, repository) }))
 }
 
 func seedSessionState(t *testing.T, s *Service, project config.ProjectID, stream config.WorkstreamID) {
 	t.Helper()
-	must(t, s.refreshRuntime())
-	s.StartActivity("historical-session-failure", ActivityAgentTurn, project, stream, "previous turn").Finish(errors.New("old failure"))
+	fixturekit.Must(t, s.refreshRuntime())
+	s.StartActivity("historical-session-failure", api.ActivityAgentTurn, project, stream, "previous turn").Finish(errors.New("old failure"))
 	service.InspectForTest(s.core()).StatusCache().Set(s.statusList())
-	for _, kind := range append(slices.Clone(turnDirectories), "design", "session-models") {
+	for _, kind := range append(slices.Clone(service.TestTurnDirectories), "design", "session-models") {
 		dir := filepath.Join(s.current().Root.String(), kind, string(project), string(stream))
-		must(t, os.MkdirAll(dir, 0700))
-		must(t, os.WriteFile(filepath.Join(dir, "state"), []byte("private history"), 0600))
+		fixturekit.Must(t, os.MkdirAll(dir, 0700))
+		fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "state"), []byte("private history"), 0600))
 	}
-	must(t, s.store.SetPriority(runtime.Priority{Project: project, Workstreams: []config.WorkstreamID{stream}}))
-	must(t, s.store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "owner pause"}))
+	fixturekit.Must(t, s.store.SetPriority(runtime.Priority{Project: project, Workstreams: []config.WorkstreamID{stream}}))
+	fixturekit.Must(t, s.store.SetPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "owner pause"}))
 }
 
 func TestDestroySessionRemovesOpenAndEndedSessionsAndKeepsRemote(t *testing.T) {
@@ -131,33 +134,33 @@ func TestDestroySessionRemovesOpenAndEndedSessionsAndKeepsRemote(t *testing.T) {
 			s, c, _, project, stream, _, clone := newSessionControlsFixture(t)
 			ctx := context.Background()
 			worktree := sessionWorktreePath(s.current().Root.String(), project, stream)
-			must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("pushed work"), 0600))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("pushed work"), 0600))
 			_, err := c.SessionCommit(ctx, stream, "pushed change", "pushed")
-			must(t, err)
-			// This is a local bare test remote; destroy has no remote effect.
+			fixturekit.Must(t, err)
+
 			pushed, err := c.SessionPush(ctx, stream)
-			must(t, err)
-			must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("unpushed work"), 0600))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, os.WriteFile(filepath.Join(worktree, "note.txt"), []byte("unpushed work"), 0600))
 			_, err = c.SessionCommit(ctx, stream, "unpushed change", "unpushed")
-			must(t, err)
+			fixturekit.Must(t, err)
 
 			if ended {
 				_, err = c.SessionEnd(ctx, stream)
-				must(t, err)
+				fixturekit.Must(t, err)
 			}
 			seedSessionState(t, s, project, stream)
 			result, err := c.DestroySession(ctx, stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !result.Destroyed || result.Project != project || result.Workstream != stream {
 				t.Fatalf("response: %+v", result)
 			}
 			assertDestroyedSession(t, s, c, project, stream)
 			bare := filepath.Join(filepath.Dir(clone), "remotes", "dagger", "dagger.git")
-			if tip := strings.TrimSpace(demoGit(t, filepath.Dir(clone), "--git-dir", bare, "rev-parse", pushed.Branch)); tip != pushed.Commit {
+			if tip := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(clone), "--git-dir", bare, "rev-parse", pushed.Branch)); tip != pushed.Commit {
 				t.Fatal("remote branch changed")
 			}
 			_, err = c.DestroySession(ctx, stream)
-			assertCode(t, err, NotFound)
+			fixturekit.AssertCode(t, err, api.NotFound)
 		})
 	}
 }
@@ -167,23 +170,23 @@ func TestDestroyDesignRemovesWorkgroupAndLeavesNeighbors(t *testing.T) {
 	s, c, _, project, session, _, _ := newSessionControlsFixture(t)
 	ctx := context.Background()
 	opened, err := c.OpenDesign(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	neighbor, err := c.OpenDesign(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	seedSessionState(t, s, project, opened.Design.Workstream)
 	result, err := c.DestroyDesign(ctx, opened.Design.Workstream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !result.Destroyed {
 		t.Fatal("destroy not acknowledged")
 	}
 	assertDestroyedSession(t, s, c, project, opened.Design.Workstream)
 	_, err = c.Design(ctx, neighbor.Design.Workstream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.Session(ctx, session)
-	must(t, err)
-	// A subsequent wrapping pass cannot resurrect the deleted design.
+	fixturekit.Must(t, err)
+
 	cfg, projects := s.runtimes()
-	must(t, s.ensureWorkgroups(ctx, cfg, projects, nil))
+	fixturekit.Must(t, s.ensureWorkgroups(ctx, cfg, projects, nil))
 	assertDestroyedSession(t, s, c, project, opened.Design.Workstream)
 }
 
@@ -192,7 +195,7 @@ func TestDestroySessionDoesNotRestoreStatusCache(t *testing.T) {
 	s, c, _, project, stream, _, _ := newSessionControlsFixture(t)
 	seedSessionState(t, s, project, stream)
 	snapshot := s.statusList()
-	if !slices.ContainsFunc(snapshot.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream }) {
+	if !slices.ContainsFunc(snapshot.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == stream }) {
 		t.Fatal("status snapshot does not include the session")
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -200,7 +203,7 @@ func TestDestroySessionDoesNotRestoreStatusCache(t *testing.T) {
 	defer unblock()
 	finished := make(chan struct{})
 	go func() {
-		readview.Bounded(context.Background(), service.InspectForTest(s.core()).StatusCache(), time.Minute, func() StatusResponse {
+		readview.Bounded(context.Background(), service.InspectForTest(s.core()).StatusCache(), time.Minute, func() api.StatusResponse {
 			close(entered)
 			<-release
 			return snapshot
@@ -209,11 +212,11 @@ func TestDestroySessionDoesNotRestoreStatusCache(t *testing.T) {
 	}()
 	<-entered
 	_, err := c.DestroySession(context.Background(), stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	unblock()
 	select {
 	case <-finished:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("status read did not finish")
 	}
 	assertDestroyedSession(t, s, c, project, stream)
@@ -236,17 +239,17 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 				ctx := context.Background()
 				if design {
 					opened, err := c.OpenDesign(ctx, project)
-					must(t, err)
+					fixturekit.Must(t, err)
 					stream = opened.Design.Workstream
 				}
 				neighbor, err := c.OpenDesign(ctx, project)
-				must(t, err)
+				fixturekit.Must(t, err)
 				seedSessionState(t, s, project, stream)
 				if !design {
 					view, err := c.Session(ctx, stream)
-					must(t, err)
+					fixturekit.Must(t, err)
 					v := view.Session
-					must(t, service.InspectForTest(s.core()).WritePendingSession(pendingSession{Version: 1, Project: project, Workstream: stream, Profile: v.Profile, Base: v.Base, Branch: v.Branch}))
+					fixturekit.Must(t, service.InspectForTest(s.core()).WritePendingSession(service.TestPendingSession{Version: 1, Project: project, Workstream: stream, Profile: v.Profile, Base: v.Base, Branch: v.Branch}))
 				}
 				interrupt.Store(true)
 				if design {
@@ -254,18 +257,18 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 				} else {
 					_, err = c.DestroySession(ctx, stream)
 				}
-				assertCode(t, err, Internal)
+				fixturekit.AssertCode(t, err, api.Internal)
 				pending, err := trace.SessionDestroyPending(s.current().Root, project, stream)
-				must(t, err)
+				fixturekit.Must(t, err)
 				if !pending {
 					t.Fatal("interruption lost destroy intent")
 				}
-				if cached, ok := service.InspectForTest(s.core()).StatusCache().Get(); ok && slices.ContainsFunc(cached.Workstreams, func(w WorkstreamStatus) bool { return w.Workstream == stream }) {
+				if cached, ok := service.InspectForTest(s.core()).StatusCache().Get(); ok && slices.ContainsFunc(cached.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == stream }) {
 					t.Fatal("pending destroy remains in the status cache")
 				}
 				if stage == "session-destroy-recorded" {
 					repo := s.sole().repository
-					h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "late-document", Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: ownerActor, Cause: "late-document"}
+					h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "late-document", Revision: 1, Project: project, Workstream: stream, At: s.now(), Actor: intake.OwnerActor, Cause: "late-document"}
 					err := repo.Append(ctx, trace.Document{Header: h, Path: "tools/late.json", Content: "must not be saved"})
 					if !errors.Is(err, os.ErrNotExist) {
 						t.Fatalf("late document write was not fenced: %v", err)
@@ -277,18 +280,18 @@ func TestDestroySessionRecoveryAtEveryRemovalBoundary(t *testing.T) {
 				}
 
 				_, err = c.Session(ctx, stream)
-				assertCode(t, err, NotFound)
+				fixturekit.AssertCode(t, err, api.NotFound)
 				_, err = c.Design(ctx, stream)
-				assertCode(t, err, NotFound)
-				must(t, (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: s.sole().repository}).Pass(ctx))
-				must(t, s.Close())
+				fixturekit.AssertCode(t, err, api.NotFound)
+				fixturekit.Must(t, (&lifecycle.WorkgroupResolver{S: s.lifecycle(), Repository: s.sole().repository}).Pass(ctx))
+				fixturekit.Must(t, s.Close())
 				interrupt.Store(false)
 				s, c = start(t, opts)
 				assertDestroyedSession(t, s, c, project, stream)
 				_, err = c.Design(ctx, neighbor.Design.Workstream)
-				must(t, err)
-				// Repeated restart leaves no pending destroy, archive or recreated wrapper.
-				must(t, s.Close())
+				fixturekit.Must(t, err)
+
+				fixturekit.Must(t, s.Close())
 				s, c = start(t, opts)
 				assertDestroyedSession(t, s, c, project, stream)
 			})
@@ -318,43 +321,43 @@ func TestDestroySessionFencesInterruptedOpen(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+		_, err := c.OpenSession(ctx, api.SessionOpenRequest{Project: project, Profile: "default"})
 		done <- err
 	}()
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("session open never recorded its trace")
 	}
 	pending, err := service.InspectForTest(s.core()).ReadPendingSession()
-	must(t, err)
+	fixturekit.Must(t, err)
 	if pending == nil {
 		t.Fatal("session open has no recovery journal")
 	}
 	_, err = c.DestroySession(ctx, pending.Workstream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	_, err = c.Session(ctx, pending.Workstream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	closeRelease()
 	select {
 	case err := <-done:
-		assertCode(t, err, Internal)
-	case <-time.After(demoTimeout):
+		fixturekit.AssertCode(t, err, api.Internal)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("interrupted open did not return")
 	}
 	interrupt.Store(false)
 	_, err = c.DestroySession(ctx, pending.Workstream)
-	must(t, err)
-	// A replay that read the old journal must revalidate before any effect.
+	fixturekit.Must(t, err)
+
 	_, err = service.InspectForTest(s.core()).CompleteSessionOpen(ctx, *pending)
-	if !errors.Is(err, errSessionDiscarded) {
+	if !errors.Is(err, service.TestErrSessionDiscarded) {
 		t.Fatalf("stale open replay was not refused: %v", err)
 	}
 	journal, err := s.current().Root.PendingSessionOpen()
-	must(t, err)
-	assertGone(t, journal)
+	fixturekit.Must(t, err)
+	fixturekit.AssertGone(t, journal)
 	assertDestroyedSession(t, s, c, project, pending.Workstream)
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	s, c = start(t, opts)
 	assertDestroyedSession(t, s, c, project, pending.Workstream)
 }
@@ -377,14 +380,14 @@ func TestDestroySessionRefusesInFlightCheckAndPush(t *testing.T) {
 				return nil
 			}))
 			if control == "check" {
-				service.InspectForTest(s.core()).SetReviewChecks(checkFunc(func(ctx context.Context, _ string) (CheckResult, error) {
+				service.InspectForTest(s.core()).SetReviewChecks(fixturekit.CheckFunc(func(ctx context.Context, _ string) (api.CheckResult, error) {
 					close(entered)
 					select {
 					case <-release:
 					case <-ctx.Done():
-						return CheckResult{}, ctx.Err()
+						return api.CheckResult{}, ctx.Err()
 					}
-					return CheckResult{Output: passedReport}, nil
+					return api.CheckResult{Output: fixturekit.PassedReport}, nil
 				}))
 			}
 			done := make(chan error, 1)
@@ -399,25 +402,25 @@ func TestDestroySessionRefusesInFlightCheckAndPush(t *testing.T) {
 			}()
 			select {
 			case <-entered:
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("control never entered")
 			}
 			_, err := c.DestroySession(context.Background(), stream)
-			assertCode(t, err, Conflict)
+			fixturekit.AssertCode(t, err, api.Conflict)
 			_, err = c.Session(context.Background(), stream)
-			must(t, err)
-			if _, found, err := sessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
+			fixturekit.Must(t, err)
+			if _, found, err := service.TestSessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
 				t.Fatalf("worktree changed: %v", err)
 			}
 			close(release)
 			select {
 			case err := <-done:
-				must(t, err)
-			case <-time.After(demoTimeout):
+				fixturekit.Must(t, err)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("control did not finish")
 			}
 			_, err = c.DestroySession(context.Background(), stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			assertDestroyedSession(t, s, c, project, stream)
 		})
 	}
@@ -429,7 +432,7 @@ func TestDestroySessionFencesControlsWithStaleLookups(t *testing.T) {
 		t.Run(control, func(t *testing.T) {
 			t.Parallel()
 			entered, release := make(chan struct{}), make(chan struct{})
-			var logs syncBuffer
+			var logs fixturekit.SyncBuffer
 			var passes atomic.Int64
 			s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
 				opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -466,20 +469,20 @@ func TestDestroySessionFencesControlsWithStaleLookups(t *testing.T) {
 			}()
 			select {
 			case <-entered:
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("lookup never entered")
 			}
 			_, err := c.DestroySession(context.Background(), stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			close(release)
 			select {
 			case err := <-done:
-				assertCode(t, err, NotFound)
-			case <-time.After(demoTimeout):
+				fixturekit.AssertCode(t, err, api.NotFound)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("control did not finish")
 			}
 			assertDestroyedSession(t, s, c, project, stream)
-			awaitFurtherPasses(t, &passes, 2)
+			intakefixture.AwaitFurtherPasses(t, &passes, 2)
 			if strings.Contains(logs.String(), `"level":"ERROR"`) {
 				t.Fatalf("background error: %s", logs.String())
 			}
@@ -499,7 +502,7 @@ func TestDestroySessionKeepsNeighborScheduling(t *testing.T) {
 				defer unblock()
 				var armed atomic.Bool
 				var passes atomic.Int64
-				var logs syncBuffer
+				var logs fixturekit.SyncBuffer
 				s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
 					opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 					opts.schedulePassed = func() { passes.Add(1) }
@@ -517,69 +520,69 @@ func TestDestroySessionKeepsNeighborScheduling(t *testing.T) {
 				})
 				if design {
 					opened, err := c.OpenDesign(ctx, project)
-					must(t, err)
+					fixturekit.Must(t, err)
 					stream = opened.Design.Workstream
 				}
 				if stage == "workgroup-resolution-edges-discovered" {
 					repo, err := s.repository(project)
-					must(t, err)
+					fixturekit.Must(t, err)
 					archived := config.WorkstreamID("w_00000000000000000000000000000903")
-					must(t, repo.CreateWorkstream(ctx, archived, s.now(), ownerActor))
-					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "archived-cancelled", Revision: 1, Project: project, Workstream: archived, At: s.now(), Actor: ownerActor, Cause: "fixture"}
-					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "cancelled archive"}})
-					must(t, err)
-					must(t, s.refreshRuntime())
-					must(t, s.store.SetArchived(runtime.Archive{Project: project, Workstream: archived, Title: "Cancelled archive", State: AbandonedState, ArchivedAt: s.now(), CleanedAt: s.now(), Resolved: true, ResolutionEvidence: "cancelled"}))
+					fixturekit.Must(t, repo.CreateWorkstream(ctx, archived, s.now(), intake.OwnerActor))
+					h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "archived-cancelled", Revision: 1, Project: project, Workstream: archived, At: s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: intake.AbandonedState, Reason: "cancelled archive"}})
+					fixturekit.Must(t, err)
+					fixturekit.Must(t, s.refreshRuntime())
+					fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: project, Workstream: archived, Title: "Cancelled archive", State: intake.AbandonedState, ArchivedAt: s.now(), CleanedAt: s.now(), Resolved: true, ResolutionEvidence: "cancelled"}))
 				}
 				armed.Store(true)
 				select {
 				case <-entered:
-				case <-time.After(demoTimeout):
+				case <-time.After(fixturekit.DemoTimeout):
 					t.Fatal("scheduling did not reach its boundary")
 				}
 				repo, err := s.repository(project)
-				must(t, err)
+				fixturekit.Must(t, err)
 				neighbor := config.WorkstreamID("w_00000000000000000000000000000901")
-				must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), ownerActor))
-				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-waiting", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: ownerActor, Cause: "fixture"}
+				fixturekit.Must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), intake.OwnerActor))
+				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-waiting", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
 				_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: lifecycle.EdgeWaitSubject, To: "waiting", Reason: "Await edge observation"}})
-				must(t, err)
+				fixturekit.Must(t, err)
 				var neighborGroup config.WorkgroupID
 				if strings.HasPrefix(stage, "workgroup-resolution") {
-					_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), ownerActor, "neighbor-group")
-					must(t, err)
+					_, err = trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), intake.OwnerActor, "neighbor-group")
+					fixturekit.Must(t, err)
 					groups, _, err := trace.Workgroups(repo)
-					must(t, err)
+					fixturekit.Must(t, err)
 					group, found := trace.WorkgroupOf(groups, neighbor)
 					if !found {
 						t.Fatal("neighbor has no workgroup")
 					}
 					neighborGroup = group.ID
 					h.ID = "neighbor-abandoned"
-					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "neighbor is resolved"}})
-					must(t, err)
+					_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: intake.AbandonedState, Reason: "neighbor is resolved"}})
+					fixturekit.Must(t, err)
 				}
 				if design {
 					_, err = c.DestroyDesign(ctx, stream)
 				} else {
 					_, err = c.DestroySession(ctx, stream)
 				}
-				must(t, err)
+				fixturekit.Must(t, err)
 				unblock()
-				eventually(t, "neighbor's edge wait clears after destroy", func() bool {
+				intakefixture.Eventually(t, "neighbor's edge wait clears after destroy", func() bool {
 					state, err := repo.Workflow(neighbor, lifecycle.EdgeWaitSubject)
-					must(t, err)
+					fixturekit.Must(t, err)
 					return state.Value == "available"
 				})
 				if neighborGroup != "" {
-					eventually(t, "neighbor's workgroup resolves after destroy", func() bool {
+					intakefixture.Eventually(t, "neighbor's workgroup resolves after destroy", func() bool {
 						resolved, _, err := trace.ResolvedWorkgroups(repo)
-						must(t, err)
+						fixturekit.Must(t, err)
 						return slices.Contains(resolved, neighborGroup)
 					})
 				}
 				assertDestroyedSession(t, s, c, project, stream)
-				awaitFurtherPasses(t, &passes, 2)
+				intakefixture.AwaitFurtherPasses(t, &passes, 2)
 				if strings.Contains(logs.String(), `"level":"ERROR"`) {
 					t.Fatalf("background error: %s", logs.String())
 				}
@@ -593,60 +596,69 @@ func TestDestroyRefusesTurnsAndConcurrentDesignStart(t *testing.T) {
 	s, c, project := newDesignFixture(t)
 	ctx := context.Background()
 	opened, err := c.OpenDesign(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
-	// The design lock is held across both message admission and workgroup start.
+
 	lock := intake.DesignLock(s.sole().repository, stream)
 	lock.Lock()
 	_, err = c.DestroyDesign(ctx, stream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	lock.Unlock()
 	_, err = c.DesignMessage(ctx, stream, "discuss")
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = c.DestroyDesign(ctx, stream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	_, err = c.Design(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 }
 
-func TestDestroyRefusesOtherKindsAndStartedDesign(t *testing.T) {
+func destroyRefusalChangesNothing(t *testing.T, c *Client, repo *trace.Repository, id config.WorkstreamID) {
+	t.Helper()
+	ctx := context.Background()
+	before, err := repo.WorkflowStates(id)
+	fixturekit.Must(t, err)
+	_, err = c.DestroySession(ctx, id)
+	fixturekit.AssertCode(t, err, api.Conflict)
+	_, err = c.DestroyDesign(ctx, id)
+	fixturekit.AssertCode(t, err, api.Conflict)
+	after, err := repo.WorkflowStates(id)
+	fixturekit.Must(t, err)
+	if len(before) != len(after) {
+		t.Fatal("refusal changed workflow")
+	}
+}
+
+func TestDestroyRefusesAnOrdinaryWorkstream(t *testing.T) {
+	t.Parallel()
+	s, c, project := newDesignFixture(t)
+	input := "ordinary feature"
+	ordinary, err := c.HandIn(context.Background(), api.HandInRequest{Project: project, Stdin: &input, Key: "ordinary-destroy-refusal"})
+	fixturekit.Must(t, err)
+	destroyRefusalChangesNothing(t, c, s.sole().repository, ordinary.Workstream)
+}
+
+func TestDestroyRefusesADesignWhoseWorkgroupStarted(t *testing.T) {
 	t.Parallel()
 	s, c, project := newDesignFixture(t)
 	ctx := context.Background()
-	input := "ordinary feature"
-	ordinary, err := c.HandIn(ctx, HandInRequest{Project: project, Stdin: &input, Key: "ordinary-destroy-refusal"})
-	must(t, err)
 	opened, err := c.OpenDesign(ctx, project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	repo := s.sole().repository
-	// This marker is the same guard as the owner start transition.
-	state, err := repo.Workflow(opened.Design.Workstream, designSessionSubject)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "started-test", Revision: 1, Project: project, Workstream: opened.Design.Workstream, At: s.now(), Actor: ownerActor, Cause: "started-test"}
-	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: designSessionSubject, From: designOpenValue, To: designClosedValue, Reason: "owner started workgroup"}})
-	must(t, err)
-	for _, id := range []config.WorkstreamID{ordinary.Workstream, opened.Design.Workstream} {
-		before, err := repo.WorkflowStates(id)
-		must(t, err)
-		_, err = c.DestroySession(ctx, id)
-		assertCode(t, err, Conflict)
-		_, err = c.DestroyDesign(ctx, id)
-		assertCode(t, err, Conflict)
-		after, err := repo.WorkflowStates(id)
-		must(t, err)
-		if len(before) != len(after) {
-			t.Fatal("refusal changed workflow")
-		}
-	}
+	state, err := repo.Workflow(opened.Design.Workstream, intake.DesignSessionSubject)
+	fixturekit.Must(t, err)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "started-test", Revision: 1, Project: project, Workstream: opened.Design.Workstream, At: s.now(), Actor: intake.OwnerActor, Cause: "started-test"}
+	_, err = repo.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: intake.DesignSessionSubject, From: intake.DesignOpenValue, To: intake.DesignClosedValue, Reason: "owner started workgroup"}})
+	fixturekit.Must(t, err)
+	destroyRefusalChangesNothing(t, c, repo, opened.Design.Workstream)
 	groups, revision, err := trace.Workgroups(repo)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, route := range []string{"design", "sessions"} {
-		var out SessionDestroyResponse
-		err = c.Do(ctx, "POST", Prefix+"/"+route+"/"+string(groups[0].ID)+"/destroy", nil, &out)
-		assertCode(t, err, Conflict)
+		var out api.SessionDestroyResponse
+		err = c.Do(ctx, "POST", service.Prefix+"/"+route+"/"+string(groups[0].ID)+"/destroy", nil, &out)
+		fixturekit.AssertCode(t, err, api.Conflict)
 	}
 	_, afterRevision, err := trace.Workgroups(repo)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if afterRevision != revision {
 		t.Fatal("refusal changed the workgroup")
 	}
@@ -669,21 +681,21 @@ func TestDestroySessionRefusesRunningTurn(t *testing.T) {
 		return &agent.Result{ClaudeID: "session", ResultText: "done"}, nil
 	}
 	_, err := c.SessionMessage(context.Background(), stream, "work")
-	must(t, err)
+	fixturekit.Must(t, err)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("turn did not start")
 	}
 	_, err = c.DestroySession(context.Background(), stream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	_, err = c.Session(context.Background(), stream)
-	must(t, err)
-	if _, found, err := sessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
+	fixturekit.Must(t, err)
+	if _, found, err := service.TestSessionGit(s.current().For(project)).Workspace(context.Background(), string(stream)); err != nil || !found {
 		t.Fatalf("worktree changed: %v", err)
 	}
 	close(release)
-	awaitSession(t, c, stream, func(v SessionView) bool { return v.State == trace.SessionIdle })
+	fixturekit.AwaitSession(t, c, stream, func(v api.SessionView) bool { return v.State == trace.SessionIdle })
 }
 
 func TestDestroyDesignRefusesWorkgroupStartInProgress(t *testing.T) {
@@ -701,28 +713,28 @@ func TestDestroyDesignRefusesWorkgroupStartInProgress(t *testing.T) {
 		return nil
 	}))
 	opened, err := c.OpenDesign(context.Background(), project)
-	must(t, err)
-	must(t, recordDesignDraft(t, s.sole().repository, opened.Design.Workstream, "Ship a small change."))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, intakefixture.RecordDesignDraft(t, s.sole().repository, opened.Design.Workstream, "Ship a small change."))
 	finished := make(chan error, 1)
 	go func() { _, err := c.DesignStart(context.Background(), opened.Design.Workstream); finished <- err }()
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("start did not reach handoff")
 	}
 	_, err = c.DestroyDesign(context.Background(), opened.Design.Workstream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	_, err = c.Design(context.Background(), opened.Design.Workstream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	close(release)
 	select {
 	case err := <-finished:
-		must(t, err)
-	case <-time.After(demoTimeout):
+		fixturekit.Must(t, err)
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("start did not finish")
 	}
 	_, err = c.DestroyDesign(context.Background(), opened.Design.Workstream)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 }
 
 func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
@@ -734,7 +746,7 @@ func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
 			unblock := sync.OnceFunc(func() { close(release) })
 			defer unblock()
 			reachedDestroy := sync.OnceFunc(func() { close(destroying) })
-			var logs syncBuffer
+			var logs fixturekit.SyncBuffer
 			var passes atomic.Int64
 			s, c, _, project, stream, _, _ := newSessionControlsFixture(t, func(opts *Options) {
 				opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -749,11 +761,11 @@ func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
 			ctx := context.Background()
 			if design {
 				opened, err := c.OpenDesign(ctx, project)
-				must(t, err)
+				fixturekit.Must(t, err)
 				stream = opened.Design.Workstream
 			}
 			repo, err := s.repository(project)
-			must(t, err)
+			fixturekit.Must(t, err)
 			type snapshot struct {
 				streams []config.WorkstreamID
 				err     error
@@ -776,20 +788,20 @@ func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
 			}()
 			select {
 			case <-listed:
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("discovery did not enumerate the session")
 			}
 			neighbor := config.WorkstreamID("w_00000000000000000000000000000904")
-			must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), ownerActor))
-			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), ownerActor, "neighbor-group")
-			must(t, err)
+			fixturekit.Must(t, repo.CreateWorkstream(ctx, neighbor, s.now(), intake.OwnerActor))
+			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{neighbor}, s.now(), intake.OwnerActor, "neighbor-group")
+			fixturekit.Must(t, err)
 			group, found := trace.WorkgroupOf(groups, neighbor)
 			if !found {
 				t.Fatal("neighbor has no workgroup")
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-cancelled", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: ownerActor, Cause: "fixture"}
-			_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: AbandonedState, Reason: "neighbor is resolved"}})
-			must(t, err)
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "neighbor-cancelled", Revision: 1, Project: project, Workstream: neighbor, At: s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+			_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: intake.AbandonedState, Reason: "neighbor is resolved"}})
+			fixturekit.Must(t, err)
 			destroyed := make(chan error, 1)
 			go func() {
 				var err error
@@ -804,16 +816,16 @@ func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
 			case <-destroying:
 			case err := <-destroyed:
 				t.Fatalf("destroy returned before reaching trace removal: %v", err)
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("destroy did not reach trace removal")
 			}
 			pending, err := trace.SessionDestroyPending(s.current().Root, project, stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !pending {
 				t.Fatal("destroy has no durable intent")
 			}
 			gone, err := trace.WorkstreamTraceGone(s.current().Root, project, stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if gone {
 				t.Fatal("destroy removed the trace during classification")
 			}
@@ -828,26 +840,26 @@ func TestDestroySessionWaitsForDiscoverySnapshot(t *testing.T) {
 			unblock()
 			select {
 			case result := <-scanned:
-				must(t, result.err)
+				fixturekit.Must(t, result.err)
 				if slices.Contains(result.streams, stream) {
 					t.Fatal("snapshot retained a removable session")
 				}
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("discovery did not finish")
 			}
 			select {
 			case err := <-destroyed:
-				must(t, err)
-			case <-time.After(demoTimeout):
+				fixturekit.Must(t, err)
+			case <-time.After(fixturekit.DemoTimeout):
 				t.Fatal("destroy did not finish after the snapshot released its guard")
 			}
-			eventually(t, "neighbor workgroup resolves", func() bool {
+			intakefixture.Eventually(t, "neighbor workgroup resolves", func() bool {
 				resolved, _, err := trace.ResolvedWorkgroups(repo)
-				must(t, err)
+				fixturekit.Must(t, err)
 				return slices.Contains(resolved, group.ID)
 			})
 			assertDestroyedSession(t, s, c, project, stream)
-			awaitFurtherPasses(t, &passes, 2)
+			intakefixture.AwaitFurtherPasses(t, &passes, 2)
 			if strings.Contains(logs.String(), `"level":"ERROR"`) {
 				t.Fatalf("background error: %s", logs.String())
 			}

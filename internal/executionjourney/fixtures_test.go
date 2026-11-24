@@ -2,14 +2,13 @@ package executionjourney
 
 import (
 	context "context"
-	http "net/http"
-	testing "testing"
-	time "time"
-
+	"github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	delivery "github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	lifecycle "github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/questions"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	service "github.com/kpenfound/osmia/internal/service"
 	servicetest "github.com/kpenfound/osmia/internal/servicetest"
@@ -17,23 +16,24 @@ import (
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	shed "github.com/kpenfound/osmia/internal/shed"
 	trace "github.com/kpenfound/osmia/internal/trace"
+	http "net/http"
+	strings "strings"
+	testing "testing"
+	time "time"
 )
 
-// delivered returns what each draft_write the scripted turn made returned.
-func (f *architectFixture) delivered(turn string) []draftStatus {
+func (f *architectFixture) delivered(turn string) []intake.DraftStatus {
 	return f.scenario().Delivered(turn)
 }
 
-func (s *Service) saveChange(ctx context.Context, repo *trace.Repository, c *WorkgroupChange) error {
+func (s *Service) saveChange(ctx context.Context, repo *trace.Repository, c *lifecycle.WorkgroupChange) error {
 	return s.lifecycle().SaveChange(ctx, repo, c)
 }
 
-func draftDelivery(cfg *config.Config, r *trace.Repository, w config.WorkstreamID, report FinalReport) (string, string, error) {
-	return delivery.New(delivery.Dependencies{PendingMergeOrderReferences: pendingMergeOrderReferences}).DraftDelivery(cfg, r, w, report)
+func draftDelivery(cfg *config.Config, r *trace.Repository, w config.WorkstreamID, report api.FinalReport) (string, string, error) {
+	return delivery.New(delivery.Dependencies{PendingMergeOrderReferences: lifecycle.PendingMergeOrderReferences}).DraftDelivery(cfg, r, w, report)
 }
 
-// ruling returns the turns of the requester's thread that deliver the
-// ruling on amendment 1.
 func (f *shedFixture) ruling(t *testing.T, stream config.WorkstreamID, requester string) []trace.QueuedTurn {
 	t.Helper()
 	return intakefixture.AmendmentRuling(t, f.repository(), stream, requester)
@@ -74,13 +74,10 @@ func (f *architectFixture) transitions(t *testing.T, stream config.WorkstreamID)
 func startNotifying(t *testing.T, opts Options, inbox *fakeInbox) (*Service, *Client) {
 	t.Helper()
 	s, c := start(t, opts)
-	inbox.Observe(func() { service.InspectForTest(s.core()).Publish(Event{Kind: EventInbox}) })
+	inbox.Observe(func() { service.InspectForTest(s.core()).Publish(api.Event{Kind: api.EventInbox}) })
 	return s, c
 }
 
-// fakeWebhook records the bodies posted to it and answers with status. It
-// stands in for the owner's real webhook endpoint, leaving that endpoint's
-// actual network behaviour and availability unverified.
 type fakeWebhook struct{ *fixturekit.Webhook }
 
 func (w *fakeWebhook) hook() string { return w.Hook() }
@@ -96,8 +93,6 @@ func (w *fakeWebhook) await(t *testing.T, n int) []string {
 	return intakefixture.AwaitWebhook(t, w.Webhook, n)
 }
 
-// eventTraceOptions plants a workstream with one escalated question in the
-// trace and returns the options of a service that has not started.
 func eventTraceOptions(t *testing.T) Options {
 	t.Helper()
 	opts, cfg := conversationFixture(t, "evs-")
@@ -105,15 +100,15 @@ func eventTraceOptions(t *testing.T) Options {
 	return opts
 }
 
-func (s *Service) requestChange(ctx context.Context, raw string, req ChangeRequest) (WorkgroupChange, *APIError) {
+func (s *Service) requestChange(ctx context.Context, raw string, req lifecycle.ChangeRequest) (lifecycle.WorkgroupChange, *api.APIError) {
 	return s.lifecycle().RequestChange(ctx, raw, req)
 }
 
 type fakeInbox struct{ fixturekit.NotificationInbox }
 
-func (f *fakeInbox) read(ctx context.Context) (InboxResponse, *APIError) { return f.Read(ctx) }
+func (f *fakeInbox) read(ctx context.Context) (api.InboxResponse, *api.APIError) { return f.Read(ctx) }
 
-func (f *fakeInbox) set(entries ...InboxEntry) { f.Set(entries...) }
+func (f *fakeInbox) set(entries ...api.InboxEntry) { f.Set(entries...) }
 
 func (f *fakeInbox) breakInbox(broken bool) { f.Break(broken) }
 
@@ -130,28 +125,23 @@ func (s *Service) ensureWorkgroups(ctx context.Context, cfg *config.Config, proj
 	return s.lifecycle().EnsureWorkgroups(ctx, cfg, ps, archives)
 }
 
-// setUpBusyReadsService starts a service whose only active project has
-// stream already created, wired so a RepositoryBoundary operation reaches
-// blocking instead of a real sealer, builder or foreman.
 func setUpBusyReadsService(t *testing.T, blocking coreadapter.Reconciler) (*Service, *Client, *trace.Repository) {
 	t.Helper()
 	opts := testOptions(fixturekit.BusyReadsConfig(t))
 	opts.Reconciliation.Adapters = map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: blocking}
 	s, c := start(t, opts)
-	_, active := s.runtimeOf(project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
 	return s, c, active.repository
 }
 
-func readLedger(t *testing.T, opts Options) notifyLedger {
+func readLedger(t *testing.T, opts Options) service.TestNotifyLedger {
 	t.Helper()
-	return fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root)
+	return fixturekit.ReadNotificationLedger[service.TestNotifyLedger](t, opts.Config.Root)
 }
 
-// builtForAmendment returns a fixture with a building workstream on seal 1,
-// a committee of one and the given shed.max_rounds.
 func builtForAmendment(t *testing.T, rounds int) (*shedFixture, config.WorkstreamID) {
 	t.Helper()
 	f := newDebateFixture(t, 1, rounds)
@@ -182,13 +172,11 @@ func fixtureAt(t *testing.T, home string) Options {
 	return Options{Options: servicetest.FixtureAt(t, home)}
 }
 
-// newHandInFixture starts a service with an active project whose charter has
-// rules.
 func newHandInFixture(t *testing.T) *handInFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
 	f := &handInFixture{}
-	data := intakefixture.NewHandInSetup(t, clone, func(fake *fakeIssues) intakefixture.ArchitectProjectClient {
+	data := intakefixture.NewHandInSetup(t, clone, func(fake *fixturekit.FakeIssues) intakefixture.ArchitectProjectClient {
 		opts.Issues = fake
 		f.s, f.c = start(t, opts)
 		return f.c
@@ -197,14 +185,12 @@ func newHandInFixture(t *testing.T) *handInFixture {
 	return f
 }
 
-// cloneFixture is a project root, a clone with tracked and untracked files and
-// the fake engine the role turns run in.
 type cloneFixture struct {
 	opts     Options
 	clone    string
-	engine   *demoEngine
-	sessions *demoSessions
-	clock    *demoClock
+	engine   *fixturekit.DemoEngine
+	sessions *fixturekit.DemoSessions
+	clock    *fixturekit.DemoClock
 }
 
 func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFixture {
@@ -223,9 +209,9 @@ func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFi
 func start(t *testing.T, o Options) (*Service, *Client) {
 	t.Helper()
 	s, err := Start(context.Background(), o)
-	must(t, err)
+	fixturekit.Must(t, err)
 	c := NewClient(s.Socket())
-	t.Cleanup(func() { c.Close(); must(t, s.Close()) })
+	t.Cleanup(func() { c.Close(); fixturekit.Must(t, s.Close()) })
 	return s, c
 }
 
@@ -234,37 +220,33 @@ func (w *fakeWebhook) records(opts Options) *fakeWebhook {
 	return w
 }
 
-func (s *Service) deltaTool(wt *trace.Repository, c WorkgroupChange, agent, name string) coreadapter.Tool {
+func (s *Service) deltaTool(wt *trace.Repository, c lifecycle.WorkgroupChange, agent, name string) coreadapter.Tool {
 	return s.lifecycle().DeltaTool(wt, c, agent, name)
 }
 
-// ownerMoves lists the states the workstream's owner subject went through.
 func (f *shedFixture) ownerMoves(t *testing.T, stream config.WorkstreamID) []string {
 	t.Helper()
 	return intakefixture.OwnerMoves(t, f.transitions(t, stream))
 }
 
-// eventTraceFixture is a service whose trace holds stream and quiet, with
-// quiet's question escalated to the owner as inbox entry 1.
 func eventTraceFixture(t *testing.T) (*Service, *Client) {
 	t.Helper()
 	return start(t, eventTraceOptions(t))
 }
 
-// awaitAmendment waits until amendment 1 reaches the wanted state.
 func (f *shedFixture) awaitAmendment(t *testing.T, stream config.WorkstreamID, want string) {
 	t.Helper()
 	intakefixture.AwaitAmendment(t, f.repository(), stream, want)
 }
 
-func notifyDiagnostics(t *testing.T, c *Client) (status, cfg []Diagnostic) {
+func notifyDiagnostics(t *testing.T, c *Client) (status, cfg []api.Diagnostic) {
 	t.Helper()
 	st, err := c.Statuses(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	cr, err := c.Configuration(context.Background())
-	must(t, err)
-	pick := func(ds []Diagnostic) []Diagnostic {
-		var out []Diagnostic
+	fixturekit.Must(t, err)
+	pick := func(ds []api.Diagnostic) []api.Diagnostic {
+		var out []api.Diagnostic
 		for _, d := range ds {
 			if d.Field == "notify" {
 				out = append(out, d)
@@ -275,9 +257,7 @@ func notifyDiagnostics(t *testing.T, c *Client) (status, cfg []Diagnostic) {
 	return pick(st.Diagnostics), pick(cr.Diagnostics)
 }
 
-var committedPaths = fixturekit.CommittedPaths
-
-func (s *Service) workstreamStatus(raw string) (WorkstreamStatus, *APIError) {
+func (s *Service) workstreamStatus(raw string) (api.WorkstreamStatus, *api.APIError) {
 	return service.InspectForTest(s.core()).WorkstreamStatus(raw)
 }
 
@@ -298,15 +278,15 @@ func fixture(t *testing.T) Options { return Options{Options: servicetest.Fixture
 type handInFixture struct {
 	s       *Service
 	c       *Client
-	issues  *fakeIssues
+	issues  *fixturekit.FakeIssues
 	project config.ProjectID
 	trace   string
 	home    string
 }
 
-var entryOf = fixturekit.NotificationEntry
-
-func (s *Service) statusList() StatusResponse { return service.InspectForTest(s.core()).StatusList() }
+func (s *Service) statusList() api.StatusResponse {
+	return service.InspectForTest(s.core()).StatusList()
+}
 
 func (f *architectFixture) handIn(t *testing.T, key, content string) config.WorkstreamID {
 	t.Helper()
@@ -317,11 +297,6 @@ func (s *Service) changeContext(ctx context.Context, raw string) (*trace.Reposit
 	return s.lifecycle().ChangeContext(ctx, raw)
 }
 
-// presentAmendment plants amendment 1 as the chief of staff presents it: the
-// requester of the given role asked for it from its turn filing on unit
-// resume, which waits for it, the architect proposed spec and graph, the
-// given committee records make its first round, and packet.json revision 1
-// is presented. It returns the requester's agent.
 func presentAmendment(t *testing.T, f *shedFixture, stream config.WorkstreamID, role, spec, graph string, records ...shed.Record) string {
 	t.Helper()
 	return intakefixture.PresentAmendment(t, f.repository(), f.project, f.clock.Now(), stream, role, spec, graph, records...)
@@ -329,29 +304,21 @@ func presentAmendment(t *testing.T, f *shedFixture, stream config.WorkstreamID, 
 
 func (s *Service) halt(p *activeProject) error { return service.InspectForTest(s.core()).Halt(p.id) }
 
-// withTailnet sets opts to join a fake tailnet that reports names, and
-// returns a pointer to the node the service joins.
-func withTailnet(t *testing.T, opts *Options, names ...string) **fakeTailnet {
+func withTailnet(t *testing.T, opts *Options, names ...string) **fixturekit.TailnetNode {
 	t.Helper()
 	join, joined := fixturekit.TailnetJoiner(names...)
-	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) { return join(hostname, dir) }
+	opts.JoinTailnet = func(hostname, dir string) (service.TailnetListener, error) { return join(hostname, dir) }
 	return joined
 }
 
-// newDesignFixture starts a service with an active project whose charter
-// has rules and whose clone has one commit, the same shape newHandInFixture
-// gives an ordinary hand-in.
 func newDesignFixture(t *testing.T) (*Service, *Client, config.ProjectID) {
 	t.Helper()
 	f := newHandInFixture(t)
 	return f.s, f.c, f.project
 }
 
-var feedDocument = fixturekit.FeedDocument
-
 func newFakeWebhook(t *testing.T) *fakeWebhook { return &fakeWebhook{fixturekit.NewWebhook(t)} }
 
-// revisions lists the recorded revisions of one document.
 func (f *shedFixture) revisions(t *testing.T, stream config.WorkstreamID, id string) []int {
 	t.Helper()
 	return f.scenario().DocumentRevisions(t, stream, id)
@@ -362,31 +329,79 @@ func (f *shedFixture) ratification(t *testing.T, stream config.WorkstreamID, rou
 	return f.scenario().Ratification(t, stream, round)
 }
 
-func currentChange(t *testing.T, s *Service, address config.WorkstreamID, id string) WorkgroupChange {
+func currentChange(t *testing.T, s *Service, address config.WorkstreamID, id string) lifecycle.WorkgroupChange {
 	t.Helper()
 	wt, g, _, close, err := s.changeContext(context.Background(), string(address))
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer close()
-	changes, err := readChanges(wt, g.Members[0])
-	must(t, err)
+	changes, err := lifecycle.ReadChanges(wt, g.Members[0])
+	fixturekit.Must(t, err)
 	for _, c := range changes {
 		if c.ID == id {
 			return c
 		}
 	}
-	return WorkgroupChange{}
+	return lifecycle.WorkgroupChange{}
 }
 
-// withListen appends a [listen] table with the given body to the fixture's
-// top-level file.
 func withListen(t *testing.T, opts Options, body string) {
 	t.Helper()
 	fixturekit.WithListen(t, opts.Config.Root, body)
 }
 
-// acknowledgedDraftOperations returns the draft operations once every one of
-// them is acknowledged, for assertions reached through an awaited state.
 func (f *architectFixture) acknowledgedDraftOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	return f.scenario().AcknowledgedDraftOperations(t, stream)
+}
+
+var (
+	amendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
+)
+
+func (f *architectFixture) runs() []string {
+	return f.scenario().Runs()
+}
+
+func (f *crossRepoRatifyFixture) scriptDrafts(t *testing.T) {
+	t.Helper()
+	intakefixture.ScriptCrossRepoDrafts(t, f.engine, func() (config.WorkstreamID, config.WorkstreamID) { return f.stream1, f.stream2 })
+}
+
+func completeClaimedTurn(t *testing.T, f *shedFixture, r *trace.Repository, w config.WorkstreamID, a string, q trace.QueuedTurn, o *coreadapter.Outcome) {
+	t.Helper()
+	f.sharedTurns().CompleteClaimedTurn(t, r, w, a, q, o)
+}
+func chiefRecordsAnswer(t *testing.T, f *shedFixture, r *trace.Repository, w config.WorkstreamID, id, text, cite string) {
+	t.Helper()
+	f.sharedTurns().ChiefRecordsAnswer(t, r, w, id, text, cite)
+}
+
+func claimOldestTurn(t *testing.T, f *shedFixture, r *trace.Repository, w config.WorkstreamID, a string) trace.QueuedTurn {
+	t.Helper()
+	return intakefixture.ClaimOldestTurn(t, f.sharedTurns(), r, w, a)
+}
+
+func (s *Service) answers(cfg *config.Config, r *trace.Repository) *questions.Deliverer {
+	return s.intake().Answers(cfg, r)
+}
+
+func chiefAnswers(t *testing.T, f *shedFixture, r *trace.Repository, w config.WorkstreamID, id, text, cite string) {
+	t.Helper()
+	chiefRecordsAnswer(t, f, r, w, id, text, cite)
+	fixturekit.Must(t, f.s.answers(f.s.cfg, r).Pass(context.Background()))
+}
+
+func (f *shedFixture) buildFixture() intakefixture.BuildFixture {
+	return intakefixture.BuildFixture{
+		Upstream: f.upstream,
+		Seed: func(t *testing.T, key, graph, backend, base string) (config.WorkstreamID, *trace.Repository) {
+			return seedBuild(t, f, key, graph, backend, base)
+		},
+		Start: f.start,
+	}
+}
+
+func sealDependent(t *testing.T, f *shedFixture, repo *trace.Repository, backend string, base config.WorkstreamID, files map[string]string) (config.WorkstreamID, string) {
+	t.Helper()
+	return intakefixture.SealDependent(t, f.s.intake(), repo, backend, base, files)
 }

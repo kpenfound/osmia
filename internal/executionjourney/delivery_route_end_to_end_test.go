@@ -3,6 +3,9 @@ package executionjourney
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,46 +27,37 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// routeWorld is a running service whose project's upstream is a real bare Git
-// repository and whose pull request host and Jev are fakes. Its one workstream
-// is assembled and has a downstream workstream that waits for it to merge. The
-// service itself runs the final review, the draft publication, the checks, the
-// gate worker, the reconciler and the pull request polls.
 type routeWorld struct {
 	t        *testing.T
 	f        *shedFixture
 	stream   config.WorkstreamID
 	down     config.WorkstreamID
-	pulls    *fakePulls
+	pulls    *fixturekit.FakePulls
 	hook     *fakeWebhook
 	provider *jevfixture.Provider
 	upstream string
 	base     string
-	// pushes holds one line for every update of the upstream's main branch.
+
 	pushes string
 
 	cards    atomic.Int64
+	passes   *atomic.Int64
 	stopCard chan struct{}
 	cardDone chan struct{}
 }
 
 type routeOptions struct {
-	// jev is Jev's provider; nil leaves Jev unconfigured.
 	jev *jevfixture.Provider
-	// delivery is the project's delivery setting.
+
 	delivery string
-	// boundary is the service's fault point.
+
 	boundary func(context.Context, string) error
-	// later are the findings the final reviews after the first report.
+
 	later []any
 }
 
-// downstreamStream is the workstream that waits for the landing workstream.
 const downstreamStream = config.WorkstreamID("w_00000000000000000000000000000c02")
 
-// confident is a Jev that picks option at confidence whenever it is offered
-// and defers every decision that does not offer it, such as a delivery
-// approval, so that card stays the owner's.
 func confident(option string, confidence float64) *jevfixture.Provider {
 	return &jevfixture.Provider{Confidence: confidence, Pick: func(options []string) string {
 		for _, o := range options {
@@ -78,7 +72,6 @@ func confident(option string, confidence float64) *jevfixture.Provider {
 	}}
 }
 
-// routeDecisions counts the delivery-route requests Jev received.
 func routeDecisions(p *jevfixture.Provider) int {
 	if p == nil {
 		return 0
@@ -95,8 +88,11 @@ func routeDecisions(p *jevfixture.Provider) int {
 func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	t.Helper()
 	ctx := context.Background()
-	w := &routeWorld{t: t, provider: o.jev, hook: newFakeWebhook(t), pulls: &fakePulls{SyncHead: true}, stopCard: make(chan struct{}), cardDone: make(chan struct{})}
+	w := &routeWorld{t: t, provider: o.jev, hook: newFakeWebhook(t), pulls: &fixturekit.FakePulls{SyncHead: true}, stopCard: make(chan struct{}), cardDone: make(chan struct{})}
+	passes, onPass := intakefixture.ScheduleCounter()
+	w.passes = passes
 	f := newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
+		opts.schedulePassed = onPass
 		opts.PullRequests = w.pulls
 		if o.jev != nil {
 			withJev(t, o.jev)(opts)
@@ -107,25 +103,23 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	})
 	w.f = f
 
-	// The project delivers to its own upstream, and opts in when asked.
 	saved, err := f.c.ProjectConfig(ctx, f.project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	none := ""
 	set := api.ProjectConfigValues{Fork: &none}
 	if o.delivery != "" {
 		set.Delivery = &o.delivery
 	}
 	_, err = f.c.SaveProjectConfig(ctx, f.project, api.ProjectConfigEdit{Pin: saved.Pin, Set: set})
-	must(t, err)
+	fixturekit.Must(t, err)
 	f.s.cfg = f.s.current()
 
 	var repository *trace.Repository
 	w.stream, repository = f.buildFixture().SeedGit(t, "route")
 	home := filepath.Dir(f.clone)
-	w.upstream = strings.TrimSpace(demoGit(t, home, "-C", f.clone, "remote", "get-url", "upstream"))
+	w.upstream = strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "get-url", "upstream"))
 	w.pulls.Mu.Lock()
-	// The running service reads this from its own goroutines, so it must not
-	// fail the test.
+
 	w.pulls.Branches = func(branch string) string {
 		tip, _ := fixturekit.PublicationForkTip(w.upstream, branch)
 		return tip
@@ -134,22 +128,22 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 	w.base = w.rev("refs/heads/main")
 	w.pushes = filepath.Join(home, "main-updates")
 	hookScript := "#!/bin/sh\nwhile read old new ref; do\n  if [ \"$ref\" = refs/heads/main ]; then\n    echo \"$new\" >> '" + w.pushes + "'\n  fi\ndone\n"
-	must(t, os.WriteFile(filepath.Join(w.upstream, "hooks", "pre-receive"), []byte(hookScript), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.upstream, "hooks", "pre-receive"), []byte(hookScript), 0700))
 
 	f.s.setSole(&activeProject{repository: repository})
 	a := &finalReviewer{s: f.s, repository: repository}
 	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
 	})
-	// The final reviews that follow a rebase read the rebased branch.
+
 	for k := 2; k <= 4; k++ {
 		later := o.later
 		if later == nil {
 			later = []any{}
 		}
 		f.finalTurn(k, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-			_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume again.", "findings": later})
+			_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume again.", "findings": later})
 			return err
 		})
 	}
@@ -157,14 +151,13 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 		map[string]string{"internal/trace/resume.go": "package trace\n\n// Resume resumes.\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n\n// Dedupe skips.\n"})
 
-	// A workstream that waits for this one to merge.
 	at := f.s.now()
-	must(t, repository.CreateWorkstream(ctx, downstreamStream, at, fixturekit.ServiceActor))
+	fixturekit.Must(t, repository.CreateWorkstream(ctx, downstreamStream, at, fixturekit.ServiceActor))
 	g, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{w.stream, downstreamStream}, at, fixturekit.OwnerActor, "fixture")
-	must(t, err)
-	must(t, trace.RecordProjectSpec(ctx, repository, g, trace.ProjectSpec{Behavior: "The downstream workstream needs this one.", Graph: []trace.Edge{{From: w.stream, To: downstreamStream, Type: trace.EdgeHardBlock}}}, at, fixturekit.OwnerActor, "fixture"))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, repository, g, trace.ProjectSpec{Behavior: "The downstream workstream needs this one.", Graph: []trace.Edge{{From: w.stream, To: downstreamStream, Type: trace.EdgeHardBlock}}}, at, fixturekit.OwnerActor, "fixture"))
 	w.down = downstreamStream
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 
 	if o.boundary != nil {
 		f.opts.boundary = o.boundary
@@ -178,14 +171,12 @@ func newRouteWorld(t *testing.T, o routeOptions) *routeWorld {
 			close(w.stopCard)
 		}
 		<-w.cardDone
-		// The service stops before the test's directories go.
+
 		w.f.stop(t)
 	})
 	return w
 }
 
-// watchCards reads the owner's inbox as the owner's page does and counts every
-// entry it shows for the workstream.
 func (w *routeWorld) watchCards() {
 	defer close(w.cardDone)
 	for {
@@ -208,10 +199,9 @@ func (w *routeWorld) watchCards() {
 
 func (w *routeWorld) repository() *trace.Repository { return w.f.repository() }
 
-// rev is where the upstream's ref is.
 func (w *routeWorld) rev(ref string) string {
 	w.t.Helper()
-	return strings.TrimSpace(demoGit(w.t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-parse", ref))
+	return strings.TrimSpace(fixturekit.DemoGit(w.t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-parse", ref))
 }
 
 func (w *routeWorld) mainUpdates() int {
@@ -219,50 +209,51 @@ func (w *routeWorld) mainUpdates() int {
 	if errors.Is(err, os.ErrNotExist) {
 		return 0
 	}
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	return len(strings.Fields(string(data)))
 }
 
 func (w *routeWorld) feature() string {
 	w.t.Helper()
 	state, err := w.repository().Workflow(w.stream, trace.FeatureSubject)
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	return state.Value
 }
 
 func (w *routeWorld) edgeWait() string {
 	w.t.Helper()
 	state, err := w.repository().Workflow(w.down, lifecycle.EdgeWaitSubject)
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	return state.Value
 }
 
-// advance moves the service's clock on, so the polls the service keeps to a
-// cadence come due.
 func (w *routeWorld) advance(d time.Duration) {
 	w.f.clock.Mu.Lock()
 	w.f.clock.At = w.f.clock.At.Add(d)
 	w.f.clock.Mu.Unlock()
 }
 
-// await waits for cond, moving the clock on by step between looks when step is
-// set.
 func (w *routeWorld) await(what string, step time.Duration, cond func() bool) {
 	w.t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for !cond() {
-		if time.Now().After(deadline) {
-			w.t.Fatalf("timed out waiting for %s", what)
+	intakefixture.Soon(w.t, what, func() bool {
+		if cond() {
+			return true
 		}
 		if step > 0 {
 			w.advance(step)
 		}
-		time.Sleep(25 * time.Millisecond)
+		return false
+	})
+}
+
+func (w *routeWorld) advanceThroughPasses() {
+	w.t.Helper()
+	for range 3 {
+		w.advance(11 * time.Minute)
+		intakefixture.AwaitFurtherPasses(w.t, w.passes, 1)
 	}
 }
 
-// awaitDraft waits for the service to push the signed branch and open its
-// draft, and for checks to pass on it.
 func (w *routeWorld) awaitDraft() delivery.Push {
 	w.t.Helper()
 	var push delivery.Push
@@ -277,7 +268,6 @@ func (w *routeWorld) awaitDraft() delivery.Push {
 	return push
 }
 
-// awaitCard waits until the owner's inbox holds the workstream's delivery card.
 func (w *routeWorld) awaitCard() api.InboxEntry {
 	w.t.Helper()
 	var card api.InboxEntry
@@ -313,11 +303,10 @@ func (w *routeWorld) hostCounts() (creates, readies, closes int) {
 	return w.pulls.Creates, w.pulls.Readies, w.pulls.Closes
 }
 
-// landings is how many landing operations the workstream has.
 func (w *routeWorld) landings() int {
 	w.t.Helper()
 	records, err := w.repository().Operations(w.stream)
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	n := 0
 	for _, r := range records {
 		if delivery.LandingAction(r.Operation) {
@@ -330,16 +319,15 @@ func (w *routeWorld) landings() int {
 func (w *routeWorld) landed() (delivery.DeliveryLanding, bool) {
 	w.t.Helper()
 	landing, found, err := delivery.ReadDeliveryLanding(w.repository(), w.stream)
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	return landing, found
 }
 
-// delivered is the transition that delivered the workstream.
 func (w *routeWorld) delivered() trace.Transition {
 	w.t.Helper()
 	var found []trace.Transition
 	for _, tr := range w.f.transitions(w.t, w.stream) {
-		if tr.Subject == trace.FeatureSubject && tr.To == DeliveredState {
+		if tr.Subject == trace.FeatureSubject && tr.To == intake.DeliveredState {
 			found = append(found, tr)
 		}
 	}
@@ -374,21 +362,17 @@ func (w *routeWorld) posts(contains ...string) int {
 	return n
 }
 
-// requireLanded checks what every landing leaves behind: the base branch at the
-// signed commit by a fast-forward, the feature branch kept, a landing record, a
-// delivered and resolved workstream, a released downstream workstream, a
-// closed leftover draft with a comment and a notification to the owner.
 func (w *routeWorld) requireLanded(push delivery.Push, decidedBy string) {
 	w.t.Helper()
 	t := w.t
-	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == DeliveredState })
+	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == intake.DeliveredState })
 	if got := w.rev("refs/heads/main"); got != push.Commit {
 		t.Fatalf("the base branch is at %s, want the signed pushed commit %s", got, push.Commit)
 	}
-	if merges := strings.TrimSpace(demoGit(t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-list", "--merges", w.base+".."+push.Commit)); merges != "" {
+	if merges := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(w.f.clone), "-C", w.upstream, "rev-list", "--merges", w.base+".."+push.Commit)); merges != "" {
 		t.Fatalf("landing created merge commits: %s", merges)
 	}
-	if got := w.rev("refs/heads/" + featureBranch(w.stream)); got != push.Commit {
+	if got := w.rev("refs/heads/" + intake.FeatureBranch(w.stream)); got != push.Commit {
 		t.Fatalf("the feature branch is at %s, want it kept at %s", got, push.Commit)
 	}
 	if n := w.mainUpdates(); n != 1 {
@@ -402,11 +386,9 @@ func (w *routeWorld) requireLanded(push delivery.Push, decidedBy string) {
 		t.Fatalf("landing opened %d pull requests and marked %d ready", creates, readies)
 	}
 
-	// The downstream workstream is released by the landing itself.
 	w.await("the downstream workstream to be released", 11*time.Minute, func() bool { return w.edgeWait() == "available" })
 	w.noPullRequestWasMerged()
 
-	// The next pull request poll closes the leftover draft with a comment.
 	w.await("the leftover draft to be closed", 11*time.Minute, func() bool { _, _, closes := w.hostCounts(); return closes == 1 })
 	w.pulls.Mu.Lock()
 	comments := append([]fixturekit.PullComment(nil), w.pulls.Comments...)
@@ -418,22 +400,17 @@ func (w *routeWorld) requireLanded(push delivery.Push, decidedBy string) {
 		t.Fatalf("the draft is %s", got)
 	}
 
-	// The owner is told, once.
 	w.await("the owner's notification", 0, func() bool { return w.posts("Landed commit: "+push.Commit) > 0 })
 	if n := w.posts("Landed commit: "+push.Commit, "main of dagger/dagger"); n != 1 {
 		t.Fatalf("%d notifications name the landed commit and the base branch: %q", n, w.hook.received())
 	}
 
-	// Later polls close nothing more and change nothing.
-	for range 3 {
-		w.advance(11 * time.Minute)
-		time.Sleep(100 * time.Millisecond)
-	}
-	if _, _, closes := w.hostCounts(); closes != 1 || w.feature() != DeliveredState || w.landings() != 1 || w.mainUpdates() != 1 {
+	w.advanceThroughPasses()
+	if _, _, closes := w.hostCounts(); closes != 1 || w.feature() != intake.DeliveredState || w.landings() != 1 || w.mainUpdates() != 1 {
 		t.Fatalf("later polls changed the outcome: %d closes, %s, %d landings, %d base updates", closes, w.feature(), w.landings(), w.mainUpdates())
 	}
 	summary, err := w.f.c.Trace(context.Background(), w.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if summary.Delivery == nil || summary.Delivery.Merged != push.Commit {
 		t.Fatalf("the trace shows the delivery as %+v", summary.Delivery)
 	}
@@ -454,24 +431,18 @@ func (w *routeWorld) requireNoCards() {
 		w.t.Fatalf("the owner's inbox showed a card for the workstream %d times", n)
 	}
 	entries, err := w.repository().Inbox()
-	must(w.t, err)
+	fixturekit.Must(w.t, err)
 	if len(entries) != 0 {
 		w.t.Fatalf("%d entries were escalated to the owner: %+v", len(entries), entries)
 	}
 }
 
-// A clean workstream on an opted-in project, with Jev confident that it should
-// land, is landed by the service alone: the base branch is fast-forwarded to
-// the signed commit, the workstream is delivered and resolved, a downstream
-// workstream is released without any merge on the pull request host, the draft
-// the landing leaves open is closed with a comment at the next poll, and the
-// owner is told. No card goes to the owner.
 func TestJevLandsACleanWorkstreamThroughTheRunningService(t *testing.T) {
 	t.Parallel()
 	p := confident("land", 0.97)
 	w := newRouteWorld(t, routeOptions{jev: p, delivery: config.DeliveryJev})
 	push := w.awaitDraft()
-	w.await("the downstream workstream to wait", 0, func() bool { return w.edgeWait() == "waiting" || w.feature() == DeliveredState })
+	w.await("the downstream workstream to wait", 0, func() bool { return w.edgeWait() == "waiting" || w.feature() == intake.DeliveredState })
 	w.requireLanded(push, trace.DecidedByJev)
 	if d := w.delivered(); d.DecidedBy != trace.DecidedByJevGate || d.Judgment == "" {
 		t.Fatalf("the workstream was delivered by %+v", d)
@@ -482,9 +453,6 @@ func TestJevLandsACleanWorkstreamThroughTheRunningService(t *testing.T) {
 	w.requireNoCards()
 }
 
-// The owner lands a workstream with "Approve and land" while Jev is
-// unconfigured: the card offers it beside "Mark ready", the downstream
-// workstream waits until the landing, and nothing asks Jev.
 func TestTheOwnerApprovesAndLandsWithJevUnconfigured(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -496,16 +464,16 @@ func TestTheOwnerApprovesAndLandsWithJevUnconfigured(t *testing.T) {
 	}
 	w.await("the downstream workstream to wait", 0, func() bool { return w.edgeWait() == "waiting" })
 	presented, err := w.f.c.Delivery(ctx, w.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !presented.CanLand || presented.Recommendation != "" {
 		t.Fatalf("the presentation %+v", presented)
 	}
-	if w.rev("refs/heads/main") != w.base || w.feature() != AssembledState {
+	if w.rev("refs/heads/main") != w.base || w.feature() != intake.AssembledState {
 		t.Fatal("the workstream landed before the owner approved")
 	}
 
 	response, err := w.f.c.ApproveAndLand(ctx, w.stream, api.DeliveryLandDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if response.Outcome != api.LandOutcomeLanded || response.Commit != push.Commit || response.Approval.Route != api.DeliveryRouteLand {
 		t.Fatalf("the response is %+v", response)
 	}
@@ -515,18 +483,15 @@ func TestTheOwnerApprovesAndLandsWithJevUnconfigured(t *testing.T) {
 	}
 }
 
-// When Jev confidently picks to land and the upstream refuses the push, the
-// draft is marked ready, the workstream is delivered with a notice that says
-// why it did not land, and the owner is never shown a card.
 func TestARefusedLandingFallsBackToTheDraftWithoutAnOwnerCard(t *testing.T) {
 	t.Parallel()
 	p := confident("land", 0.97)
 	w := newRouteWorld(t, routeOptions{jev: p, delivery: config.DeliveryJev})
 	hook := "#!/bin/sh\nwhile read old new ref; do\n  if [ \"$ref\" = refs/heads/main ]; then\n    echo 'remote: error: GH006: Protected branch update failed for refs/heads/main.' >&2\n    exit 1\n  fi\ndone\n"
-	must(t, os.WriteFile(filepath.Join(w.upstream, "hooks", "pre-receive"), []byte(hook), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.upstream, "hooks", "pre-receive"), []byte(hook), 0700))
 	push := w.awaitDraft()
 
-	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == DeliveredState })
+	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == intake.DeliveredState })
 	w.await("the draft to be marked ready", 0, func() bool { _, readies, _ := w.hostCounts(); return readies == 1 })
 	if creates, readies, _ := w.hostCounts(); creates != 1 || readies != 1 {
 		t.Fatalf("%d pull requests opened and %d marked ready", creates, readies)
@@ -541,7 +506,7 @@ func TestARefusedLandingFallsBackToTheDraftWithoutAnOwnerCard(t *testing.T) {
 		t.Fatal("a landing is recorded though the push was refused")
 	}
 	notices, err := w.repository().Outbox(w.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	said := false
 	for _, n := range notices {
 		said = said || strings.Contains(n.Event.Body, "delivered without landing") && strings.Contains(n.Event.Body, "Protected branch")
@@ -551,31 +516,24 @@ func TestARefusedLandingFallsBackToTheDraftWithoutAnOwnerCard(t *testing.T) {
 	}
 	key := jev.DeliveryRouteKey(w.stream, push.Review, push.Commit)
 	res, err := jev.Recorded(w.repository(), w.stream, jev.KindDeliveryRoute, key)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if res.Status != jev.Binding || res.Refused != "" {
 		t.Fatalf("Jev's pick is %+v: the fallback is a completed pull request delivery, not a refusal", res)
 	}
 
-	// Nothing asks Jev again, lands again, closes the pull request or shows a card.
-	for range 3 {
-		w.advance(11 * time.Minute)
-		time.Sleep(100 * time.Millisecond)
-	}
+	w.advanceThroughPasses()
 	if n := routeDecisions(p); n != 1 {
 		t.Fatalf("Jev was asked %d times", n)
 	}
 	if _, _, closes := w.hostCounts(); closes != 0 || w.pull().State != "open" {
 		t.Fatalf("the polls closed the delivered pull request: %d closes", closes)
 	}
-	if w.landings() > 1 || w.feature() != DeliveredState || w.mainUpdates() != 0 {
+	if w.landings() > 1 || w.feature() != intake.DeliveredState || w.mainUpdates() != 0 {
 		t.Fatalf("%d landings, %s, %d base updates", w.landings(), w.feature(), w.mainUpdates())
 	}
 	w.requireNoCards()
 }
 
-// When Jev is not confident, nothing is decided: the draft stays a draft and
-// the "Mark ready" card appears with "Approve and land" beside it, showing
-// Jev's pick as the recommendation.
 func TestAnUnsureJevLeavesTheMarkReadyCardWithItsRecommendation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -590,7 +548,7 @@ func TestAnUnsureJevLeavesTheMarkReadyCardWithItsRecommendation(t *testing.T) {
 		t.Fatalf("the recommendation is %q", card.Recommendation)
 	}
 	presented, err := w.f.c.Delivery(ctx, w.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !presented.CanLand || !strings.Contains(presented.Recommendation, "land") {
 		t.Fatalf("the presentation offers landing %v with the recommendation %q", presented.CanLand, presented.Recommendation)
 	}
@@ -603,17 +561,12 @@ func TestAnUnsureJevLeavesTheMarkReadyCardWithItsRecommendation(t *testing.T) {
 	if creates, readies, closes := w.hostCounts(); creates != 1 || readies != 0 || closes != 0 {
 		t.Fatalf("%d opened, %d marked ready, %d closed", creates, readies, closes)
 	}
-	if w.rev("refs/heads/main") != w.base || w.feature() != AssembledState || w.landings() != 0 {
+	if w.rev("refs/heads/main") != w.base || w.feature() != intake.AssembledState || w.landings() != 0 {
 		t.Fatal("the workstream moved without a decision")
 	}
 }
 
-// A project that delivers by pull request behaves as it always has even when
-// Jev is configured and would pick landing: no landing, no delivery-route
-// judgment and no "Approve and land". Jev is asked the ordinary delivery
-// approval alone, its deferral is on the card, and the owner's "Mark ready"
-// delivers the workstream by marking the draft ready.
-func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
+func TestAPullRequestProjectDeliversThroughMarkReady(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := confident("land", 0.99)
@@ -624,7 +577,7 @@ func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 		t.Fatalf("the delivery card is %+v", card)
 	}
 	presented, err := w.f.c.Delivery(ctx, w.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if presented.CanLand || strings.Contains(presented.Recommendation, "land") {
 		t.Fatalf("the presentation %+v", presented)
 	}
@@ -637,11 +590,11 @@ func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 	}
 
 	approved, err := w.f.c.ApproveDelivery(ctx, w.stream, api.DeliveryDecision{Review: decision.Review, ReviewRevision: decision.ReviewRevision, Commit: decision.Commit, DraftHash: decision.DraftHash})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if approved.Route != "" {
 		t.Fatalf("marking ready recorded the route %q", approved.Route)
 	}
-	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == DeliveredState })
+	w.await("the workstream to be delivered", 0, func() bool { return w.feature() == intake.DeliveredState })
 	if pr := w.pull(); pr.Draft || pr.State != "open" {
 		t.Fatalf("the pull request is %+v", pr)
 	}
@@ -670,11 +623,6 @@ func TestAPullRequestProjectDeliversThroughMarkReadyAsBefore(t *testing.T) {
 	}
 }
 
-// The service stops after the landing push reached the upstream and before the
-// landing completed. On restart it settles the landing against the fetched base
-// and completes it once: the base branch holds the commit once, nothing is
-// pushed again, rebased or marked ready, and the workstream is delivered and
-// resolved with its downstream workstream released.
 func TestARestartAfterTheLandingPushCompletesTheLandingOnce(t *testing.T) {
 	t.Parallel()
 	var pushed sync.Once
@@ -693,13 +641,13 @@ func TestARestartAfterTheLandingPushCompletesTheLandingOnce(t *testing.T) {
 	push := w.awaitDraft()
 	select {
 	case <-reached:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the landing never pushed")
 	}
 	if got := w.rev("refs/heads/main"); got != push.Commit || w.mainUpdates() != 1 {
 		t.Fatalf("the upstream is at %s after %d updates, want the pushed %s", got, w.mainUpdates(), push.Commit)
 	}
-	if w.feature() == DeliveredState {
+	if w.feature() == intake.DeliveredState {
 		t.Fatal("the landing completed before the service stopped")
 	}
 	if _, found := w.landed(); found {
@@ -710,12 +658,12 @@ func TestARestartAfterTheLandingPushCompletesTheLandingOnce(t *testing.T) {
 	w.f.stop(t)
 	w.f.start(t)
 
-	w.await("the workstream to be delivered after the restart", 0, func() bool { return w.feature() == DeliveredState })
+	w.await("the workstream to be delivered after the restart", 0, func() bool { return w.feature() == intake.DeliveredState })
 	w.requireLanded(push, trace.DecidedByJev)
 	if got := w.rev("refs/heads/main"); got != push.Commit || w.mainUpdates() != 1 {
 		t.Fatalf("the base branch is at %s after %d updates", got, w.mainUpdates())
 	}
-	if got := w.rev("refs/heads/" + featureBranch(w.stream)); got != push.Commit {
+	if got := w.rev("refs/heads/" + intake.FeatureBranch(w.stream)); got != push.Commit {
 		t.Fatalf("the feature branch moved to %s: the branch was rebased", got)
 	}
 	if creates, readies, _ := w.hostCounts(); creates != 1 || readies != 0 {

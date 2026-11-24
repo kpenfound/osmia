@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,7 +28,7 @@ import (
 func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	f, _ := newMasonFixture(t, 1, independentPlan)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
 	intakefixture.PrepareRebase(t, f.unitSeedDriver(repository), repository, stream, func(t *testing.T, r *trace.Repository, w config.WorkstreamID, u string, o *coreadapter.Outcome) trace.QueuedTurn {
 		return captureMasonTurn(t, f, r, w, u, o)
@@ -33,32 +38,35 @@ func newRebaseFixture(t *testing.T, key string) (*shedFixture, config.Workstream
 
 func moveFeature(t *testing.T, f *shedFixture, stream config.WorkstreamID, files map[string]string) string {
 	t.Helper()
-	return intakefixture.MoveFeature(t, workspaces(f.s.current(), branchesDirectory, backendOf(t, f, stream)), stream, files)
+	return intakefixture.MoveFeature(t, intake.Workspaces(f.s.current(), intake.BranchesDirectory, backendOf(t, f, stream)), stream, files)
 }
 
 func rebaseOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.UnitOperations(t, repository, stream, unit, func(op coreadapter.Operation) (string, error) { in, err := decodeRebase(op); return in.Unit, err })
+	return intakefixture.UnitOperations(t, repository, stream, unit, func(op coreadapter.Operation) (string, error) {
+		in, err := execution.DecodeRebase(op)
+		return in.Unit, err
+	})
 }
 
-func unitRebases(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []UnitRebase {
+func unitRebases(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []api.UnitRebase {
 	t.Helper()
-	return intakefixture.UnitRebases(t, repository, stream, unit, rebaseDocument)
+	return intakefixture.UnitRebases(t, repository, stream, unit, execution.RebaseDocument)
 }
 
-func latestReport(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, UnitReport) {
+func latestReport(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, execution.UnitReport) {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reportDocument(unit) {
+		if d.ID == execution.ReportDocument(unit) {
 			latest = d
 		}
 	}
-	var report UnitReport
+	var report execution.UnitReport
 	if latest.Revision != 0 {
-		must(t, json.Unmarshal([]byte(latest.Content), &report))
+		fixturekit.Must(t, json.Unmarshal([]byte(latest.Content), &report))
 	}
 	return latest, report
 }
@@ -70,7 +78,7 @@ func completeMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repositor
 
 func captureMasonTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, unit string, outcome *coreadapter.Outcome) trace.QueuedTurn {
 	t.Helper()
-	return captureTurn(t, f, repository, stream, masonAgent(unit), outcome)
+	return captureTurn(t, f, repository, stream, intake.MasonAgent(unit), outcome)
 }
 
 func captureTurn(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, agent string, outcome *coreadapter.Outcome) trace.QueuedTurn {
@@ -87,23 +95,23 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	lands := &foreman{masons: m}
 	units := newUnitWorkspaces(f.s.cfg, repository)
 	w, base, found, err := units.find(ctx, stream, "dedupe")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
 	paths, err := units.paths(w)
-	must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), masonAgent("dedupe"), masonTurnID("dedupe"))
-	must(t, os.MkdirAll(viewRoot, 0700))
+	fixturekit.Must(t, err)
+	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), intake.MasonAgent("dedupe"), service.TestMasonTurnID("dedupe"))
+	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
-	must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "DEDUPE.md"), []byte("dedupe\n"), 0600))
-	_, err = repository.ClaimTurn(ctx, stream, masonAgent("dedupe"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("dedupe"), masonTurnID("dedupe")), f.clock.Now())
-	must(t, err)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(view.Workspace().Directory, "DEDUPE.md"), []byte("dedupe\n"), 0600))
+	_, err = repository.ClaimTurn(ctx, stream, intake.MasonAgent("dedupe"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), intake.MasonAgent("dedupe"), service.TestMasonTurnID("dedupe")), f.clock.Now())
+	fixturekit.Must(t, err)
 	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
 		t.Fatalf("a workspace with an interrupted writer was rebased: %+v", ops)
 	}
@@ -113,24 +121,24 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 	if ops := landOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("a landing was asked for while units are behind: %+v", ops)
 	}
-	if head := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD")); head != base {
+	if head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD")); head != base {
 		t.Fatalf("the writer's workspace moved to %s", head)
 	}
 
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	m.repository = repository
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	if ops := rebaseOperations(t, repository, stream, "dedupe"); len(ops) != 0 {
 		t.Fatalf("a workspace with an interrupted writer was rebased: %+v", ops)
 	}
-	must(t, m.Pass(ctx))
-	must(t, m.Pass(ctx))
-	th, err := repository.Thread(stream, masonAgent("dedupe"))
-	must(t, err)
+	fixturekit.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
+	th, err := repository.Thread(stream, intake.MasonAgent("dedupe"))
+	fixturekit.Must(t, err)
 	continuation := th.Turns[len(th.Turns)-1]
-	if continuation.Request.TurnID != masonAgent("dedupe")+"-recover-1" || !continuation.CompletedAt.IsZero() {
+	if continuation.Request.TurnID != intake.MasonAgent("dedupe")+"-recover-1" || !continuation.CompletedAt.IsZero() {
 		t.Fatalf("the interrupted turn's continuation %+v", continuation)
 	}
 	admit := f.s.admit(f.s.current(), repository)
@@ -139,19 +147,19 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 		t.Fatalf("a mason turn of a unit behind its feature branch was admitted: %t %v", admitted, err)
 	}
 
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	in, err := decodeRebase(ops[0].Operation)
-	must(t, err)
-	if in != (rebaseInput{Unit: "dedupe", Rebase: 1, Onto: landed}) {
+	in, err := execution.DecodeRebase(ops[0].Operation)
+	fixturekit.Must(t, err)
+	if in != (execution.RebaseInput{Unit: "dedupe", Rebase: 1, Onto: landed}) {
 		t.Fatalf("rebase input %+v", in)
 	}
 	r := rebaser{lands}
 	result, err := r.Apply(ctx, ops[0].Operation)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if result.Outcome != "succeeded" {
 		t.Fatalf("the rebase %+v", result)
 	}
@@ -160,11 +168,11 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 			t.Fatalf("the rebased workspace's %s holds %q, %v", name, data, err)
 		}
 	}
-	if status := demoGit(t, filepath.Dir(f.clone), "-C", w.Path, "status", "--porcelain"); strings.TrimSpace(status) != "" {
+	if status := fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "status", "--porcelain"); strings.TrimSpace(status) != "" {
 		t.Fatalf("the rebased workspace:\n%s", status)
 	}
-	head := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD"))
-	if parent := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%P", head)); parent != landed {
+	head := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", w.Path, "rev-parse", "HEAD"))
+	if parent := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "log", "-1", "--format=%P", head)); parent != landed {
 		t.Fatalf("the rebased commit's parents %s, want %s", parent, landed)
 	}
 	rebases := unitRebases(t, repository, stream, "dedupe")
@@ -172,12 +180,12 @@ func TestRebaseWaitsForAnInterruptedWriterAndKeepsItsWork(t *testing.T) {
 		t.Fatalf("rebase records %+v", rebases)
 	}
 	got := rebases[0]
-	snapshot := strings.TrimSpace(demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "show", got.Snapshot+":DEDUPE.md"))
-	want := UnitRebase{Unit: "dedupe", Rebase: 1, Operation: ops[0].Operation.ID, State: UnitImplementing, Branch: unitBranch(stream, "dedupe"), Base: base, Onto: landed, Snapshot: got.Snapshot, Commit: head, Conflicts: []string{}}
+	snapshot := strings.TrimSpace(fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "show", got.Snapshot+":DEDUPE.md"))
+	want := api.UnitRebase{Unit: "dedupe", Rebase: 1, Operation: ops[0].Operation.ID, State: intake.UnitImplementing, Branch: execution.UnitBranch(stream, "dedupe"), Base: base, Onto: landed, Snapshot: got.Snapshot, Commit: head, Conflicts: []string{}}
 	if !reflect.DeepEqual(got, want) || snapshot != "dedupe" {
 		t.Fatalf("rebase.json %+v, want %+v; snapshot holds %q", got, want, snapshot)
 	}
-	if state, err := repository.Workflow(stream, rebaseSubject("dedupe")); err != nil || state.Value != "rebased-1" {
+	if state, err := repository.Workflow(stream, execution.RebaseSubject("dedupe")); err != nil || state.Value != "rebased-1" {
 		t.Fatalf("rebase subject %+v %v", state, err)
 	}
 	if admitted, err := admit(ctx, candidate); err != nil || !admitted {
@@ -213,10 +221,10 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 			ctx := context.Background()
 			lands := &foreman{masons: newMasonController(f.s, repository)}
 			w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "resume")
-			must(t, err)
-			must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "RESUME.md"), []byte("resume\n"), 0600))
 			landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
-			must(t, lands.Pass(ctx))
+			fixturekit.Must(t, lands.Pass(ctx))
 			ops := rebaseOperations(t, repository, stream, "resume")
 			if len(ops) != 1 {
 				t.Fatalf("resume's rebases %+v", ops)
@@ -241,7 +249,7 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 				t.Fatalf("the retried rebase %+v %v", result, err)
 			}
 			home := filepath.Dir(f.clone)
-			if count := strings.TrimSpace(demoGit(t, home, "-C", f.clone, "rev-list", "--count", landed+".."+unitBranch(stream, "resume"))); count != "1" {
+			if count := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", f.clone, "rev-list", "--count", landed+".."+execution.UnitBranch(stream, "resume"))); count != "1" {
 				t.Fatalf("the unit branch gained %s commits on %s", count, landed)
 			}
 			for name, want := range map[string]string{"RESUME.md": "resume\n", "LANDED.md": "landed\n"} {
@@ -249,21 +257,21 @@ func TestInterruptedRebaseIsReconciled(t *testing.T) {
 					t.Fatalf("the rebased workspace's %s holds %q, %v", name, data, err)
 				}
 			}
-			if status := strings.TrimSpace(demoGit(t, home, "-C", w.Path, "status", "--porcelain")); status != "" {
+			if status := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", w.Path, "status", "--porcelain")); status != "" {
 				t.Fatalf("the rebased workspace:\n%s", status)
 			}
 			rebases := unitRebases(t, repository, stream, "resume")
-			head := strings.TrimSpace(demoGit(t, home, "-C", w.Path, "rev-parse", "HEAD"))
+			head := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", w.Path, "rev-parse", "HEAD"))
 			if len(rebases) != 1 || rebases[0].Commit != head || rebases[0].Onto != landed {
 				t.Fatalf("rebase records %+v, head %s", rebases, head)
 			}
 			var outcomes []string
-			for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
-				if tr.Subject == rebaseSubject("resume") && tr.From != "" {
+			for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
+				if tr.Subject == execution.RebaseSubject("resume") && tr.From != "" {
 					outcomes = append(outcomes, tr.ID)
 				}
 			}
-			if !slices.Equal(outcomes, []string{rebaseSubject("resume") + "-1-rebased"}) {
+			if !slices.Equal(outcomes, []string{execution.RebaseSubject("resume") + "-1-rebased"}) {
 				t.Fatalf("rebase outcomes %v", outcomes)
 			}
 		})
@@ -277,90 +285,89 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 	ctx := context.Background()
 	m := newMasonController(f.s, repository)
 	lands := &foreman{masons: m}
-	landed := moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
+	landed := moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
 	_, before := latestReport(t, repository, stream, "dedupe")
 
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
 	}
-	// The rebase records its result, as every attempt does, so it no longer
-	// holds the unit.
+
 	result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands})
 	if result.Outcome != "succeeded" {
 		t.Fatalf("the conflicted rebase %+v", result)
 	}
 	rebases := unitRebases(t, repository, stream, "dedupe")
-	if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{masonWrote}) || rebases[0].State != UnitApproved || rebases[0].Snapshot != before.Candidate {
+	if len(rebases) != 1 || !slices.Equal(rebases[0].Conflicts, []string{fixturekit.MasonWrote}) || rebases[0].State != intake.UnitApproved || rebases[0].Snapshot != before.Candidate {
 		t.Fatalf("rebase records %+v", rebases)
 	}
 	w, _, _, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
-	must(t, err)
-	data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
-	must(t, err)
+	fixturekit.Must(t, err)
+	data, err := os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote))
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(data), "\n<<<<<<< "+landed+"\n") || !strings.Contains(string(data), "\n>>>>>>> "+before.Candidate+"\n") {
 		t.Fatalf("the conflicted file holds %q", data)
 	}
 	if _, report := latestReport(t, repository, stream, "dedupe"); !reflect.DeepEqual(report, before) {
 		t.Fatalf("a conflicted rebase changed the report to %+v", report)
 	}
-	transition, _ := rebaseIDs("dedupe", 1)
+	transition, _ := execution.RebaseIDs("dedupe", 1)
 	outbox, err := repository.Outbox(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
-		return e.TransitionID == transition+"-conflicted" && e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, "Unit dedupe conflicts with feature branch") && strings.Contains(e.Event.Body, masonWrote)
+		return e.TransitionID == transition+"-conflicted" && e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, "Unit dedupe conflicts with feature branch") && strings.Contains(e.Event.Body, fixturekit.MasonWrote)
 	}) {
 		t.Fatal("the chief of staff was not told of the conflict")
 	}
 
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	if ops := landOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("a landing was asked for with a conflicted unit: %+v", ops)
 	}
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	must(t, err)
-	if state.Value != UnitImplementing {
+	fixturekit.Must(t, err)
+	if state.Value != intake.UnitImplementing {
 		t.Fatalf("the conflicted unit is %s", state.Value)
 	}
-	moved := slices.IndexFunc(allTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
-		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == foremanActor
+	moved := slices.IndexFunc(intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream), func(tr trace.Transition) bool {
+		return tr.ID == trace.UnitSubject("dedupe")+"-implementing-rebase-1" && tr.From == intake.UnitApproved && tr.Cause == transition+"-conflicted" && tr.Actor == service.TestForemanActor
 	})
 	if moved < 0 {
 		t.Fatal("the unit's return to implementing is not recorded")
 	}
-	th, err := repository.Thread(stream, masonAgent("dedupe"))
-	must(t, err)
+	th, err := repository.Thread(stream, intake.MasonAgent("dedupe"))
+	fixturekit.Must(t, err)
 	resolve := th.Turns[len(th.Turns)-1]
-	for _, want := range []string{"- " + masonWrote + "\n", `"<<<<<<< ` + landed + `"`, `">>>>>>> ` + before.Candidate + `"`, "2. Acknowledged chunks are never sent again."} {
-		if resolve.Request.TurnID != resolveTurnID("dedupe", 1) || !strings.Contains(resolve.Request.Prompt, want) {
+	for _, want := range []string{"- " + fixturekit.MasonWrote + "\n", `"<<<<<<< ` + landed + `"`, `">>>>>>> ` + before.Candidate + `"`, "2. Acknowledged chunks are never sent again."} {
+		if resolve.Request.TurnID != execution.ResolveTurnID("dedupe", 1) || !strings.Contains(resolve.Request.Prompt, want) {
 			t.Fatalf("the resolve turn %s lacks %q:\n%s", resolve.Request.TurnID, want, resolve.Request.Prompt)
 		}
 	}
-	must(t, lands.Pass(ctx))
-	if again, err := repository.Thread(stream, masonAgent("dedupe")); err != nil || len(again.Turns) != len(th.Turns) {
+	fixturekit.Must(t, lands.Pass(ctx))
+	if again, err := repository.Thread(stream, intake.MasonAgent("dedupe")); err != nil || len(again.Turns) != len(th.Turns) {
 		t.Fatalf("another pass queued more turns: %+v %v", again, err)
 	}
 
 	done := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitImplementing {
+	fixturekit.Must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitImplementing {
 		t.Fatalf("a candidate with conflict markers left implementing: %+v %v", state, err)
 	}
 	if doc, _ := latestReport(t, repository, stream, "dedupe"); doc.Revision != rebases[0].Report {
 		t.Fatalf("a candidate with conflict markers was reported as revision %d", doc.Revision)
 	}
-	th, err = repository.Thread(stream, masonAgent("dedupe"))
-	must(t, err)
+	th, err = repository.Thread(stream, intake.MasonAgent("dedupe"))
+	fixturekit.Must(t, err)
 	remind := th.Turns[len(th.Turns)-1]
-	if remind.Request.TurnID != fmt.Sprintf("%s-markers-%d", masonAgent("dedupe"), done.Sequence) || !strings.Contains(remind.Request.Prompt, "still carry conflict markers") || !strings.Contains(remind.Request.Prompt, masonWrote) {
+	if remind.Request.TurnID != fmt.Sprintf("%s-markers-%d", intake.MasonAgent("dedupe"), done.Sequence) || !strings.Contains(remind.Request.Prompt, "still carry conflict markers") || !strings.Contains(remind.Request.Prompt, fixturekit.MasonWrote) {
 		t.Fatalf("the reminder %s:\n%s", remind.Request.TurnID, remind.Request.Prompt)
 	}
 
-	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
 	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitChecking {
+	fixturekit.Must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != execution.UnitChecking {
 		t.Fatalf("the resolved unit is %+v %v", state, err)
 	}
 	_, report := latestReport(t, repository, stream, "dedupe")
@@ -368,7 +375,7 @@ func TestRebaseConflictGoesToTheMasonAndNeverToTheReviewer(t *testing.T) {
 		t.Fatalf("the resolved report %+v, want a new candidate from %s", report, landed)
 	}
 	req, _, err := m.candidateEvidence(ctx, stream, "dedupe")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Contains(req.Diff, "<<<<<<<") || strings.Contains(req.Diff, ">>>>>>>") || !strings.Contains(req.Diff, "+// landed and deduplicated") {
 		t.Fatalf("the reviewer's diff:\n%s", req.Diff)
 	}
@@ -387,15 +394,15 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
 	landed := moveFeature(t, f, stream, map[string]string{"LANDED.md": "landed\n"})
 
-	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitImplementing {
+	fixturekit.Must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != intake.UnitImplementing {
 		t.Fatalf("a unit behind its feature branch is %+v %v", state, err)
 	}
-	if blocked, err := repository.Workflow(stream, blockedSubject("dedupe")); err != nil || blocked.Value != "" {
+	if blocked, err := repository.Workflow(stream, execution.BlockedSubject("dedupe")); err != nil || blocked.Value != "" {
 		t.Fatalf("a unit behind its feature branch was blocked: %+v %v", blocked, err)
 	}
 
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
@@ -403,8 +410,8 @@ func TestUnitDoneBehindItsFeatureBranchFinishesAfterItsRebase(t *testing.T) {
 	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
 		t.Fatalf("the rebase %+v", result)
 	}
-	must(t, m.Pass(ctx))
-	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != UnitChecking {
+	fixturekit.Must(t, m.Pass(ctx))
+	if state, err := repository.Workflow(stream, trace.UnitSubject("dedupe")); err != nil || state.Value != execution.UnitChecking {
 		t.Fatalf("the rebased unit is %+v %v", state, err)
 	}
 	if _, report := latestReport(t, repository, stream, "dedupe"); report.Base != landed {
@@ -420,8 +427,8 @@ func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 	ctx := context.Background()
 	m := newMasonController(f.s, repository)
 	lands := &foreman{masons: m}
-	moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
-	must(t, lands.Pass(ctx))
+	moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
+	fixturekit.Must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("dedupe's rebases %+v", ops)
@@ -429,31 +436,29 @@ func TestRebaseConflictRemindersAreBoundedByCleanTurns(t *testing.T) {
 	if result := settleOperation(t, f.s, repository, stream, ops[0].Operation, rebaser{lands}); result.Outcome != "succeeded" {
 		t.Fatalf("the conflicted rebase %+v", result)
 	}
-	must(t, lands.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
 
 	done := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	must(t, m.Pass(ctx))
-	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); ids[len(ids)-1] != fmt.Sprintf("%s-markers-%d", masonAgent("dedupe"), done.Sequence) {
+	fixturekit.Must(t, m.Pass(ctx))
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.MasonAgent("dedupe")); ids[len(ids)-1] != fmt.Sprintf("%s-markers-%d", intake.MasonAgent("dedupe"), done.Sequence) {
 		t.Fatalf("the mason's turns after a done with markers %v", ids)
 	}
 	again := completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	must(t, err)
-	if state.Value != UnitContested {
+	fixturekit.Must(t, err)
+	if state.Value != intake.UnitContested {
 		t.Fatalf("the unit is %s after a second done with markers", state.Value)
 	}
-	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); slices.Contains(ids, fmt.Sprintf("%s-markers-%d", masonAgent("dedupe"), again.Sequence)) {
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.MasonAgent("dedupe")); slices.Contains(ids, fmt.Sprintf("%s-markers-%d", intake.MasonAgent("dedupe"), again.Sequence)) {
 		t.Fatalf("the mason was reminded again: %v", ids)
 	}
-	contest := transitionByID(t, repository, stream, trace.EventID(trace.EventID(again.Request.ID, "response"), "contested"))
-	if contest.From != UnitImplementing || contest.Actor != masonActor || !strings.Contains(contest.Reason, "exhausting mason.max_clean_turns (1)") {
+	contest := intakefixture.TransitionByID(t, repository, stream, trace.EventID(trace.EventID(again.Request.ID, "response"), "contested"))
+	if contest.From != intake.UnitImplementing || contest.Actor != intake.MasonActor || !strings.Contains(contest.Reason, "exhausting mason.max_clean_turns (1)") {
 		t.Fatalf("the contest %+v", contest)
 	}
 }
 
-// A rebase can finish between the foreman's hook and the mason's hook. The
-// completed turn before that rebase has not attempted its conflict resolution.
 func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newRebaseFixture(t, "resolution-before-reminder")
@@ -462,14 +467,14 @@ func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing
 	m := newMasonController(f.s, repository)
 	lands := &foreman{masons: m}
 	w, _, found, err := newUnitWorkspaces(f.s.cfg, repository).find(ctx, stream, "dedupe")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("dedupe has no workspace")
 	}
-	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// dedupe\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// dedupe\n"), 0600))
 	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	moveFeature(t, f, stream, map[string]string{masonWrote: "package trace\n\n// landed\n"})
-	must(t, lands.Pass(ctx))
+	moveFeature(t, f, stream, map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n"})
+	fixturekit.Must(t, lands.Pass(ctx))
 	ops := rebaseOperations(t, repository, stream, "dedupe")
 	if len(ops) != 1 {
 		t.Fatalf("rebases: %+v", ops)
@@ -478,39 +483,37 @@ func TestConcurrentRebaseWaitsForItsResolutionBeforeRemindingTheMason(t *testing
 	if result.Outcome != "succeeded" {
 		t.Fatalf("rebase: %+v", result)
 	}
-	// The scheduling pass has already passed the foreman. It reaches the
-	// mason before the next foreman hook can queue the resolution turn.
-	must(t, m.Pass(ctx))
-	th, err := repository.Thread(stream, masonAgent("dedupe"))
-	must(t, err)
+
+	fixturekit.Must(t, m.Pass(ctx))
+	th, err := repository.Thread(stream, intake.MasonAgent("dedupe"))
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 {
 		t.Fatalf("the pre-rebase done turn received a reminder: %+v", th.Turns)
 	}
-	// Restart between observing the deferred done and queuing its resolver.
-	must(t, repository.Close())
+
+	fixturekit.Must(t, repository.Close())
 	repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	m = newMasonController(f.s, repository)
 	lands = &foreman{masons: m}
-	must(t, m.Pass(ctx))
-	must(t, lands.Pass(ctx))
-	th, err = repository.Thread(stream, masonAgent("dedupe"))
-	must(t, err)
-	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != resolveTurnID("dedupe", 1) {
+	fixturekit.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, lands.Pass(ctx))
+	th, err = repository.Thread(stream, intake.MasonAgent("dedupe"))
+	fixturekit.Must(t, err)
+	if len(th.Turns) != 2 || th.Turns[1].Request.TurnID != execution.ResolveTurnID("dedupe", 1) {
 		t.Fatalf("conflict resolution: %+v", th.Turns)
 	}
-	// A queued resolver still owns the next attempt; the older done cannot
-	// produce a reminder while the resolver waits to run.
-	must(t, m.Pass(ctx))
-	if ids := turnIDs(t, repository, stream, masonAgent("dedupe")); len(ids) != 2 {
+
+	fixturekit.Must(t, m.Pass(ctx))
+	if ids := intakefixture.TurnIDs(t, repository, stream, intake.MasonAgent("dedupe")); len(ids) != 2 {
 		t.Fatalf("a queued resolution received a premature reminder: %v", ids)
 	}
-	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n\n// landed and deduplicated\n"), 0600))
 	completeMasonTurn(t, f, repository, stream, "dedupe", dedupeReport)
-	must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	must(t, err)
-	if state.Value != UnitChecking {
+	fixturekit.Must(t, err)
+	if state.Value != execution.UnitChecking {
 		t.Fatalf("the resolved unit did not finish after restart: %+v", state)
 	}
 }

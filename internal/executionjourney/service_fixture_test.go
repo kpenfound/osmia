@@ -2,24 +2,28 @@ package executionjourney
 
 import (
 	"context"
-	"sync/atomic"
-	"testing"
-	"time"
-
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"slices"
+	"sync/atomic"
+	"testing"
+	"time"
 )
 
 type Options struct {
@@ -30,7 +34,7 @@ type Options struct {
 	notifyInbox    func(context.Context) (api.InboxResponse, *api.APIError)
 	reviewChecks   service.ReviewChecks
 	controls       *runtimeControls
-	// telemetryExporter receives the service's spans and turns telemetry on.
+
 	telemetryExporter sdktrace.SpanExporter
 }
 
@@ -179,7 +183,7 @@ func NewClient(socket string) *Client {
 func (s *Service) chiefRepository(ctx context.Context, r *trace.Repository, w config.WorkstreamID) (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error) {
 	return s.intake().ChiefRepository(ctx, r, w)
 }
-func (s *Service) newWorkspaces(ctx context.Context, c *config.Config) (WorkspacesStatus, error) {
+func (s *Service) newWorkspaces(ctx context.Context, c *config.Config) (api.WorkspacesStatus, error) {
 	return s.intake().NewWorkspaces(ctx, c)
 }
 func (s *Service) runtimes() (*config.Config, []*activeProject) {
@@ -190,11 +194,11 @@ func (s *Service) runtimes() (*config.Config, []*activeProject) {
 	}
 	return cfg, out
 }
-func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
+func (s *Service) feedList(raw string) (api.FeedResponse, *api.APIError) {
 	return service.InspectForTest(s.core()).Feed(raw)
 }
 
-func (s *Service) ruleContested(ctx context.Context, w, u string, r ContestedRulingRequest) (ContestedRulingResponse, *APIError) {
+func (s *Service) ruleContested(ctx context.Context, w, u string, r api.ContestedRulingRequest) (api.ContestedRulingResponse, *api.APIError) {
 	return service.InspectForTest(s.core()).RuleContested(ctx, w, u, r)
 }
 
@@ -237,13 +241,13 @@ func (s *Service) execution() *execution.Controller {
 	return c
 }
 
-func (s *Service) moveUnit(ctx context.Context, r *trace.Repository, w config.WorkstreamID, u string, req UnitMoveRequest, a trace.Actor, turn string) (UnitMoveResponse, *APIError) {
+func (s *Service) moveUnit(ctx context.Context, r *trace.Repository, w config.WorkstreamID, u string, req api.UnitMoveRequest, a trace.Actor, turn string) (api.UnitMoveResponse, *api.APIError) {
 	return s.execution().MoveUnit(ctx, r, w, u, req, a, turn)
 }
-func (s *Service) ownerMove(ctx context.Context, w, u string, r UnitMoveRequest) (UnitMoveResponse, *APIError) {
+func (s *Service) ownerMove(ctx context.Context, w, u string, r api.UnitMoveRequest) (api.UnitMoveResponse, *api.APIError) {
 	return s.execution().OwnerMove(ctx, w, u, r)
 }
-func (s *Service) recordContestedRuling(ctx context.Context, r *trace.Repository, w config.WorkstreamID, u string, req ContestedRulingRequest, a trace.Actor, ds ...trace.Document) (ContestedRulingResponse, *APIError) {
+func (s *Service) recordContestedRuling(ctx context.Context, r *trace.Repository, w config.WorkstreamID, u string, req api.ContestedRulingRequest, a trace.Actor, ds ...trace.Document) (api.ContestedRulingResponse, *api.APIError) {
 	return s.execution().RecordContestedRuling(ctx, r, w, u, req, a, ds...)
 }
 func (c *runtimeControls) execution() *execution.Controls {
@@ -277,4 +281,81 @@ func (s *Service) delivery() *delivery.Controller {
 		c.Step = s.boundary
 	}
 	return c
+}
+
+type drifter struct{ *foreman }
+
+func (d drifter) driver() *service.TestDriftDriver {
+	return service.DriftForTest(d.s.core(), d.repository)
+}
+func (d drifter) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
+	return d.driver().Request(ctx, due)
+}
+func (d drifter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
+	return d.driver().Inspect(ctx, op)
+}
+func (d drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
+	return d.driver().Apply(ctx, op)
+}
+
+var factoryTarget = runtime.Target{Scope: "factory"}
+
+func (s *Service) admit(cfg *config.Config, r *trace.Repository) func(context.Context, scheduler.Candidate) (bool, error) {
+	return service.InspectForTest(s.core()).Admit(cfg, r)
+}
+func (s *Service) traceView(ctx context.Context, w, kind, sel string) (any, *api.APIError) {
+	return service.InspectForTest(s.core()).TraceView(ctx, w, kind, sel)
+}
+func (s *Service) capacityStatus(list []api.WorkstreamStatus) *api.CapacityStatus {
+	return service.InspectForTest(s.core()).Capacity(list)
+}
+func (s *Service) contestedEntry(r *trace.Repository, w config.WorkstreamID, u string) (api.InboxEntry, bool, error) {
+	return service.InspectForTest(s.core()).ContestedEntry(r, w, u)
+}
+
+func (s *Service) decideAmendment(ctx context.Context, raw string, id string, req api.AmendmentDecisionRequest) (api.AmendmentResponse, *api.APIError) {
+	return s.intake().DecideAmendment(ctx, raw, id, req)
+}
+
+type reloadFiles struct {
+	fixturekit.ReloadFiles
+	top, topText string
+}
+
+func configFiles(t *testing.T, opts Options) reloadFiles {
+	f := fixturekit.ConfigFiles(t, opts.Config.Root)
+	return reloadFiles{f, f.Top, f.TopText}
+}
+func (f reloadFiles) write(t *testing.T, top string) { f.ReloadFiles.Write(t, top) }
+
+func workTransitions(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []trace.Transition {
+	t.Helper()
+	all, err := trace.Read[trace.Transition](repo, stream)
+	fixturekit.Must(t, err)
+	return slices.DeleteFunc(all, func(tr trace.Transition) bool { return router.IsJournal(tr.Subject) })
+}
+
+func driftOperations(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
+	return intakefixture.DriftOperations(t, repo, stream, service.DriftAction)
+}
+
+const sibling config.WorkstreamID = "w_0123456789abcdef0123456789abcdee"
+
+func (s *Service) setReviewChecks(checker checks.ReviewChecks) {
+	s.options.reviewChecks = checker
+	InspectForTest(s).SetReviewChecks(checker)
+}
+func (s *Service) decideChange(ctx context.Context, raw, id string, d service.ChangeDecision) (lifecycle.WorkgroupChange, *api.APIError) {
+	return s.lifecycle().DecideChange(ctx, raw, id, d)
+}
+func recordUpstreamOwnPullRequest(t *testing.T, s *Service, repo *trace.Repository, stream config.WorkstreamID, p api.DeliveryPublication) {
+	t.Helper()
+	fixturekit.UpstreamOwnPullRequest(t, repo, stream, p, s.now(), service.TestForemanActor, delivery.PublicationDocument, delivery.PublicationPath)
+}
+func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest execution.UnitCheckRun, runs []execution.UnitCheckRun) (int, error) {
+	return c.driver().IncompleteSinceEntry(stream, unit, latest, runs)
+}
+func (f *shedFixture) awaitShed(t *testing.T, stream config.WorkstreamID, want string, never ...string) {
+	t.Helper()
+	f.scenario().AwaitShed(t, stream, want, never...)
 }

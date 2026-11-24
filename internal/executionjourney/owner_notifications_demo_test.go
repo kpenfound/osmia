@@ -4,6 +4,12 @@ import (
 	context "context"
 	errors "errors"
 	fmt "fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	maps "maps"
 	http "net/http"
 	os "os"
@@ -22,20 +28,16 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ledgerModTime is the modification time of the notifications ledger at
-// path, which notifier.pass rewrites every time it runs with a webhook set.
 func ledgerModTime(t *testing.T, path string) time.Time {
 	t.Helper()
 	info, err := os.Stat(path)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return info.ModTime()
 }
 
-// notifiedKind is the kind a notification body names: the Kind line of an
-// owner decision, or the budget pause.
 func notifiedKind(body string) string {
 	if strings.HasPrefix(body, "Osmia paused dispatch: the daily budget is reached.\n") {
-		return NotifyBudgetPause
+		return service.TestNotifyBudgetPause
 	}
 	for line := range strings.SplitSeq(body, "\n") {
 		if kind, ok := strings.CutPrefix(line, "Kind: "); ok {
@@ -45,79 +47,67 @@ func notifiedKind(body string) string {
 	return ""
 }
 
-// TestOwnerNotificationsDemonstration takes one workstream from hand-in to a
-// delivered pull request through the local API while notify.webhook is set.
-// Every owner decision on the way, and the daily budget pause, reaches the
-// fake webhook exactly once, across a restart while a sent notification is
-// open and another while one is still pending. See docs/owner-notifications-demonstration.md.
 func TestOwnerNotificationsDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 1, validPlan)
+	f, masons := newMasonFixture(t, 1, fixturekit.ValidPlan)
 	defer func() { f.stop(t) }()
 
-	// The owner allows USD 1.00 a day and sets a webhook. A failed post is
-	// retried after two seconds, then four, eight and sixteen.
 	f.stop(t)
 	hook := newFakeWebhook(t).records(f.opts)
 	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
 	configFile, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0)
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = configFile.WriteString("[budget]\nper_day = \"1.00\"\n")
-	must(t, errors.Join(err, configFile.Close()))
+	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 	setWebhook(t, f.opts, hook.hook())
 	f.opts.Location = time.UTC
 	f.opts.NotifyRetry = 2 * time.Second
 
-	// Delivery goes to a local bare fork and a fake pull request host.
 	var stream config.WorkstreamID
 	home := filepath.Dir(f.clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
+	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
 	forkBranch := func() string {
-		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
+		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}
-	prs := &fakePulls{Fork: forkBranch, SyncHead: true}
+	prs := &fixturekit.FakePulls{Fork: forkBranch, SyncHead: true}
 	f.opts.PullRequests = prs
 
-	// The fake architect and committee draft and debate the amendment.
 	f.script("amend-1-1", map[string]string{plan.SpecPath: amendedSpec}, nil)
-	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, nil)
+	f.script("amend-1-round-1-"+intake.CommitteeAgent(1)+"-1", nil, nil)
 	f.script("amend-1-reply-1", nil, nil)
 
 	problems := &demoProblems{}
-	p := &faults{}
-	rulingTurn := amendmentRulingTurn("1")
+	p := &intakefixture.Faults{}
+	rulingTurn := intake.AmendmentRulingTurn("1")
 	masons.Mu.Lock()
-	masons.Response = map[string]string{masonTurnID("dedupe"): "I cannot complete this work."}
-	masons.Play[rulingTurn] = reportDone("Uploads resume")
+	masons.Response = map[string]string{service.TestMasonTurnID("dedupe"): "I cannot complete this work."}
+	masons.Play[rulingTurn] = intakefixture.ReportDone("Uploads resume")
 	for i := 1; i <= 3; i++ {
-		masons.Play[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+		masons.Play[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 				return err
 			}
-			if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
+			if recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 				return fmt.Errorf("done refused: %q %v", reason, err)
 			}
 			return nil
 		}
 	}
 	masons.Mu.Unlock()
-	// The answer shows the spec must change: the mason asks again, and the
-	// chief of staff routes that question to an amendment.
+
 	masons.Chief.Route("2", []string{"spec#1"}, "Resume from a durable checkpoint", "Acknowledgements are not durable")
 	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
+		_, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": "Acknowledgements are not durable, so resuming from the last one loses chunks. Should the spec say a durable checkpoint?"})
 		return err
 	})
 
 	f.engine.Mu.Lock()
-	// resume's mason asks question 1; its answer turn asks question 2, which
-	// the chief of staff routes to an amendment,
-	// and the turn that brings the owner's ruling spends past the budget.
-	f.engine.Turns[masonTurnID("resume")] = masons.Asking(p, "", "1")
+
+	f.engine.Turns[service.TestMasonTurnID("resume")] = masons.Asking(p, "", "1")
 	f.engine.Turns[rulingTurn] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		result, err := masons.Turn(ctx, req, verified, tools)
 		if result != nil {
@@ -126,18 +116,18 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		return result, err
 	}
 	for i := 1; i <= 3; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", masonAgent("dedupe"), i)] = masons.Turn
+		f.engine.Turns[fmt.Sprintf("%s-owner-revise-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
 	}
 	chief := f.engine.Turns["*"]
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}
 		case strings.HasPrefix(req.Name, "final-"):
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
+			body, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("final report %s: %s: %v", req.Name, body, err)
 			}
@@ -149,12 +139,10 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	f.engine.Mu.Unlock()
 	f.start(t)
 
-	// notified waits until the webhook has accepted the notification of kind
-	// and returns it.
 	notified := func(kind string) string {
 		t.Helper()
 		var body string
-		eventually(t, "the webhook never accepted a "+kind+" notification", func() bool {
+		intakefixture.Eventually(t, "the webhook never accepted a "+kind+" notification", func() bool {
 			for _, b := range hook.accepted() {
 				if notifiedKind(b) == kind {
 					body = b
@@ -172,26 +160,20 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		}
 	}
 
-	// 1. Hand-in and ratification.
 	stream = f.shedAs(t, "first-release")
-	names(notified(InboxRatification), InboxRatification)
+	names(notified(api.InboxRatification), api.InboxRatification)
 	f.ratifiedBuild(t, stream)
 
-	// 2. resume's question is escalated; the owner answers it.
-	eventually(t, "question 1 was never escalated", func() bool {
+	intakefixture.Eventually(t, "question 1 was never escalated", func() bool {
 		asked, err := f.repository().Questions(stream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		return slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.ID == "1" && q.State == trace.QuestionEscalated })
 	})
-	names(notified(InboxEscalation), InboxEscalation)
-	// The service restarts while the escalation is open and already sent; it
-	// is not posted again. The webhook accepting a post does not settle it: a
-	// stop before the notifier has recorded the response leaves the entry
-	// pending, and delivery is at-least-once, so the restart waits for the
-	// ledger to hold the escalation as sent.
-	eventually(t, "the escalation notification was never recorded as sent", func() bool {
-		return slices.ContainsFunc(slices.Collect(maps.Values(readLedger(t, f.opts).Notifications)), func(rec *notification) bool {
-			return rec.Kind == InboxEscalation && rec.State == notificationSent
+	names(notified(api.InboxEscalation), api.InboxEscalation)
+
+	intakefixture.Eventually(t, "the escalation notification was never recorded as sent", func() bool {
+		return slices.ContainsFunc(slices.Collect(maps.Values(readLedger(t, f.opts).Notifications)), func(rec *service.TestNotification) bool {
+			return rec.Kind == api.InboxEscalation && rec.State == service.TestNotificationSent
 		})
 	})
 	f.stop(t)
@@ -199,70 +181,55 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	ledgerPath := filepath.Join(f.opts.Config.Root, "notifications.json")
 	beforeRestart := ledgerModTime(t, ledgerPath)
 	f.start(t)
-	// n.pass rewrites the ledger every time it runs with the webhook set, so
-	// the file's mtime advancing is a positive signal that the notifier
-	// passed at least once after the restart, before checking that none of
-	// its passes posted the already-sent escalation again.
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		if last := ledgerModTime(t, ledgerPath); last.After(beforeRestart) {
-			break
-		} else if time.Now().After(deadline) {
-			t.Fatalf("the notifier never passed after the restart: ledger mtime %s, still %s", last, beforeRestart)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	settled(t, func() int { return len(hook.received()) })
+
+	intakefixture.Soon(t, "the notifier to pass after the restart", func() bool {
+		return ledgerModTime(t, ledgerPath).After(beforeRestart)
+	})
+	intakefixture.Settled(t, func() int { return len(hook.received()) })
 	if since := hook.received()[sent:]; len(since) != 0 {
 		t.Fatalf("posts after the restart with the escalation open: %q", since)
 	}
 	f.rule(t, "1")
 
-	// 3. The answer turn asks to amend spec#1; the owner rejects the packet.
-	f.awaitAmendment(t, stream, amendmentPresented)
-	names(notified(InboxAmendment), InboxAmendment)
+	f.awaitAmendment(t, stream, intake.AmendmentPresented)
+	names(notified(api.InboxAmendment), api.InboxAmendment)
 	view, err := f.c.Amendment(ctx, stream, "1")
-	must(t, err)
-	_, err = f.c.DecideAmendment(ctx, stream, "1", AmendmentDecisionRequest{Decision: AmendmentReject, Packet: view.Revision, Note: "Keep the acknowledged-chunk contract."})
-	must(t, err)
-	f.awaitAmendment(t, stream, amendmentRuled)
+	fixturekit.Must(t, err)
+	_, err = f.c.DecideAmendment(ctx, stream, "1", api.AmendmentDecisionRequest{Decision: intake.AmendmentReject, Packet: view.Revision, Note: "Keep the acknowledged-chunk contract."})
+	fixturekit.Must(t, err)
+	f.awaitAmendment(t, stream, intake.AmendmentRuled)
 
-	// 4. The ruling turn spends USD 1.25 of the USD 1.00 budget; the factory
-	// pauses, and the owner resumes it once notified.
-	eventually(t, "the daily budget never paused the factory", func() bool {
+	intakefixture.Eventually(t, "the daily budget never paused the factory", func() bool {
 		pause, ok := factoryPauseOf(t, f.c)
 		return ok && pause.Source == runtime.PauseDailyBudget
 	})
-	if body := notified(NotifyBudgetPause); !strings.Contains(body, "\nProject: "+string(f.project)+"\n") || !strings.Contains(body, "\nSpend: USD 1.25 or more\nLimit: USD 1.00\n") {
+	if body := notified(service.TestNotifyBudgetPause); !strings.Contains(body, "\nProject: "+string(f.project)+"\n") || !strings.Contains(body, "\nSpend: USD 1.25 or more\nLimit: USD 1.00\n") {
 		t.Fatalf("budget pause notification:\n%s", body)
 	}
-	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest(factoryTarget))
+	mutation(t, f.c, "DELETE", "pause", api.ClearPauseRequest(factoryTarget))
 	f.awaitMerged(t, stream, "resume")
 
-	// 5. dedupe's mason gives up while the webhook is failing. The service
-	// stops with the contested notification pending and posts it once after
-	// it starts again; nothing already sent is posted again.
 	hook.respond(http.StatusServiceUnavailable)
-	f.awaitUnit(t, stream, "dedupe", UnitContested)
+	f.awaitUnit(t, stream, "dedupe", intake.UnitContested)
 	raiseFixtureContest(t, f.repository(), stream, "dedupe")
-	eventually(t, "the contested notification was never attempted", func() bool {
-		return slices.ContainsFunc(hook.received(), func(b string) bool { return notifiedKind(b) == InboxContested })
+	intakefixture.Eventually(t, "the contested notification was never attempted", func() bool {
+		return slices.ContainsFunc(hook.received(), func(b string) bool { return notifiedKind(b) == api.InboxContested })
 	})
 	f.stop(t)
 	before := len(hook.received())
-	var pending []*notification
+	var pending []*service.TestNotification
 	for _, rec := range readLedger(t, f.opts).Notifications {
-		if rec.State == notificationPending {
+		if rec.State == service.TestNotificationPending {
 			pending = append(pending, rec)
 		}
 	}
-	if len(pending) != 1 || pending[0].Kind != InboxContested || pending[0].Workstream != string(stream) {
+	if len(pending) != 1 || pending[0].Kind != api.InboxContested || pending[0].Workstream != string(stream) {
 		t.Fatalf("pending across the restart: %+v", pending)
 	}
 	hook.respond(http.StatusOK)
 	f.start(t)
-	names(notified(InboxContested), InboxContested)
-	if since := hook.received()[before:]; len(since) != 1 || notifiedKind(since[0]) != InboxContested {
+	names(notified(api.InboxContested), api.InboxContested)
+	if since := hook.received()[before:]; len(since) != 1 || notifiedKind(since[0]) != api.InboxContested {
 		t.Fatalf("posts after the restart: %q", since)
 	}
 	if _, err := f.c.RuleContested(ctx, stream, "dedupe", "revise", "Skip chunks the store acknowledged."); err != nil {
@@ -270,15 +237,13 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	}
 	f.awaitMerged(t, stream, "dedupe")
 
-	// 6. Final review presents the delivery; the owner approves it and the
-	// service opens the pull request.
-	f.awaitFeature(t, stream, AssembledState)
-	names(notified(InboxDelivery), InboxDelivery)
+	f.awaitFeature(t, stream, intake.AssembledState)
+	names(notified(api.InboxDelivery), api.InboxDelivery)
 	presented, err := f.c.Delivery(ctx, stream)
-	must(t, err)
-	_, err = f.c.ApproveDelivery(ctx, stream, DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
-	must(t, err)
-	f.awaitFeature(t, stream, DeliveredState)
+	fixturekit.Must(t, err)
+	_, err = f.c.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	fixturekit.Must(t, err)
+	f.awaitFeature(t, stream, intake.DeliveredState)
 	problems.check(t)
 	p.Check(t)
 	masons.Check(t)
@@ -288,8 +253,7 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 	}
 	prs.Mu.Unlock()
 
-	// Exactly one notification per owner decision and one for the pause.
-	kinds := []string{InboxRatification, InboxEscalation, InboxAmendment, NotifyBudgetPause, InboxContested, InboxDelivery}
+	kinds := []string{api.InboxRatification, api.InboxEscalation, api.InboxAmendment, service.TestNotifyBudgetPause, api.InboxContested, api.InboxDelivery}
 	var got []string
 	for _, b := range hook.accepted() {
 		got = append(got, notifiedKind(b))
@@ -303,12 +267,12 @@ func TestOwnerNotificationsDemonstration(t *testing.T) {
 		}
 	}
 	for key, rec := range readLedger(t, f.opts).Notifications {
-		if rec.State != notificationSent {
+		if rec.State != service.TestNotificationSent {
 			t.Fatalf("notification %s is %s", key, rec.State)
 		}
 	}
 	inbox, err := f.c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 0 {
 		t.Fatalf("inbox after delivery: %+v", inbox.Entries)
 	}

@@ -2,6 +2,9 @@ package executionjourney
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// departingTo scripts a Jev that departs from the default of the chief of
-// staff's proposals to target and finds every other exit's default fits.
 func departingTo(target string) func(jevfixture.Ask) jevfixture.Reply {
 	return func(a jevfixture.Ask) jevfixture.Reply {
 		if a.Trigger == execution.TriggerMoveProposal {
@@ -25,8 +26,6 @@ func departingTo(target string) func(jevfixture.Ask) jevfixture.Reply {
 	}
 }
 
-// proposalRecords returns the route records of the chief of staff's proposals,
-// in the order they were raised.
 func proposalRecords(t *testing.T, m *moveFixture) []router.Record {
 	t.Helper()
 	var out []router.Record
@@ -47,15 +46,11 @@ func assertNoPhraseRequest(t *testing.T, out string) {
 	}
 }
 
-// The chief of staff kicks a ready unit: the proposal is the default, so the
-// router follows it and the unit re-enters ready with the move recorded. A
-// started unit does not go back to ready, and a ready unit whose dependencies
-// have merged does not go back to planned.
 func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 	t.Parallel()
 	m := newMoveFixture(t, "propose-kick")
 	routeThrough(m.f.s, &jevfixture.Transitions{})
-	if state := workflowOf(t, m.repo, m.stream, "dedupe"); state.Value != UnitReady {
+	if state := workflowOf(t, m.repo, m.stream, "dedupe"); state.Value != intake.UnitReady {
 		t.Fatalf("dedupe is %s, not ready", state.Value)
 	}
 	out := m.moveUnit(t, `{"unit":"dedupe","to":"ready","note":"Nothing has picked it up; start it."}`)
@@ -63,11 +58,11 @@ func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 		t.Fatalf("the kick: %s", out)
 	}
 	moved := latestOf(t, m.repo, m.stream, trace.UnitSubject("dedupe"))
-	if moved.From != UnitReady || moved.To != UnitReady || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByChief || moved.DefaultTo != UnitReady || moved.Departed() {
+	if moved.From != intake.UnitReady || moved.To != intake.UnitReady || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByChief || moved.DefaultTo != intake.UnitReady || moved.Departed() {
 		t.Fatalf("the kick's transition %+v", moved)
 	}
 	recs := proposalRecords(t, m)
-	if len(recs) != 1 || recs[0].Unit != "dedupe" || recs[0].Outcome != router.OutcomeFollowed || recs[0].Target != UnitReady || recs[0].Proposed != UnitReady {
+	if len(recs) != 1 || recs[0].Unit != "dedupe" || recs[0].Outcome != router.OutcomeFollowed || recs[0].Target != intake.UnitReady || recs[0].Proposed != intake.UnitReady {
 		t.Fatalf("route %+v", recs)
 	}
 
@@ -82,9 +77,6 @@ func TestChiefOfStaffKicksAReadyUnit(t *testing.T) {
 	}
 }
 
-// The chief of staff's move takes a unit out of a contest it raised itself, and
-// out of one it already ruled on, as its own decision: a pinned move entered with
-// no request to Jev and the chief of staff recorded as the decider.
 func TestChiefOfStaffMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 	t.Parallel()
 	t.Run("raised", func(t *testing.T) {
@@ -99,7 +91,7 @@ func TestChiefOfStaffMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 			t.Fatalf("the move: %s", out)
 		}
 		moved := latestOf(t, m.repo, m.stream, trace.UnitSubject("resume"))
-		if moved.To != UnitReviewing || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
+		if moved.To != intake.UnitReviewing || moved.DecidedBy != trace.DecidedByChief || moved.Departed() || moved.Judgment != "" {
 			t.Fatalf("the move's transition %+v", moved)
 		}
 		if n := len(p.TransitionRequests()); n != 0 {
@@ -122,20 +114,17 @@ func TestChiefOfStaffMovesAUnitOutOfAContestItRaisedOrRuled(t *testing.T) {
 		if out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"The checks run again; review it."}`); !strings.Contains(out, `"recorded":true`) {
 			t.Fatalf("the move: %s", out)
 		}
-		if m.state(t).Value != UnitReviewing {
+		if m.state(t).Value != intake.UnitReviewing {
 			t.Fatalf("the unit is %s", m.state(t).Value)
 		}
 	})
 }
 
-// A proposal to approve a candidate never carries the authority to: nothing is
-// committed whatever Jev would answer, Jev is not asked, and the move is left
-// as a pending owner decision that the result points to.
 func TestAChiefProposalToApproveLeavesAPendingOwnerDecision(t *testing.T) {
 	t.Parallel()
 	m := newMoveFixture(t, "propose-approve")
 	p := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply {
-		return jevfixture.Departs(a, UnitApproved, 0.99, 0.99)
+		return jevfixture.Departs(a, intake.UnitApproved, 0.99, 0.99)
 	}}
 	routeThrough(m.f.s, p)
 	out := m.moveUnit(t, `{"unit":"resume","to":"approved","note":"The change holds."}`)
@@ -143,11 +132,11 @@ func TestAChiefProposalToApproveLeavesAPendingOwnerDecision(t *testing.T) {
 		t.Fatalf("the proposal to approve: %s", out)
 	}
 	assertNoPhraseRequest(t, out)
-	if m.state(t).Value != UnitReviewing {
+	if m.state(t).Value != intake.UnitReviewing {
 		t.Fatalf("the unit is %s", m.state(t).Value)
 	}
 	for _, tr := range workTransitions(t, m.repo, m.stream) {
-		if tr.To == UnitApproved {
+		if tr.To == intake.UnitApproved {
 			t.Fatalf("a proposal committed an approval: %+v", tr)
 		}
 	}
@@ -155,7 +144,7 @@ func TestAChiefProposalToApproveLeavesAPendingOwnerDecision(t *testing.T) {
 		t.Fatalf("Jev was asked %d times about a gate", n)
 	}
 	recs := proposalRecords(t, m)
-	if len(recs) != 1 || recs[0].State != router.StateOwner || recs[0].Hold != router.HoldGate || recs[0].Target != UnitApproved {
+	if len(recs) != 1 || recs[0].State != router.StateOwner || recs[0].Hold != router.HoldGate || recs[0].Target != intake.UnitApproved {
 		t.Fatalf("route %+v", recs)
 	}
 	if pending, err := router.Unfinished(m.repo, m.stream); err != nil || len(pending) != 1 {
@@ -163,24 +152,21 @@ func TestAChiefProposalToApproveLeavesAPendingOwnerDecision(t *testing.T) {
 	}
 }
 
-// A contest the owner moved the unit into is the owner's to move it out of: a
-// proposal of the chief of staff leaves a pending owner decision and moves
-// nothing, whatever Jev would answer.
 func TestAChiefProposalOutOfTheOwnersContestLeavesAPendingOwnerDecision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	m := newMoveFixture(t, "propose-owner-contest")
-	p := &jevfixture.Transitions{Script: departingTo(UnitReviewing)}
+	p := &jevfixture.Transitions{Script: departingTo(intake.UnitReviewing)}
 	routeThrough(m.f.s, p)
-	if _, api := m.f.s.ownerMove(ctx, string(m.stream), "resume", UnitMoveRequest{To: UnitContested, Note: "Hold it while I look."}); api != nil {
-		t.Fatal(api.Message)
+	if _, apiErr := m.f.s.ownerMove(ctx, string(m.stream), "resume", api.UnitMoveRequest{To: intake.UnitContested, Note: "Hold it while I look."}); apiErr != nil {
+		t.Fatal(apiErr.Message)
 	}
 	out := m.moveUnit(t, `{"unit":"resume","to":"reviewing","note":"Review it."}`)
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "pending as an owner decision on the recovery card") {
 		t.Fatalf("the proposal out of the owner's contest: %s", out)
 	}
 	assertNoPhraseRequest(t, out)
-	if m.state(t).Value != UnitContested {
+	if m.state(t).Value != intake.UnitContested {
 		t.Fatalf("the unit is %s", m.state(t).Value)
 	}
 	if n := len(p.TransitionRequests()); n != 0 {
@@ -188,22 +174,20 @@ func TestAChiefProposalOutOfTheOwnersContestLeavesAPendingOwnerDecision(t *testi
 	}
 }
 
-// A planned unit becomes ready only once every unit it depends on has merged,
-// and the chief of staff may hold it as planned, which restarts that stage.
 func TestChiefOfStaffMovesAPlannedUnitOnlyWhenItsDependenciesMerged(t *testing.T) {
 	t.Parallel()
 	f, _ := newMasonFixture(t, 1, landingPlan)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repo := seedBuild(t, f, "propose-planned", landingPlan, config.WorkspacesGit, base)
 	f.s.setSole(&activeProject{repository: repo})
 	routeThrough(f.s, &jevfixture.Transitions{})
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
-		Turn: "events_1", Prompt: "Unit dedupe is planned.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
+	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
+		Turn: "events_1", Prompt: "Unit dedupe is planned.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	controls := &runtimeControls{}
 	controls.service.Store(f.s)
 	tool := controls.moveUnit(repo, scope)
-	if state := workflowOf(t, repo, stream, "dedupe"); state.Value != UnitPlanned {
+	if state := workflowOf(t, repo, stream, "dedupe"); state.Value != intake.UnitPlanned {
 		t.Fatalf("dedupe is %s, not planned", state.Value)
 	}
 	if out := intakefixture.Handle(t, tool, `{"unit":"dedupe","to":"ready","note":"Start it."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "depends on has not merged") {
@@ -213,7 +197,7 @@ func TestChiefOfStaffMovesAPlannedUnitOnlyWhenItsDependenciesMerged(t *testing.T
 		t.Fatalf("holding a planned unit: %s", out)
 	}
 	moved := latestOf(t, repo, stream, trace.UnitSubject("dedupe"))
-	if moved.From != UnitPlanned || moved.To != UnitPlanned || moved.Actor != chiefActor || moved.DecidedBy != trace.DecidedByChief {
+	if moved.From != intake.UnitPlanned || moved.To != intake.UnitPlanned || moved.Actor != intake.ChiefActor || moved.DecidedBy != trace.DecidedByChief {
 		t.Fatalf("the transition %+v", moved)
 	}
 }

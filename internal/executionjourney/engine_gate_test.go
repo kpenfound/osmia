@@ -3,6 +3,11 @@ package executionjourney
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/service"
@@ -15,14 +20,14 @@ type heldEngineControl struct {
 
 func TestEngineGateReleasesCancelledCheck(t *testing.T) {
 	t.Parallel()
-	checks := newSlotChecks()
-	f, stream, repo := newChecksFixture(t, "engine-cancel-check", checks)
+	checker := newSlotChecks()
+	f, stream, repo := newChecksFixture(t, "engine-cancel-check", checker)
 	defer repo.Close()
 	c, op := requestUnitCheck(t, f.s, repo, stream)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	finished := applyCheck(ctx, c, op)
-	awaitCheck(t, checks.entered)
+	finished := intakefixture.ApplyCheck(ctx, c, op)
+	awaitCheck(t, checker.entered)
 	control := &heldEngineControl{inside: make(chan struct{}), finish: make(chan struct{})}
 	close(control.finish)
 	err := f.s.RestartEngine(t.Context(), control)
@@ -40,7 +45,7 @@ func TestEngineGateReleasesCancelledCheck(t *testing.T) {
 		t.Fatalf("cancelled check: %v", err)
 	}
 	awaitCheckSlots(t, f.s, 0, 0)
-	must(t, f.s.RestartEngine(t.Context(), control))
+	fixturekit.Must(t, f.s.RestartEngine(t.Context(), control))
 	awaitCheck(t, control.inside)
 }
 
@@ -67,8 +72,8 @@ func TestEngineMaintenanceWaitCreatesNoCheckEvidence(t *testing.T) {
 	} {
 		t.Run(action.name, func(t *testing.T) {
 			t.Parallel()
-			checks := newSlotChecks()
-			f, stream, repo := newChecksFixture(t, "engine-wait-"+action.name, checks)
+			checker := newSlotChecks()
+			f, stream, repo := newChecksFixture(t, "engine-wait-"+action.name, checker)
 			defer repo.Close()
 			c, op := requestUnitCheck(t, f.s, repo, stream)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -77,34 +82,33 @@ func TestEngineMaintenanceWaitCreatesNoCheckEvidence(t *testing.T) {
 			maintenance := make(chan error, 1)
 			go func() { maintenance <- action.run(f.s.Service, ctx, control) }()
 			awaitCheck(t, control.inside)
-			finished := applyCheck(ctx, c, op)
+			finished := intakefixture.ApplyCheck(ctx, c, op)
 			st := awaitCheckSlots(t, f.s, 0, 1)
 			if len(st.Active) != 0 || st.Waiting[0].Unit != "resume" {
 				t.Fatalf("maintenance admitted checks: %+v", st)
 			}
-			// Admission has reached its wait, while Docker is held. Nothing
-			// durable describes a started or incomplete run in this interval.
-			runs, err := checkRuns(repo, stream)
-			must(t, err)
-			if len(runs) != 0 || len(streamDocuments(t, repo, stream, checkSelectionDocument("resume", 1))) != 0 {
+
+			runs, err := execution.CheckRuns(repo, stream)
+			fixturekit.Must(t, err)
+			if len(runs) != 0 || len(intakefixture.StreamDocuments(t, repo, stream, execution.CheckSelectionDocument("resume", 1))) != 0 {
 				t.Fatalf("waiting check wrote evidence: %+v", runs)
 			}
-			state, err := repo.Workflow(stream, checksSubject("resume"))
-			must(t, err)
+			state, err := repo.Workflow(stream, execution.ChecksSubject("resume"))
+			fixturekit.Must(t, err)
 			if state.Value != "requested-1" {
 				t.Fatalf("maintenance wait changed checks state: %+v", state)
 			}
 			close(control.finish)
-			must(t, awaitCheck(t, maintenance))
-			awaitCheck(t, checks.entered)
-			checks.release <- checkOutcome{Result: CheckResult{Output: passedReport}}
-			must(t, awaitCheck(t, finished))
+			fixturekit.Must(t, awaitCheck(t, maintenance))
+			awaitCheck(t, checker.entered)
+			checker.release <- fixturekit.CheckOutcome{Result: api.CheckResult{Output: fixturekit.PassedReport}}
+			fixturekit.Must(t, awaitCheck(t, finished))
 			run := onlyRun(t, repo, stream)
-			if run.Status != ChecksPassed {
+			if run.Status != checks.ChecksPassed {
 				t.Fatalf("wait produced %+v", run)
 			}
-			n, err := c.incompleteSinceEntry(stream, "resume", run, []UnitCheckRun{run})
-			must(t, err)
+			n, err := c.incompleteSinceEntry(stream, "resume", run, []execution.UnitCheckRun{run})
+			fixturekit.Must(t, err)
 			if n != 0 {
 				t.Fatalf("maintenance wait counted as %d incomplete runs", n)
 			}

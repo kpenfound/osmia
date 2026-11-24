@@ -3,6 +3,11 @@ package executionjourney
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,8 +33,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// The markers the telemetry journey seeds into content the factory handles.
-// None of them may appear in any span.
 const (
 	journeyReport   = "zq-mason-report-marker"
 	journeyReply    = "zq-mason-reply-marker"
@@ -39,9 +42,6 @@ const (
 	journeyCheck    = "zq-check-output-marker"
 )
 
-// journeyContent is the text the journey's workstream carries that a span must
-// never repeat: the plan's unit titles, the final report's summary and a
-// prompt and a system prompt of a mason turn, besides the seeded markers.
 var journeyContent = []string{
 	journeyReport, journeyReply, journeyEvidence, journeyAction, journeyPause, journeyCheck,
 	"Resume from the last chunk", "Send chunks", "Record acknowledged chunks", "Resumable uploads", reviewSummary,
@@ -54,45 +54,37 @@ const (
 	journeyReviewers = 1
 )
 
-// telemetryJourney is a workstream driven from intake to its archive on a
-// service that is restarted between the final review and its delivery.
 type telemetryJourney struct {
 	f      *shedFixture
 	stream config.WorkstreamID
-	// created is the workstream's recorded creation.
+
 	created time.Time
-	// pauseSetAt is when the pause that stays open across the restart was set.
+
 	pauseSetAt time.Time
-	// openState is the last workstream transition recorded before the restart:
-	// the workstream state it entered is open across the restart.
+
 	openState trace.Transition
-	// beforeRestart holds the spans the first run exported by the time it stopped.
+
 	beforeRestart servicetest.Spans
-	// stopTook is the longest a stop of the service took.
+
 	stopTook time.Duration
-	// delivered reports the workstream reached delivery.
+
 	delivered bool
-	// sinkOn and sinkStats are the service's span sink before its last stop.
+
 	sinkOn    bool
 	sinkStats telemetry.Stats
 }
 
-// driveTelemetryJourney runs one workstream through intake, build and delivery
-// with two mason slots held while the mason limit is raised, a queued review,
-// a unit returned to its mason, a pause and a restart. A nil exporter runs it
-// with telemetry off.
 func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *telemetryJourney {
 	t.Helper()
 	ctx := context.Background()
-	checks := &fakeChecks{
+	checker := &fixturekit.FakeChecks{
 		Links:    []string{"dag+check://release/version-round-trip", "dag+check://go/packages/tests/test?go-package=internal/web"},
-		Outcomes: []checkOutcome{{Result: CheckResult{Output: passedReport + journeyCheck + "\n"}}},
+		Outcomes: []fixturekit.CheckOutcome{{Result: api.CheckResult{Output: fixturekit.PassedReport + journeyCheck + "\n"}}},
 	}
-	// The service holds a pull request credential from its first start; the
-	// host behind it is set up once the fixture has its clone.
-	hosted := &fakePulls{}
+
+	hosted := &fixturekit.FakePulls{}
 	prepare := func(o *Options) {
-		o.reviewChecks = checks
+		o.reviewChecks = checker
 		o.PullRequests = hosted
 		if exporter != nil {
 			o.telemetryExporter = exporter
@@ -100,7 +92,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	capacity := fmt.Sprintf("masons = %d\nper_workstream = 3\nreviewers = %d\n", journeyMasons, journeyReviewers)
 	f, masons := newMasonFixtureWith(t, config.WorkspacesGit, capacity, disjointPlan, prepare)
-	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, masonTurnID, ownerActor)
+	intakefixture.ExtendParallelMasons(t, f.clone, f.repository(), f.clock.Now(), f.engine, masons, service.TestMasonTurnID, intake.OwnerActor)
 	defer f.stop(t)
 	j := &telemetryJourney{f: f}
 
@@ -110,13 +102,11 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	}
 	useJevProvider(f.s, &jevtest.Provider{Results: selection})
 
-	// The masons report with seeded text, and the first mason turns of two units
-	// wait at a gate so both mason slots are held while the limit is raised.
 	masons.Response = map[string]string{}
 	units := []string{"resume", "upload", "audit"}
 	for _, unit := range units {
-		masons.Play[masonTurnID(unit)] = reportDone(journeyReport)
-		masons.Response[masonTurnID(unit)] = journeyReply
+		masons.Play[service.TestMasonTurnID(unit)] = intakefixture.ReportDone(journeyReport)
+		masons.Response[service.TestMasonTurnID(unit)] = journeyReply
 	}
 	masonGate, reviewGate := make(chan struct{}), make(chan struct{})
 	entered := make(chan string, 16)
@@ -136,16 +126,16 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	var resumeReviews atomic.Int32
 	f.engine.Mu.Lock()
 	chief := f.engine.Turns["*"]
-	f.engine.Turns[masonTurnID("resume")] = gated
-	f.engine.Turns[masonTurnID("upload")] = gated
-	f.engine.Turns[masonTurnID("audit")] = gated
+	f.engine.Turns[service.TestMasonTurnID("resume")] = gated
+	f.engine.Turns[service.TestMasonTurnID("upload")] = gated
+	f.engine.Turns[service.TestMasonTurnID("audit")] = gated
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
-		case strings.HasPrefix(req.Name, masonAgent("resume")+"-revise-"):
+		case strings.HasPrefix(req.Name, intake.MasonAgent("resume")+"-revise-"):
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/retry.go"), []byte("package trace\n// retry token handled\n"), 0600); err != nil {
 				return nil, err
 			}
-			if err := reportDone(journeyReport)(ctx, req, tools); err != nil {
+			if err := intakefixture.ReportDone(journeyReport)(ctx, req, tools); err != nil {
 				return nil, err
 			}
 			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: journeyReply, SessionDir: req.SessionDir, NumTurns: 1}, nil
@@ -153,8 +143,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 			if _, err := reviewtools.IdentityInPrompt(req.Prompt); err != nil {
 				return nil, err
 			}
-			// The first review waits at a gate holding the only reviewer slot,
-			// so the next review queues for one.
+
 			if reviewing.Add(1) == 1 {
 				select {
 				case <-reviewGate:
@@ -162,16 +151,16 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 					return nil, ctx.Err()
 				}
 			}
-			verdict := map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}}
+			verdict := map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []api.ReviewFinding{}}
 			if strings.Contains(req.Name, "resume") && resumeReviews.Add(1) == 1 {
-				verdict = map[string]any{"decision": "material_findings", "summary": reviewSummary, "findings": []ReviewFinding{{Severity: "material", Evidence: journeyEvidence, Action: journeyAction}}}
+				verdict = map[string]any{"decision": "material_findings", "summary": reviewSummary, "findings": []api.ReviewFinding{{Severity: "material", Evidence: journeyEvidence, Action: journeyAction}}}
 			}
-			body, err := callTool(ctx, tools, verdictTool, verdict)
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, verdict)
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict: %s: %v", body, err)
 			}
 		case strings.HasPrefix(req.Name, "final-1-"):
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
+			body, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("final report: %s: %v", body, err)
 			}
@@ -183,8 +172,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	f.engine.Mu.Unlock()
 
 	factory := runtime.Target{Scope: "factory"}
-	// The service holds a pull request credential: its final review pushes
-	// the feature branch to a local bare fork and opens the draft there.
+
 	var stream config.WorkstreamID
 	hostFork, host := hostService(t, f, func() config.WorkstreamID { return stream })
 	hosted.Mu.Lock()
@@ -195,50 +183,41 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	j.stream = stream
 	var err error
 	j.created, err = f.repository().WorkstreamCreated(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 
-	// A second pause replaces the first, and is released to start the work.
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
+	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
 	mutation(t, f.c, "DELETE", "pause", factory)
 
-	// Two units hold both mason slots.
 	for range journeyMasons {
 		select {
 		case <-entered:
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("the masons did not both start")
 		}
 	}
-	awaitRole(t, f, masonRole, journeyMasons, 0)
-	// The mason limit rises while both slots are held, and the third unit takes
-	// the slot the reload added.
+	awaitRole(t, f, intake.MasonRole, journeyMasons, 0)
+
 	rewriteCapacity(t, f.opts.Config.Root, fmt.Sprintf("masons = %d\n", journeyMasons), fmt.Sprintf("masons = %d\n", journeyReloaded))
 	_, err = f.c.Reload(ctx)
-	must(t, err)
-	awaitRole(t, f, masonRole, journeyReloaded, 0)
+	fixturekit.Must(t, err)
+	awaitRole(t, f, intake.MasonRole, journeyReloaded, 0)
 	close(masonGate)
-	// The first units reported reach review: one holds the reviewer slot and
-	// another waits for it.
-	awaitRole(t, f, reviewerRole, journeyReviewers, 1)
+
+	awaitRole(t, f, intake.ReviewerRole, journeyReviewers, 1)
 	close(reviewGate)
 
 	for _, unit := range units {
 		f.awaitMerged(t, stream, unit)
 	}
-	f.awaitFeature(t, stream, AssembledState)
-	deadline := time.Now().Add(demoTimeout)
-	for len(streamDocuments(t, f.repository(), stream, finalReportDocument)) < 1 {
-		if time.Now().After(deadline) {
-			t.Fatal("the final review did not report")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	f.awaitFeature(t, stream, intake.AssembledState)
+	intakefixture.Soon(t, "the final review to report", func() bool {
+		return len(intakefixture.StreamDocuments(t, f.repository(), stream, delivery.FinalReportDocument)) >= 1
+	})
 	masons.Check(t)
 
-	// A pause stays open across the restart that follows.
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
+	mutation(t, f.c, "PUT", "pause", api.PauseRequest{Target: factory, Mode: "soft", Source: "owner", Reason: journeyPause})
 	rt, err := f.c.Runtime(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, p := range rt.Effective.Pauses {
 		if p.Target == factory {
 			j.pauseSetAt = p.SetAt
@@ -247,7 +226,7 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 	if j.pauseSetAt.IsZero() {
 		t.Fatalf("runtime pauses %+v", rt.Effective.Pauses)
 	}
-	for _, tr := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, tr := range intakefixture.AllTransitions(t, f.s.cfg.Root, f.project, stream) {
 		if tr.Subject == trace.FeatureSubject {
 			j.openState = tr
 		}
@@ -257,18 +236,17 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 		j.beforeRestart = servicetest.Spans(mem.GetSpans())
 	}
 
-	// The owner approves delivery while the service is down.
 	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	f.s.setSole(&activeProject{repository: repository})
 	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, fork: hostFork, pulls: hosted}
 	p.approve(t, nil)
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	f.opts.PullRequests = p.pulls
 
 	f.start(t)
 	rt, err = f.c.Runtime(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var kept bool
 	for _, pause := range rt.Effective.Pauses {
 		kept = kept || (pause.Target == factory && pause.SetAt.Equal(j.pauseSetAt))
@@ -277,17 +255,16 @@ func driveTelemetryJourney(t *testing.T, exporter sdktrace.SpanExporter) *teleme
 		t.Fatalf("the pause did not survive the restart: %+v", rt.Effective.Pauses)
 	}
 	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitFeature(t, stream, DeliveredState)
+	f.awaitFeature(t, stream, intake.DeliveredState)
 	j.delivered = true
 	_, err = f.c.Archive(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	j.sinkOn, j.sinkStats = service.InspectForTest(f.s.core()).Telemetry()
 	j.stop(t)
 	return j
 }
 
-// stop stops the service and keeps how long that took.
 func (j *telemetryJourney) stop(t *testing.T) {
 	t.Helper()
 	began := time.Now()
@@ -295,38 +272,32 @@ func (j *telemetryJourney) stop(t *testing.T) {
 	j.stopTook = max(j.stopTook, time.Since(began))
 }
 
-// awaitRole waits until the role's pool reports the slots in use and, when
-// waiting is positive, at least that many turns waiting for a slot.
 func awaitRole(t *testing.T, f *shedFixture, role string, used, waiting int) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	var last string
-	for time.Now().Before(deadline) {
+	intakefixture.Soon(t, fmt.Sprintf("the %s pool to reach %d in use and %d waiting", role, used, waiting), func() bool {
 		status, err := f.c.Statuses(context.Background())
-		must(t, err)
-		if status.Capacity != nil {
-			for _, r := range status.Capacity.Roles {
-				last = fmt.Sprintf("%s used %d waiting %d", r.Role, r.Used, len(r.Waiting))
-				if r.Role == role && r.Used == used && len(r.Waiting) >= waiting {
-					return
-				}
+		fixturekit.Must(t, err)
+		if status.Capacity == nil {
+			return false
+		}
+		for _, r := range status.Capacity.Roles {
+			if r.Role == role && r.Used == used && len(r.Waiting) >= waiting {
+				return true
 			}
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("the %s pool never reached %d in use and %d waiting; last %s", role, used, waiting, last)
+		return false
+	})
 }
 
-// rewriteCapacity replaces old with new in the service's configuration file.
 func rewriteCapacity(t *testing.T, root, old, new string) {
 	t.Helper()
 	path := filepath.Join(root, "config.toml")
 	data, err := os.ReadFile(path)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(data), old) {
 		t.Fatalf("configuration lacks %q:\n%s", old, data)
 	}
-	must(t, os.WriteFile(path, []byte(strings.Replace(string(data), old, new, 1)), 0600))
+	fixturekit.Must(t, os.WriteFile(path, []byte(strings.Replace(string(data), old, new, 1)), 0600))
 }
 
 const (
@@ -344,8 +315,6 @@ const (
 	attrKind       = "osmia.kind"
 )
 
-var recordspansUnitCauses = recordspans.UnitCauses
-
 func hasAttr(sp tracetest.SpanStub, key string) bool {
 	_, ok := servicetest.Attr(sp, key)
 	return ok
@@ -356,11 +325,6 @@ func attrOf(sp tracetest.SpanStub, key string) string {
 	return v
 }
 
-// The running service sends every span of the contract for a workstream driven
-// from intake to its archive: a unit returned to its mason with its cause, two
-// held mason slots across a limit change, a queued review, checks with a
-// covered count, a pause and a restart in the middle, and no content of the
-// factory in any of them.
 func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
@@ -377,7 +341,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		}
 	}()
 
-	// One root in the workstream's trace, from its recorded creation to its archive.
 	roots := spans.Named("osmia.workstream").With(attrWorkstream, stream)
 	if len(roots) != 1 {
 		t.Fatalf("%d root spans", len(roots))
@@ -405,8 +368,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		}
 	}
 
-	// Workstream states leave no gap from creation to the end of the root, and
-	// include an owner gate the owner ended.
 	states := own.Named("osmia.workstream.state").SortedByStart()
 	if len(states) < 4 || !states[0].StartTime.Equal(j.created) || !states[len(states)-1].EndTime.Equal(root.EndTime) || attrOf(states[len(states)-1], attrNext) != "archived" {
 		t.Fatalf("workstream states: %d", len(states))
@@ -418,14 +379,12 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 			fail("state span %d (%s) does not follow %s", i, attrOf(sp, attrState), attrOf(states[i-1], attrNext))
 		}
 	}
-	for _, want := range []string{AssembledState, DeliveredState, "building", "cause owner"} {
+	for _, want := range []string{intake.AssembledState, intake.DeliveredState, "building", "cause owner"} {
 		if !seen[want] {
 			fail("no workstream state span for %q: %v", want, seen)
 		}
 	}
 
-	// The state open at the restart is sent once, after it, with its recorded
-	// start and the ID its recorded entry gives.
 	openID := telemetry.WorkstreamSpan(j.stream, "workstream-state", j.openState.ID)
 	if got := j.beforeRestart.Where(func(sp tracetest.SpanStub) bool { return sp.SpanContext.SpanID() == openID }); len(got) != 0 {
 		fail("the state open at the restart was sent before it ended")
@@ -442,11 +401,9 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		}
 	}
 
-	// Unit states: contiguous per unit, every cause from the bounded set, and
-	// exactly one unit returned to its mason, with why.
 	unitStates := own.Named("osmia.unit.state")
 	causes := map[string]bool{}
-	for _, c := range recordspansUnitCauses {
+	for _, c := range recordspans.UnitCauses {
 		causes[c] = true
 	}
 	byUnit := map[string]servicetest.Spans{}
@@ -475,7 +432,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("units returned to the mason: %v", bounces)
 	}
 
-	// Turns follow the GenAI conventions and carry no cost the backend did not report.
 	turns := own.Where(func(sp tracetest.SpanStub) bool { return strings.HasPrefix(sp.Name, "invoke_agent ") })
 	roles := map[string]int{}
 	for _, sp := range turns {
@@ -490,13 +446,11 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("turn spans by role %v", roles)
 	}
 
-	// Checks carry the count they covered.
 	checkRuns := own.Named("osmia.check.run")
 	kinds := map[string]int{}
 	for _, sp := range checkRuns {
 		kinds[attrOf(sp, attrKind)]++
-		// A final review's result is read from the pull request's statuses,
-		// which select nothing, so only the other runs carry a covered count.
+
 		final := attrOf(sp, attrKind) == "final"
 		if attrOf(sp, attrOutcome) != "passed" || !final && (!hasAttr(sp, attrCovered) || attrOf(sp, attrCovered) == "0") || final && hasAttr(sp, attrCovered) {
 			fail("check span %v", sp.Attributes)
@@ -506,7 +460,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("check spans by kind %v", kinds)
 	}
 
-	// Slot spans: held and waited for, in every pool that did work.
 	slots := spans.Where(func(sp tracetest.SpanStub) bool { return strings.HasPrefix(sp.Name, "osmia.slot.") })
 	slotRoles := map[string]int{}
 	for _, sp := range slots {
@@ -534,9 +487,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		}
 	}
 
-	// Pool limits: one span per interval of constant limit for every configured
-	// pool, used or not, and the mason limit changes at the reload while its
-	// slots stay held.
 	uptimes := spans.Named("osmia.service.uptime").SortedByStart()
 	if len(uptimes) != 2 || len(spans.Named("osmia.service.start")) != 2 || !uptimes[0].EndTime.Before(uptimes[1].StartTime) && !uptimes[0].EndTime.Equal(uptimes[1].StartTime) {
 		t.Fatalf("%d uptime spans", len(uptimes))
@@ -580,10 +530,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("no mason slot was granted under the raised limit")
 	}
 
-	// Capacity follows from these spans alone: the mason pool is at capacity
-	// while its slots meet the limit and not for the whole run, a pool that held
-	// nothing is idle throughout, and the unbounded pools are busy or idle and
-	// never at capacity.
 	times := spans.PoolTimes(uptimes[0].StartTime, uptimes[1].EndTime)
 	for _, pool := range []string{"mason", "reviewer", "committee", "architect", "checks"} {
 		pt := times[pool]
@@ -599,8 +545,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("mason pool at capacity %v of the %v it ran", mason.AtCapacity, mason.Running)
 	}
 
-	// Pauses cover the pause, never its reason; the one open at the restart is
-	// sent after it with its recorded start and derived ID.
 	pauses := spans.Named("osmia.pause")
 	var open servicetest.Spans
 	for _, sp := range pauses {
@@ -616,7 +560,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 		fail("%d pause spans; the one open at the restart: %v", len(pauses), open)
 	}
 
-	// No content, in any span name, attribute, event, status or resource.
 	if leaks := spans.Leaks(journeyContent...); len(leaks) != 0 {
 		fail("content in spans:\n%s", strings.Join(leaks, "\n"))
 	}
@@ -638,8 +581,6 @@ func TestTelemetryJourneySendsTheSpanContract(t *testing.T) {
 	}
 }
 
-// With telemetry off the same journey sends no spans, builds no sink and keeps
-// no interval ledger.
 func TestTelemetryOffJourneySendsNoSpans(t *testing.T) {
 	t.Parallel()
 	j := driveTelemetryJourney(t, nil)
@@ -649,15 +590,13 @@ func TestTelemetryOffJourneySendsNoSpans(t *testing.T) {
 	root := j.f.s.cfg.Root
 	for _, ledger := range []func() (string, error){root.SlotIntervals, root.ServiceIntervals} {
 		path, err := ledger()
-		must(t, err)
+		fixturekit.Must(t, err)
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("telemetry off wrote %s: %v", path, err)
 		}
 	}
 }
 
-// A collector that refuses every export, or never answers, neither stops the
-// workstream nor holds the service past its bounded flush.
 func TestTelemetryJourneyContinuesWhenTheCollectorRefusesOrHangs(t *testing.T) {
 	t.Parallel()
 	refusing := &servicetest.RefusingExporter{}
@@ -680,17 +619,14 @@ func TestTelemetryJourneyContinuesWhenTheCollectorRefusesOrHangs(t *testing.T) {
 	}
 }
 
-// Every configured pool has a pool limit span for the run, whether or not it
-// did work: a service that is started and stopped with no work sends no slot
-// span, and the idle pools show only as limit spans over the whole run.
 func TestTelemetryServiceWithoutWorkSendsAPoolLimitSpanForEveryConfiguredPool(t *testing.T) {
 	t.Parallel()
 	exporter := tracetest.NewInMemoryExporter()
 	opts := fixture(t)
 	opts.telemetryExporter = exporter
 	s, err := Start(context.Background(), opts)
-	must(t, err)
-	must(t, s.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.Close())
 	spans := servicetest.SpansOf(exporter)
 	uptime := spans.Named("osmia.service.uptime")
 	limits := spans.Named("osmia.pool.limit")

@@ -3,6 +3,11 @@ package executionjourney
 import (
 	context "context"
 	json "encoding/json"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	os "os"
 	slices "slices"
 	strings "strings"
@@ -28,25 +33,22 @@ func assertAcceptanceDraftInstructions(t *testing.T, prompt string) {
 
 func TestAcceptanceFactoryInstructions(t *testing.T) {
 	t.Parallel()
-	assertAcceptanceDraftInstructions(t, architectPrompt("handed/stdin", 1, "", false, "", nil))
-	for _, role := range []string{architectRole, committeeRole} {
-		policy := factoryInstructions(coreadapter.Scope{Role: role})
+	assertAcceptanceDraftInstructions(t, intake.ArchitectPrompt("handed/stdin", 1, "", false, "", nil))
+	for _, role := range []string{intake.ArchitectRole, intake.CommitteeRole} {
+		policy := service.TestFactoryInstructions(coreadapter.Scope{Role: role})
 		for _, want := range []string{"whole check suite to pass or run", "asking a reviewer to show which tests ran", "engineering defect to correct", "service-owned check gate already runs checks with smart-check selection"} {
 			if !strings.Contains(policy, want) {
 				t.Errorf("%s policy lacks %q: %s", role, want, policy)
 			}
 		}
 	}
-	assertCheckGateReviewInstructions(t, factoryInstructions(coreadapter.Scope{Role: reviewerRole}))
-	assertCheckGateReviewInstructions(t, factoryInstructions(coreadapter.Scope{Role: committeeRole}))
-	assertFinalCheckReviewInstructions(t, finalSystemPrompt(config.Project{}))
-	// The final reader's turn gets its own check instructions, not the unit-review wording.
-	assertFinalCheckReviewInstructions(t, finalSystemPrompt(config.Project{})+factoryInstructions(coreadapter.Scope{Role: committeeRole, Turn: "final-3-committee-1-1"}))
+	intakefixture.AssertCheckGateReviewInstructions(t, service.TestFactoryInstructions(coreadapter.Scope{Role: intake.ReviewerRole}))
+	intakefixture.AssertCheckGateReviewInstructions(t, service.TestFactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole}))
+	assertFinalCheckReviewInstructions(t, delivery.FinalSystemPrompt(config.Project{}))
+
+	assertFinalCheckReviewInstructions(t, delivery.FinalSystemPrompt(config.Project{})+service.TestFactoryInstructions(coreadapter.Scope{Role: intake.CommitteeRole, Turn: "final-3-committee-1-1"}))
 }
 
-// assertFinalCheckReviewInstructions fails unless the prompt tells the final
-// reader how to use a recorded check result and carries none of the
-// unit-review check gate wording.
 func assertFinalCheckReviewInstructions(t *testing.T, prompt string) {
 	t.Helper()
 	for _, want := range []string{"A recorded pass satisfies every criterion that needs tests or checks to pass", "A recorded failure is evidence you may cite", "is not a finding by itself"} {
@@ -61,32 +63,30 @@ func assertFinalCheckReviewInstructions(t *testing.T, prompt string) {
 	}
 }
 
-var acceptancePlan = intakefixture.AcceptancePlan
-
 func TestDraftWriteCheckAcceptance(t *testing.T) {
 	t.Parallel()
 	ownSpec, err := os.ReadFile("testdata/check-acceptance/spec.md")
-	must(t, err)
+	fixturekit.Must(t, err)
 	ownPlan, err := os.ReadFile("testdata/check-acceptance/plan.json")
-	must(t, err)
+	fixturekit.Must(t, err)
 	mentions := []string{"acceptance never requires all checks to pass", "the validator rejects acceptance saying 'all checks pass'", "table tests flag 'full check run is green'", "all internal/plan tests pass"}
 	mentionSpec := "## Acceptance criteria\n1. " + strings.Join(mentions, ". ") + "\n2. Acknowledged chunks are never sent again.\n"
 	cases := []struct{ name, spec, graph, at string }{
-		{"criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All `dagger checks` pass", 1), validPlan, "spec#1"},
-		{"unit", validSpec, acceptancePlan(t, validPlan, "dagger check passes"), `unit "resume": acceptance item 1`},
-		{"scoped-run-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in internal/plan", 1), validPlan, ""},
-		{"scoped-run-unit", validSpec, acceptancePlan(t, validPlan, "Run all checks in internal/plan", "Execute every test in the parser suite"), ""},
-		{"relative-scope-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in ./internal/plan. All checks must be run under ./internal/plan.", 1), validPlan, ""},
-		{"relative-scope-unit", validSpec, acceptancePlan(t, validPlan, "Run all checks in ./internal/plan", "All checks must be run under ./internal/plan", "All checks pass in ./internal/plan"), ""},
-		{"backticked-relative-scope-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in `./internal/plan`. All checks must be run under `./internal/plan`.", 1), validPlan, ""},
-		{"backticked-relative-scope-unit", validSpec, acceptancePlan(t, validPlan, "Run all checks in `./internal/plan`", "All checks must be run under `./internal/plan`", "All checks pass in `./internal/plan`"), ""},
-		{"unscoped-run-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks", 1), validPlan, "spec#1"},
-		{"unscoped-run-unit", validSpec, acceptancePlan(t, validPlan, "Run all checks"), `unit "resume": acceptance item 1`},
-		{"run-backticked-command-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run `dagger check`", 1), validPlan, "spec#1"},
-		{"run-backticked-subject-unit", validSpec, acceptancePlan(t, validPlan, "Run `all checks`"), `unit "resume": acceptance item 1`},
-		{"relative-scope-then-unscoped-criterion", strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in ./internal/plan. Run all checks.", 1), validPlan, "spec#1"},
-		{"relative-scope-then-unscoped-unit", validSpec, acceptancePlan(t, validPlan, "Run all checks in `./internal/plan`. All checks pass."), `unit "resume": acceptance item 1`},
-		{"mentions", mentionSpec, acceptancePlan(t, validPlan, mentions...), ""},
+		{"criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All `dagger checks` pass", 1), fixturekit.ValidPlan, "spec#1"},
+		{"unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "dagger check passes"), `unit "resume": acceptance item 1`},
+		{"scoped-run-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in internal/plan", 1), fixturekit.ValidPlan, ""},
+		{"scoped-run-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run all checks in internal/plan", "Execute every test in the parser suite"), ""},
+		{"relative-scope-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in ./internal/plan. All checks must be run under ./internal/plan.", 1), fixturekit.ValidPlan, ""},
+		{"relative-scope-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run all checks in ./internal/plan", "All checks must be run under ./internal/plan", "All checks pass in ./internal/plan"), ""},
+		{"backticked-relative-scope-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in `./internal/plan`. All checks must be run under `./internal/plan`.", 1), fixturekit.ValidPlan, ""},
+		{"backticked-relative-scope-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run all checks in `./internal/plan`", "All checks must be run under `./internal/plan`", "All checks pass in `./internal/plan`"), ""},
+		{"unscoped-run-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks", 1), fixturekit.ValidPlan, "spec#1"},
+		{"unscoped-run-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run all checks"), `unit "resume": acceptance item 1`},
+		{"run-backticked-command-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run `dagger check`", 1), fixturekit.ValidPlan, "spec#1"},
+		{"run-backticked-subject-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run `all checks`"), `unit "resume": acceptance item 1`},
+		{"relative-scope-then-unscoped-criterion", strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "Run all checks in ./internal/plan. Run all checks.", 1), fixturekit.ValidPlan, "spec#1"},
+		{"relative-scope-then-unscoped-unit", fixturekit.ValidSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "Run all checks in `./internal/plan`. All checks pass."), `unit "resume": acceptance item 1`},
+		{"mentions", mentionSpec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, mentions...), ""},
 		{"own-feature", string(ownSpec), string(ownPlan), ""},
 	}
 	for _, quote := range []struct{ name, open, close string }{
@@ -103,34 +103,34 @@ func TestDraftWriteCheckAcceptance(t *testing.T) {
 			"The validator rejects " + quote.open + "Run all checks" + quote.close + ".",
 		}
 		spec := "## Acceptance criteria\n1. " + strings.Join(items, " ") + "\n2. Acknowledged chunks are never sent again.\n"
-		cases = append(cases, struct{ name, spec, graph, at string }{"quoted-statements-" + quote.name, spec, acceptancePlan(t, validPlan, items...), ""})
+		cases = append(cases, struct{ name, spec, graph, at string }{"quoted-statements-" + quote.name, spec, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, items...), ""})
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			f := newArchitectFixture(t)
 			defer f.stop(t)
-			// The feature fixture uses the production text and its original entities.
+
 			entities, err := kb.Load(f.repository())
-			must(t, err)
+			fixturekit.Must(t, err)
 			if tc.name == "own-feature" {
 				entities.Entities = append(entities.Entities, kb.Entity{ID: "internal.service", Name: "Service", Paths: []string{"internal/service/**"}}, kb.Entity{ID: "internal.plan", Name: "Plan", Paths: []string{"internal/plan/**"}})
-				must(t, kb.Store(context.Background(), f.repository(), entities, f.clock.Now(), serviceActor, "fixture"))
+				fixturekit.Must(t, kb.Store(context.Background(), f.repository(), entities, f.clock.Now(), intake.ServiceActor, "fixture"))
 				charter, err := f.repository().Charter(context.Background())
-				must(t, err)
-				recordCharter(t, f.repository(), charter.Content+"\n4. Run dagger check with --parallel 4.\n")
+				fixturekit.Must(t, err)
+				fixturekit.RecordCharter(t, f.repository(), charter.Content+"\n4. Run dagger check with --parallel 4.\n")
 			}
 			f.script("draft-1-1", map[string]string{plan.SpecPath: tc.spec, plan.PlanPath: tc.graph}, nil)
-			f.script("draft-2-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-			stream := f.handIn(t, "acceptance-"+tc.name, handedDesign)
-			f.await(t, stream, sketched)
+			f.script("draft-2-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+			stream := f.handIn(t, "acceptance-"+tc.name, fixturekit.HandedDesign)
+			f.await(t, stream, intakefixture.Sketched)
 			deliveries := f.delivered("draft-1-1")
 			if len(deliveries) != 2 {
 				t.Fatalf("deliveries: %+v", deliveries)
 			}
 			got := deliveries[1]
 			if tc.at == "" {
-				if got.Verdict != draftValid || len(got.Problems) != 0 {
+				if got.Verdict != intake.DraftValid || len(got.Problems) != 0 {
 					t.Fatalf("valid mentions: %+v", got)
 				}
 				for _, doc := range []struct{ id, content string }{{plan.SpecDocument, tc.spec}, {plan.PlanDocument, tc.graph}} {
@@ -140,7 +140,7 @@ func TestDraftWriteCheckAcceptance(t *testing.T) {
 				}
 				return
 			}
-			if got.Verdict != draftInvalid || len(got.Problems) != 1 || !strings.Contains(got.Problems[0], tc.at) {
+			if got.Verdict != intake.DraftInvalid || len(got.Problems) != 1 || !strings.Contains(got.Problems[0], tc.at) {
 				t.Fatalf("verdict: %+v", got)
 			}
 			invalid := slices.DeleteFunc(f.transitions(t, stream), func(tr trace.Transition) bool { return tr.ID != "draft-1-invalid" })
@@ -157,53 +157,53 @@ func TestDraftWriteCheckAcceptance(t *testing.T) {
 func TestAmendmentCheckAcceptance(t *testing.T) {
 	t.Parallel()
 	f := newArchitectFixture(t)
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	stream := f.handIn(t, "amend-check-acceptance", handedDesign)
-	f.await(t, stream, sketched)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	stream := f.handIn(t, "amend-check-acceptance", fixturekit.HandedDesign)
+	f.await(t, stream, intakefixture.Sketched)
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	// Simulate sealed historical acceptance, which remains loadable.
-	oldSpec := strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)
-	oldGraph := acceptancePlan(t, validPlan, "dagger check passes", "A checkpoint is durable")
+
+	oldSpec := strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)
+	oldGraph := intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "dagger check passes", "A checkpoint is durable")
 	docs := []trace.Document{}
 	for _, item := range []struct{ id, path, text string }{{plan.SpecDocument, plan.SpecPath, oldSpec}, {plan.PlanDocument, plan.PlanPath, oldGraph}} {
-		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: item.id, Revision: 2, Project: repo.Project(), Workstream: stream, At: f.clock.Now(), Actor: architectActor, Cause: "fixture"}, Path: item.path, Content: item.text})
+		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: item.id, Revision: 2, Project: repo.Project(), Workstream: stream, At: f.clock.Now(), Actor: intake.ArchitectActor, Cause: "fixture"}, Path: item.path, Content: item.text})
 	}
-	must(t, repo.RecordDocuments(context.Background(), docs))
-	a := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), docs))
+	a := &intake.AmendmentDrafter{Drafter: &intake.Drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
 	for _, tc := range []struct{ name, spec, graph, at string }{
 		{"carryover", strings.Replace(oldSpec, "Acknowledged chunks", "Durably acknowledged chunks", 1), strings.Replace(oldGraph, "A checkpoint is durable", "A checkpoint survives restart", 1), ""},
 		{"changed-criterion", strings.Replace(oldSpec, "All checks pass", "Full check run is green", 1), oldGraph, "spec#1"},
-		{"changed-item", oldSpec, acceptancePlan(t, oldGraph, "All tests pass"), `unit "resume": acceptance item 1`},
-		{"added-item", oldSpec, acceptancePlan(t, oldGraph, "dagger check passes", "A checkpoint is durable", "Run the full test suite"), `unit "resume": acceptance item 3`},
+		{"changed-item", oldSpec, intakefixture.AcceptancePlan(t, oldGraph, "All tests pass"), `unit "resume": acceptance item 1`},
+		{"added-item", oldSpec, intakefixture.AcceptancePlan(t, oldGraph, "dagger check passes", "A checkpoint is durable", "Run the full test suite"), `unit "resume": acceptance item 3`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: architectRole}
+			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: intake.ArchitectRole}
 			tool := a.DraftTool(scope, "amend-"+tc.name+"-1", a.Judge)
 			for _, file := range []struct{ path, text string }{{plan.SpecPath, tc.spec}, {plan.PlanPath, tc.graph}} {
 				raw, _ := json.Marshal(map[string]string{"path": file.path, "content": file.text})
 				out, err := tool.Handle(context.Background(), raw)
-				must(t, err)
+				fixturekit.Must(t, err)
 				if file.path != plan.PlanPath {
 					continue
 				}
-				var status draftStatus
-				must(t, json.Unmarshal(out, &status))
+				var status intake.DraftStatus
+				fixturekit.Must(t, json.Unmarshal(out, &status))
 				if tc.at == "" {
-					if status.Verdict != draftValid {
+					if status.Verdict != intake.DraftValid {
 						t.Fatalf("carryover: %+v", status)
 					}
-				} else if status.Verdict != draftInvalid || len(status.Problems) != 1 || !strings.Contains(status.Problems[0], tc.at) {
+				} else if status.Verdict != intake.DraftInvalid || len(status.Problems) != 1 || !strings.Contains(status.Problems[0], tc.at) {
 					t.Fatalf("verdict: %+v", status)
 				}
 			}
 		})
 	}
-	must(t, a.Enqueue(context.Background(), f.s.current(), stream, "guidance", 1, "fixture", nil))
-	thread, err := repo.Thread(stream, architectAgent)
-	must(t, err)
+	fixturekit.Must(t, a.Enqueue(context.Background(), f.s.current(), stream, "guidance", 1, "fixture", nil))
+	thread, err := repo.Thread(stream, intake.ArchitectAgent)
+	fixturekit.Must(t, err)
 	assertAcceptanceDraftInstructions(t, thread.Turns[len(thread.Turns)-1].Request.Prompt)
 }
 
@@ -213,31 +213,31 @@ func TestDeliverDeltaCheckAcceptance(t *testing.T) {
 	defer repo.Close()
 	f.s.setSole(runtimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
-	must(t, err)
-	c, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "acceptance-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
-	if api != nil {
-		t.Fatal(api)
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	fixturekit.Must(t, err)
+	c, apiErr := f.s.requestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "acceptance-delta", Kind: "amend", Scope: "workgroup", Change: "Resume from checkpoints"})
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	// Two pinned slices exercise legacy text both in changed and untouched slices.
-	legacy := c.Before.Slices[0]
-	legacy.Spec = strings.Replace(legacy.Spec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)
-	legacy.Plan = acceptancePlan(t, legacy.Plan, "dagger check passes")
-	c.Before.Slices[0] = legacy
+
+	edited := c.Before.Slices[0]
+	edited.Spec = strings.Replace(edited.Spec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1)
+	edited.Plan = intakefixture.AcceptancePlan(t, edited.Plan, "dagger check passes")
+	c.Before.Slices[0] = edited
 	other, err := config.NewWorkstreamID()
-	must(t, err)
-	otherSlice := legacy
+	fixturekit.Must(t, err)
+	otherSlice := edited
 	otherSlice.Workstream = other
 	c.Before.Slices = append(c.Before.Slices, otherSlice)
 	c.Members = append(c.Members, amendment.Member{Workstream: other, Units: map[string]string{}})
-	// A real second workstream gives delivery validation its project context.
-	must(t, repo.CreateWorkstream(ctx, other, f.s.now(), ownerActor))
-	must(t, f.s.saveChange(ctx, repo, &c))
-	tool := f.s.deltaTool(repo, c, architectAgent, deltaDraftTool)
+
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, other, f.s.now(), intake.OwnerActor))
+	fixturekit.Must(t, f.s.saveChange(ctx, repo, &c))
+	tool := f.s.deltaTool(repo, c, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, tc := range []struct{ name, spec, graph, at string }{
-		{"criterion", strings.Replace(legacy.Spec, "All checks pass", "Full check run is green", 1), legacy.Plan, "spec#1"},
-		{"item", legacy.Spec, acceptancePlan(t, legacy.Plan, "All checks pass"), `unit "resume": acceptance item 1`},
-		{"carryover", legacy.Spec, strings.Replace(legacy.Plan, "Resume", "Resume safely", 1), ""},
+		{"criterion", strings.Replace(edited.Spec, "All checks pass", "Full check run is green", 1), edited.Plan, "spec#1"},
+		{"item", edited.Spec, intakefixture.AcceptancePlan(t, edited.Plan, "All checks pass"), `unit "resume": acceptance item 1`},
+		{"carryover", edited.Spec, strings.Replace(edited.Plan, "Resume", "Resume safely", 1), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			after := c.Before
@@ -245,7 +245,7 @@ func TestDeliverDeltaCheckAcceptance(t *testing.T) {
 			after.Slices[0].Spec, after.Slices[0].Plan = tc.spec, tc.graph
 			raw, _ := json.Marshal(after)
 			out, err := tool.Handle(ctx, raw)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if tc.at != "" {
 				if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), strings.ReplaceAll(tc.at, `"`, `\"`)) {
 					t.Fatalf("delta refusal: %s", out)
@@ -254,7 +254,7 @@ func TestDeliverDeltaCheckAcceptance(t *testing.T) {
 					t.Fatalf("invalid delta advanced: %s", now.State)
 				}
 			} else if !strings.Contains(string(out), `"recorded":true`) {
-				t.Fatalf("legacy carryover rejected: %s", out)
+				t.Fatalf("carryover rejected: %s", out)
 			}
 		})
 	}
@@ -263,32 +263,32 @@ func TestDeliverDeltaCheckAcceptance(t *testing.T) {
 func TestShedRedraftCheckAcceptance(t *testing.T) {
 	t.Parallel()
 	f := newArchitectFixture(t)
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	stream := f.handIn(t, "shed-check-acceptance", handedDesign)
-	f.await(t, stream, sketched)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	stream := f.handIn(t, "shed-check-acceptance", fixturekit.HandedDesign)
+	f.await(t, stream, intakefixture.Sketched)
 	f.stop(t)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	d := &debate{S: f.s.intake().DebateDependencies(), Repository: repo}
+	d := &intake.Debate{S: f.s.intake().DebateDependencies(), Repository: repo}
 	for _, tc := range []struct{ name, path, content, at string }{
-		{"criterion", plan.SpecPath, strings.Replace(validSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1), "spec#1"},
-		{"unit", plan.PlanPath, acceptancePlan(t, validPlan, "dagger check passes"), `unit "resume": acceptance item 1`},
+		{"criterion", plan.SpecPath, strings.Replace(fixturekit.ValidSpec, "An interrupted upload resumes from the last acknowledged chunk.", "All checks pass", 1), "spec#1"},
+		{"unit", plan.PlanPath, intakefixture.AcceptancePlan(t, fixturekit.ValidPlan, "dagger check passes"), `unit "resume": acceptance item 1`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: architectRole}
+			scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Role: intake.ArchitectRole}
 			turn := "reply-acceptance-" + tc.name
 			tool := d.Drafter().DraftTool(scope, turn, d.Judge)
 			raw, _ := json.Marshal(map[string]string{"path": tc.path, "content": tc.content})
 			out, err := tool.Handle(context.Background(), raw)
-			must(t, err)
-			var status draftStatus
-			must(t, json.Unmarshal(out, &status))
-			if status.Verdict != draftInvalid || len(status.Problems) != 1 || !strings.Contains(status.Problems[0], tc.at) {
+			fixturekit.Must(t, err)
+			var status intake.DraftStatus
+			fixturekit.Must(t, json.Unmarshal(out, &status))
+			if status.Verdict != intake.DraftInvalid || len(status.Problems) != 1 || !strings.Contains(status.Problems[0], tc.at) {
 				t.Fatalf("shed verdict: %+v", status)
 			}
 			_, problems, err := d.Redraft(stream, turn)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if !slices.Equal(problems, status.Problems) {
 				t.Fatalf("recording validation differs: %v versus %v", problems, status.Problems)
 			}
