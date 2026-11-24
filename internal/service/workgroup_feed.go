@@ -35,17 +35,10 @@ func workgroupAuthorityError(err error) *APIError {
 	return &APIError{Code: code, Message: err.Error()}
 }
 
-// openWorkgroupFeed resolves local groups through their chief and shared
-// groups through the existing lifecycle binding. The latter validates joins
-// and retired identities before granting access to the original authority.
 func (s *Service) openWorkgroupFeed(ctx context.Context, raw string) (workgroupFeedAuthority, *APIError) {
 	return s.openWorkgroupFeedMode(ctx, raw, true)
 }
 
-// openWorkgroupFeedForRead is openWorkgroupFeed for reading the shared thread.
-// It needs no live member to supply context, so it also opens the thread of a
-// workgroup whose members are all archived; the authority's bundle stream is
-// then empty.
 func (s *Service) openWorkgroupFeedForRead(ctx context.Context, raw string) (workgroupFeedAuthority, *APIError) {
 	return s.openWorkgroupFeedMode(ctx, raw, false)
 }
@@ -93,8 +86,6 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 			return workgroupFeedAuthority{chief, host, bundle, members, close}, nil
 		}
 	}
-	// CrossRepoProjectSpec reads the original workgroup journal even when no
-	// member has published its locator yet. Joining must remain a hold.
 	for _, active := range projects {
 		if !cfg.Active(active.id) {
 			continue
@@ -130,8 +121,6 @@ func (s *Service) openWorkgroupFeedMode(ctx context.Context, raw string, needCon
 			if needContext || group.Conversation == nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(lifecycle.ErrNoLiveWorkgroupContext)
 			}
-			// Every member is archived, so the shared thread is opened through
-			// the workgroup's conversation origin.
 			_, _, origin, api := s.conversationTrace(string(group.Conversation.Workstream))
 			if api != nil {
 				return workgroupFeedAuthority{}, workgroupAuthorityError(apiErrAsError{Api: api})
@@ -167,8 +156,6 @@ func (s *Service) workgroupSend(ctx context.Context, raw string, req SendRequest
 	})
 }
 
-// workgroupFeed reads the shared thread. It needs no live member, so it still
-// answers once every member is archived.
 func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedResponse, *APIError) {
 	a, api := s.openWorkgroupFeedForRead(ctx, raw)
 	if api != nil {
@@ -188,15 +175,12 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		for _, m := range a.members {
 			repos[m.Workstream] = m.Project.Project()
 		}
-		// The shared thread keeps both whole-group and member-addressed turns.
 		thread, err := a.chief.ChiefOfStaffThread(a.host)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return WorkgroupFeedResponse{}, err
 		}
 		for _, q := range thread.Turns {
 			member := q.Request.Workstream
-			// EnqueueTurn canonicalizes Workstream to the host. The leading owner
-			// address note preserves the member without changing the trace format.
 			line, _, _ := strings.Cut(q.Request.SystemPrompt, "\n")
 			if _, tail, found := strings.Cut(line, " The owner addressed workstream "); found {
 				address, _, _ := strings.Cut(tail, ",")
@@ -215,8 +199,6 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 				}
 			}
 		}
-		// Read member actions with their source identity, and deduplicate shared
-		// escalations and changes that are visible through several member addresses.
 		entries = slices.DeleteFunc(entries, func(e FeedEntry) bool { return e.Kind == "action" })
 		type actionIdentity struct {
 			Entry  ConversationEntry
@@ -255,7 +237,6 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 			if _, err := chiefActionsWithIdentity(a.chief, m.Workstream, emit); err != nil {
 				return WorkgroupFeedResponse{}, err
 			}
-			// Each member's delivery briefs are its own, labelled with it.
 			briefs, err := briefEntries(m.Project, m.Workstream)
 			if err != nil {
 				return WorkgroupFeedResponse{}, err
@@ -322,8 +303,6 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 		summary.State, summary.DisplayState, summary.Wait, summary.PRLink, summary.Archived, summary.ArchivedBy = w.State, w.DisplayState, w.Wait, archive.DeliveryLink, true, archivedBy(archive)
 		return summary, nil
 	}
-	// Use the same projection as the status endpoint, including edge waits,
-	// owner gates, unit states and the recorded publication evidence.
 	rows, unreadable, api := s.projectStatuses(&activeProject{id: m.Project.Project(), repository: m.Project})
 	if api != nil {
 		return summary, apiErrAsError{Api: api}

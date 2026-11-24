@@ -19,8 +19,6 @@ const (
 	reasonFlakeFix = config.WorkstreamID("w_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 )
 
-// openFlakeFix makes reasonFlakeFix the open flake-fix workstream of the group
-// of reasonLink, and returns the group.
 func openFlakeFix(t *testing.T, repository *trace.Repository) string {
 	t.Helper()
 	ctx := context.Background()
@@ -60,7 +58,6 @@ func reviewingReason(t *testing.T, repository *trace.Repository, stream config.W
 
 func TestPassReasonNamesTheOpenFlakeFixWorkstreamOfAFlakyCheck(t *testing.T) {
 	t.Parallel()
-	// A sibling test of the package the open workstream fixes counts too.
 	f, stream, repository := newChecksFixture(t, "checks-flaky-open", flakyPassingChecks(reasonSibling))
 	f.cfg.Project.FlakeFixes = true
 	group := openFlakeFix(t, repository)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -21,7 +22,7 @@ func TestAnswersAreNotDeliveredToAbandonedWorkstreams(t *testing.T) {
 	home, err := os.MkdirTemp("", "qb-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
@@ -74,7 +75,7 @@ func TestAnswersAreNotDeliveredToMergedUnits(t *testing.T) {
 	home, err := os.MkdirTemp("", "qm-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}

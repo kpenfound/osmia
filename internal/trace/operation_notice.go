@@ -35,8 +35,6 @@ type OperationNotice struct {
 func (r *Repository) RecordOperationNotice(ctx context.Context, stream config.WorkstreamID, n OperationNotice) error {
 	id := "operation-notice-" + n.ID
 	var err error
-	// Another notice of the workstream can move the subject between the read
-	// and the write; the write is then made again from the new state.
 	for range 3 {
 		var state WorkflowState
 		if state, err = r.Workflow(stream, OperationNoticeSubject); err != nil {

@@ -10,17 +10,10 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// tomlStatement is one table header or key/value assignment of a TOML file,
-// with the byte offsets that let an edit leave every other byte alone.
 type tomlStatement struct {
-	header bool
-	// table is the header's own table path, or for an assignment the path of
-	// the table it sits in. key is the assignment's key path inside it.
-	table, key []string
-	// start is the offset of the first byte of the statement's first line and
-	// end the offset after its last line, newline included.
-	start, end int
-	// valueStart and valueEnd bound an assignment's value.
+	header               bool
+	table, key           []string
+	start, end           int
 	valueStart, valueEnd int
 }
 
@@ -28,7 +21,6 @@ func (s tomlStatement) path() []string { return append(slices.Clone(s.table), s.
 
 var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// quoteKey writes one key segment as a bare or basic-string key.
 func quoteKey(k string) string {
 	if bareKey.MatchString(k) {
 		return k
@@ -36,7 +28,6 @@ func quoteKey(k string) string {
 	return tomlString(k)
 }
 
-// scanTOML splits a file into its statements without interpreting values.
 func scanTOML(text string) ([]tomlStatement, error) {
 	var out []tomlStatement
 	var table []string
@@ -96,7 +87,6 @@ func scanTOML(text string) ([]tomlStatement, error) {
 	return out, nil
 }
 
-// lineEnd returns the offset after the newline ending the line at i.
 func lineEnd(text string, i int) int {
 	if n := strings.IndexByte(text[i:], '\n'); n >= 0 {
 		return i + n + 1
@@ -104,7 +94,6 @@ func lineEnd(text string, i int) int {
 	return len(text)
 }
 
-// finishLine accepts only blanks and a comment up to the end of the line.
 func finishLine(text string, i int) (int, error) {
 	i = skipBlanks(text, i, len(text))
 	if i < len(text) && text[i] == '\r' {
@@ -122,7 +111,6 @@ func finishLine(text string, i int) (int, error) {
 	return 0, fmt.Errorf("unexpected text after a value at byte %d", i)
 }
 
-// scanKey reads a possibly dotted key, bare or quoted, from i.
 func scanKey(text string, i int) ([]string, int, error) {
 	var path []string
 	for {
@@ -164,7 +152,6 @@ func scanKey(text string, i int) ([]string, int, error) {
 	}
 }
 
-// scanQuoted returns the offset after the single-line string starting at i.
 func scanQuoted(text string, i int) (int, error) {
 	q := text[i]
 	for j := i + 1; j < len(text); j++ {
@@ -180,7 +167,6 @@ func scanQuoted(text string, i int) (int, error) {
 	return 0, errors.New("unterminated string")
 }
 
-// scanValue returns the offset after the value starting at i.
 func scanValue(text string, i int) (int, error) {
 	if i >= len(text) {
 		return 0, errors.New("missing value")
@@ -229,7 +215,6 @@ func scanValue(text string, i int) (int, error) {
 	return i + len(value), nil
 }
 
-// scanMultiline returns the offset after a triple-quoted string at i.
 func scanMultiline(text string, i int) (int, error) {
 	q := text[i]
 	closing := strings.Repeat(string(q), 3)
@@ -249,7 +234,6 @@ func scanMultiline(text string, i int) (int, error) {
 	return 0, errors.New("unterminated multi-line string")
 }
 
-// eolOf is the line ending the file already uses.
 func eolOf(text string) string {
 	if strings.Contains(text, "\r\n") {
 		return "\r\n"
@@ -259,8 +243,6 @@ func eolOf(text string) string {
 
 var errLayout = errors.New("the file uses a layout that cannot be edited safely")
 
-// definedAbove reports whether an assignment sets a table that contains path:
-// an inline table, which the edit cannot reach into.
 func definedAbove(stmts []tomlStatement, path []string) bool {
 	for _, s := range stmts {
 		if s.header {
@@ -273,9 +255,6 @@ func definedAbove(stmts []tomlStatement, path []string) bool {
 	return false
 }
 
-// setTOMLKey sets the value at path to the TOML literal value. An existing
-// assignment keeps its key, spacing and trailing comment; a new key is placed
-// with its siblings. Every other byte is unchanged.
 func setTOMLKey(text string, path []string, literal string) (string, error) {
 	stmts, err := scanTOML(text)
 	if err != nil {
@@ -349,8 +328,6 @@ func setTOMLKey(text string, path []string, literal string) (string, error) {
 	return text + block, nil
 }
 
-// insertAfter places line at offset at, which follows a statement's newline
-// unless the statement ended the file without one.
 func insertAfter(text string, at int, line, eol string) string {
 	if at > 0 && text[at-1] != '\n' {
 		line = eol + line
@@ -358,8 +335,6 @@ func insertAfter(text string, at int, line, eol string) string {
 	return text[:at] + line + text[at:]
 }
 
-// removeTOMLKey removes the assignment at path with its trailing comment. A
-// key that is not set leaves the text as it was.
 func removeTOMLKey(text string, path []string) (string, error) {
 	stmts, err := scanTOML(text)
 	if err != nil {
@@ -376,16 +351,12 @@ func removeTOMLKey(text string, path []string) (string, error) {
 	return text, nil
 }
 
-// keyEdit sets path to value (a string, int or bool) or, when remove is true,
-// removes it.
 type keyEdit struct {
 	path   []string
 	value  any
 	remove bool
 }
 
-// editTOML applies the edits to text in order and proves the result decodes
-// to the original with exactly those keys changed.
 func editTOML(text string, edits []keyEdit) (string, error) {
 	var before map[string]any
 	if _, err := toml.Decode(text, &before); err != nil {
@@ -466,7 +437,6 @@ func deleteTree(m map[string]any, path []string) {
 	delete(m, path[len(path)-1])
 }
 
-// pruneTree drops empty tables, which a file may or may not spell out.
 func pruneTree(m map[string]any) {
 	for k, v := range m {
 		if sub, ok := v.(map[string]any); ok {

@@ -13,10 +13,10 @@ const FactoryPolicySubject = "factory-policy"
 
 const FactoryPolicyVersion = "adaptive"
 
-// acceptanceDraftInstructions applies to every architect submission path.
+// AcceptanceDraftInstructions applies to every architect submission path.
 const AcceptanceDraftInstructions = "\n\nAcceptance states observable behaviours and may name tests the unit adds as evidence. Never require a whole-suite check pass or run. There is no need to list existing tests to keep passing: the factory's service-owned check gate catches regressions. The factory runs and selects checks itself, using smart-check selection. A passing service-owned check gate is the evidence that required tests ran and passed."
 
-// recordFactoryPolicy commits adoption and its recovery notice together. Repeating
+// RecordFactoryPolicy commits adoption and its recovery notice together. Repeating
 // reconciliation never loses the notice or creates another one after acknowledgment.
 func RecordFactoryPolicy(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, at time.Time, revisit bool) error {
 	st, err := r.Workflow(stream, FactoryPolicySubject)

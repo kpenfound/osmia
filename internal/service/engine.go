@@ -14,8 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/redact"
 )
 
-// configuredChecks binds a client to the configuration of its operation. A
-// running operation keeps this client when reload installs new stages.
 func (s *Service) configuredChecks(cfg *config.Config) ReviewChecks {
 	if s.options.reviewChecks != nil {
 		return s.options.reviewChecks
@@ -33,9 +31,6 @@ func (s *Service) configuredChecks(cfg *config.Config) ReviewChecks {
 	return DaggerChecks{Engine: selection, CloudToken: token}
 }
 
-// configuredCloudChecks is the cloud engine runner a check run falls back to,
-// or nil when cfg does not turn the fallback on. It carries the compute token
-// the primary runner uses.
 func (s *Service) configuredCloudChecks(cfg *config.Config) ReviewChecks {
 	if cfg == nil {
 		return nil
@@ -52,10 +47,6 @@ func (s *Service) configuredCloudChecks(cfg *config.Config) ReviewChecks {
 	return DaggerChecks{Engine: string(config.DaggerEngineCloud), CloudToken: token}
 }
 
-// configuredRerun is the runner that requests a rerun of a pull request's
-// failed Cloud checks for cfg: the Dagger CLI with the API token
-// dagger.cloud_api_token_env names, which may be unset, in which case no rerun
-// can be requested.
 func (s *Service) configuredRerun(cfg *config.Config) CloudRerunner {
 	if s.options.CloudRerun != nil {
 		return s.options.CloudRerun
@@ -68,17 +59,10 @@ func (s *Service) configuredRerun(cfg *config.Config) CloudRerunner {
 	return DaggerChecks{CloudToken: token}
 }
 
-// configuredTrace is the runner that fetches a Dagger Cloud trace's output
-// for cfg: the Dagger CLI with the API token dagger.cloud_api_token_env names,
-// which may be unset, in which case every fetch reports that no token is
-// configured.
 func (s *Service) configuredTrace(cfg *config.Config) TraceRunner {
 	return traceRunner(s, cfg)
 }
 
-// traceRunner is s's configured trace runner for cfg. A nil s, which a turn
-// built before the service is attached has, runs the Dagger CLI with the API
-// token cfg names.
 func traceRunner(s *Service, cfg *config.Config) TraceRunner {
 	if s != nil && s.options.CloudTrace != nil {
 		return s.options.CloudTrace
@@ -92,7 +76,6 @@ func traceRunner(s *Service, cfg *config.Config) TraceRunner {
 }
 
 func (s *Service) ensureEngine(ctx context.Context, cfg *config.Config) error {
-	// Read and register the tokens before any engine command can report an error.
 	s.configuredChecks(cfg)
 	redact.Register(os.Getenv(cfg.Dagger.Resolve().CloudAPITokenEnv))
 	if err := engine.New(cfg.Dagger.Resolve(), engine.Options{}).Ensure(ctx); err != nil {
@@ -101,7 +84,6 @@ func (s *Service) ensureEngine(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// engineHTTP composes lifecycle controls with the service's admission gate.
 func (s *Service) engineHTTP(w http.ResponseWriter, r *http.Request) bool {
 	action, ok := strings.CutPrefix(r.URL.Path, Prefix+"/engine/")
 	if !ok {
@@ -120,11 +102,9 @@ func (s *Service) engineHTTP(w http.ResponseWriter, r *http.Request) bool {
 	if (action != "restart" && action != "prune") || r.Method != http.MethodPost {
 		return false
 	}
-	// Lifecycle commands may need several bounded probes and container commands.
 	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(engineActionTimeout))
 	ctx, cancel := context.WithTimeout(r.Context(), engine.ActionTimeout)
 	defer cancel()
-	// Waiting for a configuration mutation counts against the action budget.
 	retry := time.NewTicker(10 * time.Millisecond)
 	defer retry.Stop()
 	for !s.projectMu.TryLock() {

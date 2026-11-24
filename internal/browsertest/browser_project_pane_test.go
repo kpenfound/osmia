@@ -69,8 +69,6 @@ func TestBrowserProjectPaneCreatesProjectsAndScopesActions(t *testing.T) {
 	}
 }
 
-// Repo-local inbox numbers can be equal in different projects. Opening and
-// answering either project's decision must preserve the other one's pins.
 func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 	t.Parallel()
 	f := newTwoProjectFixture(t)
@@ -79,8 +77,6 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 	}
 	withWeb(t, f.opts, "127.0.0.1:0")
 	ctx := context.Background()
-	// Seed durable decisions before background chief-event delivery can
-	// enqueue turns ahead of the fixture's manually claimed chief turns.
 	for _, id := range []config.ProjectID{project, otherProject} {
 		repo, err := trace.Open(f.cfg.Root, f.cfg.For(id).Project)
 		must(t, err)
@@ -110,7 +106,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		must(t, repo.Close())
 	}
 	s, c := start(t, f.opts)
-	entries := entriesOf(t, c, InboxEscalation)
+	entries := entriesOf(t, c, service.InboxEscalation)
 	if len(entries) != 2 || entries[0].Number != entries[1].Number || entries[0].Project == entries[1].Project {
 		t.Fatalf("expected separate project decisions with equal numbers: %+v", entries)
 	}
@@ -132,8 +128,6 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		p.TypeInto(card+"textarea", "Keep this project's contract stable.")
 		p.Click(card + "button[type=submit]")
 		p.AwaitGone("the answered project decision", card)
-		// The card is dismissed optimistically; only the server's answer
-		// confirms that the durable inbox can be checked.
 		p.Await("the server confirms this project's answer", `(() => {
 				const result = document.querySelector('#inbox-result');
 				return ['error', 'unavailable'].includes(result.dataset.outcome) ||
@@ -146,7 +140,7 @@ func TestBrowserProjectPaneKeepsProjectInboxDecisionsSeparate(t *testing.T) {
 		if texts := p.OutcomeTexts("#workstreams"); len(texts) != 1 || texts[0] != fmt.Sprintf("Answered inbox entry %d.", entry.Number) {
 			t.Fatalf("project decision outcome entries: %q", texts)
 		}
-		remaining := entriesOf(t, c, InboxEscalation)
+		remaining := entriesOf(t, c, service.InboxEscalation)
 		if len(remaining) != 1-i || i == 0 && remaining[0].Project != entries[1].Project {
 			t.Fatalf("answer affected another project: %+v", remaining)
 		}

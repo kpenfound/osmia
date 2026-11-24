@@ -8,8 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/jev"
 )
 
-// A binding pick the service refused stays the occurrence's binding result,
-// carries its refusal, and is not asked again, after a restart included.
 func TestARefusedBindingPickKeepsItsRefusalAndIsNeverAskedAgain(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()
@@ -51,7 +49,6 @@ func TestARefusedBindingPickKeepsItsRefusalAndIsNeverAskedAgain(t *testing.T) {
 	}
 }
 
-// Only an accepted judgment of the workstream can be refused.
 func TestOnlyAnAcceptedJudgmentIsRefused(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()

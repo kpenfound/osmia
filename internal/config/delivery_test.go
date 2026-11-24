@@ -2,7 +2,6 @@ package config
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,7 +13,7 @@ clone = "~/clone"
 
 func TestDeliveryDefaultsToPullRequest(t *testing.T) {
 	for name, project := range map[string]string{"no fork": noForkProjectConfig, "fork": projectConfig} {
-		c, err := Load(fixture(t, topConfig, project))
+		c, err := load(fixture(t, topConfig, project))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -29,7 +28,7 @@ func TestDeliveryAcceptsBothValues(t *testing.T) {
 		value string
 		lands bool
 	}{{"pull-request", false}, {"jev", true}} {
-		c, err := Load(fixture(t, topConfig, noForkProjectConfig+"delivery = '"+tc.value+"'\n"))
+		c, err := load(fixture(t, topConfig, noForkProjectConfig+"delivery = '"+tc.value+"'\n"))
 		if err != nil {
 			t.Fatalf("%s: %v", tc.value, err)
 		}
@@ -41,7 +40,7 @@ func TestDeliveryAcceptsBothValues(t *testing.T) {
 
 func TestDeliveryRejectsOtherValues(t *testing.T) {
 	for _, value := range []string{"'merge'", "'Jev'", "'pull_request'", "''", "true", "1"} {
-		c, err := Load(fixture(t, topConfig, noForkProjectConfig+"delivery = "+value+"\n"))
+		c, err := load(fixture(t, topConfig, noForkProjectConfig+"delivery = "+value+"\n"))
 		var field *FieldError
 		if c != nil || !errors.As(err, &field) || field.Field != "delivery" || !strings.Contains(field.Path, pid) {
 			t.Fatalf("%s: %v %v", value, c, err)
@@ -50,17 +49,16 @@ func TestDeliveryRejectsOtherValues(t *testing.T) {
 }
 
 func TestDeliveryJevIsRejectedOnAForkProject(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig+"delivery = 'jev'\n"))
+	c, err := load(fixture(t, topConfig, projectConfig+"delivery = 'jev'\n"))
 	var field *FieldError
 	if c != nil || !errors.As(err, &field) || field.Field != "delivery" {
 		t.Fatalf("fork project with jev: %v %v", c, err)
 	}
-	c, err = Load(fixture(t, topConfig, projectConfig+"delivery = 'pull-request'\n"))
+	c, err = load(fixture(t, topConfig, projectConfig+"delivery = 'pull-request'\n"))
 	if err != nil || c.Project.Delivery != DeliveryPullRequest || c.Project.PushRepository() != "owner/repo" {
 		t.Fatalf("fork project with pull-request: %v %v", c, err)
 	}
-	// A fork that names the upstream is not a fork.
-	c, err = Load(fixture(t, topConfig, strings.Replace(projectConfig, `fork = "owner/repo"`, `fork = "UPSTREAM/repo"`, 1)+"delivery = 'jev'\n"))
+	c, err = load(fixture(t, topConfig, strings.Replace(projectConfig, `fork = "owner/repo"`, `fork = "UPSTREAM/repo"`, 1)+"delivery = 'jev'\n"))
 	if err != nil || !c.Project.Lands() {
 		t.Fatalf("fork equal to upstream: %v %v", c, err)
 	}
@@ -78,8 +76,8 @@ func TestEditProjectRoundTripsAndValidatesDelivery(t *testing.T) {
 	if want := noForkProjectConfig + "delivery = \"jev\"\n"; string(edited) != want || !file.Project.Lands() || !file.Set("delivery") {
 		t.Fatalf("edited %q: %+v", edited, file.Project)
 	}
-	write(t, filepath.Join(c.Root.String(), "projects", pid, "config.toml"), string(edited))
-	fresh, err := Load(opts)
+	write(t, projectFile(opts), string(edited))
+	fresh, err := load(opts)
 	if err != nil || fresh.Project.Delivery != DeliveryJev {
 		t.Fatalf("reload: %v %v", fresh, err)
 	}
@@ -107,14 +105,15 @@ func TestEditProjectRoundTripsAndValidatesDelivery(t *testing.T) {
 
 func TestProjectConfigBytesKeepsAndValidatesDelivery(t *testing.T) {
 	clone := t.TempDir()
-	path := filepath.Join(t.TempDir(), "config.toml")
 	p := Project{Name: "x", Upstream: "up/repo", Clone: clone, BaseBranch: "main", Delivery: DeliveryJev}
-	if err := writeProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"jev\"\n") {
-		t.Fatalf("jev: %v\n%s", err, read(t, path))
+	data, err := ProjectConfigBytes(p)
+	if err != nil || !strings.Contains(string(data), "delivery = \"jev\"\n") {
+		t.Fatalf("jev: %v\n%s", err, data)
 	}
 	p.Delivery = ""
-	if err := writeProjectConfig(path, p); err != nil || !strings.Contains(read(t, path), "delivery = \"pull-request\"\n") {
-		t.Fatalf("default: %v\n%s", err, read(t, path))
+	data, err = ProjectConfigBytes(p)
+	if err != nil || !strings.Contains(string(data), "delivery = \"pull-request\"\n") {
+		t.Fatalf("default: %v\n%s", err, data)
 	}
 	for name, bad := range map[string]Project{
 		"other value": {Upstream: "up/repo", Clone: clone, BaseBranch: "main", Delivery: "merge"},

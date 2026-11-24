@@ -69,8 +69,6 @@ func (g *Git) fastForward(ctx context.Context, remote, commit, branch string) (F
 	}
 	var e *Error
 	if !errors.As(err, &e) {
-		// A cancellation, a deadline or a process that could not run says nothing
-		// of the remote.
 		return FastForwardResult{Outcome: FastForwardUnknown, Output: err.Error()}, err
 	}
 	switch outcome := ClassifyPushOutput(e.Stderr); outcome {

@@ -1,11 +1,6 @@
-// Package skills parses and validates the skills a role's configuration
-// references by git URL, and prepares them as Claude Code plugin
-// directories. Cloning, refreshing and wrapping references as plugins is
-// agentcore's own skills package (github.com/kpenfound/agentcore/skills);
-// Manager configures a core skills.Manager from Osmia's refresh policy, git
-// runner and clock on every call. Reference parsing and validation (Parse,
-// ParseRefresh) stay Osmia's own: they are used by role configuration and by
-// the execution boundary before a turn's skills ever reach Manager.Prepare.
+// Package skills parses skill references and refresh policies and prepares
+// the referenced skills as plugin directories through agentcore's skills
+// manager.
 package skills
 
 import (
@@ -50,8 +45,6 @@ func Parse(raw string) (Spec, error) {
 			return s, fmt.Errorf("skill %q: sub-directory must name a directory inside the repository", raw)
 		}
 	}
-	// A trailing "@ref" is only a ref when it comes after the last path
-	// separator, so scp-style git@host:org/repo URLs still work.
 	if i := strings.LastIndex(rest, "@"); i > strings.LastIndexAny(rest, "/:") {
 		s.Ref = rest[i+1:]
 		rest = rest[:i]
@@ -94,11 +87,10 @@ func ParseRefresh(policy string) (always bool, after time.Duration, err error) {
 	}
 }
 
-// Manager clones skill references into Dir and returns plugin directories
-// that expose only their skills. It implements core's agent.SkillPreparer by
-// configuring agentcore's own skills.Manager on every call: the clone,
-// refresh and plugin-wrapping mechanics are core's, run with the git runner,
-// clock and refresh policy a caller configures on Manager.
+// Manager prepares skill references as plugin directories under Dir that
+// expose only their skills, running agentcore's skills manager with the git
+// runner, clock and refresh policy configured here. It implements
+// agent.SkillPreparer.
 type Manager struct {
 	// Dir holds clones (Dir/repos) and generated plugins (Dir/plugins).
 	Dir string
@@ -112,7 +104,6 @@ type Manager struct {
 	// Logger receives refresh warnings; nil is slog.Default().
 	Logger *slog.Logger
 
-	// mu serialises preparation: turns start concurrently and share Dir.
 	mu sync.Mutex
 }
 
@@ -142,10 +133,6 @@ func (m *Manager) Prepare(ctx context.Context, refs []string) ([]string, error) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cm := coreskills.NewManager(m.Dir, m.Logger)
-	// Osmia always wraps a reference by its SKILL.md or skills/ shape, even
-	// when the clone is itself a full Claude Code plugin: SkillsOnly keeps
-	// that behaviour and refuses anything else, the same two shapes Parse
-	// and the execution boundary expect skill content to have.
 	cm.SkillsOnly = true
 	cm.Git = m.Git
 	cm.Now = m.Now
@@ -153,9 +140,6 @@ func (m *Manager) Prepare(ctx context.Context, refs []string) ([]string, error) 
 	return cm.Prepare(ctx, refs)
 }
 
-// refreshPolicy translates the configured policy string into core's
-// RefreshPolicy. An empty policy is DefaultRefresh; an invalid one, or a
-// nonpositive duration, never refreshes.
 func (m *Manager) refreshPolicy() coreskills.RefreshPolicy {
 	policy := DefaultRefresh
 	if m.Refresh != nil {

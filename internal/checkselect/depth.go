@@ -48,7 +48,6 @@ func Depth(breadth BreadthResult) DepthPlan {
 		coverage := listedCoverage(root.Links)
 		c := CollectionDepth{Root: root.Link, Finest: finest(root.Links)}
 		keys, consistent := filterOrder(c.Finest)
-		// Intermediate listed items must agree with the leaves' filter order.
 		for _, link := range root.Links {
 			order := itemFilters(parseAddress(link))
 			if len(order) > len(keys) || !slices.Equal(order, keys[:min(len(order), len(keys))]) {
@@ -79,7 +78,6 @@ func Depth(breadth BreadthResult) DepthPlan {
 	return p
 }
 
-// finest retains leaves only, including opaque links whose coverage is unknown.
 func finest(links []string) []string {
 	var out []string
 	for _, link := range links {
@@ -94,8 +92,6 @@ func finest(links []string) []string {
 	return distinct(out)
 }
 
-// filterOrder requires every leaf to name the same filters in the same order.
-// The check-name filter identifies the collection and is not an item level.
 func filterOrder(links []string) ([]string, bool) {
 	var keys []string
 	for i, link := range links {

@@ -51,8 +51,6 @@ func setup(t *testing.T, agents ...string) (*fixture, *trace.Repository) {
 	return setupIn(t, t.TempDir(), project, agents...)
 }
 
-// setupIn creates project id's trace under the Osmia root in base, with the
-// fixture's workstream and a mason thread for each agent.
 func setupIn(t *testing.T, base string, id config.ProjectID, agents ...string) (*fixture, *trace.Repository) {
 	t.Helper()
 	root, err := config.ResolveRoot(filepath.Join(base, "osmia"), "")
@@ -101,15 +99,12 @@ func (f *fixture) queueOn(t *testing.T, repo *trace.Repository, ws config.Workst
 	return req
 }
 
-// thread creates an agent thread with the given role in ws.
 func (f *fixture) thread(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, id, role string) {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: f.project.ID, Workstream: ws, At: f.clock.Now(), Actor: owner, Cause: "created"}
 	must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: role, ThreadID: "thread_" + id}))
 }
 
-// dispatched lists the turn operations of the given workstreams, by default
-// the fixture's, as sorted agent/turn pairs.
 func dispatched(t *testing.T, repo *trace.Repository, streams ...config.WorkstreamID) []string {
 	t.Helper()
 	if len(streams) == 0 {
@@ -139,8 +134,6 @@ func (f turnsFunc) Run(ctx context.Context, p coreadapter.PreparedTurn) (coreada
 	return f(ctx, p)
 }
 
-// controller binds the scheduler and a thread dispatcher to one reconciliation
-// controller, as the service does.
 func (f *fixture) controller(t *testing.T, repo *trace.Repository, turns coreadapter.Turns, admit func(context.Context, Candidate) (bool, error)) *reconcile.Controller {
 	t.Helper()
 	return f.controllerWith(t, repo, turns, Options{Admit: admit})
@@ -175,7 +168,6 @@ func TestPassDispatchesEachThreadsNextTurnOnce(t *testing.T) {
 	if got, want := dispatched(t, repo), []string{"alpha/one", "beta/one"}; !slices.Equal(got, want) {
 		t.Fatalf("dispatched %v, want %v", got, want)
 	}
-	// Level-triggered: another pass, also after reopening, publishes nothing new.
 	must(t, s.Pass(ctx))
 	repo = f.reopen(t, repo)
 	s, err = New(repo, Options{Now: f.clock.Now})
@@ -214,12 +206,10 @@ func TestPassLeavesThreadsWithATurnInFlight(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "claimed", "operated")
 	defer repo.Close()
-	// A claim without an operation, as a direct runner call leaves it.
 	f.queue(t, repo, "claimed", "one")
 	f.queue(t, repo, "claimed", "two")
 	_, err := repo.ClaimTurn(ctx, stream, "claimed", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
-	// An unfinished turn with an operation published by someone else.
 	f.queue(t, repo, "operated", "one")
 	f.queue(t, repo, "operated", "two")
 	op, err := thread.TurnOperation(project, "event_external", thread.TurnInput{Workstream: stream, Agent: "operated", Turn: "one"})
@@ -235,7 +225,6 @@ func TestPassLeavesThreadsWithATurnInFlight(t *testing.T) {
 	}
 }
 
-// publish stores a turn operation with raw input, as any trace writer may.
 func (f *fixture) publish(t *testing.T, repo *trace.Repository, name, input string) {
 	t.Helper()
 	event := trace.EventID(name, "turn")
@@ -253,7 +242,6 @@ func TestUndecodableTurnOperationsDoNotStopDispatch(t *testing.T) {
 	f.queue(t, repo, "beta", "one")
 	f.publish(t, repo, "array", `[]`)
 	f.publish(t, repo, "typed", `{"agent":1}`)
-	// The dispatcher refuses unknown fields, so this does not dispatch alpha/one.
 	f.publish(t, repo, "extra", `{"workstream":"`+string(stream)+`","agent":"alpha","turn":"one","extra":true}`)
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](result("one"), result("one"))}
 	c := f.controller(t, repo, turns, nil)
@@ -302,7 +290,6 @@ func TestAdmitGatesDispatch(t *testing.T) {
 	if len(offered) != 2 || offered[0].Workstream != stream || offered[0].Turn.Request.ID != req.ID || offered[1].Thread.Identity.ID != "beta" {
 		t.Fatalf("candidates %+v", offered)
 	}
-	// A declined candidate is offered again; an admitted one is not re-offered.
 	offered = nil
 	must(t, s.Pass(ctx))
 	if len(offered) != 1 || offered[0].Thread.Identity.ID != "beta" {
@@ -323,7 +310,6 @@ func TestControllerRunsQueuedTurnsInOrder(t *testing.T) {
 	f.queue(t, repo, "alpha", "two")
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](result("one"), result("two"))}
 	c := f.controller(t, repo, turns, nil)
-	// Each pass dispatches and runs the next turn; a thread runs turns one at a time.
 	must(t, c.Pass(ctx))
 	if calls := turns.Calls(); len(calls) != 1 || calls[0].Scope.Turn != "one" {
 		t.Fatalf("first pass calls %+v", calls)
@@ -388,7 +374,6 @@ func TestRestartFinishesAnInFlightTurnWithoutRunningItAgain(t *testing.T) {
 	f, repo := setup(t, "alpha")
 	f.queue(t, repo, "alpha", "one")
 	f.queue(t, repo, "alpha", "two")
-	// The service stops while the first turn's backend is returning.
 	ctx, cancel := context.WithCancel(context.Background())
 	var ran []string
 	turns := turnsFunc(func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
@@ -438,7 +423,6 @@ func TestRestartKeepsAnInterruptedTurnReserved(t *testing.T) {
 	s, err := New(repo, Options{Now: f.clock.Now})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	// The process died after the runner claimed the turn, before any result.
 	_, err = repo.ClaimTurn(ctx, stream, "alpha", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
 	repo = f.reopen(t, repo)
@@ -471,15 +455,8 @@ func TestNewRequiresRepository(t *testing.T) {
 	}
 }
 
-// sessionStream is a second workstream of the fixture's project, recorded as
-// a session, with its own queued turn of the session role.
 const sessionStream config.WorkstreamID = "w_00000000000000000000000000000002"
 
-// TestPassNeverDispatchesASessionWorkstream covers the part of spec#21
-// about a running session turn taking no mason slot: a session workstream's
-// queued turn is never offered as a candidate, dispatched, or counted
-// against any role's slots, while an ordinary workstream alongside it is
-// unaffected.
 func TestPassNeverDispatchesASessionWorkstream(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "alpha")

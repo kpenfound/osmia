@@ -14,11 +14,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// overlapTimeout bounds how long a blocked fake effect waits for the others.
 const overlapTimeout = 10 * time.Second
 
-// sessions is a runner-boundary adapter whose effects block: each waits until
-// every operation named in overlap has started, or until release is closed.
 type sessions struct {
 	mu               sync.Mutex
 	started, applied []string
@@ -63,7 +60,6 @@ func (s *sessions) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		select {
 		case <-s.release:
 		case <-ctx.Done():
-			// A cancelled session takes a moment to stop.
 			time.Sleep(200 * time.Millisecond)
 			return coreadapter.OperationResult{}, ctx.Err()
 		}
@@ -82,8 +78,6 @@ func (s *sessions) snapshot() (inspections, started, applied []string) {
 	return slices.Clone(s.inspections), slices.Clone(s.started), slices.Clone(s.applied)
 }
 
-// publish adds one runner-boundary operation per action to the fixture's
-// workstream.
 func (f *fixture) publish(t *testing.T, actions ...string) {
 	t.Helper()
 	var events []trace.Event
@@ -98,8 +92,6 @@ func (f *fixture) publish(t *testing.T, actions ...string) {
 	must(t, err)
 }
 
-// concurrent is a controller over s whose operations named in actions are
-// concurrent.
 func (f *fixture) concurrent(t *testing.T, s *sessions, actions ...string) *Controller {
 	t.Helper()
 	c, err := New(f.repository, Options{Worker: "test-controller", Now: f.clock.Now, RetryDelay: time.Minute,
@@ -109,8 +101,6 @@ func (f *fixture) concurrent(t *testing.T, s *sessions, actions ...string) *Cont
 	return c
 }
 
-// done reports, by action, whether its operation is acknowledged with a
-// result, and fails unless each has at most one result and acknowledgement.
 func (f *fixture) done(t *testing.T) map[string]bool {
 	t.Helper()
 	records, err := f.repository.Operations(streamID)
@@ -134,8 +124,6 @@ func (f *fixture) done(t *testing.T) map[string]bool {
 	return out
 }
 
-// Two concurrent operations of one pass apply their effects at the same
-// time: each effect waits for the other to start.
 func TestConcurrentOperationsApplyAtOnce(t *testing.T) {
 	f := setup(t, coreadapter.RepositoryBoundary)
 	f.publish(t, "first", "second")
@@ -152,8 +140,6 @@ func TestConcurrentOperationsApplyAtOnce(t *testing.T) {
 	}
 }
 
-// A concurrent worker is claimed in priority order. An inline workflow
-// completes while the worker's effect runs, and later passes leave it alone.
 func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t, coreadapter.RepositoryBoundary)
@@ -198,7 +184,6 @@ func TestSerialOperationCompletesWhileAConcurrentEffectRuns(t *testing.T) {
 	}
 }
 
-// awaitStarted waits until the effect of the operation action started.
 func (f *fixture) awaitStarted(t *testing.T, s *sessions, action string) {
 	t.Helper()
 	deadline := time.After(overlapTimeout)
@@ -214,8 +199,6 @@ func (f *fixture) awaitStarted(t *testing.T, s *sessions, action string) {
 	}
 }
 
-// Run cancels a concurrent operation in flight and joins it before it
-// returns; the operation keeps its claim and completes after a restart.
 func TestRunJoinsConcurrentOperations(t *testing.T) {
 	for _, class := range []trace.OperationClass{trace.WorkflowOperation, trace.WorkerOperation, trace.ConversationOperation} {
 		t.Run(string(class), func(t *testing.T) {
@@ -255,7 +238,6 @@ func TestRunJoinsConcurrentOperations(t *testing.T) {
 	}
 }
 
-// A store failure of a concurrent operation stops the loop with that error.
 func TestConcurrentOperationFailureStopsRun(t *testing.T) {
 	f := setup(t, coreadapter.RepositoryBoundary)
 	f.publish(t, "session")
@@ -285,8 +267,6 @@ func TestConcurrentOperationFailureStopsRun(t *testing.T) {
 	}
 }
 
-// A concurrent operation interrupted at any boundary completes once after a
-// restart, and a recorded result is not inspected again.
 func TestRestartAtEveryBoundaryOfAConcurrentOperation(t *testing.T) {
 	steps := []string{"before-claim", "after-claim", "before-inspection", "after-inspection", "after-observation", "before-effect", "after-effect", "before-result", "after-result", "before-acknowledgement", "after-acknowledgement"}
 	for _, class := range []trace.OperationClass{trace.WorkflowOperation, trace.WorkerOperation, trace.ConversationOperation} {

@@ -34,8 +34,6 @@ func PrepareDeliveryMaintenance(t *testing.T, f DeliveryMaintenance) {
 	t.Helper()
 	ctx := context.Background()
 	upstream := f.Config.Project.Upstream
-	// Record a completed delivery on the fork, then configure the canonical
-	// upstream for the integration check and second publication.
 	f.Config.Project.Upstream = f.Config.Project.Fork
 	f.Approve()
 	result, err := f.Publish()
@@ -64,7 +62,6 @@ func PrepareDeliveryMaintenance(t *testing.T, f DeliveryMaintenance) {
 	fixturekit.Must(t, err)
 	doc.Workstream, doc.ID, doc.Path, doc.Content = f.Stream, "workstream-base", "base.json", string(data)
 	fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
-	// A second upstream commit forces maintenance to move the reviewed branch.
 	f.AdvanceUpstream(map[string]string{"INTEGRATED.md": "dependency is integrated\n"})
 	host := &fixturekit.FakePulls{Fork: func() string { return f.ForkTip() }}
 	result = f.Refresh(host, upstream)

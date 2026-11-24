@@ -13,13 +13,11 @@ import (
 //go:embed index.html app.js style.css favicon.svg fonts/instrument-sans/InstrumentSans-Variable.woff2 fonts/instrument-sans/OFL.txt fonts/jetbrains-mono/JetBrainsMono-Variable.woff2 fonts/jetbrains-mono/OFL.txt
 var assets embed.FS
 
-// asset is one embedded file and the content type it is served with.
 type asset struct {
 	name        string
 	contentType string
 }
 
-// paths maps each URL path the page is served under to its file.
 var paths = map[string]asset{
 	"/":            {"index.html", "text/html; charset=utf-8"},
 	"/app.js":      {"app.js", "text/javascript; charset=utf-8"},
@@ -30,9 +28,6 @@ var paths = map[string]asset{
 	"/fonts/JetBrainsMono-Variable.woff2":  {"fonts/jetbrains-mono/JetBrainsMono-Variable.woff2", "font/woff2"},
 }
 
-// policy lets the page load only its own script, style, icon and fonts and talk
-// only to its own origin, so no other site can frame it and no injected
-// markup can run.
 const policy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 // Serve writes the page file at r's path for a GET or HEAD request and

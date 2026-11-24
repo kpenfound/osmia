@@ -90,11 +90,6 @@ func RoutingSubjectOf(repository *trace.Repository, host config.WorkstreamID, id
 	return s, "", nil
 }
 
-// requireRouting applies the shared precondition to the chief of staff's
-// outcome for question id: when the question is one routed with Jev, a decide
-// result must exist for it, and a binding pick allows only itself. A question
-// that is not routed with Jev, or no longer open, passes: the tool's own checks
-// decide it as they always did.
 func requireRouting(repository *trace.Repository, host config.WorkstreamID, id, outcome string) (*jev.Result, string, error) {
 	s, reason, err := RoutingSubjectOf(repository, host, id)
 	var refused *trace.QuestionRefused
@@ -110,10 +105,6 @@ func requireRouting(repository *trace.Repository, host config.WorkstreamID, id, 
 	return jev.Require(s.Repository, s.Stream, jev.KindQuestionRouting, s.Key(), outcome, s.Label())
 }
 
-// handToOwner puts a question to the owner's inbox when the service refused the
-// transition Jev's binding pick calls for. The escalation carries no gate
-// judgment: the question already carries Jev's binding judgment, which the
-// owner's card shows, and Jev is not asked again about it.
 func handToOwner(ctx context.Context, repository *trace.Repository, agent string, scope coreadapter.Scope, id string, bound *jev.Result, why string, at time.Time) (string, error) {
 	s, _, err := RoutingSubjectOf(repository, config.WorkstreamID(scope.Workstream), id)
 	if err != nil {

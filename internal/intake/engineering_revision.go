@@ -14,15 +14,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// engineeringRevision checks the mechanical boundaries of delegated plan decisions.
+// EngineeringRevision checks the mechanical boundaries of delegated plan decisions.
 // Whether an approach fulfills intent remains a recorded engineering judgment.
 func (s *Controller) EngineeringRevision(r *trace.Repository, stream config.WorkstreamID, c AmendmentCase, current seal.Seal, dissent []shed.Entry, note string) *APIError {
 	refuse := func(s string) *APIError { return &APIError{Code: Conflict, Message: s} }
 	if strings.TrimSpace(note) == "" {
 		return refuse("an engineering decision requires its reasoning against approved intent")
 	}
-	// Final reviews run only once the feature has assembled, so their count
-	// bounds revisions of an assembled workstream and of one reopened from it.
 	rounds, err := s.FinalRoundsWithBlocking(r, stream)
 	if err != nil {
 		return &APIError{Code: Internal, Message: err.Error()}
@@ -78,13 +76,12 @@ func (s *Controller) EngineeringRevision(r *trace.Repository, stream config.Work
 	return nil
 }
 
-// revisionWorkersIdle prevents a new assignment from racing a worker using its predecessor.
+// RevisionWorkersIdle prevents a new assignment from racing a worker using its predecessor.
 func RevisionWorkersIdle(r *trace.Repository, stream config.WorkstreamID, units []string) (bool, error) {
 	for _, unit := range units {
 		for _, agent := range []string{MasonAgent(unit), ReviewerAgent(unit)} {
 			th, err := r.Thread(stream, agent)
 			if err != nil {
-				// Units which have not started have no role thread.
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}

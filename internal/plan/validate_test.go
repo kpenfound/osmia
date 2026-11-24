@@ -15,7 +15,6 @@ var entities = kb.Map{Version: kb.Version, Entities: []kb.Entity{
 	{ID: "docs", Name: "docs"},
 }}
 
-// sample returns a plan that is valid against validSpec and entities.
 func sample() Plan {
 	return Plan{Version: Version, Units: []Unit{
 		{ID: "parser", Task: "Parse the spec.", Acceptance: []string{"TestParseSpec passes"}, Criteria: []string{"spec#1"}, Footprint: []string{"trace"}},
@@ -181,7 +180,6 @@ func TestCyclesAreReportedOncePerCycle(t *testing.T) {
 }
 
 func TestValidateNewRepositoryPlanWithPathGlobs(t *testing.T) {
-	// A repository holding only a README seeds just the root entity.
 	m := kb.Map{Version: kb.Version, Entities: []kb.Entity{{ID: kb.RootID, Name: "the whole repository", Paths: []string{"**"}}}}
 	spec := "# Kern\n\n## Acceptance criteria\n\n1. A skeleton builds.\n2. The server starts.\n"
 	p := Plan{Version: Version, Units: []Unit{

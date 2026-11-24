@@ -21,8 +21,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// fakeTraceCLI installs a Dagger CLI stand-in that logs the arguments of each
-// invocation to a file and then runs body, in which "$@" are the arguments.
 func (f *watchFixture) fakeTraceCLI(body string) (log string) {
 	f.t.Helper()
 	dir := f.t.TempDir()
@@ -34,8 +32,6 @@ func (f *watchFixture) fakeTraceCLI(body string) (log string) {
 	return log
 }
 
-// fetchedOutput is a CLI body that writes more than the output bound, with
-// the token and the arguments in its end.
 const fetchedOutput = `yes 'padding line of the trace output' | head -n 4000; echo "output of: $*"; echo "token: $DAGGER_CLOUD_TOKEN"`
 
 func cliCalls(t *testing.T, log string) []string {
@@ -52,7 +48,6 @@ func (f *watchFixture) traceFetcher() checkrun.TraceFetcher {
 	return checkrun.TraceFetcher{Repository: f.repo, Now: f.clock.Now}
 }
 
-// traceRecordFiles are the workstream's documents under traces/, by path.
 func (f *watchFixture) traceRecordFiles() map[string]string {
 	f.t.Helper()
 	docs, err := trace.Read[trace.Document](f.repo, stream)
@@ -75,8 +70,6 @@ func failing(f *watchFixture, specs ...[2]string) []func(time.Duration) pulls.Co
 	return out
 }
 
-// view is the reader's view of the review's check result, as the final
-// reader's staged files hold it.
 func (f *watchFixture) view() map[string]string {
 	f.t.Helper()
 	files, err := FinalCheckFiles(f.repo, stream, f.report)
@@ -93,7 +86,6 @@ func TestFailedCloudRunRecordsEachFailedChecksTraceAndShowsItToTheFinalReader(t 
 	f := newWatchFixture(t)
 	f.assemble()
 	log := f.fakeTraceCLI(fetchedOutput)
-	// test:a and docs share a trace; lint names none.
 	run := settleFailedRun(f, 89, failing(f, [2]string{"test:a", traceA}, [2]string{"docs", traceA}, [2]string{"build", traceB}, [2]string{"lint", ""})...)
 	if run.Status != "failed" || len(run.FailedChecks) != 4 || len(f.rerunCalls()) != 1 {
 		t.Fatalf("run %+v, reruns %q", run, f.rerunCalls())
@@ -132,7 +124,6 @@ func TestFailedCloudRunRecordsEachFailedChecksTraceAndShowsItToTheFinalReader(t 
 		t.Errorf("the view holds %v", slices.Sorted(maps.Keys(view)))
 	}
 
-	// The chief of staff reads the records, and the action answers from them.
 	if records := f.traceRecordFiles(); len(records) != 3 {
 		t.Fatalf("records %v", slices.Sorted(maps.Keys(records)))
 	}
@@ -153,7 +144,6 @@ func TestFailedCloudRunRecordsEachFailedChecksTraceAndShowsItToTheFinalReader(t 
 		t.Error("the whole-trace output replaced a narrowed record")
 	}
 
-	// A retry and a restart fetch nothing more.
 	f.mustComplete()
 	f.restart()
 	f.mustComplete()
@@ -238,8 +228,6 @@ func TestNoTraceIsFetchedWithoutAFailedCheckThatNamesOne(t *testing.T) {
 	})
 }
 
-// A fetch that fails or hangs is recorded with its reason, and the review
-// goes on with the same result and the same single rerun as without the fetch.
 func TestFailedTraceFetchIsRecordedWithItsReasonAndChangesNothing(t *testing.T) {
 	t.Parallel()
 	baseline := newWatchFixture(t)
@@ -300,7 +288,6 @@ func TestFailedTraceFetchIsRecordedWithItsReasonAndChangesNothing(t *testing.T) 
 					t.Errorf("the view lacks the failure of %s %s", p.trace, p.check)
 				}
 			}
-			// Neither a retry nor a restart fetches a recorded failure again.
 			made := calls()
 			f.mustComplete()
 			f.restart()
@@ -308,7 +295,6 @@ func TestFailedTraceFetchIsRecordedWithItsReasonAndChangesNothing(t *testing.T) 
 			if calls() != made {
 				t.Errorf("a retry fetched again: %d then %d", made, calls())
 			}
-			// The action is not answered from a failure record.
 			if _, ok, _ := fetcher.Lookup(stream, traceA, "test:a"); ok {
 				t.Error("the failure answers the action")
 			}
@@ -316,8 +302,6 @@ func TestFailedTraceFetchIsRecordedWithItsReasonAndChangesNothing(t *testing.T) 
 	}
 }
 
-// sameResult reports whether two records of the same failed result agree on
-// everything the automatic fetch could change.
 func sameResult(t *testing.T, want, got FinalCheckRun) bool {
 	t.Helper()
 	a, err := json.Marshal(want)
@@ -327,7 +311,6 @@ func sameResult(t *testing.T, want, got FinalCheckRun) bool {
 	return string(a) == string(b)
 }
 
-// hangingTraces is a trace reader that never answers and ignores its context.
 type hangingTraces struct {
 	calls   atomic.Int32
 	release chan struct{}
@@ -341,15 +324,10 @@ func (h *hangingTraces) FetchTrace(context.Context, string, string) (checkrun.Tr
 
 var errInterrupted = errors.New("interrupted")
 
-// A service interrupted after the check result is recorded and before some or
-// all of its traces are recorded fetches only the missing traces when the
-// review's operation is retried, and changes nothing of the result.
 func TestInterruptedFinalChecksFillOnlyTheMissingTraces(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		// interrupt is the step the service stops at, and survive the number of
-		// traces recorded when it stops.
+		name      string
 		interrupt string
 		survive   int
 	}{

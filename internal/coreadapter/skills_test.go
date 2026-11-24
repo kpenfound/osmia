@@ -15,8 +15,6 @@ import (
 
 var roleSkills = []string{"https://github.com/acme/skills#skills/tdd", "https://github.com/acme/review@v1"}
 
-// skillTurn is a read-only claude turn of a role that configures skills, and
-// an engine that prepares skills in its own directory.
 func skillTurn(t *testing.T, mode string) (a.PreparedTurn, *adaptertest.Engine) {
 	t.Helper()
 	turn := toolTurn(t, mode)
@@ -48,7 +46,6 @@ func TestClaudeTurnGetsRoleSkills(t *testing.T) {
 	}
 }
 
-// codexSkillTurn is skillTurn on the Codex backend.
 func codexSkillTurn(t *testing.T, mode string) (a.PreparedTurn, *adaptertest.Engine) {
 	t.Helper()
 	turn, engine := skillTurn(t, mode)

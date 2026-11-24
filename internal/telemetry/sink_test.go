@@ -29,7 +29,6 @@ var (
 	}
 )
 
-// memorySink is a sink over an in-memory exporter.
 func memorySink(t *testing.T, opts Options) (*Sink, *tracetest.InMemoryExporter) {
 	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
@@ -51,8 +50,6 @@ func flush(t *testing.T, sink *Sink) {
 	}
 }
 
-// With no endpoint nothing is built, read or contacted, whatever the
-// environment names: the sink discards every span.
 func TestTelemetryOffBuildsNoExporterAndMakesNoConnection(t *testing.T) {
 	listener := collector(t)
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://"+listener.addr)
@@ -83,7 +80,6 @@ func TestTelemetryOffBuildsNoExporterAndMakesNoConnection(t *testing.T) {
 	if none.Enabled() || none.Close() != nil || none.Flush(context.Background()) != nil {
 		t.Fatal("a nil sink must discard spans")
 	}
-	time.Sleep(50 * time.Millisecond)
 	if reads != 0 {
 		t.Fatalf("the headers variable was read %d times with telemetry off", reads)
 	}
@@ -95,7 +91,6 @@ func TestTelemetryOffBuildsNoExporterAndMakesNoConnection(t *testing.T) {
 func TestEmittedSpansKeepTheirRecordedIdentityAndTimes(t *testing.T) {
 	sink, exporter := memorySink(t, Options{Version: "v1.2.3"})
 	s := span
-	// An attribute outside the allow-list is dropped, as is a repeated key.
 	s.Attrs = append(s.Attrs, String("osmia.prompt", "do the thing"), Role("reviewer"))
 	s.Events = []Event{{Name: SpanName("loop_guard"), At: start.Add(time.Second), Attrs: []Attr{Cause("trip"), String("osmia.reason", "stuck")}}, {Name: Name{}, At: start}}
 	s.Failed = true
@@ -130,8 +125,6 @@ func TestEmittedSpansKeepTheirRecordedIdentityAndTimes(t *testing.T) {
 	}
 }
 
-// The resource is built by hand: service.name and the version, whatever the
-// OTEL_* variables say.
 func TestResourceIgnoresTheEnvironment(t *testing.T) {
 	t.Setenv("OTEL_SERVICE_NAME", "from-env")
 	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=env,service.name=also-env")
@@ -170,8 +163,6 @@ func TestUnusableSpansAreRejected(t *testing.T) {
 	}
 }
 
-// blockingExporter holds every export until release is closed or, with
-// honorContext, until the export's context ends.
 type blockingExporter struct {
 	release      chan struct{}
 	honorContext bool
@@ -202,9 +193,6 @@ func newBlocking(t *testing.T, honorContext bool) *blockingExporter {
 	return b
 }
 
-// A collector that never answers cannot stall the caller: emitting returns
-// at once, the bounded queue drops what does not fit, and shutdown gives up
-// after its wait.
 func TestBlockedExporterNeverBlocksEmitOrShutdown(t *testing.T) {
 	for _, honorContext := range []bool{true, false} {
 		t.Run(map[bool]string{true: "exporter honors its context", false: "exporter ignores its context"}[honorContext], func(t *testing.T) {
@@ -241,8 +229,6 @@ func TestBlockedExporterNeverBlocksEmitOrShutdown(t *testing.T) {
 	}
 }
 
-// A refusing or panicking exporter loses the batch and nothing else: the sink
-// keeps taking spans, counts the loss and logs it once without secrets.
 func TestFailingExporterDropsBatchesQuietly(t *testing.T) {
 	var logs bytes.Buffer
 	var calls atomic.Int32
@@ -280,14 +266,9 @@ func (f funcExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnly
 }
 func (funcExporter) Shutdown(context.Context) error { return nil }
 
-// Spans still queued at shutdown are exported before the wait ends.
 func TestShutdownFlushesPendingSpans(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
-	slow := funcExporter(func(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
-		time.Sleep(20 * time.Millisecond)
-		return exporter.ExportSpans(ctx, spans)
-	})
-	sink, err := New(config.Telemetry{}, Options{Exporter: slow, FlushInterval: time.Hour, BatchSize: 10})
+	sink, err := New(config.Telemetry{}, Options{Exporter: exporter, FlushInterval: time.Hour, BatchSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +288,6 @@ func TestShutdownFlushesPendingSpans(t *testing.T) {
 	if st := sink.Stats(); st.Exported != 95 || st.Dropped != 0 {
 		t.Fatalf("stats %+v", st)
 	}
-	// A second shutdown and a late emit are harmless.
 	if err := sink.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}

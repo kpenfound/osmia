@@ -2,290 +2,201 @@ package intakejourney
 
 import (
 	context "context"
-
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	errors "errors"
 	fmt "fmt"
-
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	os "os"
 	filepath "path/filepath"
-
 	slices "slices"
 	strings "strings"
 	sync "sync"
 	atomic "sync/atomic"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	plan "github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	questions "github.com/kpenfound/osmia/internal/questions"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	shed "github.com/kpenfound/osmia/internal/shed"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const askedQuestion = intakefixture.AskedQuestion
-const askedAnswer = intakefixture.AskedAnswer
-const relayedRuling = intakefixture.RelayedRuling
-const chiefRole = intakefixture.ChiefRole
-const pinOne = intakefixture.PinOne
-
-type chief = intakefixture.Chief
-
-// newAskingFixture is a debate fixture whose service also runs the chief of
-// staff through the production thread reconciler, so a member's question is
-// chosen for, ruled on and delivered.
-func newAskingFixture(t *testing.T, members, rounds int, p *faults) (*shedFixture, *chief) {
+func newAskingFixture(t *testing.T, members, rounds int, p *intakefixture.Faults) (*journey.ShedFixture, *intakefixture.Chief) {
 	t.Helper()
 	return newAskingFixtureWith(t, members, rounds, p, nil)
 }
 
-// newAskingFixtureWith is newAskingFixture with prepare applied to the
-// service's options before it starts.
-func newAskingFixtureWith(t *testing.T, members, rounds int, p *faults, prepare func(*Options)) (*shedFixture, *chief) {
+func newAskingFixtureWith(t *testing.T, members, rounds int, p *intakefixture.Faults, prepare func(*journey.Options)) (*journey.ShedFixture, *intakefixture.Chief) {
 	t.Helper()
-	f := newDebateFixtureWith(t, members, rounds, chiefRole, func(opts *Options) {
-		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
+	f := journey.NewDebateFixtureWith(t, members, rounds, intakefixture.ChiefRole, func(opts *journey.Options) {
+		opts.Threads = journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts}).Threads
 		if prepare != nil {
 			prepare(opts)
 		}
 	})
-	c := &chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	f.engine.Turns["*"] = c.Turn
+	c := &intakefixture.Chief{P: p, Released: map[string]bool{}, Held: map[string]chan struct{}{}}
+	f.Engine.Mu.Lock()
+	defer f.Engine.Mu.Unlock()
+	f.Engine.Turns["*"] = c.Turn
 	return f, c
 }
 
-// answer installs the fake behaviour of the turn that delivers the answer to
-// question id to its asker.
-func (f *shedFixture) answer(id string, run fakeTurn) string {
-	return intakefixture.Answer(f.engine, id, run)
-}
-
-var asks = intakefixture.Asks
-
-// rule has the owner rule on the inbox entry that escalated question id, once
-// it is there.
-func (f *shedFixture) rule(t *testing.T, id string) {
+func awaitDocument(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, id string) {
 	t.Helper()
-	intakefixture.Rule(t, f.c, id)
+	f.S.Until(t, "document "+id+" to be recorded", func() bool { return len(f.Documents(t, stream, id)) > 0 })
 }
 
-func (f *shedFixture) thread(t *testing.T, stream config.WorkstreamID, member string) trace.Thread {
-	t.Helper()
-	return intakefixture.Thread(t, f.repository(), stream, member)
-}
-
-func (f *shedFixture) question(t *testing.T, stream config.WorkstreamID, id string) trace.QuestionState {
-	t.Helper()
-	return intakefixture.Question(t, f.repository(), stream, id)
-}
-
-// awaitQuestion waits until question id is in the given state.
-func (f *shedFixture) awaitQuestion(t *testing.T, stream config.WorkstreamID, id, state string) {
-	t.Helper()
-	intakefixture.AwaitQuestion(t, f.repository(), stream, id, state)
-}
-
-// awaitTurn waits until the member's thread holds the given turn.
-func (f *shedFixture) awaitTurn(t *testing.T, stream config.WorkstreamID, member, turn string) trace.QueuedTurn {
-	t.Helper()
-	return intakefixture.AwaitNamedTurn(t, f.repository(), stream, member, turn)
-}
-
-// awaitDocument waits until the workstream records the document.
-func awaitDocument(t *testing.T, f *shedFixture, stream config.WorkstreamID, id string) {
-	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for len(f.documents(t, stream, id)) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("document %s was never recorded", id)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-var results = intakefixture.Results
-
-// roundOperation returns the acknowledged round operation with the given
-// resumption number.
-func (f *shedFixture) roundOperation(t *testing.T, stream config.WorkstreamID, resume int) trace.OperationRecord {
-	t.Helper()
-	ops := f.acknowledgedRoundOperations(t, stream)
-	for _, o := range ops {
-		if in, err := decodeRound(o.Operation); err == nil && in.Resume == resume {
-			return o
-		}
-	}
-	t.Fatalf("no round operation with resumption %d: %v", resume, results(ops))
-	return trace.OperationRecord{}
-}
-
-func (f *shedFixture) record(t *testing.T, stream config.WorkstreamID, member string) shed.Record {
-	t.Helper()
-	records, err := shed.Records(f.repository(), stream)
-	must(t, err)
-	for _, r := range records {
-		if r.Member == member {
-			return r
-		}
-	}
-	t.Fatalf("no record of %s: %+v", member, records)
-	return shed.Record{}
-}
-
-// A member that asks parks the round: its turn ends waiting, the round
-// operation ends waiting, the question is in the chief of staff's hands, no
-// reply is requested and the workstream stays in the shed, across a restart
-// and through the owner's actions. The owner's ruling, relayed by the chief of
-// staff, runs as the member's next turn against the same pinned revision,
-// continuing what it contributed before asking, and the round is heard with
-// every member.
 func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, _ := newAskingFixture(t, 2, 1, p)
-	defer f.stop(t)
-	member := committeeAgent(1)
+	defer f.Stop(t)
+	member := intake.CommitteeAgent(1)
 	first, second := shed.ObjectionID(1, member, 1), shed.ObjectionID(1, member, 2)
-	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		return errors.Join(objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
+	asking := f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		return errors.Join(intakefixture.Objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), intakefixture.Asks(p, "1")(ctx, req, verified, tools))
 	})
-	other := f.member(1, 2, 1, silent)
-	answering := f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + askedQuestion, "<<< osmia:owner_response", "| " + relayedRuling} {
+	other := f.Member(1, 2, 1, intakefixture.Silent)
+	answering := f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+		for _, want := range []string{"The owner ruled on your question 1. The chief of staff relays the ruling.", "| " + intakefixture.AskedQuestion, "<<< osmia:owner_response", "| " + intakefixture.RelayedRuling} {
 			if !strings.Contains(req.Prompt, want) {
 				p.Report("answer prompt lacks %q:\n%s", want, req.Prompt)
 			}
 		}
-		if !strings.Contains(req.SystemPrompt, "member of the committee") || req.Profile.Name != committeeRole {
+		if !strings.Contains(req.SystemPrompt, "member of the committee") || req.Profile.Name != intake.CommitteeRole {
 			p.Report("answer turn system prompt %q, profile %+v", req.SystemPrompt, req.Profile)
 		}
-		names, err := toolNames(ctx, tools)
+		names, err := intakefixture.ToolNames(ctx, tools)
 		if err != nil || !slices.Equal(names, []string{questions.AskTool, shed.ConcedeTool, "file_read", shed.ObjectTool, "project_context"}) {
 			p.Report("answer turn tools %v %v", names, err)
 		}
 
-		if got, err := readTool(ctx, tools, "spec.md"); err != nil || got != validSpec {
+		if got, err := intakefixture.ReadTool(ctx, tools, "spec.md"); err != nil || got != fixturekit.ValidSpec {
 			p.Report("the answer turn read spec %q %v", got, err)
 		}
 
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != second {
+		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != second {
 			p.Report("objection after the answer: %v %q %v", recorded, id, err)
 		}
-		return concedes(p, first, second)(ctx, req, nil, tools)
+		return intakefixture.Concedes(p, first, second)(ctx, req, nil, tools)
 	})
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	p.Check(t)
 
-	ops := f.acknowledgedRoundOperations(t, stream)
-	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1", pinOne, member)
+	ops := f.AcknowledgedRoundOperations(t, stream)
+	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1", intakefixture.PinOne, member)
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "waiting" || ops[0].Result.Evidence != parked {
-		t.Fatalf("round operations: %v", results(ops))
+		t.Fatalf("round operations: %v", intakefixture.Results(ops))
 	}
-	park := f.transition(t, stream, "shed-round-1-waiting-1")
-	if park.From != "round-1" || park.To != "waiting-1" || park.Cause != ops[0].Operation.ID || park.Reason != parked || park.Actor != shedActor {
+	park := f.Transition(t, stream, "shed-round-1-waiting-1")
+	if park.From != "round-1" || park.To != "waiting-1" || park.Cause != ops[0].Operation.ID || park.Reason != parked || park.Actor != intake.ShedActor {
 		t.Fatalf("park: %+v", park)
 	}
 
-	asker := f.thread(t, stream, member)
+	asker := f.Thread(t, stream, member)
 	if last := asker.Turns[len(asker.Turns)-1]; !asker.Parked() || last.Request.TurnID != asking || last.Status() != "waiting" || last.Response.Result.Outcome == nil || *last.Response.Result.Outcome != (coreadapter.Outcome{Status: "waiting", Report: "Asked question 1"}) {
 		t.Fatalf("asker's thread: %+v", asker)
 	}
-	if th := f.thread(t, stream, committeeAgent(2)); th.Parked() || th.Turns[len(th.Turns)-1].Status() != "idle" {
+	if th := f.Thread(t, stream, intake.CommitteeAgent(2)); th.Parked() || th.Turns[len(th.Turns)-1].Status() != "idle" {
 		t.Fatalf("other member's thread: %+v", th)
 	}
-	if q := f.question(t, stream, "1"); q.Asked.AskedBy.ID != member || q.Asked.Turn != asking || q.Asked.Question != askedQuestion {
+	if q := f.Question(t, stream, "1"); q.Asked.AskedBy.ID != member || q.Asked.Turn != asking || q.Asked.Question != intakefixture.AskedQuestion {
 		t.Fatalf("question: %+v", q)
 	}
-	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
+	if records, err := shed.Records(f.Repository(), stream); err != nil || len(records) != 0 {
 		t.Fatalf("records of a parked round: %+v %v", records, err)
 	}
-	if len(f.replyOperations(t, stream)) != 0 {
+	if len(f.ReplyOperations(t, stream)) != 0 {
 		t.Fatal("the architect was asked for a reply while the round is parked")
 	}
-	f.stillInShed(t, stream)
+	f.StillInShed(t, stream)
 
-	objected, err := f.c.ShedObject(ctx, stream, "The plan never names the retry budget.")
+	objected, err := f.C.ShedObject(ctx, stream, "The plan never names the retry budget.")
 	if err != nil || objected.Action != "objected" || objected.Round != 1 {
 		t.Fatalf("owner objection while parked: %+v %v", objected, err)
 	}
-	if ruled, err := f.c.ShedRule(ctx, stream, objected.Objection, "dismiss", "The budget is the default."); err != nil || ruled.Action != "dismissed" {
+	if ruled, err := f.C.ShedRule(ctx, stream, objected.Objection, "dismiss", "The budget is the default."); err != nil || ruled.Action != "dismissed" {
 		t.Fatalf("owner ruling while parked: %+v %v", ruled, err)
 	}
-	edited := strings.Replace(validSpec, "never sent again", "never sent twice", 1)
-	editDraft(t, f.c, stream, edited, "")
+	edited := strings.Replace(fixturekit.ValidSpec, "never sent again", "never sent twice", 1)
+	servicetest.EditDraft(t, f.C.Client, stream, edited, "")
 
-	f.awaitQuestion(t, stream, "1", trace.QuestionEscalated)
-	f.stop(t)
-	f.start(t)
-	if state, err := f.repository().Workflow(stream, shedSubject); err != nil || state.Value != "waiting-1" {
+	f.AwaitQuestion(t, stream, "1", trace.QuestionEscalated)
+	f.Stop(t)
+	f.Start(t)
+	if state, err := f.Repository().Workflow(stream, intake.ShedSubject); err != nil || state.Value != "waiting-1" {
 		t.Fatalf("shed after the restart: %+v %v", state, err)
 	}
-	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: f.repository()}).Pass(ctx))
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
+	fixturekit.Must(t, (&intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: f.Repository()}).Pass(ctx))
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v after the restart, want %v", moves, want)
 	}
-	inbox, err := f.c.Inbox(ctx)
-	if err != nil || len(inbox.Entries) != 1 || inbox.Entries[0].Workstream != stream || !slices.Equal(inbox.Entries[0].Asked, []InboxQuestion{{ID: "1", AskedBy: member, Question: askedQuestion}}) {
+	inbox, err := f.C.Inbox(ctx)
+	if err != nil || len(inbox.Entries) != 1 || inbox.Entries[0].Workstream != stream || !slices.Equal(inbox.Entries[0].Asked, []api.InboxQuestion{{ID: "1", AskedBy: member, Question: intakefixture.AskedQuestion}}) {
 		t.Fatalf("inbox: %+v %v", inbox, err)
 	}
 
-	f.rule(t, "1")
-	f.awaitShed(t, stream, "concluded-1")
+	f.Rule(t, "1")
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
 
-	heard := fmt.Sprintf("round 1 against %s: 2 members heard, 2 objections, 2 concessions, 0 failed turns; 1 objections stand", pinOne)
-	resumed := f.roundOperation(t, stream, 1)
-	if resumed.Result.Outcome != "succeeded" || resumed.Result.Evidence != heard || len(f.acknowledgedRoundOperations(t, stream)) != 2 {
-		t.Fatalf("round operations: %v", results(f.roundOperations(t, stream)))
+	heard := fmt.Sprintf("round 1 against %s: 2 members heard, 2 objections, 2 concessions, 0 failed turns; 1 objections stand", intakefixture.PinOne)
+	resumed := f.RoundOperation(t, stream, 1)
+	if resumed.Result.Outcome != "succeeded" || resumed.Result.Evidence != heard || len(f.AcknowledgedRoundOperations(t, stream)) != 2 {
+		t.Fatalf("round operations: %v", intakefixture.Results(f.RoundOperations(t, stream)))
 	}
-	if in, err := decodeRound(resumed.Operation); err != nil || in != (roundInput{Round: 1, Spec: 1, Plan: 1, Resume: 1}) {
+	if in, err := intake.DecodeRound(resumed.Operation); err != nil || in != (intake.RoundInput{Round: 1, Spec: 1, Plan: 1, Resume: 1}) {
 		t.Fatalf("resumption input %+v %v", in, err)
 	}
-	resumption := f.transition(t, stream, "shed-round-1-resume-1")
-	if resumption.From != "waiting-1" || resumption.To != "round-1" || resumption.Cause != "shed-round-1-waiting-1" || resumption.Actor != shedActor || resumption.Reason != fmt.Sprintf("round 1 against %s resumes: every member that asked has its answer", pinOne) {
+	resumption := f.Transition(t, stream, "shed-round-1-resume-1")
+	if resumption.From != "waiting-1" || resumption.To != "round-1" || resumption.Cause != "shed-round-1-waiting-1" || resumption.Actor != intake.ShedActor || resumption.Reason != fmt.Sprintf("round 1 against %s resumes: every member that asked has its answer", intakefixture.PinOne) {
 		t.Fatalf("resumption: %+v", resumption)
 	}
-	if told := f.transition(t, stream, "shed-round-1-heard"); told.Cause != resumed.Operation.ID || told.Reason != heard {
+	if told := f.Transition(t, stream, "shed-round-1-heard"); told.Cause != resumed.Operation.ID || told.Reason != heard {
 		t.Fatalf("heard: %+v", told)
 	}
-	mine := f.record(t, stream, member)
+	mine := f.Record(t, stream, member)
 	if mine.Turn != asking || mine.Failure != "" || len(mine.Objections) != 2 || mine.Objections[1].ID != second ||
 		!slices.Equal(mine.Concessions, []shed.Concession{{Objection: first, Reason: "The reply settles it."}, {Objection: second, Reason: "The reply settles it."}}) {
 		t.Fatalf("record: %+v", mine)
 	}
-	if end := f.transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded after round 1: the owner disposed of every objection that stood" {
+	if end := f.Transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded after round 1: the owner disposed of every objection that stood" {
 		t.Fatalf("conclusion: %+v", end)
 	}
-	if ran := f.ran(); ran[asking] != 1 || ran[other] != 1 || ran[answering] != 1 || ran[roundTurnID(1, member, 2)] != 0 {
+	if ran := f.Ran(); ran[asking] != 1 || ran[other] != 1 || ran[answering] != 1 || ran[intake.RoundTurnID(1, member, 2)] != 0 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	if q := f.question(t, stream, "1"); q.State != trace.QuestionAnswered || q.Ruling == nil || q.Ruling.Decision != trace.DecisionRuling || q.Ruling.ReturnedAnswer != relayedRuling {
+	if q := f.Question(t, stream, "1"); q.State != trace.QuestionAnswered || q.Ruling == nil || q.Ruling.Decision != trace.DecisionRuling || q.Ruling.ReturnedAnswer != intakefixture.RelayedRuling {
 		t.Fatalf("question: %+v", q)
 	}
-	if th := f.thread(t, stream, member); th.Parked() || len(th.Turns) != 2 || th.Turns[1].Request.TurnID != answering || th.Turns[1].Status() != "idle" || th.Turns[1].Request.SystemPrompt != th.Turns[0].Request.SystemPrompt {
+	if th := f.Thread(t, stream, member); th.Parked() || len(th.Turns) != 2 || th.Turns[1].Request.TurnID != answering || th.Turns[1].Status() != "idle" || th.Turns[1].Request.SystemPrompt != th.Turns[0].Request.SystemPrompt {
 		t.Fatalf("asker's thread: %+v", th)
 	}
-	if specs := f.documents(t, stream, plan.SpecDocument); len(specs) != 2 || specs[1].Content != edited {
+	if specs := f.Documents(t, stream, plan.SpecDocument); len(specs) != 2 || specs[1].Content != edited {
 		t.Fatalf("the owner's edit while parked was not recorded: %+v", specs)
 	}
-	f.stillInShed(t, stream)
+	f.StillInShed(t, stream)
 
-	f.await(t, stream, func(_, _ string) bool {
-		threads, err := f.repository().Threads(stream)
-		must(t, err)
+	f.Await(t, stream, func(_, _ string) bool {
+		threads, err := f.Repository().Threads(stream)
+		fixturekit.Must(t, err)
 		for _, th := range threads {
 			for _, q := range th.Turns {
 				if q.CompletedAt.IsZero() {
@@ -295,8 +206,8 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 		}
 		return true
 	})
-	root := f.opts.Config.Root
-	if _, err := os.Lstat(filepath.Join(root, "shed", string(f.project), string(stream), answering, "workspace")); !os.IsNotExist(err) {
+	root := f.Opts.Config.Root
+	if _, err := os.Lstat(filepath.Join(root, "shed", string(f.Project), string(stream), answering, "workspace")); !os.IsNotExist(err) {
 		t.Fatal("the answer turn's staged workspace is retained")
 	}
 	if entries, err := os.ReadDir(filepath.Join(root, "views")); err != nil || len(entries) != 0 {
@@ -304,363 +215,341 @@ func TestMemberQuestionParksTheRoundUntilTheAnswerArrives(t *testing.T) {
 	}
 }
 
-// The owner may skip debate while a round is parked: the skip is recorded,
-// the packet is presented, and the answer, once delivered, runs no turn.
 func TestOwnerSkipsDebateWhileARoundIsParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, _ := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
-	member := committeeAgent(1)
-	f.member(1, 1, 1, asks(p, "1"))
-	answering := f.answer("1", silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	defer f.Stop(t)
+	member := intake.CommitteeAgent(1)
+	f.Member(1, 1, 1, intakefixture.Asks(p, "1"))
+	answering := f.Answer("1", intakefixture.Silent)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	p.Check(t)
-	if skipped, err := f.c.ShedSkip(ctx, stream); err != nil || skipped.Action != skippedValue {
+	if skipped, err := f.C.ShedSkip(ctx, stream); err != nil || skipped.Action != intake.SkippedValue {
 		t.Fatalf("skip while parked: %+v %v", skipped, err)
 	}
-	f.rule(t, "1")
+	f.Rule(t, "1")
 
-	queued := f.awaitTurn(t, stream, member, answering)
+	queued := f.AwaitTurn(t, stream, member, answering)
 	awaitDocument(t, f, stream, shed.PacketDocumentID(1))
-	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: f.repository()}).Pass(ctx))
+	fixturekit.Must(t, (&intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: f.Repository()}).Pass(ctx))
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	if ran := f.ran(); ran[answering] != 0 || !queued.CompletedAt.IsZero() || len(f.roundOperations(t, stream)) != 1 {
+	if ran := f.Ran(); ran[answering] != 0 || !queued.CompletedAt.IsZero() || len(f.RoundOperations(t, stream)) != 1 {
 		t.Fatalf("a skipped debate ran the answer: %v", ran)
 	}
-	if skipped, err := skippedDebate(f.repository(), stream); err != nil || !skipped {
+	if skipped, err := intake.SkippedDebate(f.Repository(), stream); err != nil || !skipped {
 		t.Fatalf("the skip is not recorded: %v %v", skipped, err)
 	}
-	f.stillInShed(t, stream)
+	f.StillInShed(t, stream)
 }
 
-// A service stop that interrupts the answer's turn is recovered like any
-// other: the member's next attempt carries the answer it received, and the
-// round is heard with what that attempt contributed.
 func TestInterruptedAnswerTurnIsRetriedWithTheAnswer(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, c := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
+	defer f.Stop(t)
 	c.Release("1")
-	member := committeeAgent(1)
-	asking := f.member(1, 1, 1, asks(p, "1"))
+	member := intake.CommitteeAgent(1)
+	asking := f.Member(1, 1, 1, intakefixture.Asks(p, "1"))
 	started := make(chan struct{})
 	var once sync.Once
-	answering := f.answer("1", func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+	answering := f.Answer("1", func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		once.Do(func() { close(started) })
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	retried := f.member(1, 1, 2, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
-		for _, want := range []string{"Round 1 of the shed", "The answers to the questions you asked in this round:", "Answer to your question 1.", "| " + askedQuestion, "<<< osmia:answer", "| " + askedAnswer} {
+	retried := f.Member(1, 1, 2, func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+		for _, want := range []string{"Round 1 of the shed", "The answers to the questions you asked in this round:", "Answer to your question 1.", "| " + intakefixture.AskedQuestion, "<<< osmia:answer", "| " + intakefixture.AskedAnswer} {
 			if !strings.Contains(req.Prompt, want) {
 				p.Report("retried attempt's prompt lacks %q:\n%s", want, req.Prompt)
 			}
 		}
 		return nil
 	})
-	stream := f.handIn(t, "design", handedDesign)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
 	select {
 	case <-started:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the answer's turn never started")
 	}
-	f.stop(t)
-	f.start(t)
-	f.awaitShed(t, stream, "concluded-1")
+	f.Stop(t)
+	f.Start(t)
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	if ran := f.ran(); ran[asking] != 1 || ran[answering] != 1 || ran[retried] != 1 {
+	if ran := f.Ran(); ran[asking] != 1 || ran[answering] != 1 || ran[retried] != 1 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	th := f.thread(t, stream, member)
+	th := f.Thread(t, stream, member)
 	if len(th.Turns) != 3 || th.Turns[1].Request.TurnID != answering || th.Turns[1].Status() != "interrupted" || th.Turns[2].Request.TurnID != retried || th.Turns[2].Status() != "idle" {
 		t.Fatalf("asker's thread: %+v", th)
 	}
-	if mine := f.record(t, stream, member); mine.Turn != retried || !mine.Silent() {
+	if mine := f.Record(t, stream, member); mine.Turn != retried || !mine.Silent() {
 		t.Fatalf("record: %+v", mine)
 	}
-	if end := f.transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded by consensus after round 1: no objection stands" {
+	if end := f.Transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded by consensus after round 1: no objection stands" {
 		t.Fatalf("conclusion: %+v", end)
 	}
 }
 
-// A turn that asked and was then interrupted by a service stop parks the
-// round like one that ended waiting: the member gets no new attempt, the
-// answer runs on its thread, and the round is heard with what the interrupted
-// turn contributed before asking.
 func TestAskingTurnInterruptedByAStopStillParksTheRound(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
-	// Held back until the restarted round has recorded its park on the
-	// still open question, the chief of staff's review of it, and the
-	// answer it would then queue, cannot reach the member's thread first
-	// and let the round skip the park the assertions below need to see.
+	p := &intakefixture.Faults{}
 	var parked atomic.Bool
-	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
+	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action == thread.TurnAction && !parked.Load()
 		}
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 	c.Release("1")
-	member := committeeAgent(1)
+	member := intake.CommitteeAgent(1)
 	first := shed.ObjectionID(1, member, 1)
 	asked := make(chan struct{})
-	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if err := errors.Join(objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools)); err != nil {
+	asking := f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if err := errors.Join(intakefixture.Objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), intakefixture.Asks(p, "1")(ctx, req, verified, tools)); err != nil {
 			return err
 		}
 		close(asked)
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	answering := f.answer("1", concedes(p, first))
-	stream := f.handIn(t, "design", handedDesign)
+	answering := f.Answer("1", intakefixture.Concedes(p, first))
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
 	select {
 	case <-asked:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the member never asked")
 	}
-	f.stop(t)
-	f.start(t)
-	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	f.Stop(t)
+	f.Start(t)
+	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	parked.Store(true)
-	f.awaitShed(t, stream, "concluded-1")
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	if park := f.transition(t, stream, "shed-round-1-waiting-1"); park.Reason != fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1", pinOne, member) {
+	if park := f.Transition(t, stream, "shed-round-1-waiting-1"); park.Reason != fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1", intakefixture.PinOne, member) {
 		t.Fatalf("park: %+v", park)
 	}
-	if ran := f.ran(); ran[asking] != 1 || ran[answering] != 1 || ran[roundTurnID(1, member, 2)] != 0 {
+	if ran := f.Ran(); ran[asking] != 1 || ran[answering] != 1 || ran[intake.RoundTurnID(1, member, 2)] != 0 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	th := f.thread(t, stream, member)
+	th := f.Thread(t, stream, member)
 	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != answering || th.Turns[1].Status() != "idle" {
 		t.Fatalf("asker's thread: %+v", th)
 	}
-	if mine := f.record(t, stream, member); mine.Turn != asking || mine.Failure != "" || len(mine.Objections) != 1 || len(mine.Concessions) != 1 {
+	if mine := f.Record(t, stream, member); mine.Turn != asking || mine.Failure != "" || len(mine.Objections) != 1 || len(mine.Concessions) != 1 {
 		t.Fatalf("record: %+v", mine)
 	}
-	if end := f.transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded by consensus after round 1: no objection stands" {
+	if end := f.Transition(t, stream, "shed-concluded-1"); end.Reason != "debate concluded by consensus after round 1: no objection stands" {
 		t.Fatalf("conclusion: %+v", end)
 	}
 }
 
-// An answer queued behind a turn a crashed service left reserved runs once
-// that turn is abandoned: the round is heard with the answer, not held behind
-// the reservation. The reservation is planted between lifetimes: a stop
-// completes the turn it interrupts, a crash does not.
 func TestAnswerQueuedBehindAReservedTurnRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, c := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
+	defer f.Stop(t)
 
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		return questionResult(req, "session-chief", "Choice left for the planted turn"), nil
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
+		return intakefixture.QuestionResult(req, "session-chief", "Choice left for the planted turn"), nil
 	}
-	f.engine.Mu.Unlock()
-	member := committeeAgent(1)
+	f.Engine.Mu.Unlock()
+	member := intake.CommitteeAgent(1)
 	asked := make(chan struct{})
-	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if err := asks(p, "1")(ctx, req, verified, tools); err != nil {
+	asking := f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if err := intakefixture.Asks(p, "1")(ctx, req, verified, tools); err != nil {
 			return err
 		}
 		close(asked)
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	answering := f.answer("1", silent)
-	stream := f.handIn(t, "design", handedDesign)
+	answering := f.Answer("1", intakefixture.Silent)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
 	select {
 	case <-asked:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the member never asked")
 	}
 
-	eventually(t, "the chief of staff's turns were never claimed", func() bool {
-		th, err := f.repository().Thread(stream, trace.ChiefOfStaff)
-		must(t, err)
+	intakefixture.Eventually(t, "the chief of staff's turns were never claimed", func() bool {
+		th, err := f.Repository().Thread(stream, trace.ChiefOfStaff)
+		fixturekit.Must(t, err)
 		return !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Claim == nil && q.CompletedAt.IsZero() })
 	})
-	f.stop(t)
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = c.Turn
-	f.engine.Mu.Unlock()
+	f.Stop(t)
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = c.Turn
+	f.Engine.Mu.Unlock()
 
-	cfg, err := config.Load(f.opts.Config)
-	must(t, err)
-	repo, err := trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(f.Opts.Config)
+	fixturekit.Must(t, err)
+	repo, err := trace.Open(cfg.Root, config.Project{ID: f.Project, Clone: f.Clone})
+	fixturekit.Must(t, err)
 	th, err := repo.Thread(stream, member)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Status() != "interrupted" {
 		t.Fatalf("asking turn after the stop: %+v", th.Turns)
 	}
-	reserved := roundTurnID(1, member, 2)
+	reserved := intake.RoundTurnID(1, member, 2)
 	second := th.Turns[0].Request
-	second.ID, second.TurnID, second.At = "request_"+reserved, reserved, f.clock.Now()
+	second.ID, second.TurnID, second.At = "request_"+reserved, reserved, f.Clock.Now()
 	_, err = repo.EnqueueTurn(ctx, second)
-	must(t, err)
-	home := filepath.Dir(f.clone)
-	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.clock.Now())
-	must(t, err)
+	fixturekit.Must(t, err)
+	home := filepath.Dir(f.Clone)
+	_, err = repo.ClaimTurn(ctx, stream, member, "token_"+reserved, filepath.Join(home, reserved), f.Clock.Now())
+	fixturekit.Must(t, err)
 
 	chief, err := repo.Thread(stream, trace.ChiefOfStaff)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if chief.Active != "" {
-		must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, chief.Active, f.clock.Now()))
+		fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, chief.Active, f.Clock.Now()))
 	}
-	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.project, Workstream: stream, At: f.clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
+	chiefHeader := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_planted", Revision: 1, Project: f.Project, Workstream: stream, At: f.Clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "planted"}
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{Header: chiefHeader, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "planted", Profile: second.Profile, Prompt: "Answer"})
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token_planted", filepath.Join(home, "planted"), f.clock.Now())
-	must(t, err)
-	chiefScope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "planted", Role: trace.ChiefOfStaff}
-	_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, chiefScope, "1", askedAnswer, []string{"charter#1"}, f.clock.Now())
-	must(t, err)
+	fixturekit.Must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token_planted", filepath.Join(home, "planted"), f.Clock.Now())
+	fixturekit.Must(t, err)
+	chiefScope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "planted", Role: trace.ChiefOfStaff}
+	_, err = repo.AnswerQuestion(ctx, trace.ChiefOfStaff, chiefScope, "1", intakefixture.AskedAnswer, []string{"charter#1"}, f.Clock.Now())
+	fixturekit.Must(t, err)
 
-	must(t, repo.Close())
-	repo, err = trace.Open(cfg.Root, config.Project{ID: f.project, Clone: f.clone})
-	must(t, err)
-	must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "planted", f.clock.Now()))
+	fixturekit.Must(t, repo.Close())
+	repo, err = trace.Open(cfg.Root, config.Project{ID: f.Project, Clone: f.Clone})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.AbandonTurn(ctx, stream, trace.ChiefOfStaff, "planted", f.Clock.Now()))
 	planted, err := repo.Questions(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(planted) != 1 || planted[0].State != trace.QuestionAnswered {
 		t.Fatalf("planted questions: %+v", planted)
 	}
 	if delivered, err := questions.Deliver(ctx, repo, planted[0], func(string, string) (coreadapter.Profile, error) {
 		return coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, nil
-	}, f.clock.Now()); err != nil || !delivered {
+	}, f.Clock.Now()); err != nil || !delivered {
 		t.Fatalf("deliver: %t %v", delivered, err)
 	}
 	if th, err := repo.Thread(stream, member); err != nil || len(th.Turns) != 3 || th.Turns[1].Claim == nil || th.Turns[1].Response != nil || th.Turns[2].Request.TurnID != answering {
 		t.Fatalf("planted thread: %+v %v", th, err)
 	}
-	must(t, repo.Close())
-	f.start(t)
-	f.awaitShed(t, stream, "concluded-1")
+	fixturekit.Must(t, repo.Close())
+	f.Start(t)
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	th = f.thread(t, stream, member)
+	th = f.Thread(t, stream, member)
 	if len(th.Turns) != 3 || th.Turns[1].Request.TurnID != reserved || th.Turns[1].Status() != "interrupted" || th.Turns[2].Request.TurnID != answering || th.Turns[2].Status() != "idle" {
 		t.Fatalf("asker's thread: %+v", th)
 	}
-	if ran := f.ran(); ran[asking] != 1 || ran[answering] != 1 || ran[reserved] != 0 || ran[roundTurnID(1, member, 3)] != 0 {
+	if ran := f.Ran(); ran[asking] != 1 || ran[answering] != 1 || ran[reserved] != 0 || ran[intake.RoundTurnID(1, member, 3)] != 0 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	if mine := f.record(t, stream, member); mine.Turn != asking || !mine.Silent() {
+	if mine := f.Record(t, stream, member); mine.Turn != asking || !mine.Silent() {
 		t.Fatalf("record: %+v", mine)
 	}
 }
 
-// A turn that asked and then failed parks the round too: the answer runs on
-// the member's thread, and the record is what the chain ended with.
 func TestTurnThatFailedAfterAskingParksTheRound(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, c := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
+	defer f.Stop(t)
 	c.Release("1")
-	member := committeeAgent(1)
-	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if err := asks(p, "1")(ctx, req, verified, tools); err != nil {
+	member := intake.CommitteeAgent(1)
+	asking := f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if err := intakefixture.Asks(p, "1")(ctx, req, verified, tools); err != nil {
 			return err
 		}
 		return errors.New("the backend crashed after the question")
 	})
-	answering := f.answer("1", silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "concluded-1")
+	answering := f.Answer("1", intakefixture.Silent)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	th := f.thread(t, stream, member)
+	th := f.Thread(t, stream, member)
 	if len(th.Turns) != 2 || th.Turns[0].Status() != "failed" || th.Turns[1].Request.TurnID != answering || th.Turns[1].Status() != "idle" {
 		t.Fatalf("asker's thread: %+v", th)
 	}
-	if ran := f.ran(); ran[asking] != 1 || ran[answering] != 1 || ran[roundTurnID(1, member, 2)] != 0 {
+	if ran := f.Ran(); ran[asking] != 1 || ran[answering] != 1 || ran[intake.RoundTurnID(1, member, 2)] != 0 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	if mine := f.record(t, stream, member); mine.Turn != asking || !mine.Silent() {
+	if mine := f.Record(t, stream, member); mine.Turn != asking || !mine.Silent() {
 		t.Fatalf("record: %+v", mine)
 	}
-	if told := f.transition(t, stream, "shed-round-1-heard"); told.Reason != fmt.Sprintf("round 1 against %s: 1 members heard, 0 objections, 0 concessions, 0 failed turns; 0 objections stand", pinOne) {
+	if told := f.Transition(t, stream, "shed-round-1-heard"); told.Reason != fmt.Sprintf("round 1 against %s: 1 members heard, 0 objections, 0 concessions, 0 failed turns; 0 objections stand", intakefixture.PinOne) {
 		t.Fatalf("heard: %+v", told)
 	}
 }
 
-// A member that asks again in its answer turn parks the round again: the
-// second park is caused by the resumed operation, the second resumption is
-// numbered, and every turn of the chain contributes to the one record.
 func TestMemberAsksAgainInItsAnswerTurn(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, c := newAskingFixture(t, 1, 1, p)
-	defer f.stop(t)
+	defer f.Stop(t)
 	c.Release("1")
 	c.Release("2")
-	member := committeeAgent(1)
+	member := intake.CommitteeAgent(1)
 	ids := []string{shed.ObjectionID(1, member, 1), shed.ObjectionID(1, member, 2), shed.ObjectionID(1, member, 3)}
-	asking := f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		return errors.Join(objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), asks(p, "1")(ctx, req, verified, tools))
+	asking := f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		return errors.Join(intakefixture.Objects(p, shed.Fit, "plan", "spec#1")(ctx, req, verified, tools), intakefixture.Asks(p, "1")(ctx, req, verified, tools))
 	})
-	f.answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != ids[1] {
+	f.Answer("1", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "acceptance", "part": "plan#dedupe", "argument": "No unit shows it.", "citations": []string{"spec#2"}}); err != nil || !recorded || id != ids[1] {
 			p.Report("objection in the first answer turn: %v %q %v", recorded, id, err)
 		}
-		return asks(p, "2")(ctx, req, verified, tools)
+		return intakefixture.Asks(p, "2")(ctx, req, verified, tools)
 	})
-	f.answer("2", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+	f.Answer("2", func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		if !strings.Contains(req.Prompt, "Answer to your question 2.") {
 			p.Report("second answer prompt:\n%s", req.Prompt)
 		}
-		if recorded, id, err := shedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}}); err != nil || !recorded || id != ids[2] {
+		if recorded, id, err := intakefixture.ShedTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}}); err != nil || !recorded || id != ids[2] {
 			p.Report("objection in the second answer turn: %v %q %v", recorded, id, err)
 		}
-		return concedes(p, ids...)(ctx, req, verified, tools)
+		return intakefixture.Concedes(p, ids...)(ctx, req, verified, tools)
 	})
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "concluded-1")
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
 
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	first, second := f.roundOperation(t, stream, 1), f.roundOperation(t, stream, 2)
-	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 2", pinOne, member)
+	first, second := f.RoundOperation(t, stream, 1), f.RoundOperation(t, stream, 2)
+	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 2", intakefixture.PinOne, member)
 	if first.Result.Outcome != "waiting" || first.Result.Evidence != parked || second.Result.Outcome != "succeeded" {
-		t.Fatalf("round operations: %v", results(f.roundOperations(t, stream)))
+		t.Fatalf("round operations: %v", intakefixture.Results(f.RoundOperations(t, stream)))
 	}
-	if park := f.transition(t, stream, "shed-round-1-waiting-2"); park.Cause != first.Operation.ID || park.From != "round-1" || park.To != "waiting-1" || park.Reason != parked {
+	if park := f.Transition(t, stream, "shed-round-1-waiting-2"); park.Cause != first.Operation.ID || park.From != "round-1" || park.To != "waiting-1" || park.Reason != parked {
 		t.Fatalf("second park: %+v", park)
 	}
-	if resumption := f.transition(t, stream, "shed-round-1-resume-2"); resumption.Cause != "shed-round-1-waiting-2" || resumption.From != "waiting-1" || resumption.To != "round-1" {
+	if resumption := f.Transition(t, stream, "shed-round-1-resume-2"); resumption.Cause != "shed-round-1-waiting-2" || resumption.From != "waiting-1" || resumption.To != "round-1" {
 		t.Fatalf("second resumption: %+v", resumption)
 	}
-	if in, err := decodeRound(second.Operation); err != nil || in != (roundInput{Round: 1, Spec: 1, Plan: 1, Resume: 2}) {
+	if in, err := intake.DecodeRound(second.Operation); err != nil || in != (intake.RoundInput{Round: 1, Spec: 1, Plan: 1, Resume: 2}) {
 		t.Fatalf("second resumption input %+v %v", in, err)
 	}
-	if told := f.transition(t, stream, "shed-round-1-heard"); told.Cause != second.Operation.ID {
+	if told := f.Transition(t, stream, "shed-round-1-heard"); told.Cause != second.Operation.ID {
 		t.Fatalf("heard: %+v", told)
 	}
-	mine := f.record(t, stream, member)
+	mine := f.Record(t, stream, member)
 	if mine.Turn != asking || len(mine.Objections) != 3 || len(mine.Concessions) != 3 || mine.Failure != "" {
 		t.Fatalf("record: %+v", mine)
 	}
@@ -669,128 +558,120 @@ func TestMemberAsksAgainInItsAnswerTurn(t *testing.T) {
 			t.Fatalf("objection %d is %s", i+1, o.ID)
 		}
 	}
-	if th := f.thread(t, stream, member); len(th.Turns) != 3 || th.Turns[0].Status() != "waiting" || th.Turns[1].Status() != "waiting" || th.Turns[2].Status() != "idle" {
+	if th := f.Thread(t, stream, member); len(th.Turns) != 3 || th.Turns[0].Status() != "waiting" || th.Turns[1].Status() != "waiting" || th.Turns[2].Status() != "idle" {
 		t.Fatalf("asker's thread: %+v", th)
 	}
 }
 
-// Two members ask in one round: the park names both, and the round resumes
-// only once the second answer is queued, not when the first is.
 func TestRoundResumesOnlyWhenEveryAskerHasItsAnswer(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	f, c := newAskingFixture(t, 2, 1, p)
-	defer f.stop(t)
+	defer f.Stop(t)
 	c.Release("1")
-	one, two := committeeAgent(1), committeeAgent(2)
+	one, two := intake.CommitteeAgent(1), intake.CommitteeAgent(2)
 	firstAsked := make(chan struct{})
-	f.member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+	f.Member(1, 1, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		defer close(firstAsked)
-		return asks(p, "1")(ctx, req, verified, tools)
+		return intakefixture.Asks(p, "1")(ctx, req, verified, tools)
 	})
-	f.member(1, 2, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
+	f.Member(1, 2, 1, func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error {
 		select {
 		case <-firstAsked:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		return asks(p, "2")(ctx, req, verified, tools)
+		return intakefixture.Asks(p, "2")(ctx, req, verified, tools)
 	})
-	answerOne, answerTwo := f.answer("1", silent), f.answer("2", silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	answerOne, answerTwo := f.Answer("1", intakefixture.Silent), f.Answer("2", intakefixture.Silent)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 	p.Check(t)
-	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1; %s waits for the answer to question 2", pinOne, one, two)
-	if park := f.transition(t, stream, "shed-round-1-waiting-1"); park.Reason != parked {
+	parked := fmt.Sprintf("round 1 against %s is parked: %s waits for the answer to question 1; %s waits for the answer to question 2", intakefixture.PinOne, one, two)
+	if park := f.Transition(t, stream, "shed-round-1-waiting-1"); park.Reason != parked {
 		t.Fatalf("park: %+v", park)
 	}
 
-	queued := f.awaitTurn(t, stream, one, answerOne)
-	f.awaitQuestion(t, stream, "2", trace.QuestionEscalated)
-	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: f.repository()}).Pass(ctx))
-	if state, err := f.repository().Workflow(stream, shedSubject); err != nil || state.Value != "waiting-1" || !queued.CompletedAt.IsZero() || len(f.roundOperations(t, stream)) != 1 {
+	queued := f.AwaitTurn(t, stream, one, answerOne)
+	f.AwaitQuestion(t, stream, "2", trace.QuestionEscalated)
+	fixturekit.Must(t, (&intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: f.Repository()}).Pass(ctx))
+	if state, err := f.Repository().Workflow(stream, intake.ShedSubject); err != nil || state.Value != "waiting-1" || !queued.CompletedAt.IsZero() || len(f.RoundOperations(t, stream)) != 1 {
 		t.Fatalf("shed with one answer queued: %+v %v", state, err)
 	}
-	if ran := f.ran(); ran[answerOne] != 0 {
+	if ran := f.Ran(); ran[answerOne] != 0 {
 		t.Fatalf("the first answer ran before the second arrived: %v", ran)
 	}
-	f.rule(t, "2")
-	f.awaitShed(t, stream, "concluded-1")
+	f.Rule(t, "2")
+	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1", "round-1", "heard-1", "concluded-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	if ran := f.ran(); ran[answerOne] != 1 || ran[answerTwo] != 1 {
+	if ran := f.Ran(); ran[answerOne] != 1 || ran[answerTwo] != 1 {
 		t.Fatalf("turns ran: %v", ran)
 	}
-	if told := f.transition(t, stream, "shed-round-1-heard"); told.Reason != fmt.Sprintf("round 1 against %s: 2 members heard, 0 objections, 0 concessions, 0 failed turns; 0 objections stand", pinOne) {
+	if told := f.Transition(t, stream, "shed-round-1-heard"); told.Reason != fmt.Sprintf("round 1 against %s: 2 members heard, 0 objections, 0 concessions, 0 failed turns; 0 objections stand", intakefixture.PinOne) {
 		t.Fatalf("heard: %+v", told)
 	}
 	for _, member := range []string{one, two} {
-		if mine := f.record(t, stream, member); !mine.Silent() {
+		if mine := f.Record(t, stream, member); !mine.Silent() {
 			t.Fatalf("record of %s: %+v", member, mine)
 		}
 	}
 }
 
-// Abandoning the workstream while a round is parked leaves it parked: the
-// answer, recorded before the abandonment, is never delivered, no turn runs,
-// and the round neither records nor fails.
 func TestAbandoningAParkedRoundLeavesItParked(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p := &faults{}
-	// Keep the chief's review queued until the round's park is durable.
+	p := &intakefixture.Faults{}
 	var chiefReviewHeld atomic.Bool
 	chiefReviewHeld.Store(true)
-	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
+	f, c := newAskingFixtureWith(t, 1, 1, p, func(opts *journey.Options) {
 		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
 			return op.Action == thread.TurnAction && chiefReviewHeld.Load()
 		}
 	})
-	defer f.stop(t)
-	// Hold automatic delivery while the chief answers, so abandonment comes
-	// before the explicit delivery and debate passes.
-	InspectForTest(f.s).HoldAnswerDelivery()
+	defer f.Stop(t)
+	journey.InspectForTest(f.S).HoldAnswerDelivery()
 	hold := c.Hold("1")
-	member := committeeAgent(1)
-	f.member(1, 1, 1, asks(p, "1"))
-	answering := f.answer("1", silent)
-	stream := f.handIn(t, "design", handedDesign)
-	f.awaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
+	member := intake.CommitteeAgent(1)
+	f.Member(1, 1, 1, intakefixture.Asks(p, "1"))
+	answering := f.Answer("1", intakefixture.Silent)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.AwaitShed(t, stream, "waiting-1", "heard-1", "failed-1")
 
 	chiefReviewHeld.Store(false)
 
-	f.awaitQuestion(t, stream, "1", trace.QuestionAnswered)
-	if _, err := f.c.Abandon(ctx, stream, "Superseded."); err != nil {
+	f.AwaitQuestion(t, stream, "1", trace.QuestionAnswered)
+	if _, err := f.C.Abandon(ctx, stream, "Superseded."); err != nil {
 		t.Fatal(err)
 	}
 	close(hold)
 
-	repo := f.repository()
-	drivePass(t, f.s, repo, func() error {
-		if err := f.s.answers(f.s.current(), repo).Pass(ctx); err != nil {
+	repo := f.Repository()
+	drivePass(t, f.S, repo, func() error {
+		if err := f.S.Answers(f.S.Current(), repo).Pass(ctx); err != nil {
 			return err
 		}
-		return (&debate{S: f.s.intake().DebateDependencies(), Repository: repo}).Pass(ctx)
+		return (&intake.Debate{S: f.S.Intake().DebateDependencies(), Repository: repo}).Pass(ctx)
 	})
-	if moves, want := f.shedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
+	if moves, want := f.ShedMoves(t, stream), []string{"round-1", "waiting-1"}; !slices.Equal(moves, want) {
 		t.Fatalf("shed went %v, want %v", moves, want)
 	}
-	if th := f.thread(t, stream, member); len(th.Turns) != 1 || th.Turns[0].Status() != "waiting" {
+	if th := f.Thread(t, stream, member); len(th.Turns) != 1 || th.Turns[0].Status() != "waiting" {
 		t.Fatalf("asker's thread after the abandonment: %+v", th)
 	}
-	if ran := f.ran(); ran[answering] != 0 {
+	if ran := f.Ran(); ran[answering] != 0 {
 		t.Fatalf("the answer ran: %v", ran)
 	}
-	if records, err := shed.Records(f.repository(), stream); err != nil || len(records) != 0 {
+	if records, err := shed.Records(f.Repository(), stream); err != nil || len(records) != 0 {
 		t.Fatalf("records: %+v %v", records, err)
 	}
-	if feature, err := f.repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != AbandonedState {
+	if feature, err := f.Repository().Workflow(stream, trace.FeatureSubject); err != nil || feature.Value != intake.AbandonedState {
 		t.Fatalf("feature: %+v %v", feature, err)
 	}
-	if q := f.question(t, stream, "1"); q.State != trace.QuestionAnswered {
+	if q := f.Question(t, stream, "1"); q.State != trace.QuestionAnswered {
 		t.Fatalf("question: %+v", q)
 	}
 }

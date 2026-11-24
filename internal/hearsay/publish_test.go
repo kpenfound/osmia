@@ -108,7 +108,6 @@ func TestReconcilePostsEveryRevisionOfAnUnpostedRecordAndTheNewOnesAfterwards(t 
 	if res.Posts != 2 || len(got) != 2 || got[0].wire.Body != "c" || got[1].wire.Body != "d" {
 		t.Fatalf("new revisions: %+v", got)
 	}
-	// A posted digest that is no revision any more leaves only the current one.
 	res = Reconcile(context.Background(), poster, []Record{rec}, map[string]Posted{rec.Ref(): {Digest: "gone"}})
 	if got = e.take(); len(got) != 1 || got[0].wire.Body != "d" || res.Posts != 1 {
 		t.Fatalf("unknown digest: %+v", got)
@@ -121,7 +120,6 @@ func TestReconcileKeepsUpdateTimesIncreasingAndRepostsClearedRecordsIdentically(
 	rec := Record{Source: "work", Key: "k", Versions: []Wire{version("a", "2026-01-02T00:00:00Z")}}
 	res := Reconcile(context.Background(), poster, []Record{rec}, nil)
 	first := e.take()[0].wire
-	// The next revision carries an older evidence time yet is later than the posted one.
 	rec.Versions = []Wire{version("b", "2026-01-01T12:00:00Z")}
 	Reconcile(context.Background(), poster, []Record{rec}, posted(res))
 	second := e.take()[0].wire
@@ -130,7 +128,6 @@ func TestReconcileKeepsUpdateTimesIncreasingAndRepostsClearedRecordsIdentically(
 	if !b.After(a) {
 		t.Fatalf("update times %s then %s", first.UpdatedAt, second.UpdatedAt)
 	}
-	// A cleared digest reposts what was first posted, byte for byte.
 	rec.Versions = []Wire{version("a", "2026-01-02T00:00:00Z")}
 	Reconcile(context.Background(), poster, []Record{rec}, map[string]Posted{rec.Ref(): {UpdatedAt: b}})
 	again := e.take()[0].wire

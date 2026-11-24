@@ -4,11 +4,6 @@ import (
 	"slices"
 )
 
-// maxConsistentReadAttempts bounds Consistent's retries. Each attempt
-// only repeats in-memory assembly over a trace's own generation-cached scan
-// and the runtime store's own cheap snapshot copy, so it is cheap; the
-// bound exists to give up and return the last attempt rather than retry
-// forever under a sustained burst of commits or runtime overrides.
 const maxConsistentReadAttempts = 20
 
 // Consistent runs fn repeatedly until none of sources changes across one
@@ -31,7 +26,6 @@ func Consistent[T any](fn func() (T, error), sources ...func() uint64) (T, error
 	return fn()
 }
 
-// generationsOf reads every source once, in order.
 func generationsOf(sources []func() uint64) []uint64 {
 	out := make([]uint64, len(sources))
 	for i, g := range sources {

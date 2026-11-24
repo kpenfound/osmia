@@ -58,8 +58,7 @@ func (Document) traceRecord() {}
 
 // Transition is one change of a workflow subject's state. DecidedBy,
 // Judgment and DefaultTo record how the transition router chose it (see
-// Routing); a transition no router chose, and every transition written before
-// they existed, has none of them.
+// Routing); a transition no router chose has none of them.
 type Transition struct {
 	Header
 	Subject   string `json:"subject"`
@@ -116,11 +115,10 @@ func (Amendment) traceRecord() {}
 // present, names the workstream each entry of Questions belongs to, letting
 // one consolidated escalation span every member of a shared workgroup a
 // genuine gap affects; when absent, every question belongs to the
-// workstream the escalation is recorded on, as it always did before a
-// workgroup could hold more than one member. Section cites the spec or plan
+// workstream the escalation is recorded on. Section cites the spec or plan
 // passage in tension, and Conflict states the tension itself: together with
-// Options and Recommendation, a worker's escalated question is structured as
-// spec#17 asks.
+// Options and Recommendation, a worker's escalated question is structured
+// with all four.
 type Escalation struct {
 	Batch          string                `json:"batch"`
 	Inbox          int                   `json:"inbox"`
@@ -133,10 +131,6 @@ type Escalation struct {
 	Recommendation string                `json:"recommendation"`
 }
 
-// workstreamOf returns the workstream Escalation.Questions[i] belongs to:
-// Workstreams[i] when recorded, or home, the workstream the escalation was
-// read from, for an escalation recorded before cross-workstream batches
-// existed.
 func (e Escalation) workstreamOf(i int, home config.WorkstreamID) config.WorkstreamID {
 	if i < len(e.Workstreams) && e.Workstreams[i] != "" {
 		return e.Workstreams[i]
@@ -204,9 +198,6 @@ type TurnResponse struct {
 	Failure         string                    `json:"failure,omitempty"`
 	FailureClass    coreadapter.FailureKind   `json:"failure_class,omitempty"`
 	Classification  *TurnClassification       `json:"classification,omitempty"`
-	// ClassifierUsage is the usage of classifier turns, present only on
-	// responses already stored.
-	ClassifierUsage []coreadapter.Usage `json:"classifier_usage,omitempty"`
 	// Advice is the advisory text the service added to the request's prompt
 	// when the turn ran.
 	Advice string `json:"advice,omitempty"`
@@ -253,11 +244,8 @@ var keyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 func key(s string) bool     { return keyPattern.MatchString(s) }
 func present(s string) bool { return strings.TrimSpace(s) != "" }
 
-// validActor accepts "beekeeper" only to keep reading records an earlier
-// version of the service attributed to its now-removed service-wide
-// assistant; nothing in the service writes that kind any more.
 func validActor(a Actor) bool {
-	return (a.Kind == "owner" || a.Kind == "service" || a.Kind == "agent" || a.Kind == "beekeeper") && key(a.ID)
+	return (a.Kind == "owner" || a.Kind == "service" || a.Kind == "agent") && key(a.ID)
 }
 func validUsage(u coreadapter.Usage) bool {
 	return u.Turns >= 0 && u.CostUSD >= 0 && !math.IsNaN(u.CostUSD) && !math.IsInf(u.CostUSD, 0) && (u.CostKnown || u.CostUSD == 0)
@@ -339,20 +327,15 @@ func validate(r Record) error {
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.Profile.Name) && present(v.Profile.Backend) && present(v.Profile.Model) && present(v.Prompt) && v.Profile.Timeout >= 0 && v.Profile.MaxTurns >= 0 && v.Profile.CostLimitUSD >= 0 && !math.IsNaN(v.Profile.CostLimitUSD) && !math.IsInf(v.Profile.CostLimitUSD, 0) && (v.Resume == nil || validSession(*v.Resume))
 	case TurnResponse:
 		valid = key(v.AgentID) && key(v.ThreadID) && key(v.TurnID) && key(v.RequestID) && v.RequestRevision > 0 && !v.Result.StartedAt.IsZero() && v.Result.Duration >= 0 && validUsage(v.Result.Usage) && (validSession(v.Result.Session) || (v.Result.Session == (coreadapter.BackendSession{}) && (present(v.Failure) || v.Stop != nil)))
-		valid = valid && len(v.ClassifierUsage) <= 2
 		valid = valid && (v.FailureClass == "" || v.Failure != "" && (v.FailureClass == coreadapter.Infrastructure || v.FailureClass == coreadapter.Behavioural))
-		valid = valid && (len(v.ClassifierUsage) == 0 || v.Classification != nil)
 		if s := v.Stop; s != nil {
 			valid = valid && (s.Cause == TurnStopHardPause || s.Cause == TurnStopOwner) && present(s.Scope) && present(s.Source) && present(s.Reason) && v.Result.Cancelled && v.Failure == "" && v.Classification == nil
-		}
-		for _, usage := range v.ClassifierUsage {
-			valid = valid && validUsage(usage)
 		}
 		if v.Classification != nil {
 			c := v.Classification
 			valid = valid && v.Failure == "" && v.Result.Outcome == nil && !v.Result.Cancelled && !v.Result.IsError && !v.Result.TimedOut && v.Result.ExitCode == 0 && v.Result.Signal == 0 &&
 				slices.Contains([]string{"asked_in_prose", "claims_done", "gave_up", "unclear"}, c.Class) && present(c.Evidence) && len([]rune(c.Window)) <= 2000 &&
-				slices.Contains([]string{"", ClassifiedByRule, ClassifiedByClassifier, ClassifiedByJev}, c.By) && (c.By == ClassifiedByJev) == (c.Judgment != "") && (c.Judgment == "" || key(c.Judgment))
+				slices.Contains([]string{"", ClassifiedByRule, ClassifiedByJev}, c.By) && (c.By == ClassifiedByJev) == (c.Judgment != "") && (c.Judgment == "" || key(c.Judgment))
 			for _, count := range c.ToolCounts {
 				valid = valid && count >= 0
 			}
@@ -385,8 +368,6 @@ func documentPath(p string, stream bool) error {
 	return fmt.Errorf("unsupported document path %q", p)
 }
 
-// workstreamMovePath reports whether parts name one move of a workstream to
-// another feature state: moves/move-<n>.json.
 func workstreamMovePath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "moves" || !strings.HasPrefix(parts[1], "move-") || !strings.HasSuffix(parts[1], ".json") {
 		return false
@@ -394,18 +375,10 @@ func workstreamMovePath(parts []string) bool {
 	return shedRound.MatchString("round-" + strings.TrimSuffix(strings.TrimPrefix(parts[1], "move-"), ".json"))
 }
 
-// sessionEntryPath reports whether parts name a service entry recorded on a
-// session's thread: session-entries/<id>.json.
 func sessionEntryPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "session-entries" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
-// sessionCheckPath reports whether parts name a session's check run record:
-// session-checks/checks-<run>.json, its captured output,
-// session-checks/checks-<run>-output.txt, or the unfinished evidence of a run
-// that has no result, session-checks/checks-<run>-started.json, mirroring how
-// a workstream's own final check runs are kept under final/ instead of
-// session-checks/.
 func sessionCheckPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "session-checks" {
 		return false
@@ -435,12 +408,6 @@ func amendmentRoundPath(parts []string) bool {
 	return len(parts) == 4 && shedRound.MatchString(parts[2]) && strings.HasSuffix(parts[3], ".json") && key(strings.TrimSuffix(parts[3], ".json"))
 }
 
-// unitPath reports whether parts name a unit record of a workstream,
-// units/<unit>/report.json, review.json, landing.json, rebase.json,
-// change.json, dispatch.json, checks-<n>.json, checks-<n>-selection.json,
-// checks-<n>-output.txt, ruling-<n>.json,
-// mason-ruling-<n>.json, move-<n>.json or chief-<contest>.json, where the
-// unit and the contest are keys.
 func unitPath(parts []string) bool {
 	if len(parts) != 3 || parts[0] != "units" || !key(parts[1]) {
 		return false
@@ -470,17 +437,11 @@ func unitPath(parts []string) bool {
 	return strings.HasPrefix(parts[2], "mason-ruling-") && strings.HasSuffix(parts[2], ".json") && shedRound.MatchString("round-"+n)
 }
 
-// finalPath reports whether parts name a final review record of a
-// workstream, including its rebase, check runs, check reruns, the choice about a push's missing check results, review, the delivery brief
-// recorded for each review (brief-<review>.json), follow-ups, delivery
-// decision, publication, the marking of the pull request ready for review, the
-// owner's own merge into upstream, and a landing's records: the landing itself, its
-// intent and the decision to land that a moved base kept.
 func finalPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "final" {
 		return false
 	}
-	if checkOutputName(parts[1]) || finalCheckAttemptName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
+	if checkOutputName(parts[1]) || finalCheckRerunName(parts[1]) || finalChecksChoiceName(parts[1]) || finalChecksRequestName(parts[1]) {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[1], "checks-"), ".json")
@@ -498,16 +459,6 @@ func checkSelectionName(name string) bool {
 	return strings.HasPrefix(name, "checks-") && strings.HasSuffix(name, "-selection.json") && shedRound.MatchString("round-"+n)
 }
 
-func finalCheckAttemptName(name string) bool {
-	if !strings.HasPrefix(name, "checks-") || !strings.HasSuffix(name, "-started.json") {
-		return false
-	}
-	review, attempt, ok := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(name, "checks-"), "-started.json"), "-attempt-")
-	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+attempt)
-}
-
-// finalCheckRerunName reports whether name is checks-<review>-push-<push>-rerun.json,
-// the record of the one rerun of a push's failed checks.
 func finalCheckRerunName(name string) bool {
 	if !strings.HasPrefix(name, "checks-") || !strings.HasSuffix(name, "-rerun.json") {
 		return false
@@ -516,17 +467,11 @@ func finalCheckRerunName(name string) bool {
 	return ok && shedRound.MatchString("round-"+review) && shedRound.MatchString("round-"+push)
 }
 
-// finalChecksChoiceName reports whether name is checks-push-<push>-choice.json,
-// the record of the choice to keep waiting for a push's check results or to
-// continue without them.
 func finalChecksChoiceName(name string) bool {
 	push, ok := strings.CutSuffix(strings.TrimPrefix(name, "checks-push-"), "-choice.json")
 	return strings.HasPrefix(name, "checks-push-") && ok && shedRound.MatchString("round-"+push)
 }
 
-// finalChecksRequestName reports whether name is
-// checks-push-<push>-request-<n>.json, the record of the n-th rerun of every
-// check of a push the chief of staff asked for.
 func finalChecksRequestName(name string) bool {
 	if !strings.HasPrefix(name, "checks-push-") || !strings.HasSuffix(name, ".json") {
 		return false
@@ -540,9 +485,6 @@ func checkOutputName(name string) bool {
 	return strings.HasPrefix(name, "checks-") && strings.HasSuffix(name, "-output.txt") && shedRound.MatchString("round-"+n)
 }
 
-// driftPath reports whether parts name a drift record of a workstream: its
-// drift rebase record, drift/rebase.json, or a handback of a held drift
-// rebase, drift/handback-<n>.json.
 func driftPath(parts []string) bool {
 	if len(parts) != 2 || parts[0] != "drift" {
 		return false
@@ -553,8 +495,6 @@ func driftPath(parts []string) bool {
 
 var shedRound = regexp.MustCompile(`^round-[1-9][0-9]{0,8}$`)
 
-// shedPath reports whether parts name a shed record of a workstream,
-// shed/round-<n>/<name>.json, where the name is a key such as an agent ID.
 func shedPath(parts []string) bool {
 	return len(parts) == 3 && parts[0] == "shed" && shedRound.MatchString(parts[1]) && strings.HasSuffix(parts[2], ".json") && key(strings.TrimSuffix(parts[2], ".json"))
 }
@@ -616,13 +556,10 @@ func judgmentPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "judgments" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
-// routePath reports whether parts name a route journal record: routes/<id>.json.
 func routePath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "routes" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
-// recoveryPath reports whether parts name a recovery card record:
-// recovery/<id>.json.
 func recoveryPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "recovery" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
@@ -635,9 +572,6 @@ func sealingPath(parts []string) bool {
 	return len(parts) == 2 && parts[0] == "sealing" && strings.HasPrefix(parts[1], "base-") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }
 
-// adaptiveDocumentPath reports whether parts name a discovery, a recorded
-// source, a recorded Dagger Cloud trace output or a chief of staff's
-// follow-up: <folder>/<key>.json.
 func adaptiveDocumentPath(parts []string) bool {
 	return len(parts) == 2 && (parts[0] == "discoveries" || parts[0] == "sources" || parts[0] == "traces" || parts[0] == "follow-ups") && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))
 }

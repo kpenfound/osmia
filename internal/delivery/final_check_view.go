@@ -9,16 +9,14 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// finalChecksView is the directory of the final reader's view that holds the
-// recorded check result.
 const finalChecksView = "final"
 
 // FinalCheckFiles returns the files of the reader's view that carry the
 // review's recorded check result, by their path in the view: the latest
-// final/checks-<k>.json recorded for the reviewed commit, and the output file
-// that record names (OutputPath at OutputRevision), and for a failed Dagger
-// Cloud result the recorded trace output, or the recorded failure, of each of
-// its failed checks that names a trace ID, under final/checks-<k>-traces/. It
+// final/checks-<k>.json recorded for the reviewed commit and, for a failed
+// Dagger Cloud result, the recorded trace output, or the recorded failure, of
+// each of its failed checks that names a trace ID, under
+// final/checks-<k>-traces/. It
 // returns none when no record of the commit exists, as for a review of a
 // delivered workstream.
 func FinalCheckFiles(repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (map[string]string, error) {
@@ -47,14 +45,5 @@ func FinalCheckFiles(repository *trace.Repository, stream config.WorkstreamID, r
 	for name, content := range finalTraceFiles(docs, run) {
 		files[name] = content
 	}
-	if run.OutputPath == "" {
-		return files, nil
-	}
-	for _, d := range slices.Backward(docs) {
-		if d.Path == run.OutputPath && (run.OutputRevision == 0 || d.Revision == run.OutputRevision) {
-			files[d.Path] = d.Content
-			return files, nil
-		}
-	}
-	return nil, fmt.Errorf("%s names the check output %s revision %d, which the trace does not record", record.Path, run.OutputPath, run.OutputRevision)
+	return files, nil
 }

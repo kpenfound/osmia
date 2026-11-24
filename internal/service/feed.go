@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/readview"
@@ -14,8 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// feedList reads member activity, oldest first. Single-member workgroups
-// also include their chief conversation, statuses and turns.
 func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	_, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
@@ -27,12 +26,10 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	}
 	defer closeChief()
 	entries, err := readview.Consistent(func() ([]FeedEntry, error) {
-		out, err := feedEntries(repository, chief, stream)
+		out, err := FeedEntries(repository, chief, stream)
 		if err != nil {
 			return nil, err
 		}
-		// The recovery cards open for the owner are part of the feed, placed
-		// where each was opened.
 		recoveries, err := s.feedRecoveries(repository, stream)
 		if err != nil {
 			return nil, err
@@ -47,13 +44,7 @@ func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
 	return FeedResponse{Workstream: stream, Entries: entries}, nil
 }
 
-// feedEntries merges the workstream's records into one feed ordered by time.
-// Entries recorded at the same time keep the conversation first, then
-// statuses, transitions, sessions, check/review entries, images and delivery
-// briefs. chief is the repository the workstream's chief-of-staff conversation
-// is read from: repository itself, unless stream belongs to a cross-repo
-// workgroup, whose shared thread lives only in that workgroup's own trace.
-func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
+func FeedEntries(repository, chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	group, err := paneWorkgroup(repository, stream)
 	if err != nil {
 		return nil, err
@@ -71,12 +62,10 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 		return nil, err
 	}
 	for _, t := range transitions {
-		// The router's journal is its own bookkeeping, not a state change of the
-		// work.
 		if router.IsJournal(t.Subject) {
 			continue
 		}
-		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
+		out = append(out, FeedEntry{Kind: "transition", At: t.At, Transition: &api.FeedTransition{Subject: t.Subject, Unit: t.Unit, From: t.From, To: t.To, Actor: t.Actor.Kind + ":" + t.Actor.ID, Reason: t.Reason, DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo, Departed: t.Departed()}})
 	}
 	threads, err := repository.Threads(stream)
 	if err != nil {
@@ -112,9 +101,6 @@ func feedEntries(repository, chief *trace.Repository, stream config.WorkstreamID
 	return out, nil
 }
 
-// briefEntries is one feed entry per final review the workstream has a
-// delivery brief for: the latest brief of that review, placed where its first
-// brief was recorded. A screenshot whose image is gone has a placeholder.
 func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
 	briefs, err := delivery.Briefs(repository, stream)
 	if err != nil {
@@ -122,9 +108,9 @@ func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]F
 	}
 	out := make([]FeedEntry, 0, len(briefs))
 	for _, b := range briefs {
-		brief := &FeedBrief{Review: b.Review, ReviewRevision: b.ReviewRevision, Commit: b.Commit, Text: b.Text, BeforeYouShip: b.BeforeYouShip}
+		brief := &api.FeedBrief{Review: b.Review, ReviewRevision: b.ReviewRevision, Commit: b.Commit, Text: b.Text, BeforeYouShip: b.BeforeYouShip}
 		for _, id := range b.Screenshots {
-			image := FeedImage{ID: id}
+			image := api.FeedImage{ID: id}
 			v, err := repository.StoredImage(stream, id)
 			switch {
 			case errors.Is(err, os.ErrNotExist):
@@ -141,9 +127,8 @@ func briefEntries(repository *trace.Repository, stream config.WorkstreamID) ([]F
 	return out, nil
 }
 
-// chiefFeedEntries reads the shared conversation and chief statuses.
 func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID) ([]FeedEntry, error) {
-	conversation, err := conversationEntries(chief, stream)
+	conversation, err := ConversationEntries(chief, stream)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +150,6 @@ func chiefFeedEntries(chief *trace.Repository, stream config.WorkstreamID) ([]Fe
 	return out, nil
 }
 
-// feedSession describes one claimed turn of a thread.
 func feedSession(th trace.Thread, q trace.QueuedTurn) *FeedSession {
 	out := &FeedSession{Agent: th.Identity.ID, Role: th.Identity.Role, Unit: string(q.Request.Unit), Turn: q.Request.TurnID, Profile: q.Request.Profile.Name, StartedAt: q.Claim.At}
 	if n := len(q.Attempts); n > 0 {
@@ -174,8 +158,6 @@ func feedSession(th trace.Thread, q trace.QueuedTurn) *FeedSession {
 	switch q.Status() {
 	case "running", "captured":
 		out.State = "running"
-		// A claim an earlier service session left without a result never
-		// completes.
 		if th.Status == "interrupted" && th.Active == q.Request.TurnID {
 			out.State = "interrupted"
 		}

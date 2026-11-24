@@ -14,8 +14,6 @@ const deliveryEntry = `{"kind":"delivery","project":"p_fake","workstream":"w_000
 	`"quick_reply":"","opened_at":"2026-01-01T00:00:00Z","asked":[],` +
 	`"answer":{"method":"POST","path":"/v1/delivery/w_000","body":{"review":2,"review_revision":3,"commit":"abc123","draft_hash":"hash1"}}}`
 
-// deliveryPresentation is the JSON of a delivery presentation of final
-// review 2 whose brief field is brief, left out when brief is empty.
 func deliveryPresentation(brief string) string {
 	if brief != "" {
 		brief = `,"brief":` + brief
@@ -25,8 +23,6 @@ func deliveryPresentation(brief string) string {
 		`"title":"Add the thing","draft":"The description.\n","draft_hash":"hash1","messages":[],"style":"merge"` + brief + `}`
 }
 
-// newDeliveryBriefPage opens the page on a fake API whose delivery card for
-// w_000 reads presentation, and whose feed for w_000 holds feed.
 func newDeliveryBriefPage(t *testing.T, presentation string, feed ...string) *page {
 	t.Helper()
 	api := newFakeAPI(1)
@@ -47,12 +43,8 @@ func newDeliveryBriefPage(t *testing.T, presentation string, feed ...string) *pa
 	return p
 }
 
-// briefCard is the delivery card's own brief block.
 const briefCard = `[data-decision][data-kind="delivery"] [data-field=brief]`
 
-// A recorded brief shows its text and its screenshots as thumbnails that open
-// the full image, apart from the report, and, with items, a labelled block of
-// them that is always visible.
 func TestBrowserDeliveryCardShowsTheRecordedBrief(t *testing.T) {
 	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"recorded","review":2,"review_revision":3,"commit":"abc123",`+
@@ -88,7 +80,6 @@ func TestBrowserDeliveryCardShowsTheRecordedBrief(t *testing.T) {
 	p.awaitText(`[data-decision][data-kind="delivery"] [data-field=summary]`, "Everything shown.")
 }
 
-// A brief with no items shows no deployment block.
 func TestBrowserDeliveryCardShowsNoBeforeYouShipWithoutItems(t *testing.T) {
 	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"recorded","review":2,"review_revision":3,"commit":"abc123","text":"Text only."}`))
@@ -100,7 +91,6 @@ func TestBrowserDeliveryCardShowsNoBeforeYouShipWithoutItems(t *testing.T) {
 	}
 }
 
-// With no brief recorded for the review, the card says so.
 func TestBrowserDeliveryCardSaysNoBriefWasRecorded(t *testing.T) {
 	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(`{"state":"none_recorded","review":2,"review_revision":3,"commit":"abc123"}`))
@@ -112,7 +102,6 @@ func TestBrowserDeliveryCardSaysNoBriefWasRecorded(t *testing.T) {
 	}
 }
 
-// A presentation without a brief field has no brief block.
 func TestBrowserDeliveryCardWithoutBriefFieldShowsNoBlock(t *testing.T) {
 	t.Parallel()
 	p := newDeliveryBriefPage(t, deliveryPresentation(""))
@@ -124,8 +113,6 @@ func TestBrowserDeliveryCardWithoutBriefFieldShowsNoBlock(t *testing.T) {
 	}
 }
 
-// The brief is its own entry of the workstream's Conversation, with its text, items and
-// screenshots, and the conversation composer stays under it.
 func TestBrowserConversationShowsTheBriefAsItsOwnEntry(t *testing.T) {
 	t.Parallel()
 	brief := `{"kind":"brief","at":"2026-01-01T00:00:05Z","brief":{"review":2,"review_revision":3,"commit":"abc123",` +

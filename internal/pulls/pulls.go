@@ -1,6 +1,6 @@
-// Package pulls finds, opens and updates pull requests for the service. Credentials
-// stay in the service process: callers hold them in a Client and no session
-// receives them.
+// Package pulls finds, opens and updates pull requests for the service.
+// Credentials stay in the service process: callers hold them in a Client and
+// no session receives them.
 package pulls
 
 import (
@@ -87,8 +87,8 @@ func Credentialed(client Client) bool {
 // MaxResponse bounds the API response GitHub reads.
 const MaxResponse = 8 << 20
 
-// GitHub finds, opens and updates pull requests through the GitHub REST API. Token,
-// when set, is sent as a bearer token.
+// GitHub finds, opens and updates pull requests through the GitHub REST API.
+// Token, when set, is sent as a bearer token.
 type GitHub struct {
 	BaseURL string // defaults to https://api.github.com
 	Token   string
@@ -212,15 +212,12 @@ func (g GitHub) Ready(ctx context.Context, repository string, number int) (PullR
 	return updated.pull(), nil
 }
 
-// get reads one pull request's current state over the REST API.
 func (g GitHub) get(ctx context.Context, repository string, number int) (githubPull, error) {
 	var out githubPull
 	err := g.do(ctx, "pulls.get", ghlog.Read, repository, http.MethodGet, fmt.Sprintf("/repos/%s/pulls/%d", repository, number), nil, http.StatusOK, &out)
 	return out, err
 }
 
-// do performs one GitHub REST request and records one ghlog entry for it,
-// whether it succeeds or fails.
 func (g GitHub) do(ctx context.Context, action, access, repository, method, path string, in any, want int, out any) error {
 	start := time.Now()
 	status, err := g.request(ctx, method, path, in, want, out)
@@ -228,8 +225,6 @@ func (g GitHub) do(ctx context.Context, action, access, repository, method, path
 	return err
 }
 
-// doStatusRead is do for reading a commit's statuses: its errors name the
-// status code, the content type and any decode error, and no response text.
 func (g GitHub) doStatusRead(ctx context.Context, action, repository, path string, out any) error {
 	start := time.Now()
 	status, err := g.send(ctx, true, http.MethodGet, path, nil, http.StatusOK, out)
@@ -241,9 +236,6 @@ func (g GitHub) request(ctx context.Context, method, path string, in any, want i
 	return g.send(ctx, false, method, path, in, want, out)
 }
 
-// send performs one request. With diagnostic, every failure of the answer is
-// a ResponseError built from the status code, the response Content-Type and
-// the decode error alone: it carries no text taken from the response body.
 func (g GitHub) send(ctx context.Context, diagnostic bool, method, path string, in any, want int, out any) (status int, err error) {
 	base := g.BaseURL
 	if base == "" {
@@ -300,9 +292,6 @@ func (g GitHub) send(ctx context.Context, diagnostic bool, method, path string, 
 	return status, nil
 }
 
-// diagnosticError describes an answer by its status code and Content-Type, the
-// rate limit and retry headers GitHub sent, what went wrong and the decode
-// error, when there is one. It never names the body or the credential.
 func diagnosticError(resp *http.Response, problem, decode string) *ResponseError {
 	contentType := errorText(resp.Header.Get("Content-Type"))
 	if contentType == "" {
@@ -319,8 +308,6 @@ func diagnosticError(resp *http.Response, problem, decode string) *ResponseError
 	return &ResponseError{Status: resp.StatusCode, Message: text}
 }
 
-// decodeProblem names a JSON decode error without quoting the input: the
-// messages of the decoder can repeat a character or a value of the body.
 func decodeProblem(err error) string {
 	var syntax *json.SyntaxError
 	var typed *json.UnmarshalTypeError
@@ -337,8 +324,6 @@ func decodeProblem(err error) string {
 	return "the JSON does not match the expected form"
 }
 
-// errTransport is a request that got no answer: the connection failed or
-// timed out.
 var errTransport = errors.New("request failed")
 
 // ResponseError is an answer the client could not use: GitHub's status with
@@ -353,17 +338,11 @@ type ResponseError struct {
 
 func (e *ResponseError) Error() string { return e.Message }
 
-// maxErrorBody bounds the error response statusError reads, and
-// maxErrorText each value it keeps from it.
 const (
 	maxErrorBody = 64 << 10
 	maxErrorText = 500
 )
 
-// statusError describes an unexpected answer: its status, GitHub's message
-// and documentation link, the token permissions GitHub says the request
-// needs, and the rate limit when it is exhausted or GitHub asks to retry
-// later.
 func statusError(resp *http.Response) *ResponseError {
 	var body struct {
 		Message          string `json:"message"`
@@ -394,8 +373,6 @@ func statusError(resp *http.Response) *ResponseError {
 	return &ResponseError{Status: resp.StatusCode, Message: text, Details: details}
 }
 
-// rateLimitHints says from the response headers when the rate limit is
-// exhausted or GitHub asks to retry later.
 func rateLimitHints(resp *http.Response) string {
 	var text string
 	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
@@ -410,7 +387,6 @@ func rateLimitHints(resp *http.Response) string {
 	return text
 }
 
-// errorText is one value of an error response, on one line and bounded.
 func errorText(s string) string {
 	s = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

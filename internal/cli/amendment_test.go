@@ -10,21 +10,19 @@ import (
 	"time"
 
 	wire "github.com/kpenfound/osmia/internal/api"
-	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// withAmendment creates a project trace whose building workstream has
-// amendment 1 presented to the owner, as a stopped service left it.
 func withAmendment(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	cmd := exec.Command("git", "init", "--quiet", cfg.Project.Clone)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
@@ -59,51 +57,72 @@ func withAmendment(t *testing.T) service.Options {
 	return opts
 }
 
-func TestAmendmentCommands(t *testing.T) {
+func startAmendment(t *testing.T) string {
+	t.Helper()
 	opts := withAmendment(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+	return opts.Config.Root
+}
 
+func TestAmendmentShowsThePresentedPacket(t *testing.T) {
+	root := startAmendment(t)
 	out := successful(t, root, "amendment", stream, "1")
 	if !strings.HasPrefix(out, "Amendment 1 of "+stream+": presented after round 1\nPacket revision 1:\n") || !strings.Contains(out, "ratify: no objection stands") {
 		t.Fatalf("amendment output %q", out)
 	}
+}
+
+func TestAmendmentJSONShowsThePresentedState(t *testing.T) {
+	root := startAmendment(t)
 	var view wire.AmendmentResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "amendment", stream, "1", "--json")), &view))
 	if view.State != "presented" || view.Revision != 1 || view.Decision != nil {
 		t.Fatalf("amendment --json %+v", view)
 	}
+}
+
+func TestAmendmentRefusesAnUnknownAmendment(t *testing.T) {
+	root := startAmendment(t)
 	code, out, diag := invoke(t, root, "amendment", stream, "2")
 	if code == 0 || out != "" || !strings.Contains(diag, "has no amendment 2") {
 		t.Fatalf("unknown amendment: %d %q %q", code, out, diag)
 	}
+}
 
-	// The decision is on the packet revision the command read.
-	out = successful(t, root, "amendment", stream, "1", "reject", "Keep restarts as they are.")
+func TestAmendmentRejectRecordsTheDecision(t *testing.T) {
+	root := startAmendment(t)
+	out := successful(t, root, "amendment", stream, "1", "reject", "Keep restarts as they are.")
 	if want := "Amendment 1 of " + stream + ": rejected\nthe owner rejected amendment 1 on packet revision 1; the sealed spec and plan stay in force: Keep restarts as they are.\n"; out != want {
 		t.Fatalf("reject output %q, want %q", out, want)
 	}
-	code, out, diag = invoke(t, root, "amendment", stream, "1", "approve")
+}
+
+func TestAmendmentRefusesToApproveARejectedPacket(t *testing.T) {
+	root := startAmendment(t)
+	successful(t, root, "amendment", stream, "1", "reject", "Keep restarts as they are.")
+	code, out, diag := invoke(t, root, "amendment", stream, "1", "approve")
 	if code != 5 || out != "" || !strings.Contains(diag, "already decided: reject") {
 		t.Fatalf("approving a rejected packet: %d %q %q", code, out, diag)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
+}
+
+func TestRejectedAmendmentIsRuledWithItsDecision(t *testing.T) {
+	root := startAmendment(t)
+	successful(t, root, "amendment", stream, "1", "reject", "Keep restarts as they are.")
+	var view wire.AmendmentResponse
+	eventually(t, 10*time.Second, func() (bool, string) {
 		must(t, json.Unmarshal([]byte(successful(t, root, "amendment", stream, "1", "--json")), &view))
-		if view.State == "ruled" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("amendment stayed %s", view.State)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return view.State == "ruled", "amendment stayed " + view.State
+	})
 	if view.Decision == nil || view.Decision.Decision != "reject" || view.Decision.Packet != 1 {
 		t.Fatalf("decided amendment %+v", view)
 	}
+}
 
+func TestAmendmentRefusesInvalidArguments(t *testing.T) {
+	root := startAmendment(t)
 	for _, args := range [][]string{
 		{"amendment"},
 		{"amendment", stream},

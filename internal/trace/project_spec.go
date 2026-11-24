@@ -76,10 +76,6 @@ func SliceFor(spec ProjectSpec, stream config.WorkstreamID) (Slice, bool) {
 	return Slice{}, false
 }
 
-// parseSpecCriterion returns the number a "spec#<n>" citation names, or
-// false for any other form. internal/trace cannot import internal/plan,
-// which already owns this citation form, without an import cycle through
-// internal/kb, so the minimal parse is repeated here.
 func parseSpecCriterion(citation string) (int, bool) {
 	rest, ok := strings.CutPrefix(citation, "spec#")
 	if !ok {
@@ -301,15 +297,12 @@ func RecordedProjectSpecRevision(r *Repository, workgroup config.WorkgroupID, sp
 // ProjectSpecOf returns the recorded project spec of the workgroup stream
 // belongs to, and whether one is recorded for it: false both when stream has
 // no recorded workgroup and when its workgroup has no recorded project
-// spec. r must be the project's own repository. The cross-repo pointer
-// (CrossRepoWorkgroupOf) is checked first: a member of a cross-repo
-// workgroup is also recorded in r's own same-repo workgroups (today's
-// EnsureWorkgroups wraps every non-session workstream into one before it
-// learns of any cross-repo membership), so checking that first would always
-// find that unrelated, spec-less entry and never reach the cross-repo one.
-// When stream carries no cross-repo pointer, the project spec is read from r
-// directly; when it does, it is read from that workgroup's own trace instead,
-// never duplicated into r (charter#2).
+// spec. r must be the project's own repository. When stream carries a
+// cross-repo pointer (CrossRepoWorkgroupOf), the project spec is read from
+// that workgroup's own trace and never duplicated into r; otherwise it is
+// read from r directly. The pointer is checked first because a member of a
+// cross-repo workgroup is also recorded in a one-workstream workgroup of r's
+// own, which holds no spec.
 func (r *Repository) ProjectSpecOf(stream config.WorkstreamID) (ProjectSpec, config.WorkgroupID, bool, error) {
 	id, err := r.CrossRepoWorkgroupOf(stream)
 	if err != nil {
@@ -337,23 +330,10 @@ func (r *Repository) ProjectSpecOf(stream config.WorkstreamID) (ProjectSpec, con
 	return ProjectSpec{}, "", false, nil
 }
 
-// projectSpecOfLocked is ProjectSpecOf's variant for a caller that already
-// holds member's own scoped repository locked (target.mu), with v already
-// loaded for member under that same lock: used by FileAmendment's second,
-// post-lock contractTouch, it must never call Workflow, CrossRepoWorkgroupOf
-// or ProjectSpecOf, since scoped(member) caches and returns that identical,
-// already-locked instance, and a second r.mu.Lock() on it self-deadlocks.
-// The cross-repo pointer is instead read directly from v. When project is
-// itself the cross-repo workgroup's own trace (its project identity already
-// matches the pointer), its approval or draft is read through the existing
-// handle, without re-opening the trace or re-locking the asking member.
 func projectSpecOfLocked(project *Repository, v *workflowView, member config.WorkstreamID, records []Record) (ProjectSpec, config.WorkgroupID, bool, error) {
 	id := config.WorkgroupID(v.states[CrossRepoWorkgroupSubject].Value)
 	if id != "" {
 		if config.ProjectID(project.Project()) == crossRepoProject(id) {
-			// The locked target is the real asking member. The shared
-			// authority is a different scoped handle; use the existing
-			// workgroup instance and never resolve or lock the member again.
 			groups, _, err := Workgroups(project)
 			if err != nil {
 				return ProjectSpec{}, id, false, err
@@ -390,8 +370,6 @@ func projectSpecOfLocked(project *Repository, v *workflowView, member config.Wor
 		var revision WorkgroupRevision
 		var published bool
 		if g.Members[0] == member {
-			// FileAmendment already loaded this member under target.mu.
-			// Read its revision from those records without re-locking it.
 			var docs []Document
 			for _, record := range records {
 				if d, ok := record.(Document); ok && d.Workstream == member {

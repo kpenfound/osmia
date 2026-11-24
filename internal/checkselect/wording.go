@@ -1,6 +1,5 @@
 package checkselect
 
-// The request wording is shared by the service and smartcheck.
 const (
 	process       = "Osmia is choosing which of a project's Dagger checks to run on a change, in three stages. Stage 1, breadth: for each top-level check, could the change affect it or any of its items at all? A no skips the check and everything in it. Stage 2, depth: for each collection kept by stage 1, at which level of its hierarchy should stage 3 judge it? Stage 3, ranking: for each remaining link, could the change alter its result? A yes runs it. Missing an affected check can let a regression through; running an unaffected one only costs time."
 	breadthStage  = "Stage 1 of 3, breadth. Could the change in the state alter the result of the Dagger check `%s`, or of any of its items?"

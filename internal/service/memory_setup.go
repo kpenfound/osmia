@@ -32,8 +32,6 @@ func (s *Service) memorySetup(w http.ResponseWriter, r *http.Request, raw string
 	respond(w, http.StatusOK, out)
 }
 
-// Defaults for the Hearsay pair when [hearsay.publish] or the principal
-// settings do not name one.
 const (
 	defaultWorkSource   = "osmia-work"
 	defaultOwnerSource  = "osmia-work-owner"
@@ -43,12 +41,6 @@ const (
 	defaultOwnerEnv     = "HEARSAY_OWNER_TOKEN"
 )
 
-// buildMemorySetup returns the Hearsay configuration for one project. The
-// work source holds the project's records and the owner source holds what the
-// owner decided; the publisher agent is the only poster on both and an
-// attributor, so the owner source's records can name the owner as author. Only
-// the owner source's documents and decisions ratify. The class agents read
-// acting for the owner and are not posters.
 func buildMemorySetup(cfg *config.Config, repo *trace.Repository) (MemorySetup, error) {
 	id := string(repo.Project())
 	out := MemorySetup{Files: map[string]json.RawMessage{}, WorkSource: defaultWorkSource, OwnerSource: defaultOwnerSource, Publisher: defaultPublisher, Principal: cfg.Hearsay.Principal}
@@ -86,8 +78,6 @@ func buildMemorySetup(cfg *config.Config, repo *trace.Repository) (MemorySetup, 
 	if err := put("sources/osmia.yaml", sources); err != nil {
 		return out, err
 	}
-	// A work source supplies every principal's identity by its id, so none
-	// needs an explicit mapping.
 	principals := []any{
 		map[string]any{"id": out.Principal, "kind": "human", "token_env": ownerEnv, "scopes": grants},
 		map[string]any{"id": out.Publisher, "kind": "agent", "class": "observer", "token_env": publisherEnv, "scopes": grants},
@@ -106,9 +96,6 @@ func buildMemorySetup(cfg *config.Config, repo *trace.Repository) (MemorySetup, 
 	if err := put("scopes/osmia.yaml", scopes); err != nil {
 		return out, err
 	}
-	// Authority follows the source a record arrived on: only the owner
-	// source's documents and decisions ratify, whoever they name as author.
-	// Hand ratification stays with the owner.
 	policies := []any{map[string]any{"scope": out.WorkSource, "ratified_by": map[string]any{"principals": []string{out.Principal}, "sources": []string{out.OwnerSource}, "artifacts": []string{"spec", "decision"}}}}
 	if err := put("authority/osmia.yaml", policies); err != nil {
 		return out, err

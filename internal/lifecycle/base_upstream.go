@@ -101,8 +101,6 @@ func (s *Controller) MoveOntoUpstream(ctx context.Context, cfg *config.Config, r
 	id := fmt.Sprintf("%s-%d", BaseWaitSubject, wait.Version+1)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: BaseObservationDocument, Revision: revision + 1, Project: repository.Project(), Workstream: stream, At: s.Now(), Actor: ownerActor, Cause: id}
 	doc := trace.Document{Header: h, Path: "base-observation.json", Content: string(data)}
-	// The owner's decision releases the park as it was given: a pinned move
-	// the router applies with the base observation it records.
 	x := router.Exit{
 		Repo: repository, Project: repository.Project(), Workstream: stream, Machine: DependencyMachine,
 		Subject: BaseWaitSubject, From: wait.Value, Version: wait.Version, Trigger: TriggerBaseIntegrated, Cause: "owner-base-upstream", HeaderCause: "owner-base-upstream", Actor: ownerActor,

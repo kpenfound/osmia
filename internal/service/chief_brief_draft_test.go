@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// A brief with Before you ship items recorded or replaced after the owner read
-// the presentation changes the draft hash, so an approval carrying the earlier
-// hash is refused with the existing conflict; the brief's other fields reach
-// neither the drafted description nor the delivery commit messages.
 func TestDeliveryBriefItemsChangeTheDraftHashAndRefuseAnEarlierApproval(t *testing.T) {
 	t.Parallel()
 	f, stream, _, report, tool := briefFixture(t)
@@ -55,7 +53,7 @@ func TestDeliveryBriefItemsChangeTheDraftHashAndRefuseAnEarlierApproval(t *testi
 	}
 	refused(second, first.DraftHash)
 	messages, err := json.Marshal(second.Messages)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, text := range []string{mainText, "Set UPLOAD_KEY"} {
 		if strings.Contains(second.Title, text) || strings.Contains(string(messages), text) || strings.Contains(strings.ReplaceAll(second.Draft, "- Set UPLOAD_KEY", ""), text) {
 			t.Fatalf("%q reached the title, body or commit messages", text)

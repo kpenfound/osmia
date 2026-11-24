@@ -9,8 +9,6 @@ import (
 var reportURLs = regexp.MustCompile(`https://[^\s<>"'\x1b]+`)
 var tracePath = regexp.MustCompile(`^/(?:[A-Za-z0-9_-]+/)?traces/[A-Za-z0-9_-]+/?$`)
 
-// cloudTraceURL accepts only the Cloud report's HTTPS trace links. Other
-// report URLs, credentials, queries and fragments are not telemetry links.
 func cloudTraceURL(output string) string {
 	for _, candidate := range reportURLs.FindAllString(output, -1) {
 		candidate = strings.TrimRight(candidate, ").,;")

@@ -11,6 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -25,14 +32,13 @@ const (
 	lateTrace  = "https://dagger.cloud/example/traces/later333"
 )
 
-// Snippets a fake dagger runs for one invocation of `dagger check`.
 const (
 	fakePasses     = "printf 'CHECKS  ✔ 1 passed\\n✔ dag://go/test 1s OK\\n'\n"
 	fakeFails      = "printf 'CHECKS  ✘ 1 failed\\n✘ dag://go/test 1s ERROR\\n    wrong answer\\n'\nexit 3\n"
 	fakeEngineLost = "echo 'Error: the engine session was lost' >&2\nexit 1\n"
-	// fakeHangs outlasts every checks_timeout and says it printed its link.
+
 	fakeHangs = ": > \"$dir/printed\"\nexec sleep 60\n"
-	// fakeHolds waits for the test to release it before it passes.
+
 	fakeHolds = ": > \"$dir/printed\"\nwhile [ ! -f \"$dir/release\" ]; do sleep 0.05; done\n" + fakePasses
 )
 
@@ -44,23 +50,16 @@ func fakeLink(url string, stderr bool) string {
 	return line + "\n"
 }
 
-// fakeDagger is the executable a check run starts instead of the Dagger CLI.
 type fakeDagger struct{ dir string }
 
-// installFakeDagger puts a dagger executable on the search path. Its nth
-// `dagger check` on an engine runs the nth snippet scripted for that engine
-// ("local" when the run names none, "cloud" for the cloud engine, "address"
-// for a runner address), and the
-// last snippet again once they are used up. `dagger list checks` lists one
-// check.
 func installFakeDagger(t *testing.T, scripts map[string][]string) fakeDagger {
 	t.Helper()
 	dir := t.TempDir()
 	for engine, snippets := range scripts {
 		for i, snippet := range snippets {
-			must(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s.%d", engine, i+1)), []byte(snippet), 0600))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s.%d", engine, i+1)), []byte(snippet), 0600))
 		}
-		must(t, os.WriteFile(filepath.Join(dir, engine+".max"), []byte(strconv.Itoa(len(snippets))), 0600))
+		fixturekit.Must(t, os.WriteFile(filepath.Join(dir, engine+".max"), []byte(strconv.Itoa(len(snippets))), 0600))
 	}
 	bin := t.TempDir()
 	script := `#!/bin/sh
@@ -78,7 +77,7 @@ max=$(cat "$dir/$engine.max")
 [ "$n" -le "$max" ] || n=$max
 . "$dir/$engine.$n"
 `
-	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(script), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return fakeDagger{dir: dir}
 }
@@ -87,29 +86,25 @@ func (d fakeDagger) marker(name string) string { return filepath.Join(d.dir, nam
 
 func (d fakeDagger) touch(t *testing.T, name string) {
 	t.Helper()
-	must(t, os.WriteFile(d.marker(name), nil, 0600))
+	fixturekit.Must(t, os.WriteFile(d.marker(name), nil, 0600))
 }
 
 func (d fakeDagger) await(t *testing.T, name string) {
 	t.Helper()
-	soon(t, "the fake dagger to write "+name, func() bool {
+	intakefixture.Soon(t, "the fake dagger to write "+name, func() bool {
 		_, err := os.Stat(d.marker(name))
 		return err == nil
 	})
 }
 
-// localChecks and cloudChecks are the runners the service builds from its
-// configuration, pointed at the fake dagger.
 func localChecks(token string) checkrun.DaggerChecks { return checkrun.DaggerChecks{CloudToken: token} }
 
 func cloudChecks(token string) checkrun.DaggerChecks {
 	return checkrun.DaggerChecks{Engine: "cloud", CloudToken: token}
 }
 
-// linkedChecksService is a started service that runs the checks of one seeded unit
-// by itself once its gate opens. It holds every other operation back.
 type linkedChecksService struct {
-	f       *shedFixture
+	f       *journey.ShedFixture
 	stream  config.WorkstreamID
 	timeout string
 	open    atomic.Bool
@@ -117,17 +112,15 @@ type linkedChecksService struct {
 	running bool
 }
 
-// startLinkedChecksService starts the service over the seeded workstream, with
-// checks as its runner. The gate is closed: nothing runs until allow.
-func startLinkedChecksService(t *testing.T, f *shedFixture, repo *trace.Repository, stream config.WorkstreamID, checks ReviewChecks, timeout string) *linkedChecksService {
+func startLinkedChecksService(t *testing.T, f *journey.ShedFixture, repo *trace.Repository, stream config.WorkstreamID, checker checkrun.ReviewChecks, timeout string) *linkedChecksService {
 	t.Helper()
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	r := &linkedChecksService{f: f, stream: stream, timeout: timeout, ticks: make(chan time.Time, 1)}
-	f.opts.Reconciliation.Ticks = r.ticks
-	f.opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
-		return !r.open.Load() || op.Action != CheckAction
+	f.Opts.Reconciliation.Ticks = r.ticks
+	f.Opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+		return !r.open.Load() || op.Action != service.CheckAction
 	}
-	f.opts.reviewChecks = checks
+	f.Opts.ReviewChecks = checker
 	r.start(t)
 	t.Cleanup(func() {
 		if r.running {
@@ -139,10 +132,10 @@ func startLinkedChecksService(t *testing.T, f *shedFixture, repo *trace.Reposito
 
 func (r *linkedChecksService) start(t *testing.T) {
 	t.Helper()
-	r.f.start(t)
+	r.f.Start(t)
 	r.running = true
 	if r.timeout != "" {
-		cfg := r.f.s.current()
+		cfg := r.f.S.Current()
 		cfg.Project.ChecksTimeout = r.timeout
 		for i := range cfg.Projects {
 			cfg.Projects[i].ChecksTimeout = r.timeout
@@ -150,43 +143,38 @@ func (r *linkedChecksService) start(t *testing.T) {
 	}
 }
 
-// stop stops the service, as when the owner stops it, which ends a run that
-// is still going.
 func (r *linkedChecksService) stop(t *testing.T) {
 	t.Helper()
 	r.running = false
-	r.f.stop(t)
+	r.f.Stop(t)
 }
 
-// allow lets the service run the unit's checks.
 func (r *linkedChecksService) allow() {
 	r.open.Store(true)
 	select {
-	case r.ticks <- r.f.clock.Now():
+	case r.ticks <- r.f.Clock.Now():
 	default:
 	}
 }
 
-func (r *linkedChecksService) repo() *trace.Repository { return r.f.repository() }
+func (r *linkedChecksService) repo() *trace.Repository { return r.f.Repository() }
 
-// awaitRun waits for the service to record the run's result and returns it.
-func (r *linkedChecksService) awaitRun(t *testing.T) UnitCheckRun {
+func (r *linkedChecksService) awaitRun(t *testing.T) execution.UnitCheckRun {
 	t.Helper()
-	soon(t, "the service to record the check run", func() bool {
-		runs, err := checkRuns(r.repo(), r.stream)
-		must(t, err)
+	intakefixture.Soon(t, "the service to record the check run", func() bool {
+		runs, err := execution.CheckRuns(r.repo(), r.stream)
+		fixturekit.Must(t, err)
 		return len(runs) == 1
 	})
 	return onlyRun(t, r.repo(), r.stream)
 }
 
-// revisions returns every revision of the run's start record.
-func (r *linkedChecksService) revisions(t *testing.T) []UnitCheckSelection {
+func (r *linkedChecksService) revisions(t *testing.T) []execution.UnitCheckSelection {
 	t.Helper()
-	var revisions []UnitCheckSelection
-	for _, d := range streamDocuments(t, r.repo(), r.stream, checkSelectionDocument("resume", 1)) {
-		var start UnitCheckSelection
-		must(t, json.Unmarshal([]byte(d.Content), &start))
+	var revisions []execution.UnitCheckSelection
+	for _, d := range intakefixture.StreamDocuments(t, r.repo(), r.stream, execution.CheckSelectionDocument("resume", 1)) {
+		var start execution.UnitCheckSelection
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &start))
 		if d.Revision != len(revisions)+1 {
 			t.Fatalf("start record revision %d after %d revisions", d.Revision, len(revisions))
 		}
@@ -195,7 +183,6 @@ func (r *linkedChecksService) revisions(t *testing.T) []UnitCheckSelection {
 	return revisions
 }
 
-// links lists the trace_url each revision of the start record carries.
 func (r *linkedChecksService) links(t *testing.T) string {
 	t.Helper()
 	var links []string
@@ -207,21 +194,18 @@ func (r *linkedChecksService) links(t *testing.T) string {
 
 func linkList(links ...string) string { return strings.Join(links, ",") }
 
-// awaitLinks waits for the start record's revisions to carry links.
 func (r *linkedChecksService) awaitLinks(t *testing.T, links ...string) {
 	t.Helper()
-	soon(t, "the start record to carry "+linkList(links...), func() bool { return r.links(t) == linkList(links...) })
+	intakefixture.Soon(t, "the start record to carry "+linkList(links...), func() bool { return r.links(t) == linkList(links...) })
 }
 
-// entry is the unit_checks entry of the workstream's feed, read through the
-// running service's feed API.
-func (r *linkedChecksService) entry(t *testing.T) *FeedUnitChecks {
+func (r *linkedChecksService) entry(t *testing.T) *api.FeedUnitChecks {
 	t.Helper()
-	feed, api := r.f.s.feedList(string(r.stream))
-	if api != nil {
-		t.Fatalf("feed: %+v", api)
+	feed, apiErr := r.f.S.FeedList(string(r.stream))
+	if apiErr != nil {
+		t.Fatalf("feed: %+v", apiErr)
 	}
-	var found *FeedUnitChecks
+	var found *api.FeedUnitChecks
 	for _, e := range feed.Entries {
 		if e.Kind == "unit_checks" {
 			if found != nil {
@@ -238,33 +222,28 @@ func (r *linkedChecksService) entry(t *testing.T) *FeedUnitChecks {
 
 func (r *linkedChecksService) feedJSON(t *testing.T) string {
 	t.Helper()
-	feed, api := r.f.s.feedList(string(r.stream))
-	if api != nil {
-		t.Fatalf("feed: %+v", api)
+	feed, apiErr := r.f.S.FeedList(string(r.stream))
+	if apiErr != nil {
+		t.Fatalf("feed: %+v", apiErr)
 	}
 	data, err := json.Marshal(feed)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return string(data)
 }
 
-// newLinkedChecksService seeds a checking unit and starts the service over it.
-func newLinkedChecksService(t *testing.T, key string, checks ReviewChecks, timeout string) *linkedChecksService {
+func newLinkedChecksService(t *testing.T, key string, checker checkrun.ReviewChecks, timeout string) *linkedChecksService {
 	t.Helper()
-	f, stream, repo := newChecksFixture(t, key, checks)
-	return startLinkedChecksService(t, f, repo, stream, checks, timeout)
+	f, stream, repo := newChecksFixture(t, key, checker)
+	return startLinkedChecksService(t, f, repo, stream, checker, timeout)
 }
 
-// newFallbackLinkedChecksService is newLinkedChecksService with check_fallback
-// turned on, so the service builds the cloud engine's runner from its
-// configuration and the token in the environment.
-func newFallbackLinkedChecksService(t *testing.T, key string, local ReviewChecks, timeout string) *linkedChecksService {
+func newFallbackLinkedChecksService(t *testing.T, key string, local checkrun.ReviewChecks, timeout string) *linkedChecksService {
 	t.Helper()
 	t.Setenv("OSMIA_FALLBACK_TEST_TOKEN", cloudToken)
 	f, stream, repo := newFallbackChecksFixture(t, key, fallbackConfig, local, nil)
 	return startLinkedChecksService(t, f, repo, stream, local, timeout)
 }
 
-// serial: the fake dagger prints a trace link and then outlasts checks_timeout.
 func TestServiceUnitChecksThatTimeOutKeepTheLinkTheyPrinted(t *testing.T) {
 	for name, stderr := range map[string]bool{"stderr": true, "stdout": false} {
 		t.Run(name, func(t *testing.T) {
@@ -272,7 +251,7 @@ func TestServiceUnitChecksThatTimeOutKeepTheLinkTheyPrinted(t *testing.T) {
 			r := newLinkedChecksService(t, "trace-timeout-"+name, localChecks(cloudToken), "2s")
 			r.allow()
 			run := r.awaitRun(t)
-			if run.Status != ChecksIncomplete || !strings.Contains(run.Error, "checks_timeout") || run.TraceURL != localTrace {
+			if run.Status != checkrun.ChecksIncomplete || !strings.Contains(run.Error, "checks_timeout") || run.TraceURL != localTrace {
 				t.Fatalf("recorded run %+v", run)
 			}
 			if run.Evidence == nil || len(run.Evidence.Traces) != 1 || run.Evidence.Traces[0].URL != localTrace {
@@ -281,20 +260,19 @@ func TestServiceUnitChecksThatTimeOutKeepTheLinkTheyPrinted(t *testing.T) {
 			if got := r.links(t); got != linkList("", localTrace) {
 				t.Fatalf("start record revisions carry %q", got)
 			}
-			if entry := r.entry(t); entry.State != ChecksIncomplete || entry.TraceURL != localTrace {
+			if entry := r.entry(t); entry.State != checkrun.ChecksIncomplete || entry.TraceURL != localTrace {
 				t.Fatalf("feed entry %+v", entry)
 			}
 		})
 	}
 }
 
-// serial: the link reaches the start record while the run is still going.
 func TestServiceUnitChecksRecordTheLinkWhileTheRunGoesOn(t *testing.T) {
 	fake := installFakeDagger(t, map[string][]string{"local": {fakeLink(localTrace, true) + fakeHolds}})
 	r := newLinkedChecksService(t, "trace-running", localChecks(cloudToken), "")
 	r.allow()
 	r.awaitLinks(t, "", localTrace)
-	if runs, err := checkRuns(r.repo(), r.stream); err != nil || len(runs) != 0 {
+	if runs, err := execution.CheckRuns(r.repo(), r.stream); err != nil || len(runs) != 0 {
 		t.Fatalf("a result was recorded while the run goes on: %+v %v", runs, err)
 	}
 	if entry := r.entry(t); entry.State != "running" || entry.TraceURL != localTrace || entry.FinishedAt != nil {
@@ -302,19 +280,17 @@ func TestServiceUnitChecksRecordTheLinkWhileTheRunGoesOn(t *testing.T) {
 	}
 	fake.touch(t, "release")
 	run := r.awaitRun(t)
-	if run.Status != ChecksPassed || run.TraceURL != localTrace {
+	if run.Status != checkrun.ChecksPassed || run.TraceURL != localTrace {
 		t.Fatalf("recorded run %+v", run)
 	}
 	if got := r.links(t); got != linkList("", localTrace) {
 		t.Fatalf("a link that did not change wrote another revision: %q", got)
 	}
-	if entry := r.entry(t); entry.State != ChecksPassed || entry.TraceURL != localTrace {
+	if entry := r.entry(t); entry.State != checkrun.ChecksPassed || entry.TraceURL != localTrace {
 		t.Fatalf("finished feed entry %+v", entry)
 	}
 }
 
-// serial: the service stops after the link was printed, and the run it left
-// behind starts again; its attempt prints no link.
 func TestServiceStoppedUnitChecksLeaveTheLinkOnTheStartRecord(t *testing.T) {
 	fake := installFakeDagger(t, map[string][]string{"local": {
 		fakeLink(localTrace, true) + fakeHangs,
@@ -325,11 +301,9 @@ func TestServiceStoppedUnitChecksLeaveTheLinkOnTheStartRecord(t *testing.T) {
 	fake.await(t, "printed")
 	r.stop(t)
 
-	// The gate is closed again after the restart, so the stopped run is
-	// still unfinished when the feed is read.
 	r.open.Store(false)
 	r.start(t)
-	if runs, err := checkRuns(r.repo(), r.stream); err != nil || len(runs) != 0 {
+	if runs, err := execution.CheckRuns(r.repo(), r.stream); err != nil || len(runs) != 0 {
 		t.Fatalf("a stopped run was recorded: %+v %v", runs, err)
 	}
 	revisions := r.revisions(t)
@@ -340,32 +314,29 @@ func TestServiceStoppedUnitChecksLeaveTheLinkOnTheStartRecord(t *testing.T) {
 		t.Fatalf("feed entry of the stopped run %+v", entry)
 	}
 
-	// The run starts again: it restores its start evidence from the latest
-	// revision, and its attempt that prints no link keeps the first one.
 	r.allow()
 	run := r.awaitRun(t)
-	if run.Status != ChecksPassed || run.TraceURL != localTrace || run.Selection == nil || !run.StartedAt.Equal(revisions[0].StartedAt) {
+	if run.Status != checkrun.ChecksPassed || run.TraceURL != localTrace || run.Selection == nil || !run.StartedAt.Equal(revisions[0].StartedAt) {
 		t.Fatalf("the run after the restart %+v", run)
 	}
 	if got := r.links(t); got != linkList("", localTrace) {
 		t.Fatalf("start record revisions after the restart carry %q", got)
 	}
-	if entry := r.entry(t); entry.State != ChecksPassed || entry.TraceURL != localTrace {
+	if entry := r.entry(t); entry.State != checkrun.ChecksPassed || entry.TraceURL != localTrace {
 		t.Fatalf("feed entry after the restart %+v", entry)
 	}
 }
 
-// serial: a failed run's rerun prints no link, or prints another.
 func TestServiceFailedUnitChecksKeepTheLatestLinkThatWasPrinted(t *testing.T) {
 	t.Run("a rerun that prints no link", func(t *testing.T) {
 		installFakeDagger(t, map[string][]string{"local": {fakeLink(localTrace, false) + fakeFails, fakeFails}})
 		r := newLinkedChecksService(t, "trace-failed", localChecks(cloudToken), "")
 		r.allow()
 		run := r.awaitRun(t)
-		if run.Status != ChecksFailed || run.TraceURL != localTrace || len(run.Failed) != 1 {
+		if run.Status != checkrun.ChecksFailed || run.TraceURL != localTrace || len(run.Failed) != 1 {
 			t.Fatalf("recorded run %+v", run)
 		}
-		if entry := r.entry(t); entry.State != ChecksFailed || entry.TraceURL != localTrace {
+		if entry := r.entry(t); entry.State != checkrun.ChecksFailed || entry.TraceURL != localTrace {
 			t.Fatalf("feed entry %+v", entry)
 		}
 	})
@@ -374,7 +345,7 @@ func TestServiceFailedUnitChecksKeepTheLatestLinkThatWasPrinted(t *testing.T) {
 		r := newLinkedChecksService(t, "trace-failed-later", localChecks(cloudToken), "")
 		r.allow()
 		run := r.awaitRun(t)
-		if run.Status != ChecksFailed || run.TraceURL != lateTrace {
+		if run.Status != checkrun.ChecksFailed || run.TraceURL != lateTrace {
 			t.Fatalf("recorded run %+v", run)
 		}
 		if got := r.links(t); got != linkList("", localTrace, lateTrace) {
@@ -386,21 +357,19 @@ func TestServiceFailedUnitChecksKeepTheLatestLinkThatWasPrinted(t *testing.T) {
 	})
 }
 
-// serial: a passed run shows its link.
 func TestServicePassedUnitChecksCarryTheirLink(t *testing.T) {
 	installFakeDagger(t, map[string][]string{"local": {fakeLink(localTrace, true) + fakePasses}})
 	r := newLinkedChecksService(t, "trace-passed", localChecks(cloudToken), "")
 	r.allow()
 	run := r.awaitRun(t)
-	if run.Status != ChecksPassed || run.TraceURL != localTrace {
+	if run.Status != checkrun.ChecksPassed || run.TraceURL != localTrace {
 		t.Fatalf("recorded run %+v", run)
 	}
-	if entry := r.entry(t); entry.State != ChecksPassed || entry.TraceURL != localTrace {
+	if entry := r.entry(t); entry.State != checkrun.ChecksPassed || entry.TraceURL != localTrace {
 		t.Fatalf("feed entry %+v", entry)
 	}
 }
 
-// serial: the engine is the default, a runner address and the cloud engine.
 func TestServiceUnitChecksCarryTheirLinkInEveryEngineMode(t *testing.T) {
 	for name, tc := range map[string]struct {
 		checks checkrun.DaggerChecks
@@ -415,7 +384,7 @@ func TestServiceUnitChecksCarryTheirLinkInEveryEngineMode(t *testing.T) {
 			installFakeDagger(t, map[string][]string{tc.engine: {fakeLink(localTrace, true) + fakePasses}})
 			r := newLinkedChecksService(t, "trace-engine", tc.checks, "")
 			r.allow()
-			if run := r.awaitRun(t); run.Status != ChecksPassed || run.TraceURL != localTrace {
+			if run := r.awaitRun(t); run.Status != checkrun.ChecksPassed || run.TraceURL != localTrace {
 				t.Fatalf("recorded run %+v", run)
 			}
 			if entry := r.entry(t); entry.TraceURL != localTrace {
@@ -425,7 +394,6 @@ func TestServiceUnitChecksCarryTheirLinkInEveryEngineMode(t *testing.T) {
 	}
 }
 
-// serial: the cloud engine's attempt follows a local engine failure.
 func TestServiceUnitChecksLinkToTheCloudRunAfterTheFallback(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cloud   string
@@ -434,9 +402,9 @@ func TestServiceUnitChecksLinkToTheCloudRunAfterTheFallback(t *testing.T) {
 		want    string
 		links   string
 	}{
-		"cloud passes":      {fakeLink(cloudTrace, false) + fakePasses, "", ChecksPassed, cloudTrace, linkList("", localTrace, cloudTrace)},
-		"cloud times out":   {fakeLink(cloudTrace, false) + fakeHangs, "2s", ChecksIncomplete, cloudTrace, linkList("", localTrace, cloudTrace)},
-		"cloud prints none": {fakePasses, "", ChecksPassed, localTrace, linkList("", localTrace)},
+		"cloud passes":      {fakeLink(cloudTrace, false) + fakePasses, "", checkrun.ChecksPassed, cloudTrace, linkList("", localTrace, cloudTrace)},
+		"cloud times out":   {fakeLink(cloudTrace, false) + fakeHangs, "2s", checkrun.ChecksIncomplete, cloudTrace, linkList("", localTrace, cloudTrace)},
+		"cloud prints none": {fakePasses, "", checkrun.ChecksPassed, localTrace, linkList("", localTrace)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			installFakeDagger(t, map[string][]string{
@@ -459,13 +427,12 @@ func TestServiceUnitChecksLinkToTheCloudRunAfterTheFallback(t *testing.T) {
 	}
 }
 
-// serial: without a token the fake dagger's setup prompt is no trace link.
 func TestServiceUnitChecksWithoutATokenRecordNoLink(t *testing.T) {
 	installFakeDagger(t, map[string][]string{"local": {"echo 'Visit https://dagger.cloud/example/traces/prompt999 to set up' >&2\n" + fakePasses}})
 	r := newLinkedChecksService(t, "trace-no-token", localChecks(""), "")
 	r.allow()
 	run := r.awaitRun(t)
-	if run.Status != ChecksPassed || run.TraceURL != "" || (run.Evidence != nil && len(run.Evidence.Traces) > 0) {
+	if run.Status != checkrun.ChecksPassed || run.TraceURL != "" || (run.Evidence != nil && len(run.Evidence.Traces) > 0) {
 		t.Fatalf("recorded run %+v", run)
 	}
 	if got := r.links(t); got != "" {
@@ -475,7 +442,7 @@ func TestServiceUnitChecksWithoutATokenRecordNoLink(t *testing.T) {
 		t.Fatalf("the feed shows a link or a note: %s", feed)
 	}
 	docs, err := trace.Read[trace.Document](r.repo(), r.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
 		if (strings.HasSuffix(d.Path, "-selection.json") || strings.HasSuffix(d.Path, "checks-1.json")) && strings.Contains(d.Content, "trace_url") {
 			t.Fatalf("%s carries a trace_url: %s", d.Path, d.Content)

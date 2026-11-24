@@ -8,9 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// The newest workstream creation time covers every kind of workstream, is
-// absent for a project without one, and is read from the manifests without
-// decoding any stored record.
 func TestNewestWorkstreamCreated(t *testing.T) {
 	ctx := context.Background()
 	root, p := fixture(t)

@@ -11,24 +11,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The bounds of the summary Jev reads. The request as a whole stays under
-// jev.MaxDecisionBytes; the summary gives way first.
 const (
-	// maxEntryText bounds one record's text in the summary.
-	maxEntryText = 4 << 10
-	// maxHistory is how many of the subject's latest transitions the summary
-	// shows.
-	maxHistory = 10
-	// maxReason bounds a history entry's reason.
-	maxReason = 300
-	// requestMargin is the room the summary leaves in the request for the
-	// framing the questions and options add.
+	maxEntryText  = 4 << 10
+	maxHistory    = 10
+	maxReason     = 300
 	requestMargin = 8 << 10
 )
 
-// summary is the structured state Jev reads for one exit. Everything in it is
-// a record's own text or a word, count or duration computed by code; none of
-// it is code.
 type summary struct {
 	Task           string          `json:"task"`
 	Table          string          `json:"table"`
@@ -49,9 +38,7 @@ type summary struct {
 type summaryTarget struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	// Bar is the probability the target needs for a departure: "default" for
-	// the default itself, "modest" or "strict".
-	Bar string `json:"bar"`
+	Bar         string `json:"bar"`
 }
 
 type historyEntry struct {
@@ -64,8 +51,6 @@ type historyEntry struct {
 
 var fence = regexp.MustCompile("(?s)```.*?(```|$)")
 
-// plain returns text without fenced code, capped at limit bytes at a rune
-// boundary.
 func plain(text string, limit int) string {
 	text = strings.TrimSpace(fence.ReplaceAllString(text, "[code omitted]"))
 	if len(text) <= limit {
@@ -85,9 +70,6 @@ func minutes(from, to time.Time) int {
 	return int(to.Sub(from) / time.Minute)
 }
 
-// buildSummary builds the summary of the exit for the legal targets. now is the
-// time the minutes are measured to; transitions are the workstream's, read
-// from the trace.
 func buildSummary(x Exit, legal []Target, transitions []trace.Transition, now time.Time) summary {
 	s := summary{Task: jev.TransitionTask, Table: TableVersion, Trigger: x.Trigger, Machine: x.Machine, Subject: x.Subject, State: x.From, Default: x.Default,
 		Intent: plain(x.Evidence.Intent, maxEntryText)}
@@ -134,8 +116,6 @@ func buildSummary(x Exit, legal []Target, transitions []trace.Transition, now ti
 	return s
 }
 
-// fit trims the summary until its JSON is within limit bytes: older history
-// first, then the evidence, longest text first. It reports the JSON.
 func (s *summary) fit(limit int) ([]byte, error) {
 	for {
 		data, err := json.Marshal(s)
@@ -164,9 +144,6 @@ func (s *summary) fit(limit int) ([]byte, error) {
 	}
 }
 
-// summaryBudget is how many bytes of summary fit in a request whose options
-// are given: the options appear in the summary's target list and in both pick
-// questions.
 func summaryBudget(options []jev.TransitionOption) int {
 	used := requestMargin
 	for _, o := range options {

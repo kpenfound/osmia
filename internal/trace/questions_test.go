@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// askerThread creates a thread of the role with one claimed turn and returns
-// the scope of that turn.
 func askerThread(t *testing.T, r *Repository, agent, role, turn string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -30,8 +28,6 @@ func askerThread(t *testing.T, r *Repository, agent, role, turn string) coreadap
 	return coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Unit: "unit1", Thread: agent + "_thread", Turn: turn, Role: role}
 }
 
-// failure checks that err is an ordinary error, not a refusal written for the
-// agent, and that it says part.
 func failure(t *testing.T, err error, part string) {
 	t.Helper()
 	var refused *QuestionRefused
@@ -65,8 +61,6 @@ func questionStates(t *testing.T, r *Repository) map[string]QuestionState {
 	return out
 }
 
-// committed checks that the trace's head commit holds the question file as
-// it is on disk.
 func committed(t *testing.T, r *Repository, name string) {
 	t.Helper()
 	s := mustScoped(t, r, streamID)
@@ -91,8 +85,6 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	if got := refusal(t, second(r.Ask(ctx, "mason1", mason, " \n", at))); !strings.Contains(got, "question is required") {
 		t.Fatalf("empty question: %s", got)
 	}
-	// A publication that fails before the ref moves leaves neither the
-	// question nor its event.
 	s.failPublication = func(step string) error {
 		if step == boundaryBeforeCommit {
 			return errors.New("injected")
@@ -153,7 +145,6 @@ func TestAskRecordsTheQuestionAndOneEventTogether(t *testing.T) {
 	if err != nil || next.ID != "2" {
 		t.Fatalf("second question: %+v %v", next, err)
 	}
-	// A turn that is not this session's active claim cannot ask.
 	stale := mason
 	stale.Turn = "other"
 	failure(t, second(r.Ask(ctx, "mason1", stale, "Which store?", asked)), "turn scope denied")
@@ -177,7 +168,6 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	mason := coreadapter.Scope{Project: string(projectID), Workstream: string(streamID), Unit: "unit1", Thread: "mason1_thread", Turn: "build_mason1", Role: "mason"}
 	when := at.Add(time.Hour)
 
-	// Only the chief of staff chooses, and an answer needs text and a citation.
 	failure(t, second(r.AnswerQuestion(ctx, "mason1", mason, "1", "Use the file store.", []string{"charter#1"}, when)), "only a chief-of-staff turn may choose what happens to a question")
 	failure(t, second(r.EscalateQuestions(ctx, "mason1", mason, EscalationRequest{Questions: []string{"1"}, Rephrasing: "r", Blocked: "b", Recommendation: "c"}, when)), "only a chief-of-staff turn may choose what happens to a question")
 	stale := chief
@@ -218,7 +208,6 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 		t.Fatalf("escalation of an answered question: %s", got)
 	}
 
-	// A batch escalates together or not at all.
 	request := EscalationRequest{Questions: []string{"2", "3"}, Rephrasing: "Should uploads resume after a restart?", Blocked: "The upload unit and its review.", Options: []string{"Resume", "Restart"}, Recommendation: "Resume."}
 	for reason, change := range map[string]func(*EscalationRequest){
 		"questions is required: list at least one open question":           func(e *EscalationRequest) { e.Questions = nil },
@@ -277,7 +266,6 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 		if q := s["4"]; q.State != QuestionEscalated || q.Latest.Escalation.Batch != "escalation_4" || q.Latest.Escalation.Inbox != 2 || len(q.Latest.Escalation.Options) != 0 {
 			t.Fatalf("single escalation: %+v", q)
 		}
-		// An escalated question stays open until it is ruled on.
 		if got := statusOf(t, r).OpenQuestions; got != 3 {
 			t.Fatalf("open questions: %d", got)
 		}
@@ -294,9 +282,6 @@ func TestChiefOfStaffChoosesOnceForEachQuestion(t *testing.T) {
 	check(reopened)
 }
 
-// An open question whose number already names a ruling record, such as an
-// imported one, cannot be answered: a second first revision would damage the
-// ruling's history.
 func TestAnswerRefusesToOverwriteARuling(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)

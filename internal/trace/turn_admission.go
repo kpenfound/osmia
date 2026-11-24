@@ -24,7 +24,6 @@ func WithTurnAdmission(ctx context.Context, stream config.WorkstreamID, subject,
 	return context.WithValue(ctx, turnAdmissionKey{}, turnAdmission{stream, subject, state})
 }
 
-// admitTurn requires r.mu and the workflow view loaded under that lock.
 func admitTurn(ctx context.Context, stream config.WorkstreamID, view *workflowView) error {
 	condition, ok := ctx.Value(turnAdmissionKey{}).(turnAdmission)
 	if !ok || condition.stream != stream {

@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// manual is a clock that moves only when the test moves it.
 type manual struct {
 	mu  sync.Mutex
 	now time.Time
@@ -36,7 +35,6 @@ func (c *manual) Advance(d time.Duration) time.Time {
 	return c.now
 }
 
-// rig sends slot spans to an in-memory exporter.
 type rig struct {
 	t        *testing.T
 	exporter *tracetest.InMemoryExporter
@@ -54,13 +52,10 @@ func newRig(t *testing.T) *rig {
 	return &rig{t: t, exporter: exporter, sink: sink, clock: &manual{now: start}, ledger: filepath.Join(t.TempDir(), "slot-intervals.json")}
 }
 
-// recorder starts a recorder, as a service run does: the ledger holds what an
-// earlier recorder left open.
 func (r *rig) recorder() *slotspans.Recorder {
 	return slotspans.New(r.sink, slotspans.Options{Ledger: r.ledger, Now: r.clock.Now})
 }
 
-// spans returns the slot spans sent so far of the given name.
 func (r *rig) spans(name string) []tracetest.SpanStub {
 	r.t.Helper()
 	must(r.t, r.sink.Flush(context.Background()))
@@ -81,7 +76,6 @@ func attrs(s tracetest.SpanStub) map[string]string {
 	return out
 }
 
-// finish completes the turn the way a runner does.
 func finish(t *testing.T, repo *trace.Repository, ws config.WorkstreamID, agent, turn string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -124,7 +118,6 @@ func TestScheduledTurnHoldsOneSlotSpanFromDispatchToWhereThePoolStopsCounting(t 
 	if got := r.spans("osmia.slot.held"); len(got) != 0 {
 		t.Fatalf("held spans while the slots are held: %d", len(got))
 	}
-	// The turns complete, but the pool counts them until the project's next pass.
 	r.clock.Advance(10 * time.Second)
 	finish(t, repo, stream, "mason1", "one", r.clock.Now())
 	finish(t, repo, stream, "reviewer1", "one", r.clock.Now())
@@ -184,18 +177,18 @@ func TestWaitSpanStartsAtTheFirstRefusalAndKeepsItsIdentityAcrossARestart(t *tes
 	}
 	rec := r.recorder()
 	f.queue(t, repo, "mason1", "one")
-	pass(rec) // mason1 takes the only slot
+	pass(rec)
 	paused = true
 	r.clock.Advance(time.Minute)
 	f.queue(t, repo, "mason2", "one")
-	pass(rec) // queued under a pause: no capacity wait
+	pass(rec)
 	if open := rec.Find(slotspans.Wait, slotspans.SourceTurn, nil); len(open) != 0 {
 		t.Fatalf("a wait opened under a pause: %+v", open)
 	}
 	r.clock.Advance(30 * time.Second)
 	paused = false
 	refusedAt := r.clock.Now()
-	pass(rec) // released from the pause and refused by capacity
+	pass(rec)
 	open := rec.Find(slotspans.Wait, slotspans.SourceTurn, nil)
 	if len(open) != 1 {
 		t.Fatalf("open waits after the first refusal: %+v", open)
@@ -206,7 +199,6 @@ func TestWaitSpanStartsAtTheFirstRefusalAndKeepsItsIdentityAcrossARestart(t *tes
 		t.Fatalf("a wait span before the wait ended: %d", len(got))
 	}
 
-	// The service restarts while the turn waits.
 	rec.Close()
 	r.clock.Advance(20 * time.Second)
 	rec = r.recorder()
@@ -216,7 +208,6 @@ func TestWaitSpanStartsAtTheFirstRefusalAndKeepsItsIdentityAcrossARestart(t *tes
 		t.Fatalf("the wait after the restart: %+v, want the one that began at the first refusal", again)
 	}
 
-	// The mason finishes; the next pass hands its slot to the waiting turn.
 	r.clock.Advance(5 * time.Second)
 	finish(t, repo, stream, "mason1", "one", r.clock.Now())
 	r.clock.Advance(time.Second)
@@ -261,7 +252,6 @@ func TestWaitSpanEndsWhenTheTurnIsCanceledBlockedOrItsProjectLeaves(t *testing.T
 	if open := pool.Spans.Find(slotspans.Wait, slotspans.SourceTurn, nil); len(open) != 3 {
 		t.Fatalf("open waits %d, want three", len(open))
 	}
-	// One waiting turn is canceled, one becomes blocked, one outlives the project.
 	r.clock.Advance(10 * time.Second)
 	canceledAt := r.clock.Now()
 	n, err := repo.CancelQueuedTurn(ctx, stream, "mason2", "one", canceledAt, owner, "no longer needed")
@@ -310,7 +300,6 @@ func TestSlotHeldAcrossARestartIsSentOnceWithItsOriginalStart(t *testing.T) {
 	id := held[0].SpanID()
 	rec.Close()
 
-	// The restart finds the turn still in flight and the limit raised.
 	r.clock.Advance(time.Minute)
 	rec = r.recorder()
 	defer rec.Close()
@@ -357,7 +346,6 @@ func TestWorkflowReservationIsHeldFromAdmissionAndItsRunnerTurnIsNotCountedTwice
 		t.Cleanup(func() { repo.Close() })
 		f.thread(t, repo, stream, "committee1", "committee")
 		must(t, pool.Join(repo))
-		// Like the service's gate, a workflow runner's turns are never offered a slot.
 		runner := func(c Candidate) (bool, error) { return c.Thread.Identity.ID == "final-reader", nil }
 		s, err := New(repo, Options{Now: r.clock.Now, Capacity: limits, Shared: pool, Holds: runner})
 		must(t, err)
@@ -370,12 +358,10 @@ func TestWorkflowReservationIsHeldFromAdmissionAndItsRunnerTurnIsNotCountedTwice
 	if !admitted {
 		t.Fatal("the free committee slot was refused")
 	}
-	// The competing project's committee turn is refused by the reservation.
 	r.clock.Advance(5 * time.Second)
 	refusedAt := r.clock.Now()
 	fixtures[1].queue(t, repos[1], "committee1", "one")
 	must(t, schedulers[1].Pass(ctx))
-	// The runner claims its turn late; the slot is still held once.
 	r.clock.Advance(10 * time.Second)
 	fixtures[0].queue(t, repos[0], "final-reader", "one")
 	must(t, schedulers[0].Pass(ctx))
@@ -453,8 +439,6 @@ func TestRefusedReservationWaitsUntilItIsAdmittedOrAbandoned(t *testing.T) {
 		t.Fatalf("attributes %v", attrs(waits[0]))
 	}
 
-	// A reservation that is refused and never asked for again is abandoned at
-	// its last refusal.
 	if _, admitted, _ := pool.TryReserve(repo, stream, "committee", "late", limits); admitted {
 		t.Fatal("admitted past the limit")
 	}

@@ -45,9 +45,6 @@ func (b *BaseRefresher) ObserveDraftPullRequests(ctx context.Context) error {
 	return nil
 }
 
-// draftPollDue reports whether stream is assembled with a pull request of a
-// recorded push whose lookup is due. It forgets the cadence of a workstream
-// that needs no lookup.
 func (b *BaseRefresher) draftPollDue(stream config.WorkstreamID) (bool, error) {
 	project := b.Repository.Project()
 	if attempt, checked := b.S.Polls.Last(project, stream, DraftPoll); checked && b.S.Now().Sub(attempt.At) < b.S.About(b.Repository).Project.PullRequestPollInterval() {
@@ -72,8 +69,6 @@ func (b *BaseRefresher) observeDraftPullRequest(ctx context.Context, client pull
 	if due, err := b.draftPollDue(stream); err != nil || !due {
 		return err
 	}
-	// An approval whose application is still to run marks the pull request
-	// ready itself and records the delivery with the approval.
 	if publication, err := b.Repository.Workflow(stream, publicationSubject); err != nil {
 		return err
 	} else if strings.HasPrefix(publication.Value, "requested-") {

@@ -7,7 +7,6 @@ import (
 
 const recoveryOccurrence = "unit-index@4/unit.stalled/stalled-20260101T000000Z"
 
-// recoveryMoveJSON is the move a recovery card pins, as the service sends it.
 func recoveryMoveJSON(origin string) string {
 	return fmt.Sprintf(`{"occurrence":%q,"machine":"unit","subject":"unit-index","unit":"index","from":"checking","version":4,"target":"checking","origin":%q,"reason":"unit index has made no progress and neither Jev nor the chief of staff cleared the stall within a further 45 minutes, so starting checking again is yours to approve"}`, recoveryOccurrence, origin)
 }
@@ -17,8 +16,6 @@ func recoveryEntry() string {
 	return `{"kind":"recovery","project":"p_fake","workstream":"w_000","unit":"index","options":["approve"],"asked":[],"question":"Approve this recovery move: unit index goes from checking (version 4) to checking.","blocked":"Unit index.","recovery":` + recoveryMoveJSON("stall") + `,"answer":{"method":"POST","path":"/v1/recovery/w_000","body":` + body + `}}`
 }
 
-// The recovery card shows the exact move it pins, has one button, and sends
-// the pinned move unchanged when it is clicked.
 func TestBrowserRecoveryCardShowsAndSendsThePinnedMove(t *testing.T) {
 	t.Parallel()
 	f := newDecisionButtonFixture(t, recoveryEntry())
@@ -37,8 +34,6 @@ func TestBrowserRecoveryCardShowsAndSendsThePinnedMove(t *testing.T) {
 	assertDecisionRequest(t, f, "/v1/recovery/w_000", map[string]any{"occurrence": recoveryOccurrence, "subject": "unit-index", "unit": "index", "from": "checking", "version": float64(4), "target": "checking"})
 }
 
-// Two recovery cards of one workstream are two cards, told apart by the move
-// they pin, and each is answered on its own.
 func TestBrowserRecoveryCardsOfOneWorkstreamStayApart(t *testing.T) {
 	t.Parallel()
 	other := `{"kind":"recovery","project":"p_fake","workstream":"w_000","unit":"","options":["approve"],"asked":[],"question":"Approve this recovery move: workstream w_000 goes from assembled (version 7) to assembled.","recovery":{"occurrence":"feature@7/ws.stalled/stalled-1","machine":"ws","subject":"feature","from":"assembled","version":7,"target":"assembled","origin":"stall","reason":"the workstream has made no progress"},"answer":{"method":"POST","path":"/v1/recovery/w_000","body":{"occurrence":"feature@7/ws.stalled/stalled-1","subject":"feature","from":"assembled","version":7,"target":"assembled"}}}`
@@ -46,9 +41,6 @@ func TestBrowserRecoveryCardsOfOneWorkstreamStayApart(t *testing.T) {
 	f.p.await("two recovery cards", `document.querySelectorAll('[data-decision][data-kind=recovery]').length === 2`)
 }
 
-// A recovery card in the feed is a quiet line in Activity, identified by the
-// card's move and not by how far the card has progressed: the entry keeps its
-// name when the card goes from open to approved.
 func TestBrowserActivityShowsARecoveryCardAndKeepsItsIdentity(t *testing.T) {
 	entry := func(state string) string {
 		return `{"kind":"recovery","at":"2026-01-01T00:00:01Z","recovery":{"occurrence":"` + recoveryOccurrence + `","machine":"unit","subject":"unit-index","unit":"index","from":"checking","version":4,"target":"checking","origin":"stall","reason":"no progress","state":"` + state + `"}}`

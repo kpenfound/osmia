@@ -13,9 +13,6 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// answers wraps the fake API with the routes these tests control: the
-// abandon endpoint, whose request bodies it records, and the feed, which it
-// can make fail.
 type answers struct {
 	mu        sync.Mutex
 	abandoned []string
@@ -59,25 +56,30 @@ func openViewsPage(t *testing.T, workstreams int, width, height int64, failFeed 
 	return p, api, a
 }
 
-// Abandoning opens a dialog in the page. It names the consequence, asks for a
-// reason, confirms with the danger button and cancels with a quiet one, closes
-// on Escape and hands focus back to the control that opened it. The page
-// never asks the browser to confirm and never jumps to Documents.
-func TestBrowserAbandonOpensADialogTheKeyboardOperates(t *testing.T) {
-	t.Parallel()
+type abandonDialog struct {
+	p *page
+	a *answers
+}
+
+func openAbandonDialogPage(t *testing.T) abandonDialog {
+	t.Helper()
 	p, _, a := openViewsPage(t, 1, 1280, 800, false)
 	p.click(`[data-select="w_000"]`)
 	p.await("the workstream shown", `document.getElementById('workstream-head').dataset.workstream === 'w_000'`)
-	p.eval(`window.nativeConfirms = 0; window.confirm = () => { window.nativeConfirms++; return true; }`, nil)
-	open := func() {
-		t.Helper()
-		p.click("#workstream-menu-button")
-		p.click(`[data-workstream-action="abandon"]`)
-		p.await("the dialog open", `document.getElementById('confirm-dialog').open`)
-	}
+	return abandonDialog{p: p, a: a}
+}
 
-	open()
-	p.await("the consequence named, the danger button and a reason field focused", `(() => {
+func (d abandonDialog) open() {
+	d.p.click("#workstream-menu-button")
+	d.p.click(`[data-workstream-action="abandon"]`)
+	d.p.await("the dialog open", `document.getElementById('confirm-dialog').open`)
+}
+
+func TestBrowserAbandonDialogNamesTheConsequenceAndFocusesTheReason(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.await("the consequence named, the danger button and a reason field focused", `(() => {
 		const dialog = document.getElementById('confirm-dialog');
 		const accept = document.getElementById('confirm-accept');
 		return dialog.querySelector('h2').textContent === 'Abandon Workstream 0?' &&
@@ -88,46 +90,77 @@ func TestBrowserAbandonOpensADialogTheKeyboardOperates(t *testing.T) {
 			document.querySelector('[data-panel=documents]').hidden &&
 			document.querySelector('[data-tab=conversation]').getAttribute('aria-selected') === 'true';
 	})()`)
+}
 
-	// Escape closes it and focus returns to the menu button.
-	p.run(chromedp.KeyEvent(kb.Escape))
-	p.await("the dialog closed and focus returned", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
-	if got := a.requests(); len(got) != 0 {
+func TestBrowserAbandonDialogClosesOnEscapeAndReturnsFocus(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.run(chromedp.KeyEvent(kb.Escape))
+	d.p.await("the dialog closed and focus returned", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
+}
+
+func TestBrowserCancelledAbandonReachesNoService(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.run(chromedp.KeyEvent(kb.Escape))
+	d.p.await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
+	if got := d.a.requests(); len(got) != 0 {
 		t.Fatalf("a cancelled abandon reached the service: %v", got)
 	}
+}
 
-	// Tab moves through the reason, cancel and the danger button; the danger
-	// button without a reason keeps the dialog open and says why.
-	open()
-	p.run(chromedp.KeyEvent(kb.Tab))
-	p.await("cancel after the reason", `document.activeElement === document.getElementById('confirm-cancel')`)
-	p.run(chromedp.KeyEvent(kb.Tab))
-	p.await("the danger button after cancel", `document.activeElement === document.getElementById('confirm-accept')`)
-	p.run(chromedp.KeyEvent(kb.Enter))
-	p.awaitText("#confirm-result", "Give a reason")
-	p.await("the dialog still open on the reason", `document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('confirm-reason')`)
+func TestBrowserAbandonDialogTabsFromTheReasonToCancelThenTheDangerButton(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.run(chromedp.KeyEvent(kb.Tab))
+	d.p.await("cancel after the reason", `document.activeElement === document.getElementById('confirm-cancel')`)
+	d.p.run(chromedp.KeyEvent(kb.Tab))
+	d.p.await("the danger button after cancel", `document.activeElement === document.getElementById('confirm-accept')`)
+}
 
-	// With a reason, Tab Tab Enter confirms.
-	p.typeInto("#confirm-reason", "Superseded by the upload design.")
-	p.run(chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Tab))
-	p.await("the danger button focused", `document.activeElement === document.getElementById('confirm-accept')`)
-	p.run(chromedp.KeyEvent(kb.Enter))
-	p.await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
-	p.awaitText("#inbox-result", "Abandoned Workstream 0.")
-	got := a.requests()
+func TestBrowserAbandonDialogStaysOpenAndAsksForAReason(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.run(chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Enter))
+	d.p.awaitText("#confirm-result", "Give a reason")
+	d.p.await("the dialog still open on the reason", `document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('confirm-reason')`)
+}
+
+func TestBrowserAbandonSendsTheReasonFromTheKeyboard(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.open()
+	d.p.typeInto("#confirm-reason", "Superseded by the upload design.")
+	d.p.run(chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Tab))
+	d.p.await("the danger button focused", `document.activeElement === document.getElementById('confirm-accept')`)
+	d.p.run(chromedp.KeyEvent(kb.Enter))
+	d.p.await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
+	d.p.awaitText("#inbox-result", "Abandoned Workstream 0.")
+	got := d.a.requests()
 	if len(got) != 1 || got[0] != `/v1/abandon/w_000 {"reason":"Superseded by the upload design."}` {
 		t.Fatalf("abandon requests: %v", got)
 	}
+}
+
+func TestBrowserAbandonUsesNoNativeConfirm(t *testing.T) {
+	t.Parallel()
+	d := openAbandonDialogPage(t)
+	d.p.eval(`window.nativeConfirms = 0; window.confirm = () => { window.nativeConfirms++; return true; }`, nil)
+	d.open()
+	d.p.typeInto("#confirm-reason", "Superseded by the upload design.")
+	d.p.click("#confirm-accept")
+	d.p.await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
 	var native int
-	p.eval(`window.nativeConfirms`, &native)
+	d.p.eval(`window.nativeConfirms`, &native)
 	if native != 0 {
 		t.Fatalf("the page called window.confirm %d times", native)
 	}
 }
 
-// The create forms share one layout: each label sits above its control, hints
-// follow the control, the actions come last and the form-level result after
-// them, with the same spacing in all four.
 func TestBrowserCreateFormsShareOneLayout(t *testing.T) {
 	t.Parallel()
 	p, _, _ := openViewsPage(t, 1, 1280, 800, false)
@@ -176,8 +209,6 @@ func TestBrowserCreateFormsShareOneLayout(t *testing.T) {
 	}
 }
 
-// A failed read is a designed state with a way forward, and the banner names
-// what could not be read instead of a request path; trying again reads it.
 func TestBrowserFailedReadsOfferTheNextStep(t *testing.T) {
 	t.Parallel()
 	p, api, a := openViewsPage(t, 1, 1280, 800, true)
@@ -200,7 +231,6 @@ func TestBrowserFailedReadsOfferTheNextStep(t *testing.T) {
 		document.querySelector('#workstreams [data-field=empty] [data-state=empty]') !== null`)
 	p.awaitText("#workstreams [data-field=empty]", "Write to the chief of staff below.")
 
-	// The banner offers the same way forward for a read that fails later.
 	a.failFeed.Store(true)
 	api.pushEvent("resync")
 	p.await("the banner and its retry after the read failed again", `!document.getElementById('problems').hidden && !document.getElementById('problems-retry').hidden`)
@@ -209,7 +239,6 @@ func TestBrowserFailedReadsOfferTheNextStep(t *testing.T) {
 	p.await("the banner gone once the conversation reads", `document.getElementById('problems').hidden && document.querySelector('#workstreams [data-state=error]') === null`)
 }
 
-// Empty lists say what belongs there and offer the control that creates it.
 func TestBrowserEmptyListsOfferTheNextStep(t *testing.T) {
 	t.Parallel()
 	p, _, _ := openViewsPage(t, 0, 1280, 800, false)
@@ -229,8 +258,6 @@ func TestBrowserEmptyListsOfferTheNextStep(t *testing.T) {
 	p.await("project creation opened", `!document.querySelector('.view[data-view=project-add]').hidden`)
 }
 
-// While the workstream list is read the sidebar holds a loading state in the
-// space the list will take.
 func TestBrowserLoadingStateHoldsTheSidebar(t *testing.T) {
 	t.Parallel()
 	api := newFakeAPI(2)

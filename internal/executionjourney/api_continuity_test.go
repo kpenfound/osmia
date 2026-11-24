@@ -5,15 +5,6 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	isolation "github.com/kpenfound/osmia/internal/isolation"
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	fs "io/fs"
 	os "os"
 	filepath "path/filepath"
@@ -23,12 +14,21 @@ import (
 	sync "sync"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
+	agent "github.com/kpenfound/agentcore/agent"
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	isolation "github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var checkGrants = fixturekit.CheckGrants
-
-// checkBoundary makes the negative assertions from inside a running turn. It
-// returns an error because it runs on the service's controller goroutine.
 func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession, clone string) error {
 	var problems []error
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
@@ -47,24 +47,24 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 	if want := coreadapter.AllowedTools([]string{"osmia_0"}, names); !slices.Equal(req.Profile.AllowedTools, want) {
 		fail("backend allow list %v, want %v", req.Profile.AllowedTools, want)
 	}
-	// Granted by name but beyond the role's execute and VCS ceiling.
+
 	for _, name := range []string{"shell", "git_push"} {
-		if _, err := callTool(ctx, tools, name, map[string]any{}); err == nil {
+		if _, err := fixturekit.CallTool(ctx, tools, name, map[string]any{}); err == nil {
 			fail("runtime called %s", name)
 		}
 	}
 	for _, path := range []string{".git/config", "../escape", filepath.Join(clone, "escape"), "src/../../escape"} {
-		if _, err := callTool(ctx, tools, "file_write", map[string]any{"path": path, "content": "tampered"}); err == nil {
+		if _, err := fixturekit.CallTool(ctx, tools, "file_write", map[string]any{"path": path, "content": "tampered"}); err == nil {
 			fail("runtime wrote %s", path)
 		}
 	}
 	for _, path := range []string{".git/HEAD", "../config.toml", filepath.Join(clone, "src", "app.txt")} {
-		if _, err := callTool(ctx, tools, "file_read", map[string]any{"path": path}); err == nil {
+		if _, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": path}); err == nil {
 			fail("runtime read %s", path)
 		}
 	}
-	// checkGrants pins the native tools to the file tools alone: the mason holds no web tool, and is not told it can search the web.
-	checkGrants(req, verified, clone, fail)
+
+	fixturekit.CheckGrants(req, verified, clone, fail)
 	if strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
 		fail("mason system prompt carries the web guidance")
 	}
@@ -75,24 +75,20 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 		fail("request carries VCS access")
 	}
 	for key, value := range req.Env {
-		if key != "OSMIA_MCP_TOKEN" || strings.Contains(value, demoSecret) {
+		if key != "OSMIA_MCP_TOKEN" || strings.Contains(value, fixturekit.DemoSecret) {
 			fail("runtime environment exposes %s", key)
 		}
 	}
 	for _, text := range []string{req.Prompt, req.SystemPrompt} {
-		if strings.Contains(text, demoSecret) {
+		if strings.Contains(text, fixturekit.DemoSecret) {
 			fail("prompt exposes a delivery credential")
 		}
 	}
 	return errors.Join(problems...)
 }
 
-var snapshot = intakefixture.Snapshot
-
-var deliver = intakefixture.Deliver
-
 func TestThreadContinuityAcrossRestart(t *testing.T) {
-	// serial: subtests set process env GITHUB_TOKEN, GH_TOKEN and OSMIA_DELIVERY_TOKEN via t.Setenv
+
 	for _, mode := range []string{"resume", "replay"} {
 		t.Run(mode, func(t *testing.T) { demonstrate(t, mode) })
 	}
@@ -100,58 +96,57 @@ func TestThreadContinuityAcrossRestart(t *testing.T) {
 
 func demonstrate(t *testing.T, mode string) {
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "OSMIA_DELIVERY_TOKEN"} {
-		t.Setenv(name, demoSecret)
+		t.Setenv(name, fixturekit.DemoSecret)
 	}
 	ctx := context.Background()
 	var home string
 	if keep := os.Getenv("OSMIA_CONTINUITY_DEMO_DIR"); keep != "" {
 		home = filepath.Join(keep, mode)
-		must(t, os.MkdirAll(keep, 0700))
-		must(t, os.Mkdir(home, 0700))
+		fixturekit.Must(t, os.MkdirAll(keep, 0700))
+		fixturekit.Must(t, os.Mkdir(home, 0700))
 	} else {
 		var err error
 		home, err = os.MkdirTemp("", "continuity-")
-		must(t, err)
+		fixturekit.Must(t, err)
 		t.Cleanup(func() { os.RemoveAll(home) })
 	}
-	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	opts := journey.FixtureAt(t, home)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
-	traceDir, err := cfg.Root.ProjectTrace(project)
-	must(t, err)
+	traceDir, err := cfg.Root.ProjectTrace(fixturekit.Project)
+	fixturekit.Must(t, err)
 	t.Logf("%s demonstration root: %s; trace: %s", mode, root, traceDir)
 
-	// A local target repository whose metadata only the service may touch.
 	clone := cfg.Project.Clone
-	must(t, os.MkdirAll(filepath.Join(clone, "src"), 0700))
-	must(t, os.WriteFile(filepath.Join(clone, "src", "app.txt"), []byte("original\n"), 0600))
-	demoGit(t, home, "-C", clone, "init", "-q")
-	demoGit(t, home, "-C", clone, "add", "src/app.txt")
-	demoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	cloneBefore := snapshot(t, clone)
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(clone, "src"), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "src", "app.txt"), []byte("original\n"), 0600))
+	fixturekit.DemoGit(t, home, "-C", clone, "init", "-q")
+	fixturekit.DemoGit(t, home, "-C", clone, "add", "src/app.txt")
+	fixturekit.DemoGit(t, home, "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
+	cloneBefore := intakefixture.Snapshot(t, clone)
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created", Depth: 0}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
-	first := deliver(t, repo, "first", 0, clock.Now())
-	must(t, repo.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created", Depth: 0}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
+	first := intakefixture.Deliver(t, repo, "first", 0, clock.Now())
+	fixturekit.Must(t, repo.Close())
 
-	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	engine.Resume = func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
 		if mode == "resume" && previous == next && session == (coreadapter.BackendSession{Backend: "claude", ID: "session-first"}) {
 			return nil
 		}
 		return coreadapter.ErrResumeUnavailable
 	}
-	workspaces := &demoWorkspaces{Directory: clone}
+	workspaces := &fixturekit.DemoWorkspaces{Directory: clone}
 	views := filepath.Join(root, "views")
-	must(t, os.Mkdir(views, 0700))
+	fixturekit.Must(t, os.Mkdir(views, 0700))
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -159,17 +154,14 @@ func demonstrate(t *testing.T, mode string) {
 		live = r
 		bound.Unlock()
 		turns := &isolation.Turns{Workspaces: workspaces, Views: isolation.Views{Directory: views}, Engine: engine,
-			Grants: map[string]coreadapter.Capabilities{demoRole: {Tools: []string{"file_read", "file_write", "shell", "git_push"}, WriteFiles: true}},
+			Grants: map[string]coreadapter.Capabilities{fixturekit.DemoRole: {Tools: []string{"file_read", "file_write", "shell", "git_push"}, WriteFiles: true}},
 			Tools:  []coreadapter.Tool{{Name: "shell", Effect: coreadapter.ToolExecute}, {Name: "git_push", Effect: coreadapter.ToolVCS}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Paths: []string{"src"}, Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
 		}
-		// This demonstration exercises the Runner's resume mechanism directly,
-		// independent of Osmia's own role confinement (which only the session
-		// role gets in production; see thread.Runner.ResumableRoles and
-		// internal/service/enforcement.go).
+
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now, ResumableRoles: func(string) bool { return true }},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "sessions", in.Agent, in.Turn)
@@ -180,15 +172,13 @@ func demonstrate(t *testing.T, mode string) {
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 	current := func() *trace.Repository { bound.Lock(); defer bound.Unlock(); return live }
 
-	// First service lifetime: the first turn runs; a second message arrives
-	// while it is active; the service stops as the backend returns.
 	entered := make(chan struct{})
 	engine.Turns["first"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		err := checkBoundary(ctx, req, verified, tools, clone)
 		if req.ResumeID != "" || !strings.HasSuffix(req.Prompt, first.Prompt) {
 			err = errors.Join(err, fmt.Errorf("first turn context: %q %q", req.ResumeID, req.Prompt))
 		}
-		_, e2 := callTool(ctx, tools, "file_write", map[string]any{"path": "src/app.txt", "content": "edited in turn one\n"})
+		_, e2 := fixturekit.CallTool(ctx, tools, "file_write", map[string]any{"path": "src/app.txt", "content": "edited in turn one\n"})
 		if err = errors.Join(err, e2); err != nil {
 			t.Error(err)
 		}
@@ -196,51 +186,49 @@ func demonstrate(t *testing.T, mode string) {
 		<-ctx.Done()
 		return &agent.Result{ClaudeID: "session-first", ResultText: "First answer", SessionDir: req.SessionDir, NumTurns: 3, CostUSD: 0.25, CostKnown: true}, nil
 	}
-	s, err := Start(ctx, opts)
-	must(t, err)
+	s, err := journey.Start(ctx, opts)
+	fixturekit.Must(t, err)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		s.Close()
 		t.Fatal("first turn did not start from durable intent")
 	}
 	repo = current()
-	second := deliver(t, repo, "second", 1, clock.Now())
-	if _, err := repo.ClaimTurn(ctx, stream, demoAgent, "competing", filepath.Join(root, "competing"), clock.Now()); !errors.Is(err, trace.ErrClaimed) {
+	second := intakefixture.Deliver(t, repo, "second", 1, clock.Now())
+	if _, err := repo.ClaimTurn(ctx, fixturekit.Stream, fixturekit.DemoAgent, "competing", filepath.Join(root, "competing"), clock.Now()); !errors.Is(err, trace.ErrClaimed) {
 		t.Errorf("second turn claimable while first is active: %v", err)
 	}
-	th, err := repo.Thread(stream, demoAgent)
-	must(t, err)
+	th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if th.Active != "first" || len(th.Turns) != 2 || th.Turns[1].Claim != nil {
 		t.Fatalf("mid-turn queue: %+v", th)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	th, err = repo.Thread(stream, demoAgent)
-	must(t, err)
+	fixturekit.Must(t, err)
+	th, err = repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if th.Active != "" || th.Status != "idle" || th.Session.ID != "session-first" || th.Turns[0].CompletedAt.IsZero() || th.Turns[1].Claim != nil || th.Turns[1].Request.Prompt != second.Prompt {
 		t.Fatalf("stopped state: %+v", th)
 	}
 	firstSession := th.Turns[0].Claim.ServiceSession
-	ops, err := repo.Operations(stream)
-	must(t, err)
+	ops, err := repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	for _, op := range ops {
 		var in thread.TurnInput
-		must(t, json.Unmarshal(op.Operation.Input, &in))
+		fixturekit.Must(t, json.Unmarshal(op.Operation.Input, &in))
 		switch {
 		case in.Turn == "first" && (op.Claim == nil || op.Result != nil || op.Acknowledged):
 			t.Fatalf("first operation was not left mid-reconciliation: %+v", op)
-		// The second intent may be inspected while the first turn runs, but
-		// waits for it: nothing applies it before the restart.
+
 		case in.Turn == "second" && (op.EffectStarted || op.Result != nil || op.Acknowledged):
 			t.Fatalf("second operation was applied before the restart: %+v", op)
 		}
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
-	// Second service lifetime: the controller finds both intents by scanning.
 	finished := make(chan struct{})
 	engine.Turns["second"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		defer close(finished)
@@ -270,8 +258,8 @@ func demonstrate(t *testing.T, mode string) {
 				err = errors.Join(err, fmt.Errorf("replayed exchange: %s", history))
 			}
 		}
-		// Views are fresh copies; the first turn's edit was never copied back.
-		content, e3 := callTool(ctx, tools, "file_read", map[string]any{"path": "src/app.txt"})
+
+		content, e3 := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": "src/app.txt"})
 		if e3 == nil && content != `"original\n"` {
 			e3 = fmt.Errorf("fresh view content %s", content)
 		}
@@ -284,24 +272,23 @@ func demonstrate(t *testing.T, mode string) {
 		}
 		return &agent.Result{ClaudeID: id, ResultText: "Second answer", SessionDir: req.SessionDir, NumTurns: 2}, nil
 	}
-	s, err = Start(ctx, opts)
-	must(t, err)
+	s, err = journey.Start(ctx, opts)
+	fixturekit.Must(t, err)
 	select {
 	case <-finished:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		s.Close()
 		t.Fatal("second turn did not run from durable state")
 	}
-	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
-		ops, err := current().Operations(stream)
-		must(t, err)
+	fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		ops, err := current().Operations(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		return ops
 	})
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	// Inspect the history through the typed read API and ordinary files.
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	if engine.Runs[0] != "first" || engine.Runs[1] != "second" || len(engine.Runs) != 2 {
 		t.Fatalf("backend runs %v", engine.Runs)
@@ -309,19 +296,19 @@ func demonstrate(t *testing.T, mode string) {
 	if want := map[string]int{"resume": 1, "replay": 1}[mode]; engine.Checks != want {
 		t.Fatalf("resume checks %d", engine.Checks)
 	}
-	th, err = repo.Thread(stream, demoAgent)
-	must(t, err)
-	if th.Identity.Role != demoRole || th.Identity.ThreadID != demoThread || th.Active != "" || th.Status != "idle" || len(th.Turns) != 2 {
+	th, err = repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
+	if th.Identity.Role != fixturekit.DemoRole || th.Identity.ThreadID != fixturekit.DemoThread || th.Active != "" || th.Status != "idle" || len(th.Turns) != 2 {
 		t.Fatalf("final thread: %+v", th)
 	}
-	requests, err := trace.Read[trace.TurnRequest](repo, stream)
-	must(t, err)
-	responses, err := trace.Read[trace.TurnResponse](repo, stream)
-	must(t, err)
-	costs, err := trace.Read[trace.Cost](repo, stream)
-	must(t, err)
-	transitions, err := trace.Read[trace.Transition](repo, stream)
-	must(t, err)
+	requests, err := trace.Read[trace.TurnRequest](repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	responses, err := trace.Read[trace.TurnResponse](repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	costs, err := trace.Read[trace.Cost](repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	transitions, err := trace.Read[trace.Transition](repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(requests) != 2 || len(responses) != 2 || len(costs) != 2 || len(transitions) != 2 {
 		t.Fatalf("records: %d requests, %d responses, %d costs, %d transitions", len(requests), len(responses), len(costs), len(transitions))
 	}
@@ -331,10 +318,10 @@ func demonstrate(t *testing.T, mode string) {
 		if q.Sequence != uint64(i+1) || q.CompletedAt.IsZero() || q.Status() != "idle" || len(q.Attempts) != 1 || !reflect.DeepEqual(q.Request, req) || !reflect.DeepEqual(*q.Response, res) {
 			t.Fatalf("turn %d: %+v", i, q)
 		}
-		if res.RequestID != req.ID || res.TurnID != req.TurnID || res.ThreadID != demoThread || res.Cause != req.Cause || res.Result.FinalResponse != finals[i] || res.Result.SessionDirectory != filepath.Join(root, "sessions", demoAgent, req.TurnID) {
+		if res.RequestID != req.ID || res.TurnID != req.TurnID || res.ThreadID != fixturekit.DemoThread || res.Cause != req.Cause || res.Result.FinalResponse != finals[i] || res.Result.SessionDirectory != filepath.Join(root, "sessions", fixturekit.DemoAgent, req.TurnID) {
 			t.Fatalf("response provenance: %+v", res)
 		}
-		scope := coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: demoThread, Turn: req.TurnID, Role: demoRole}
+		scope := coreadapter.Scope{Project: string(fixturekit.Project), Workstream: string(fixturekit.Stream), Thread: fixturekit.DemoThread, Turn: req.TurnID, Role: fixturekit.DemoRole}
 		if cost.Entry.Scope != scope || cost.Entry.AttemptID != thread.AttemptID(req.ID, 1) || cost.Cause != req.Cause || cost.Entry.At != q.Attempts[0].At || cost.Entry.Usage != res.Result.Usage {
 			t.Fatalf("cost provenance: %+v", cost)
 		}
@@ -355,19 +342,19 @@ func demonstrate(t *testing.T, mode string) {
 	if mode == "replay" && (a.ReplayFrom != 1 || a.Omitted != 0) {
 		t.Fatalf("replay bounds: %+v", a)
 	}
-	outbox, err := repo.Outbox(stream)
-	must(t, err)
-	ops, err = repo.Operations(stream)
-	must(t, err)
+	outbox, err := repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
+	ops, err = repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(outbox) != 2 || len(ops) != 2 {
 		t.Fatalf("outbox %d, operations %d", len(outbox), len(ops))
 	}
 	for i, op := range ops {
 		var in thread.TurnInput
-		must(t, json.Unmarshal(op.Operation.Input, &in))
+		fixturekit.Must(t, json.Unmarshal(op.Operation.Input, &in))
 		var result thread.TurnResult
 		if op.Result != nil {
-			must(t, json.Unmarshal(op.Result.Data, &result))
+			fixturekit.Must(t, json.Unmarshal(op.Result.Data, &result))
 		}
 		q := th.Turns[slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == in.Turn })]
 		if !op.Acknowledged || op.Result == nil || op.Result.Outcome != "idle" || result.ResponseID != q.Response.ID || result.RequestID != q.Request.ID || outbox[i].Event.Operation.ID != op.Operation.ID || op.Transition.ID != "deliver_"+in.Turn {
@@ -385,30 +372,29 @@ func demonstrate(t *testing.T, mode string) {
 		if kinds["effect"] != 1 || kinds["result"] != 1 || kinds["acknowledge"] != 1 {
 			t.Fatalf("operation %s history %v", in.Turn, kinds)
 		}
-		// The first intent spans both service sessions and was completed by inspection.
+
 		if in.Turn == "first" && (kinds["claim"] != 2 || len(sessions) != 2 || op.Observation.State != coreadapter.EffectCompleted) {
 			t.Fatalf("first operation after restart: %v %+v", kinds, op.Observation)
 		}
-		// The second intent was applied once, by the restarted service.
+
 		if in.Turn == "second" && (kinds["claim"] < 1 || op.Claim != nil || effectSession(op) != th.Turns[1].Claim.ServiceSession) {
 			t.Fatalf("second operation: %v %+v", kinds, op.History)
 		}
 	}
 
-	// The trace holds the whole history, and nothing leaked or escaped.
-	for _, name := range []string{"events.jsonl", "ledger.jsonl", "agents/" + demoAgent + "/log.jsonl", "agents/" + demoAgent + "/identity.jsonl"} {
-		if len(workstreamRecords(t, cfg.Root, project, stream, name)) == 0 {
+	for _, name := range []string{"events.jsonl", "ledger.jsonl", "agents/" + fixturekit.DemoAgent + "/log.jsonl", "agents/" + fixturekit.DemoAgent + "/identity.jsonl"} {
+		if len(fixturekit.WorkstreamRecords(t, cfg.Root, fixturekit.Project, fixturekit.Stream, name)) == 0 {
 			t.Fatalf("trace records %s: none", name)
 		}
 	}
-	if log := workstreamRecords(t, cfg.Root, project, stream, "agents/"+demoAgent+"/log.jsonl"); len(log) != 4 {
+	if log := fixturekit.WorkstreamRecords(t, cfg.Root, fixturekit.Project, fixturekit.Stream, "agents/"+fixturekit.DemoAgent+"/log.jsonl"); len(log) != 4 {
 		t.Fatalf("owned log has %d records", len(log))
 	}
-	if after := snapshot(t, clone); !reflect.DeepEqual(after, cloneBefore) {
+	if after := intakefixture.Snapshot(t, clone); !reflect.DeepEqual(after, cloneBefore) {
 		t.Fatal("runtime changed the target repository or its VCS metadata")
 	}
-	for path, content := range snapshot(t, root) {
-		if strings.Contains(content, demoSecret) {
+	for path, content := range intakefixture.Snapshot(t, root) {
+		if strings.Contains(content, fixturekit.DemoSecret) {
 			t.Fatalf("delivery credential recorded in %s", path)
 		}
 	}
@@ -420,8 +406,6 @@ func demonstrate(t *testing.T, mode string) {
 	}
 }
 
-// effectSession returns the repository session that recorded the operation's
-// effect.
 func effectSession(op trace.OperationRecord) string {
 	for _, action := range op.History {
 		if action.Kind == "effect" {

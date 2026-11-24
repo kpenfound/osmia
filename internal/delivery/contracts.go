@@ -1,3 +1,5 @@
+// Package delivery runs a workstream's final checks and review and publishes
+// or lands the assembled feature branch.
 package delivery
 
 import (
@@ -13,8 +15,6 @@ const AssembledState = intake.AssembledState
 const BuildingState = intake.BuildingState
 
 type CheckResult = api.CheckResult
-
-type CheckSelection = api.CheckSelection
 
 const ChecksIncomplete = execution.ChecksIncomplete
 
@@ -128,8 +128,6 @@ var isSession = intake.IsSession
 
 var landingDocument = execution.LandingDocument
 
-var librarianWorkstream = intake.LibrarianWorkstream
-
 const maxFinalRounds = intake.MaxFinalRounds
 
 const maxIncompleteChecks = execution.MaxIncompleteChecks
@@ -143,8 +141,6 @@ var ownerActor = intake.OwnerActor
 var ownerHeader = intake.OwnerHeader
 
 const publicationEscalation = intake.PublicationEscalation
-
-var quoteLinks = execution.QuoteLinks
 
 var refuseReport = intake.RefuseReport
 

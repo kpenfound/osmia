@@ -54,18 +54,15 @@ type DeliveryPresentation struct {
 	// delivers by pull request and for a delivered workstream.
 	CanLand bool `json:"can_land,omitempty" description:"True when the owner may approve and land the workstream: its project's delivery is jev and the workstream is assembled. Landing is still refused when checks did not pass on the pushed commit. Absent for a project that delivers by pull request or a delivered workstream."`
 	// Recommendation is the route Jev recommends when it picked one without
-	// the authority to apply it: DeliveryRouteLand or DeliveryRoutePullRequest.
+	// the authority to apply it: DeliveryRouteLand or "pull-request".
 	// It is empty when Jev made no pick.
 	Recommendation string `json:"recommendation,omitempty" description:"The route land or pull-request that Jev picked below the decision threshold or without applying it, from its delivery-route decision. Empty when Jev made no pick."`
 }
 
-// The routes a delivery approval takes. An approval with no route marks the
-// draft pull request ready for review, as DeliveryRoutePullRequest does;
-// DeliveryRouteLand lands the workstream on the project's base branch.
-const (
-	DeliveryRoutePullRequest = "pull-request"
-	DeliveryRouteLand        = "land"
-)
+// DeliveryRouteLand is the route of an approval that lands the workstream on
+// the project's base branch. An approval with no route, or the route
+// "pull-request", marks the draft pull request ready for review.
+const DeliveryRouteLand = "land"
 
 // The states of the check result a delivery presentation shows.
 const (
@@ -145,9 +142,7 @@ type DeliveryBrief struct {
 }
 
 // DeliveryApproval preserves the exact title and text and reviewed identity
-// the owner approved when marking the pull request ready for review. Title is empty in an approval recorded before the
-// title became part of the draft; deliveryTitle(Description, stream) is
-// then used instead, as it was when that approval was recorded.
+// the owner approved when marking the pull request ready for review.
 // DescriptionHash allows publication to check the text it will send.
 type DeliveryApproval struct {
 	Review          int                         `json:"review"`
@@ -178,7 +173,7 @@ type DeliveryApproval struct {
 	Judgment  string `json:"judgment,omitempty"`
 	// Route is what the approval authorises: DeliveryRouteLand when the owner
 	// approved landing the workstream on the base branch, and empty or
-	// DeliveryRoutePullRequest when it marks the draft pull request ready.
+	// "pull-request" when it marks the draft pull request ready.
 	Route string `json:"route,omitempty"`
 }
 

@@ -56,12 +56,7 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	must(t, err)
 	streams, err := repo.Workstreams()
 	must(t, err)
-	var ws = streams[0]
-	for _, candidate := range streams {
-		if candidate != librarianWorkstream(id) {
-			ws = candidate
-		}
-	}
+	ws := streams[0]
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, Revision: 1, Project: id, Workstream: ws, At: service.InspectForTest(s).Now(), Actor: ownerActor, Cause: "draft"}
 	spec := trace.Document{Header: h, Path: "spec.md", Content: validSpec}
 	spec.ID = "spec"
@@ -71,14 +66,12 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	h.Schema, h.ID = "osmia.trace.transition", "sketch"
 	_, err = repo.SetFeatureState(context.Background(), h, "sketched", "Draft ready")
 	must(t, err)
-	// The page shows the workstream it handed in.
 	p.Await("the handed-in workstream shown", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(ws)))
 	p.Await("the view closed", `!document.querySelector('.view[data-view="workstream"]').hidden`)
 	p.SelectWorkstream(ws)
 	parentText := "A prerequisite"
-	parent, err := c.HandIn(context.Background(), HandInRequest{Project: id, Key: "browser-parent", Stdin: &parentText})
+	parent, err := c.HandIn(context.Background(), service.HandInRequest{Project: id, Key: "browser-parent", Stdin: &parentText})
 	must(t, err)
-	// The Documents tab reads the documents and the dependency as it opens.
 	p.Click("[data-tab=documents]")
 	p.Await("the documents tab", `!document.querySelector('[data-panel=documents]').hidden`)
 	p.AwaitText("#document-revisions", "Spec revision 1")
@@ -89,7 +82,6 @@ func TestBrowserRegistersHandsInEditsAndInspectsTrace(t *testing.T) {
 	p.Choose("#base-form [name=base]", string(parent.Workstream))
 	p.Click("#base-form [type=submit]")
 	p.AwaitText("#base-form .result", "Dependency revision 1 saved")
-	// A separate owner's write makes the page's revision stale.
 	spec.Revision = 2
 	spec.Content = validSpec + "\nAnother owner edit.\n"
 	must(t, repo.RecordDocuments(context.Background(), []trace.Document{spec}))

@@ -17,8 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
-// statusFake stands in for the GitHub combined-status API, a remote system
-// whose real paging and rate limits it does not reproduce.
 func statusFake(t *testing.T, statuses []string, perPage int, requests *[]string) GitHub {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,8 +132,6 @@ func TestCommitStatusesAreLoggedAsReads(t *testing.T) {
 	}
 }
 
-// roundTrip lets a test serve any answer, including one whose body cannot be
-// read.
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

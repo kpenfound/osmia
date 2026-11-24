@@ -542,7 +542,7 @@ statuses of the pushed head commit in the upstream repository:
 The committee's final read starts only on a completed result for the exact
 commit that was pushed, and its prompt carries the outcome, the counts, the
 failed checks with their trace ids and the flaky checks. The chief of staff
-triages blocking findings as before: the ones that need code go into one plan
+triages blocking findings: the ones that need code go into one plan
 revision, whose commit is pushed to the open pull request and starts a new
 cycle, and it records the delivery brief for the review.
 
@@ -729,7 +729,7 @@ and what to do when a mason runs out of memory are in
 [Sandbox size](configuration.md#sandbox-size). Osmia sets no `cpus` or `memory`
 of its own.
 
-## Projects, their settings and the import
+## Projects and their settings
 
 The active projects, in order, and every active project's settings live in
 Osmia's own store under the root, in `<root>/project-store/`, not in a file you
@@ -740,56 +740,6 @@ and `remove`, the Settings API and the offline `osmia project settings` repair.
 only, so the file can be read-only, owned by a deployment tool or kept in a
 dotfiles repository, and it stays byte for byte as you left it through startup,
 doctor, registration, removal, settings saves and reload.
-
-### First start after an upgrade
-
-A root that has `active_projects` in its top-level file and one
-`projects/<project-id>/config.toml` per listed project is imported into the store
-once, by the first `osmia serve` or `osmia doctor` that owns the root. Until the
-import is complete, the steps run in this order:
-
-1. the trace migration, as before;
-2. a project split that an earlier run journalled in `project-splits.json`
-   finishes;
-3. a preflight loads every listed project's file. If one does not load, the run
-   stops with the loader's error naming the file and the field, such as
-   `<root>/projects/<project-id>/config.toml: clone: …`. Nothing was modified:
-   no project file, no top-level file, no split journal, and nothing is marked
-   imported. Until the import is complete that file is still the project's only
-   settings, so the refusal is resolved by correcting the field the error names
-   and starting again;
-4. a new project split, if a listed project still names a group, covers listed
-   projects only; the files of projects that are not listed are not read or
-   rewritten;
-5. the import records the list, in order, and each listed file as that project's
-   first stored revision, marks each file retired, and records the import as
-   complete together with the registry.
-
-An interruption at any point resumes on the next start or doctor run without a
-second revision of any project and without losing a setting. A root with no
-`active_projects`, such as a fresh install, starts with an empty registry.
-
-Once the import is complete the service reads neither `active_projects` nor any
-`projects/<project-id>/config.toml` again, and startup and doctor look for no
-project split. A leftover `active_projects` in the top-level file is accepted and
-ignored, and the service logs a warning at startup and reload that it has no
-effect. Editing it, or a retired file, changes no project and no setting.
-
-Each imported file stays at `projects/<project-id>/config.toml` with the settings
-it held at the import, now starting with a comment block that says it is
-retired: Osmia reads project settings from its store, the file is no longer read
-and edits to it have no effect. Files of projects that were not listed in
-`active_projects` are never imported and never changed.
-
-### Rolling back
-
-The store adds nothing that an earlier Osmia version refuses to open. If you
-roll back to that version and its top-level file, which still lists
-`active_projects`, it starts on the retired project files and runs the projects
-and settings as they stood at the import. From then on the two versions keep
-separate records: a project added, removed or reconfigured by one version after
-the import is not seen by the other, which reads only its own files or its own
-store.
 
 ### When a project's stored settings do not load
 
@@ -806,7 +756,7 @@ With the service stopped, run `osmia project settings <project-id> show` to read
 the stored settings, then `osmia project settings <project-id> set
 clone=~/src/widgets`. The command applies a settings save's validation and
 records the result as a new revision; it changes neither the registry nor the
-top-level file and reads no retired file. While a service runs, the command
+top-level file. While a service runs, the command
 refuses and writes nothing: use the Settings page or `PUT
 /v1/projects/config/<project-id>`. See [the command](cli.md#command-line).
 
@@ -852,8 +802,7 @@ apply without applying it. The file is `unchanged`, `changed` when a setting it
 holds differs from the loaded one, or `invalid` when it cannot be read or does
 not validate, with the reason. A comment or formatting change leaves it
 `unchanged`. Drift covers the top-level file only: a stored revision that is
-pending, a leftover `active_projects` and a retired project file are never
-drift.
+pending is never drift.
 
 ## Notifications
 
@@ -1109,7 +1058,7 @@ subprocess output that reaches the service's own output.
 
 A failure of the service process, at startup or after it started, is one
 `"level":"ERROR"` record on that same stream, with the same credential
-redaction and guidance `osmia doctor` points to as before, and the same exit
+redaction and guidance `osmia doctor` points to, and the same exit
 code. The `osmia serve --detach` launcher is not the service process: its own
 "ready" line and, when the detached service does not become ready, its own
 failure message stay human-readable text on the terminal that started it,

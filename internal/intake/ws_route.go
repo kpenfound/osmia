@@ -44,20 +44,16 @@ const (
 	TriggerFinalClean        = "final.reviewed_clean"
 	TriggerFinalBlocking     = "final.reviewed_blocking"
 	TriggerFinalFailed       = "final.failed"
-	TargetHold               = "hold"
 	TargetWait               = "wait"
 	TargetDebateRound        = "debate_round"
 	TargetRedraft            = "redraft"
 	TargetFailed             = "failed"
 	TargetExhausted          = "exhausted"
-	TargetConcluded          = "concluded"
 	TargetRatified           = "ratified"
-	TargetAbandoned          = "abandoned"
 	TargetDelivered          = "delivered"
 	TargetReopenBuilding     = "reopen_building"
 	TargetFreshReview        = "fresh_review"
 	TargetReviewed           = "reviewed"
-	TargetBuilding           = "building"
 	TargetAssembled          = "assembled"
 	ownerCardRatification    = "the ratification card"
 	ownerCardRecovery        = "the recovery card"
@@ -151,11 +147,6 @@ func RouteError(res router.Result, err error, what string) *APIError {
 	return &APIError{Code: Conflict, Message: fmt.Sprintf("%s was not recorded: the router held it (%s). %s", what, res.Hold, res.Reason)}
 }
 
-// raise routes an exit a pass raises: on the scheduling path it is handed to the
-// router's worker, which asks Jev beside the pass, and anywhere else it is
-// routed in place. The pass that raised an exit raises it again while the
-// subject is still where the exit left it, and the router finishes whatever an
-// earlier run recorded.
 func raise(ctx context.Context, rt router.Port, x router.Exit) error {
 	if rt == nil {
 		return errors.New("routing a workstream's exits is unavailable")
@@ -172,7 +163,6 @@ func raise(ctx context.Context, rt router.Port, x router.Exit) error {
 // machines, as raise does.
 func Raise(ctx context.Context, rt router.Port, x router.Exit) error { return raise(ctx, rt, x) }
 
-// route applies a pinned move through the controller's router.
 func (s *Controller) route(ctx context.Context, m PinnedMove) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing a workstream's gate decisions is unavailable")
@@ -180,8 +170,6 @@ func (s *Controller) route(ctx context.Context, m PinnedMove) (router.Result, er
 	return s.Router.Route(ctx, m.Exit())
 }
 
-// WorkstreamTargets returns the exit's targets in the order given: a target
-// with a bar departs from the default only at it.
 type wsTrigger struct {
 	questions   []router.Question
 	corroborate map[string][]router.Condition
@@ -192,10 +180,6 @@ func ask(name, instructions string) router.Question {
 	return router.Question{Name: name, Instructions: instructions}
 }
 
-// triggerSpecs defines, per trigger of a workstream's exits that Jev judges,
-// what the router asks Jev beyond the questions every exit has. Each question
-// is answered as a probability of a proposition about the records in the
-// summary.
 var triggerSpecs = map[string]wsTrigger{
 	TriggerDraftExhausted: {
 		describe: map[string]string{
@@ -269,15 +253,6 @@ func ExitTarget(trigger string, t router.Target) router.Target {
 // ExitQuestions returns the questions of the trigger.
 func ExitQuestions(trigger string) []router.Question { return triggerSpecs[trigger].questions }
 
-// ---------------------------------------------------------------------------
-// Draft exhausted
-
-// exhaustedExit is the exit of a handed-in workstream none of whose drafts
-// in its current run, drafts first to n, was accepted. MaxDrafts stays a hard
-// limit: one more draft is not offered, so the exit has the one target, which
-// stops drafting with a notice to the chief of staff. A move to sketched by
-// the owner or the chief of staff starts the next run. Each run's stop has its
-// own transition and notice.
 func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.WorkflowState, n, first, drafts int, last trace.Transition, reason, body string) router.Exit {
 	targets := []router.Target{
 		ExitTarget(TriggerDraftExhausted, router.Target{Name: TargetExhausted, State: DraftExhausted, Description: "Stop drafting."}),
@@ -303,13 +278,6 @@ func (d *Drafter) exhaustedExit(stream config.WorkstreamID, state trace.Workflow
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Shed concluded
-
-// concludedExit is the exit of a workstream whose debate concluded after round
-// n, raised on the owner subject the owner's next action moves. Today's default
-// leaves the decision to the owner; another round or a redraft is a departure
-// at the strict bar.
 func (d *Debate) concludedExit(stream config.WorkstreamID, owner trace.WorkflowState, n int, open []shed.Entry, canRound, canRedraft bool) router.Exit {
 	targets := []router.Target{ExitTarget(TriggerShedConcluded, router.Target{Name: TargetWait, Description: "Wait for the owner.", Stay: true, NoMove: true})}
 	if canRound {
@@ -335,7 +303,6 @@ func (d *Debate) concludedExit(stream config.WorkstreamID, owner trace.WorkflowS
 	return x
 }
 
-// shedRoundOf returns the round a concluded exit was raised for.
 func shedRoundOf(x router.Exit) (int, error) {
 	n, err := strconv.Atoi(strings.TrimPrefix(x.Cause, "shed-concluded-"))
 	if err != nil {
@@ -344,9 +311,6 @@ func shedRoundOf(x router.Exit) (int, error) {
 	return n, nil
 }
 
-// recordsOfOwnerAction returns what an owner action of the shed records for a
-// target: the file the debate reads and the notice naming it. It is the one
-// definition of the records, whoever acts: the owner's command and the router.
 func ownerShedDocument(repo *trace.Repository, project config.ProjectID, stream config.WorkstreamID, id, path, content string, at time.Time, actor trace.Actor) (trace.Document, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -407,9 +371,6 @@ func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 	})
 }
 
-// failedExit is the exit of a sealing that failed: its subject moves to
-// failed-<k> while it still reads sealing-<k>, and the chief of staff is told.
-// It has one legal target, so the router keeps it without asking Jev.
 func (z *Sealer) failedExit(stream config.WorkstreamID, state trace.WorkflowState, to, id, cause, reason, body string) router.Exit {
 	return router.Exit{
 		Repo: z.Repository, Project: z.Repository.Project(), Workstream: stream, Machine: WorkstreamMachine,
@@ -424,10 +385,8 @@ func (z *Sealer) failedExit(stream config.WorkstreamID, state trace.WorkflowStat
 	}
 }
 
-// marshalDraft encodes the input of a draft operation.
 func marshalDraft(in DraftInput) ([]byte, error) { return json.Marshal(in) }
 
-// draftOperation is the runner operation that runs the draft the input numbers.
 func draftOperation(project config.ProjectID, stream config.WorkstreamID, event string, input []byte) coreadapter.Operation {
 	return coreadapter.Operation{ID: trace.OperationID(project, stream, event), Boundary: coreadapter.RunnerBoundary, Action: DraftAction, Input: input}
 }

@@ -38,9 +38,6 @@ func PatternsOverlap(a, b string) bool {
 	return visit(0, 0)
 }
 
-// segmentsOverlap intersects two path.Match segment languages. Literal bytes
-// and character classes are converted to transitions; stars have an epsilon
-// edge and a transition back to themselves.
 func segmentsOverlap(a, b string) bool {
 	aa, bb := globTokens(a), globTokens(b)
 	seen := map[[2]int]bool{}

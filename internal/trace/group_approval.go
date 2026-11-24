@@ -46,7 +46,6 @@ func ReadGroupApproval(r *Repository, host config.WorkstreamID) (GroupApproval, 
 	if err != nil {
 		return GroupApproval{}, Document{}, false, err
 	}
-	r.approvalDecodes.Add(1)
 	if r.shared != nil {
 		r.shared.approvalDecodes.Add(1)
 	}
@@ -83,7 +82,7 @@ func RecordGroupApproval(ctx context.Context, r *Repository, host config.Workstr
 }
 
 // GroupApproved consults the shared authority without holding a member mutex.
-// Ordinary workstreams retain their existing individual ratification behavior.
+// Ordinary workstreams are ratified individually.
 func (r *Repository) GroupApproved(stream config.WorkstreamID) (bool, error) {
 	id, err := r.CrossRepoWorkgroupOf(stream)
 	if err != nil || id == "" {
@@ -125,9 +124,6 @@ func (r *Repository) groupApproval(id config.WorkgroupID) (GroupApproval, bool, 
 	return decision, found, err
 }
 
-// groupApprovalState returns the workgroup's approval, whether one is
-// recorded, and whether group approval is required. The approval belongs to
-// the caller.
 func (r *Repository) groupApprovalState(id config.WorkgroupID) (GroupApproval, bool, bool, error) {
 	snap, err := r.groupApprovalSnapshot(id)
 	if err != nil {
@@ -139,7 +135,6 @@ func (r *Repository) groupApprovalState(id config.WorkgroupID) (GroupApproval, b
 	return cloneGroupApproval(*snap.decision), true, snap.required, nil
 }
 
-// cloneGroupApproval returns a copy of a that shares no mutable data with it.
 func cloneGroupApproval(a GroupApproval) GroupApproval {
 	a.ProjectSpec = cloneProjectSpec(a.ProjectSpec)
 	if a.Members != nil {
@@ -153,7 +148,6 @@ func cloneGroupApproval(a GroupApproval) GroupApproval {
 	return a
 }
 
-// cloneProjectSpec returns a copy of spec that shares no mutable data with it.
 func cloneProjectSpec(spec ProjectSpec) ProjectSpec {
 	spec.Contracts = slices.Clone(spec.Contracts)
 	spec.Graph = slices.Clone(spec.Graph)

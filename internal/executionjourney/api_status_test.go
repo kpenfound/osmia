@@ -5,11 +5,24 @@ import (
 	json "encoding/json"
 	errors "errors"
 	fmt "fmt"
+	os "os"
+	filepath "path/filepath"
+	reflect "reflect"
+	slices "slices"
+	strings "strings"
+	sync "sync"
+	testing "testing"
+	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	agent "github.com/kpenfound/agentcore/agent"
 	bundle "github.com/kpenfound/osmia/internal/bundle"
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -19,84 +32,70 @@ import (
 	thread "github.com/kpenfound/osmia/internal/thread"
 	trace "github.com/kpenfound/osmia/internal/trace"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
 )
 
-const chiefAgent = intakefixture.ChiefAgent
-
-const chiefThread = intakefixture.ChiefThread
-
-// queueChiefTurn accepts an owner message for the chief of staff and
-// publishes the intent to run it.
 func queueChiefTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
-		AgentID: chiefAgent, ThreadID: chiefThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: owner, Cause: "message_" + turn, Depth: 1},
+		AgentID: intakefixture.ChiefAgent, ThreadID: intakefixture.ChiefThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
 		SystemPrompt: "You are the chief of staff.", Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(ctx, req)
-	must(t, err)
+	fixturekit.Must(t, err)
 	event := trace.EventID("deliver_"+turn, "turn")
-	op, err := thread.TurnOperation(project, event, thread.TurnInput{Workstream: stream, Agent: chiefAgent, Turn: turn})
-	must(t, err)
+	op, err := thread.TurnOperation(fixturekit.Project, event, thread.TurnInput{Workstream: fixturekit.Stream, Agent: intakefixture.ChiefAgent, Turn: turn})
+	fixturekit.Must(t, err)
 	tx := trace.Transaction{Transition: trace.Transition{
-		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
+		Header:  trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "deliver_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "service", ID: "inbox"}, Cause: req.ID, Depth: 1},
 		Subject: "chief_inbox", To: "delivering", Reason: "Owner message accepted for the chief of staff"},
 		Events: []trace.Event{{ID: event, Kind: "turn", Body: "Deliver " + turn, Operation: &op}}}
 	_, err = repo.Transact(ctx, tx)
-	must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cs-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
-	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
+	opts := journey.FixtureAt(t, home)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.MkdirAll(cfg.Project.Clone, 0700))
+	fixturekit.DemoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	must(t, repo.CreateWorkstream(ctx, quiet, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: chiefAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: chiefThread}
-	must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Quiet, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.ChiefAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "chief_of_staff", ThreadID: intakefixture.ChiefThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	queueChiefTurn(t, repo, "status", clock.Now())
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
-	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	engine := &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	engine := &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	startTurn := make(chan struct{})
 	views := filepath.Join(cfg.Root.String(), "views")
-	must(t, os.Mkdir(views, 0700))
+	fixturekit.Must(t, os.Mkdir(views, 0700))
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		turns := &isolation.Turns{Workspaces: &demoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
+		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{Directory: cfg.Project.Clone}, Views: isolation.Views{Directory: views}, Engine: engine,
 			Grants: map[string]coreadapter.Capabilities{"chief_of_staff": {Tools: []string{status.ToolName}}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
 			},
 			Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-				set, err := status.Tool(r, chiefAgent, scope, clock.Now)
+				set, err := status.Tool(r, intakefixture.ChiefAgent, scope, clock.Now)
 				return []coreadapter.Tool{set}, err
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: clock.Now},
 			Prepare: func(ctx context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -111,8 +110,6 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, make(chan time.Time)
 
-	// The fake chief of staff waits until the test has read the empty status,
-	// then writes a rejected, a first and a replacing status.
 	release, finished := make(chan struct{}), make(chan struct{})
 	var results []string
 	var mu sync.Mutex
@@ -133,11 +130,11 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, args := range []map[string]any{
-			{"goal": "Finish the importer on " + chiefThread + ".", "note": "Started.", "agents": []string{}},
+			{"goal": "Finish the importer on " + intakefixture.ChiefThread + ".", "note": "Started.", "agents": []string{}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is drafted.", "agents": []string{"The architect is drafting the plan."}},
 			{"goal": "Ship resumable uploads.", "note": "The plan is ready for review. Work is starting.", "agents": []string{"The architect is idle."}},
 		} {
-			out, err := callTool(ctx, tools, status.ToolName, args)
+			out, err := fixturekit.CallTool(ctx, tools, status.ToolName, args)
 			if err != nil {
 				return nil, err
 			}
@@ -146,27 +143,27 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		return &agent.Result{ClaudeID: "session-chief", ResultText: "Status written", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	list, err := c.Statuses(ctx)
-	must(t, err)
-	groups, _, err := trace.Workgroups(s.sole().repository)
-	must(t, err)
-	empty := func(w config.WorkstreamID) WorkstreamStatus {
+	fixturekit.Must(t, err)
+	groups, _, err := trace.Workgroups(s.Sole().Repository)
+	fixturekit.Must(t, err)
+	empty := func(w config.WorkstreamID) api.WorkstreamStatus {
 		group, ok := trace.WorkgroupOf(groups, w)
 		if !ok {
 			t.Fatalf("workstream %s has no recorded workgroup", w)
 		}
-		return WorkstreamStatus{DisplayState: "planning", Workgroup: &WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}, Workstream: w, Project: project, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit,
+		return api.WorkstreamStatus{DisplayState: "planning", Workgroup: &api.WorkgroupView{ID: group.ID, Members: []config.WorkstreamID{w}, Edges: []trace.Edge{}}, Workstream: w, Project: fixturekit.Project, Units: []api.UnitStatus{}, Advisories: []api.OverlapAdvisory{}, Gates: []trace.OwnerGate{}, Agents: []api.AgentStatus{}, ContextMode: "file", Workspaces: config.WorkspacesGit,
 			TelemetryTraceID: telemetry.WorkstreamTrace(w).String(), TelemetryRootSpanID: telemetry.WorkstreamRoot(w).String()}
 	}
-	if want := []WorkstreamStatus{empty(stream), empty(quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
+	if want := []api.WorkstreamStatus{empty(fixturekit.Stream), empty(fixturekit.Quiet)}; !sameStatuses(list.Workstreams, want) || len(list.Diagnostics) != 0 {
 		t.Fatalf("before the chief of staff wrote: %+v", list)
 	}
 	close(startTurn)
 	close(release)
 	select {
 	case <-finished:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("chief-of-staff turn did not run")
 	}
 	mu.Lock()
@@ -179,14 +176,14 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 		t.Fatalf("tool results:\n%s\nwant:\n%s", strings.Join(results, "\n"), strings.Join(want, "\n"))
 	}
 	mu.Unlock()
-	stored, err := c.Status(ctx, stream)
-	must(t, err)
-	must(t, s.Close())
+	stored, err := c.Status(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.Close())
 
-	check := func(got WorkstreamStatus) {
+	check := func(got api.WorkstreamStatus) {
 		t.Helper()
 		st := got.Status
-		if got.Workstream != stream || got.Project != project || got.State != nil || got.OpenQuestions != 0 || got.ContextMode != "file" || st == nil ||
+		if got.Workstream != fixturekit.Stream || got.Project != fixturekit.Project || got.State != nil || got.OpenQuestions != 0 || got.ContextMode != "file" || st == nil ||
 			st.Goal != "Ship resumable uploads." || st.Attention != "" || st.Note != "The plan is ready for review. Work is starting." ||
 			!slices.Equal(st.Agents, []string{"The architect is idle."}) || st.Revision != 2 || st.UpdatedAt.IsZero() {
 			t.Fatalf("stored status: %+v %+v", got, st)
@@ -194,10 +191,9 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 	check(stored)
 
-	// A new service lifetime reads the same status without rerunning the turn.
-	_, c = start(t, opts)
-	after, err := c.Status(ctx, stream)
-	must(t, err)
+	_, c = journey.StartT(t, opts)
+	after, err := c.Status(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	check(after)
 	if len(after.Agents) != 0 {
 		t.Fatalf("completed turn still appears after restart: %+v", after.Agents)
@@ -207,13 +203,13 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	if !reflect.DeepEqual(after, stored) {
 		t.Fatalf("stored status changed across restart: %+v, want %+v", after, stored)
 	}
-	none, err := c.Status(ctx, quiet)
-	must(t, err)
-	if !reflect.DeepEqual(none, empty(quiet)) {
+	none, err := c.Status(ctx, fixturekit.Quiet)
+	fixturekit.Must(t, err)
+	if !reflect.DeepEqual(none, empty(fixturekit.Quiet)) {
 		t.Fatalf("workstream without status: %+v", none)
 	}
 	raw := map[string]json.RawMessage{}
-	must(t, c.Do(ctx, "GET", Prefix+"/status/"+string(quiet), nil, &raw))
+	fixturekit.Must(t, c.Do(ctx, "GET", service.Prefix+"/status/"+string(fixturekit.Quiet), nil, &raw))
 	if string(raw["status"]) != "null" || string(raw["state"]) != "null" || string(raw["units"]) != "[]" || string(raw["gates"]) != "[]" || string(raw["open_questions"]) != "0" || string(raw["context_mode"]) != `"file"` {
 		t.Fatalf("no-status JSON: %v", raw)
 	}
@@ -224,9 +220,11 @@ func TestChiefOfStaffStatusAcrossRestart(t *testing.T) {
 	}
 }
 
-func sameStatuses(got, want []WorkstreamStatus) bool {
-	sort := func(list []WorkstreamStatus) {
-		slices.SortFunc(list, func(a, b WorkstreamStatus) int { return strings.Compare(string(a.Workstream), string(b.Workstream)) })
+func sameStatuses(got, want []api.WorkstreamStatus) bool {
+	sort := func(list []api.WorkstreamStatus) {
+		slices.SortFunc(list, func(a, b api.WorkstreamStatus) int {
+			return strings.Compare(string(a.Workstream), string(b.Workstream))
+		})
 	}
 	got, want = slices.Clone(got), slices.Clone(want)
 	sort(got)
@@ -237,35 +235,34 @@ func sameStatuses(got, want []WorkstreamStatus) bool {
 func TestStatusErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts := fixture(t)
-	_, c := start(t, opts)
-	// A configured project without a trace has no workstream status.
+	opts := journey.Fixture(t)
+	_, c := journey.StartT(t, opts)
+
 	list, err := c.Statuses(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(list.Workstreams) != 0 || len(list.Diagnostics) != 0 {
 		t.Fatalf("no trace: %+v", list)
 	}
-	for id, code := range map[string]Code{"w_bad": Validation, string(stream): NotFound, "": Validation} {
-		var api *APIError
+	for id, code := range map[string]api.Code{"w_bad": api.Validation, string(fixturekit.Stream): api.NotFound, "": api.Validation} {
+		var apiErr *api.APIError
 		_, err := c.Status(ctx, config.WorkstreamID(id))
-		if !errors.As(err, &api) || api.Code != code || api.Message == "" {
+		if !errors.As(err, &apiErr) || apiErr.Code != code || apiErr.Message == "" {
 			t.Errorf("%q: %v, want %s", id, err, code)
 		}
 	}
 
-	// Without a project, the list is empty and one workstream is no_project.
 	root := opts.Config.Root
 	idle := filepath.Join(filepath.Dir(root), "idle")
-	must(t, os.MkdirAll(idle, 0700))
-	must(t, os.WriteFile(filepath.Join(idle, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
-	_, c = start(t, Options{Options: service.Options{Config: config.Options{Root: idle}, ShutdownTimeout: 100 * time.Millisecond}})
+	fixturekit.Must(t, os.MkdirAll(idle, 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(idle, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	_, c = journey.StartT(t, journey.Options{Options: service.Options{Config: config.Options{Root: idle}, ShutdownTimeout: 100 * time.Millisecond}})
 	list, err = c.Statuses(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(list.Workstreams) != 0 {
 		t.Fatalf("no project: %+v", list)
 	}
-	var api *APIError
-	if _, err := c.Status(ctx, stream); !errors.As(err, &api) || api.Code != NoProject {
+	var apiErr *api.APIError
+	if _, err := c.Status(ctx, fixturekit.Stream); !errors.As(err, &apiErr) || apiErr.Code != api.NoProject {
 		t.Fatalf("no project: %v", err)
 	}
 }
@@ -274,46 +271,44 @@ func TestStatusReportsUnreadableTrace(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "cu-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	must(t, os.MkdirAll(cfg.Project.Clone, 0700))
-	demoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
+	opts := journey.FixtureAt(t, home)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.MkdirAll(cfg.Project.Clone, 0700))
+	fixturekit.DemoGit(t, home, "-C", cfg.Project.Clone, "init", "-q")
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, demoStart, owner)
-	must(t, err)
+	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, fixturekit.DemoStart, owner)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	must(t, repo.CreateWorkstream(ctx, stream, demoStart, owner))
-	// A running controller stops the service on a damaged trace, so the
-	// handlers are called on a service value without one.
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream}}})
-	must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, fixturekit.DemoStart, owner))
+
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{fixturekit.Stream}}})
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { store.Close() })
-	s := &Service{cfg: cfg, projects: []*activeProject{runtimeFor(repo)}, store: store}
-	traceExec(t, workstreamTraceDirectory(t, cfg.Root, project, stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.status', 'status', 1, '{not json}')", "workstreams/"+string(stream)+"/status.jsonl")
-	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", project)
-	list := s.statusList()
-	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", project)
-	// The capacity reads no trace, and failure streaks read only the thread
-	// records, so a damaged status record hides neither.
-	if want := []Diagnostic{{Field: "provider_usage", Code: Internal, Message: usage}, {Field: "workstreams", Code: Internal, Message: message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
+	s := &journey.Service{Cfg: cfg, Projects: []*journey.ActiveProject{journey.RuntimeFor(repo)}, Store: store}
+	fixturekit.TraceExec(t, fixturekit.WorkstreamTraceDirectory(t, cfg.Root, fixturekit.Project, fixturekit.Stream), "INSERT INTO records (commit_seq, path, schema, id, revision, body) VALUES (1, ?, 'osmia.trace.status', 'status', 1, '{not json}')", "workstreams/"+string(fixturekit.Stream)+"/status.jsonl")
+	message := fmt.Sprintf("cannot read the workstream status of project %s; check the trace repository", fixturekit.Project)
+	list := s.StatusList()
+	usage := fmt.Sprintf("cannot read today's costs or turn attempts in project %s; check the trace repository", fixturekit.Project)
+
+	if want := []api.Diagnostic{{Field: "provider_usage", Code: api.Internal, Message: usage}, {Field: "workstreams", Code: api.Internal, Message: message}}; len(list.Workstreams) != 0 || len(list.FailureStreaks) != 0 || list.Capacity == nil || list.ProviderUsage != nil || !reflect.DeepEqual(list.Diagnostics, want) {
 		t.Fatalf("damaged trace: %+v", list)
 	}
-	if _, api := s.workstreamStatus(string(stream)); api == nil || *api != (APIError{Code: Internal, Message: message}) {
-		t.Fatalf("damaged trace: %v", api)
+	if _, apiErr := s.WorkstreamStatus(string(fixturekit.Stream)); apiErr == nil || *apiErr != (api.APIError{Code: api.Internal, Message: message}) {
+		t.Fatalf("damaged trace: %v", apiErr)
 	}
 }
 
 func TestStatusViewCarriesTraceFacts(t *testing.T) {
 	t.Parallel()
-	at := demoStart
+	at := fixturekit.DemoStart
 	stored := &trace.Status{Header: trace.Header{Revision: 4, At: at}, StatusContent: trace.StatusContent{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}}}
 	state := "building"
-	got := statusView(project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored}, false)
-	want := WorkstreamStatus{Workstream: stream, Project: project, State: &state, Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file", Workspaces: config.WorkspacesJujutsu,
-		Status: &StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
+	got := service.WorkstreamStatusView(fixturekit.Project, bundle.ModeFile, trace.WorkstreamStatus{Workstream: fixturekit.Stream, Workspaces: config.WorkspacesJujutsu, State: state, OpenQuestions: 2, Status: stored}, false)
+	want := api.WorkstreamStatus{Workstream: fixturekit.Stream, Project: fixturekit.Project, State: &state, Units: []api.UnitStatus{}, Advisories: []api.OverlapAdvisory{}, OpenQuestions: 2, Gates: []trace.OwnerGate{}, ContextMode: "file", Workspaces: config.WorkspacesJujutsu,
+		Status: &api.StatusView{Goal: "g", Attention: "a", Note: "n", Agents: []string{"x"}, Revision: 4, UpdatedAt: at}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}

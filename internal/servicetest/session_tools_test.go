@@ -43,7 +43,7 @@ func TestSessionReplySucceedsWithShowImageAvailable(t *testing.T) {
 	if len(engine.Calls()) != 1 {
 		t.Fatalf("session ran %d turns", len(engine.Calls()))
 	}
-	thread, err := service.InspectForTest(s).SoleRepository().Thread(stream, service.TestSessionAgentID)
+	thread, err := service.InspectForTest(s).SoleRepository().Thread(stream, service.SessionAgentID)
 	fixturekit.Must(t, err)
 	if len(thread.Turns) != 1 || thread.Turns[0].Response == nil {
 		t.Fatalf("session did not record a reply: %+v", thread.Turns)

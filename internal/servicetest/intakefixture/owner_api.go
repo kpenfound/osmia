@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -19,9 +21,9 @@ func WriteCharter(t *testing.T, c CharterClient, project config.ProjectID, conte
 	t.Helper()
 	ctx := context.Background()
 	current, err := c.Charter(ctx, project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	doc, err := c.EditCharter(ctx, project, api.CharterEdit{Revision: current.Revision, Content: content})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return doc
 }
 
@@ -32,8 +34,16 @@ type MutationClient interface {
 func Mutation(t *testing.T, c MutationClient, method, kind string, input any) {
 	t.Helper()
 	var result api.MutationResponse
-	Must(t, c.Do(context.Background(), method, api.Prefix+"/runtime/"+kind, input, &result))
+	fixturekit.Must(t, c.Do(context.Background(), method, api.Prefix+"/runtime/"+kind, input, &result))
 	if !result.Applied {
 		t.Fatal("not acknowledged")
 	}
+}
+
+// ReadFeed reads a workstream's feed through the real endpoint.
+func ReadFeed(t *testing.T, c MutationClient, id config.WorkstreamID) api.FeedResponse {
+	t.Helper()
+	var out api.FeedResponse
+	fixturekit.Must(t, c.Do(context.Background(), "GET", api.Prefix+"/feed/"+string(id), nil, &out))
+	return out
 }

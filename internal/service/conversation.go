@@ -13,25 +13,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefPrompt opens the system prompt of every owner message turn; the
-// priority guidance and the workstream's rendered bundle follow it.
 const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
 
-// chiefGuidance is the guidance of every chief-of-staff turn the service
-// starts with the chief's full toolset: owner messages and follow-ups.
 func chiefGuidance() string {
-	return strings.Join([]string{followUpGuidance, chiefDocumentsGuidance, priorityGuidance, pauseGuidance, changeGuidance, amendmentGuidance, charterGuidance, contestGuidance, objectionGuidance, driftHandbackGuidance, ownerWritingGuidance}, "\n\n")
+	return strings.Join([]string{intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
 }
 
-// now is the service clock: the reconciliation clock when one is supplied.
 func (s *Service) now() time.Time {
 	if s.options.Reconciliation.Now != nil {
 		return s.options.Reconciliation.Now().UTC()
@@ -39,17 +38,10 @@ func (s *Service) now() time.Time {
 	return time.Now().UTC()
 }
 
-// conversationTrace resolves raw to a workstream of an active project and
-// returns the project's open trace. The librarian's workstream is unknown
-// here as it is in status: its chief of staff never gets a turn.
 func (s *Service) conversationTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	return s.resolveConversationTrace(raw, false)
 }
 
-// conversationReadTrace is conversationTrace for reading a conversation. It
-// also admits a workstream the chief of staff archived because its pull
-// request merged, for as long as archive cleanup has not removed its trace, so
-// the entry saying so stays readable.
 func (s *Service) conversationReadTrace(raw string) (config.ProjectID, config.WorkstreamID, *trace.Repository, *APIError) {
 	return s.resolveConversationTrace(raw, true)
 }
@@ -82,7 +74,7 @@ func (s *Service) resolveConversationTrace(raw string, readingChiefArchive bool)
 		return "", "", nil, &APIError{Code: NoProject, Message: "no project is configured; add one with osmia project add"}
 	}
 	for _, active := range projects {
-		if !cfg.Active(active.id) || id == librarianWorkstream(active.id) {
+		if !cfg.Active(active.id) {
 			continue
 		}
 		streams, err := active.repository.Workstreams()
@@ -96,8 +88,6 @@ func (s *Service) resolveConversationTrace(raw string, readingChiefArchive bool)
 	return "", "", nil, &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is not in an active project; list workstreams with osmia status", id)}
 }
 
-// send accepts an owner message as the next turn of the workstream's
-// chief-of-staff thread. It returns only after the request is durable.
 func (s *Service) send(ctx context.Context, raw string, req SendRequest) (ConversationEntry, *APIError) {
 	_, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
@@ -108,10 +98,10 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	} else if design {
 		return ConversationEntry{}, &APIError{Code: Validation, Message: fmt.Sprintf("workstream %s is a design session; send messages with POST %s/design/%s/message", stream, Prefix, stream)}
 	}
-	if blocked, err := s.designStartPending(repository, stream); err != nil {
+	if blocked, err := s.intake().DesignStartPending(repository, stream); err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: err.Error()}
 	} else if blocked {
-		state, err := repository.Workflow(stream, designStartSubject)
+		state, err := repository.Workflow(stream, intake.DesignStartSubject)
 		if err != nil || (state.Value != "active" && state.Value != "complete" && state.Value != "invalid") {
 			return ConversationEntry{}, &APIError{Code: Conflict, Message: "the design workgroup is starting; retry once conversation adoption completes"}
 		}
@@ -125,8 +115,6 @@ func (s *Service) send(ctx context.Context, raw string, req SendRequest) (Conver
 	})
 }
 
-// sendChief assembles context, releases its read handle and resolves again for
-// the durable enqueue. An empty address sends to the shared host itself.
 func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req SendRequest, resolve func() (*trace.Repository, config.WorkstreamID, config.WorkstreamID, func(), error)) (ConversationEntry, *APIError) {
 	wholeGroup := stream == ""
 	if strings.TrimSpace(req.Text) == "" {
@@ -171,10 +159,6 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	id := hex.EncodeToString(nonce[:])
 	at := s.now()
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for workstream %s; check the trace repository", stream)}
-	// chiefContext already closed the first resolution once it finished
-	// reading from it, so the durable write below reopens the target fresh,
-	// exactly as chiefRepository documents: transient, never held open past
-	// one call.
 	target, _, _, closeTarget, err = resolve()
 	if err != nil {
 		return ConversationEntry{}, workgroupAuthorityError(err)
@@ -208,8 +192,6 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	return entry, nil
 }
 
-// conversationList reads the owner's messages to the workstream's chief of
-// staff, and its final responses to them, from the thread's turn log.
 func (s *Service) conversationList(raw string) (ConversationResponse, *APIError) {
 	_, stream, repository, api := s.conversationReadTrace(raw)
 	if api != nil {
@@ -225,7 +207,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	}
 	defer closeTarget()
 	entries, err := readview.Consistent(func() ([]ConversationEntry, error) {
-		entries, err := conversationEntries(target, thread)
+		entries, err := ConversationEntries(target, thread)
 		if err != nil {
 			return nil, err
 		}
@@ -237,7 +219,7 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 		for _, a := range archives {
 			actions = append(actions, a.ConversationEntry)
 		}
-		return withActions(entries, actions), nil
+		return WithActions(entries, actions), nil
 	}, target.Generation, s.storeGeneration)
 	if err != nil {
 		return ConversationResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the conversation of workstream %s; check the trace repository", stream)}
@@ -245,11 +227,6 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	return ConversationResponse{Workstream: stream, Entries: entries}, nil
 }
 
-// conversationTarget opens the trace holding stream's chief-of-staff thread and
-// names the workstream to read it as. A workstream archived out of a shared
-// workgroup no longer joins it, so the thread is opened through the
-// workgroup's live members and read as its host. Reading needs no member to
-// supply context, so the thread also opens once every member is archived.
 func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (*trace.Repository, config.WorkstreamID, func(), error) {
 	if _, archived := s.archivedWorkstream(string(stream)); archived {
 		group, err := repository.CrossRepoWorkgroupOf(stream)
@@ -268,10 +245,7 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 	return target, stream, closeTarget, err
 }
 
-// conversationEntries returns the workstream's conversation with its chief of
-// staff, oldest first: the owner's messages, the final responses to them and
-// the actions the chief of staff took on the owner's behalf.
-func conversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	out := []ConversationEntry{}
 	t, err := repository.ChiefOfStaffThread(stream)
 	if errors.Is(err, os.ErrNotExist) {
@@ -286,8 +260,6 @@ func conversationEntries(repository *trace.Repository, stream config.WorkstreamI
 		}
 		entries := conversation(q)
 		entries[0].QueuedReason = queuedReason(t, q)
-		// A claim an earlier service session left without a result never
-		// completes and is never retried.
 		if t.Status == "interrupted" && t.Active == q.Request.TurnID {
 			for i := range entries {
 				entries[i].State = TurnFailed
@@ -295,26 +267,18 @@ func conversationEntries(repository *trace.Repository, stream config.WorkstreamI
 		}
 		out = append(out, entries...)
 	}
-	actions, err := chiefActions(repository, stream)
+	actions, err := ChiefActions(repository, stream)
 	if err != nil {
 		return nil, err
 	}
-	return withActions(out, actions), nil
+	return WithActions(out, actions), nil
 }
 
-// archiveAction is the conversation entry for one archive the chief of staff
-// made, with the archived workstream it is about.
 type archiveAction struct {
 	ConversationEntry
 	Workstream config.WorkstreamID
 }
 
-// chiefArchiveActions returns the entries for the workstreams the chief of
-// staff archived because their pull request merged and whose conversation is
-// stream's: stream itself and the other members of its workgroup. Each is
-// derived from its archive record, so it exists exactly when that archive was
-// committed and is shown once, and a member's cleanup leaves it in the shared
-// thread. repository must be the project's own repository.
 func (s *Service) chiefArchiveActions(repository *trace.Repository, stream config.WorkstreamID) ([]archiveAction, error) {
 	members, err := repository.WorkgroupMembers(stream)
 	if err != nil {
@@ -351,9 +315,7 @@ func chiefArchiveActionsOf(archives []runtime.Archive, shared func(runtime.Archi
 	return out
 }
 
-// withActions places each action before the first entry recorded after it,
-// in the order they were recorded, so a message stays beside its response.
-func withActions(entries, actions []ConversationEntry) []ConversationEntry {
+func WithActions(entries, actions []ConversationEntry) []ConversationEntry {
 	actions = slices.Clone(actions)
 	sort.SliceStable(actions, func(i, j int) bool { return actions[i].At.Before(actions[j].At) })
 	merged := make([]ConversationEntry, 0, len(entries)+len(actions))
@@ -366,12 +328,7 @@ func withActions(entries, actions []ConversationEntry) []ConversationEntry {
 	return append(merged, actions...)
 }
 
-// chiefActions returns what the chief of staff did on the owner's behalf in
-// the workstream, as action entries: its rulings on contested units, the
-// contests, questions and committee objections it raised to the owner, the
-// owner's rulings on those questions, the objections it dismissed and the
-// units it moved.
-func chiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
+func ChiefActions(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
 	return chiefActionsWithIdentity(repository, stream, nil)
 }
 
@@ -424,9 +381,6 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 			text += "\nRecommendation: " + escalation.Recommendation
 		}
 		emit(ConversationEntry{Turn: escalation.Batch, Kind: "action", Text: text, At: escalation.EscalatedAt, State: TurnDone}, member)
-		// One consolidated escalation has one owner answer. Read its original
-		// ruling revision so relaying it cannot change its text or timestamp.
-		// Background chief turns stay out of the owner's conversation.
 		if escalation.State != trace.QuestionEscalated && len(escalation.Questions) > 0 {
 			q := escalation.Questions[0]
 			if q.Ruling != nil && q.Ruling.Decision == trace.DecisionRuling {
@@ -456,10 +410,10 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		emit(ConversationEntry{Turn: decision.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone}, stream)
 	}
 	for _, d := range docs {
-		if d.Unit == "" || !strings.HasPrefix(d.Path, movePrefix(d.Unit)) {
+		if d.Unit == "" || !strings.HasPrefix(d.Path, execution.MovePrefix(d.Unit)) {
 			continue
 		}
-		var move UnitMove
+		var move api.UnitMove
 		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -473,10 +427,10 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		emit(ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone}, stream)
 	}
 	for _, d := range docs {
-		if !strings.HasPrefix(d.ID, workstreamMovePrefix) {
+		if !strings.HasPrefix(d.ID, lifecycle.WorkstreamMovePrefix) {
 			continue
 		}
-		var move WorkstreamMove
+		var move api.WorkstreamMove
 		if err := json.Unmarshal([]byte(d.Content), &move); err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Path, err)
 		}
@@ -489,8 +443,6 @@ func chiefActionsWithIdentity(repository *trace.Repository, stream config.Workst
 		}
 		emit(ConversationEntry{Turn: move.Turn, Kind: "action", Text: text, At: d.At, State: TurnDone}, stream)
 	}
-	// Each revision of a round's decisions adds one decision, shown at the
-	// time that revision was recorded.
 	decided := map[string]bool{}
 	for _, d := range docs {
 		if !strings.HasPrefix(d.Path, "shed/") || !strings.HasSuffix(d.Path, "/chief.json") {

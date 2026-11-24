@@ -14,42 +14,42 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-type turnsFunc = fixturekit.TurnsFunc
 
 func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ev-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{At: demoStart}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	for i, to := range []string{"handed", "planning"} {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "feature_" + to, Project: project, Workstream: stream, At: clock.Now().Add(time.Duration(i) * time.Second), Actor: owner, Cause: "owner"}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "feature_" + to, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now().Add(time.Duration(i) * time.Second), Actor: owner, Cause: "owner"}
 		_, err := repo.SetFeatureState(ctx, h, to, "Owner moved the feature to "+to)
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "codex", ID: "session"}, FinalResponse: "Noted"}}
 	fake := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply)}
 	ran := make(chan struct{}, 1)
-	turns := turnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+	turns := fixturekit.TurnsFunc(func(ctx context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		select {
 		case ran <- struct{}{}:
 		default:
@@ -69,22 +69,19 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	}
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
-	// Every tick is received only after the previous pass finished.
 	pass := func(s *Service) {
 		t.Helper()
 		select {
 		case ticks <- clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			s.Close()
 			t.Fatal("service did not finish its pass")
 		}
 	}
 
-	// Workstream state changes are routine progress, which waits for
-	// events.progress_window.
 	clock.Advance(14 * time.Minute)
 	s, err := Start(ctx, opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	firstService := s
 	t.Cleanup(func() { _ = firstService.Close() })
 	pass(s)
@@ -92,38 +89,34 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 	bound.Lock()
 	repo = live
 	bound.Unlock()
-	th, err := repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("event turn inside the window: %+v", th.Turns)
 	}
-	// "other" is a configured profile outside the chief of staff's fallback chain.
-	must(t, s.store.SetProfile(trace.ChiefOfStaff, "other"))
+	fixturekit.Must(t, s.store.SetProfile(trace.ChiefOfStaff, "other"))
 	clock.Advance(2 * time.Minute)
-	// The pass that closes the window also runs the turn: no later tick is sent.
 	pass(s)
 	select {
 	case <-ran:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		s.Close()
 		t.Fatal("event turn did not run in the pass that queued it")
 	}
-	// The next tick is received once that pass has recorded the turn, so the
-	// service is not stopped halfway through it.
 	pass(s)
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	s, err = Start(ctx, opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	restartedService := s
 	t.Cleanup(func() { _ = restartedService.Close() })
 	clock.Advance(time.Minute)
 	pass(s)
 	pass(s)
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	calls := fake.Calls()
 	if len(calls) != 1 {
@@ -136,21 +129,21 @@ func TestServiceDeliversEventsToTheChiefOfStaffOnceAcrossRestart(t *testing.T) {
 		!strings.Contains(call.Prompt, "Workstream state changed from handed to planning: Owner moved the feature to planning") {
 		t.Fatalf("event turn %+v", call)
 	}
-	th, err = repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err = repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].CompletedAt.IsZero() || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("chief-of-staff thread %+v", th)
 	}
-	worker, err := repo.Thread(stream, demoAgent)
-	must(t, err)
+	worker, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if len(worker.Turns) != 0 {
 		t.Fatalf("worker received a turn: %+v", worker.Turns)
 	}
-	entries, err := repo.Outbox(stream)
-	must(t, err)
+	entries, err := repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if chiefEvent(e.Event) {
+		if intakefixture.ChiefEvent(e.Event) {
 			notices++
 		}
 		if !e.Acknowledged {
@@ -166,27 +159,27 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "eva-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &fixedClock{At: demoStart}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
 	for i, to := range []string{HandedState, AbandonedState} {
-		h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "feature_" + to, Project: project, Workstream: stream, At: clock.Now().Add(time.Duration(i) * time.Second), Actor: owner, Cause: "owner"}
+		h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: "feature_" + to, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now().Add(time.Duration(i) * time.Second), Actor: owner, Cause: "owner"}
 		_, err := repo.SetFeatureState(ctx, h, to, "Owner moved the feature to "+to)
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
+		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: fixturekit.TurnsFunc(func(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 			return coreadapter.SessionResult{}, errors.New("no turn may run")
 		}), Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -195,36 +188,34 @@ func TestAbandonedWorkstreamEventsAreNotDelivered(t *testing.T) {
 	}
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
-	// Each restart after an event turn was queued would cancel it and queue
-	// another; the window is closed in every lifetime.
 	for range 2 {
 		s, err := Start(ctx, opts)
-		must(t, err)
+		fixturekit.Must(t, err)
 		clock.Advance(time.Hour)
 		for range 3 {
 			select {
 			case ticks <- clock.Now():
-			case <-time.After(demoTimeout):
+			case <-time.After(fixturekit.DemoTimeout):
 				s.Close()
 				t.Fatal("service did not finish its pass")
 			}
 		}
-		must(t, s.Close())
+		fixturekit.Must(t, s.Close())
 	}
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	th, err := repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("event turns of an abandoned workstream: %+v", th.Turns)
 	}
-	entries, err := repo.Outbox(stream)
-	must(t, err)
+	entries, err := repo.Outbox(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	notices := 0
 	for _, e := range entries {
-		if !chiefEvent(e.Event) {
+		if !intakefixture.ChiefEvent(e.Event) {
 			continue
 		}
 		notices++

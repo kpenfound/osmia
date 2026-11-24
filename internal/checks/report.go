@@ -15,53 +15,36 @@ var reportHeading = regexp.MustCompile(`^(?:CHECKS|== CHECKS ==)(?:[ \t]|$)`)
 var reportCheck = regexp.MustCompile(`^([ \t]*)([✘✔⊘◌])[ \t]+(dag(?:\+check)?://\S+)(.*)$`)
 var reportError = regexp.MustCompile(`(?m)^Error: (.+)$`)
 
-// reportNothingSelected matches Dagger's refusal of a run whose filters leave no
-// check: "no checks matched pattern" when it names addresses, and "no checks
-// selected" when it does not.
 var reportNothingSelected = regexp.MustCompile(`^no checks (?:matched|selected)`)
 
-// reportNotRefused matches what a run shows when checks had started or its
-// engine session was lost, so a missing report says nothing about its links.
 var reportNotRefused = regexp.MustCompile(`checks: [0-9]+/[0-9]+ done|http://dagger/|engine closed session`)
 
-// errorLimit bounds the Dagger error a reason or selection detail repeats.
 const errorLimit = 1024
 
 type checkFailure struct {
-	link       string
-	heading    string
-	start, end int
-	lines      []string
-	// passedLater records that a later report in the output shows the check
-	// passing.
+	link        string
+	heading     string
+	start, end  int
+	lines       []string
 	passedLater bool
 }
 
-// parseCheckReport reads check results only inside Dagger's CHECKS sections.
-// Output with several reports yields every report's heading, one per line.
-// Check links can exceed 64 KiB; splitting on newlines has no scanner limit.
 func parseCheckReport(output string) (heading string, failures []checkFailure) {
 	heading, failures, _ = parseCheckReportResults(output)
 	return heading, failures
 }
 
-// parseCheckReportResults is parseCheckReport that also returns the links the
-// report shows passing, in the order they first appear.
 func parseCheckReportResults(output string) (heading string, failures []checkFailure, passed []string) {
 	heading, failures, passed, _ = scanCheckReport(output)
 	return heading, failures, passed
 }
 
-// reportLine is one check result line of a report: the check's link, its mark
-// and the rest of the line, which holds its duration.
 type reportLine struct {
 	link string
 	mark string
 	rest string
 }
 
-// scanCheckReport is parseCheckReportResults that also returns every check
-// result line of the report, in order.
 func scanCheckReport(output string) (heading string, failures []checkFailure, passed []string, results []reportLine) {
 	lines := strings.Split(reportColor.ReplaceAllString(output, ""), "\n")
 	active := -1
@@ -82,8 +65,6 @@ func scanCheckReport(output string) (heading string, failures []checkFailure, pa
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
 		if reportHeading.MatchString(strings.TrimSpace(line)) && indent <= checkIndent+2 {
 			checkIndent = indent
-			// Dagger lists the checks of a nested report one level inside its
-			// heading; a top-level report lists them flush with it.
 			childIndent = 0
 			if indent > 0 {
 				childIndent = indent + 2
@@ -91,7 +72,6 @@ func scanCheckReport(output string) (heading string, failures []checkFailure, pa
 			active = -1
 			continue
 		}
-		// The rerun section can have a bare heading or a report heading.
 		if strings.HasPrefix(line, "== ") || line == "RUN LOCALLY" || line == "RE-RUN IN CI" {
 			inChecks, active = false, -1
 			continue
@@ -124,8 +104,6 @@ func scanCheckReport(output string) (heading string, failures []checkFailure, pa
 	return heading, failures, passed, results
 }
 
-// latestFailures keeps one failure for each link: its most recent, in the order
-// the links first failed.
 func latestFailures(failures []checkFailure) []checkFailure {
 	var latest []checkFailure
 	for _, failure := range failures {
@@ -248,12 +226,6 @@ func OutputEvidence(output, path string, revision int, truncated bool) string {
 	return outputEvidence(output, path, truncated, fmt.Sprintf("\nCaptured check output: %s (revision %d). Read it with factory_context using that revision, start/lines and offset/next_offset for large lines.", path, revision))
 }
 
-// ViewOutputEvidence is OutputEvidence for a reader whose read-only view holds
-// the complete captured output at path.
-func ViewOutputEvidence(output, path string, truncated bool) string {
-	return outputEvidence(output, path, truncated, fmt.Sprintf("\nCaptured check output: %s, in your view.", path))
-}
-
 func outputEvidence(output, path string, truncated bool, pointer string) string {
 	out := ""
 	if path != "" {
@@ -273,8 +245,6 @@ func outputEvidence(output, path string, truncated bool, pointer string) string 
 	return out
 }
 
-// daggerError returns the message of the last error Dagger printed, or empty
-// when it printed none.
 func daggerError(output string) string {
 	matches := reportError.FindAllStringSubmatch(reportColor.ReplaceAllString(output, ""), -1)
 	if len(matches) == 0 {
@@ -283,9 +253,6 @@ func daggerError(output string) string {
 	return CheckExcerpt(matches[len(matches)-1][1], errorLimit)
 }
 
-// refusal returns Dagger's error when the output of one dagger check run shows
-// it refused to run: it exited with an error, without a report, without
-// starting a check and with its engine session intact.
 func refusal(output string, exit int) string {
 	if exit <= 0 {
 		return ""

@@ -15,18 +15,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// exhausted reports whether a completed turn failed with an infrastructure
-// failure. The runner retries such a failure on the turn's profile and its
-// fallbacks before it completes the turn, so a turn that still ended with one
-// exhausted its retries.
-func exhausted(q trace.QueuedTurn) bool {
+func Exhausted(q trace.QueuedTurn) bool {
 	return !q.CompletedAt.IsZero() && q.Status() == "failed" && q.Response.FailureClass == coreadapter.Infrastructure
 }
 
-// failureHistory describes the attempts of a turn: their profile, and the
-// class and text of their failure. Consecutive attempts that failed the same
-// way on the same profile are described once, as a range.
-func failureHistory(q trace.QueuedTurn) string {
+func FailureHistory(q trace.QueuedTurn) string {
 	type run struct {
 		first, last         int
 		profile, class, why string
@@ -55,34 +48,21 @@ func failureHistory(q trace.QueuedTurn) string {
 	return strings.Join(attempts, "; ")
 }
 
-// failureContestID is the ID of the transition that contests a unit because
-// the turn that captured response failed.
-func failureContestID(response string) string { return trace.EventID(response, "contested") }
+func FailureContestID(response string) string { return trace.EventID(response, "contested") }
 
-// contestFailure contests a unit whose thread's latest turn exhausted its
-// infrastructure retries and fallbacks, moving it from `from` with a notice
-// for the chief of staff. The reason describes every attempt; the attempts
-// stay in the thread's log. A turn that contested the unit once never does
-// again, so an owner ruling moves the unit on. It reports whether the unit
-// moved.
 func contestFailure(ctx context.Context, s *Controller, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, at time.Time) (bool, error) {
-	if !exhausted(last) {
+	if !Exhausted(last) {
 		return false, nil
 	}
-	id := failureContestID(last.Response.ID)
+	id := FailureContestID(last.Response.ID)
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	if err != nil || slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == id }) {
 		return false, err
 	}
-	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile: %s", role, last.Request.TurnID, unit, failureHistory(last))
+	reason := fmt.Sprintf("the %s turn %s of unit %s failed on every retry and fallback profile: %s", role, last.Request.TurnID, unit, FailureHistory(last))
 	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, "the infrastructure failure repeats", true)
 }
 
-// contestTurn routes the exit of a unit whose latest turn failed or was
-// interrupted again and again. The default is to contest it; the router may
-// instead queue the turn once more, unless retry is false: the turns
-// interrupted in a row reached maxRecoveries, a limit that stays hard, so the
-// retry is not offered. The exit is handed to the router's worker.
 func (s *Controller) contestTurn(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, last trace.QueuedTurn, id, reason, failure string, retry bool) error {
 	targets := []string{UnitContested}
 	if retry && (from == UnitImplementing || from == UnitReviewing) {
@@ -92,23 +72,15 @@ func (s *Controller) contestTurn(ctx context.Context, repo *trace.Repository, st
 		Repo: repo, Stream: stream, Unit: unit, State: state, Trigger: TriggerTurnFailed, Cause: last.Response.ID,
 		Default: UnitContested, Targets: targets, Actor: actor,
 		ID: id, HeaderCause: last.Response.ID, Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", reason)},
-		Note: failure,
+		Note:     failure,
 		Evidence: router.Evidence{Facts: map[string]any{"role": role}, Records: []router.Entry{{Kind: "turn", ID: last.Request.TurnID, Text: reason}}},
 	})
 	return err
 }
 
-// maxRecoveries is how many turns of one piece of work may be interrupted in
-// a row, the turn and the continuations that recover it, before the service
-// stops continuing it.
-const maxRecoveries = 3
+const MaxRecoveries = 3
 
-// interruptedInARow counts the interrupted turns of the thread's latest
-// piece of work: its latest turn when that ended interrupted, and each turn
-// before it that it continues, back to the turn that started the work. A turn
-// that is no continuation, such as one a ruling or a move queued, starts a
-// new count.
-func interruptedInARow(th trace.Thread) int {
+func InterruptedInARow(th trace.Thread) int {
 	n := 0
 	for _, q := range slices.Backward(th.Turns) {
 		if q.CompletedAt.IsZero() || q.Status() != "interrupted" {
@@ -122,13 +94,9 @@ func interruptedInARow(th trace.Thread) int {
 	return n
 }
 
-// contestInterrupted contests a unit whose thread's latest maxRecoveries
-// turns were interrupted, moving it from `from` with a notice for the chief
-// of staff, instead of continuing the work once more. It reports whether the
-// unit moved.
 func contestInterrupted(ctx context.Context, s *Controller, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, from string, actor trace.Actor, role string, th trace.Thread, at time.Time) (bool, error) {
-	n := interruptedInARow(th)
-	if n < maxRecoveries {
+	n := InterruptedInARow(th)
+	if n < MaxRecoveries {
 		return false, nil
 	}
 	last := th.Turns[len(th.Turns)-1]
@@ -137,9 +105,6 @@ func contestInterrupted(ctx context.Context, s *Controller, repo *trace.Reposito
 	return true, s.contestTurn(ctx, repo, stream, unit, state, from, actor, role, last, id, reason, fmt.Sprintf("%d turns in a row were interrupted", n), false)
 }
 
-// contestFailure contests an implementing unit whose mason's latest turn
-// exhausted its infrastructure retries and fallbacks, or whose latest
-// maxRecoveries turns were interrupted.
 func (m *masons) contestFailure(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState) (bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
@@ -154,29 +119,21 @@ func (m *masons) contestFailure(ctx context.Context, stream config.WorkstreamID,
 	return contestFailure(ctx, m.s, m.repository, stream, unit, state, UnitImplementing, masonActor, masonRole, th.Turns[len(th.Turns)-1], m.s.Now())
 }
 
-// failedReview reports whether a contest was raised because a reviewer turn
-// failed, rather than by review bounces.
-func failedReview(contest trace.Transition, unit string) bool {
-	return contest.To == UnitContested && contest.From == UnitReviewing && contest.Actor == reviewerActor && contest.Cause != reviewDocument(unit)
+func FailedReview(contest trace.Transition, unit string) bool {
+	return contest.To == UnitContested && contest.From == UnitReviewing && contest.Actor == ReviewerActor && contest.Cause != ReviewDocument(unit)
 }
 
-// checksContest reports whether a contest was raised because the unit's
-// check runs kept failing to complete.
-func checksContest(contest trace.Transition, unit string) bool {
-	return contest.To == UnitContested && contest.From == UnitChecking && contest.Actor == checksActor && contest.Cause != reviewDocument(unit)
+func ChecksContest(contest trace.Transition, unit string) bool {
+	return contest.To == UnitContested && contest.From == UnitChecking && contest.Actor == ChecksActor && contest.Cause != ReviewDocument(unit)
 }
 
-// rebaseContest reports whether a contest was raised because the foreman's
-// rebases of the unit onto one feature branch commit kept being refused.
-func rebaseContest(contest trace.Transition, unit string) bool {
-	return contest.To == UnitContested && contest.Actor == foremanActor && strings.HasPrefix(contest.Cause, rebaseSubject(unit)+"-") && strings.HasSuffix(contest.Cause, "-refused")
+func RebaseContest(contest trace.Transition, unit string) bool {
+	return contest.To == UnitContested && contest.Actor == foremanActor && strings.HasPrefix(contest.Cause, RebaseSubject(unit)+"-") && strings.HasSuffix(contest.Cause, "-refused")
 }
 
-// bounceContest reports whether a contest was raised because send-backs, by
-// reviewer verdicts and failed checks together, reached shed.max_bounces.
-func bounceContest(contest trace.Transition, unit string) bool {
-	if contest.To != UnitContested || contest.Cause != reviewDocument(unit) {
+func BounceContest(contest trace.Transition, unit string) bool {
+	if contest.To != UnitContested || contest.Cause != ReviewDocument(unit) {
 		return false
 	}
-	return contest.From == UnitReviewing && contest.Actor == reviewerActor || contest.From == UnitChecking && contest.Actor == checksActor
+	return contest.From == UnitReviewing && contest.Actor == ReviewerActor || contest.From == UnitChecking && contest.Actor == ChecksActor
 }

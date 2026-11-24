@@ -2,8 +2,9 @@ package intakefixture
 
 import (
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func AwaitWebhook(t *testing.T, w *fixturekit.Webhook, n int) []string {

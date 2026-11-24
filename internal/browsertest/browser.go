@@ -37,12 +37,6 @@ type Page struct {
 	Requested []string
 }
 
-// browsers is the package's pool of Chromium processes, at most one for
-// each test the package runs at once (-test.parallel). A test holds one of
-// them for as long as it runs, so its tab is the only one a test drives in
-// that browser's window: it stays the visible, focused tab, and a native
-// dialog it opens blocks no other test, while other tests run beside it on
-// browsers of their own.
 var browsers browserPool
 
 type browserPool struct {
@@ -55,15 +49,11 @@ type browserPool struct {
 	stopped bool
 }
 
-// pooledBrowser is one Chromium process and the context of the long-lived
-// tab that started it, for a test's own tab to derive from with
-// chromedp.NewContext.
 type pooledBrowser struct {
 	ctx  context.Context
 	stop func()
 }
 
-// parallelism is the most tests this package runs at once.
 func parallelism() int {
 	if f := flag.Lookup("test.parallel"); f != nil {
 		if n, err := strconv.Atoi(f.Value.String()); err == nil && n > 0 {
@@ -73,10 +63,6 @@ func parallelism() int {
 	return max(runtime.GOMAXPROCS(0), 1)
 }
 
-// acquire returns the browser t holds, taking an idle one or starting a new
-// one up to the pool's size, or waiting for another test to release one. The
-// browser returns to the pool when t finishes, after every cleanup t
-// registers later, including its tabs'.
 func (b *browserPool) acquire(t *testing.T, binary string) *pooledBrowser {
 	t.Helper()
 	b.mu.Lock()
@@ -125,7 +111,6 @@ func (b *browserPool) acquire(t *testing.T, binary string) *pooledBrowser {
 	return browser
 }
 
-// startBrowser starts the Chromium binary named by binary.
 func startBrowser(binary string) (*pooledBrowser, error) {
 	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(binary), chromedp.NoSandbox,
 		chromedp.Flag("disable-dev-shm-usage", true))
@@ -135,8 +120,6 @@ func startBrowser(binary string) (*pooledBrowser, error) {
 		cancel()
 		cancelAllocator()
 	}
-	// The first run starts the browser itself, on the long-lived context,
-	// before any test's own tab or per-action timeout.
 	if err := chromedp.Run(ctx, network.Enable()); err != nil {
 		stop()
 		return nil, err
@@ -144,24 +127,12 @@ func startBrowser(binary string) (*pooledBrowser, error) {
 	return &pooledBrowser{ctx: ctx, stop: stop}, nil
 }
 
-// OpenBrowser gives the test its own tab, on a browser from the package's
-// pool of the Chromium binary OSMIA_BROWSER names, or skips the test without
-// one. The browser Dagger check sets it. The test holds that browser until
-// it finishes, and a later call in the same test opens another tab on it.
-// Every tab lives in the window of the browser's long-lived tab; a second
-// browser context's first target has no window to open in under headless
-// Chromium and Target.createTarget fails with "no browser is open", and
-// chromedp's own browser-context creation offers no way to request one
-// (target.CreateTargetParams.NewWindow, which would, is also documented as
-// unsupported by headless shell). Each fixture's web listener binds its own
-// loopback port, so localStorage, sessionStorage and cache are isolated per
-// test by origin even on a browser an earlier test used. Bringing the tab to
-// the front as soon as it opens keeps it the visible, focused tab, which some
-// pages need: app.js only polls for configuration drift, and only marks a
-// workstream seen, while document.visibilityState is "visible". t.Cleanup
-// closes the tab before the fixture that ran it tears down the service and
-// its workspace, since cleanups run in last-registered-first-run order and
-// this one is registered after the fixture's.
+// OpenBrowser gives the test its own tab on a browser from the package's pool
+// of the Chromium binary OSMIA_BROWSER names, or skips the test without one.
+// The test holds that browser until it finishes; a later call in the same test
+// opens another tab on it. Each tab is brought to the front, so it is the
+// visible, focused tab, and it is closed before the fixture that ran it tears
+// down the service.
 func OpenBrowser(t *testing.T) *Page {
 	t.Helper()
 	binary := os.Getenv("OSMIA_BROWSER")
@@ -179,14 +150,11 @@ func OpenBrowser(t *testing.T) *Page {
 			p.Mu.Unlock()
 		}
 	})
-	// The first run opens this test's own tab, on its own long-lived
-	// context, before any later action's per-run timeout, and brings it to
-	// the front before anything else can observe its visibility.
 	fixturekit.Must(t, chromedp.Run(ctx, network.Enable(), cdppage.BringToFront()))
 	return p
 }
 
-// run runs the actions, and fails with the Page's text when one fails.
+// Run runs the actions, and fails with the Page's text when one fails.
 func (p *Page) Run(actions ...chromedp.Action) {
 	p.T.Helper()
 	ctx, cancel := context.WithTimeout(p.Ctx, BrowserTimeout)
@@ -205,7 +173,7 @@ func (p *Page) Eval(expression string, out any) {
 	p.Run(chromedp.Evaluate(expression, out))
 }
 
-// await waits until the expression is true, and fails with the Page's text
+// Await waits until the expression is true, and fails with the Page's text
 // when it stays false.
 func (p *Page) Await(what, expression string) {
 	p.T.Helper()
@@ -238,7 +206,7 @@ func TextOf(selector string) string {
 	return "(document.querySelector(" + Quote(selector) + ")?.textContent ?? '')"
 }
 
-// awaitText waits until the element's text contains want.
+// AwaitText waits until the element's text contains want.
 func (p *Page) AwaitText(selector, want string) {
 	p.T.Helper()
 	p.Await(fmt.Sprintf("%q in %s", want, selector), TextOf(selector)+".includes("+Quote(want)+")")
@@ -302,7 +270,7 @@ func (p *Page) OutcomeTexts(scope string) []string {
 	return texts
 }
 
-// click clicks the first element selector matches, once it is scrolled to
+// Click clicks the first element selector matches, once it is scrolled to
 // the middle of the Page, clear of the sticky heading and message field.
 func (p *Page) Click(selector string) {
 	p.T.Helper()
@@ -340,8 +308,6 @@ func ClickCurrent(selector string, opts ...chromedp.QueryOption) chromedp.Action
 				if cleanup != nil || received {
 					return cleanup
 				}
-				// Replacing a pressed node can deliver the click to its
-				// ancestor instead. No handler on the target ran.
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -358,19 +324,19 @@ func ClickCurrent(selector string, opts ...chromedp.QueryOption) chromedp.Action
 	})
 }
 
-// typeInto types text into the first field selector matches.
+// TypeInto types text into the first field selector matches.
 func (p *Page) TypeInto(selector, text string) {
 	p.T.Helper()
 	p.Run(chromedp.SendKeys(selector, text, chromedp.ByQuery))
 }
 
-// choose selects value in the first select selector matches.
+// Choose selects value in the first select selector matches.
 func (p *Page) Choose(selector, value string) {
 	p.T.Helper()
 	p.Run(chromedp.SetValue(selector, value, chromedp.ByQuery))
 }
 
-// selectWorkstream picks a workstream from the list the way the owner does,
+// SelectWorkstream picks a workstream from the list the way the owner does,
 // opening the list first where it is collapsed, and waits until the main
 // area shows it.
 func (p *Page) SelectWorkstream(id config.WorkstreamID) {
@@ -386,7 +352,7 @@ func (p *Page) SelectWorkstream(id config.WorkstreamID) {
 		` && document.body.dataset.picker === 'closed'`))
 }
 
-// sidebarIDs reads the workstream IDs the sidebar's list of work shows, top
+// SidebarIDs reads the workstream IDs the sidebar's list of work shows, top
 // to bottom.
 func (p *Page) SidebarIDs() []string {
 	p.T.Helper()
@@ -398,7 +364,7 @@ func (p *Page) SidebarIDs() []string {
 	return strings.Split(joined, ",")
 }
 
-// awaitSidebarOrder waits until the sidebar's list of work shows exactly
+// AwaitSidebarOrder waits until the sidebar's list of work shows exactly
 // want, top to bottom.
 func (p *Page) AwaitSidebarOrder(want ...config.WorkstreamID) {
 	p.T.Helper()
@@ -411,7 +377,7 @@ func (p *Page) AwaitSidebarOrder(want ...config.WorkstreamID) {
 	p.Await("the sidebar ordered "+joined, expr)
 }
 
-// closePopovers closes the header's open popovers and menus.
+// ClosePopovers closes the header's open popovers and menus.
 func (p *Page) ClosePopovers() {
 	p.T.Helper()
 	p.Eval(`document.querySelectorAll(':popover-open').forEach((e) => e.hidePopover())`, nil)
@@ -443,7 +409,7 @@ func (p *Page) OpenNewItem(item string) {
 	p.Click(item)
 }
 
-// openPauses opens the header's pause popover unless it is open.
+// OpenPauses opens the header's pause popover unless it is open.
 func (p *Page) OpenPauses() {
 	p.T.Helper()
 	var open bool
@@ -454,7 +420,7 @@ func (p *Page) OpenPauses() {
 	}
 }
 
-// paths returns the paths of every URL the Page requested.
+// Paths returns the paths of every URL the Page requested.
 func (p *Page) Paths() []string {
 	p.T.Helper()
 	p.Mu.Lock()
@@ -571,8 +537,6 @@ func (p *Page) SelectDesign(id config.WorkstreamID) {
 		document.getElementById('design-meta').textContent.includes(`+Quote(string(id))+`)`))
 }
 
-// selectSidebarRow repeats this idempotent selection when a sidebar reorder
-// disconnects the focused button before the trusted key event reaches it.
 func selectSidebarRow(selector, shown string) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		for {

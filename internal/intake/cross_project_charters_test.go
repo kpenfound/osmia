@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -35,7 +36,7 @@ func newCrossCharterFixture(t *testing.T) *crossCharterFixture {
 	home, err := os.MkdirTemp("", "charters-")
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	cfg, err := config.Load(fixturekit.ConfigAt(t, home))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, home))
 	fixturekit.Must(t, err)
 	owner := OwnerActor
 	a, err := trace.CreateSeeded(ctx, cfg.Root, cfg.Project, fixturekit.DemoStart, owner, []byte(`{"version":1,"entities":[{"id":"internal.trace","name":"Trace","paths":["internal/trace"]}]}`))
@@ -134,7 +135,6 @@ func TestCrossProjectCharterValidationAndContext(t *testing.T) {
 			}
 		}
 	}
-	// An authority reopened without bound member handles still reads every charter.
 	fixturekit.Must(t, f.group.Close())
 	reopened, err := trace.OpenWorkgroupAuthority(f.cfg.Root, f.workgroup.ID)
 	fixturekit.Must(t, err)
@@ -214,7 +214,6 @@ func TestCrossProjectCharterConflictAndAmendment(t *testing.T) {
 	controller := New(Dependencies{Now: func() time.Time { return fixturekit.DemoStart }, Runtimes: func() (*config.Config, []*Project) {
 		return f.cfg, []*Project{{ID: f.a.Project(), Repository: f.a}, {ID: f.b.Project(), Repository: f.b}}
 	}})
-	// Decisions addressed through the original member still reach B after reopening.
 	fixturekit.Must(t, f.group.Close())
 	fixturekit.Must(t, f.b.Close())
 	bProject := f.cfg.Project

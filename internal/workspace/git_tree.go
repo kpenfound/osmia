@@ -31,15 +31,12 @@ func (g *Git) Tree(ctx context.Context, commit string) (fs.FS, error) {
 	return &gitTree{git: g, ctx: ctx, root: oid, trees: map[string]map[string]treeEntry{}}, nil
 }
 
-// treeEntry is one entry of a Git tree object.
 type treeEntry struct {
 	name, mode, kind, oid string
 }
 
 func (e treeEntry) symlink() bool { return e.mode == "120000" }
 
-// directory reports whether a checkout holds a directory for the entry: a
-// subtree, or a submodule, which a checkout creates empty.
 func (e treeEntry) directory() bool { return e.kind == "tree" || e.kind == "commit" }
 
 func (e treeEntry) fileMode() fs.FileMode {
@@ -54,7 +51,6 @@ func (e treeEntry) fileMode() fs.FileMode {
 	return 0o644
 }
 
-// maxTreeLinks bounds the symbolic links one lookup follows, as os.Root does.
 const maxTreeLinks = 255
 
 type gitTree struct {
@@ -75,8 +71,6 @@ var (
 
 var errTreeEscape = errors.New("path escapes from the tree")
 
-// list returns the entries of the tree object oid by name. The empty oid is
-// the empty tree.
 func (t *gitTree) list(oid string) (map[string]treeEntry, error) {
 	if oid == "" {
 		return nil, nil
@@ -114,9 +108,6 @@ func (t *gitTree) blob(oid string) ([]byte, error) {
 	return []byte(out), err
 }
 
-// lookup resolves name to its entry, following every symbolic link on the way
-// and, when follow is set, the one that names the entry itself. The root is a
-// directory entry whose oid is the root tree.
 func (t *gitTree) lookup(name string, follow bool) (treeEntry, error) {
 	current := treeEntry{mode: "040000", kind: "tree", oid: t.root}
 	if name == "." {
@@ -187,7 +178,6 @@ func (t *gitTree) resolve(op, name string, follow bool) (treeEntry, error) {
 	return entry, nil
 }
 
-// Stat describes name, following symbolic links as a checkout's would.
 func (t *gitTree) Stat(name string) (fs.FileInfo, error) {
 	entry, err := t.resolve("stat", name, true)
 	if err != nil {
@@ -196,7 +186,6 @@ func (t *gitTree) Stat(name string) (fs.FileInfo, error) {
 	return treeInfo{entry: entry, name: path.Base(name)}, nil
 }
 
-// ReadFile returns the content of the regular file name.
 func (t *gitTree) ReadFile(name string) ([]byte, error) {
 	entry, err := t.resolve("readfile", name, true)
 	if err != nil {
@@ -212,8 +201,6 @@ func (t *gitTree) ReadFile(name string) ([]byte, error) {
 	return data, nil
 }
 
-// ReadDir lists the directory name sorted by file name. A symbolic link
-// among its entries is described, not followed.
 func (t *gitTree) ReadDir(name string) ([]fs.DirEntry, error) {
 	entry, err := t.resolve("readdir", name, true)
 	if err != nil {
@@ -238,7 +225,6 @@ func (t *gitTree) ReadDir(name string) ([]fs.DirEntry, error) {
 	return out, nil
 }
 
-// Open opens name as a file; a directory lists its entries.
 func (t *gitTree) Open(name string) (fs.File, error) {
 	entry, err := t.resolve("open", name, true)
 	if err != nil {

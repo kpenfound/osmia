@@ -22,21 +22,10 @@ const DeliveryPath = "final/delivery.json"
 const DeliveryDocument = "final-delivery"
 const DeliverySubject = "delivery-owner"
 
-// PublishedTitle is the title to publish for an approval: the title it
-// recorded, or, for an approval recorded before this field existed,
-// DeliveryTitle(Description, stream), which is what was published for it
-// then.
-func PublishedTitle(approval DeliveryApproval, stream config.WorkstreamID) string {
-	if approval.Title != "" {
-		return approval.Title
-	}
-	return DeliveryTitle(approval.Description, stream)
-}
-
 func DescriptionHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 
-// BoundSubject truncates s to subjectLength runes, as DeliveryTitle and a
-// landing commit subject do.
+// BoundSubject truncates s to subjectLength runes, as a delivery title and a
+// landing commit subject are.
 func BoundSubject(s string) string {
 	if runes := []rune(s); len(runes) > subjectLength {
 		return string(append(runes[:subjectLength-1], '…'))
@@ -162,7 +151,7 @@ func ClosingReference(handed trace.Document, targetRepo string) string {
 	return fmt.Sprintf("closes %s/%s#%d", ref.Owner, ref.Repo, ref.Number)
 }
 
-// draftDelivery is the workstream's title and pull request body: the title
+// DraftDelivery is the workstream's title and pull request body: the title
 // (see WorkstreamTitle) and a short prose summary of the sealed spec,
 // closing the issue the workstream was handed in from when one is recorded
 // and its repository can be compared with the one the pull request would
@@ -176,9 +165,6 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 	return title, body, err
 }
 
-// draftDelivery drafts the title and body as DraftDelivery does and also
-// reports whether the body says the pull request stays a draft, which is
-// whether PendingMergeOrderReferences returned a reference for it.
 func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, opensAsDraft bool, err error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -212,18 +198,12 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 	if ref := ClosingReference(handed, targetRepo); ref != "" {
 		body += "\n" + ref + "\n"
 	}
-	// A workgroup merge-order edge whose upstream has not yet merged keeps
-	// the pull request a draft after the owner approves marking it ready; the
-	// owner sees the dependency stated here.
 	if references, err := s.PendingMergeOrderReferences(repository, stream); err != nil {
 		return "", "", false, err
 	} else if len(references) > 0 {
 		opensAsDraft = true
 		body += fmt.Sprintf("\nThis depends on %s, which must merge first, so this pull request stays a draft. After updating to the merged dependencies, checks, final review and a fresh owner approval to mark it ready for review are required.\n", strings.Join(references, ", "))
 	}
-	// Only the "Before you ship" items of the brief recorded for this same
-	// final review (number, revision and commit) enter the body; a stale brief
-	// or one without items leaves it untouched.
 	if brief, found, err := BriefForReport(repository, stream, report, reviewRevision); err != nil {
 		return "", "", false, err
 	} else if found && len(brief.BeforeYouShip) > 0 {
@@ -313,8 +293,6 @@ func (s *Controller) presentDelivery(ctx context.Context, project config.Project
 		} else if landed {
 			landing = &l
 		}
-		// A landing writes the merge record the dependency edges read; the
-		// presentation shows it as the landing it is, not as the owner's merge.
 		if m, merged, err := ReadDeliveryMerge(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 		} else if merged && landing == nil {
@@ -368,16 +346,13 @@ func (s *Controller) presentDelivery(ctx context.Context, project config.Project
 	if err != nil {
 		return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot draft the title and description from trace records"}
 	}
-	// An owner's approval to land stands while the landing it started waits to be
-	// retried on the rebased commit: it is not stale, it is the decision the retry
-	// carries out.
 	retrying := false
 	if approval != nil && approval.Route == DeliveryRouteLand {
 		if _, retrying, err = PendingLandingRoute(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read landing records"}
 		}
 	}
-	if approval != nil && !retrying && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || PublishedTitle(*approval, stream) != title) {
+	if approval != nil && !retrying && (approval.Style != s.About(repository).Project.Landing || len(approval.Messages) == 0 || approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter || approval.Seal != report.Seal || approval.Title != title) {
 		approval = nil
 	}
 	style := s.About(repository).Project.Landing
@@ -396,8 +371,6 @@ func (s *Controller) presentDelivery(ctx context.Context, project config.Project
 	canLand := feature.Value == AssembledState && s.About(repository).Project.Lands()
 	recommendation := ""
 	if canLand {
-		// Jev's pick for this delivery that it had no authority to apply: the card
-		// shows it beside the owner's own routes.
 		if push, found, err := CurrentPush(repository, stream); err != nil {
 			return DeliveryPresentation{}, &APIError{Code: Internal, Message: "cannot read pushes"}
 		} else if found {
@@ -409,8 +382,6 @@ func (s *Controller) presentDelivery(ctx context.Context, project config.Project
 	return DeliveryPresentation{Project: project, Workstream: stream, Report: report, ReviewRevision: review.Revision, Title: title, Draft: draft, DraftHash: draftHash(title, draft, style, messages), Messages: messages, Style: style, Approval: approval, Publication: publication, Delivered: feature.Value == DeliveredState, Maintenance: maintenance, DraftPullRequest: opensAsDraft, Checks: checks, Brief: brief, CanLand: canLand, Recommendation: recommendation}, nil
 }
 
-// draftHash identifies the title, description, style and commit messages a
-// presentation drafts, so a decision can name exactly what it read.
 func draftHash(title, description, style string, messages []workspace.DeliveryMessage) string {
 	pinned, _ := json.Marshal(struct {
 		Title       string
@@ -450,8 +421,6 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	if api != nil {
 		return DeliveryApproval{}, api
 	}
-	// Landing and marking the pull request ready are two ways to deliver; a
-	// landing under way decides which one this workstream takes.
 	if landing, err := LandingInFlight(repository, stream); err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read landing records"}
 	} else if landing {
@@ -499,8 +468,6 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	if err != nil {
 		return DeliveryApproval{}, &APIError{Code: Internal, Message: "cannot read delivery records"}
 	}
-	// Approving again after a refused publication records a new approval,
-	// which asks for another publication.
 	if existing != nil {
 		refused, err := PublicationRefused(repository, stream, prior.Revision)
 		if err != nil {
@@ -510,8 +477,6 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 			existing = nil
 		}
 	}
-	// An approval to land is not the approval to mark ready; this one replaces
-	// it.
 	if existing != nil && existing.Route == DeliveryRouteLand {
 		existing = nil
 	}
@@ -550,7 +515,7 @@ func (s *Controller) ApproveDeliveryBy(ctx context.Context, raw string, req Deli
 	return approval, nil
 }
 
-// deliveryGate checks the approval against the current review and the exact
+// DeliveryGate checks the approval against the current review and the exact
 // description publication proposes to send.
 func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
 	if privateCheckTrace(description) {
@@ -588,7 +553,7 @@ func (s *Controller) DeliveryGate(ctx context.Context, repository *trace.Reposit
 	if approval.Route == DeliveryRouteLand {
 		return *approval, "the owner approved landing the workstream on its base branch, not marking the pull request ready for review", nil
 	}
-	if privateCheckTrace(PublishedTitle(*approval, stream)) {
+	if privateCheckTrace(approval.Title) {
 		return *approval, "pull request titles must not include private Dagger Cloud trace links", nil
 	}
 	if approval.Review != report.Review || approval.ReviewRevision != review.Revision || approval.Commit != report.Commit || approval.Seal != report.Seal || approval.SpecHash != report.SpecHash || approval.Spec != report.Spec || approval.Plan != report.Plan || approval.Charter != report.Charter {

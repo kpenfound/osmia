@@ -23,7 +23,6 @@ type ShedProposal struct {
 	At      time.Time
 }
 
-// proposer names who a proposal's records are attributed to.
 func proposer(actor trace.Actor) string {
 	if actor == trace.JevActor {
 		return "Jev"
@@ -104,8 +103,6 @@ func (s *Controller) ShedProposalExit(raw string, in ShedProposal) (router.Exit,
 		Subject: OwnerSubject, From: o.Owner.Value, Version: o.Owner.Version,
 		Trigger: TriggerMoveProposal, Cause: cause, Actor: in.Actor, Note: note, Turn: in.Turn, At: in.At, Proposed: name,
 		Default: TargetWait, Targets: []router.Target{stay, asked},
-		// The chief of staff's proposal is its own decision: the router enters
-		// the redraft or the round it asks for, after the prerequisites.
 		Authority:    &router.Authority{Kind: router.AuthorityChief, Target: name},
 		Questions:    []router.Question{ask("proposal_fits", "The proposed move fits the evidence."), ask("evidence_supports", "The history and the standing dissent support the move.")},
 		TransitionID: func(t router.Target) string { return cause + "-" + t.Name },

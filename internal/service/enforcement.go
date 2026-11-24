@@ -12,8 +12,11 @@ import (
 	"github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -23,11 +26,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Enforcement is what a service runs its role turns through: the engine
-// handing out each role's core enforcer and the host serving each turn's
-// scoped tools, and what it runs candidates' checks with, and the cloud runner
-// those checks fall back to when check_fallback is on. Skills is the
-// engine's skill cache, refreshed as the loaded configuration says.
+// Enforcement is what a service runs its role turns through: the engine that
+// hands out each role's core enforcer, the host that serves each turn's scoped
+// tools, the runner for candidates' checks and the cloud runner those checks
+// fall back to when check_fallback is on. Skills is the engine's skill cache,
+// refreshed as the loaded configuration says.
 type Enforcement struct {
 	Engine      coreadapter.Engine
 	Hosts       coreadapter.MCPHosts
@@ -49,41 +52,18 @@ func CoreEnforcement(root config.Root) Enforcement {
 	}
 }
 
-// chiefGrant is what a chief-of-staff thread turn may call: file_read over
-// its read-only view of the workstream's documents, status, runtime controls,
-// owner decisions, objection decisions, unit moves, drift handbacks, follow-ups,
-// question tools and shared project context. It names every tool chiefTools makes, plus the three tools
-// a design session's agent may reach (draft_brief, read_repo, set_title): Select narrows
-// an ordinary
-// chief-of-staff turn's grant down to chiefOrdinaryTools, which excludes
-// them, and a design session's turn down to designOnlyTools, which excludes
-// everything else, so the ceiling here is never itself the enforced set. It
-// holds the Web permission, which both narrowings set explicitly because a
-// narrowing intersects it.
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, checksChoiceTool, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, decideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), projectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), ProjectContextTool)}
 
-// chiefOrdinaryTools is chiefGrant's tool list without the three design-only
-// tools, so an ordinary chief-of-staff turn never reaches them.
-var chiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+var ChiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
 	return name == draftBriefToolName || name == designReadRepoToolName || name == designTitleToolName
 })
 
-// chiefOrdinaryNarrow is what Select narrows an ordinary chief-of-staff turn
-// to: chiefOrdinaryTools, and the Web permission.
-var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: chiefOrdinaryTools, Web: true}
+var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: ChiefOrdinaryTools, Web: true}
 
-// designOnlyTools is the entire toolset a design session's turn may reach:
-// read-only file access to its staged view, read-only cross-repo code
-// access, recording its drafted brief and setting its title. No write, version-control,
-// credential or owner-gate tool of chiefGrant is reachable through it.
 var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}
 
-// designNarrow is what Select narrows a design session's turn to:
-// designOnlyTools, and the Web permission. The backend's own web tools are
-// native tools, not service tools, so they add nothing to the tools above.
 var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 
-// chiefTools are the service tools of one chief-of-staff turn.
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	set, err := status.ToolHolding(r, trace.ChiefOfStaff, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
@@ -92,54 +72,24 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
 	for i, t := range chief {
 		if t.Name == questions.RouteAmendmentTool {
-			chief[i] = controls.reopenForRevision(r, scope, t)
+			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
 		}
 	}
-	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), controls.pullRequestChecks(r, scope), controls.askOwnerAboutChecks(r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.resolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.dropDependency(r, scope), controls.retryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), projectContext(r, scope))), err
+	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), ProjectContext(r, scope))), err
 }
 
-// masonGrant is what a mason thread turn may do: read, write and execute in
-// its view, ask the chief of staff, read factory context, record a
-// discovery, file an amendment and report done. A unit mason is narrowed to
-// unitMasonGrant; the drift mason keeps every tool here but amend, which it
-// narrows to cite the drift rebase's upstream commit.
-var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, doneTool}, WriteFiles: true, Execute: true}
+var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, execution.DoneTool}, WriteFiles: true, Execute: true}
 
-// unitMasonGrant is what a unit mason turn may do: read, write and execute in
-// its view of its unit's workspace, ask the chief of staff and report its
-// unit done.
 var unitMasonGrant = execution.UnitMasonGrant
 
-// reviewerGrant is what a unit reviewer turn may do: read its candidate and
-// diff, ask the chief of staff, read factory context, record a discovery and
-// record its verdict. The service runs the candidate's checks before review.
-// The drift reviewer holds the same tools, over the resolved candidate it
-// reads instead of a unit's.
-var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, verdictTool, reviewtools.DiffToolName}}
+var reviewerGrant = coreadapter.Capabilities{Tools: []string{"file_read", questions.AskTool, factoryContextTool, discoveryTool, execution.VerdictTool, reviewtools.DiffToolName}}
 
-// Enforce returns opts with Architect, Committee and Threads
-// running every role turn through e. Thread turns are granted to the chief of
-// staff, mason and reviewer; a turn of any other role fails with a recorded
-// reason. A chief-of-staff turn reads a view of its workstream's documents,
-// staged afresh for each turn. A mason turn works on a view of its unit's workspace, copied back
-// into the workspace after the turn, and a mason turn whose done the service
-// accepted ends with the outcome done, the mason's report and its card. A
-// drift mason turn works the same way on its workstream's drift resolution
-// workspace, with file tools, ask, factory_context, discovery recording,
-// amend and done. A drift reviewer turn reads a read-only export of the
-// resolved candidate it reviews, with file_read, ask, factory_context,
-// discovery recording, workstream_diff and verdict; it writes nothing and
-// executes nothing. Both resolve to the same drift rebase, and the reviewer
-// to the same review, for an answer continuation as for the original turn,
-// from durable question and drift/rebase.json records rather than the turn
-// ID, so the attribution survives a restart. An amendment a drift mason
-// files, or a unit reviewer files while it reads a candidate a drift rebase
-// carried, cites that drift rebase's upstream commit. Each role's
-// sandbox comes from its configuration, and a sandbox the platform cannot
-// enforce fails the turn with core's reason. Thread turns take their role's sandbox and the root from the
-// configuration the service has loaded, and record UTC times. Unit and final
-// review check runs use e.Checks, or the runner opts already holds when e has
-// none.
+// Enforce returns opts with Architect, Committee and Threads running every
+// role turn through e. Thread turns are granted to the chief of staff, mason
+// and reviewer; a turn of any other role fails with a recorded reason. A
+// sandbox the platform cannot enforce fails the turn with core's reason. Unit
+// and final review check runs use e.Checks, or the runner opts already holds
+// when e has none.
 func Enforce(opts Options, e Enforcement) Options {
 	if e.Checks != nil {
 		opts.reviewChecks = e.Checks
@@ -168,8 +118,8 @@ func Enforce(opts Options, e Enforcement) Options {
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg, r)
 		drifts := resolutions{StreamWorkspaces: driftWorkspaces(cfg, r)}
-		reports := &masonReports{}
-		verdicts := &reviewerReports{}
+		reports := &execution.MasonReports{}
+		verdicts := &execution.ReviewerReports{}
 		turns := &isolation.Turns{
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
@@ -183,18 +133,18 @@ func Enforce(opts Options, e Enforcement) Options {
 				if !ok || scope.Project != project {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
-				execution := cfg.RoleExecution(scope.Role)
+				settings := cfg.RoleExecution(scope.Role)
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
-					return drifts.Selection(ctx, scope, execution)
+					return drifts.Selection(ctx, scope, settings)
 				}
 				if scope.Role == masonRole {
-					return units.selection(ctx, scope, execution)
+					return units.selection(ctx, scope, settings)
 				}
 				if scope.Role == reviewerRole && scope.Thread == driftReviewerAgent {
-					return driftReviewerSelection(ctx, cfg, r, scope, execution)
+					return lifecycle.DriftReviewerSelection(ctx, cfg, r, scope, settings)
 				}
 				if scope.Role == reviewerRole {
-					return unitReviewerSelection(ctx, cfg, r, scope, execution)
+					return execution.UnitReviewerSelection(ctx, cfg, r, scope, settings)
 				}
 				if scope.Role == trace.ChiefOfStaff {
 					stream, err := config.ParseWorkstreamID(scope.Workstream)
@@ -211,15 +161,15 @@ func Enforce(opts Options, e Enforcement) Options {
 						if err != nil {
 							return isolation.Selection{}, err
 						}
-						return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
+						return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings,
 							Narrow: &designNarrow}, nil
 					}
 					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
-					paths, err := stageChiefDocuments(r, stream, workspace)
+					paths, err := StageChiefDocuments(r, stream, workspace)
 					if err != nil {
 						return isolation.Selection{}, err
 					}
-					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: execution,
+					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings,
 						Narrow: &chiefOrdinaryNarrow}, nil
 				}
 				return isolation.Selection{}, errors.New("view selection denied")
@@ -234,7 +184,7 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return nil, err
 					}
-					diff, err := driftDiffTool(ctx, cfg, r, scope)
+					diff, err := lifecycle.DriftDiffTool(ctx, cfg, r, scope)
 					if err != nil {
 						return nil, err
 					}
@@ -246,11 +196,11 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				if scope.Role == reviewerRole {
 					ask, err := questions.Tools(r, reviewerAgent(scope.Unit), scope, now)
-					identity, identityErr := unitReviewerIdentity(r, scope)
+					identity, identityErr := execution.UnitReviewerIdentity(r, scope)
 					if identityErr != nil {
 						return nil, identityErr
 					}
-					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.Tool(scope), reviewDiffTool(cfg, r, scope, identity)), err
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.Tool(scope), execution.ReviewDiffTool(cfg, r, scope, identity)), err
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
@@ -259,9 +209,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				if err != nil {
 					return nil, err
 				}
-				// The design tools are registered unconditionally; Select's Narrow
-				// decides, per turn, whether any is actually reachable.
-				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), designReadRepoTool(cfg, r, controls.intake(), scope), designTitleTool(r, scope, now)), nil
+				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), intake.DesignReadRepoTool(cfg, r, controls.intake(), scope), intake.DesignTitleTool(r, scope, now)), nil
 			},
 			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
 				if scope.Role == sessionRole && scope.Project == project {
@@ -276,11 +224,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				return nil, nil
 			},
-			Hosts: e.Hosts,
-			// resumableEngine's heuristic fallback (used only when e.Engine has
-			// no CheckResume of its own) only ever answers for a session turn:
-			// Runner.ResumableRoles below confines it. Every other role's
-			// CheckResume call reaches e.Engine exactly as it would unwrapped.
+			Hosts:  e.Hosts,
 			Engine: resumableEngine{e.Engine},
 			Capture: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {
 				if scope.Role == sessionRole {
@@ -306,14 +250,14 @@ func Enforce(opts Options, e Enforcement) Options {
 		return thread.Dispatcher{Runner: runner,
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)
-				if in.Agent == sessionAgentID {
+				if in.Agent == SessionAgentID {
 					directory = filepath.Join(runtime.ModelSessionDirectory(root, r.Project(), in.Workstream), in.Turn)
 				}
 				return coreadapter.PreparedTurn{SessionDirectory: directory}, os.MkdirAll(directory, 0700)
 			},
 			Relay: func(ctx context.Context, t trace.Thread, q trace.QueuedTurn) error {
 				if t.Identity.Role == sessionRole {
-					return sessionRelay(ctx, r, now, t, q)
+					return SessionRelay(ctx, r, now, t, q)
 				}
 				return nil
 			}}, nil
@@ -321,10 +265,6 @@ func Enforce(opts Options, e Enforcement) Options {
 	return opts
 }
 
-// threadWorkspaces lends a drift mason turn its workstream's resolution
-// workspace, every other mason turn its unit's workspace, a session turn
-// its session's worktree and every other thread turn the directory its
-// selection stages.
 type threadWorkspaces struct {
 	units    unitWorkspaces
 	drifts   resolutions
@@ -344,11 +284,8 @@ func (w threadWorkspaces) Acquire(ctx context.Context, req coreadapter.Workspace
 	return stagedWorkspaces{}.Acquire(ctx, req)
 }
 
-// driftMasonTools returns the question tools of a drift mason turn: amend,
-// citing the drift rebase whose conflicts it resolves, or none while no
-// resolution is in progress.
 func driftMasonTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
-	move, found, err := resolvingMove(r, config.WorkstreamID(scope.Workstream))
+	move, found, err := lifecycle.ResolvingMove(r, config.WorkstreamID(scope.Workstream))
 	if err != nil || !found {
 		return nil, err
 	}

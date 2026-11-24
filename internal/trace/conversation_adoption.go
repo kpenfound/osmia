@@ -57,7 +57,6 @@ func PrepareDesignWorkgroup(ctx context.Context, root config.Root, id config.Wor
 		return nil, Workgroup{}, err
 	}
 	g := Workgroup{ID: id, Members: append([]config.WorkstreamID{origin.Workstream}, order...), Conversation: &origin}
-	// A crash may leave the host committed before its chief or group record.
 	hostDirectory, err := root.WorkstreamTrace(r.Project(), origin.Workstream)
 	if err == nil {
 		if _, stat := os.Stat(hostDirectory); errors.Is(stat, os.ErrNotExist) {
@@ -166,8 +165,6 @@ func (r *Repository) AdoptDesignConversation(ctx context.Context, source *Reposi
 	if err := target.checkRevisions(ctx, []Record{origin}); err != nil {
 		return err
 	}
-	// The imported identity and log replace the host's own, which hold no
-	// turns, and the origin precedes the records it admits.
 	prefix := "workstreams/" + string(stream) + "/agents/" + ChiefOfStaff + "/"
 	c := change{replace: []string{prefix + "identity.jsonl", prefix + "log.jsonl"}, records: append([]Record{origin}, imports...), stream: stream, workflow: &targetLog, message: "Adopt design conversation"}
 	return target.publish(ctx, c)
@@ -178,9 +175,6 @@ func conversationRecordHash(rec Record) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
-// importedConversationRecord accepts a foreign scope only at its pinned
-// original workstream and only with the immutable fingerprint written at adoption.
-// It requires r.cache.mu, and remembers each workstream's import.
 func (r *Repository) importedConversationRecord(ctx context.Context, rec Record) bool {
 	h := rec.header()
 	imported, ok := r.cache.origins[h.Workstream]
@@ -223,17 +217,4 @@ func (r *Repository) RetireDesignConversation(ctx context.Context, stream config
 	}
 	delete(log.Threads, ChiefOfStaff)
 	return source.saveThread(ctx, stream, log)
-}
-
-// DesignConversationImported reports whether the host has committed its queue.
-func (r *Repository) DesignConversationImported(stream config.WorkstreamID) (bool, error) {
-	source, err := r.scoped(stream)
-	if err != nil {
-		return false, err
-	}
-	_, err = source.file("workstreams/" + string(stream) + "/" + conversationOriginPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	return err == nil, err
 }

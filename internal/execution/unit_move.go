@@ -17,12 +17,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const moveUnitTool = "move_unit"
+const MoveUnitTool = "move_unit"
 
-// moveSources are the states a unit moves from: not merged.
 var moveSources = []string{UnitPlanned, UnitReady, UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested, UnitWaiting}
 
-// moveTargets are the states a unit moves to.
 var moveTargets = []string{UnitPlanned, UnitReady, UnitImplementing, UnitChecking, UnitReviewing, UnitApproved, UnitContested}
 
 func moveDocument(unit string, version uint64) string {
@@ -33,21 +31,16 @@ func movePath(unit string, version uint64) string {
 	return fmt.Sprintf("units/%s/move-%d.json", trace.UnitSubject(unit), version)
 }
 
-func movePrefix(unit string) string { return "units/" + trace.UnitSubject(unit) + "/move-" }
+func MovePrefix(unit string) string { return "units/" + trace.UnitSubject(unit) + "/move-" }
 
-// isMove reports whether t is a move of the unit.
-func isMove(t trace.Transition, unit string) bool {
+func IsMove(t trace.Transition, unit string) bool {
 	return t.Subject == trace.UnitSubject(unit) && strings.HasPrefix(t.ID, trace.UnitSubject(unit)+"-move-")
 }
 
-// moveContest reports whether a contest was raised by a move to contested,
-// which raises the unit to the owner.
-func moveContest(contest trace.Transition, unit string) bool {
-	return contest.To == UnitContested && isMove(contest, unit)
+func MoveContest(contest trace.Transition, unit string) bool {
+	return contest.To == UnitContested && IsMove(contest, unit)
 }
 
-// recordedMoves returns the unit's recorded moves with their documents, in the
-// order they were recorded.
 func recordedMoves(repo *trace.Repository, stream config.WorkstreamID, unit string) ([]trace.Document, []UnitMove, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -56,7 +49,7 @@ func recordedMoves(repo *trace.Repository, stream config.WorkstreamID, unit stri
 	var records []trace.Document
 	var moves []UnitMove
 	for _, d := range docs {
-		if d.Unit != unit || !strings.HasPrefix(d.Path, movePrefix(unit)) {
+		if d.Unit != unit || !strings.HasPrefix(d.Path, MovePrefix(unit)) {
 			continue
 		}
 		var m UnitMove
@@ -68,7 +61,6 @@ func recordedMoves(repo *trace.Repository, stream config.WorkstreamID, unit stri
 	return records, moves, nil
 }
 
-// moveNote returns the note of the move a transition records.
 func moveNote(repo *trace.Repository, stream config.WorkstreamID, unit string, t trace.Transition) (string, error) {
 	records, moves, err := recordedMoves(repo, stream, unit)
 	if err != nil {
@@ -80,13 +72,10 @@ func moveNote(repo *trace.Repository, stream config.WorkstreamID, unit string, t
 	return "", nil
 }
 
-// unitOperation returns the action of a landing or rebase of the unit that
-// has no result yet, or "" when none is in flight.
 func unitOperation(repo *trace.Repository, stream config.WorkstreamID, unit string) (string, error) {
 	return unitOperationExcept(repo, stream, unit, "")
 }
 
-// operationUnit returns the unit a landing or rebase operation is about.
 func operationUnit(op coreadapter.Operation) (string, error) {
 	var in struct {
 		Unit string `json:"unit"`
@@ -97,7 +86,7 @@ func operationUnit(op coreadapter.Operation) (string, error) {
 	return in.Unit, nil
 }
 
-// moveUnit moves a unit that has not merged to another state, as actor: the
+// MoveUnit moves a unit that has not merged to another state, as actor: the
 // owner, or the chief of staff in turn. The move and its document are recorded
 // together. A move to implementing gives the unit's mason a turn with the note
 // and a fresh clean-turn allowance; to checking, a fresh check run of the
@@ -111,7 +100,6 @@ func (s *Controller) MoveUnit(ctx context.Context, repo *trace.Repository, strea
 	return s.moveUnit(ctx, repo, stream, unit, req, actor, turn, "")
 }
 
-// moveUnit is MoveUnit with the Jev judgment a Jev gate decision comes from.
 func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, req UnitMoveRequest, actor trace.Actor, turn, judgment string) (UnitMoveResponse, *APIError) {
 	note := strings.TrimSpace(req.Note)
 	if !slices.Contains(moveTargets, req.To) || note == "" {
@@ -151,10 +139,6 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 	}
 	at := s.Now()
 	pinned := actor == trace.JevActor || actor.Kind == ownerActor.Kind
-	// The records are built once here, so a move that cannot be recorded is
-	// refused before anything is asked of the router, which builds them again
-	// when it enters the target. A proposal to approve is never entered, so it
-	// builds none.
 	var records unitMoveRecord
 	if pinned || req.To != UnitApproved {
 		var api *APIError
@@ -162,11 +146,6 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 			return UnitMoveResponse{}, api
 		}
 	}
-	// An owner's decision, one of Jev's gate decisions and a move of the chief
-	// of staff's own are pinned moves: the router enters exactly the target,
-	// after its hard prerequisites. A chief move that approves a candidate or
-	// moves a unit out of a contest the owner holds is the owner's, and waits
-	// as a pending owner decision.
 	cause := fmt.Sprintf("%s-%d", moveDocument(unit, state.Version), at.UnixNano())
 	var in UnitExitInput
 	switch {
@@ -211,8 +190,6 @@ func (s *Controller) moveUnit(ctx context.Context, repo *trace.Repository, strea
 	return UnitMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("unit %s was not moved to %s: the move is held (%s). %s Nothing moved, and the unit keeps its state", unit, req.To, res.Hold, res.Reason)}
 }
 
-// pendingOwnerMove says what became of a proposal that belongs to the owner: it
-// is a pending owner decision, and where the owner decides it.
 func pendingOwnerMove(unit, to string, res router.Result) string {
 	why := "the owner decides it"
 	switch {
@@ -226,26 +203,14 @@ func pendingOwnerMove(unit, to string, res router.Result) string {
 	return fmt.Sprintf("unit %s was not moved to %s: %s. The move is pending as an owner decision on %s; nothing moved", unit, to, why, recoveryCard)
 }
 
-// unitMoveRecord is what entering a target by a move records: the move, its
-// documents (the move's own, and for approved the approval of the candidate)
-// and the transition that carries them with its notice.
 type unitMoveRecord struct {
 	move UnitMove
 	docs []trace.Document
 	tx   trace.Transaction
 }
 
-// unitMoveRecords defines, once, what moving a started unit to a state records,
-// for every way the move is made: an owner's command, the chief of staff's
-// tool and the transition router. A move to implementing gives the unit's
-// mason a turn with the note and a fresh clean-turn allowance; to checking, a
-// fresh check run of the recorded candidate; to reviewing, a fresh review of
-// it; to approved, an approval of it that the foreman lands; and to contested,
-// raises the unit to the owner. cause is the record the move follows, and
-// transition the ID of the transition, derived from the move's document when
-// empty.
 func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, to, note string, actor trace.Actor, turn, cause, transition string, at time.Time) (unitMoveRecord, *APIError) {
-	by := rulerName(actor)
+	by := RulerName(actor)
 	move := UnitMove{From: state.Value, To: to, Note: note, By: by, Turn: turn}
 	id := moveDocument(unit, state.Version)
 	var docs []trace.Document
@@ -274,7 +239,7 @@ func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository
 		}
 	case UnitApproved:
 		m := &masons{s: s, cfg: s.About(repo), repository: repo}
-		_, identity, err := m.candidateEvidence(ctx, stream, unit)
+		_, identity, err := m.CandidateEvidence(ctx, stream, unit)
 		if err != nil {
 			if ctx.Err() != nil {
 				return unitMoveRecord{}, &APIError{Code: Internal, Message: "the move was cancelled"}
@@ -308,10 +273,6 @@ func (s *Controller) unitMoveRecords(ctx context.Context, repo *trace.Repository
 	return unitMoveRecord{move: move, docs: docs, tx: tx}, nil
 }
 
-// approvalRecord returns the next revision of the unit's review.json: a
-// satisfactory decision on identity's candidate by whoever moved the unit to
-// approved, which is the approval the foreman lands. Send-backs counted so far
-// stay counted.
 func approvalRecord(repo *trace.Repository, stream config.WorkstreamID, unit string, identity UnitReviewIdentity, move, by, note string, actor trace.Actor, at time.Time) (trace.Document, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -319,7 +280,7 @@ func approvalRecord(repo *trace.Repository, stream config.WorkstreamID, unit str
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
+		if d.ID == ReviewDocument(unit) {
 			latest = d
 		}
 	}
@@ -332,11 +293,11 @@ func approvalRecord(repo *trace.Repository, stream config.WorkstreamID, unit str
 	if err != nil {
 		return trace.Document{}, err
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reviewDocument(unit), Revision: latest.Revision + 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: move}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: ReviewDocument(unit), Revision: latest.Revision + 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: move}
 	return trace.Document{Header: h, Path: fmt.Sprintf("units/%s/review.json", unit), Content: string(content) + "\n"}, nil
 }
 
-// ownerMove moves a unit as the owner.
+// OwnerMove moves a unit as the owner.
 func (s *Controller) OwnerMove(ctx context.Context, raw, unit string, req UnitMoveRequest) (UnitMoveResponse, *APIError) {
 	_, stream, repo, api := s.ConversationTrace(raw)
 	if api != nil {
@@ -365,7 +326,7 @@ func (s *Controller) OwnerMove(ctx context.Context, raw, unit string, req UnitMo
 // which says what became of it. A shared chief of staff names the member whose
 // unit moves.
 func (c *Controls) MoveUnit(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: moveUnitTool, Effect: coreadapter.ToolMemory,
+	tool := coreadapter.Tool{Name: MoveUnitTool, Effect: coreadapter.ToolMemory,
 		Description: "Move a unit of this workstream to another state when the state machine leaves it stuck or wrong. The move is your decision: the service makes it unless a hard prerequisite refuses it (a landing or rebase in flight, a pause, the budget, a missing candidate), and the result says what happened, or that the move belongs to the owner and is pending on a card. " +
 			"unit: its ID; to: ready (kick a ready unit, or make a planned unit ready once every unit it depends on has merged), planned (hold a unit that has not started until its dependencies merge), implementing (its mason revises the unit in its workspace, with a fresh clean-turn allowance), checking (the service runs the checks again on the recorded candidate), reviewing (its reviewer reviews the recorded candidate again), approved (a candidate approved without independent review is the owner's decision, so the move waits as a pending owner decision) or contested (hold the unit for the owner); " +
 			"note: for the mason or reviewer, what to do differently, which it receives; for contested, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they do. Moving a unit to the state it is in restarts that stage. " +

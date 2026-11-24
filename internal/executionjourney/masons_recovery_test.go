@@ -10,6 +10,14 @@ import (
 	strings "strings"
 	testing "testing"
 
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	isolation "github.com/kpenfound/osmia/internal/isolation"
@@ -19,60 +27,60 @@ import (
 
 func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 	t.Parallel()
-	f, _ := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
-	stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "finish-recovery")[0]
-	f.stop(t)
+	f, _ := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer func() { f.Stop(t) }()
+	stream := seedBuildingPaused(f, t, runtime.Target{Scope: "factory"}, fixturekit.ValidPlan, "finish-recovery")[0]
+	f.Stop(t)
 	ctx := context.Background()
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	m := &masons{s: f.s, cfg: f.s.cfg, repository: repo}
-	b, found, err := m.read(stream)
-	must(t, err)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
+	m := &journey.Masons{S: f.S, Cfg: f.S.Cfg, Repository: repo}
+	b, found, err := m.Read(stream)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, _, err := m.start(ctx, b, "resume")
-	must(t, err)
+	started, _, err := m.Start(ctx, b, "resume")
+	fixturekit.Must(t, err)
 	if !started {
 		t.Fatal("mason did not start")
 	}
-	unit := newUnitWorkspaces(f.s.cfg, repo)
-	w, _, found, err := unit.find(ctx, stream, "resume")
-	must(t, err)
+	unit := journey.NewUnitWorkspaces(f.S.Cfg, repo)
+	w, _, found, err := unit.Find(ctx, stream, "resume")
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("unit workspace missing")
 	}
-	must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, masonWrote)), 0700))
-	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("package trace\n"), 0600))
-	directory := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume"))
-	q, err := repo.ClaimTurn(ctx, stream, masonAgent("resume"), "completed", directory, f.clock.Now())
-	must(t, err)
-	content, err := json.Marshal(MasonReport{Outcome: "Built"})
-	must(t, err)
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, fixturekit.MasonWrote)), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n"), 0600))
+	directory := filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
+	q, err := repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "completed", directory, f.Clock.Now())
+	fixturekit.Must(t, err)
+	content, err := json.Marshal(service.MasonReport{Outcome: "Built"})
+	fixturekit.Must(t, err)
 	h := q.Request.Header
-	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.clock.Now()
-	response := trace.TurnResponse{Header: h, AgentID: masonAgent("resume"), ThreadID: masonAgent("resume"), TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
-		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "completed-mason"}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: &coreadapter.Outcome{Status: masonDone, Report: string(content), Card: &exampleCard}}}
-	must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
-	must(t, repo.CompleteTurn(ctx, stream, masonAgent("resume"), q.Request.TurnID, q.Claim.Token, f.clock.Now()))
-	must(t, repo.Close())
-	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	h.Schema, h.ID, h.At = "osmia.trace.turn-response", trace.EventID(q.Request.ID, "response"), f.Clock.Now()
+	response := trace.TurnResponse{Header: h, AgentID: intake.MasonAgent("resume"), ThreadID: intake.MasonAgent("resume"), TurnID: q.Request.TurnID, RequestID: q.Request.ID, RequestRevision: q.Request.Revision,
+		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: q.Request.Profile.Backend, ID: "completed-mason"}, SessionDirectory: directory, StartedAt: q.Claim.At, Outcome: &coreadapter.Outcome{Status: execution.MasonDone, Report: string(content), Card: &intakefixture.ExampleCard}}}
+	fixturekit.Must(t, repo.CaptureTurn(ctx, q.Claim.Token, response))
+	fixturekit.Must(t, repo.CompleteTurn(ctx, stream, intake.MasonAgent("resume"), q.Request.TurnID, q.Claim.Token, f.Clock.Now()))
+	fixturekit.Must(t, repo.Close())
+	repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	m.repository = repo
-	must(t, m.Pass(ctx))
-	must(t, m.Pass(ctx))
+	m.Repository = repo
+	fixturekit.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
 	state, err := repo.Workflow(stream, trace.UnitSubject("resume"))
-	must(t, err)
-	if state.Value != UnitChecking {
+	fixturekit.Must(t, err)
+	if state.Value != execution.UnitChecking {
 		t.Fatalf("unit recovered as %s", state.Value)
 	}
 	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	reports := 0
 	for _, doc := range docs {
-		if doc.ID == reportDocument("resume") {
+		if doc.ID == execution.ReportDocument("resume") {
 			reports++
 		}
 	}
@@ -83,94 +91,94 @@ func TestCompletedMasonTurnFinishesAfterRestart(t *testing.T) {
 
 func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 	t.Parallel()
-	f, _ := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
-	stream := f.seedBuildingPaused(t, runtime.Target{Scope: "factory"}, validPlan, "recover")[0]
-	f.stop(t)
+	f, _ := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer func() { f.Stop(t) }()
+	stream := seedBuildingPaused(f, t, runtime.Target{Scope: "factory"}, fixturekit.ValidPlan, "recover")[0]
+	f.Stop(t)
 	ctx := context.Background()
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	m := &masons{s: f.s, cfg: f.s.cfg, repository: repo}
-	b, found, err := m.read(stream)
-	must(t, err)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
+	m := &journey.Masons{S: f.S, Cfg: f.S.Cfg, Repository: repo}
+	b, found, err := m.Read(stream)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, _, err := m.start(ctx, b, "resume")
-	must(t, err)
+	started, _, err := m.Start(ctx, b, "resume")
+	fixturekit.Must(t, err)
 	if !started {
 		t.Fatal("mason did not start")
 	}
-	units := newUnitWorkspaces(f.s.cfg, repo)
-	w, _, found, err := units.find(ctx, stream, "resume")
-	must(t, err)
+	units := journey.NewUnitWorkspaces(f.S.Cfg, repo)
+	w, _, found, err := units.Find(ctx, stream, "resume")
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("unit workspace missing")
 	}
-	paths, err := units.paths(w)
-	must(t, err)
-	viewRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume"))
-	must(t, os.MkdirAll(viewRoot, 0700))
+	paths, err := units.Driver().Paths(w)
+	fixturekit.Must(t, err)
+	viewRoot := filepath.Join(f.S.Cfg.Root.String(), "views", string(f.Project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume"))
+	fixturekit.Must(t, os.MkdirAll(viewRoot, 0700))
 	view, err := (isolation.Views{Directory: viewRoot}).Create(ctx, coreadapter.Workspace{Directory: w.Path, Access: coreadapter.ReadWrite}, paths)
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
-	changed := filepath.Join(view.Workspace().Directory, masonWrote)
-	must(t, os.WriteFile(changed, []byte("package trace\n// recovered\n"), 0600))
-	if _, err := os.Stat(filepath.Join(w.Path, masonWrote)); !os.IsNotExist(err) {
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(viewRoot, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600))
+	changed := filepath.Join(view.Workspace().Directory, fixturekit.MasonWrote)
+	fixturekit.Must(t, os.WriteFile(changed, []byte("package trace\n// recovered\n"), 0600))
+	if _, err := os.Stat(filepath.Join(w.Path, fixturekit.MasonWrote)); !os.IsNotExist(err) {
 		t.Fatalf("edit reached workspace before recovery: %v", err)
 	}
-	_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), masonTurnID("resume")), f.clock.Now())
-	must(t, err)
-	must(t, repo.Close())
-	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.s.cfg.Project.ID: []config.WorkstreamID{stream}}})
-	must(t, err)
-	must(t, store.SetProfile(masonRole, "other"))
-	f.s.store = store
-	InspectForTest(f.s).SetRuntimeStore(store)
-	must(t, InspectForTest(f.s).SetStoppedRuntime(store))
+	_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed", filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.MasonAgent("resume"), execution.MasonTurnID("resume")), f.Clock.Now())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.Close())
+	store, _, err := runtime.Open(runtime.Inputs{Config: f.S.Cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.S.Cfg.Project.ID: []config.WorkstreamID{stream}}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, store.SetProfile(intake.MasonRole, "other"))
+	f.S.Store = store
+	journey.InspectForTest(f.S).SetRuntimeStore(store)
+	fixturekit.Must(t, journey.InspectForTest(f.S).SetStoppedRuntime(store))
 	defer store.Close()
-	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	m.repository = repo
+	m.Repository = repo
 	units.Repository = repo
-	must(t, m.Pass(ctx))
-	must(t, m.Pass(ctx))
-	th, err := repo.Thread(stream, masonAgent("resume"))
-	must(t, err)
-	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != masonAgent("resume")+"-recover-1" || !strings.Contains(th.Turns[1].Request.Prompt, "The service stopped during your last turn") {
+	fixturekit.Must(t, m.Pass(ctx))
+	fixturekit.Must(t, m.Pass(ctx))
+	th, err := repo.Thread(stream, intake.MasonAgent("resume"))
+	fixturekit.Must(t, err)
+	if len(th.Turns) != 2 || th.Turns[0].Status() != "interrupted" || th.Turns[1].Request.TurnID != intake.MasonAgent("resume")+"-recover-1" || !strings.Contains(th.Turns[1].Request.Prompt, "The service stopped during your last turn") {
 		t.Fatalf("recovered mason thread: %+v", th)
 	}
 	if th.Turns[0].Request.Profile.Name != "default" || th.Turns[1].Request.Profile.Name != "other" || th.Turns[1].Request.Profile.Backend != "codex" {
 		t.Fatalf("recovery profiles: %+v", th.Turns)
 	}
-	data, err := os.ReadFile(filepath.Join(w.Path, masonWrote))
-	must(t, err)
+	data, err := os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote))
+	fixturekit.Must(t, err)
 	if string(data) != "package trace\n// recovered\n" {
 		t.Fatalf("recovered workspace file %q", data)
 	}
 	if _, err := os.Stat(view.Workspace().Directory); !os.IsNotExist(err) {
 		t.Fatalf("surviving view was not consumed: %v", err)
 	}
-	if _, _, found, err := units.find(ctx, stream, "resume"); err != nil || !found {
+	if _, _, found, err := units.Find(ctx, stream, "resume"); err != nil || !found {
 		t.Fatalf("unit workspace changed after recovery: found %t: %v", found, err)
 	}
 
 	next := th.Turns[1].Request.TurnID
-	partialRoot := filepath.Join(f.s.cfg.Root.String(), "views", string(f.project), string(stream), masonAgent("resume"), next)
-	must(t, os.MkdirAll(partialRoot, 0700))
+	partialRoot := filepath.Join(f.S.Cfg.Root.String(), "views", string(f.Project), string(stream), intake.MasonAgent("resume"), next)
+	fixturekit.Must(t, os.MkdirAll(partialRoot, 0700))
 	_, err = os.MkdirTemp(partialRoot, "turn-")
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, masonAgent("resume"), "crashed-again", filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), masonAgent("resume"), next), f.clock.Now())
-	must(t, err)
-	must(t, repo.Close())
-	repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
+	_, err = repo.ClaimTurn(ctx, stream, intake.MasonAgent("resume"), "crashed-again", filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.MasonAgent("resume"), next), f.Clock.Now())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.Close())
+	repo, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	m.repository = repo
-	must(t, m.Pass(ctx))
-	data, err = os.ReadFile(filepath.Join(w.Path, masonWrote))
-	must(t, err)
+	m.Repository = repo
+	fixturekit.Must(t, m.Pass(ctx))
+	data, err = os.ReadFile(filepath.Join(w.Path, fixturekit.MasonWrote))
+	fixturekit.Must(t, err)
 	if string(data) != "package trace\n// recovered\n" {
 		t.Fatalf("partial view replaced the workspace: %q", data)
 	}
@@ -178,53 +186,53 @@ func TestInterruptedMasonViewIsRecoveredBeforeOneContinuation(t *testing.T) {
 
 func TestRestartCountsImplementingUnitsBeforeStarting(t *testing.T) {
 	t.Parallel()
-	f, masons := newParallelMasonFixture(t, 2, 3, disjointPlan)
+	f, masons := journey.NewParallelMasonFixture(t, 2, 3, intakefixture.DisjointPlan)
 
-	clarification := masonAgent("upload") + "-clarify-1"
-	masons.Play[clarification] = failMasonTurn
-	f.engine.Mu.Lock()
-	f.engine.Turns[clarification] = masons.Turn
-	f.engine.Mu.Unlock()
-	defer func() { f.stop(t) }()
+	clarification := intake.MasonAgent("upload") + "-clarify-1"
+	masons.Play[clarification] = intakefixture.FailMasonTurn
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[clarification] = masons.Turn
+	f.Engine.Mu.Unlock()
+	defer func() { f.Stop(t) }()
 	factory := runtime.Target{Scope: "factory"}
-	stream := f.seedBuildingPaused(t, factory, disjointPlan, "start-recovery")[0]
-	f.stop(t)
-	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	m := newMasonController(f.s, repo)
-	b, found, err := m.read(stream)
-	must(t, err)
+	stream := seedBuildingPaused(f, t, factory, intakefixture.DisjointPlan, "start-recovery")[0]
+	f.Stop(t)
+	repo, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
+	m := journey.NewMasonController(f.S, repo)
+	b, found, err := m.Read(stream)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("building workstream missing")
 	}
-	started, _, err := m.start(context.Background(), b, "resume")
-	must(t, errors.Join(err, repo.Close()))
+	started, _, err := m.Start(context.Background(), b, "resume")
+	fixturekit.Must(t, errors.Join(err, repo.Close()))
 	if !started {
 		t.Fatal("resume did not start")
 	}
 
 	want := []string{trace.UnitSubject("resume"), trace.UnitSubject("upload")}
 	for restart := range 2 {
-		f.start(t)
+		f.Start(t)
 		if restart == 0 {
-			mutation(t, f.c, "DELETE", "pause", factory)
+			intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
 		}
-		f.awaitMasonRan(t, stream, "resume")
-		f.awaitMasonRan(t, stream, "upload")
-		f.awaitDeferral(t, stream, "audit", DeferCapacity)
+		f.AwaitMasonRan(t, stream, "resume")
+		f.AwaitMasonRan(t, stream, "upload")
+		awaitDeferral(f, t, stream, "audit", execution.DeferCapacity)
 		masons.Check(t)
-		if got := starts(t, f, stream); !slices.Equal(got, want) {
+		if got := journey.Starts(t, f, stream); !slices.Equal(got, want) {
 			t.Fatalf("after restart %d, started %v, want %v", restart+1, got, want)
 		}
 		var ran []string
 		for _, req := range implementationRuns(masons, stream) {
 			ran = append(ran, req.Name)
 		}
-		if slices.Sort(ran); !slices.Equal(ran, []string{masonTurnID("resume"), masonTurnID("upload")}) {
+		if slices.Sort(ran); !slices.Equal(ran, []string{execution.MasonTurnID("resume"), execution.MasonTurnID("upload")}) {
 			t.Fatalf("after restart %d, mason turns ran %v", restart+1, ran)
 		}
-		f.checkUnits(t, stream, []UnitStatus{{Unit: "resume", State: UnitImplementing}, {Unit: "upload", State: UnitImplementing}, f.deferred(t, stream, "audit", slotless(2))})
-		f.stop(t)
+		f.CheckUnits(t, stream, []api.UnitStatus{{Unit: "resume", State: intake.UnitImplementing}, {Unit: "upload", State: intake.UnitImplementing}, deferred(f, t, stream, "audit", slotless(2))})
+		f.Stop(t)
 	}
-	f.start(t)
+	f.Start(t)
 }

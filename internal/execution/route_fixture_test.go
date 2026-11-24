@@ -8,8 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 )
 
-// inlineRouter is the router as a fixture controller uses it: a pass the test
-// runs directly is no scheduling pass, so its exits are routed in place.
 type inlineRouter struct{ r *router.Router }
 
 func (i inlineRouter) Route(ctx context.Context, x router.Exit) (router.Result, error) {
@@ -24,7 +22,6 @@ func (i inlineRouter) Submit(x router.Exit, done func(router.Result, error)) boo
 	return true
 }
 
-// routeWith routes the exits of c through a router whose Jev answers as p does.
 func routeWith(c *Controller, now func() time.Time, p *jevfixture.Transitions) *router.Router {
 	effects := &router.Effects{}
 	RegisterUnitEffects(effects, func() *Controller { return c })
@@ -33,8 +30,6 @@ func routeWith(c *Controller, now func() time.Time, p *jevfixture.Transitions) *
 	return r
 }
 
-// workerRouter is the router as the service gives it to the controllers: an
-// exit a scheduling pass raises goes to the worker.
 type workerRouter struct {
 	r *router.Router
 	w *router.Worker

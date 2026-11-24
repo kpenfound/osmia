@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -27,8 +28,6 @@ import (
 
 var gateKeys atomic.Int64
 
-// gateKey names an environment variable holding Jev's API key, set when on.
-// Setting it later is how a test configures Jev once its setup is done.
 func gateKey(t *testing.T, on bool) string {
 	t.Helper()
 	name := fmt.Sprintf("OSMIA_GATE_TEST_KEY_%d", gateKeys.Add(1))
@@ -39,13 +38,20 @@ func gateKey(t *testing.T, on bool) string {
 	return name
 }
 
-// gateJevConfig is the [jev] table that reads its key from the variable.
 func gateJevConfig(key string) string {
 	return fmt.Sprintf("[jev]\napi_key_env = %q\ntimeout = \"20s\"\n", key)
 }
 
-// newJevGateFixture is a debate fixture of one member in one round whose Jev
-// answers through p, configured when the key variable is set.
+func gateScans() (*atomic.Int64, func(*Options)) {
+	scans := &atomic.Int64{}
+	return scans, func(o *Options) { o.gateScanned = func() { scans.Add(1) } }
+}
+
+func awaitGateScans(t *testing.T, scans *atomic.Int64) {
+	t.Helper()
+	intakefixture.AwaitFurtherPasses(t, scans, 2)
+}
+
 func newJevGateFixture(t *testing.T, p *gateJev, key string, prepare func(*Options)) *shedFixture {
 	t.Helper()
 	return newDebateFixtureWith(t, 1, 1, gateJevConfig(key), func(o *Options) {
@@ -56,25 +62,21 @@ func newJevGateFixture(t *testing.T, p *gateJev, key string, prepare func(*Optio
 	})
 }
 
-// reachPacket hands in a design whose debate concludes by consensus, and
-// returns once the shed rests at its decision point. Nobody ratifies it.
 func (f *shedFixture) reachPacket(t *testing.T) config.WorkstreamID {
 	t.Helper()
 	f.upstream(t)
 	faults := &intakefixture.Faults{}
 	f.member(1, 1, 1, intakefixture.Concedes(faults))
-	stream := f.handIn(t, "design", intakefixture.HandedDesign)
+	stream := f.handIn(t, "design", fixturekit.HandedDesign)
 	f.awaitShed(t, stream, "concluded-1")
 	faults.Check(t)
 	return stream
 }
 
-// judgments returns the latest revision of every judgment record of the
-// workstream, by ID, and how many revisions there are in all.
 func judgments(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) (map[string]jev.Record, int) {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	latest := map[string]trace.Document{}
 	revisions := 0
 	for _, d := range docs {
@@ -88,14 +90,12 @@ func judgments(t *testing.T, repo *trace.Repository, stream config.WorkstreamID)
 	out := map[string]jev.Record{}
 	for id, d := range latest {
 		var r jev.Record
-		must(t, json.Unmarshal([]byte(d.Content), &r))
+		fixturekit.Must(t, json.Unmarshal([]byte(d.Content), &r))
 		out[id] = r
 	}
 	return out, revisions
 }
 
-// decisionJudgment is the latest record of the workstream's judgment of the
-// occurrence, if any.
 func decisionJudgment(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, kind jev.DecisionKind, key string) (string, jev.Record, bool) {
 	t.Helper()
 	records, _ := judgments(t, repo, stream)
@@ -107,14 +107,11 @@ func decisionJudgment(t *testing.T, repo *trace.Repository, stream config.Workst
 	return "", jev.Record{}, false
 }
 
-// ratifications returns the recorded revisions of the ratification of round 1.
 func (f *shedFixture) ratifications(t *testing.T, stream config.WorkstreamID) []trace.Document {
 	t.Helper()
 	return f.documents(t, stream, shed.RatificationDocumentID(1))
 }
 
-// requireJevRatification checks the one ratification record is Jev's, with the
-// judgment it names, and returns the judgment's ID.
 func (f *shedFixture) requireJevRatification(t *testing.T, stream config.WorkstreamID) string {
 	t.Helper()
 	docs := f.ratifications(t, stream)
@@ -122,12 +119,12 @@ func (f *shedFixture) requireJevRatification(t *testing.T, stream config.Workstr
 		t.Fatalf("ratification records: %+v", docs)
 	}
 	record, err := shed.ParseRatification([]byte(docs[0].Content))
-	must(t, err)
+	fixturekit.Must(t, err)
 	if record.DecidedBy != trace.DecidedByJev || record.Judgment == "" || record.Revision != (shed.Pin{Spec: 1, Plan: 1}) || record.Round != 1 {
 		t.Fatalf("ratification %+v", record)
 	}
 	transitions, err := trace.Read[trace.Transition](f.repository(), stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	found := false
 	for _, tr := range transitions {
 		if tr.Subject == intake.OwnerSubject && tr.To == "ratified-1" {
@@ -161,10 +158,6 @@ func optionNames(p *gateJev) []string {
 	return names
 }
 
-// A confident Jev ratifies the packet on its own: the ratification is recorded
-// with Jev as its actor and its judgment, the workstream is sealed and built as
-// after the owner's ratification, and no ratification card is left. No client
-// reads the inbox or the status until the end.
 func TestAConfidentRatificationIsDecidedByJevAndTheWorkstreamBuilds(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.97}
@@ -190,7 +183,7 @@ func TestAConfidentRatificationIsDecidedByJevAndTheWorkstreamBuilds(t *testing.T
 		t.Fatalf("a ratification card remains: %+v", entries)
 	}
 	res, err := f.s.jev.Lookup(f.repository(), stream, jev.KindRatification, jev.RatificationKey(1, 1, 1))
-	must(t, err)
+	fixturekit.Must(t, err)
 	if res.Status != jev.Binding || res.Judgment != judgment || res.Pick != "ratify" {
 		t.Fatalf("lookup %+v", res)
 	}
@@ -221,10 +214,7 @@ func TestReadsNeverAskJevOrRecordWhileAGatesJudgmentIsPending(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("Jev was never asked")
 	}
-	// The debate's conclusion is also routed, asking Jev for a transition
-	// judgment of its own in the background; it is final before the reads are
-	// compared with the records.
-	eventually(t, "the concluded debate's transition judgment", func() bool {
+	intakefixture.Soon(t, "the concluded debate's transition judgment", func() bool {
 		records, _ := judgments(t, f.repository(), stream)
 		for _, r := range records {
 			if o := r.Occurrence; o != nil && o.Kind == jev.TransitionKind && strings.Contains(o.Key, "ws.shed_concluded") {
@@ -239,7 +229,7 @@ func TestReadsNeverAskJevOrRecordWhileAGatesJudgmentIsPending(t *testing.T) {
 			t.Fatalf("a pending gate is in the inbox: %+v", entries)
 		}
 		status, err := f.c.Status(ctx, stream)
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, gate := range status.Gates {
 			if gate.Kind == "ratification" {
 				t.Fatalf("a pending gate is in the status: %+v", status.Gates)
@@ -267,11 +257,12 @@ func TestABelowThresholdAnswerSendsTheCardToTheOwnerWithJevsPick(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	p := &gateJev{confidence: 0.6}
-	f := newJevGateFixture(t, p, gateKey(t, true), nil)
+	scans, counted := gateScans()
+	f := newJevGateFixture(t, p, gateKey(t, true), counted)
 	defer f.stop(t)
 	stream := f.reachPacket(t)
 	var entry InboxEntry
-	eventually(t, "the card", func() bool {
+	intakefixture.Soon(t, "the card", func() bool {
 		entries := f.ratificationEntries(t, stream)
 		if len(entries) == 1 {
 			entry = entries[0]
@@ -285,16 +276,16 @@ func TestABelowThresholdAnswerSendsTheCardToTheOwnerWithJevsPick(t *testing.T) {
 	for range 3 {
 		f.ratificationEntries(t, stream)
 		_, err := f.c.Status(ctx, stream)
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	time.Sleep(500 * time.Millisecond)
+	awaitGateScans(t, scans)
 	if len(p.Requests()) != 1 || len(f.ratifications(t, stream)) != 0 {
 		t.Fatalf("%d requests, %d ratifications", len(p.Requests()), len(f.ratifications(t, stream)))
 	}
 	f.stop(t)
 	f.start(t)
 	stream = f.awaitStreamAfterRestart(t, stream)
-	time.Sleep(500 * time.Millisecond)
+	awaitGateScans(t, scans)
 	if len(p.Requests()) != 1 || len(f.ratificationEntries(t, stream)) != 1 {
 		t.Fatalf("after the restart: %d requests", len(p.Requests()))
 	}
@@ -312,11 +303,9 @@ func TestABelowThresholdAnswerSendsTheCardToTheOwnerWithJevsPick(t *testing.T) {
 	}
 }
 
-// awaitStreamAfterRestart waits until the restarted service serves the
-// workstream's packet.
 func (f *shedFixture) awaitStreamAfterRestart(t *testing.T, stream config.WorkstreamID) config.WorkstreamID {
 	t.Helper()
-	eventually(t, "the packet after the restart", func() bool {
+	intakefixture.Soon(t, "the packet after the restart", func() bool {
 		_, err := f.c.Packet(context.Background(), stream)
 		return err == nil
 	})
@@ -332,7 +321,7 @@ func TestWithoutJevsKeyTheCardKeepsTheChiefOfStaffsRecommendation(t *testing.T) 
 	defer f.stop(t)
 	stream := f.reachPacket(t)
 	var entry InboxEntry
-	eventually(t, "the card", func() bool {
+	intakefixture.Soon(t, "the card", func() bool {
 		entries := f.ratificationEntries(t, stream)
 		if len(entries) == 1 {
 			entry = entries[0]
@@ -342,7 +331,7 @@ func TestWithoutJevsKeyTheCardKeepsTheChiefOfStaffsRecommendation(t *testing.T) 
 	if entry.Recommendation != "ratify: no objection stands" || entry.Jev != nil || !slices.Equal(entry.Options, []string{"ratify"}) {
 		t.Fatalf("card %+v", entry)
 	}
-	eventually(t, "the recorded fallback", func() bool {
+	intakefixture.Soon(t, "the recorded fallback", func() bool {
 		_, r, ok := decisionJudgment(t, f.repository(), stream, jev.KindRatification, jev.RatificationKey(1, 1, 1))
 		return ok && r.State == jev.StateFallback && r.Reason == jev.ReasonUnconfigured
 	})
@@ -413,7 +402,7 @@ func TestAJevRatificationWhoseSealingWasInterruptedIsSealedOnceAfterARestart(t *
 	})
 	defer f.stop(t)
 	stream := f.reachPacket(t)
-	eventually(t, "the interrupted sealing", func() bool { return crashes.Load() > 0 })
+	intakefixture.Soon(t, "the interrupted sealing", func() bool { return crashes.Load() > 0 })
 	judgment := f.requireJevRatification(t, stream)
 	if _, _, found, err := seal.Latest(f.repository(), stream); err != nil || found {
 		t.Fatalf("the interrupted sealing recorded a seal: %v %v", found, err)
@@ -448,7 +437,8 @@ func TestAnOwnerDecisionMadeFirstStandsOverJevsPick(t *testing.T) {
 			return ctx.Err()
 		}
 	}}
-	f := newJevGateFixture(t, p, gateKey(t, true), nil)
+	scans, counted := gateScans()
+	f := newJevGateFixture(t, p, gateKey(t, true), counted)
 	defer f.stop(t)
 	stream := f.reachPacket(t)
 	<-entered
@@ -457,7 +447,7 @@ func TestAnOwnerDecisionMadeFirstStandsOverJevsPick(t *testing.T) {
 	}
 	close(release)
 	f.scenario().AwaitFeature(t, stream, BuildingState)
-	time.Sleep(500 * time.Millisecond)
+	awaitGateScans(t, scans)
 	docs := f.ratifications(t, stream)
 	if len(docs) != 1 || docs[0].Actor != ownerActor {
 		t.Fatalf("ratification records: %+v", docs)
@@ -482,17 +472,16 @@ func TestARefusedConfidentPickLeavesTheCardWithTheOwnerShowingJevsJudgment(t *te
 			return ctx.Err()
 		}
 	}}
-	f := newJevGateFixture(t, p, gateKey(t, true), nil)
+	scans, counted := gateScans()
+	f := newJevGateFixture(t, p, gateKey(t, true), counted)
 	defer f.stop(t)
 	stream := f.reachPacket(t)
 	<-entered
-	// The plan stops validating while Jev decides, so the service refuses the
-	// ratification the pick calls for.
-	must(t, kb.Store(context.Background(), f.repository(), kb.Map{Version: kb.Version}, f.clock.Now(), ownerActor, "gate-test"))
+	fixturekit.Must(t, kb.Store(context.Background(), f.repository(), kb.Map{Version: kb.Version}, f.clock.Now(), ownerActor, "gate-test"))
 	close(release)
 
 	var entry InboxEntry
-	eventually(t, "the refused card", func() bool {
+	intakefixture.Soon(t, "the refused card", func() bool {
 		entries := f.ratificationEntries(t, stream)
 		if len(entries) == 1 {
 			entry = entries[0]
@@ -506,23 +495,20 @@ func TestARefusedConfidentPickLeavesTheCardWithTheOwnerShowingJevsJudgment(t *te
 	f.stop(t)
 	f.start(t)
 	f.awaitStreamAfterRestart(t, stream)
-	time.Sleep(500 * time.Millisecond)
+	awaitGateScans(t, scans)
 	if entries := f.ratificationEntries(t, stream); len(entries) != 1 || entries[0].Jev == nil || !entries[0].Jev.Binding || len(p.Requests()) != 1 || len(f.ratifications(t, stream)) != 0 {
 		t.Fatalf("after the restart: %+v, %d requests", entries, len(p.Requests()))
 	}
 }
 
-// presentedAmendment is a fixture whose Jev is unconfigured while the building
-// workstream is set up and the amendment presented, and configured after: the
-// amendment is what Jev decides.
 func presentedAmendment(t *testing.T, p *gateJev) (*shedFixture, config.WorkstreamID, string, seal.Seal, string) {
 	t.Helper()
 	key := gateKey(t, false)
 	f := newDebateFixtureWith(t, 1, 1, gateJevConfig(key), func(o *Options) { o.JevProvider = p.Factory() })
 	stream := f.buildFixture().Amendment(t)
 	before, _, _, err := seal.Latest(f.repository(), stream)
-	must(t, err)
-	requester := presentAmendment(t, f, stream, masonRole, amendedSpec, validPlan)
+	fixturekit.Must(t, err)
+	requester := presentAmendment(t, f, stream, masonRole, intakefixture.AmendedSpec, fixturekit.ValidPlan)
 	return f, stream, requester, before, key
 }
 
@@ -545,7 +531,7 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 				t.Fatalf("decision records: %+v", docs)
 			}
 			var decision struct{ Decision, Actor, Judgment, Note string }
-			must(t, json.Unmarshal([]byte(docs[0].Content), &decision))
+			fixturekit.Must(t, json.Unmarshal([]byte(docs[0].Content), &decision))
 			if !strings.EqualFold(decision.Decision, choice) || decision.Actor != trace.DecidedByJev || decision.Judgment == "" || !strings.Contains(decision.Note, decision.Judgment) {
 				t.Fatalf("decision %+v", decision)
 			}
@@ -557,7 +543,7 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 				t.Fatalf("options %v after %d requests", got, len(p.Requests()))
 			}
 			after, _, _, err := seal.Latest(f.repository(), stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			wantSeal := before.Seal
 			if choice == "approve" {
 				wantSeal++
@@ -569,7 +555,7 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 			if len(turns) != 1 || !strings.Contains(turns[0].Request.Prompt, "Actor: jev.") || !strings.Contains(turns[0].Request.Prompt, "jev_response") {
 				t.Fatalf("the requester's ruling: %+v", turns)
 			}
-			if entries := f.scenario().InboxEntries(t, stream, InboxAmendment); len(entries) != 0 {
+			if entries := f.scenario().InboxEntries(t, stream, api.InboxAmendment); len(entries) != 0 {
 				t.Fatalf("an amendment card remains: %+v", entries)
 			}
 		})
@@ -581,11 +567,12 @@ func TestAConfidentJevApprovesOrDeclinesAnIntentChangingAmendment(t *testing.T) 
 func TestJevIsNeverAskedAboutAPlanOnlyAmendment(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.99}
-	f := newDebateFixtureWith(t, 1, 1, gateJevConfig(gateKey(t, true)), func(o *Options) { o.JevProvider = p.Factory() })
+	scans, counted := gateScans()
+	f := newDebateFixtureWith(t, 1, 1, gateJevConfig(gateKey(t, true)), func(o *Options) { o.JevProvider = p.Factory(); counted(o) })
 	stream := f.buildFixture().Amendment(t)
 	defer f.stop(t)
-	presentAmendment(t, f, stream, masonRole, validSpec, amendedPlan)
-	time.Sleep(2 * time.Second)
+	presentAmendment(t, f, stream, masonRole, fixturekit.ValidSpec, intakefixture.RestartPlan)
+	awaitGateScans(t, scans)
 	if state, err := f.repository().Workflow(stream, amendmentSubject("1")); err != nil || state.Value != intake.AmendmentPresented {
 		t.Fatalf("amendment 1 is %q: %v", state.Value, err)
 	}
@@ -594,16 +581,12 @@ func TestJevIsNeverAskedAboutAPlanOnlyAmendment(t *testing.T) {
 	}
 }
 
-// newEscalationFixture is a trace holding one workstream whose escalations the
-// gate worker decides through a Jev answering through p, configured.
 func newEscalationFixture(t *testing.T, p *gateJev) (*gateFixture, *trace.Repository, config.WorkstreamID) {
 	t.Helper()
 	f := newGateFixture(t, p)
 	return f, f.repo, fixturekit.Stream
 }
 
-// claimThread creates a thread of the role with one claimed turn and returns
-// the scope of that turn.
 func claimThread(t *testing.T, repo *trace.Repository, now time.Time, agent, role, turn, unit string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -612,39 +595,33 @@ func claimThread(t *testing.T, repo *trace.Repository, now time.Time, agent, rol
 		return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, Unit: unit, At: now, Actor: owner, Cause: "gate-test"}
 	}
 	thread := agent + "_thread"
-	must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agent), Role: role, ThreadID: thread}))
+	fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: h("agent", agent), Role: role, ThreadID: thread}))
 	_, err := repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h("turn-request", "request_"+turn), AgentID: agent, ThreadID: thread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Work"})
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, agent, "token_"+turn, "/owned/"+turn, now)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return coreadapter.Scope{Project: string(repo.Project()), Workstream: string(fixturekit.Stream), Unit: unit, Thread: thread, Turn: turn, Role: role}
 }
 
-// escalate asks a question as a worker of the role and has the chief of staff
-// escalate it with the given options.
 func escalate(t *testing.T, f *gateFixture, role string, options ...string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
 	chief := claimThread(t, f.repo, f.now(), "chief", trace.StatusRole, "chief1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(ctx, "asker", asker, "Should uploads resume after a restart?", f.now())
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.repo.EscalateQuestions(ctx, "chief", chief, trace.EscalationRequest{Questions: []string{"1"}, Rephrasing: "Should uploads resume?", Section: "spec#1", Conflict: "The spec says resume; the plan says restart.", Blocked: "The upload unit.", Options: options, Recommendation: "Resume from the last chunk."}, f.now())
-	must(t, err)
+	fixturekit.Must(t, err)
 	return chief
 }
 
 func (f *gateFixture) gates(t *testing.T) []intake.Gate {
 	t.Helper()
 	gates, err := f.s.intake().ReachedGates(context.Background(), &intake.Project{ID: f.repo.Project(), Repository: f.repo})
-	must(t, err)
+	fixturekit.Must(t, err)
 	return gates
 }
 
-// Jev rules on an escalated question from the options the chief of staff wrote,
-// as the owner would: the ruling is recorded with Jev as its actor and its
-// judgment, the card is never shown, and the chief of staff relays the ruling
-// as it relays the owner's.
 func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -657,7 +634,7 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 		t.Fatalf("gates %+v", gates)
 	}
 	entries, err := repo.Inbox()
-	must(t, err)
+	fixturekit.Must(t, err)
 	if _, open, err := f.s.intake().EscalationCard(repo, entries[0], intake.InboxView(entries[0])); err != nil || open {
 		t.Fatalf("the card of a gate Jev is deciding is shown: %v %v", open, err)
 	}
@@ -666,7 +643,7 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 		t.Fatalf("requests %d, options %v", len(p.Requests()), optionNames(p))
 	}
 	states, err := repo.Questions(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	judgment, _, _ := decisionJudgment(t, repo, stream, jev.KindEscalatedQuestion, jev.QuestionKey("1"))
 	ruling := states[0].Ruling
 	if states[0].State != trace.QuestionRuled || ruling == nil || ruling.Actor != trace.JevActor || ruling.DecidedBy != trace.DecidedByJev || ruling.Judgment != judgment || judgment == "" || ruling.OwnerResponse != "Restart the upload." {
@@ -678,12 +655,11 @@ func TestAConfidentJevRulesOnAnEscalatedQuestionFromTheChiefsOptions(t *testing.
 	if after, err := repo.Inbox(); err != nil || after[0].State == trace.QuestionEscalated {
 		t.Fatalf("the escalation is still open: %+v %v", after, err)
 	}
-	// The chief of staff relays the ruling as it relays the owner's.
 	if _, err := repo.RelayRuling(ctx, "chief", chief, "1", "Restart the upload.", trace.ScopeLocal, f.now()); err != nil {
 		t.Fatal(err)
 	}
 	relayed, err := repo.Questions(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if relayed[0].State != trace.QuestionAnswered || relayed[0].Ruling.DecidedBy != trace.DecidedByJev || relayed[0].Ruling.Judgment != judgment || relayed[0].Ruling.Actor.Kind != "agent" {
 		t.Fatalf("relayed %+v", relayed[0])
 	}
@@ -708,7 +684,7 @@ func TestEscalationsWithoutWrittenOptionsAreNeverSent(t *testing.T) {
 				t.Fatalf("gates %+v", gates)
 			}
 			entries, err := f.repo.Inbox()
-			must(t, err)
+			fixturekit.Must(t, err)
 			card, open, err := f.s.intake().EscalationCard(f.repo, entries[0], intake.InboxView(entries[0]))
 			if err != nil || !open || card.Jev != nil || card.Recommendation != "Resume from the last chunk." {
 				t.Fatalf("card %+v open %v: %v", card, open, err)
@@ -743,7 +719,7 @@ func TestJevDecidesAnArchitectsEscalationAtTheOwnerThreshold(t *testing.T) {
 			}
 			f.w.handle(ctx, gates[0])
 			states, err := f.repo.Questions(fixturekit.Stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			_, record, _ := decisionJudgment(t, f.repo, fixturekit.Stream, jev.KindArchitectEscalation, jev.QuestionKey("1"))
 			if record.Occurrence == nil || record.Occurrence.Threshold != c.owner {
 				t.Fatalf("judgment %+v", record)
@@ -754,7 +730,7 @@ func TestJevDecidesAnArchitectsEscalationAtTheOwnerThreshold(t *testing.T) {
 			}
 			if !c.ruled {
 				entries, err := f.repo.Inbox()
-				must(t, err)
+				fixturekit.Must(t, err)
 				card, open, err := f.s.intake().EscalationCard(f.repo, entries[0], intake.InboxView(entries[0]))
 				if err != nil || !open || card.Jev == nil || card.Jev.Binding || !strings.Contains(card.Recommendation, "Jev recommends Keep the project.") {
 					t.Fatalf("card %+v open %v: %v", card, open, err)
@@ -773,7 +749,6 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 	p := &gateJev{confidence: 0.99}
 	f := newGateFixture(t, p)
 	escalate(t, f, masonRole, "Resume from the last chunk.", "Restart the upload.")
-	// The chief's own question-routing decision was a binding pick to answer it.
 	chiefJev := &gateJev{confidence: 0.97, pick: func(string, []string) string { return "answer" }}
 	routed := gateJudge(f.now, chiefJev).Decide(ctx, f.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "chief-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
 		Options: []jev.DecisionOption{{Name: "answer", Description: "Answer it."}, {Name: "escalate", Description: "Escalate it."}}})
@@ -784,7 +759,7 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 		t.Fatalf("gates %+v", gates)
 	}
 	entries, err := f.repo.Inbox()
-	must(t, err)
+	fixturekit.Must(t, err)
 	card, open, err := f.s.intake().EscalationCard(f.repo, entries[0], intake.InboxView(entries[0]))
 	if err != nil || !open || card.Jev == nil || !card.Jev.Binding || card.Jev.Pick != "answer" || card.Jev.Judgment != routed.Judgment || !strings.Contains(card.Recommendation, "Jev decided answer") {
 		t.Fatalf("card %+v open %v: %v", card, open, err)
@@ -792,7 +767,6 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 	if len(p.Requests()) != 0 {
 		t.Fatalf("%d gate requests", len(p.Requests()))
 	}
-	// A routing pick that was to escalate is executable: the gate judges it.
 	f2 := newGateFixture(t, p)
 	escalate(t, f2, masonRole, "Resume from the last chunk.", "Restart the upload.")
 	gateJudge(f2.now, &gateJev{confidence: 0.97, pick: func(string, []string) string { return "escalate" }}).Decide(ctx, f2.repo, jev.DecisionRequest{Scope: coreadapter.Scope{Project: string(f2.repo.Project()), Workstream: string(fixturekit.Stream)}, Cause: "chief-decide", Kind: jev.KindQuestionRouting, Occurrence: jev.QuestionKey("1"), State: "state",
@@ -802,10 +776,6 @@ func TestAnEscalationCarryingABindingJudgmentGoesToTheOwnerWithoutAGateRequest(t
 	}
 }
 
-// Jev rules on a contested unit the chief of staff escalated, from the one
-// ruling that needs none of the owner's words: the unit's candidate is reviewed
-// again, as Jev's ruling, and the card is never shown. A contest the chief of
-// staff did not escalate is not a gate.
 func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -829,11 +799,11 @@ func TestAConfidentJevReviewsAnEscalatedContestAgain(t *testing.T) {
 	w := newGateWorker(c.f.s, &activeProject{id: c.repo.Project(), repository: c.repo})
 	w.handle(ctx, *gate)
 
-	if got := c.state(t).Value; got != UnitReviewing {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 		t.Fatalf("the unit is %q", got)
 	}
 	transitions, err := trace.Read[trace.Transition](c.repo, c.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var ruled *trace.Transition
 	for i, tr := range transitions {
 		if tr.Subject == trace.UnitSubject("resume") && tr.From == UnitContested && tr.To == UnitReviewing {
@@ -864,7 +834,7 @@ func TestACancelledWorkstreamHasNoGateForJev(t *testing.T) {
 		t.Fatal(err)
 	}
 	gates, err := f.s.intake().ReachedGates(context.Background(), &intake.Project{ID: f.repository().Project(), Repository: f.repository()})
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(gates) != 0 || len(p.Requests()) != 0 {
 		t.Fatalf("gates %+v, %d requests", gates, len(p.Requests()))
 	}

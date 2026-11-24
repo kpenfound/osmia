@@ -13,60 +13,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// briefDirective prefixes an owner message that has the fake chief of staff
-// make the tool calls the message carries, as one JSON object.
 const briefDirective = "BRIEFCALL "
 
-// briefNoticed finds the review and review revision a final review notice
-// tells the chief of staff to name.
 var briefNoticed = regexp.MustCompile(`naming review (\d+) and review_revision (\d+)`)
 
-// ownPrompt returns the part of a chief-of-staff prompt that belongs to the
-// turn itself. A turn that is replayed rather than resumed carries the
-// thread's earlier exchanges, encoded on one line, ahead of its own prompt.
-func ownPrompt(prompt string) string {
-	if !strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
-		return prompt
-	}
-	if _, own, ok := strings.Cut(prompt, "\n\n"); ok {
-		return own
-	}
-	return ""
-}
-
-// briefCall is one tool call of the fake chief of staff.
 type briefCall struct {
 	Tool  string         `json:"tool"`
 	Input map[string]any `json:"input"`
 }
 
-// briefPlan is what the fake chief of staff does on the notice of one final
-// review: it makes the early calls, waits at the gate, then records Text with
-// the items and screenshots, or records nothing when Text is empty.
 type briefPlan struct {
 	Text        string
 	Items       []string
 	Screenshots []string
-	// Early are record_delivery_brief inputs made before the gate, as a
-	// delayed or replayed call of an earlier review would be.
-	Early []map[string]any
-	// Calls are tool calls made before the gate, as the chief of staff's
-	// triage of the review's findings.
-	Calls []briefCall
+	Early       []map[string]any
+	Calls       []briefCall
 }
 
-// briefChief is a fake chief of staff that handles the delivery brief
-// notices of final reviews as its plans say and makes the calls an owner
-// message asks for. It matches only the part of a prompt that is its own.
 type briefChief struct {
 	mu      sync.Mutex
 	plans   map[int]briefPlan
@@ -83,15 +61,12 @@ func newBriefChief() *briefChief {
 	return &briefChief{plans: map[int]briefPlan{}, results: map[string][]string{}, early: map[int][]string{}, called: map[int][]string{}}
 }
 
-// plan sets what the chief does on the notice of final review review.
 func (c *briefChief) plan(review int, p briefPlan) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.plans[review] = p
 }
 
-// hold makes the chief wait, in the turn that handles a final review notice,
-// until release is called.
 func (c *briefChief) hold() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -100,7 +75,6 @@ func (c *briefChief) hold() {
 	}
 }
 
-// release lets the turns that wait at the gate go on, and later ones too.
 func (c *briefChief) release() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -122,21 +96,12 @@ func (c *briefChief) result(id string) []string {
 	return c.results[id]
 }
 
-// calls returns the results of the plan's Calls for a final review.
 func (c *briefChief) calls(review int) []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.called[review]...)
 }
 
-// prompts returns the prompts the chief handled, oldest first.
-func (c *briefChief) prompts() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]string(nil), c.heard...)
-}
-
-// heardOf returns how many prompts the chief handled that contain text.
 func (c *briefChief) heardOf(text string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -155,10 +120,8 @@ func (c *briefChief) earlyResults(review int) []string {
 	return c.early[review]
 }
 
-// call makes one tool call and returns its result as text; a failed call is
-// a result too, so the turn completes and the test names it.
 func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall) string {
-	out, err := callTool(ctx, tools, call.Tool, call.Input)
+	out, err := fixturekit.CallTool(ctx, tools, call.Tool, call.Input)
 	if err != nil {
 		return call.Tool + " failed: " + err.Error()
 	}
@@ -166,7 +129,7 @@ func briefToolCall(ctx context.Context, tools *mcp.ClientSession, call briefCall
 }
 
 func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-	prompt := ownPrompt(req.Prompt)
+	prompt := intakefixture.OwnPrompt(req.Prompt)
 	c.mu.Lock()
 	c.heard = append(c.heard, prompt)
 	c.mu.Unlock()
@@ -240,193 +203,154 @@ func (c *briefChief) turn(ctx context.Context, req agent.Request, _ *agent.Turn,
 	return finish("Handled the final review notice.")
 }
 
-// problems returns the brief calls of the notices the service refused.
 func (c *briefChief) problems() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.refused...)
 }
 
-// briefJourney is a project whose chief of staff is a fake model behind the
-// service's real chief-of-staff tools, with one workstream that has been
-// assembled and given its first final review. The service runs only while
-// the journey says so: the final reviews and the publication run on the
-// stopped service's controllers, as they do in the other delivery tests, and
-// the chief's turns, the inbox, the delivery presentation and the owner's
-// approval run in the service.
 type briefJourney struct {
-	*publicationFixture
+	*journey.PublicationFixture
 	chief   *briefChief
 	running bool
 }
 
-// newBriefJourney assembles one workstream, records its first final review
-// and leaves the service stopped with the trace open. extra is appended to
-// the configuration.
 func newBriefJourney(t *testing.T, extra string) *briefJourney {
 	t.Helper()
 	j := newBriefFixture(t, extra)
-	stream, repository := j.buildFixture().SeedGit(t, "brief")
-	j.stream, j.repository = stream, repository
+	stream, repository := j.BuildFixture().SeedGit(t, "brief")
+	j.Stream, j.Repository = stream, repository
 	j.host(t)
-	j.s.setSole(&activeProject{repository: repository})
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 	j.assemble(t, stream, "internal/trace", "resume", "dedupe")
 	return j
 }
 
-// host gives the service a credential for a fake pull request host, so that
-// each final review pushes its commit and opens or updates the draft pull
-// request, and finds the checks of the pushed commit passed.
 func (j *briefJourney) host(t *testing.T) {
 	t.Helper()
-	j.fork, j.pulls = hostBranches(t, j.shedFixture)
+	j.Fork, j.Pulls = j.ShedFixture.HostBranches(t)
 }
 
-// newBriefFixture starts the project with a chief of staff behind the real
-// tools and the fake chief of this journey.
 func newBriefFixture(t *testing.T, extra string) *briefJourney {
 	t.Helper()
 	return newBriefFixtureAt(t, extra, nil)
 }
 
-// newBriefFixtureAt is newBriefFixture with the service, and the turns it
-// runs, reading now as their clock when it is not nil.
 func newBriefFixtureAt(t *testing.T, extra string, now func() time.Time) *briefJourney {
 	t.Helper()
-	f := newDebateFixtureWith(t, 1, 1, chiefRole+extra, func(opts *Options) {
+	f := journey.NewDebateFixtureWith(t, 1, 1, intakefixture.ChiefRole+extra, func(opts *journey.Options) {
 		opts.WriteTimeout = time.Minute
 		if now != nil {
 			opts.Reconciliation.Now = now
 		}
-		enforced := Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
-		opts.Threads, opts.controls = enforced.Threads, enforced.controls
+		enforced := journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: opts.Committee.Hosts})
+		opts.Threads, opts.Controls = enforced.Threads, enforced.Controls
 	})
 	chief := newBriefChief()
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = chief.turn
-	f.engine.Mu.Unlock()
-	return &briefJourney{publicationFixture: &publicationFixture{shedFixture: f}, chief: chief}
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = chief.turn
+	f.Engine.Mu.Unlock()
+	return &briefJourney{PublicationFixture: &journey.PublicationFixture{ShedFixture: f}, chief: chief}
 }
 
-// assemble merges both units of the stream's plan onto its feature branch,
-// asks for its final review and runs the review, which finds nothing. dir is
-// the directory the units' files go in, and the names say which files, so
-// that members of one project do not share a commit.
-func (j *briefJourney) assemble(t *testing.T, stream config.WorkstreamID, dir, resume, dedupe string) FinalReport {
+func (j *briefJourney) assemble(t *testing.T, stream config.WorkstreamID, dir, resume, dedupe string) api.FinalReport {
 	t.Helper()
-	a := &finalReviewer{s: j.s, repository: j.repository}
-	_, op := assembleBoth(t, j.shedFixture, j.repository, a, stream,
+	a := &journey.FinalReviewer{S: j.S, Repository: j.Repository}
+	_, op := journey.AssembleBoth(t, j.ShedFixture, j.Repository, a, stream,
 		map[string]string{dir + "/" + resume + ".go": "package trace\n"},
 		map[string]string{dir + "/" + dedupe + ".go": "package trace\n"})
 	return j.review(t, stream, op, "Resumable uploads")
 }
 
-// review runs final review op as a reader that finds nothing, and returns the
-// report it recorded.
-func (j *briefJourney) review(t *testing.T, stream config.WorkstreamID, op coreadapter.Operation, summary string) FinalReport {
+func (j *briefJourney) review(t *testing.T, stream config.WorkstreamID, op coreadapter.Operation, summary string) api.FinalReport {
 	t.Helper()
-	in, err := decodeFinalReview(op)
-	must(t, err)
-	j.finalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": summary, "findings": []any{}})
+	in, err := delivery.DecodeFinalReview(op)
+	fixturekit.Must(t, err)
+	j.FinalTurn(in.Review, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": summary, "findings": []any{}})
 		return err
 	})
-	a := &finalReviewer{s: j.s, repository: j.repository}
-	if result := settleOperation(t, j.s, j.repository, stream, op, a); result.Outcome != "succeeded" {
+	a := &journey.FinalReviewer{S: j.S, Repository: j.Repository}
+	if result := journey.SettleOperation(t, j.S, j.Repository, stream, op, a); result.Outcome != "succeeded" {
 		t.Fatalf("final review %d: %+v", in.Review, result)
 	}
-	report, found, err := latestFinalReport(j.repository, stream)
-	must(t, err)
-	if !found || report.Review != in.Review || report.Outcome != finalReviewed {
+	report, found, err := delivery.LatestFinalReport(j.Repository, stream)
+	fixturekit.Must(t, err)
+	if !found || report.Review != in.Review || report.Outcome != delivery.FinalReviewed {
 		t.Fatalf("final review %d recorded %+v", in.Review, report)
 	}
-	if stream == j.stream {
-		j.report = report
+	if stream == j.Stream {
+		j.Report = report
 	}
 	return report
 }
 
-// reassemble has the owner send the workstream back to building, repairs its
-// feature branch with files, moves it to assembled and runs the fresh final
-// review. The service must be stopped.
-func (j *briefJourney) reassemble(t *testing.T, files map[string]string) FinalReport {
+func (j *briefJourney) reassemble(t *testing.T, files map[string]string) api.FinalReport {
 	t.Helper()
 	ctx := context.Background()
 	move := func(to, note string) {
 		t.Helper()
-		if _, api := j.s.ownerMoveWorkstream(ctx, string(j.stream), WorkstreamMoveRequest{To: to, Note: note}); api != nil {
-			t.Fatalf("move to %s: %s", to, api.Message)
+		if _, apiFault := j.S.Lifecycle().OwnerMoveWorkstream(ctx, string(j.Stream), api.WorkstreamMoveRequest{To: to, Note: note}); apiFault != nil {
+			t.Fatalf("move to %s: %s", to, apiFault.Message)
 		}
 	}
-	move(BuildingState, "The owner asked for a change to the brief's page.")
-	moveFeature(t, j.shedFixture, j.stream, files)
-	move(AssembledState, "The change landed; review the branch.")
-	must(t, (&finalReviewer{s: j.s, repository: j.repository}).Pass(ctx))
-	ops := finalOperations(t, j.repository, j.stream)
-	return j.review(t, j.stream, ops[len(ops)-1].Operation, "Resumable uploads, changed")
+	move(intake.BuildingState, "The owner asked for a change to the brief's page.")
+	journey.MoveFeature(t, j.ShedFixture, j.Stream, files)
+	move(intake.AssembledState, "The change landed; review the branch.")
+	fixturekit.Must(t, (&journey.FinalReviewer{S: j.S, Repository: j.Repository}).Pass(ctx))
+	ops := journey.FinalOperations(t, j.Repository, j.Stream)
+	return j.review(t, j.Stream, ops[len(ops)-1].Operation, "Resumable uploads, changed")
 }
 
-// capture records what the preview tool records for a capture of the
-// workstream at commit, and returns the image's ID. The trace must be open.
 func (j *briefJourney) capture(t *testing.T, name, commit string) string {
 	t.Helper()
 	var data bytes.Buffer
-	must(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 3, 2))))
+	fixturekit.Must(t, png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 3, 2))))
 	return j.captureImage(t, name, commit, data.Bytes())
 }
 
-// captureImage records the PNG data as the capture of the workstream at
-// commit, and returns the image's ID.
 func (j *briefJourney) captureImage(t *testing.T, name, commit string, data []byte) string {
 	t.Helper()
 	ctx := context.Background()
-	img, err := j.repository.RecordImage(ctx, trace.Header{Project: j.repository.Project(), Workstream: j.stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", data, "turn")
-	must(t, err)
-	content, err := json.Marshal(map[string]any{"workstream": j.stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.stream, "commit": commit}})
-	must(t, err)
-	must(t, j.repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.repository.Project(), Workstream: j.stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
+	img, err := j.Repository.RecordImage(ctx, trace.Header{Project: j.Repository.Project(), Workstream: j.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, name, "image/png", data, "turn")
+	fixturekit.Must(t, err)
+	content, err := json.Marshal(map[string]any{"workstream": j.Stream, "commit": commit, "result": map[string]any{"image_id": img.ID, "workstream": j.Stream, "commit": commit}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, j.Repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: j.Repository.Project(), Workstream: j.Stream, At: fixturekit.DemoStart, Actor: intake.ServiceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
 	return img.ID
 }
 
-// run starts the service on the trace the journey holds open.
 func (j *briefJourney) run(t *testing.T) {
 	t.Helper()
-	must(t, j.repository.Close())
-	j.start(t)
+	fixturekit.Must(t, j.Repository.Close())
+	j.Start(t)
 	if !j.running {
-		// Cleanups run last-registered first, so the held turns are let go
-		// before the service waits for them.
-		t.Cleanup(func() { j.stop(t) })
+		t.Cleanup(func() { j.Stop(t) })
 		t.Cleanup(j.chief.release)
 	}
 	j.running = true
 }
 
-// halt stops the service and opens its trace for the stopped service's
-// controllers.
 func (j *briefJourney) halt(t *testing.T) {
 	t.Helper()
 	j.chief.release()
-	j.stop(t)
-	repository, err := trace.Open(j.s.cfg.Root, j.s.cfg.Project)
-	must(t, err)
+	j.Stop(t)
+	repository, err := trace.Open(j.S.Cfg.Root, j.S.Cfg.Project)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repository.Close() })
-	j.repository = repository
-	j.s.setSole(&activeProject{repository: repository})
+	j.Repository = repository
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 }
 
-// awaitStarts waits until the chief has begun handling n final review
-// notices.
 func (j *briefJourney) awaitStarts(t *testing.T, n int) {
 	t.Helper()
 	intakefixture.Eventually(t, "the chief of staff never began the turn for the final review notice", func() bool { return j.chief.started() >= n })
 }
 
-// entries returns the workstream's delivery entries of the inbox.
 func (j *briefJourney) entries(t *testing.T, stream config.WorkstreamID) []api.InboxEntry {
 	t.Helper()
 	var out []api.InboxEntry
-	for _, e := range intakefixture.EntriesOf(t, j.c, InboxDelivery) {
+	for _, e := range intakefixture.EntriesOf(t, j.C, api.InboxDelivery) {
 		if e.Workstream == stream {
 			out = append(out, e)
 		}
@@ -434,8 +358,6 @@ func (j *briefJourney) entries(t *testing.T, stream config.WorkstreamID) []api.I
 	return out
 }
 
-// awaitEntry waits until the workstream's delivery entry is listed and
-// returns it.
 func (j *briefJourney) awaitEntry(t *testing.T, stream config.WorkstreamID) api.InboxEntry {
 	t.Helper()
 	var found api.InboxEntry
@@ -450,31 +372,26 @@ func (j *briefJourney) awaitEntry(t *testing.T, stream config.WorkstreamID) api.
 	return found
 }
 
-// present reads the workstream's delivery presentation from the service.
 func (j *briefJourney) present(t *testing.T, stream config.WorkstreamID) api.DeliveryPresentation {
 	t.Helper()
-	p, err := j.c.Delivery(context.Background(), stream)
-	must(t, err)
+	p, err := j.C.Delivery(context.Background(), stream)
+	fixturekit.Must(t, err)
 	return p
 }
 
-// approvePresented has the owner approve the presentation p as it reads, through the
-// service.
-func (j *briefJourney) approvePresented(p api.DeliveryPresentation) (DeliveryApproval, error) {
-	return j.c.ApproveDelivery(context.Background(), p.Workstream, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
+func (j *briefJourney) approvePresented(p api.DeliveryPresentation) (api.DeliveryApproval, error) {
+	return j.C.ApproveDelivery(context.Background(), p.Workstream, api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
 }
 
-// ask sends the owner message that has the chief of staff make calls, and
-// returns their results.
 func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, calls ...briefCall) []string {
 	t.Helper()
 	data, err := json.Marshal(struct {
 		ID    string      `json:"id"`
 		Calls []briefCall `json:"calls"`
 	}{id, calls})
-	must(t, err)
-	_, err = j.c.Send(context.Background(), stream, briefDirective+string(data))
-	must(t, err)
+	fixturekit.Must(t, err)
+	_, err = j.C.Send(context.Background(), stream, briefDirective+string(data))
+	fixturekit.Must(t, err)
 	var out []string
 	intakefixture.Eventually(t, "the chief of staff never made the calls of "+id, func() bool {
 		out = j.chief.result(id)
@@ -483,8 +400,6 @@ func (j *briefJourney) ask(t *testing.T, stream config.WorkstreamID, id string, 
 	return out
 }
 
-// recordBrief is the record_delivery_brief call that records a brief of the
-// final review the presentation p shows, for member when it is not empty.
 func recordBrief(p api.DeliveryPresentation, member config.WorkstreamID, text string, items ...string) briefCall {
 	input := map[string]any{"review": p.Report.Review, "review_revision": p.ReviewRevision, "text": text}
 	if len(items) > 0 {
@@ -496,24 +411,19 @@ func recordBrief(p api.DeliveryPresentation, member config.WorkstreamID, text st
 	return briefCall{Tool: "record_delivery_brief", Input: input}
 }
 
-// publish has the stopped service mark the approved workstream's draft pull
-// request ready and returns the body it now has. The service must be stopped.
 func (j *briefJourney) publish(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
-	// The running service asked for the marking ready once the owner approved;
-	// it could not carry it out while stopped, so the request is still pending.
-	// One that was not asked for is asked for now.
 	var op coreadapter.Operation
-	if ops := j.operations(t); len(ops) > 0 {
+	if ops := j.Operations(t); len(ops) > 0 {
 		op = ops[len(ops)-1]
 	} else {
-		op = j.request(t)
+		op = j.Request(t)
 	}
-	result, err := j.publisher().Apply(ctx, op)
-	must(t, err)
-	if result.Outcome != "succeeded" || len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Prs[0].Draft {
-		t.Fatalf("marking ready %+v: %+v", result, j.pulls)
+	result, err := j.Publisher().Apply(ctx, op)
+	fixturekit.Must(t, err)
+	if result.Outcome != "succeeded" || len(j.Pulls.Prs) != 1 || j.Pulls.Creates != 1 || j.Pulls.Readies != 1 || j.Pulls.Prs[0].Draft {
+		t.Fatalf("marking ready %+v: %+v", result, j.Pulls)
 	}
-	return j.pulls.Prs[0].Body
+	return j.Pulls.Prs[0].Body
 }

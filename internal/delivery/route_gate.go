@@ -23,20 +23,16 @@ const (
 	RoutePullRequest = "pull-request"
 )
 
-// Bounds on what the delivery-route state shows Jev.
 const (
 	maxRouteSummary = 2 << 10
 	maxRouteReport  = 12 << 10
 	maxRouteAreas   = 40
 )
 
-// deliveryRouteKey is the occurrence key of the workstream's current delivery:
-// the latest push's signed commit and the final review it is of.
 func deliveryRouteKey(stream config.WorkstreamID, push Push) string {
 	return jev.DeliveryRouteKey(stream, push.Review, push.Commit)
 }
 
-// routeLabel names a route to the owner.
 func routeLabel(route string) string {
 	if route == RouteLand {
 		return "landing it on the base branch"
@@ -44,12 +40,6 @@ func routeLabel(route string) string {
 	return "marking the pull request ready for review"
 }
 
-// deliveryRouteReason returns why Jev may not be asked how the workstream is
-// delivered, or "" when the delivery is clean: the project lands and delivers
-// through its upstream, the current final review left nothing blocking, checks
-// passed on the exact pushed commit, and nothing waits to merge before it. It is
-// the preconditions of the owner's approval to land, with no blocking finding
-// accepted.
 func (s *Controller) deliveryRouteReason(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID) (landingPush, string, error) {
 	if cfg.HasProject() && cfg.Project.Lands() && !strings.EqualFold(cfg.Project.PushRepository(), cfg.Project.Upstream) {
 		return landingPush{}, fmt.Sprintf("the project delivers through %s, not its upstream %s", cfg.Project.PushRepository(), cfg.Project.Upstream), nil
@@ -81,8 +71,6 @@ func (s *Controller) DeliveryRouteGate(ctx context.Context, repository *trace.Re
 	if err != nil || !found {
 		return nil, err
 	}
-	// A decision to land that waits to be retried on the rebased commit stands as
-	// it is: the new push is not a delivery occurrence Jev judges again.
 	if _, retrying, err := PendingLandingRoute(repository, stream); err != nil || retrying {
 		return nil, err
 	}
@@ -92,9 +80,6 @@ func (s *Controller) DeliveryRouteGate(ctx context.Context, repository *trace.Re
 		return nil, err
 	}
 	if recorded.Status == jev.None {
-		// Nothing is recorded, so the gate is one Jev will be asked: only when the
-		// delivery is clean. Any recorded result stays the gate's, whatever the
-		// delivery is now, so that it is applied, shown or refused.
 		if _, reason, err := s.deliveryRouteReason(ctx, repository, cfg, stream); err != nil || reason != "" {
 			return nil, err
 		}
@@ -104,8 +89,6 @@ func (s *Controller) DeliveryRouteGate(ctx context.Context, repository *trace.Re
 		return nil, err
 	}
 	if approval != nil && approval.DecidedBy == trace.DecidedByJev {
-		// Jev's own approval of the pull request whose publication was refused
-		// is the owner's again: the card shows without waiting on the pick.
 		if refused, err := PublicationRefused(repository, stream, decision.Revision); err != nil {
 			return nil, err
 		} else if refused {
@@ -141,17 +124,11 @@ func (s *Controller) DeliveryRouteGate(ctx context.Context, repository *trace.Re
 	return g, nil
 }
 
-// deliveryRouteDecision reads what the records show of the delivery's decision:
-// an approval of the delivery or a landing of its push is a decision, by Jev
-// when it names Jev as its decider. A landing of Jev's whose attempt ended
-// without landing or falling back, which the service refused to apply, is none.
 func (s *Controller) deliveryRouteDecision(repository *trace.Repository, stream config.WorkstreamID, push Push) (intake.GateDecision, error) {
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return intake.GateDecision{}, err
 	}
-	// The decision to land that a moved base kept is the delivery's decision until
-	// the retry lands it or drops it.
 	if route, retrying, err := PendingLandingRoute(repository, stream); err != nil {
 		return intake.GateDecision{}, err
 	} else if retrying {
@@ -188,9 +165,6 @@ func (s *Controller) deliveryRouteDecision(repository *trace.Repository, stream 
 	return intake.GateDecision{}, nil
 }
 
-// deliveryRouteState is what Jev reads of a delivery: the spec summary, the
-// final review report, the check results, and the size of the change and the
-// areas it touches. It holds no code and no diff.
 func (s *Controller) deliveryRouteState(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, push Push, report FinalReport, review trace.Document) (string, []jev.Source, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -223,8 +197,6 @@ func (s *Controller) deliveryRouteState(ctx context.Context, repository *trace.R
 	return b.String(), []jev.Source{{Kind: "final-review", ID: FinalReportDocument, Revision: review.Revision}, {Kind: "spec", ID: plan.SpecDocument, Revision: report.Spec}}, nil
 }
 
-// routeReport states the final review report as the delivery card does: its
-// summary, how each criterion is served and its findings.
 func routeReport(r FinalReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Final review %d of commit %s.\n", r.Review, r.Commit)
@@ -250,7 +222,6 @@ func routeReport(r FinalReport) string {
 	return b.String()
 }
 
-// routeChecks states the recorded check result of the delivery's commit.
 func routeChecks(c *DeliveryChecks) string {
 	if c == nil {
 		return "No check result is recorded."
@@ -262,9 +233,6 @@ func routeChecks(c *DeliveryChecks) string {
 	return out
 }
 
-// changeSize is how large the delivery's change is, in files and lines, and the
-// entities of the project's map whose paths it touches. It states names and
-// counts only.
 func (s *Controller) changeSize(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, push Push, report FinalReport) (string, error) {
 	if report.Upstream == nil || report.Upstream.Commit == "" {
 		return "", errors.New("final review records no base the change is measured from")
@@ -316,18 +284,6 @@ func (s *Controller) changeSize(ctx context.Context, repository *trace.Repositor
 	return b.String(), nil
 }
 
-// applyDeliveryRoute carries a binding delivery-route pick out as the owner's
-// commands would, with Jev as the deciding authority, and reports what the
-// service does with it:
-//
-//   - the pick is applied (nil) when the workstream landed, the draft pull
-//     request was marked ready or the approval to do so was recorded, when the
-//     upstream refused the landing push and the fallback delivered the pull
-//     request, and when the router holds the landing, which is applied once the
-//     hold clears;
-//   - a conflict says the service refuses to apply the pick: the occurrence is
-//     no longer the workstream's current delivery, or a precondition no longer
-//     holds before anything is pushed.
 func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, key string, res jev.Result) *APIError {
 	decider := LandDecider{By: trace.DecidedByJev, Judgment: res.Judgment}
 	cfg := s.About(repository)
@@ -351,8 +307,6 @@ func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.R
 		return &APIError{Code: Internal, Message: "cannot read pushes"}
 	}
 	if !found || deliveryRouteKey(stream, push) != key {
-		// A landing this decision started stands for it though a moved base and the
-		// rebase since changed the occurrence: the retry carries the decision on.
 		if started, err := landingDecidedBy(repository, stream, decider); err != nil {
 			return &APIError{Code: Internal, Message: "cannot read landing records"}
 		} else if started {
@@ -360,8 +314,6 @@ func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.R
 		}
 		return &APIError{Code: Conflict, Message: "the delivery this decision was made for is no longer the workstream's current delivery"}
 	}
-	// A landing this decision started is its own record: it settles the pick
-	// whether it landed, fell back, is held or was refused.
 	l := &Lander{Repository: repository}
 	if _, input, outcome, landing, err := l.latest(stream); err != nil {
 		return &APIError{Code: Internal, Message: "cannot read landing records"}
@@ -380,8 +332,6 @@ func (s *Controller) applyDeliveryRoute(ctx context.Context, repository *trace.R
 	return s.applyPullRequest(ctx, repository, cfg, stream, decider)
 }
 
-// landingDecidedBy reports whether any landing attempt of the workstream was
-// asked for by the decider.
 func landingDecidedBy(repository *trace.Repository, stream config.WorkstreamID, decider LandDecider) (bool, error) {
 	records, err := repository.Operations(stream)
 	if err != nil {
@@ -395,7 +345,6 @@ func landingDecidedBy(repository *trace.Repository, stream config.WorkstreamID, 
 	return false, nil
 }
 
-// applyLand lands the workstream through LandWorkstream as Jev's decision.
 func (s *Controller) applyLand(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, decider LandDecider) *APIError {
 	result, err := s.LandWorkstream(ctx, repository, stream, LandRequest{Decider: decider})
 	if err != nil {
@@ -405,14 +354,9 @@ func (s *Controller) applyLand(ctx context.Context, repository *trace.Repository
 	case LandingRefusedBeforePush:
 		return &APIError{Code: Conflict, Message: result.Reason}
 	}
-	// Landed, fell back to the pull request, held by the router, base moved
-	// (the rebase was asked for) or pending reconciliation: the pick is applied
-	// or waits on the landing's own recovery.
 	return nil
 }
 
-// applyPullRequest records Jev's approval to mark the draft pull request ready,
-// which the publication applies as it applies the owner's.
 func (s *Controller) applyPullRequest(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, decider LandDecider) *APIError {
 	target, reason, err := s.deliveryRouteReason(ctx, repository, cfg, stream)
 	if err != nil {
@@ -435,9 +379,6 @@ func (s *Controller) applyPullRequest(ctx context.Context, repository *trace.Rep
 	return nil
 }
 
-// recommendedRoute returns the route Jev recommended for the workstream's
-// current delivery without the authority to apply it: its nonbinding pick, or a
-// binding pick the service refused to apply. It is "" when Jev made no pick.
 func recommendedRoute(repository *trace.Repository, stream config.WorkstreamID, push Push) (string, error) {
 	res, err := jev.Recorded(repository, stream, jev.KindDeliveryRoute, deliveryRouteKey(stream, push))
 	if err != nil {

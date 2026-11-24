@@ -15,8 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
-// decodeLog parses text as one JSON object per line, failing the test if
-// any line is not a JSON object.
 func decodeLog(t *testing.T, text string) []map[string]any {
 	t.Helper()
 	var records []map[string]any
@@ -33,7 +31,6 @@ func decodeLog(t *testing.T, text string) []map[string]any {
 	return records
 }
 
-// findLog returns the first record whose message is msg, or nil.
 func findLog(records []map[string]any, msg string) map[string]any {
 	for _, r := range records {
 		if r["msg"] == msg {
@@ -43,11 +40,6 @@ func findLog(records []map[string]any, msg string) map[string]any {
 	return nil
 }
 
-// TestControllerLogsOperationStartAndOutcome shows that the controller logs
-// an operation's start and its outcome, named by its action and boundary
-// and carrying the project and workstream it belongs to, through the
-// logger its context carries - the same context-carried logger the
-// service's own records use.
 func TestControllerLogsOperationStartAndOutcome(t *testing.T) {
 	f := setup(t, coreadapter.RepositoryBoundary)
 	var buf bytes.Buffer
@@ -67,9 +59,6 @@ func TestControllerLogsOperationStartAndOutcome(t *testing.T) {
 	}
 }
 
-// TestControllerLogsFailedOperationAtErrorLevel shows that a failed
-// operation's effect is logged as a failure, at a higher level than a
-// routine, successful one.
 func TestControllerLogsFailedOperationAtErrorLevel(t *testing.T) {
 	f := setup(t, coreadapter.RepositoryBoundary)
 	f.system.applyErr = errInjected
@@ -148,7 +137,6 @@ func TestRunRetriesSchedulingFailuresWithoutStoppingAdmittedWork(t *testing.T) {
 				failing.Store(true)
 				f.repository.WakeWorkflow()
 			}
-			// Repeated failed schedules must leave the loop and its work alive.
 			for range 2 {
 				await(t, failed)
 				select {
@@ -165,7 +153,6 @@ func TestRunRetriesSchedulingFailuresWithoutStoppingAdmittedWork(t *testing.T) {
 			close(s.release)
 			awaitAcknowledged(t, f, streamID, "session")
 			cancel()
-			// The deferred join runs before the log is inspected.
 			t.Cleanup(func() {
 				record := findLog(decodeLog(t, buf.String()), "reconciliation schedule failed; will retry")
 				if record == nil || record["project"] != string(projectID) || record["error"] != errInjected.Error() {

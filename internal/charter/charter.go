@@ -59,10 +59,10 @@ var (
 // are not rules. Duplicate numbers, gaps and items without text are reported.
 func Parse(content string) Charter {
 	c := Charter{Rules: []Rule{}, Diagnostics: []Diagnostic{}}
-	lines := make(map[int][]int) // rule number -> source lines
+	lines := make(map[int][]int)
 	var (
 		section string
-		open    = -1 // index of the rule still accepting continuation lines
+		open    = -1
 		comment bool
 		code    string
 	)
@@ -123,8 +123,6 @@ func Parse(content string) Charter {
 	return c
 }
 
-// stripComments removes HTML comment text from a line, given whether a
-// comment is already open, and reports whether one is still open at its end.
 func stripComments(line string, open bool) (string, bool) {
 	var out strings.Builder
 	for {
@@ -216,8 +214,6 @@ func AppendRule(content string, number int, text, source string) string {
 	return b.String()
 }
 
-// lastHeading returns the text of the last heading outside comments and
-// fenced code, as Parse reads headings.
 func lastHeading(content string) string {
 	var last, code string
 	comment := false

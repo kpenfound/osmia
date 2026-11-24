@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/recordspans"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/telemetry"
@@ -23,8 +26,6 @@ var (
 	telemetrySpanIDPattern  = regexp.MustCompile(`^[0-9a-f]{16}$`)
 )
 
-// requireTelemetryIdentity fails unless w carries the trace ID and root span ID
-// Osmia's telemetry derives from its workstream ID, in lowercase hex.
 func requireTelemetryIdentity(t *testing.T, w WorkstreamStatus) {
 	t.Helper()
 	wantTrace, wantRoot := telemetry.WorkstreamTrace(w.Workstream), telemetry.WorkstreamRoot(w.Workstream)
@@ -37,7 +38,7 @@ func requireTelemetryIdentity(t *testing.T, w WorkstreamStatus) {
 }
 
 func identityHeader(schema, id string, at time.Time, actor trace.Actor, unit string) trace.Header {
-	return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: "cause-" + id, Depth: 1}
+	return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: id, Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, Unit: unit, At: at, Actor: actor, Cause: "cause-" + id, Depth: 1}
 }
 
 // The status of a workstream carries the trace ID and the root span ID that the
@@ -46,21 +47,21 @@ func TestStatusTelemetryIdentityMatchesTheSpansTheRecorderSends(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	at := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	exporter := tracetest.NewInMemoryExporter()
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	must(t, err)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(ctx, cfg.Root, cfg.Project, at, serviceActor)
-	must(t, err)
+	fixturekit.Must(t, err)
 	repository.ObserveSpans(recordspans.Recorder{Sink: sink}.Observe)
-	must(t, repository.CreateWorkstream(ctx, stream, at, serviceActor))
-	featureTransition(t, repository, stream, "pending", at.Add(time.Minute))
-	featureTransition(t, repository, stream, "delivered", at.Add(2*time.Minute))
+	fixturekit.Must(t, repository.CreateWorkstream(ctx, fixturekit.Stream, at, serviceActor))
+	featureTransition(t, repository, fixturekit.Stream, "pending", at.Add(time.Minute))
+	featureTransition(t, repository, fixturekit.Stream, "delivered", at.Add(2*time.Minute))
 
 	agent := trace.Agent{Header: identityHeader("agent", "mason", at, serviceActor, ""), Role: "mason", ThreadID: "thread", Session: coreadapter.BackendSession{Backend: "fake", ID: "original"}}
-	must(t, repository.CreateThread(ctx, agent))
+	fixturekit.Must(t, repository.CreateThread(ctx, agent))
 	req := trace.TurnRequest{Header: identityHeader("turn-request", "request_t1", at.Add(3*time.Minute), serviceActor, "u1"), AgentID: "mason", ThreadID: "thread", TurnID: "t1",
 		Profile: coreadapter.Profile{Name: "default", Backend: "Fake", Model: "test-model-1"}, Prompt: "prompt"}
 	claimed := at.Add(4 * time.Minute)
@@ -69,35 +70,35 @@ func TestStatusTelemetryIdentityMatchesTheSpansTheRecorderSends(t *testing.T) {
 		Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "Fake", ID: "continued"}, SessionDirectory: "/owned/t1", StartedAt: claimed, Duration: 5 * time.Second, FinalResponse: "reply"}}
 	resp.Cause = req.Cause
 	_, err = repository.EnqueueTurn(ctx, req)
-	must(t, err)
-	_, err = repository.ClaimTurn(ctx, stream, "mason", "token-t1", "/owned/t1", claimed)
-	must(t, err)
-	must(t, repository.CaptureTurn(ctx, "token-t1", resp))
-	must(t, repository.CompleteTurn(ctx, stream, "mason", "t1", "token-t1", resp.At))
+	fixturekit.Must(t, err)
+	_, err = repository.ClaimTurn(ctx, fixturekit.Stream, "mason", "token-t1", "/owned/t1", claimed)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CaptureTurn(ctx, "token-t1", resp))
+	fixturekit.Must(t, repository.CompleteTurn(ctx, fixturekit.Stream, "mason", "t1", "token-t1", resp.At))
 
 	covered := 3
 	run, err := json.Marshal(execution.UnitCheckRun{Unit: "u1", Run: 1, Status: "passed", Selection: &execution.CheckSelection{Mode: "selected", Covered: &covered}, StartedAt: at.Add(6 * time.Minute), FinishedAt: at.Add(7 * time.Minute)})
-	must(t, err)
-	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: identityHeader("document", "unit-u1-checks-1", at.Add(7*time.Minute), trace.Actor{Kind: "service", ID: "checks"}, "u1"), Path: "units/u1/checks-1.json", Content: string(run) + "\n"}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: identityHeader("document", "unit-u1-checks-1", at.Add(7*time.Minute), trace.Actor{Kind: "service", ID: "checks"}, "u1"), Path: "units/u1/checks-1.json", Content: string(run) + "\n"}}))
 
 	flush, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	must(t, sink.Flush(flush))
+	fixturekit.Must(t, sink.Flush(flush))
 	spans := exporter.GetSpans()
-	must(t, sink.Close())
-	must(t, repository.Close())
+	fixturekit.Must(t, sink.Close())
+	fixturekit.Must(t, repository.Close())
 
 	_, c := start(t, opts)
 	status, err := c.Statuses(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var row *WorkstreamStatus
 	for i := range status.Workstreams {
-		if status.Workstreams[i].Workstream == stream {
+		if status.Workstreams[i].Workstream == fixturekit.Stream {
 			row = &status.Workstreams[i]
 		}
 	}
 	if row == nil {
-		t.Fatalf("workstream %s is not in the status: %+v", stream, status.Workstreams)
+		t.Fatalf("workstream %s is not in the status: %+v", fixturekit.Stream, status.Workstreams)
 	}
 	requireTelemetryIdentity(t, *row)
 
@@ -120,36 +121,37 @@ func TestStatusTelemetryIdentityMatchesTheSpansTheRecorderSends(t *testing.T) {
 	}
 }
 
-// Every row of the status list carries the identity: ordinary, session, design
-// and archived workstreams, the archived one whose trace was deleted included.
-// The values need no telemetry export and survive a restart on the same root.
-func TestStatusTelemetryIdentityIsOnEveryRowWithoutExportAndAcrossRestarts(t *testing.T) {
-	t.Parallel()
+type identityRows struct {
+	opts                               Options
+	s                                  *Service
+	c                                  *Client
+	archived, session, design, cleaned config.WorkstreamID
+}
+
+func startWithEachKindOfWorkstream(t *testing.T) *identityRows {
+	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	created := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
 	archived := config.WorkstreamID("w_00000000000000000000000000000a01")
 	session := config.WorkstreamID("w_00000000000000000000000000000a02")
 	design := config.WorkstreamID("w_00000000000000000000000000000a03")
 	cleaned := config.WorkstreamID("w_00000000000000000000000000000a04")
 	repository, err := trace.Create(ctx, cfg.Root, cfg.Project, created, serviceActor)
-	must(t, err)
-	for _, id := range []config.WorkstreamID{stream, archived, design, cleaned} {
-		must(t, repository.CreateWorkstream(ctx, id, created, serviceActor))
+	fixturekit.Must(t, err)
+	for _, id := range []config.WorkstreamID{fixturekit.Stream, archived, design, cleaned} {
+		fixturekit.Must(t, repository.CreateWorkstream(ctx, id, created, serviceActor))
 	}
-	must(t, repository.CreateSessionWorkstream(ctx, session, "default", "base", "session-branch", "A session", created, serviceActor))
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "open-design", Revision: 1, Project: project, Workstream: design, At: created, Actor: serviceActor, Cause: "fixture"}
+	fixturekit.Must(t, repository.CreateSessionWorkstream(ctx, session, "default", "base", "session-branch", "A session", created, serviceActor))
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "open-design", Revision: 1, Project: fixturekit.Project, Workstream: design, At: created, Actor: serviceActor, Cause: "fixture"}
 	_, err = repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: intake.DesignSessionSubject, To: intake.DesignOpenValue, Reason: "open design"}})
-	must(t, err)
-	must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 
 	s, c := start(t, opts)
-	if s.telemetry.Enabled() {
-		t.Fatal("telemetry export is configured")
-	}
-	_, active := s.runtimeOf(project)
+	_, active := s.runtimeOf(fixturekit.Project)
 	if active == nil {
 		t.Fatal("no active project")
 	}
@@ -158,49 +160,70 @@ func TestStatusTelemetryIdentityIsOnEveryRowWithoutExportAndAcrossRestarts(t *te
 	if _, err := c.Archive(ctx, archived); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	must(t, s.store.SetArchived(runtime.Archive{Project: project, Workstream: cleaned, State: AbandonedState, Title: "cleaned", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: created, CleanupStartedAt: created, CleanedAt: created}))
+	fixturekit.Must(t, s.store.SetArchived(runtime.Archive{Project: fixturekit.Project, Workstream: cleaned, State: AbandonedState, Title: "cleaned", Resolved: true, ResolutionEvidence: "cancelled", ArchivedAt: created, CleanupStartedAt: created, CleanedAt: created}))
 	_, err = active.repository.MarkWorkstreamTraceForDeletion(cleaned)
-	must(t, err)
-	must(t, trace.FinishWorkstreamTraceDeletion(cfg.Root, project, cleaned))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.FinishWorkstreamTraceDeletion(cfg.Root, fixturekit.Project, cleaned))
+	return &identityRows{opts: opts, s: s, c: c, archived: archived, session: session, design: design, cleaned: cleaned}
+}
 
-	rows := func(c *Client) map[config.WorkstreamID]WorkstreamStatus {
-		t.Helper()
-		status, err := c.Statuses(ctx)
-		must(t, err)
-		out := map[config.WorkstreamID]WorkstreamStatus{}
-		for _, w := range status.Workstreams {
-			out[w.Workstream] = w
-		}
-		if len(out) != len(status.Workstreams) {
-			t.Fatalf("a workstream is listed twice: %+v", status.Workstreams)
-		}
-		return out
+func (r *identityRows) rows(t *testing.T, c *Client) map[config.WorkstreamID]WorkstreamStatus {
+	t.Helper()
+	status, err := c.Statuses(context.Background())
+	fixturekit.Must(t, err)
+	out := map[config.WorkstreamID]WorkstreamStatus{}
+	for _, w := range status.Workstreams {
+		out[w.Workstream] = w
 	}
-	before := rows(c)
+	if len(out) != len(status.Workstreams) {
+		t.Fatalf("a workstream is listed twice: %+v", status.Workstreams)
+	}
+	return out
+}
+
+func TestStatusListsOrdinarySessionDesignArchivedAndCleanedWorkstreams(t *testing.T) {
+	t.Parallel()
+	r := startWithEachKindOfWorkstream(t)
+	listed := r.rows(t, r.c)
 	for id, want := range map[config.WorkstreamID]func(WorkstreamStatus) bool{
-		stream:   func(w WorkstreamStatus) bool { return !w.Archived && w.Kind == "" },
-		archived: func(w WorkstreamStatus) bool { return w.Archived },
-		session:  func(w WorkstreamStatus) bool { return w.Kind == "session" },
-		design:   func(w WorkstreamStatus) bool { return w.Kind == "design" },
-		cleaned:  func(w WorkstreamStatus) bool { return w.Archived && w.TraceDeleted },
+		fixturekit.Stream: func(w WorkstreamStatus) bool { return !w.Archived && w.Kind == "" },
+		r.archived:        func(w WorkstreamStatus) bool { return w.Archived },
+		r.session:         func(w WorkstreamStatus) bool { return w.Kind == "session" },
+		r.design:          func(w WorkstreamStatus) bool { return w.Kind == "design" },
+		r.cleaned:         func(w WorkstreamStatus) bool { return w.Archived && w.TraceDeleted },
 	} {
-		w, ok := before[id]
+		w, ok := listed[id]
 		if !ok || !want(w) {
-			t.Fatalf("workstream %s is not listed as expected: %+v", id, before)
+			t.Fatalf("workstream %s is not listed as expected: %+v", id, listed)
 		}
+	}
+}
+
+// Every row of the status list carries the identity, the one whose trace was
+// deleted included, and it needs no telemetry export.
+func TestStatusTelemetryIdentityIsOnEveryRowWithoutExport(t *testing.T) {
+	t.Parallel()
+	r := startWithEachKindOfWorkstream(t)
+	if r.s.telemetry.Enabled() {
+		t.Fatal("telemetry export is configured")
 	}
 	traces := map[string]config.WorkstreamID{}
-	for id, w := range before {
+	for id, w := range r.rows(t, r.c) {
 		requireTelemetryIdentity(t, w)
 		if other, ok := traces[w.TelemetryTraceID]; ok {
 			t.Errorf("workstreams %s and %s share trace ID %s", id, other, w.TelemetryTraceID)
 		}
 		traces[w.TelemetryTraceID] = id
 	}
+}
 
-	must(t, s.Close())
-	_, c = start(t, opts)
-	after := rows(c)
+func TestStatusTelemetryIdentitySurvivesARestartOnTheSameRoot(t *testing.T) {
+	t.Parallel()
+	r := startWithEachKindOfWorkstream(t)
+	before := r.rows(t, r.c)
+	fixturekit.Must(t, r.s.Close())
+	_, c := start(t, r.opts)
+	after := r.rows(t, c)
 	for id, w := range before {
 		got, ok := after[id]
 		if !ok {

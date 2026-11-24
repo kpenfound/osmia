@@ -16,8 +16,6 @@ import (
 
 const other config.WorkstreamID = "w_00000000000000000000000000000002"
 
-// crowd creates a second workstream and mason, reviewer, committee and
-// architect threads in both, each with one queued turn.
 func crowd(t *testing.T) (*fixture, *trace.Repository) {
 	t.Helper()
 	f, repo := setup(t)
@@ -68,20 +66,17 @@ func TestCapacityBoundsDispatch(t *testing.T) {
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits, Admit: admit})
 	must(t, err)
 	must(t, s.Pass(ctx))
-	// The reviewer is offered first, and role and workstream limits still bind.
 	if len(offered) == 0 || offered[0] != "reviewer1" {
 		t.Fatalf("review was not offered first: %v", offered)
 	}
 	if got := counts(dispatched(t, repo, stream, other)); got["reviewer"] != 1 || got["mason"] > 3 {
 		t.Fatalf("capacity exceeded: %v", got)
 	}
-	// Nothing completed, so a later pass admits nothing more.
 	must(t, s.Pass(ctx))
 	if got := dispatched(t, repo, stream, other); len(got) != 6 {
 		t.Fatalf("second pass dispatched %v", got)
 	}
 
-	// Role limits: a wide workstream cap leaves the role kinds binding.
 	f, repo = crowd(t)
 	defer repo.Close()
 	s, err = New(repo, Options{Now: f.clock.Now, Capacity: &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 10}})
@@ -110,7 +105,6 @@ func TestCapacityHoldsUnderConcurrentPasses(t *testing.T) {
 	}
 	wg.Wait()
 	got := dispatched(t, repo, stream, other)
-	// One reviewer and no more than two masons can hold role slots.
 	if n := counts(got); !maps.Equal(n, map[string]int{"architect": 1, "committee": 1, "mason": 2, "reviewer": 1}) {
 		t.Fatalf("dispatched %v", got)
 	}
@@ -174,7 +168,6 @@ func TestClaimsHoldSlotsUntilARestartInterruptsThem(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1", "mason2", "mason3")
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}
-	// A claim without an operation, as a direct runner call leaves it.
 	f.queue(t, repo, "mason1", "one")
 	_, err := repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
@@ -185,7 +178,6 @@ func TestClaimsHoldSlotsUntilARestartInterruptsThem(t *testing.T) {
 	if got := dispatched(t, repo); len(got) != 0 {
 		t.Fatalf("dispatched beside a claim: %v", got)
 	}
-	// After a restart the claim runs nowhere and frees its slot.
 	repo = f.reopen(t, repo)
 	s, err = New(repo, Options{Now: f.clock.Now, Capacity: limits})
 	must(t, err)
@@ -193,7 +185,6 @@ func TestClaimsHoldSlotsUntilARestartInterruptsThem(t *testing.T) {
 	if got := dispatched(t, repo); !slices.Equal(got, []string{"mason2/one"}) {
 		t.Fatalf("dispatched after restart %v", got)
 	}
-	// A dispatched turn claimed in an earlier session frees its slot too.
 	_, err = repo.ClaimTurn(ctx, stream, "mason2", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
 	f.queue(t, repo, "mason3", "one")
@@ -216,7 +207,6 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	f, repo := setup(t, "mason1", "mason2")
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
-	// The chief of staff's turn leaves the only slot free.
 	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "one")
 	f.queue(t, repo, "mason1", "one")
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
@@ -225,10 +215,8 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	if got := dispatched(t, repo); !slices.Equal(got, []string{"chief_of_staff/one", "mason1/one"}) {
 		t.Fatalf("dispatched %v", got)
 	}
-	// With every slot taken, the chief of staff's next turn still runs.
 	f.queue(t, repo, "mason2", "one")
 	f.queueOn(t, repo, stream, trace.ChiefOfStaff, "two")
-	// A claim in this session keeps the mason slot taken.
 	_, err = repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
 	var ran []string
@@ -246,10 +234,6 @@ func TestChiefOfStaffTakesNoSlot(t *testing.T) {
 	}
 }
 
-// TestSessionTurnTakesNoMasonSlot shows that a session's turn, which runs
-// under the role "session" on its own dedicated workstream, never competes
-// for a project's mason slots: its turn is dispatched even while the
-// project's only mason slot is held by a claimed mason turn.
 func TestSessionTurnTakesNoMasonSlot(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t, "mason1")
@@ -258,8 +242,6 @@ func TestSessionTurnTakesNoMasonSlot(t *testing.T) {
 	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 1}
 	f.thread(t, repo, other, "session", "session")
 	f.queueOn(t, repo, other, "session", "one")
-	// Hold the project's only mason slot with a claimed turn, on the
-	// session's own separate workstream.
 	f.queue(t, repo, "mason1", "one")
 	_, err := repo.ClaimTurn(ctx, stream, "mason1", "token", t.TempDir(), f.clock.Now())
 	must(t, err)
@@ -271,8 +253,6 @@ func TestSessionTurnTakesNoMasonSlot(t *testing.T) {
 	}
 }
 
-// wait names each waiting turn by the last digit of its workstream, its agent
-// and why it waits.
 func wait(slots Slots) []string {
 	var out []string
 	for _, w := range slots.Waiting {
@@ -286,8 +266,6 @@ func TestPassPublishesTurnsInFlightAndTurnsWaitingForASlot(t *testing.T) {
 	f, repo := crowd(t)
 	defer repo.Close()
 	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 5, PerWorkstream: 2}
-	// Like the service's gate, committee and architect turns are held: they
-	// are never dispatched here and wait for no slot.
 	declined := func(c Candidate) bool {
 		return c.Thread.Identity.Role == "committee" || c.Thread.Identity.Role == "architect"
 	}
@@ -299,8 +277,6 @@ func TestPassPublishesTurnsInFlightAndTurnsWaitingForASlot(t *testing.T) {
 		t.Fatalf("dispatched %v, want %v", got, want)
 	}
 
-	// A pass that finds every slot taken publishes the turns in flight and
-	// each turn it found no free slot for, and dispatches nothing.
 	must(t, s.Pass(ctx))
 	if got := dispatched(t, repo, stream, other); len(got) != 3 {
 		t.Fatalf("dispatched %v with no free slot", got)
@@ -313,7 +289,6 @@ func TestPassPublishesTurnsInFlightAndTurnsWaitingForASlot(t *testing.T) {
 		t.Fatalf("waiting %v, want %v", got, want)
 	}
 
-	// A held candidate, such as a paused workstream's, waits for no slot.
 	s, err = New(repo, Options{Now: f.clock.Now, Capacity: limits, Holds: func(c Candidate) (bool, error) { return declined(c) || c.Workstream == other, nil }, Shared: shared})
 	must(t, err)
 	must(t, s.Pass(ctx))
@@ -331,8 +306,6 @@ func TestPassPublishesTheTurnsItLeftWithoutASlot(t *testing.T) {
 	ctx := context.Background()
 	f, repo := crowd(t)
 	defer repo.Close()
-	// Nothing is in flight: the first candidate takes the free slot and the
-	// rest wait.
 	shared := &Shared{}
 	s, err := New(repo, Options{Now: f.clock.Now, Capacity: &config.Capacity{Masons: 1, Reviewers: 2, Committee: 5, PerWorkstream: 5}, Holds: func(c Candidate) (bool, error) { return c.Thread.Identity.Role != "mason", nil }, Shared: shared})
 	must(t, err)

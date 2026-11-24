@@ -31,7 +31,7 @@ func breadthAnswers(plan BreadthPlan, probabilities map[string]float64) systemon
 
 func allKept(t *testing.T, roots, expanded []string) BreadthResult {
 	t.Helper()
-	p := Breadth(roots, expanded)
+	p := lexicalBreadth(roots, expanded)
 	b, ok := ApplyBreadth(breadthAnswers(p, nil), p, .5)
 	if !ok {
 		t.Fatal("breadth rejected valid answers")
@@ -46,7 +46,7 @@ func TestBreadthRequestWordingAndData(t *testing.T) {
 	}
 	root, standalone := "dag+check://tests", "dag+check://version"
 	leaves := goLinks(root)
-	p := Breadth([]string{standalone, root}, append(slices.Clone(leaves), root, root+"?go-module=.", standalone))
+	p := lexicalBreadth([]string{standalone, root}, append(slices.Clone(leaves), root, root+"?go-module=.", standalone))
 	state, _ := State("")
 	r := BreadthRequest(state, p)
 	if err := r.Validate(); err != nil {
@@ -84,7 +84,7 @@ func TestBreadthAttributesBothLinkShapesAndAppliesThreshold(t *testing.T) {
 			kept, dropped, uncovered := "dag+check://version", "dag+check://lint", "dag+check://unknown?item=one"
 			leaves := goLinks(root)
 			listed := append(slices.Clone(leaves), root, kept, dropped, uncovered)
-			p := Breadth([]string{root, kept, dropped}, listed)
+			p := lexicalBreadth([]string{root, kept, dropped}, listed)
 			if !slices.Equal(p.Uncovered, []string{uncovered}) {
 				t.Fatalf("uncovered %q", p.Uncovered)
 			}
@@ -114,12 +114,11 @@ func TestBreadthMappingUsesCoverageAndPreservesUnknownLinks(t *testing.T) {
 	root := "dag+check://?check=test"
 	leaf := root + "&go-test=T&go-package=a"
 	parent := root + "&go-package=a"
-	p := Breadth([]string{root, parent}, []string{leaf, "opaque", "dag+check://other/path"})
+	p := lexicalBreadth([]string{root, parent}, []string{leaf, "opaque", "dag+check://other/path"})
 	if len(p.Roots[0].Links) != 0 || !slices.Equal(p.Roots[1].Links, []string{leaf}) || !slices.Equal(p.Uncovered, []string{"dag+check://other/path", "opaque"}) {
 		t.Fatalf("attribution: %+v", p)
 	}
-	// Repeated check-name filters do not introduce a hierarchy level.
-	repeated := Breadth([]string{root + "&check=test"}, []string{leaf})
+	repeated := lexicalBreadth([]string{root + "&check=test"}, []string{leaf})
 	if !slices.Equal(repeated.Roots[0].Links, []string{leaf}) {
 		t.Fatalf("repeated root: %+v", repeated)
 	}
@@ -157,7 +156,6 @@ func TestDepthRequestHierarchyAndWording(t *testing.T) {
 	}
 	got, _ := json.Marshal(instructions["hierarchy"])
 	want, _ := json.Marshal(wantHierarchy)
-	// Compare JSON values, including the absence of private execution data.
 	var gotValue, wantValue any
 	json.Unmarshal(got, &gotValue)
 	json.Unmarshal(want, &wantValue)
@@ -180,7 +178,6 @@ func TestDepthAppliesChosenLevelWithoutOverride(t *testing.T) {
 	t.Parallel()
 	for _, root := range []string{"dag+check://tests", "dag+check://?check=test"} {
 		leaves := goLinks(root)
-		// Listed intermediate links must not survive a choice of the finest level.
 		listed := append(slices.Clone(leaves), cutLinks(leaves, 2)...)
 		p := Depth(allKept(t, []string{root}, listed))
 		for _, level := range []string{"go-package", "go-test"} {
@@ -231,7 +228,7 @@ func TestDepthFailurePreservesBreadthAtFinest(t *testing.T) {
 	a, b, standalone, uncovered := "dag+check://a", "dag+check://b", "dag+check://version", "dag+check://uncovered?item=one"
 	aLeaves, bLeaves := goLinks(a), goLinks(b)
 	listed := append(append(slices.Clone(aLeaves), bLeaves...), standalone, uncovered)
-	p := Breadth([]string{a, b, standalone}, listed)
+	p := lexicalBreadth([]string{a, b, standalone}, listed)
 	breadth, ok := ApplyBreadth(breadthAnswers(p, map[string]float64{a: .9, standalone: .5}), p, .5)
 	if !ok {
 		t.Fatal("unusable breadth")
@@ -299,7 +296,7 @@ func TestStagesAreDeterministic(t *testing.T) {
 	state, _ := State("")
 	var previousBreadth, previousDepth, previousRanking []byte
 	for range 5 {
-		p := Breadth(roots, listed)
+		p := lexicalBreadth(roots, listed)
 		b, _ := ApplyBreadth(breadthAnswers(p, nil), p, .5)
 		d := Depth(b)
 		r := systemone.Response{Answers: map[string]systemone.Answer{}}
@@ -325,7 +322,7 @@ func TestStagesAreDeterministic(t *testing.T) {
 func TestStageAnswersMustBeUsable(t *testing.T) {
 	t.Parallel()
 	root := "dag+check://tests"
-	p := Breadth([]string{root}, goLinks(root))
+	p := lexicalBreadth([]string{root}, goLinks(root))
 	for _, a := range []systemone.Answer{{Kind: systemone.KindChoice}, {Kind: systemone.KindNoul, Noul: -.1}, {Kind: systemone.KindNoul, Noul: 1.1}, {Kind: systemone.KindNoul, Noul: math.NaN()}, {Kind: systemone.KindNoul, Noul: math.Inf(1)}} {
 		if _, ok := ApplyBreadth(systemone.Response{Answers: map[string]systemone.Answer{BreadthQuestion(0): a}}, p, .5); ok {
 			t.Fatalf("usable invalid breadth answer %+v", a)
@@ -383,7 +380,6 @@ func TestNarrowFilteredLinksAgainstOriginalLeaves(t *testing.T) {
 	if _, ok := Candidates(filtered, MaxQuestions); ok {
 		t.Fatal("whole-collection narrowing should fail without the original other package")
 	}
-	// A chosen parent must also survive broad-link removal against the original.
 	if got, ok := Narrow([]string{root + "&go-package=a"}, listed, MaxQuestions); !ok || len(got) != 1 {
 		t.Fatalf("filtered parent lost: %q, %t", got, ok)
 	}
@@ -430,11 +426,39 @@ func TestStateCountsProcessAndExtendedGuide(t *testing.T) {
 	if !ok || len(body) > MaxState || !strings.HasPrefix(state["diff"].(string), "omitted:") {
 		t.Fatal("oversized state kept diff")
 	}
-	// Without process that same diff would fit; process must count toward the cap.
 	delete(state, "process")
 	state["diff"] = fitting + "x"
 	body, _ = json.Marshal(state)
 	if len(body) >= MaxState {
 		t.Fatal("fixture does not isolate process cost")
 	}
+}
+
+func lexicalBreadth(topLevel, expanded []string) BreadthPlan {
+	var plan BreadthPlan
+	for _, link := range distinct(topLevel) {
+		plan.Roots = append(plan.Roots, Root{Link: link})
+	}
+	links, _ := Candidates(expanded, len(expanded))
+	for _, link := range links {
+		a := parseAddress(link)
+		owner := -1
+		for i, root := range plan.Roots {
+			r := parseAddress(root.Link)
+			if !r.covers(a) {
+				continue
+			}
+			if owner < 0 || parseAddress(plan.Roots[owner].Link).covers(r) && !r.covers(parseAddress(plan.Roots[owner].Link)) {
+				owner = i
+			}
+		}
+		if owner < 0 {
+			plan.Uncovered = append(plan.Uncovered, link)
+			continue
+		}
+		root := &plan.Roots[owner]
+		root.Links = append(root.Links, link)
+		root.Collection = root.Collection || !a.covers(parseAddress(root.Link))
+	}
+	return plan
 }

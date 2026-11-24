@@ -7,19 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/agentcore/agent/procs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recoverSessions settles sessions left by an earlier service before the
-// controller can dispatch work. Role passes then read the completed
-// interruption from the trace and reconstruct their pending work. A directory
-// without a claim covers the crash between Prepare and ClaimTurn.
 func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repository *trace.Repository) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
@@ -39,21 +35,12 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 	return nil
 }
 
-// recoverThread settles one thread's sessions left by an earlier service, as
-// recoverSessions does for every thread of each of repository's own
-// workstreams: used directly, rather than through that per-workstream loop,
-// for a cross-repo workgroup's shared chief-of-staff thread, whose
-// workstream (the workgroup's own host) never appears in any repository's
-// own Workstreams().
 func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, th trace.Thread) error {
 	for _, q := range th.Turns {
 		if !q.CompletedAt.IsZero() || q.Response != nil {
 			continue
 		}
 		if q.Claim != nil {
-			// Mason views must be copied into their workspace before
-			// the claim is released. The mason and drift passes do
-			// that reconciliation themselves.
 			if th.Identity.Role == masonRole {
 				continue
 			}
@@ -106,14 +93,6 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 	return nil
 }
 
-// recoverWorkgroupChiefSessions settles the shared chief-of-staff turns an
-// earlier service left mid-flight on each cross-repo workgroup one of
-// projects' own workstreams belongs to, the same way recoverSessions does
-// per real project, before the controller can dispatch further work. The
-// workgroup's own trace is opened transiently for this call alone; its host
-// workstream, which carries that one thread, never appears in any real
-// project's own Workstreams(), so it needs this direct recovery rather than
-// repeating project's own pass.
 func (s *Service) recoverWorkgroupChiefSessions(ctx context.Context, projects []*activeProject) error {
 	seen := map[config.WorkgroupID]bool{}
 	for _, p := range projects {
@@ -172,8 +151,6 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	if err := s.recoverThread(ctx, s.current(), wt, host, th); err != nil {
 		return err
 	}
-	// A continued conversation also recovers a shutdown whose partial result
-	// was captured before the service exited. Explicit owner stops stay stopped.
 	if g.Conversation != nil {
 		for _, q := range th.Turns {
 			if q.Response != nil && q.Status() == "interrupted" && q.Response.Result.Cancelled && q.Response.Stop == nil {
@@ -186,11 +163,6 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	return nil
 }
 
-// recoverWorkspaces restores the Jujutsu workspaces of the configured
-// project that an earlier service stopped in the middle of a multi-step
-// operation on, before any controller runs: each kind of workspace goes back
-// to the operation-log entry recorded before the interrupted attempt, and
-// the operation's retry reconciles what that attempt did to the clone.
 func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) error {
 	for _, directory := range []string{branchesDirectory, unitsDirectory, driftsDirectory} {
 		operations, err := workspaces(cfg, directory, config.WorkspacesJujutsu).Recover(ctx)
@@ -204,23 +176,13 @@ func (s *Service) recoverWorkspaces(ctx context.Context, cfg *config.Config) err
 	return nil
 }
 
-// reapSandboxes removes the Docker Sandboxes that sessions of an earlier
-// service left behind, through agentcore's own cleanup of interrupted
-// sandbox records (procs.CleanSandboxDirs). A session's directory records
-// its sandbox's name until the sandbox is removed, so a record found before
-// any turn runs names one whose session was interrupted. A sandbox that
-// cannot be removed keeps its record, and the next start tries again.
 func reapSandboxes(ctx context.Context, cfg *config.Config, sbxBin string) {
-	if sbxBin == "" {
-		sbxBin = agent.SandboxCLI
-	}
 	root, project := cfg.Root.String(), string(cfg.Project.ID)
 	patterns := []string{
 		filepath.Join(root, "threads", project, "*", "*", "*", procs.SandboxNameFile),
 		filepath.Join(root, "architect", project, "*", "*", "session", procs.SandboxNameFile),
 		filepath.Join(root, "shed", project, "*", "*", "session", procs.SandboxNameFile),
 		filepath.Join(root, "final", project, "*", "*", "session", procs.SandboxNameFile),
-		filepath.Join(root, "librarian", project, "*", "session", procs.SandboxNameFile),
 	}
 	var dirs []string
 	for _, pattern := range patterns {
@@ -251,9 +213,6 @@ func sessionDirectories(cfg *config.Config, project config.ProjectID, stream con
 			filepath.Join(root, "shed", string(project), string(stream), turn, "session"),
 			filepath.Join(root, "final", string(project), string(stream), turn, "session"),
 		}
-	case "librarian":
-		// Sandboxes of an interrupted librarian turn.
-		return []string{filepath.Join(root, "librarian", string(project), turn, "session")}
 	case sessionRole:
 		return []string{filepath.Join(runtime.ModelSessionDirectory(root, project, stream), turn)}
 	default:
@@ -261,8 +220,6 @@ func sessionDirectories(cfg *config.Config, project config.ProjectID, stream con
 	}
 }
 
-// sessionProfile returns the profile a session workstream's manifest
-// recorded when it opened.
 func sessionProfile(repository *trace.Repository, stream config.WorkstreamID) (string, error) {
 	list, err := repository.Statuses()
 	if err != nil {
@@ -276,9 +233,6 @@ func sessionProfile(repository *trace.Repository, stream config.WorkstreamID) (s
 	return "", fmt.Errorf("session %s not found", stream)
 }
 
-// recoverSession enqueues a session's continuation with its fixed profile
-// and wakes the conversation path, as sessionMessage does for an owner's
-// message. The path publishes its durable dispatch and runs it once started.
 func (s *Service) recoverSession(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
 	profileName, err := sessionProfile(repository, stream)
 	if err != nil {
@@ -295,10 +249,6 @@ func (s *Service) recoverSession(ctx context.Context, cfg *config.Config, reposi
 	return dispatchSessionTurn(ctx, repository, repository.Project(), stream, next, s.now())
 }
 
-// recoverContinuations calls recover with the turn ID of every turn of the
-// thread's agent that this or an earlier recovery pass ended interrupted, so
-// each gets the chance at a continuation an unbroken service session would
-// have given it.
 func (s *Service) recoverContinuations(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent string, recover func(turn string) error) error {
 	settled, err := repository.Thread(stream, agent)
 	if err != nil {
@@ -314,10 +264,6 @@ func (s *Service) recoverContinuations(ctx context.Context, repository *trace.Re
 	return nil
 }
 
-// recoverContinuation enqueues turn's continuation on the thread with
-// profile, resuming the interrupted request from the durable thread state,
-// and reports its new turn ID: it takes no action, and reports "", if the
-// turn did not end interrupted or its continuation is already enqueued.
 func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string, profile coreadapter.Profile) (string, error) {
 	th, err := repository.Thread(stream, agent)
 	if err != nil {
@@ -330,9 +276,7 @@ func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Rep
 		if q.Response == nil || q.Status() != "interrupted" {
 			return "", nil
 		}
-		// After maxRecoveries interruptions in a row the work is not
-		// continued again; the owner's next message resumes the thread.
-		if interruptedInARow(th) >= maxRecoveries {
+		if execution.InterruptedInARow(th) >= execution.MaxRecoveries {
 			return "", nil
 		}
 		req := q.Request

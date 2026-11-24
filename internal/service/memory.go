@@ -15,13 +15,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// memoryTurns adds authenticated context tools to the existing role boundary.
-// Narrowed turns retain their narrower grants.
-// Exploratory sessions receive only the read tools, at the observer class.
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
 	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
 		assignment, err := assignmentContext(repo, scope)
-		return factoryInstructions(scope) + assignment, err
+		return FactoryInstructions(scope) + assignment, err
 	}
 	turns.Audit = func(ctx context.Context, scope coreadapter.Scope, tool coreadapter.Tool, raw json.RawMessage) (func(context.Context, json.RawMessage, error) error, error) {
 		return repo.BeginTool(ctx, scope, tool, raw, func() time.Time { return time.Now().UTC() })
@@ -32,8 +29,8 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	external := cfg.Hearsay.URL != "" && defaultScope != ""
 	for role, grant := range turns.Grants {
 		grant.Tools = slices.Clone(grant.Tools)
-		if role != sessionRole && !slices.Contains(grant.Tools, projectContextTool) {
-			grant.Tools = append(grant.Tools, projectContextTool)
+		if role != sessionRole && !slices.Contains(grant.Tools, ProjectContextTool) {
+			grant.Tools = append(grant.Tools, ProjectContextTool)
 		}
 		if external {
 			for _, tool := range client.Tools(role, defaultScope, nil) {
@@ -54,8 +51,8 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 				return nil, err
 			}
 		}
-		if scope.Role != sessionRole && !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == projectContextTool }) {
-			tools = append(tools, projectContext(repo, scope))
+		if scope.Role != sessionRole && !slices.ContainsFunc(tools, func(tool coreadapter.Tool) bool { return tool.Name == ProjectContextTool }) {
+			tools = append(tools, ProjectContext(repo, scope))
 		}
 		if external {
 			tools = append(tools, client.Tools(scope.Role, defaultScope, func() error { return repo.ActiveTurn(scope) })...)
@@ -65,9 +62,6 @@ func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Reposit
 	return turns
 }
 
-// registerHearsaySecrets registers the credential values the configuration
-// references, so they are redacted from logs and errors from the moment the
-// configuration is loaded.
 func registerHearsaySecrets(h config.Hearsay) {
 	if h.URL == "" {
 		return

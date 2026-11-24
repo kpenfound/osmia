@@ -59,9 +59,6 @@ func (r *Repository) WorkstreamBase(stream config.WorkstreamID) (WorkstreamBase,
 // SetWorkstreamBase validates the graph and document-state gate in the same
 // transaction as the owner revision. Sealed workstreams keep their declared base.
 func (r *Repository) SetWorkstreamBase(ctx context.Context, stream, base config.WorkstreamID, revision int, at time.Time) (WorkstreamBase, error) {
-	// The acyclic-graph check reads every workstream's declared base, so it
-	// starts from the aggregate view across the project rather than stream's
-	// own trace alone.
 	records, streams, err := r.scanAll()
 	if err != nil {
 		return WorkstreamBase{}, err

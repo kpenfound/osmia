@@ -6,27 +6,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// publishThrough runs one publish pass over the service's own trace against a
-// fake hooks endpoint, and returns the requests it made.
-func publishThrough(t *testing.T, s *Service, repo *trace.Repository) []hooksPost {
+func publishThrough(t *testing.T, s *Service, repo *trace.Repository) []fixturekit.HooksPost {
 	t.Helper()
-	// serial: sets the publisher's token in the process environment.
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
-	hooks := newHooksFake(t)
+	hooks := fixturekit.NewHooks(t)
 	cfg := *s.current()
 	cfg.Hearsay = config.Hearsay{URL: "https://memory.example", Principal: "owner", TokenEnv: "PUBLISH_TEST_OWNER",
 		Publish: &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}}
 	res, err := s.publishPass(context.Background(), repo, &cfg)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(res.Failures) != 0 || res.Unreachable {
 		t.Fatalf("pass: %+v", res)
 	}
-	return hooks.take()
+	return hooks.Take()
 }
 
 // A ruling Jev made through the gate worker on an escalated question, and the
@@ -51,9 +50,9 @@ func TestPublishPostsTheRulingTheGateWorkerRecordedForJev(t *testing.T) {
 	}
 
 	posts := publishThrough(t, f.s, repo)
-	var rulings []hooksPost
-	for _, d := range decisions(posts) {
-		if d.str("question") == string(stream)+":1" {
+	var rulings []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if d.Str("question") == string(stream)+":1" {
 			rulings = append(rulings, d)
 		}
 	}
@@ -61,14 +60,14 @@ func TestPublishPostsTheRulingTheGateWorkerRecordedForJev(t *testing.T) {
 		t.Fatalf("%d decisions about the question: %v", len(rulings), kinds(posts))
 	}
 	requireWorkDecision(t, rulings[0], judgment)
-	if rulings[0].str("outcome") != "Restart the upload." || rulings[0].str("decision") != string(stream)+"-jev-ruling-1" || !slices.Contains(contractDeciders, rulings[0].str("decider")) {
+	if rulings[0].Str("outcome") != "Restart the upload." || rulings[0].Str("decision") != string(stream)+"-jev-ruling-1" || !slices.Contains(contractDeciders, rulings[0].Str("decider")) {
 		t.Fatalf("Jev's ruling: %s", rulings[0].Raw)
 	}
 	for _, post := range posts {
-		if post.Source == "osmia-owner" && post.str("kind") == "decision" {
+		if post.Source == "osmia-owner" && post.Str("kind") == "decision" {
 			t.Fatalf("a decision reached the owner source: %s", post.Raw)
 		}
-		if strings.Contains(post.Raw, `"author":"owner"`) && post.str("kind") == "decision" {
+		if strings.Contains(post.Raw, `"author":"owner"`) && post.Str("kind") == "decision" {
 			t.Fatalf("a decision names the owner as author: %s", post.Raw)
 		}
 	}

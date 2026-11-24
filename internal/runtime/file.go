@@ -96,7 +96,6 @@ func (s *Store) persist(data []byte) error {
 		return err
 	}
 	defer s.root.Remove(next)
-	// Keep a flushed rollback copy until the replacement directory entry is durable.
 	backup := ""
 	if s.disk != nil {
 		backup, err = s.stage(s.disk)
@@ -129,7 +128,7 @@ func (s *Store) persist(data []byte) error {
 		}
 		if restore != nil {
 			recovery := backup
-			backup = "" // Preserve the recovery copy if restoration failed.
+			backup = ""
 			return errors.Join(err, fmt.Errorf("runtime rollback failed; disk requires reconciliation (backup %q): %w", recovery, restore))
 		}
 		return err

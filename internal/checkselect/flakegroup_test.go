@@ -64,7 +64,6 @@ func TestFlakeGroupNeverIsModuleWideOrCollectionRoot(t *testing.T) {
 	if got, err := r.Link(rootTest + "&go-module=.&go-package=internal/a&go-package=internal/b"); !errors.Is(err, ErrBroadFlakeCheck) {
 		t.Errorf("two packages: group %+v, %v", got, err)
 	}
-	// A module with nothing narrower listed is itself the check.
 	only := NewFlakeResolver([]string{rootTest + "&go-module=other"})
 	if got, err := only.Link(rootTest + "&go-module=other"); err != nil || got.Key != rootTest+"&go-module=other" {
 		t.Errorf("module without packages: %+v, %v", got, err)
@@ -125,18 +124,17 @@ func TestCloudNameTiedToNoKnownCheckIsItsOwnUnresolvedGroup(t *testing.T) {
 	t.Parallel()
 	r := NewFlakeResolver(flakeKnown)
 	for _, name := range []string{
-		"test-split/test-cli-engine", // no such check
-		"test/internal/c/TestOne",    // no such package
-		"test/internal/a/TestNone",   // a test no listing has
-		"test",                       // the collection root: several packages, no one group
-		"test/.",                     // the module
+		"test-split/test-cli-engine",
+		"test/internal/c/TestOne",
+		"test/internal/a/TestNone",
+		"test",
+		"test/.",
 		"docs",
 	} {
 		if got := r.CloudName(name); !got.Unresolved || got.Key != name {
 			t.Errorf("%q: group %+v, want its own unresolved group", name, got)
 		}
 	}
-	// Unresolved names do not share a group with a known check or each other.
 	a, b := r.CloudName("docs"), r.CloudName("docs-lint")
 	if a == b {
 		t.Fatalf("different unknown names share %+v", a)

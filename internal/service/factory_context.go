@@ -15,9 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// memberSchema is the closed object schema of properties, a JSON object's
-// members, plus a workstream property for a chief-of-staff turn, whose tool
-// can address any member sharing that chief of staff.
 func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 	if scope.Role == trace.ChiefOfStaff {
 		properties += `,"workstream":{"type":"string"}`
@@ -25,11 +22,6 @@ func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{` + properties + `},"additionalProperties":false}`)
 }
 
-// chiefMember resolves the workstream a tool's workstream input names and
-// the project-level repository holding its trace: the turn's own workstream
-// on r when named is empty, or another member sharing a chief-of-staff
-// turn's chief. A non-empty refusal names a workstream the turn cannot
-// address.
 func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
 	own := config.WorkstreamID(scope.Workstream)
 	if named != "" && named != own && scope.Role != trace.ChiefOfStaff {
@@ -38,8 +30,6 @@ func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.Work
 	return r.ChiefMember(own, named)
 }
 
-// factoryContext exposes workstream records independently of conversation replay.
-// A chief-of-staff turn may name any member of its workgroup.
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	description := "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and their latest revisions; a folder path such as discoveries lists the documents under it. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files."
 	if scope.Role == trace.ChiefOfStaff {
@@ -136,7 +126,6 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 		}}
 }
 
-// assignmentContext refreshes essential unit context on every turn, including recovery turns.
 func assignmentContext(r *trace.Repository, scope coreadapter.Scope) (string, error) {
 	if scope.Unit == "" || (scope.Role != masonRole && scope.Role != reviewerRole) {
 		return "", nil

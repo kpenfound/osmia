@@ -61,24 +61,12 @@ func (r *Repository) MoveFeatureStateWith(ctx context.Context, h Header, from, t
 	return r.setFeatureState(ctx, h, &from, to, reason, nil, Routing{}, with...)
 }
 
-// MoveFeatureStateRouted is MoveFeatureStateWith recording how the transition
-// router chose the feature transition; a retry must record the same routing.
-func (r *Repository) MoveFeatureStateRouted(ctx context.Context, h Header, from, to, reason string, route Routing, with ...Transaction) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, &from, to, reason, nil, route, with...)
-}
-
 // SetFeatureStateUnless is SetFeatureState, except that it refuses with
 // ErrFeatureState, writing nothing, when the current state is one of refused,
 // even for a retry of a transition that already committed.
 // The check and the write hold the same lock.
 func (r *Repository) SetFeatureStateUnless(ctx context.Context, h Header, to, reason string, refused ...string) (WorkflowState, error) {
 	return r.setFeatureState(ctx, h, nil, to, reason, refused, Routing{})
-}
-
-// SetFeatureStateUnlessRouted is SetFeatureStateUnless recording how the
-// transition router chose the transition; a retry must record the same routing.
-func (r *Repository) SetFeatureStateUnlessRouted(ctx context.Context, h Header, to, reason string, route Routing, refused ...string) (WorkflowState, error) {
-	return r.setFeatureState(ctx, h, nil, to, reason, refused, route)
 }
 
 func (r *Repository) setFeatureState(ctx context.Context, h Header, from *string, to, reason string, refused []string, route Routing, with ...Transaction) (WorkflowState, error) {

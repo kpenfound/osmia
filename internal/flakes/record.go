@@ -173,7 +173,6 @@ var (
 	ErrNotReserved = errors.New("the occurrence has no reserved hand-in key")
 )
 
-// find returns the occurrence of run in the group.
 func (g *Group) find(run string) (*Occurrence, bool) {
 	id := OccurrenceID(run, g.Group)
 	for i := range g.Occurrences {
@@ -220,8 +219,6 @@ type OccurrenceInput struct {
 	FromFlakeFix bool
 }
 
-// record adds the occurrence unless the group already holds one for the same
-// run, and returns the occurrence now held and whether it was added.
 func (g *Group) record(in OccurrenceInput, at time.Time) (Occurrence, bool, error) {
 	if strings.TrimSpace(in.Run) == "" || in.Group != g.Group || len(in.Links) == 0 || in.Source.Workstream == "" {
 		return Occurrence{}, false, fmt.Errorf("a flake occurrence needs its run record, its workstream and at least one flaky check")
@@ -237,11 +234,6 @@ func (g *Group) record(in OccurrenceInput, at time.Time) (Occurrence, bool, erro
 	return o, true, nil
 }
 
-// reserve decides run's occurrence to open the group's workstream. A pending
-// occurrence of a group with an open workstream joins it; otherwise the
-// group's current generation and key are reserved for it, with the chief of
-// staff's notes. An occurrence that already has a decision keeps it. The
-// result reports whether it changed.
 func (g *Group) reserve(run, notes string, at time.Time) (Decision, bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -259,10 +251,6 @@ func (g *Group) reserve(run, notes string, at time.Time) (Decision, bool, error)
 	return o.Decision, true, nil
 }
 
-// opened completes run's reserved opening with the workstream its key made.
-// The first occurrence to complete a generation's opening is the one that
-// opened the group's workstream; an occurrence that reserved the same key
-// after it joined the workstream that exists.
 func (g *Group) opened(run string, workstream config.WorkstreamID, at time.Time) (Decision, bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -292,7 +280,6 @@ func (g *Group) opened(run string, workstream config.WorkstreamID, at time.Time)
 	return d, true, nil
 }
 
-// join decides run's pending occurrence to join workstream.
 func (g *Group) join(run string, workstream config.WorkstreamID, at time.Time) (Decision, bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -308,7 +295,6 @@ func (g *Group) join(run string, workstream config.WorkstreamID, at time.Time) (
 	return o.Decision, true, nil
 }
 
-// decline decides run's pending occurrence to be declined for reason.
 func (g *Group) decline(run, reason string, at time.Time) (Decision, bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -324,10 +310,6 @@ func (g *Group) decline(run, reason string, at time.Time) (Decision, bool, error
 	return o.Decision, true, nil
 }
 
-// close ends the group's association with workstream, which was delivered or
-// abandoned, and advances its generation. It matches the group's open
-// workstream and an opening reserved whose workstream was created but never
-// recorded as open. It reports whether anything changed.
 func (g *Group) close(workstream config.WorkstreamID, at time.Time) bool {
 	switch {
 	case g.Open != nil && g.Open.Workstream == workstream:
@@ -336,8 +318,6 @@ func (g *Group) close(workstream config.WorkstreamID, at time.Time) bool {
 		g.Open = nil
 		return true
 	case g.Open == nil:
-		// An opening of the current generation whose workstream was made but
-		// not yet recorded as open.
 		for _, o := range g.Occurrences {
 			if o.Decision.State == Opening && o.Decision.Generation == g.Generation && o.Decision.Workstream == workstream {
 				g.Closed = append(g.Closed, Closure{Workstream: workstream, Generation: g.Generation, At: at})
@@ -349,7 +329,6 @@ func (g *Group) close(workstream config.WorkstreamID, at time.Time) bool {
 	return false
 }
 
-// markNoticed marks the notice of run's occurrence as sent.
 func (g *Group) markNoticed(run string, at time.Time) (bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -362,7 +341,6 @@ func (g *Group) markNoticed(run string, at time.Time) (bool, error) {
 	return true, nil
 }
 
-// markSurfaced marks run's occurrence as surfaced to workstream.
 func (g *Group) markSurfaced(run string, workstream config.WorkstreamID, at time.Time) (bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -375,7 +353,6 @@ func (g *Group) markSurfaced(run string, workstream config.WorkstreamID, at time
 	return true, nil
 }
 
-// markAnnounced marks run's occurrence as announced to the destination.
 func (g *Group) markAnnounced(run, destination string, at time.Time) (bool, error) {
 	o, ok := g.find(run)
 	if !ok {
@@ -388,8 +365,6 @@ func (g *Group) markAnnounced(run, destination string, at time.Time) (bool, erro
 	return true, nil
 }
 
-// markMoot closes run's occurrence's destination as moot. A destination that
-// was already announced or closed stays as it is.
 func (g *Group) markMoot(run string, m Moot, at time.Time) (bool, error) {
 	o, ok := g.find(run)
 	if !ok {

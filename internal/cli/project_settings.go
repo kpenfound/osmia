@@ -17,9 +17,6 @@ import (
 	"github.com/kpenfound/osmia/internal/projectstore"
 )
 
-// Settings that hold a whole number or true or false. Every other setting of
-// config.ProjectSettings holds text, except the hearsay_entities mapping, whose
-// entries are named hearsay_entities.<local entity id>.
 var (
 	intProjectSettings  = []string{"capacity.per_workstream", "capacity.git_operations"}
 	boolProjectSettings = []string{"hearsay_declare_repo", "flake_fixes"}
@@ -27,19 +24,14 @@ var (
 
 const entityPrefix = "hearsay_entities."
 
-// errServiceRunning reports a root or project a running service holds.
 var errServiceRunning = errors.New("a running service owns this root")
 
-// projectSettingView is one setting of a stored revision.
 type projectSettingView struct {
 	Name    string `json:"name"`
 	Value   any    `json:"value"`
 	Default bool   `json:"default"`
 }
 
-// projectSettingsView is the stored settings of one project, as show prints
-// them. A revision that does not load carries its error and its stored text
-// instead of settings.
 type projectSettingsView struct {
 	Project  config.ProjectID     `json:"project"`
 	Revision int                  `json:"revision"`
@@ -49,7 +41,6 @@ type projectSettingsView struct {
 	Stored   string               `json:"stored,omitempty"`
 }
 
-// projectSettingsSaved is the result of a recorded edit.
 type projectSettingsSaved struct {
 	Project  config.ProjectID `json:"project"`
 	Revision int              `json:"revision"`
@@ -57,12 +48,6 @@ type projectSettingsSaved struct {
 	Pin      string           `json:"pin"`
 }
 
-// runProjectSettings shows or edits the stored settings of project id. It is
-// offline: it reads and writes the store directly, never contacts the service,
-// and refuses while a service owns the root. It reads only the top-level file
-// and the store, never a retired project file, and writes only a new revision
-// of the project's settings, never the registry or the top-level file. verb is
-// show, set or clear; args are the settings the last two name.
 func runProjectSettings(root config.Root, id config.ProjectID, verb string, args []string, asJSON bool, stdout, stderr io.Writer) int {
 	refuse := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, format+"\n", a...)
@@ -84,8 +69,6 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 		return code
 	}
 	if verb != "show" {
-		// Validate the edit before taking the root's lock, which creates it:
-		// a refused edit then leaves the root as it was.
 		current, err := store.Current(id)
 		if err != nil {
 			return refuse("project %s: %v", id, err)
@@ -102,7 +85,6 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 		return refuse("cannot check that the service is stopped: %v; nothing was changed", err)
 	}
 	defer release()
-	// The registry may have changed while the service was being checked for.
 	if code := requireRegistered(store, id, refuse); code != 0 {
 		return code
 	}
@@ -132,16 +114,7 @@ func runProjectSettings(root config.Root, id config.ProjectID, verb string, args
 	return 0
 }
 
-// requireRegistered refuses a project the registry does not list. It reads the
-// registry only.
 func requireRegistered(store *projectstore.Store, id config.ProjectID, refuse func(string, ...any) int) int {
-	imported, err := store.Imported()
-	if err != nil {
-		return refuse("cannot read the project registry: %v", err)
-	}
-	if !imported {
-		return refuse("project %s is not in the registry: the registry is created when the service first starts and imports the projects; start it once, then use this command", id)
-	}
 	ids, err := store.Projects()
 	if err != nil {
 		return refuse("cannot read the project registry: %v", err)
@@ -185,11 +158,6 @@ func showProjectSettings(cfg *config.Config, store *projectstore.Store, id confi
 	return 0
 }
 
-// parseSettingsEdit turns the NAME=VALUE arguments of set, or the names of
-// clear, into an edit. A name that is no setting of a project, a value of the
-// wrong kind and a setting named twice are refused naming the setting, under
-// the label of the project's stored settings; the edit itself is validated as a
-// settings save validates it.
 func parseSettingsEdit(label, verb string, args []string) (config.ProjectEdit, error) {
 	edit := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Bools: map[string]bool{}, Entities: map[string]string{}}
 	refused := func(field, reason string) error { return &config.FieldError{Path: label, Field: field, Reason: reason} }
@@ -236,12 +204,6 @@ func parseSettingsEdit(label, verb string, args []string) (config.ProjectEdit, e
 	return edit, nil
 }
 
-// holdService takes the locks a running service holds, so that neither a
-// running service nor a service starting meanwhile can write what this command
-// reads and writes: the root's ownership lock and the project's trace lock. It
-// returns errServiceRunning when either is held, and creates nothing unless
-// create is set, which creates the root's ownership lock as the service does.
-// The project's lock comes first, so a refusal for it creates no file.
 func holdService(root config.Root, id config.ProjectID, create bool) (func(), error) {
 	traces, err := root.ProjectTrace(id)
 	if err != nil {

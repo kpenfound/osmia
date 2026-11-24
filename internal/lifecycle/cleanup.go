@@ -254,8 +254,6 @@ func (c *WorkspaceCleanup) ReleaseUnit(ctx context.Context, stream config.Workst
 	case !found && !merged:
 		return errors.New("its directory is no workspace of the clone")
 	case !found:
-		// The unit's work is on the feature branch, so a directory the clone
-		// no longer knows holds nothing to keep.
 		err = os.RemoveAll(filepath.Join(c.Cfg.Root.String(), unitsDirectory, string(c.Cfg.Project.ID), string(stream), unit))
 	case !merged:
 		err = Keep(ctx, g, stream, w)

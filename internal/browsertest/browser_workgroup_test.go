@@ -42,9 +42,7 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	opts, cfg := servicetest.ConversationFixture(t, "workgroup-page-")
 	withWeb(t, opts, "127.0.0.1:0")
 	cfg.Project.Name = "Uploads repo"
-	projectConfig, err := cfg.Root.ProjectConfig(project)
-	must(t, err)
-	fixturekit.WriteProjectFile(t, projectConfig, cfg.Project)
+	fixturekit.SaveProjectSettings(t, cfg.Root.String(), cfg.Project)
 	fixturekit.SeedPage(t, cfg)
 	repo, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -59,8 +57,6 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 		must(t, trace.RecordProjectSpec(ctx, repo, g, spec, demoStart, ownerActor, "fixture"))
 	}
 	must(t, repo.Close())
-	// Page facts are recorded manually. Leave turns undispatched until a test
-	// binds a runner that completes the durable thread as well as its operation.
 	opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, opts)
 	live := service.InspectForTest(s).SoleRepository()
@@ -69,7 +65,6 @@ func newMemberPageFixture(t *testing.T, edges, multi bool) *workgroupPageFixture
 	chief := claimTurn(t, live, t.TempDir(), stream, trace.ChiefOfStaff, trace.ChiefOfStaff, "group-status", demoStart)
 	_, err = live.SetStatus(ctx, trace.ChiefOfStaff, chief, trace.StatusContent{Goal: "Ship shared uploads", Note: "The chief coordinates both repos.", Agents: []string{}}, time.Now().UTC(), func(trace.StatusContent, []string, []trace.OwnerGate) error { return nil })
 	must(t, err)
-	// A worker session, checks and review are real member-feed facts.
 	fixturekit.QueueRoleTurn(t, live, stream, intake.MasonAgent("upload"), "mason", "upload", demoStart)
 	_, err = live.ClaimTurn(ctx, stream, intake.MasonAgent("upload"), "group-worker-token", t.TempDir(), demoStart)
 	must(t, err)
@@ -90,7 +85,7 @@ func (f *workgroupPageFixture) question(t *testing.T, n int) api.InboxEntry {
 	must(t, err)
 	_, err = f.repo.EscalateQuestions(ctx, trace.ChiefOfStaff, f.chief, trace.EscalationRequest{Questions: []string{q.ID}, Rephrasing: fmt.Sprintf("Shared decision %d?", n), Blocked: "Both members", Recommendation: "Keep the shared interface."}, time.Now().UTC())
 	must(t, err)
-	entries := entriesOf(t, f.c, InboxEscalation)
+	entries := entriesOf(t, f.c, service.InboxEscalation)
 	for _, e := range entries {
 		if e.Question == fmt.Sprintf("Shared decision %d?", n) {
 			return e
@@ -136,8 +131,6 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Await("only shared entries and the dependency graph", `document.querySelector('#workgroup-content .workgroup-graph [data-edge]') !== null && !document.querySelector('#workgroup-content .feed [data-kind=milestone], #workgroup-content .feed [data-kind=transition], #workgroup-content .feed [data-kind=session], #workgroup-content .feed [data-kind=unit_checks], #workgroup-content .feed [data-kind=final_review]')`)
 	p.Click(`[data-open-member="` + string(stream) + `"]`)
 	p.Await("the member card opens its member", `!document.querySelector('[data-view=workstream]').hidden && location.hash === `+quote("#workstream="+string(stream)))
-	// The member's machine events are in its own Activity; its Conversation
-	// holds only its milestones and decisions.
 	p.OpenActivity()
 	p.Await("the member actually has detail events", `document.querySelector('#workstream-activity [data-kind=session]') !== null && document.querySelector('#workstream-activity [data-kind=transition]') !== null && document.querySelector('#workstream-activity [data-kind=unit_checks]') !== null && document.querySelector('#workstream-activity [data-kind=final_review]') !== null`)
 	p.Await("no shared conversation in the member's Activity", `!document.querySelector('#workstream-activity [data-kind=message], #workstream-activity [data-kind=response], #workstream-activity [data-kind=action], #workstream-activity [data-kind=status], #workstream-activity [data-kind=session][data-role=chief_of_staff]')`)
@@ -164,7 +157,6 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Click("#workgroup-content .composer [type=submit]")
 	p.AwaitText("#workgroup-content .composer .result", "Sent")
 	p.AwaitText("#workgroup-content .feed", "Coordinate the whole group")
-	// Finish the fixture chief's status turn, then the durable owner message.
 	fixturekit.AnswerChief(t, f.repo, stream, "group-status", "Status recorded.")
 	var q trace.QueuedTurn
 	for i := 0; i < 20; i++ {
@@ -181,8 +173,6 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	}
 	fixturekit.AnswerChief(t, f.repo, stream, q.Request.TurnID, "The group will coordinate.")
 	p.AwaitText("#workgroup-content .feed", "The group will coordinate.")
-	// These commits are separated by their rendered SSE result; no resync or
-	// interval polling can coalesce the two member updates into one read.
 	p.Eval(`window.groupEventKind = "conversation"`, nil)
 	_, err := f.c.Send(context.Background(), quiet, "A message addressed to the other member")
 	must(t, err)
@@ -207,7 +197,6 @@ func TestBrowserWorkgroupViewConversationMembersAndDecisions(t *testing.T) {
 	p.Click("#project-home")
 	p.Click(`[data-open-workgroup="` + string(f.group.ID) + `"]`)
 	p.Await("project block opens the group", `!document.querySelector('[data-view=workgroup]').hidden`)
-	// A workgroup hash is also a durable direct link.
 	p.Run(chromedp.Reload())
 	p.AwaitText("#workgroup-content .feed", "The group will coordinate.")
 }
@@ -257,7 +246,7 @@ func TestBrowserWorkgroupDecisionIdentityAndLateOutcomes(t *testing.T) {
 	answered := fmt.Sprintf("Answered inbox entry %d.", second.Number)
 	assertFeedOutcomes(p, "#workgroup-content", answered)
 	assertOutcome(p, "#inbox-result", "", "")
-	if got := entriesOf(t, f.c, InboxEscalation); len(got) != 0 {
+	if got := entriesOf(t, f.c, service.InboxEscalation); len(got) != 0 {
 		t.Fatalf("shared answers did not settle: %+v", got)
 	}
 	p.Await("one dispatch per recorded shared answer", `outcomeRequests[`+quote(first.Answer.Path)+`] === 1 && outcomeRequests[`+quote(second.Answer.Path)+`] === 1`)
@@ -400,7 +389,7 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 	}
 	f.opts.Reconciliation.Ticks = make(chan time.Time)
 	s, c := start(t, f.opts)
-	entries := entriesOf(t, c, InboxEscalation)
+	entries := entriesOf(t, c, service.InboxEscalation)
 	if len(entries) != 1 || entries[0].Workgroup != g.ID || entries[0].Project != synthetic {
 		t.Fatalf("shared decision identity: %+v", entries)
 	}
@@ -431,11 +420,9 @@ func TestBrowserWorkgroupSharedAnswerPreservesRecordedTarget(t *testing.T) {
 		t.Fatalf("answer target changed: %+v, want %s %s %s", actual, e.Answer.Method, e.Answer.Path, want)
 	}
 	releaseOutcome(p, e.Answer.Path)
-	// The accepted outcome is an entry of the workgroup's conversation feed;
-	// the shared result line shows nothing.
 	assertFeedOutcomes(p, "#workgroup-content", fmt.Sprintf("Answered inbox entry %d.", e.Number))
 	assertOutcome(p, "#inbox-result", "", "")
-	if remaining := entriesOf(t, c, InboxEscalation); len(remaining) != 0 {
+	if remaining := entriesOf(t, c, service.InboxEscalation); len(remaining) != 0 {
 		t.Fatalf("shared answer did not settle: %+v", remaining)
 	}
 }
@@ -450,9 +437,7 @@ func TestBrowserCrossProjectWorkgroupAppearsOnBothCardsWithProjectLabels(t *test
 	for _, id := range []config.ProjectID{project, otherProject} {
 		p := f.cfg.For(id).Project
 		p.Name = names[id]
-		path, err := f.cfg.Root.ProjectConfig(id)
-		must(t, err)
-		fixturekit.WriteProjectFile(t, path, p)
+		fixturekit.SaveProjectSettings(t, f.cfg.Root.String(), p)
 		r, err := trace.Open(f.cfg.Root, p)
 		must(t, err)
 		members = append(members, trace.CrossRepoMember{Project: r, Workstream: f.streams[id]})

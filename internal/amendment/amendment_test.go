@@ -13,10 +13,6 @@ func unit(id string, footprint string, criteria ...string) plan.Unit {
 	return plan.Unit{ID: id, Task: "Build " + id, Acceptance: []string{"Test" + id + " passes"}, Criteria: criteria, Footprint: []string{footprint}, DependsOn: []string{}}
 }
 
-// A unit that serves a changed criterion in either plan is reworked, even
-// when the affected set omits it; any other affected unit in both plans is
-// notified; units only in the new plan are added and units only in the old
-// plan removed. Unaffected units are in no class.
 func TestClassifySortsAffectedUnits(t *testing.T) {
 	t.Parallel()
 	before := plan.Plan{Units: []plan.Unit{unit("resume", "a", "spec#1"), unit("dedupe", "a", "spec#2"), unit("moved", "a", "spec#1"), unit("audit", "b", "spec#3"), unit("gone", "c", "spec#3"), unit("quiet", "d", "spec#3")}}
@@ -34,8 +30,6 @@ func pin(seal, revision, spec, graph int) Pin {
 	return Pin{Seal: seal, SealRevision: revision, Spec: spec, Plan: graph}
 }
 
-// A report holds across a chain of applied amendments that took every seal
-// between its own and the current one without reworking the unit.
 func TestCarriesReport(t *testing.T) {
 	t.Parallel()
 	apps := []Application{
@@ -61,8 +55,6 @@ func TestCarriesReport(t *testing.T) {
 	}
 }
 
-// A review holds when the applied amendments lead from its seal, spec and
-// plan to the current ones and none reworks, notifies or removes the unit.
 func TestCarriesReview(t *testing.T) {
 	t.Parallel()
 	apps := []Application{
@@ -90,8 +82,6 @@ func TestCarriesReview(t *testing.T) {
 	}
 }
 
-// Read keeps the latest revision of each application and orders them by the
-// seal.json revision they recorded; other amendment documents are ignored.
 func TestFromDocumentsReadsLatestApplications(t *testing.T) {
 	t.Parallel()
 	doc := func(id, path string, revision int, a Application) trace.Document {

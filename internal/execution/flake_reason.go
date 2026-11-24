@@ -23,10 +23,6 @@ func (r UnitCheckRun) KnownChecks() []string {
 	return flakes.CheckLinks(items...)
 }
 
-// openFlakeFixes names the flake-fix workstreams open for the groups of the
-// run's flaky checks, for the reason a unit's pass records. It is a read of
-// the flake record and answers nothing when the project has the setting off,
-// the run has no flaky check, or the record cannot be read.
 func (c *checkers) openFlakeFixes(run UnitCheckRun) string {
 	if !c.cfg.Project.FlakeFixes || len(run.Flaky) == 0 {
 		return ""

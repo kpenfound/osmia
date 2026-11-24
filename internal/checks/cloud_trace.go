@@ -28,14 +28,9 @@ const (
 	// timeout of its own.
 	TraceFetchTimeout = 2 * time.Minute
 
-	// traceCapture bounds the output held while the command runs. Only its end
-	// is kept.
-	traceCapture = 1 << 20
-	// traceFailureExcerpt bounds the command output quoted in a failure.
+	traceCapture        = 1 << 20
 	traceFailureExcerpt = 2048
-	// traceKillDelay is how long a command killed at its deadline may hold the
-	// fetch while its output pipes drain.
-	traceKillDelay = 5 * time.Second
+	traceKillDelay      = 5 * time.Second
 )
 
 // TraceFailureReason says why a trace could not be fetched.
@@ -207,10 +202,6 @@ var (
 	traceUnknown  = regexp.MustCompile(`(?i)\b404\b|not found|no such trace|unknown trace|does not exist|could not find|cannot find`)
 )
 
-// classifyTraceOutput names the cause the scrubbed output of a failed command
-// tells, or "" when it tells none. A rejected token is told before an unknown
-// trace, since Dagger Cloud answers an unauthenticated request for any trace
-// the same way.
 func classifyTraceOutput(text string) TraceFailureReason {
 	switch {
 	case tokenRejected.MatchString(text):
@@ -221,7 +212,6 @@ func classifyTraceOutput(text string) TraceFailureReason {
 	return ""
 }
 
-// tailBuffer keeps the end of what is written to it and counts all of it.
 type tailBuffer struct {
 	limit int
 	buf   []byte
@@ -237,13 +227,8 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// overflowed reports whether the buffer dropped the start of what was written.
 func (b *tailBuffer) overflowed() bool { return b.total > b.limit }
 
-// scrubbedTail returns the captured output as valid UTF-8 with the service's
-// secrets and secret-shaped values redacted. When the capture dropped the
-// start of the output, the first, possibly partial, line is dropped too, so no
-// secret cut in two by the capture's start survives the scrubbing.
 func scrubbedTail(b *tailBuffer) string {
 	data := b.buf
 	if len(data) > b.limit {
@@ -257,8 +242,6 @@ func scrubbedTail(b *tailBuffer) string {
 	return redact.Scrub(strings.ToValidUTF8(string(data), "�"))
 }
 
-// boundedTrace scrubs and bounds the captured output: it keeps the end, at
-// most MaxTraceOutput bytes.
 func boundedTrace(b *tailBuffer) TraceOutput {
 	text := scrubbedTail(b)
 	out := TraceOutput{Size: b.total, Truncated: b.overflowed() || len(text) > MaxTraceOutput}
@@ -266,8 +249,6 @@ func boundedTrace(b *tailBuffer) TraceOutput {
 	return out
 }
 
-// tailText returns the last limit bytes of text, starting at a character
-// boundary.
 func tailText(text string, limit int) string {
 	if len(text) <= limit {
 		return text

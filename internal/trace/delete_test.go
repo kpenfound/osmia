@@ -19,8 +19,6 @@ func TestWorkstreamTraceDeletionExcludesScopedOpen(t *testing.T) {
 	deleted := make(chan error, 1)
 	go func() {
 		moved, err := r.markWorkstreamTraceForDeletion(streamID, func() {
-			// At this boundary the old handle still owns its flock. A new
-			// scoped open must wait for the rename, not try to reacquire it.
 			if r.workstreamsMu.TryLock() {
 				r.workstreamsMu.Unlock()
 				t.Error("eviction released scoped-open exclusion before closing the live trace")

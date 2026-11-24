@@ -12,7 +12,15 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-func TestReloadCommand(t *testing.T) {
+type reloadFixture struct {
+	root     string
+	path     string
+	original []byte
+	before   wire.ConfigResponse
+}
+
+func newReloadFixture(t *testing.T) reloadFixture {
+	t.Helper()
 	opts := fixture(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
@@ -27,30 +35,55 @@ func TestReloadCommand(t *testing.T) {
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &struct {
 		Configuration *wire.ConfigResponse `json:"configuration"`
 	}{&before}))
+	return reloadFixture{root: root, path: path, original: original, before: before}
+}
 
-	must(t, os.WriteFile(path, append(append([]byte{}, original...), "[capacity]\nmasons = 0\n"...), 0600))
-	code, out, diag := invoke(t, root, "reload")
-	if code != 4 || out != "" || !strings.Contains(diag, path+": capacity.masons: must be positive") {
+func (f reloadFixture) write(t *testing.T, extra string) {
+	t.Helper()
+	must(t, os.WriteFile(f.path, append(append([]byte{}, f.original...), extra...), 0600))
+}
+
+func TestReloadRefusesAnInvalidFileAndStatusNamesTheFailure(t *testing.T) {
+	f := newReloadFixture(t)
+	f.write(t, "[capacity]\nmasons = 0\n")
+	code, out, diag := invoke(t, f.root, "reload")
+	if code != 4 || out != "" || !strings.Contains(diag, f.path+": capacity.masons: must be positive") {
 		t.Fatalf("invalid reload: %d %q %q", code, out, diag)
 	}
-	if status := successful(t, root, "status"); !strings.Contains(status, "Configuration: "+before.Digest) || !strings.Contains(status, "Last reload failed at ") || !strings.Contains(status, "capacity.masons") {
+	if status := successful(t, f.root, "status"); !strings.Contains(status, "Configuration: "+f.before.Digest) || !strings.Contains(status, "Last reload failed at ") || !strings.Contains(status, "capacity.masons") {
 		t.Fatalf("status after a failed reload:\n%s", status)
 	}
+}
 
-	must(t, os.WriteFile(path, append(append([]byte{}, original...), "[listen]\nsocket = \"local.sock\"\n[capacity]\nmasons = 7\n"...), 0600))
+func TestReloadNamesTheSettingsThatNeedARestart(t *testing.T) {
+	f := newReloadFixture(t)
+	f.write(t, "[listen]\nsocket = \"local.sock\"\n[capacity]\nmasons = 7\n")
 	var reloaded wire.ReloadResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "reload", "--json")), &reloaded))
-	if reloaded.Digest == before.Digest || len(reloaded.Digest) != 64 || len(reloaded.RestartRequired) != 1 || reloaded.RestartRequired[0] != "listen.socket" {
+	must(t, json.Unmarshal([]byte(successful(t, f.root, "reload", "--json")), &reloaded))
+	if reloaded.Digest == f.before.Digest || len(reloaded.Digest) != 64 || len(reloaded.RestartRequired) != 1 || reloaded.RestartRequired[0] != "listen.socket" {
 		t.Fatalf("reload: %+v", reloaded)
 	}
-	text := successful(t, root, "reload")
+	text := successful(t, f.root, "reload")
 	if text != "Configuration reloaded: "+reloaded.Digest+"\nRestart required to apply: listen.socket\n" {
 		t.Fatalf("reload text: %q", text)
 	}
-	if status := successful(t, root, "status"); !strings.Contains(status, "Configuration: "+reloaded.Digest) || strings.Contains(status, "Last reload failed") {
+}
+
+func TestStatusAfterAReloadShowsTheNewDigestAndNoFailure(t *testing.T) {
+	f := newReloadFixture(t)
+	f.write(t, "[capacity]\nmasons = 0\n")
+	invoke(t, f.root, "reload")
+	f.write(t, "[capacity]\nmasons = 7\n")
+	var reloaded wire.ReloadResponse
+	must(t, json.Unmarshal([]byte(successful(t, f.root, "reload", "--json")), &reloaded))
+	if status := successful(t, f.root, "status"); !strings.Contains(status, "Configuration: "+reloaded.Digest) || strings.Contains(status, "Last reload failed") {
 		t.Fatalf("status after a reload:\n%s", status)
 	}
-	if code, _, diag := invoke(t, root, "reload", "extra"); code != 2 || !strings.Contains(diag, "invalid arguments") {
+}
+
+func TestReloadTakesNoArguments(t *testing.T) {
+	f := newReloadFixture(t)
+	if code, _, diag := invoke(t, f.root, "reload", "extra"); code != 2 || !strings.Contains(diag, "invalid arguments") {
 		t.Fatalf("reload with arguments: %d %s", code, diag)
 	}
 }

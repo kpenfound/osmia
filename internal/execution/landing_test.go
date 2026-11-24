@@ -10,8 +10,6 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// A planned unit becomes ready when the unit that merges is the last of its
-// dependencies to merge, and not before.
 func TestNewlyReadyWaitsForEveryDependency(t *testing.T) {
 	t.Parallel()
 	p := plan.Plan{Version: plan.Version, Units: []plan.Unit{

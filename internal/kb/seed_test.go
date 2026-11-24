@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-// writeTree creates files (and their directories) under dir; a name ending in
-// "/" is an empty directory.
 func writeTree(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	names := make([]string, 0, len(files))
@@ -37,7 +35,6 @@ func writeTree(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// snapshot records every entry's type, mode, modification time and content.
 func snapshot(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -270,7 +267,6 @@ func seedBytes(t *testing.T, clone string) []byte {
 func TestSeedFromCodeownersAndStructure(t *testing.T) {
 	clone := t.TempDir()
 	writeTree(t, clone, fixtureFiles)
-	// A symlinked directory is not followed.
 	if err := os.Symlink(t.TempDir(), filepath.Join(clone, "linked")); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +281,6 @@ func TestSeedFromCodeownersAndStructure(t *testing.T) {
 	if after := snapshot(t, clone); !reflect.DeepEqual(before, after) {
 		t.Fatal("seeding changed the clone")
 	}
-	// A clone with the same files written in another order seeds the same bytes.
 	other := t.TempDir()
 	names := make([]string, 0, len(fixtureFiles))
 	for name := range fixtureFiles {

@@ -22,14 +22,9 @@ import (
 )
 
 const (
-	// doneTool is the tool a mason ends its unit's work with.
-	doneTool = "done"
-	// masonDone is the outcome of a mason turn whose done the service
-	// accepted. The outcome's report holds the mason's report as JSON.
-	masonDone = "done"
-	// reportPath is the path of a unit's report in its workstream's trace,
-	// with the unit ID in place of %s.
-	reportPath = "units/%s/report.json"
+	DoneTool   = "done"
+	MasonDone  = "done"
+	ReportPath = "units/%s/report.json"
 )
 
 // MasonReport is what a mason reports with done: its outcome, which says
@@ -38,66 +33,43 @@ type MasonReport struct {
 	Outcome string `json:"outcome"`
 }
 
-// doneReport is the report of an outcome masonDone: the mason's report and,
-// when the mason gave a needs_you, the text the move to checking tells the
-// chief of staff the owner has to act on. It is the needs_you after fitting,
-// or ownerActionWording when that cannot be shown, so the signal survives a
-// card the service dropped.
 type doneReport struct {
 	MasonReport
-	// Learnings are the learnings an earlier mason report carries. They are
-	// read and carried into the unit's report, never written by a new report.
-	Learnings   []string `json:"learnings,omitempty"`
-	OwnerAction string   `json:"owner_action,omitempty"`
+	OwnerAction string `json:"owner_action,omitempty"`
 }
 
 const (
-	// ownerActionWording is what a notice says when the needs_you the mason
-	// gave cannot be shown.
-	ownerActionWording = "The developer flagged an owner action, and the unit's report describes it."
-	// ownerActionHeadline is the headline of a notice about an owner action
-	// when the mason's card is gone.
+	ownerActionWording  = "The developer flagged an owner action, and the unit's report describes it."
 	ownerActionHeadline = "Owner action in the report"
 )
 
 // UnitReport is the document units/<unit>/report.json: the mason's report
-// on a unit, the turn and owner-facing card it came from, the seal the unit was built against,
-// and the candidate the service made of the unit's workspace, a commit on
-// Branch that descends from the feature branch at Base. Learnings are the
-// learnings a report recorded earlier carries; they are read and kept when a
-// report is rewritten, and a new report never writes them.
+// on a unit, the turn and owner-facing card it came from, the seal the unit
+// was built against, and the candidate the service made of the unit's
+// workspace, a commit on Branch that descends from the feature branch at Base.
 type UnitReport struct {
 	Unit      string            `json:"unit"`
 	Turn      string            `json:"turn"`
 	Seal      int               `json:"seal"`
 	Outcome   string            `json:"outcome"`
-	Learnings []string          `json:"learnings,omitempty"`
 	Card      *coreadapter.Card `json:"card,omitempty"`
 	Branch    string            `json:"branch"`
 	Base      string            `json:"base"`
 	Candidate string            `json:"candidate"`
 }
 
-// reportDocument is the document ID of a unit's report.
-func reportDocument(unit string) string { return trace.UnitSubject(unit) + "-report" }
+func ReportDocument(unit string) string { return trace.UnitSubject(unit) + "-report" }
 
-// checkingTransitionID returns the ID of the transition that moves a unit
-// to checking on its report revision k.
-func checkingTransitionID(unit string, k int) string {
+func CheckingTransitionID(unit string, k int) string {
 	return fmt.Sprintf("%s-%s-%d", trace.UnitSubject(unit), UnitChecking, k)
 }
 
-// masonReports holds the report each running mason turn's done accepted, and
-// the latest reason it refused one, until the turn ends and reports them as
-// its outcome and its result's refusal.
 type masonReports struct {
 	mu       sync.Mutex
 	accepted map[string]reportedDone
 	refused  map[string]string
 }
 
-// refuse records reason as the latest refusal of the turn key names and
-// returns it as the refusal result of the done tool.
 func (r *masonReports) refuse(key, reason string) (json.RawMessage, error) {
 	r.mu.Lock()
 	if r.refused == nil {
@@ -109,26 +81,17 @@ func (r *masonReports) refuse(key, reason string) (json.RawMessage, error) {
 }
 
 type reportedDone struct {
-	Report MasonReport
-	// Card is the fitted card, nil when the mason's card could not be shown.
-	Card *coreadapter.Card
-	// OwnerAction is the text for the owner action the mason flagged, empty
-	// when it flagged none.
+	Report      MasonReport
+	Card        *coreadapter.Card
 	OwnerAction string
 }
 
-func turnKey(scope coreadapter.Scope) string {
+func TurnKey(scope coreadapter.Scope) string {
 	return scope.Workstream + "/" + scope.Thread + "/" + scope.Turn
 }
 
-// tool returns the done tool of the claimed mason turn scope names. Input
-// its schema refuses is a tool error. A report the service refuses is an
-// ordinary result, {"recorded":false,"reason":...}, so the mason reads why,
-// fixes it and calls done again; its unit does not move. A card that does not
-// fit never refuses a report: the service fits it, and the result names each
-// adjustment.
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
+	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
 		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths, URLs or model names. The service shortens a card field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or what happened it records no card. A needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -172,7 +135,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			}
 		}
 		if !canReport {
-			return r.refuse(turnKey(scope), fmt.Sprintf("unit %s is %s, not implementing", scope.Unit, state.Value))
+			return r.refuse(TurnKey(scope), fmt.Sprintf("unit %s is %s, not implementing", scope.Unit, state.Value))
 		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
 		threads, err := repository.Threads(config.WorkstreamID(scope.Workstream))
@@ -189,7 +152,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			}
 		}
 		if reason := checkReport(input.MasonReport); reason != "" {
-			return r.refuse(turnKey(scope), reason)
+			return r.refuse(TurnKey(scope), reason)
 		}
 		fitted := status.FitCard(input.Card, known)
 		accepted := reportedDone{Report: input.MasonReport, Card: fitted.Card}
@@ -201,7 +164,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		key := turnKey(scope)
+		key := TurnKey(scope)
 		if _, ok := r.accepted[key]; ok {
 			return refuseReport("this turn already reported its unit done; end the turn")
 		}
@@ -218,12 +181,8 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 	return done
 }
 
-// driftTool returns the done tool of the claimed drift mason turn scope
-// names: it takes the outcome of the mason's resolution, which the turn
-// then ends with as its report. Whether the resolution is complete is the
-// service's to check once the turn ends.
-func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
-	done := coreadapter.Tool{Name: doneTool, Effect: coreadapter.ToolMemory,
+func (r *masonReports) DriftTool(scope coreadapter.Scope) coreadapter.Tool {
+	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
 		Description: "Report your resolution done, once no conflicted file carries a conflict marker. Give the outcome: what you resolved and how. The service checks the files and goes on with the rebase; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -240,7 +199,7 @@ func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		key := turnKey(scope)
+		key := TurnKey(scope)
 		if _, ok := r.accepted[key]; ok {
 			return refuseReport("this turn already reported its resolution done; end the turn")
 		}
@@ -256,8 +215,6 @@ func (r *masonReports) driftTool(scope coreadapter.Scope) coreadapter.Tool {
 	return done
 }
 
-// checkReport returns why a report is incomplete: an empty outcome. It
-// returns "" for a complete report.
 func checkReport(report MasonReport) string {
 	if strings.TrimSpace(report.Outcome) == "" {
 		return "outcome is required: say what the unit's work now does and how you checked its acceptance"
@@ -265,10 +222,6 @@ func checkReport(report MasonReport) string {
 	return ""
 }
 
-// reportingTurns ends every mason turn whose done the service accepted with
-// the outcome masonDone and the report, with its card when it has one,
-// whatever the agent reported. A turn without an accepted done keeps the
-// latest reason the service refused one as its result's refusal.
 type reportingTurns struct {
 	Turns   coreadapter.Turns
 	reports *masonReports
@@ -282,7 +235,7 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 	result, err := t.Turns.Run(ctx, prepared)
 	t.reports.mu.Lock()
 	defer t.reports.mu.Unlock()
-	key := turnKey(prepared.Scope)
+	key := TurnKey(prepared.Scope)
 	report, ok := t.reports.accepted[key]
 	refusal := t.reports.refused[key]
 	delete(t.reports.accepted, key)
@@ -295,14 +248,12 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 		if encodeErr != nil {
 			return result, errors.Join(err, encodeErr)
 		}
-		result.Outcome = &coreadapter.Outcome{Status: masonDone, Report: string(data)}
+		result.Outcome = &coreadapter.Outcome{Status: MasonDone, Report: string(data)}
 		result.Outcome.Card = report.Card
 	}
 	return result, err
 }
 
-// CheckResume defers to the wrapped runner; one that cannot check resumes
-// makes the turn replay.
 func (t *reportingTurns) CheckResume(ctx context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
 	if checker, ok := t.Turns.(coreadapter.ResumeChecker); ok {
 		return checker.CheckResume(ctx, previous, next, session)
@@ -310,27 +261,20 @@ func (t *reportingTurns) CheckResume(ctx context.Context, previous, next coreada
 	return coreadapter.ErrResumeUnavailable
 }
 
-// reportTaken reports whether a completed mason turn ended with an accepted
-// done that the service processes: one that ended cleanly, or with a failure
-// that is not an exhausted infrastructure failure. An interrupted turn is
-// continued by recovery and an exhausted infrastructure failure is contested,
-// whatever the turn reported.
 func reportTaken(q trace.QueuedTurn) bool {
 	switch q.Status() {
 	case "idle":
 	case "failed":
-		if exhausted(q) {
+		if Exhausted(q) {
 			return false
 		}
 	default:
 		return false
 	}
-	return q.Response.Result.Outcome != nil && q.Response.Result.Outcome.Status == masonDone
+	return q.Response.Result.Outcome != nil && q.Response.Result.Outcome.Status == MasonDone
 }
 
-// reported returns the report of the unit's mason when the last turn of its
-// thread ended with an accepted done the service processes, and that turn.
-func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport, trace.QueuedTurn, bool, error) {
+func (m *masons) Reported(stream config.WorkstreamID, unit string) (MasonReport, trace.QueuedTurn, bool, error) {
 	th, err := m.repository.Thread(stream, masonAgent(unit))
 	if errors.Is(err, os.ErrNotExist) || err == nil && len(th.Turns) == 0 {
 		return MasonReport{}, trace.QueuedTurn{}, false, nil
@@ -349,7 +293,6 @@ func (m *masons) reported(stream config.WorkstreamID, unit string) (MasonReport,
 	return report.MasonReport, last, true, nil
 }
 
-// parseDoneReport returns the report of a turn that ended with masonDone.
 func parseDoneReport(turn trace.QueuedTurn) (doneReport, error) {
 	var report doneReport
 	if err := json.Unmarshal([]byte(turn.Response.Result.Outcome.Report), &report); err != nil {
@@ -358,41 +301,26 @@ func parseDoneReport(turn trace.QueuedTurn) (doneReport, error) {
 	return report, nil
 }
 
-// finish moves an implementing unit whose mason reported done to checking:
-// it snapshots the unit's workspace as its candidate, and records the report
-// with the candidate as the next revision of units/<unit>/report.json and the
-// move in one commit. It reports whether the unit moved. A unit whose
-// candidate cannot be made stays implementing, and finish records why it is
-// blocked. A unit whose workspace is behind its feature branch waits for the
-// foreman to rebase it. A candidate that holds a stored conflict, or whose
-// files a rebase left conflicted still carry conflict markers, stays
-// implementing, and its mason gets a turn that names those files. A unit whose state moved since it was read is left to the
-// next pass.
 func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
 	moved, blocked, _, err = m.finishReport(ctx, b, unit)
 	return moved, blocked, err
 }
 
-// finishReport is finish. When the report's turn also ended with a failure and
-// the unit's candidate cannot be made, it records no block and returns why in
-// uncollected, for the unit's mason to continue from.
 func (m *masons) finishReport(ctx context.Context, b building, unit string) (moved, blocked bool, uncollected error, err error) {
-	// Queue an ordinary send-back before looking at the last done turn. The
-	// move may have committed after the review pass or before a restart.
 	if ordinarySendBack(b.reviewTransitions[trace.UnitSubject(unit)]) {
 		if err := (&reviewers{masons: m}).resumeFindings(ctx, b.stream, unit, b.states[trace.UnitSubject(unit)]); err != nil {
 			return false, false, nil, err
 		}
 	}
-	report, turn, found, err := m.reported(b.stream, unit)
+	report, turn, found, err := m.Reported(b.stream, unit)
 	if err != nil || !found {
 		return false, false, nil, err
 	}
-	units := newUnitWorkspaces(m.cfg, m.repository)
-	if behind, err := units.behind(ctx, b.stream, unit); err != nil || behind {
+	units := NewUnitWorkspaces(m.cfg, m.repository)
+	if behind, err := units.Behind(ctx, b.stream, unit); err != nil || behind {
 		return false, false, nil, err
 	}
-	w, base, candidate, err := units.snapshot(ctx, b.stream, unit)
+	w, base, candidate, err := units.Snapshot(ctx, b.stream, unit)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, false, nil, err
@@ -402,7 +330,7 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 		}
 		return false, true, nil, m.block(ctx, b.stream, unit, turn.Response.ID, fmt.Sprintf("unit %s stays implementing: its mason reported done, and its candidate cannot be made: %v", unit, err))
 	}
-	conflicted, rebase, err := m.conflicts(b.stream, unit)
+	conflicted, rebase, err := m.Conflicts(b.stream, unit)
 	if err != nil {
 		return false, false, nil, err
 	}
@@ -416,11 +344,8 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 			return false, false, nil, err
 		}
 		resolution := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool {
-			return q.Request.TurnID == resolveTurnID(unit, rebase.Rebase)
+			return q.Request.TurnID == ResolveTurnID(unit, rebase.Rebase)
 		})
-		// A rebase may finish between scheduling hooks. Its conflicts are
-		// new work, so a done response from before the resolution was queued
-		// cannot count as an attempt to resolve them.
 		if resolution < 0 || turn.Sequence < th.Turns[resolution].Sequence {
 			return false, false, nil, nil
 		}
@@ -453,7 +378,7 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	}
 	k := 1
 	for _, d := range docs {
-		if d.ID == reportDocument(unit) {
+		if d.ID == ReportDocument(unit) {
 			k = d.Revision + 1
 		}
 	}
@@ -462,40 +387,32 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	if err != nil {
 		return false, false, nil, err
 	}
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Learnings: done.Learnings, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
 	if err != nil {
 		return false, false, nil, err
 	}
 	at := m.s.Now()
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reportDocument(unit), Revision: k, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: at, Actor: masonActor, Cause: turn.Response.ID, Depth: turn.Request.Depth}
-	doc := trace.Document{Header: h, Path: fmt.Sprintf(reportPath, unit), Content: string(content) + "\n"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: ReportDocument(unit), Revision: k, Project: m.repository.Project(), Workstream: b.stream, Unit: unit, At: at, Actor: masonActor, Cause: turn.Response.ID, Depth: turn.Request.Depth}
+	doc := trace.Document{Header: h, Path: fmt.Sprintf(ReportPath, unit), Content: string(content) + "\n"}
 	subject := trace.UnitSubject(unit)
 	reason := fmt.Sprintf("the mason of unit %s reported done on turn %s; its candidate is %s on %s, from %s at %s, and its report is %s revision %d", unit, turn.Request.TurnID, candidate, w.Branch, featureBranch(b.stream), base, doc.Path, k)
-	// A mason that names something the owner must act on is news, whatever
-	// survived of its card; otherwise the unit's move to checking is routine
-	// progress.
-	ownerAction := ownerActionOf(done, card)
+	ownerAction := done.OwnerAction
 	body := finishNotice(unit, turn.Request.TurnID, doc.Path, k, card, ownerAction)
-	event := trace.Progress(checkingTransitionID(unit, k), "unit", body)
+	event := trace.Progress(CheckingTransitionID(unit, k), "unit", body)
 	if ownerAction != "" {
-		event = trace.Notice(checkingTransitionID(unit, k), "unit", body)
+		event = trace.Notice(CheckingTransitionID(unit, k), "unit", body)
 	}
-	// The report is the candidate the checks run on, so the exit carries it
-	// whichever state is entered.
 	res, err := m.s.raise(ctx, true, UnitExitInput{
 		Repo: m.repository, Stream: b.stream, Unit: unit, State: b.states[subject], Trigger: TriggerMasonDone, Cause: turn.Response.ID,
 		Default: UnitChecking, Targets: []string{UnitChecking, UnitContested}, Actor: masonActor,
-		ID: checkingTransitionID(unit, k), HeaderCause: turn.Response.ID, Reason: reason, Events: []trace.Event{event}, Documents: []trace.Document{doc},
+		ID: CheckingTransitionID(unit, k), HeaderCause: turn.Response.ID, Reason: reason, Events: []trace.Event{event}, Documents: []trace.Document{doc},
 		Candidate: func(context.Context) (string, error) { return "", nil },
 		Evidence: router.Evidence{Facts: map[string]any{"report_revision": k},
 			Records: []router.Entry{{Kind: "report", ID: doc.ID, Text: reportText(report.Outcome, card, ownerAction)}}},
 	})
-	// A report the unit's state moved past, a stale read, moves nothing.
 	return err == nil && (res.Committed || res.Handed), false, nil, err
 }
 
-// reportText is the mason's report as the router's evidence: its outcome, its
-// card and what it flagged for the owner.
 func reportText(outcome string, card *coreadapter.Card, ownerAction string) string {
 	text := "Outcome: " + outcome
 	if card != nil {
@@ -507,22 +424,6 @@ func reportText(outcome string, card *coreadapter.Card, ownerAction string) stri
 	return text
 }
 
-// ownerActionOf returns the text of the owner action the mason flagged, or
-// "" when it flagged none. A report recorded before reports carried the text
-// has it in its card.
-func ownerActionOf(report doneReport, card *coreadapter.Card) string {
-	if report.OwnerAction != "" {
-		return report.OwnerAction
-	}
-	if card != nil {
-		return card.NeedsYou
-	}
-	return ""
-}
-
-// finishNotice says that a unit is checking. It carries the card's headline
-// and the owner action when there are any; an owner action with no card has
-// the headline ownerActionHeadline.
 func finishNotice(unit, turn, path string, revision int, card *coreadapter.Card, ownerAction string) string {
 	message := fmt.Sprintf("Unit %s is checking: its mason reported done on turn %s; its report is %s revision %d.", unit, turn, path, revision)
 	switch {

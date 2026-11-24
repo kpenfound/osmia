@@ -60,10 +60,6 @@ func TestContinuationAcrossReopen(t *testing.T) {
 			}
 			checks, calls := 0, 0
 			runner.Store = repo
-			// This test exercises the Runner's resume mechanism directly,
-			// independent of which Osmia role may use it; the service confines
-			// resume to the session role through this same field (see
-			// internal/service/enforcement.go).
 			runner.ResumableRoles = func(string) bool { return true }
 			runner.Fallbacks = map[string]coreadapter.Profile{"default": {Name: "fallback", Backend: "other", Model: "small"}}
 			runner.Turns = resumableTurns{
@@ -160,7 +156,6 @@ func TestReplayBoundsAndOrder(t *testing.T) {
 		res := trace.TurnResponse{Header: trace.Header{ID: "response"}, Result: coreadapter.SessionResult{FinalResponse: "answer"}}
 		th.Turns = append(th.Turns, trace.QueuedTurn{Sequence: i, Request: req, Response: &res, CompletedAt: timestamp})
 	}
-	// An in-flight pair and a queued request are never replayed.
 	th.Turns = append(th.Turns, trace.QueuedTurn{Sequence: 6, Request: trace.TurnRequest{Prompt: "inflight"}, Response: &trace.TurnResponse{Result: coreadapter.SessionResult{FinalResponse: "partial"}}}, trace.QueuedTurn{Sequence: 7})
 	raw, from, omitted, err := Replay(th, 8, ReplayLimits{MaxTurns: 2})
 	if err != nil || from != 4 || omitted != 3 {

@@ -153,12 +153,7 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 	}, nil
 }
 
-// toolCallsBegun counts the tool calls recorded in documents whose IDs
-// begin with prefix, by their first revisions. The (path, id, revision)
-// index answers it without reading the rest of the trace.
 func toolCallsBegun(ctx context.Context, q querier, documents, prefix string) (int, error) {
-	// prefix ends in '-', so every ID it begins sorts below prefix with
-	// that last byte replaced by '.'.
 	upper := prefix[:len(prefix)-1] + "."
 	var n int
 	err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE path = ? AND id >= ? AND id < ? AND revision = 1 AND schema = 'osmia.trace.document'", documents, prefix, upper).Scan(&n)

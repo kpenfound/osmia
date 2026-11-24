@@ -70,8 +70,6 @@ func TestWorkflowReservationCoversClaimedAndCapturedRunner(t *testing.T) {
 			err = repo.CaptureTurn(context.Background(), q.Claim.Token, trace.TurnResponse{Header: h, AgentID: "runner", ThreadID: q.Request.ThreadID, TurnID: "one", RequestID: q.Request.ID, RequestRevision: 1, Result: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "captured", SessionDirectory: q.Claim.SessionDirectory, StartedAt: q.Claim.At}})
 			must(t, err)
 			release()
-			// A captured response remains unfinished after a restart. Its own
-			// operation must be able to recover it even at a one-slot limit.
 			repo = f.reopen(t, repo)
 			defer repo.Close()
 			pool = &Shared{}

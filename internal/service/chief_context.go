@@ -11,16 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefContext renders the bundle and the durable status, open escalations
-// and pending follow-ups that a fresh chief-of-staff session cannot recover
-// from bounded replay.
-// stream is the member the caller named; the chief of staff is shared by its
-// whole workgroup, so status and open escalations are shown for every
-// member, each naming the workstream it is about whenever that is not
-// stream itself.
-//
-// closeRepository releases the caller's shared reference after trace reads.
-// Provider assembly may independently open that same refcounted authority.
 func chiefContext(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error) {
 	members, err := repository.WorkgroupMembers(stream)
 	if err != nil {

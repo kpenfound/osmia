@@ -4,10 +4,6 @@ import "github.com/kpenfound/osmia/internal/api"
 
 type ActivityKind = api.ActivityKind
 
-const ActivityArchiveCleanup = api.ActivityArchiveCleanup
-
-const ActivityGit = api.ActivityGit
-
 const ActivityCheck = api.ActivityCheck
 
 const ActivityAgentTurn = api.ActivityAgentTurn
@@ -17,8 +13,6 @@ const ActivityRecovery = api.ActivityRecovery
 type ActivityEntry = api.ActivityEntry
 
 type ActivityResponse = api.ActivityResponse
-
-type AmendmentDecision = api.AmendmentDecision
 
 type AmendmentDecisionRequest = api.AmendmentDecisionRequest
 
@@ -30,11 +24,7 @@ type CharterDecisionRequest = api.CharterDecisionRequest
 
 type CharterProposalView = api.CharterProposalView
 
-type CharterProposalsResponse = api.CharterProposalsResponse
-
 type UnitActivity = api.UnitActivity
-
-type ActivityContest = api.ActivityContest
 
 type ActivityTransition = api.ActivityTransition
 
@@ -56,17 +46,9 @@ type DeliveryLandResponse = api.DeliveryLandResponse
 
 type UnitDispatch = api.UnitDispatch
 
-type DraftEdit = api.DraftEdit
-
 type CharterEdit = api.CharterEdit
 
-type BaseEdit = api.BaseEdit
-
 type FinalReport = api.FinalReport
-
-type FinalCriterion = api.FinalCriterion
-
-type FinalFinding = api.FinalFinding
 
 type UnitLanding = api.UnitLanding
 
@@ -82,17 +64,11 @@ type UnitRebase = api.UnitRebase
 
 type CheckResult = api.CheckResult
 
-type ContestedRuling = api.ContestedRuling
-
 type ContestedRulingRequest = api.ContestedRulingRequest
 
 type ContestedRulingResponse = api.ContestedRulingResponse
 
-type ReviewFinding = api.ReviewFinding
-
 type CheckSelection = api.CheckSelection
-
-type TraceSummary = api.TraceSummary
 
 type TraceGap = api.TraceGap
 
@@ -174,25 +150,11 @@ type Identity = api.Identity
 
 type HealthResponse = api.HealthResponse
 
-const BackendReady = api.BackendReady
-
-const BackendNotReady = api.BackendNotReady
-
-const BackendDegraded = api.BackendDegraded
-
 const TailnetUp = api.TailnetUp
-
-const TailnetConnecting = api.TailnetConnecting
 
 const TailnetNeedsLogin = api.TailnetNeedsLogin
 
 const TailnetDown = api.TailnetDown
-
-const TailnetHTTPSOff = api.TailnetHTTPSOff
-
-const TailnetHTTPSUp = api.TailnetHTTPSUp
-
-const TailnetHTTPSUnavailable = api.TailnetHTTPSUnavailable
 
 type TailnetStatus = api.TailnetStatus
 
@@ -218,8 +180,6 @@ type ProjectView = api.ProjectView
 
 type ProjectConfigResponse = api.ProjectConfigResponse
 
-type ProjectConfigError = api.ProjectConfigError
-
 const ProjectConfigApplied = api.ProjectConfigApplied
 
 const ProjectConfigSavedNotApplied = api.ProjectConfigSavedNotApplied
@@ -234,61 +194,23 @@ type ProjectConfigSaveResponse = api.ProjectConfigSaveResponse
 
 type RepoView = api.RepoView
 
-type ProjectRebaseRequest = api.ProjectRebaseRequest
-
-type ProjectRebaseResponse = api.ProjectRebaseResponse
-
-type WorkstreamRebaseResponse = api.WorkstreamRebaseResponse
-
-type DriftCoverage = api.DriftCoverage
-
-type DriftSkip = api.DriftSkip
-
 type CharterState = api.CharterState
 
 type HandInRequest = api.HandInRequest
 
 type HandInResponse = api.HandInResponse
 
-type DesignOpenRequest = api.DesignOpenRequest
-
-type DesignView = api.DesignView
-
-type DesignStartRequest = api.DesignStartRequest
-
 type DesignResponse = api.DesignResponse
 
 type DesignsResponse = api.DesignsResponse
-
-type DesignMessageRequest = api.DesignMessageRequest
-
-type DesignStartResponse = api.DesignStartResponse
 
 type AbandonRequest = api.AbandonRequest
 
 type AbandonResponse = api.AbandonResponse
 
-type MergeResponse = api.MergeResponse
-
-type BaseUpstreamRequest = api.BaseUpstreamRequest
-
-type BaseUpstreamResponse = api.BaseUpstreamResponse
-
-const BaseDecisionUpstream = api.BaseDecisionUpstream
-
-type ArchiveResponse = api.ArchiveResponse
-
-type ShedObjectRequest = api.ShedObjectRequest
-
-type ShedRuleRequest = api.ShedRuleRequest
-
-type ShedOverruleRequest = api.ShedOverruleRequest
-
 type ShedMoreRequest = api.ShedMoreRequest
 
 type ShedRedraftRequest = api.ShedRedraftRequest
-
-type PacketResponse = api.PacketResponse
 
 type RatifyRequest = api.RatifyRequest
 
@@ -299,10 +221,6 @@ type ShedResponse = api.ShedResponse
 type ProjectAddRequest = api.ProjectAddRequest
 
 type ProjectCreateRequest = api.ProjectCreateRequest
-
-type ProjectCreationIdentity = api.ProjectCreationIdentity
-
-type ProjectCreationState = api.ProjectCreationState
 
 type ProjectRemoveRequest = api.ProjectRemoveRequest
 
@@ -329,8 +247,6 @@ type ClearProfileRequest = api.ClearProfileRequest
 type ClearProviderLimitRequest = api.ClearProviderLimitRequest
 
 type MutationResponse = api.MutationResponse
-
-type StopResponse = api.StopResponse
 
 type StatusResponse = api.StatusResponse
 
@@ -384,8 +300,6 @@ type SessionPushResponse = api.SessionPushResponse
 
 type AgentStatus = api.AgentStatus
 
-type DriftStatus = api.DriftStatus
-
 type StatusView = api.StatusView
 
 type InboxResponse = api.InboxResponse
@@ -393,22 +307,6 @@ type InboxResponse = api.InboxResponse
 const InboxEscalation = api.InboxEscalation
 
 const InboxRatification = api.InboxRatification
-
-const InboxContested = api.InboxContested
-
-const InboxAmendment = api.InboxAmendment
-
-const InboxDelivery = api.InboxDelivery
-
-const InboxPublication = api.InboxPublication
-
-const InboxFinalChecks = api.InboxFinalChecks
-
-const InboxChecksChoice = api.InboxChecksChoice
-
-type ChecksChoiceRequest = api.ChecksChoiceRequest
-
-type ChecksChoiceResponse = api.ChecksChoiceResponse
 
 const InboxDrift = api.InboxDrift
 
@@ -420,27 +318,15 @@ const InboxBase = api.InboxBase
 
 type InboxEntry = api.InboxEntry
 
-type InboxAnswer = api.InboxAnswer
-
-type InboxQuestion = api.InboxQuestion
-
 type AnswerRequest = api.AnswerRequest
-
-type AnswerResponse = api.AnswerResponse
 
 type SendRequest = api.SendRequest
 
-type TurnState = api.TurnState
-
 const TurnQueued = api.TurnQueued
-
-const TurnRunning = api.TurnRunning
 
 const TurnDone = api.TurnDone
 
 const TurnFailed = api.TurnFailed
-
-const TurnStopped = api.TurnStopped
 
 type ConversationResponse = api.ConversationResponse
 
@@ -448,15 +334,9 @@ type ConversationEntry = api.ConversationEntry
 
 type FeedResponse = api.FeedResponse
 
-type FeedImage = api.FeedImage
-
-type FeedBrief = api.FeedBrief
-
 type FeedEntry = api.FeedEntry
 
 type FeedSession = api.FeedSession
-
-type FeedTransition = api.FeedTransition
 
 type FeedCheckSelection = api.FeedCheckSelection
 
@@ -464,19 +344,11 @@ type FeedUnitChecks = api.FeedUnitChecks
 
 type FeedFinalChecks = api.FeedFinalChecks
 
-type FeedFinalReview = api.FeedFinalReview
-
-type EventKind = api.EventKind
-
 const EventResync = api.EventResync
 
 const EventWorkstream = api.EventWorkstream
 
 const EventInbox = api.EventInbox
-
-const EventConversation = api.EventConversation
-
-const EventImage = api.EventImage
 
 const EventRuntime = api.EventRuntime
 
@@ -484,23 +356,13 @@ const EventConfig = api.EventConfig
 
 const EventSpend = api.EventSpend
 
-const EventActivity = api.EventActivity
-
 const EventCapacity = api.EventCapacity
 
 type Event = api.Event
 
 type UnitMoveRequest = api.UnitMoveRequest
 
-type UnitMove = api.UnitMove
-
-type UnitMoveResponse = api.UnitMoveResponse
-
 type WorkstreamMoveRequest = api.WorkstreamMoveRequest
-
-type WorkstreamMove = api.WorkstreamMove
-
-type WorkstreamMoveResponse = api.WorkstreamMoveResponse
 
 type WorkgroupFeedResponse = api.WorkgroupFeedResponse
 type WorkgroupMemberSummary = api.WorkgroupMemberSummary

@@ -5,11 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
 	"github.com/kpenfound/osmia/internal/config"
-
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -23,15 +21,15 @@ func seedBuild(t *testing.T, f *shedFixture, key, graph, backend, base string) (
 func recordBuild(t *testing.T, f *shedFixture, repository *trace.Repository, key, graph, backend, base string) config.WorkstreamID {
 	t.Helper()
 	w, err := InspectForTest(f.s).PrepareBuild(context.Background(), repository, backend, base)
-	must(t, err)
-	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: validSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
+	fixturekit.Must(t, err)
+	return fixturekit.RecordBuild(t, repository, fixturekit.BuildInput{Stream: w.Stream, At: w.At, Key: key, Graph: graph, Spec: fixturekit.ValidSpec, Branch: w.Branch, Workspace: w.Directory, Base: base, BaseBranch: w.BaseBranch})
 }
 
 func newReviewFixture(t *testing.T, key string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	f, _ := newMasonFixture(t, 1, independentPlan)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
+	f, _ := newMasonFixture(t, 1, intakefixture.IndependentPlan)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	stream, repository := seedBuild(t, f, key, intakefixture.IndependentPlan, config.WorkspacesGit, base)
 	seedReview(t, f, repository, stream, "resume", resumeReport)
 	return f, stream, repository
 }

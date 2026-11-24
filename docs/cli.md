@@ -86,15 +86,12 @@ quote removal, comma-separated elements and whitespace are checked as Dagger
 reads them. The checks fail closed; the chief can use module defaults or
 explain a refused value. The capture accepts only a verified engine Service ID.
 
-The CLI has no project preview settings command. A `[preview]` project table
-with `call`, `port`, `path` and `timeout` is ignored without rewriting the file
-on load or reload; other unknown keys are refused. No per-project setup is
-needed. `osmia feed` renders an image as `[image: URL]`, or an archived member's
+Previews need no per-project setup. `osmia feed` renders an image as `[image: URL]`, or an archived member's
 placeholder after its image bytes have been removed.
 
 ## Design Sessions
 
-`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. Older briefs without a list also mean the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
+`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. A brief without a list also means the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
 
 Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active. Paused projects are allowed; the session's project can be removed while another remains.
 
@@ -239,13 +236,11 @@ others: its slice is frozen, a delta that changes it is refused with a reason
 naming it, and it receives no effect while the survivors' change applies.
 These conversation controls do not introduce a separate `cancel` command.
 
-## Migration
+## Projects and workgroups
 
-Startup splits grouped registrations into independent one-repo projects while retaining every `p_` ID. Each split-off charter copies the source project's current charter with its rule numbers and records the source project and charter revision. Configuration loses only the grouping field; comments and all other bytes survive. In-flight groups retain members, approvals, pins and shared chief without re-ratification. The split is crash-safe and idempotent, with no duplicate charter revisions.
+Existing non-session workstreams belong to workgroups through their existing chief threads; exploratory sessions keep their separate kind and thread. See [configuration](configuration.md#workgroups-at-startup).
 
-Existing one-repo projects keep their settings and charter. The project/workgroup migration puts existing non-session workstreams in workgroups using their existing chief threads; exploratory sessions keep their separate kind and thread. Traces, rulings, decisions and archive records remain. An in-flight design start without a recorded selection waits with an inbox entry for the owner's validated project list; a recorded selection stays in force. See [configuration](configuration.md#project-and-workgroup-migration).
-
-Use `project add` for each repo and hand-in project lists for coordinated work. Repo-grouping commands, their registration route and web controls are unavailable; the architect has no selection turn or affected-repos tool.
+Use `project add` for each repo and hand-in project lists for coordinated work.
 
 ## Commands and flags
 
@@ -597,12 +592,10 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
   disk. It does not rewrite or prune any Git history. The archive record
   remains in `runtime.json`, and target-repository branches remain. Archive
   pins `resolution_evidence` as `merged`, `cancelled` or `unresolved`, and
-  `resolved` is true only with merged or cancelled evidence. An older flag
-  without evidence is re-derived while history is available; otherwise the
-  member remains unresolved with a visible diagnostic. Archive
+  `resolved` is true only with merged or cancelled evidence. Archive
   cannot be undone; `unarchive` returns a conflict. A repeated archive request
   changes nothing. Other states fail with `conflict` (exit 5); abandon the
-  workstream first. Previously archived workstreams receive the same one-time
+  workstream first. Archived workstreams receive the same one-time
   cleanup automatically, with their title, outcome and delivery link filled in
   while the trace is still present. Cleanup is deferred, with a logged reason,
   while the workstream has unfinished turns, pending or unacknowledged
@@ -945,10 +938,8 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
     replaces revision <m>). The service uses it when it starts.` With `--json`
     it prints `project`, `revision`, `previous` and `pin`.
   - The command reads only the top-level file and the project store. It never
-    reads a retired `projects/<id>/config.toml` and never changes the project
-    registry or the top-level file. A project that is not on the registry is
-    refused, and a root that has not completed its first start is refused with
-    a note to start the service once. A command line that is not one of the
+    changes the project registry or the top-level file. A project that is not on
+    the registry is refused. A command line that is not one of the
     three forms, or a project ID that is malformed, exits 2.
 - `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
@@ -1033,9 +1024,6 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
     wins over `--root`. A relative path resolves against the working
     directory.
   - **Exit 0** when the file is valid. It prints `<path>: valid` to stdout.
-    Load warnings, such as an ignored `[beekeeper]` or `[roles.librarian]`
-    section or a leftover `active_projects`, go to stderr as `warning: <text>`
-    and leave the exit code 0.
   - **Exit 1** when the file is invalid or unreadable. Stdout is empty and
     stderr carries the loader's error, naming the file and the field as
     `<path>: <field>: <reason>`, or `<path>: cannot be read`. The error never
@@ -1051,11 +1039,6 @@ Use `project add` for each repo and hand-in project lists for coordinated work. 
     `api_key_env` and the like), so it passes whether or not the variable is
     set. It does not check the host, such as whether a clone exists or a port is
     free.
-  - **`active_projects`.** A top-level file that still lists `active_projects`
-    validates when the list is well formed (each entry `p_` followed by 32
-    lowercase hex digits, no duplicates). An Osmia that has not imported its
-    projects yet reads the list once; one that has ignores it with a warning.
-    The command does not check that the listed projects exist.
 - `reload` asks the service to [reload its configuration](running.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
   to apply: <settings>` when the file changes settings that only a restart
@@ -1254,7 +1237,7 @@ the root and the configuration directly, the way `serve` does.
 | Group | Checks |
 | --- | --- |
 | `root` | The root is a writable directory, or does not exist yet; whether a service owns it; `service.log`, when present, is a private regular file; the socket is free or stale. |
-| `config` | The top-level `config.toml` loads and validates; the project import completes when doctor owns the root, and every registered project's stored settings load (see [the import](configuration.md#the-one-time-import)); `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
+| `config` | The top-level `config.toml` loads and validates; every registered project's stored settings load (see [the project store](configuration.md#the-project-registry-and-settings-store)); `listen.web`, when set, can be bound; Jev's API key, named by `jev.api_key_env`, is set (the service starts without it, but Jev is then unconfigured, every judgment falls back and every check runs, so the check fails); the sandbox memory the `sbx` roles could hold at once fits the host's memory (a warning when it does not; see below). |
 | `toolchain` | `git`; `jj`, required for `workspaces = "jujutsu"` and a warning for `auto`; every agent a role's profile or fallback chain names; `docker` with its daemon answering, when a role uses `sandbox = "container"`; `sbx`, when a role uses `sandbox = "sbx"`; `dagger`, which reviewer checks run, as a warning; the configured Dagger engine’s reachability, version, host CLI release mismatch and cache size where available. |
 | `projects` | Per project: the clone is a Git work tree; it has a remote naming the upstream, which answers and has the base branch; with a fork, a remote naming the fork, which answers. |
 | `github` | `GITHUB_TOKEN` is set, as a warning, and GitHub accepts it; it can read each project's upstream and fork. |
@@ -1285,26 +1268,16 @@ detail states the estimate and these assumptions and whose fix is to set
 [Sandbox size](configuration.md#sandbox-size). The check is a warning too
 when doctor cannot read the host's memory.
 
-Before the project import is complete, doctor runs it when it owns the root, in
-the order startup runs it and with the same refusals: see [the one-time
-import](configuration.md#the-one-time-import). A listed project file that does
-not load fails the `config` group with the project, the file and the field, and
-doctor changes no project file and records nothing as imported. While a service
-owns the root, doctor does not import; it reads the projects from their files
-and changes nothing. A project registration waiting for the service to finish it
-is a warning that says the import has not run yet. After the import, doctor reads
-the registry and each project's stored settings and never a retired project
-file; a project whose stored settings do not load fails with the setting named
-and the offline repair command. Doctor never writes the top-level file.
+Doctor reads the registry and each project's stored settings; a project whose
+stored settings do not load fails with the setting named and the offline repair
+command. Doctor never writes the top-level file.
 
 Checks that need something an earlier check found missing are left out: with
 no root only the toolchain and GitHub checks run, and with a configuration
 that does not load neither do the project checks. While a service owns the
 root, the `state` checks and the `listen.web` check are left to it; `osmia
 status` reports them. Otherwise doctor holds the root's ownership lock while it
-runs and opens each trace the way `serve` does: it resumes any incomplete
-migration from the shared trace layout to a dedicated repository per
-workstream, and completes a trace
+runs and opens each trace the way `serve` does and completes a trace
 publication a stopped service left unfinished.
 
 ```

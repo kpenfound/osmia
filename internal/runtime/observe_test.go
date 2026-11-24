@@ -8,8 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// The observer hears every mutation that changes the persisted state, and
-// neither a mutation that leaves it as it was nor a refused one.
 func TestObserverHearsChangingMutations(t *testing.T) {
 	t.Parallel()
 	s := open(t, fixture(t))
@@ -33,9 +31,6 @@ func TestObserverHearsChangingMutations(t *testing.T) {
 	}
 }
 
-// The pause observer hears each stored pause a mutation removes, a resume or a
-// replacement on the same target, and nothing for a pause that is only
-// rewritten as it was.
 func TestPauseEndObserverHearsRemovedPauses(t *testing.T) {
 	t.Parallel()
 	s := open(t, fixture(t))

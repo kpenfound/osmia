@@ -11,8 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Advice ends the prompt the session receives and is recorded with the
-// turn's response; the request keeps the prompt it was queued with.
 func TestAdviceEndsThePromptAndIsRecorded(t *testing.T) {
 	repo, _, _ := setup(t)
 	req := queue(t, repo, "advised")
@@ -42,8 +40,6 @@ func TestAdviceEndsThePromptAndIsRecorded(t *testing.T) {
 	}
 }
 
-// A turn stopped while its advice is asked runs no session and records no
-// advice.
 func TestStopDuringAdviceRecordsNone(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
@@ -65,7 +61,6 @@ func TestStopDuringAdviceRecordsNone(t *testing.T) {
 	if !errors.As(err, &s) || q.Response == nil || q.Response.Advice != "" || q.Status() != "interrupted" {
 		t.Fatalf("stopped turn %+v %v", q, err)
 	}
-	// A turn already stopped asks for no advice.
 	queue(t, repo, "second")
 	runner.Advise = func(context.Context, trace.TurnRequest, coreadapter.Scope) string {
 		t.Error("a stopped turn asked for advice")

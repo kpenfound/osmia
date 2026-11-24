@@ -11,15 +11,9 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// runnerAdapter routes runner-boundary operations: librarian operations to
-// their retirement, architect
-// drafts to its drafter, committee rounds and the architect's replies to its
-// debate, unit check runs to the checks controller, everything else to the
-// bound thread reconciler.
 type runnerAdapter struct {
 	deltas      deltaRunner
 	turns       coreadapter.Reconciler
-	retired     retiredOperations
 	draft       *drafter
 	amend       *amendmentDrafter
 	amendRounds amendmentDebate
@@ -31,9 +25,6 @@ type runnerAdapter struct {
 func (a runnerAdapter) Inspect(ctx context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	if op.Action == deltaTurnAction {
 		return a.deltas.Inspect(ctx, op)
-	}
-	if retiredAction(op.Action) {
-		return a.retired.Inspect(ctx, op)
 	}
 	if op.Action == DraftAction {
 		return a.draft.Inspect(ctx, op)
@@ -66,9 +57,6 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	if op.Action == deltaTurnAction {
 		return a.deltas.Apply(ctx, op)
 	}
-	if retiredAction(op.Action) {
-		return a.retired.Apply(ctx, op)
-	}
 	if op.Action == DraftAction {
 		return a.draft.Apply(ctx, op)
 	}
@@ -96,8 +84,6 @@ func (a runnerAdapter) Apply(ctx context.Context, op coreadapter.Operation) (cor
 	return a.turns.Apply(ctx, op)
 }
 
-// roleExecution resolves a role's effective profile: the runtime override
-// when one is set, otherwise the configured role binding.
 func (s *Service) roleExecution(cfg *config.Config, role string) (coreadapter.Profile, coreadapter.ExecutionSettings, error) {
 	state, _ := s.effective()
 	name := state.Profiles[role]

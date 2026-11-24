@@ -34,7 +34,6 @@ func TestGroupFlakySplitsTheFlakyChecksOfARunByGroup(t *testing.T) {
 	if len(got) != 2 || !slices.Equal(got[0].Links, []string{a1, a2}) || !slices.Equal(got[1].Links, []string{b1}) || got[0].Group == got[1].Group || got[0].Unresolved || got[1].Unresolved {
 		t.Fatalf("groups %+v", got)
 	}
-	// A Cloud name tied to no known check is a group of its own.
 	cloud := GroupFlaky([]string{a1}, []string{"test:unknown"})
 	if len(cloud) != 1 || cloud[0].Group != "test:unknown" || !cloud[0].Unresolved {
 		t.Fatalf("cloud groups %+v", cloud)

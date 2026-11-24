@@ -81,7 +81,6 @@ func (p Provider) Assemble(ctx context.Context, id config.ProjectID, scope bundl
 	if p.Client != nil {
 		client = p.Client(cfg.Hearsay)
 	}
-	// One deadline bounds the whole assembly, including multi-entity footprints.
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	out.Mode = Mode

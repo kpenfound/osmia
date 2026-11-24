@@ -173,9 +173,6 @@ func (s *Controller) ChangeContext(ctx context.Context, raw string) (*trace.Repo
 	g, ok := trace.WorkgroupOf(groups, host)
 	if !ok {
 		close()
-		// A join may publish its member locator and retract the old group
-		// after chiefRepository selected the local route. Resolve afresh only
-		// when that locator exists; shared binding validation still applies.
 		id, err := repo.CrossRepoWorkgroupOf(stream)
 		if err != nil {
 			return nil, g, "", func() {
@@ -356,7 +353,6 @@ func (s *Controller) SnapshotChange(g trace.Workgroup, repo *trace.Repository) (
 		}
 		if !found {
 			text, graph, err := MemberSpecAndPlan(r, id)
-			// Cancellation during planning has no spec to compare.
 			if err != nil {
 				text = ""
 				graph = `{"version":2,"units":[]}`
@@ -386,8 +382,6 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 		if api != nil {
 			return WorkgroupChange{}, api
 		}
-		// Until join completes, a member may still route to its temporary
-		// singleton. Neither cancellation scope may act on that grouping.
 		for _, target := range []config.WorkstreamID{stream, req.Workstream} {
 			if target == "" {
 				continue
@@ -435,8 +429,6 @@ func (s *Controller) RequestChange(ctx context.Context, raw string, req ChangeRe
 	if req.Kind == "amend" || req.Scope == "workstream" && len(members) > 1 {
 		for _, m := range members {
 			if m.Retired {
-				// An archived member is terminal; only live members need an
-				// approved seal.
 				continue
 			}
 			_, _, r, api := s.ConversationTrace(string(m.Workstream))
@@ -500,8 +492,6 @@ func (s *Controller) DecideChange(ctx context.Context, raw, id string, d ChangeD
 			if c.Request.Kind == "cancel" && d.Decision == "approve" && d.PullRequests != "close" && d.PullRequests != "draft" {
 				return c, &APIError{Code: Validation, Message: "choose close or draft for open pull requests at cancel time"}
 			}
-			// Approval compares authoritative text with the exact reviewed
-			// snapshot; it never replaces pinned member state with a new read.
 			if c.Request.Kind == "amend" {
 				current, found, err := ChangeProjectSpec(g, wt)
 				if err == nil && !found {
@@ -698,8 +688,6 @@ func ChangeRepositoryHeld(repo *trace.Repository, stream config.WorkstreamID, op
 		if err != nil {
 			return true, err
 		}
-		// Only a seal preparing this already-approved delta may start across
-		// the barrier. Ordinary queued seal/build/landing/publication waits.
 		for _, doc := range docs {
 			if doc.ID == "change-approved-"+boundary.Value {
 				return false, nil
@@ -809,7 +797,6 @@ func (c WorkgroupChange) Summary() string {
 		p, err := plan.Parse([]byte(sl.Plan))
 		if err != nil {
 			continue
-			// Validated proposals have a parsed plan.
 		}
 		for _, row := range c.Impact.Streams {
 			if row.Workstream != sl.Workstream {

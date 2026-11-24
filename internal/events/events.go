@@ -94,7 +94,6 @@ func New(repository *trace.Repository, options Options) (*Deliverer, error) {
 	return &Deliverer{repository: repository, options: options}, nil
 }
 
-// wait is how long e waits for other events before a delivery carries it.
 func (d *Deliverer) wait(e trace.OutboxEntry) time.Duration {
 	if e.Event.Kind == trace.ProgressKind {
 		return d.options.ProgressWindow
@@ -102,9 +101,6 @@ func (d *Deliverer) wait(e trace.OutboxEntry) time.Duration {
 	return d.options.Window
 }
 
-// eventTurnPending reports whether an event turn of the chief of staff is
-// queued or running. Events that arrive meanwhile wait for the next turn
-// rather than queue another behind it.
 func eventTurnPending(chief trace.Thread, states map[string]turnState) bool {
 	return slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool {
 		return q.Request.Actor == Actor && states[q.Request.TurnID] == turnPending
@@ -165,26 +161,13 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		}
 	}
 	if !hasWork {
-		// Nothing to settle or deliver: resolving a cross-repo workgroup
-		// member's shared chief-of-staff thread would open and lock that
-		// workgroup's own trace for nothing, contending with every other
-		// member's own pass over a lock no one here needs yet.
 		return nil
 	}
-	// target is resolved and released separately around this read and
-	// around the EnqueueTurn far below, rather than held open across the
-	// whole call: d.options.System, called in between, resolves the same
-	// cross-repo workgroup's own trace independently (chiefEventsPrompt's
-	// own chiefRepository call), and holding this one open across that call
-	// would make the same goroutine wait on a lock it already holds itself,
-	// which it can never regrant.
 	target, closeTarget, err := d.deliveryTarget(ctx, stream)
 	if err != nil {
 		return err
 	}
 	if target == nil {
-		// Transient contention over the workgroup trace, or the service
-		// stopping; try again on a later pass.
 		return nil
 	}
 	chief, err := target.ChiefOfStaffThread(stream)
@@ -222,8 +205,6 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 			continue
 		}
 		if !free[e.Event.ID] && e.Claim != nil {
-			// A claim of this session whose turn failed, or that has no turn,
-			// still holds the event.
 			if err := d.step("before-release"); err != nil {
 				return err
 			}
@@ -250,8 +231,6 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if d.options.System != nil {
 		if system, err = d.options.System(ctx, stream); err != nil {
 			if errors.Is(err, ErrChiefUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
-				// An unavailable shared context leaves its events pending,
-				// including when the last live member retires during assembly.
 				return nil
 			}
 			return err
@@ -281,10 +260,6 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err := d.step("before-enqueue"); err != nil {
 		return err
 	}
-	// Resolved afresh rather than reused from above: the earlier target was
-	// already released before d.options.System ran, and every event this
-	// pass has claimed stays safely claimed, to be released and retried on
-	// a later pass, if this resolution hits the same transient contention.
 	target, closeTarget, err = d.deliveryTarget(ctx, stream)
 	if err != nil {
 		return err
@@ -303,9 +278,6 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: Prompt(claimed)}
 	if _, err := target.EnqueueTurn(ctx, req); err != nil {
 		if errors.Is(err, os.ErrNotExist) && d.options.ChiefTarget != nil {
-			// A join can retract the unused local chief after resolution.
-			// Hold only when fresh routing validates a different authority
-			// or an incomplete transfer; the event claim remains retryable.
 			next, closeNext, resolveErr := d.deliveryTarget(ctx, stream)
 			if resolveErr != nil {
 				return resolveErr
@@ -323,13 +295,6 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	return nil
 }
 
-// deliveryTarget resolves d.options.ChiefTarget for stream, or
-// d.repository when no ChiefTarget is configured. target is nil with a nil
-// error when the resolution hit transient contention over a cross-repo
-// workgroup's own trace, held open by another member's own pass or by the
-// chief's own dispatch right now, or when the service is stopping: the
-// caller tries again on a later pass. Verified member retirement also leaves
-// delivery held without consuming events or recreating unavailable history.
 func (d *Deliverer) deliveryTarget(ctx context.Context, stream config.WorkstreamID) (target *trace.Repository, close func(), err error) {
 	if d.options.ChiefTarget == nil {
 		return d.repository, func() {}, nil
@@ -349,8 +314,6 @@ func (d *Deliverer) deliveryTarget(ctx context.Context, stream config.Workstream
 // the event is held instead of delivered again.
 const MaxDeliveryFailures = 5
 
-// claimedTurns returns the chief-of-staff turns that claimed e and ended,
-// in the order the thread holds them.
 func claimedTurns(e trace.OutboxEntry, chief trace.Thread) []trace.QueuedTurn {
 	claimed := map[string]bool{}
 	for _, attempt := range e.History {
@@ -392,9 +355,6 @@ func Held(e trace.OutboxEntry, chief trace.Thread) (trace.QueuedTurn, bool) {
 	return last, failed >= MaxDeliveryFailures
 }
 
-// retryAt backs off repeated delivery failures using durable turn results.
-// The first failure is retried immediately; subsequent failures wait from
-// thirty seconds up to fifteen minutes. New events keep their own schedule.
 func retryAt(e trace.OutboxEntry, chief trace.Thread) time.Time {
 	failures := 0
 	var last time.Time
@@ -436,8 +396,6 @@ func Handled(e trace.OutboxEntry, chief trace.Thread) bool {
 	return false
 }
 
-// settle acknowledges an event whose turn completed. It uses the claim of
-// this repository session that still holds the event, or a fresh one.
 func (d *Deliverer) settle(ctx context.Context, stream config.WorkstreamID, e trace.OutboxEntry) error {
 	now := d.options.Now()
 	if e.Claim != nil {
@@ -478,12 +436,6 @@ const (
 	turnDone
 )
 
-// turnStates classifies the chief-of-staff turns. A turn is pending until it
-// completes, except a reservation an earlier service session left without a
-// result, which never completes and counts as failed. A recovery continuation
-// supplies the original event turn's current state, so event delivery waits
-// for the chief's continuation. A completed turn failed when it failed or was
-// cancelled, and is done otherwise.
 func turnStates(t trace.Thread) map[string]turnState {
 	states := map[string]turnState{}
 	ancestors := map[string][]string{}
@@ -515,10 +467,6 @@ func turnStates(t trace.Thread) map[string]turnState {
 	return states
 }
 
-// deliveryState is the most advanced state among the turns the event's claims
-// name: done, then pending, then failed. turnFailed and turnNone both leave
-// the event to be delivered again. A turn is queued only after every claim of
-// its token has succeeded.
 func deliveryState(e trace.OutboxEntry, states map[string]turnState) turnState {
 	best := turnNone
 	for _, a := range e.History {

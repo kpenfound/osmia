@@ -18,44 +18,31 @@ import (
 	"github.com/kpenfound/osmia/internal/pulls"
 )
 
-// creationGitTimeout bounds each git command a creation runs.
 const creationGitTimeout = 45 * time.Second
 
-// createProjectTimeout bounds one create request: GitHub calls, the clone and
-// the registration.
 const createProjectTimeout = 3 * time.Minute
 
-// maxDescription is the longest repository description GitHub accepts.
 const maxDescription = 350
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$`)
 
-// projectCreation is the part of the registration journal that carries a
-// project creation. The plan is written before any GitHub write; the
-// repository's identity is written as soon as GitHub answers. Every later step
-// inspects the repository and the clone before acting, so Step only reports
-// how far the creation got.
 type projectCreation struct {
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	Visibility  string `json:"visibility"`
-	Description string `json:"description,omitempty"`
-	Charter     string `json:"charter"`
-	// CreateSent records that a create call is about to be, or was, sent. The
-	// repository is this creation's only when RepositoryID is also recorded.
-	CreateSent    bool   `json:"create_sent"`
-	RepositoryID  int64  `json:"repository_id,omitempty"`
-	FullName      string `json:"full_name,omitempty"`
-	SSHURL        string `json:"ssh_url,omitempty"`
-	DefaultBranch string `json:"default_branch,omitempty"`
-	Step          string `json:"step"`
-	// Stuck is why the last attempt could not go on without the owner.
-	Stuck *api.ProjectCreationStuck `json:"stuck,omitempty"`
+	Owner         string                    `json:"owner"`
+	Repo          string                    `json:"repo"`
+	Visibility    string                    `json:"visibility"`
+	Description   string                    `json:"description,omitempty"`
+	Charter       string                    `json:"charter"`
+	CreateSent    bool                      `json:"create_sent"`
+	RepositoryID  int64                     `json:"repository_id,omitempty"`
+	FullName      string                    `json:"full_name,omitempty"`
+	SSHURL        string                    `json:"ssh_url,omitempty"`
+	DefaultBranch string                    `json:"default_branch,omitempty"`
+	Step          string                    `json:"step"`
+	Stuck         *api.ProjectCreationStuck `json:"stuck,omitempty"`
 }
 
 func (c projectCreation) repository() string { return c.Owner + "/" + c.Repo }
 
-// creationStuck is a failure that retrying alone does not fix.
 type creationStuck struct{ api.ProjectCreationStuck }
 
 func (e *creationStuck) Error() string { return e.Reason }
@@ -64,9 +51,6 @@ func stuck(kind, format string, args ...any) *creationStuck {
 	return &creationStuck{api.ProjectCreationStuck{Kind: kind, Reason: fmt.Sprintf(format, args...)}}
 }
 
-// creationError is the failure of a creation finished at startup, kept apart
-// from a registration failure so diagnostics tell the owner which command
-// finishes it.
 type creationError struct {
 	ID  config.ProjectID
 	Err error
@@ -75,7 +59,6 @@ type creationError struct {
 func (e *creationError) Error() string { return fmt.Sprintf("project creation %s: %v", e.ID, e.Err) }
 func (e *creationError) Unwrap() error { return e.Err }
 
-// repositories returns the GitHub client creation uses.
 func (s *Service) repositories() pulls.Repositories {
 	if s.options.Repositories != nil {
 		return s.options.Repositories
@@ -90,7 +73,6 @@ func (s *Service) ReserveProjectCreation() (config.ProjectID, error) {
 	return s.freshIdentity()
 }
 
-// freshIdentity generates an identity that names no project directory.
 func (s *Service) freshIdentity() (config.ProjectID, error) {
 	root := s.current().Root
 	for attempt := 0; attempt < 8; attempt++ {
@@ -225,10 +207,8 @@ func (s *Service) CreateProject(ctx context.Context, req ProjectCreateRequest) (
 	return s.finishCreation(ctx, plan)
 }
 
-// planCreation runs the checks that write nothing and returns the plan to
-// save. Every refusal names what is wrong.
-func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*pendingProject, *APIError) {
-	invalid := func(format string, args ...any) (*pendingProject, *APIError) {
+func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*PendingProject, *APIError) {
+	invalid := func(format string, args ...any) (*PendingProject, *APIError) {
 		return nil, &APIError{Code: Validation, Message: fmt.Sprintf(format, args...)}
 	}
 	cfg := s.current()
@@ -300,7 +280,7 @@ func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*
 	if err != nil {
 		return nil, &APIError{Code: Internal, Message: "cannot reserve a project identity under the root; check its permissions"}
 	}
-	return &pendingProject{
+	return &PendingProject{
 		Version: 1,
 		Project: config.Project{Version: 1, ID: id, Name: name, Upstream: creation.RepoOwner + "/" + req.Repo, Clone: clone, BaseBranch: "main", Landing: "commit-per-unit"},
 		Creation: &projectCreation{
@@ -310,14 +290,11 @@ func (s *Service) planCreation(ctx context.Context, req ProjectCreateRequest) (*
 	}, nil
 }
 
-// validRepoName reports whether name is a repository name GitHub accepts.
 func validRepoName(owner, name string) bool {
 	return repoName.MatchString(name) && name != "." && name != ".." && !strings.HasSuffix(name, ".git") && config.ValidRepository(owner+"/"+name)
 }
 
-// samePlan checks a repeated request against the plan saved under its
-// identity. A request carrying only the identity finishes the plan as saved.
-func samePlan(pending pendingProject, req ProjectCreateRequest) *APIError {
+func samePlan(pending PendingProject, req ProjectCreateRequest) *APIError {
 	c := pending.Creation
 	if req.Name == "" && req.Repo == "" && req.Description == "" && req.Visibility == "" && req.Charter == "" {
 		return nil
@@ -332,7 +309,7 @@ func samePlan(pending pendingProject, req ProjectCreateRequest) *APIError {
 	return nil
 }
 
-func pendingRegistrationError(pending pendingProject) *APIError {
+func pendingRegistrationError(pending PendingProject) *APIError {
 	id := pending.Project.ID
 	if c := pending.Creation; c != nil {
 		message := fmt.Sprintf("project creation %s for %s is pending at step %s; finish it with osmia project create --id %s before registering or creating another project", id, c.repository(), c.Step, id)
@@ -344,9 +321,7 @@ func pendingRegistrationError(pending pendingProject) *APIError {
 	return &APIError{Code: Conflict, Message: fmt.Sprintf("registration of project %s is pending; finish it with osmia project add before creating a project", id)}
 }
 
-// finishCreation runs the creation's remaining steps and registers the
-// project. The caller holds projectMu.
-func (s *Service) finishCreation(ctx context.Context, pending *pendingProject) (ProjectResponse, *APIError) {
+func (s *Service) finishCreation(ctx context.Context, pending *PendingProject) (ProjectResponse, *APIError) {
 	p, err := s.runCreation(ctx, pending, true)
 	if err != nil {
 		return ProjectResponse{}, creationIncomplete(pending.Project.ID, err)
@@ -362,10 +337,7 @@ func creationIncomplete(id config.ProjectID, err error) *APIError {
 	return &APIError{Code: Internal, Message: fmt.Sprintf("project creation %s is incomplete (%v); run osmia project create --id %s to finish it", id, err, id)}
 }
 
-// runCreation does every creation step that is not yet done, then registers
-// the project through the registration steps. Each step inspects the
-// repository and the clone before acting.
-func (s *Service) runCreation(ctx context.Context, pending *pendingProject, activate bool) (config.Project, error) {
+func (s *Service) runCreation(ctx context.Context, pending *PendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	if err := s.advanceCreation(ctx, pending); err != nil {
 		var blocked *creationStuck
@@ -381,7 +353,7 @@ func (s *Service) runCreation(ctx context.Context, pending *pendingProject, acti
 	return s.complete(ctx, *pending, activate)
 }
 
-func (s *Service) advanceCreation(ctx context.Context, pending *pendingProject) error {
+func (s *Service) advanceCreation(ctx context.Context, pending *PendingProject) error {
 	if pending.Creation.Stuck != nil {
 		pending.Creation.Stuck = nil
 		if err := s.writePending(*pending); err != nil {
@@ -397,8 +369,7 @@ func (s *Service) advanceCreation(ctx context.Context, pending *pendingProject) 
 	return s.ensureMainBranch(ctx, pending)
 }
 
-// advance moves the recorded step forward and saves it.
-func (s *Service) advance(pending *pendingProject, step string) error {
+func (s *Service) advance(pending *PendingProject, step string) error {
 	order := []string{api.CreationPlanned, api.CreationRepository, api.CreationCloned, api.CreationMain}
 	index := func(name string) int {
 		for i, n := range order {
@@ -415,11 +386,7 @@ func (s *Service) advance(pending *pendingProject, step string) error {
 	return s.writePending(*pending)
 }
 
-// ensureRepository finds this creation's repository or creates it. A
-// repository is this creation's only when its identity is the one GitHub
-// returned to this creation's own create call; having asked for the name is not
-// enough. The create is sent at most once for the plan.
-func (s *Service) ensureRepository(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureRepository(ctx context.Context, pending *PendingProject) error {
 	c := pending.Creation
 	repos := s.repositories()
 	name := c.repository()
@@ -480,10 +447,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// ensureClone clones the repository into the project's clone path from the SSH
-// URL GitHub returned. The clone is made beside its destination and renamed
-// into place, so the destination exists only once the clone is whole.
-func (s *Service) ensureClone(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureClone(ctx context.Context, pending *PendingProject) error {
 	c, clone := pending.Creation, pending.Project.Clone
 	if _, err := os.Lstat(clone); err == nil {
 		origin, oerr := creationGit(ctx, clone, "config", "--get", "remote.origin.url")
@@ -515,12 +479,7 @@ func (s *Service) ensureClone(ctx context.Context, pending *pendingProject) erro
 	return s.step("repository-cloned")
 }
 
-// ensureMainBranch makes main the repository's default branch and checks it out
-// in the clone. When GitHub initialised the repository on another branch, the
-// README commit is pushed to main with the host's git and the repository's
-// default branch is set to main; the account's own default-branch preference
-// is not touched.
-func (s *Service) ensureMainBranch(ctx context.Context, pending *pendingProject) error {
+func (s *Service) ensureMainBranch(ctx context.Context, pending *PendingProject) error {
 	c, clone := pending.Creation, pending.Project.Clone
 	branch := func(err error, what string) error {
 		return stuck(api.StuckBranch, "cannot %s in %s: %v", what, c.repository(), err)
@@ -552,10 +511,6 @@ func (s *Service) ensureMainBranch(ctx context.Context, pending *pendingProject)
 	return s.step("main-branch-ready")
 }
 
-// creationGit runs git for a creation in dir, or in the current directory when
-// dir is empty. The command inherits the service's environment and so the
-// host's git and SSH configuration, with GITHUB_TOKEN removed: the token is for
-// GitHub's API only.
 func creationGit(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, creationGitTimeout)
 	defer cancel()
@@ -577,8 +532,6 @@ func creationGit(ctx context.Context, dir string, args ...string) (string, error
 	return stdout.String(), nil
 }
 
-// creationGitEnvironment is env without GITHUB_TOKEN, and with prompting for
-// a credential off so a missing one fails instead of waiting.
 func creationGitEnvironment(env []string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, entry := range env {

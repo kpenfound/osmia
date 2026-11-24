@@ -42,7 +42,6 @@ func TestHearsayKeptRecordsPersistAcrossReopenAndAreReleased(t *testing.T) {
 	if got := kept[KeptID("owner", "document/w_1-spec")]; got.Released || string(got.Data) != string(b.Data) {
 		t.Fatalf("kept entry %+v", got)
 	}
-	// Kept records belong to the project's own trace and are not digests.
 	if posted, err := r.HearsayPosted(); err != nil || len(posted) != 0 {
 		t.Fatalf("posted %v %v", posted, err)
 	}

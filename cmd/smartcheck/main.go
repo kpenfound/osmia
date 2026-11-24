@@ -45,14 +45,11 @@ func main() {
 	os.Exit(code)
 }
 
-// harness is the command with its environment, so tests replace Dagger and
-// Jev.
 type harness struct {
 	stdout, stderr io.Writer
 	getenv         func(string) string
-	// dagger runs the Dagger CLI in dir and returns its exit status.
-	dagger   func(ctx context.Context, dir string, stdout, stderr io.Writer, args ...string) (int, error)
-	evaluate func(systemone.Client, context.Context, systemone.Request) (systemone.Response, error)
+	dagger         func(ctx context.Context, dir string, stdout, stderr io.Writer, args ...string) (int, error)
+	evaluate       func(systemone.Client, context.Context, systemone.Request) (systemone.Response, error)
 }
 
 type options struct {
@@ -144,9 +141,6 @@ func (h harness) run(ctx context.Context, args []string) int {
 	return 0
 }
 
-// selection returns the check links to run in the working tree at o.dir:
-// Jev's selection, an empty slice for every check, or nil when nothing
-// changed.
 func (h harness) selection(ctx context.Context, o options) ([]string, error) {
 	key := h.getenv(o.keyEnv)
 	if key == "" {
@@ -242,7 +236,6 @@ func (h harness) list(ctx context.Context, dir string, all bool, roots ...string
 	return checkselect.Links(listing.String()), nil
 }
 
-// judge gives each stage its own full timeout, releasing it before the next.
 func (h harness) judge(ctx context.Context, client systemone.Client, request systemone.Request) (systemone.Response, error) {
 	timeout, _ := time.ParseDuration(config.DefaultJevTimeout)
 	asked, cancel := context.WithTimeout(ctx, timeout)
@@ -354,7 +347,6 @@ func (h harness) explainHierarchy(plan checkselect.DepthPlan) {
 	}
 }
 
-// explain prints Jev's answer for every candidate, most likely first.
 func (h harness) explain(r systemone.Response, candidates, selected []string, threshold float64, picks bool, took time.Duration) {
 	cost := ""
 	if r.Usage.CostKnown {
@@ -381,7 +373,6 @@ func (h harness) explain(r systemone.Response, candidates, selected []string, th
 	fmt.Fprintf(h.stderr, "selected %d of %d at probability %.2f or more\n", len(selected), len(candidates), threshold)
 }
 
-// fallback says why every check runs and selects them all.
 func (h harness) fallback(reason string) []string {
 	fmt.Fprintf(h.stderr, "smartcheck: running every check: %s\n", reason)
 	return []string{}
@@ -395,7 +386,6 @@ func (h harness) verbosef(o options, format string, args ...any) {
 
 func short(commit string) string { return commit[:min(len(commit), 12)] }
 
-// git runs git in dir and returns its standard output.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
@@ -408,8 +398,6 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-// runDagger runs the Dagger CLI in dir with the caller's environment. An
-// interrupt reaches Dagger as one, so it can stop its checks.
 func runDagger(ctx context.Context, dir string, stdout, stderr io.Writer, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = dir, os.Stdin, stdout, stderr

@@ -10,8 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// This checks the binding and journal interface. Service lifecycle acceptance
-// additionally requires the production design, ratification and archive path.
 func TestCreatedWorkgroupSharesAuthorityBeforeCreatorCloses(t *testing.T) {
 	root, r1, r2, _, _ := crossRepoFixture(t)
 	members := []CrossRepoMember{{crossMember1, r1}, {crossMember2, r2}}
@@ -153,8 +151,6 @@ func TestWorkgroupBindingsObserveRetirementOnOverlappingHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondOpen = false
-	// A cold journal-only recovery has no member bindings and needs no
-	// deleted trace or cached live handle to retain the approved pins.
 	recovered, err := OpenWorkgroupAuthority(root, group.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -221,8 +217,6 @@ func TestWorkgroupBindingFailureDoesNotProveRetirement(t *testing.T) {
 	}
 }
 
-// This exercises the routing interface's partial-commit recovery separately
-// from the service's owner archive/cleanup and live-controller acceptance.
 func TestRetiredFirstOriginPreservesPartialRulingAndHoldsRemainingRelay(t *testing.T) {
 	ctx := context.Background()
 	root, r1, r2, _, _ := crossRepoFixture(t)
@@ -333,8 +327,6 @@ func TestSharedAggregatesObserveRetirementDuringEnumeration(t *testing.T) {
 		t.Run(read.name, func(t *testing.T) {
 			var reads atomic.Int32
 			if err := r1.SetWorkgroupMemberLifecycle(func(config.WorkgroupID, config.WorkstreamID) (bool, error) {
-				// Enumeration sees live state; scoped resolution sees the
-				// subsequent durable retirement through the same binding.
 				return reads.Add(1) > 1, nil
 			}); err != nil {
 				t.Fatal(err)

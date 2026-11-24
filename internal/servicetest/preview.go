@@ -23,6 +23,7 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -119,10 +120,10 @@ func NewPreviewJourney(t *testing.T) *PreviewJourney {
 		return &agent.Result{ClaudeID: "preview-chief", ResultText: "Settings preview: " + result.ImageID}, nil
 	}
 	f.Project = NewProject(t, func(opts *service.Options, _ *service.TestHooks) {
-		WithWeb(t, *opts, "127.0.0.1:0")
+		intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 		*opts = service.EnforceThreadsForTest(*opts, service.Enforcement{Engine: engine, Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: engine.Sessions}}})
 	})
-	Mutation(t, f.C, http.MethodPut, "pause", api.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner})
+	intakefixture.Mutation(t, f.C, http.MethodPut, "pause", api.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner})
 	base := strings.TrimSpace(fixturekit.DemoGit(t, f.Clone, "-C", f.Clone, "rev-parse", "HEAD"))
 	var repo *trace.Repository
 	f.Sibling, repo = f.SeedBuild(t, "preview-sibling", fixturekit.ValidPlan, config.WorkspacesGit, base)

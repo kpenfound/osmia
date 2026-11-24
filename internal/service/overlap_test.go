@@ -1,30 +1,29 @@
 package service
 
 import (
-	context "context"
-	json "encoding/json"
-	fmt "fmt"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	slices "slices"
-	strings "strings"
-	testing "testing"
-	time "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	kb "github.com/kpenfound/osmia/internal/kb"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// overlapEntities has the subsystems internal and cmd; internal.trace,
-// internal.upload and internal.audit are part of internal, and legacy lies
-// under internal/trace without being part of anything.
 func overlapEntities() kb.Map {
 	entity := func(id, path string, partOf ...string) kb.Entity {
 		return kb.Entity{ID: id, Name: path, Aliases: []string{}, Paths: []string{path}, Owners: []string{}, PartOf: append([]string{}, partOf...)}
@@ -38,8 +37,6 @@ func overlapEntities() kb.Map {
 		entity("cmd", "cmd"),
 	}}
 }
-
-var sealOf = intakefixture.SealOf
 
 // Two sealed footprints overlap when both name an entity or when an entity's
 // path patterns cover the other's; the advisory names the most specific
@@ -67,7 +64,7 @@ func TestOverlapOfSealedFootprints(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, b := sealOf(t, 1, m, tc.a...), sealOf(t, 1, m, tc.b...)
+			a, b := intakefixture.SealOf(t, 1, m, tc.a...), intakefixture.SealOf(t, 1, m, tc.b...)
 			for _, got := range []footprintOverlap{overlapOf(a, b, m), overlapOf(b, a, m)} {
 				if !reflect.DeepEqual(got, tc.want) {
 					t.Fatalf("overlap %+v, want %+v", got, tc.want)
@@ -77,20 +74,17 @@ func TestOverlapOfSealedFootprints(t *testing.T) {
 	}
 }
 
-// projectOf is the configured project with another ID.
 func projectOf(cfg *config.Config, id config.ProjectID) config.Project {
 	p := cfg.Project
 	p.ID = id
 	return p
 }
 
-// overlapPlanted is a trace with workstreams planted building, delivered or
-// paused on seals of one-unit plans.
 type overlapPlanted struct {
 	t       *testing.T
 	opts    Options
 	cfg     *config.Config
-	clock   *fixedClock
+	clock   *fixturekit.FixedClock
 	ticks   chan time.Time
 	service *Service
 	client  *Client
@@ -100,65 +94,59 @@ func (p *overlapPlanted) header(repo *trace.Repository, stream config.Workstream
 	return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: revision, Project: repo.Project(), Workstream: stream, At: p.clock.Now(), Actor: ownerActor, Cause: "planted"}
 }
 
-// plant records seal k of the workstream, and plan revision k it seals, with
-// one unit whose footprint names the entities.
 func (p *overlapPlanted) plant(repo *trace.Repository, stream config.WorkstreamID, k int, names ...string) {
 	t := p.t
 	t.Helper()
 	footprint, err := json.Marshal(names)
-	must(t, err)
-	graph := fmt.Sprintf(`{"version": 1, "units": [{"id": "work", "title": "Do the work", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestWork"}}], "depends_on": [], "footprint": %s}]}`+"\n", footprint)
+	fixturekit.Must(t, err)
+	graph := fmt.Sprintf(`{"version": 2, "units": [{"id": "work", "title": "Do the work", "task": "Do the work", "acceptance": ["spec#1 holds, shown by TestWork (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": %s}]}`+"\n", footprint)
 	parsed, err := plan.Parse([]byte(graph))
-	must(t, err)
+	fixturekit.Must(t, err)
 	m, err := kb.Load(repo)
-	must(t, err)
+	fixturekit.Must(t, err)
 	footprints, unresolved := seal.Take(parsed, m)
 	if len(unresolved) != 0 {
 		t.Fatalf("unresolved %v", unresolved)
 	}
-	content, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: k, Round: 1, Revision: shed.Pin{Spec: 1, Plan: k}, SpecHash: seal.SpecHash(validSpec),
+	content, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: k, Round: 1, Revision: shed.Pin{Spec: 1, Plan: k}, SpecHash: seal.SpecHash(fixturekit.ValidSpec),
 		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "0123456789abcdef0123456789abcdef01234567"}, Branch: "osmia/" + string(stream), Workspace: "/planted", Footprints: footprints})
-	must(t, err)
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{
 		{Header: p.header(repo, stream, "osmia.trace.document", plan.PlanDocument, k), Path: plan.PlanPath, Content: graph},
 		{Header: p.header(repo, stream, "osmia.trace.document", seal.DocumentID, k), Path: seal.Path, Content: string(content)},
 	}))
 }
 
-// feature moves the workstream's feature state to the given value.
 func (p *overlapPlanted) feature(repo *trace.Repository, stream config.WorkstreamID, to string) {
 	p.t.Helper()
 	_, err := repo.SetFeatureState(context.Background(), p.header(repo, stream, "osmia.trace.transition", "planted-"+to, 1), to, "planted")
-	must(p.t, err)
+	fixturekit.Must(p.t, err)
 }
 
-// run starts the service, lets it finish two passes and stops it.
 func (p *overlapPlanted) run(check func()) {
 	t := p.t
 	t.Helper()
 	s, err := Start(context.Background(), p.opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	p.service, p.client = s, NewClient(s.Socket())
 	defer func() {
 		p.client.Close()
-		must(t, s.Close())
+		fixturekit.Must(t, s.Close())
 	}()
 	for range 2 {
 		select {
 		case p.ticks <- p.clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("service did not finish its pass")
 		}
 	}
 	check()
 }
 
-// advisories returns the sorted bodies of the workstream's overlap advisory
-// events.
 func (p *overlapPlanted) advisories(repo *trace.Repository, stream config.WorkstreamID) []string {
 	p.t.Helper()
 	entries, err := repo.Outbox(stream)
-	must(p.t, err)
+	fixturekit.Must(p.t, err)
 	var out []string
 	for _, e := range entries {
 		if e.Event.Kind == OverlapKind {
@@ -172,28 +160,21 @@ func (p *overlapPlanted) advisories(repo *trace.Repository, stream config.Workst
 func (p *overlapPlanted) status(stream config.WorkstreamID) []OverlapAdvisory {
 	p.t.Helper()
 	st, err := p.client.Status(context.Background(), stream)
-	must(p.t, err)
+	fixturekit.Must(p.t, err)
 	return st.Advisories
 }
 
-// Building workstreams of one project whose sealed footprints overlap each
-// warn their chief of staff about the other once per pair of seals, across
-// restarts; a new seal warns again, and status lists the advisories whose
-// seals are current. Disjoint, paused and delivered workstreams, and those
-// of another project, are not warned about.
 func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ov-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	// The landing controller reads each building workstream's feature branch
-	// from the clone, which has none.
-	demoGit(t, home, "init", "-q", filepath.Join(home, "clone"))
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
-	p := &overlapPlanted{t: t, opts: opts, cfg: cfg, clock: &fixedClock{At: demoStart}, ticks: make(chan time.Time)}
+	fixturekit.DemoGit(t, home, "init", "-q", filepath.Join(home, "clone"))
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
+	p := &overlapPlanted{t: t, opts: opts, cfg: cfg, clock: &fixturekit.FixedClock{At: fixturekit.DemoStart}, ticks: make(chan time.Time)}
 	p.opts.Reconciliation.Now, p.opts.Reconciliation.Ticks = p.clock.Now, p.ticks
 	const (
 		a         config.WorkstreamID = "w_00000000000000000000000000000001"
@@ -205,19 +186,16 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 
-	// Workstream a builds in internal.trace in both projects, b too in this
-	// one; c builds in internal.upload. The paused and the delivered
-	// workstreams build in internal.trace.
-	for _, id := range []config.ProjectID{project, elsewhere} {
+	for _, id := range []config.ProjectID{fixturekit.Project, elsewhere} {
 		repo, err := trace.Create(ctx, cfg.Root, projectOf(cfg, id), p.clock.Now(), owner)
-		must(t, err)
-		must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
 		streams := []config.WorkstreamID{a, b, c, paused, delivered}
 		if id == elsewhere {
 			streams = []config.WorkstreamID{a}
 		}
 		for _, stream := range streams {
-			must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
+			fixturekit.Must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
 			footprint := "internal.trace"
 			if stream == c {
 				footprint = "internal.upload"
@@ -225,15 +203,15 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 			p.plant(repo, stream, 1, footprint)
 			p.feature(repo, stream, BuildingState)
 		}
-		if id == project {
+		if id == fixturekit.Project {
 			_, err = repo.SetFeatureState(ctx, p.header(repo, delivered, "osmia.trace.transition", "planted-delivered", 1), DeliveredState, "planted")
-			must(t, err)
+			fixturekit.Must(t, err)
 		}
-		must(t, repo.Close())
+		fixturekit.Must(t, repo.Close())
 	}
-	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: paused}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(cfg.Root.String(), "runtime.json"), state, 0600))
+	state, err := json.Marshal(runtime.State{Version: runtime.Version, Pauses: []runtime.Pause{{Target: runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: paused}, Mode: "soft", Source: runtime.PauseOwner, Reason: "test", SetAt: time.Now().UTC()}}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(cfg.Root.String(), "runtime.json"), state, 0600))
 
 	message := func(other config.WorkstreamID, mine, theirs int, subsystems, entities string) string {
 		return fmt.Sprintf("Workstream %s of this project builds in subsystem %s: both sealed footprints cover %s (seal %d of this workstream, seal %d of that one). Its changes may conflict with this workstream's before both pull requests are open. This is an advisory and blocks neither workstream; the owner can pause or reprioritise either.", other, subsystems, entities, mine, theirs)
@@ -259,14 +237,14 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 			}
 		}
 		list, err := p.client.Statuses(context.Background())
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, st := range list.Workstreams {
 			if len(st.Advisories) != len(active[st.Workstream]) {
 				t.Fatalf("listed advisories of %s: %+v", st.Workstream, st.Advisories)
 			}
 		}
 		other, err := trace.Open(cfg.Root, projectOf(cfg, elsewhere))
-		must(t, err)
+		fixturekit.Must(t, err)
 		defer other.Close()
 		if got := p.advisories(other, a); len(got) != 0 {
 			t.Fatalf("advisories in another project: %q", got)
@@ -277,15 +255,12 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 	first := map[config.WorkstreamID][]string{a: {message(b, 1, 1, "internal", "internal.trace")}, b: {message(a, 1, 1, "internal", "internal.trace")}}
 	firstActive := map[config.WorkstreamID][]OverlapAdvisory{a: {advisory(b, 1, 1, []string{"internal.trace"}, trace1)}, b: {advisory(a, 1, 1, []string{"internal.trace"}, trace1)}}
 	p.run(func() { check(first, firstActive) })
-	// A restart warns about nothing again.
 	p.run(func() { check(first, firstActive) })
 
-	// Seal 2 of a also builds in internal.upload: a is warned again about
-	// b, and about c for the first time, and so are they.
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	p.plant(repo, a, 2, "internal.trace", "internal.upload")
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	second := map[config.WorkstreamID][]string{
 		a: {first[a][0], message(b, 2, 1, "internal", "internal.trace"), message(c, 2, 1, "internal", "internal.upload")},
 		b: {first[b][0], message(a, 1, 2, "internal", "internal.trace")},
@@ -300,18 +275,13 @@ func TestOverlapAdvisoriesWarnEachChiefOncePerSeal(t *testing.T) {
 		})
 	})
 
-	// Seal 3 of a builds in internal.audit alone: nothing overlaps, no
-	// advisory is active and none is sent.
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	p.plant(repo, a, 3, "internal.audit")
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 	p.run(func() { check(second, nil) })
 }
 
-// TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive covers status after the
-// other workstream of a recorded warning lost its trace, as archive cleanup
-// leaves it: the warning is no longer active, and reading it is no error.
 func TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -320,38 +290,38 @@ func TestOverlapAdvisoryAboutAGoneWorkstreamIsInactive(t *testing.T) {
 		b config.WorkstreamID = "w_00000000000000000000000000000002"
 	)
 	root, err := config.ResolveRoot(filepath.Join(t.TempDir(), "osmia"), "")
-	must(t, err)
-	p := &overlapPlanted{t: t, clock: &fixedClock{At: demoStart}}
+	fixturekit.Must(t, err)
+	p := &overlapPlanted{t: t, clock: &fixturekit.FixedClock{At: fixturekit.DemoStart}}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	planted := config.Project{ID: project, Clone: t.TempDir()}
+	planted := config.Project{ID: fixturekit.Project, Clone: t.TempDir()}
 	repo, err := trace.Create(ctx, root, planted, p.clock.Now(), owner)
-	must(t, err)
-	must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, kb.Store(ctx, repo, overlapEntities(), p.clock.Now(), ownerActor, "planted"))
 	for _, stream := range []config.WorkstreamID{a, b} {
-		must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, stream, p.clock.Now(), owner))
 		p.plant(repo, stream, 1, "internal.trace")
 		p.feature(repo, stream, BuildingState)
 	}
 	_, err = repo.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: p.header(repo, a, "osmia.trace.transition", "overlap-"+string(b)+"-1-1", 1), Subject: overlapSubject(b), To: "seals-1-1", Reason: "planted"}})
-	must(t, err)
+	fixturekit.Must(t, err)
 	advisories := func(repo *trace.Repository) []OverlapAdvisory {
 		t.Helper()
 		subjects, err := repo.WorkflowStates(a)
-		must(t, err)
+		fixturekit.Must(t, err)
 		out, err := overlapAdvisories(repo, a, subjects)
-		must(t, err)
+		fixturekit.Must(t, err)
 		return out
 	}
 	if got := advisories(repo); len(got) != 1 || got[0].Workstream != b {
 		t.Fatalf("active advisories: %+v", got)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	gone, err := root.WorkstreamTrace(planted.ID, b)
-	must(t, err)
-	must(t, os.RemoveAll(gone))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.RemoveAll(gone))
 	repo, err = trace.Open(root, planted)
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	if got := advisories(repo); len(got) != 0 {
 		t.Fatalf("advisories about a gone workstream: %+v", got)

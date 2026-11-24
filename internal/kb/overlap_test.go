@@ -15,7 +15,7 @@ func TestPatternsOverlap(t *testing.T) {
 		{"src/**/test?.go", "docs/testa.go", false},
 		{"src/[ab].go", "src/[bc].go", true},
 		{"src/[ab].go", "src/[cd].go", false},
-		{"src/[!a].go", "src/b.go", false}, // path.Match uses ^, not !, for negation.
+		{"src/[!a].go", "src/b.go", false},
 		{"src/[^a].go", "src/b.go", true},
 		{"**/*.go", "cmd/osmia/main.go", true},
 		{"README.md", "docs/guide.md", false},

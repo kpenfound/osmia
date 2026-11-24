@@ -35,7 +35,7 @@ func testBaseResolver(t *testing.T, fork bool) {
 	must(t, err)
 	defer repo.Close()
 	ctx := context.Background()
-	_, err = repo.SetWorkstreamBase(ctx, quiet, stream, 0, demoStart)
+	_, err = repo.SetWorkstreamBase(ctx, quiet, stream, 0, fixturekit.DemoStart)
 	must(t, err)
 	g := &fixturekit.BaseProvider{Upstream: "upstream-sha", Tip: "base-sha"}
 	hosting := &fixturekit.FakePulls{}
@@ -47,7 +47,7 @@ func testBaseResolver(t *testing.T, fork bool) {
 	parent := seal.Seal{Version: 1, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash("spec"), Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "upstream-sha"}, Branch: featureBranch(stream), Workspace: "/owned/feature"}
 	data, err := seal.Encode(parent)
 	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: seal.DocumentID, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: foremanActor, Cause: "seal"}
+	h := trace.Header{Schema: "osmia.trace.document", Version: 1, ID: seal.DocumentID, Revision: 1, Project: project, Workstream: stream, At: fixturekit.DemoStart, Actor: foremanActor, Cause: "seal"}
 	must(t, repo.RecordDocuments(ctx, []trace.Document{{Header: h, Path: seal.Path, Content: string(data)}}))
 	selected, err := s.ResolveBase(ctx, cfg, repo, quiet, g)
 	must(t, err)
@@ -67,8 +67,6 @@ func testBaseResolver(t *testing.T, fork bool) {
 		t.Fatalf("undelivered parent mistaken for integrated: %+v", selected)
 	}
 	g.IsAncestor = false
-	// A squash publication supplies the actual fork base commit, and the merged
-	// hosting record detects its integration even without an ancestor relation.
 	publication := DeliveryPublication{Status: publicationOpened, Base: "main", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), Commit: "squashed-base", PullRequest: 5}
 	data, err = json.Marshal(publication)
 	must(t, err)

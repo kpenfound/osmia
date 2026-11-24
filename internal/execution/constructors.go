@@ -39,7 +39,6 @@ func (c *Controls) ResolveContested(r *trace.Repository, s coreadapter.Scope) co
 var Checkpointed = checkpointed
 var CaptureFiles = captureFiles
 
-// AcceptedForTest reads the report accepted by a local fixture turn.
 func (r *masonReports) AcceptedForTest(key string) reportedDone {
 	r.mu.Lock()
 	defer r.mu.Unlock()

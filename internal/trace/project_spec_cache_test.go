@@ -36,8 +36,6 @@ func (f *approvalFixture) approveWith(t *testing.T, spec ProjectSpec, complete b
 	f.record(t, complete)
 }
 
-// readSpecs reads the effective spec through every cross-repo read and
-// reports each one that disagrees with want.
 func (f *approvalFixture) readSpecs(t *testing.T, want ProjectSpec) {
 	t.Helper()
 	spec, g, found, err := f.r1.CrossRepoProjectSpec(f.g.ID)
@@ -57,7 +55,6 @@ func (f *approvalFixture) readSpecs(t *testing.T, want ProjectSpec) {
 	}
 }
 
-// decodes counts every document decode a project spec read can make.
 func decodes(id config.WorkgroupID) uint64 {
 	return GroupApprovalDecodeCount(id) + ProjectSpecDecodeCount(id)
 }
@@ -75,13 +72,10 @@ func TestRepeatedProjectSpecReadsDecodeOncePerRevision(t *testing.T) {
 	if n := decodes(id) - before; n > 1 {
 		t.Fatalf("300 draft reads decoded %d documents", n)
 	}
-	// OpenCrossRepoProjectSpec hands out its own handle; the other reads reuse
-	// the one their project instance keeps.
 	if n := WorkgroupTraceOpenCount(id) - opens; n > 101 {
 		t.Fatalf("300 reads acquired the workgroup trace %d times", n)
 	}
 
-	// An approval embeds its own spec and replaces the draft.
 	approved := specVariant("approved")
 	f.approveWith(t, approved, false)
 	before = decodes(id)
@@ -99,8 +93,6 @@ func TestRepeatedProjectSpecReadsDecodeOncePerRevision(t *testing.T) {
 		t.Fatalf("reads after the completion decoded %d documents", n)
 	}
 
-	// A newer draft recorded after approval never replaces the approved spec,
-	// and changes nothing the choice reads.
 	f.draft(t, specVariant("newer-draft"))
 	before = decodes(id)
 	for range 20 {
@@ -110,8 +102,6 @@ func TestRepeatedProjectSpecReadsDecodeOncePerRevision(t *testing.T) {
 		t.Fatalf("a draft recorded after approval caused %d decodes", n)
 	}
 
-	// A published approved revision takes over on the next read, and the next
-	// published revision after it.
 	for _, label := range []string{"revision-1", "revision-2"} {
 		revised := specVariant(label)
 		if err := RecordWorkgroupRevision(context.Background(), f.wt, f.g, label, revised, at, owner); err != nil {
@@ -281,7 +271,6 @@ func TestIncomingEdgesAreDerivedOncePerRevision(t *testing.T) {
 	if n := decodes(f.g.ID) - before; n > 1 {
 		t.Fatalf("300 reads decoded %d documents", n)
 	}
-	// The edges follow the effective spec: the approval, then a revision.
 	next := specVariant("approved")
 	next.Graph = []Edge{{From: crossMember2, To: crossMember1, Type: EdgeHardBlock}}
 	f.approveWith(t, next, true)
@@ -329,7 +318,6 @@ func TestDamagedLatestProjectSpecSourceIsReportedAfterAnEarlierRevisionWasCached
 	for _, s := range sources {
 		damages := []string{"outer-json", "content-json"}
 		if s.id == WorkgroupRevisionDocument {
-			// Only a read by stored identity checks the stored revision.
 			damages = append(damages, "stored-revision")
 		}
 		for _, damage := range damages {

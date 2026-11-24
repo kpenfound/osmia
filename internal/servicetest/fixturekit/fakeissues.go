@@ -64,11 +64,9 @@ type IssueRequest struct {
 	Query  string
 	Body   string
 	Auth   string
-	// At is the real time the request arrived.
-	At time.Time
+	At     time.Time
 }
 
-// The kinds of request a Fault can target.
 const (
 	FaultCreate       = "create"
 	FaultComment      = "comment"
@@ -81,20 +79,10 @@ const (
 type FaultEffect int
 
 const (
-	// DropAfterApply applies a write and then closes the connection without
-	// answering: the response is lost.
 	DropAfterApply FaultEffect = iota
-	// HoldAfterApply applies a write, signals Applied, and holds the
-	// connection until Release closes or the client gives up, then closes it
-	// without answering.
 	HoldAfterApply
-	// StatusAfterApply applies a write and answers Status.
 	StatusAfterApply
-	// StatusBeforeApply answers Status and applies nothing.
 	StatusBeforeApply
-	// HoldBeforeServe signals Applied when the request arrives, holds it until
-	// Release closes or the client gives up, and then serves it normally: a
-	// read returns what the server holds at that time.
 	HoldBeforeServe
 )
 
@@ -102,14 +90,11 @@ const (
 // how many requests it affects: zero means one, a negative number means every
 // request until Clear.
 type Fault struct {
-	Kind   string
-	Repo   string
-	Effect FaultEffect
-	Status int
-	Times  int
-	// Applied receives a value when a HoldAfterApply fault has applied the
-	// write, or when a HoldBeforeServe fault has received the request; Release
-	// lets it go.
+	Kind    string
+	Repo    string
+	Effect  FaultEffect
+	Status  int
+	Times   int
 	Applied chan struct{}
 	Release chan struct{}
 
@@ -123,8 +108,7 @@ type Fault struct {
 // response, fail, report issues closed or change an issue's labels.
 type FakeIssueServer struct {
 	Server *httptest.Server
-	// Now is the clock that stamps created and updated times.
-	Now func() time.Time
+	Now    func() time.Time
 
 	mu       sync.Mutex
 	repos    map[string]*fakeRepo
@@ -261,7 +245,6 @@ func (g *FakeIssueServer) Clear() {
 	g.faults = nil
 }
 
-// fault returns the scripted fault that applies to a request, counting the use.
 func (g *FakeIssueServer) fault(kind, repository string) *Fault {
 	for _, f := range g.faults {
 		if f.Kind != kind || (f.Repo != "" && !strings.EqualFold(f.Repo, repository)) {
@@ -311,8 +294,6 @@ func (g *FakeIssueServer) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// finish plays a fault's effect after the write, if any. It reports whether it
-// answered the request.
 func (g *FakeIssueServer) finish(w http.ResponseWriter, r *http.Request, f *Fault) bool {
 	if f == nil {
 		return false
@@ -495,7 +476,6 @@ func (g *FakeIssueServer) listComments(w http.ResponseWriter, r *http.Request, r
 	reply(w, http.StatusOK, paged(out, q))
 }
 
-// paged cuts one page out of items; without items it is an empty list.
 func paged(items []map[string]any, q map[string][]string) []map[string]any {
 	per, _ := strconv.Atoi(first(q["per_page"]))
 	page, _ := strconv.Atoi(first(q["page"]))
@@ -546,7 +526,6 @@ func reply(w http.ResponseWriter, status int, value any) {
 	json.NewEncoder(w).Encode(value)
 }
 
-// drop closes the connection without an answer.
 func drop(w http.ResponseWriter) {
 	if h, ok := w.(http.Hijacker); ok {
 		if conn, _, err := h.Hijack(); err == nil {

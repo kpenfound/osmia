@@ -16,10 +16,6 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 )
 
-// hangingJJ writes a jj that hangs on any command with an argument named by a
-// hang-<argument> file in the returned control directory, until a
-// release-<argument> file appears, and otherwise runs the real jj. The
-// process of a hanging command writes its ID to pid-<argument>.
 func hangingJJ(t *testing.T) (jj, ctl string) {
 	t.Helper()
 	real, err := exec.LookPath("jj")
@@ -51,7 +47,6 @@ func touch(t *testing.T, path string) {
 	}
 }
 
-// pollPID reads the process ID a hanging command reported.
 func pollPID(path string) (int, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -61,18 +56,29 @@ func pollPID(path string) (int, bool) {
 	return pid, err == nil
 }
 
-// waitPID waits for a hanging command to report its process ID.
+func pollUntil(ok func() bool) bool {
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if ok() {
+			return true
+		}
+	}
+	return false
+}
+
 func waitPID(t *testing.T, path string) int {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if pid, ok := pollPID(path); ok {
-			return pid
-		}
-		time.Sleep(10 * time.Millisecond)
+	var pid int
+	if !pollUntil(func() bool { var ok bool; pid, ok = pollPID(path); return ok }) {
+		t.Fatalf("no process reported itself at %s", path)
 	}
-	t.Fatalf("no process reported itself at %s", path)
-	return 0
+	return pid
+}
+
+func cancelOncePIDReported(path string, cancel context.CancelFunc) {
+	go func() {
+		pollUntil(func() bool { _, ok := pollPID(path); return ok })
+		cancel()
+	}()
 }
 
 func processGone(pid int) bool {
@@ -81,14 +87,9 @@ func processGone(pid int) bool {
 
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !pollUntil(ok) {
+		t.Fatalf("timed out waiting until %s", what)
 	}
-	t.Fatalf("timed out waiting until %s", what)
 }
 
 func checkpointFiles(t *testing.T, j *Jujutsu) map[string]string {
@@ -118,9 +119,6 @@ func setDuration(t *testing.T, p *time.Duration, v time.Duration) {
 	t.Cleanup(func() { *p = old })
 }
 
-// A step that cannot take the clone lock before its context ends returns a
-// contention error, runs neither Recover nor Checkpoint and leaves the clone's
-// files and checkpoint as they were.
 func TestLocalStepGivesUpOnAContendedCloneLock(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
@@ -170,7 +168,6 @@ func TestLocalStepGivesUpOnAContendedCloneLock(t *testing.T) {
 		t.Fatalf("contention left %+v", q)
 	}
 
-	// With the lock free the next step recovers the interrupted attempt first.
 	err = LocalStep(context.Background(), "after", time.Now(), []Provider{j}, func(context.Context) error {
 		if got := checkpointFiles(t, j); len(got) != 1 || fmt.Sprint(got) == fmt.Sprint(checkpointsBefore) {
 			return fmt.Errorf("checkpoints at the start of the step: %v", got)
@@ -182,7 +179,6 @@ func TestLocalStepGivesUpOnAContendedCloneLock(t *testing.T) {
 	}
 }
 
-// Git worktree mutations lock the clone for themselves and give up the same way.
 func TestGitWorktreeMutationGivesUpOnAContendedCloneLock(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -205,8 +201,6 @@ func TestGitWorktreeMutationGivesUpOnAContendedCloneLock(t *testing.T) {
 	}
 }
 
-// A primary command that hangs past the step's context is killed and waited
-// on until it exits, and the step restores the checkout and returns.
 func TestLocalStepKillsAHangingPrimaryCommand(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	var ctl string
@@ -216,14 +210,7 @@ func TestLocalStepKillsAHangingPrimaryCommand(t *testing.T) {
 	touch(t, filepath.Join(ctl, "hang-hang-primary"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() {
-		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-			if _, ok := pollPID(filepath.Join(ctl, "pid-hang-primary")); ok {
-				break
-			}
-		}
-		cancel()
-	}()
+	cancelOncePIDReported(filepath.Join(ctl, "pid-hang-primary"), cancel)
 	err := LocalStep(ctx, "hanging", time.Now(), []Provider{j}, func(local context.Context) error {
 		if _, err := j.Acquire(local, vcs.Request{Name: "made", Branch: "made", Ref: base}); err != nil {
 			return err
@@ -248,9 +235,6 @@ func TestLocalStepKillsAHangingPrimaryCommand(t *testing.T) {
 	}
 }
 
-// A restoration that hangs returns within the cleanup bound. The checkpoint is
-// kept and the clone is marked as needing recovery; the next step recovers
-// first and is refused while that fails, and runs once Recover succeeds.
 func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	var ctl string
@@ -293,7 +277,6 @@ func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 		t.Fatalf("checkpoints kept: %v", kept)
 	}
 
-	// The next step runs Recover first and is refused when it fails.
 	ran := false
 	err = LocalStep(context.Background(), "next", time.Now(), []Provider{j}, func(context.Context) error {
 		ran = true
@@ -309,9 +292,6 @@ func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 		t.Fatalf("the refusal cleared the mark: %+v", q)
 	}
 
-	// Once Recover can succeed the step runs on the restored checkout. The short
-	// bound only made the hang return quickly; a restoration that works gets the
-	// bound it has in service.
 	if err := os.Remove(filepath.Join(ctl, "hang-restore")); err != nil {
 		t.Fatal(err)
 	}
@@ -330,8 +310,6 @@ func TestLocalStepReturnsFromAHangingRecoverAndRefusesDirtyReuse(t *testing.T) {
 	}
 }
 
-// A settlement that fails keeps the checkpoint, marks the clone and returns
-// the failure.
 func TestLocalStepSettleFailureMarksTheClone(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -357,10 +335,6 @@ func TestLocalStepSettleFailureMarksTheClone(t *testing.T) {
 	}
 }
 
-// A process that ignores the kill keeps the clone locked after the step
-// returns. The clone reads as not quiesced, later steps give up through
-// contention, and once the process exits the lock is freed and the next step
-// recovers before any work.
 func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	var ctl string
@@ -375,14 +349,7 @@ func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() {
-		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
-			if _, ok := pollPID(filepath.Join(ctl, "pid-hang-primary")); ok {
-				break
-			}
-		}
-		cancel()
-	}()
+	cancelOncePIDReported(filepath.Join(ctl, "pid-hang-primary"), cancel)
 	err := LocalStep(ctx, "surviving", time.Now(), []Provider{j}, func(local context.Context) error {
 		if _, err := j.Acquire(local, vcs.Request{Name: "made", Branch: "made", Ref: base}); err != nil {
 			return err
@@ -409,7 +376,6 @@ func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 		t.Fatalf("checkpoints with a surviving process: %v", got)
 	}
 
-	// Later steps give up at their own deadline instead of hanging.
 	short, stop := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer stop()
 	ran := false
@@ -421,7 +387,6 @@ func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 		t.Fatalf("a later step ran=%t returned %v", ran, err)
 	}
 
-	// The process exits: the lock is freed and the clone is recovered first.
 	touch(t, filepath.Join(ctl, "release-hang-primary"))
 	eventually(t, "the process has exited and freed the clone", func() bool { return CloneQuiescence(f.clone).Running == 0 })
 	if q := j.Quiescence(); q.Running != 0 || !q.NeedsRecovery {
@@ -441,9 +406,6 @@ func TestLocalStepKeepsTheCloneLockedWhileAKilledProcessSurvives(t *testing.T) {
 	}
 }
 
-// Quiesced reads a clone only once nothing else owns it: a clone another owner
-// holds gives up at the context's end with a contention error and the read
-// never runs, for either backend.
 func TestQuiescedGivesUpOnAContendedClone(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
@@ -476,8 +438,6 @@ func TestQuiescedGivesUpOnAContendedClone(t *testing.T) {
 	}
 }
 
-// Quiesced recovers an interrupted step before it reads, and a clone whose
-// recovery fails is refused with the recovery error instead of being read.
 func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T) {
 	f, j := newJujutsuFixture(t)
 	var ctl string
@@ -488,7 +448,6 @@ func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
 	acquireJJ(t, j, vcs.Request{Name: "a", Branch: "a", Ref: base})
 	touch(t, filepath.Join(ctl, "hang-restore"))
-	// A step cut short whose restoration hangs leaves the clone needing recovery.
 	cut, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := LocalStep(cut, "interrupted", time.Now(), []Provider{j}, func(local context.Context) error {
@@ -502,7 +461,6 @@ func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T
 		t.Fatalf("the interrupted step returned %v, checkpoints %v", err, checkpointFiles(t, j))
 	}
 
-	// Recovery hangs: the clone is refused and marked, and nothing is read.
 	ran := false
 	err = Quiesced(context.Background(), []Provider{j}, func(context.Context) error { ran = true; return nil })
 	if !IsRecoveryFailure(err) || ran {
@@ -512,9 +470,6 @@ func TestQuiescedRecoversBeforeItReadsAndIsRefusedWhenRecoveryFails(t *testing.T
 		t.Fatalf("clone after the failed recovery: %+v, checkpoints %v", q, checkpointFiles(t, j))
 	}
 
-	// Once recovery can succeed it runs first, and the read sees a clone that
-	// needs none. The short bound only made the hang return quickly; a recovery
-	// that works gets the bound it has in service.
 	if err := os.Remove(filepath.Join(ctl, "hang-restore")); err != nil {
 		t.Fatal(err)
 	}

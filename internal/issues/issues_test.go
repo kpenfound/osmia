@@ -48,9 +48,6 @@ func TestGitHubFetch(t *testing.T) {
 	var auth, path string
 	answer := `{"title":"Add hand-in","body":"Design text"}`
 	status := http.StatusOK
-	// server stands in for the real GitHub REST API: a remote, rate-limited
-	// system. It leaves unverified whether the real API's pagination, rate
-	// limiting and exact response shapes match what this fake returns.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth, path = r.Header.Get("Authorization"), r.URL.Path
 		w.WriteHeader(status)
@@ -86,10 +83,6 @@ func TestGitHubFetch(t *testing.T) {
 	}
 }
 
-// TestGitHubFetchLogsOneGitHubActivityRecordPerCall shows one record for a
-// successful fetch and one for a failing one, each with the marker that
-// tells GitHub activity apart from any other kind of record, the action,
-// method, path, repository and status, and no token in the error.
 func TestGitHubFetchLogsOneGitHubActivityRecordPerCall(t *testing.T) {
 	status := http.StatusOK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,11 +135,6 @@ func TestGitHubFetchLogsOneGitHubActivityRecordPerCall(t *testing.T) {
 	}
 }
 
-// TestGitHubFetchLogNeverCarriesSecretsOrIssueBody shows that fetching an
-// issue whose title and body hold sentinel text, while every known secret
-// environment variable holds a sentinel value, logs neither those sentinels
-// nor the issue's title or body: the GitHub activity record carries only the
-// action, method, path, status and outcome, never the issue's content.
 func TestGitHubFetchLogNeverCarriesSecretsOrIssueBody(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "sentinel-github-token")
 	t.Setenv("TS_AUTHKEY", "sentinel-ts-authkey")

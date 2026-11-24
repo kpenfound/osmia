@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -34,10 +36,10 @@ func (s *Service) executionWithChecks(checks, cloud ReviewChecks) *execution.Con
 		},
 		EdgeWaiting: edgeWaiting, ChangeHeld: changeHeld, ChangeRepositoryHeld: changeRepositoryHeld,
 		WorkgroupEdgePending: workgroupEdgePending, CarryBase: func(r *trace.Repository, w config.WorkstreamID, onto string) (string, bool, error) {
-			d, found, err := carryDrift(r, w, onto)
+			d, found, err := lifecycle.CarryDrift(r, w, onto)
 			return d.Before, found, err
 		},
-		CarriedOnto: carriedOnto, UnitDiscoveries: unitDiscoveries, UnitDrift: unitDrift, UnitRebaseConflicts: unitRebaseConflicts,
+		CarriedOnto: lifecycle.CarriedOnto, UnitDiscoveries: unitDiscoveries, UnitDrift: lifecycle.UnitDrift, UnitRebaseConflicts: lifecycle.UnitRebaseConflicts,
 	})
 }
 func (c *runtimeControls) execution() *execution.Controls {
@@ -59,7 +61,7 @@ func (c *runtimeControls) resolveContested(r *trace.Repository, scope coreadapte
 	return c.execution().ResolveContested(r, scope)
 }
 
-func (s *Service) ownerMove(ctx context.Context, raw, unit string, req UnitMoveRequest) (UnitMoveResponse, *APIError) {
+func (s *Service) ownerMove(ctx context.Context, raw, unit string, req UnitMoveRequest) (api.UnitMoveResponse, *APIError) {
 	return s.execution().OwnerMove(ctx, raw, unit, req)
 }
 
@@ -68,9 +70,3 @@ func (s *Service) ruleContested(ctx context.Context, rawStream, unit string, req
 }
 
 var captureFiles = execution.CaptureFiles
-
-var unitName = execution.UnitName
-
-func (m *masons) recoverView(ctx context.Context, stream config.WorkstreamID, agent string, view func() (string, error)) error {
-	return m.driver().RecoverView(ctx, stream, agent, view)
-}

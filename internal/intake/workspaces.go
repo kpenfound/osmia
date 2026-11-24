@@ -9,7 +9,7 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// workspaces returns the provider of the backend, config.WorkspacesGit or
+// Workspaces returns the provider of the backend, config.WorkspacesGit or
 // config.WorkspacesJujutsu, for the configured project's workspaces under
 // <root>/<directory>/<project>. It is the one place the service builds a
 // version control backend.
@@ -21,7 +21,7 @@ func Workspaces(cfg *config.Config, directory, backend string) workspace.Provide
 	return &workspace.Git{Clone: cfg.Project.Clone, Directory: dir}
 }
 
-// streamWorkspaces are one kind of workspace of the configured project, under
+// StreamWorkspaces are one kind of workspace of the configured project, under
 // <root>/<directory>/<project>. Each workstream's are on the backend its
 // trace manifest records.
 type StreamWorkspaces struct {
@@ -30,7 +30,7 @@ type StreamWorkspaces struct {
 	Directory  string
 }
 
-// of returns the provider of the workstream's workspaces.
+// Of returns the provider of the workstream's workspaces.
 func (w StreamWorkspaces) Of(stream config.WorkstreamID) (workspace.Provider, error) {
 	backend, err := w.Repository.Workspaces(stream)
 	if err != nil {

@@ -10,7 +10,13 @@ import (
 	strings "strings"
 	atomic "sync/atomic"
 	testing "testing"
-	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	kb "github.com/kpenfound/osmia/internal/kb"
@@ -22,29 +28,26 @@ import (
 
 func TestExactReviewDemonstration(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
-	f, masons, chief := newAskingMasonFixture(t, 1, independentPlan, p)
-	defer f.stop(t)
-	masons.Play[masonTurnID("resume")] = reportDone("Initial candidate")
-	// Dedupe's mason is unscripted and ends its turns without a report. Its
-	// continuations end at once instead of running until the service stops, so
-	// the unit uses up mason.max_clean_turns and is contested, and holds no
-	// turn while resume is reviewed and revised.
-	f.engine.Mu.Lock()
+	p := &intakefixture.Faults{}
+	f, masons, chief := newAskingMasonFixture(t, 1, intakefixture.IndependentPlan, p)
+	defer f.Stop(t)
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Initial candidate")
+
+	f.Engine.Mu.Lock()
 	for i := 1; i <= 8; i++ {
-		f.engine.Turns[fmt.Sprintf("%s-continue-%d", masonAgent("dedupe"), i)] = masons.Turn
-		f.engine.Turns[fmt.Sprintf("%s-recover-%d", masonAgent("dedupe"), i)] = masons.Turn
+		f.Engine.Turns[fmt.Sprintf("%s-continue-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
+		f.Engine.Turns[fmt.Sprintf("%s-recover-%d", intake.MasonAgent("dedupe"), i)] = masons.Turn
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 	var reviews atomic.Int32
-	var old, revised UnitReviewIdentity
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if strings.HasPrefix(req.Name, masonAgent("resume")+"-revise-") {
+	var old, revised service.UnitReviewIdentity
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if strings.HasPrefix(req.Name, intake.MasonAgent("resume")+"-revise-") {
 			if !strings.Contains(req.Prompt, "Handle retry token") {
 				return nil, fmt.Errorf("revision lost the finding: %s", req.Prompt)
 			}
-			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), masonWrote), []byte("package trace\n// retry token handled\n"), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), fixturekit.MasonWrote), []byte("package trace\n// retry token handled\n"), 0600); err != nil {
 				return nil, err
 			}
 			if err := os.MkdirAll(filepath.Join(req.Workspace.Directory(), "docs"), 0700); err != nil {
@@ -53,12 +56,12 @@ func TestExactReviewDemonstration(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "docs", "proof.md"), []byte("Retry proof\n"), 0600); err != nil {
 				return nil, err
 			}
-			if err := reportDone("Revised candidate")(ctx, req, tools); err != nil {
+			if err := intakefixture.ReportDone("Revised candidate")(ctx, req, tools); err != nil {
 				return nil, err
 			}
 			return &agent.Result{ClaudeID: req.Name, ResultText: "Revised", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		if strings.HasPrefix(req.Name, reviewerAgent("resume")+"-review-") {
+		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
 			listed, err := tools.ListTools(ctx, nil)
 			if err != nil {
 				return nil, err
@@ -68,14 +71,14 @@ func TestExactReviewDemonstration(t *testing.T) {
 				names = append(names, tool.Name)
 			}
 			slices.Sort(names)
-			if !slices.Equal(names, []string{questions.AskTool, "factory_context", "file_read", "project_context", "record_discovery", verdictTool, reviewtools.DiffToolName}) {
+			if !slices.Equal(names, []string{questions.AskTool, "factory_context", "file_read", "project_context", "record_discovery", execution.VerdictTool, reviewtools.DiffToolName}) {
 				return nil, fmt.Errorf("reviewer tools %+v", listed.Tools)
 			}
 			identity, err := reviewtools.IdentityInPrompt(req.Prompt)
 			if err != nil {
 				return nil, err
 			}
-			if body, err := callTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"paths": []string{masonWrote}}); err != nil || !strings.Contains(body, identity.Candidate.Revision) || !strings.Contains(body, "+++ b/"+masonWrote) {
+			if body, err := fixturekit.CallTool(ctx, tools, reviewtools.DiffToolName, map[string]any{"paths": []string{fixturekit.MasonWrote}}); err != nil || !strings.Contains(body, identity.Candidate.Revision) || !strings.Contains(body, "+++ b/"+fixturekit.MasonWrote) {
 				return nil, fmt.Errorf("workstream_diff %s: %v", body, err)
 			}
 			n := reviews.Add(1)
@@ -85,17 +88,17 @@ func TestExactReviewDemonstration(t *testing.T) {
 				revised = identity
 			}
 			if n == 2 {
-				if err := asks(p, "1")(ctx, req, turn, tools); err != nil {
+				if err := intakefixture.Asks(p, "1")(ctx, req, turn, tools); err != nil {
 					return nil, err
 				}
 				return &agent.Result{ClaudeID: req.Name, ResultText: "Asked", SessionDir: req.SessionDir, NumTurns: 1}, nil
 			}
-			v := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{}}
+			v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary, Findings: []api.ReviewFinding{}}
 			if n == 1 {
 				v.Decision = "material_findings"
-				v.Findings = []ReviewFinding{{Severity: "material", Evidence: "Retry proof fails", Action: "Handle retry token"}}
+				v.Findings = []api.ReviewFinding{{Severity: "material", Evidence: "Retry proof fails", Action: "Handle retry token"}}
 			}
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}
@@ -103,65 +106,54 @@ func TestExactReviewDemonstration(t *testing.T) {
 		}
 		return chief.Turn(ctx, req, turn, tools)
 	}
-	f.engine.Mu.Unlock()
-	f.answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		if !strings.Contains(req.Prompt, relayedRuling) {
+	f.Engine.Mu.Unlock()
+	f.Answer("1", func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
+		if !strings.Contains(req.Prompt, intakefixture.RelayedRuling) {
 			return fmt.Errorf("reviewer did not receive the ruling")
 		}
-		v := UnitVerdict{Decision: "satisfactory", Summary: reviewSummary, Findings: []ReviewFinding{}}
-		body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
+		v := service.UnitVerdict{Decision: "satisfactory", Summary: fixturekit.ReviewSummary, Findings: []api.ReviewFinding{}}
+		body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": v.Decision, "summary": v.Summary, "findings": v.Findings})
 		if err != nil || !strings.Contains(body, `"recorded":true`) {
 			return fmt.Errorf("answer verdict %s: %v", body, err)
 		}
 		return nil
 	})
-	stream, _ := f.builtAs(t, "exact-review")
-	mapping, err := kb.Load(f.repository())
-	must(t, err)
+	stream, _ := f.BuiltAs(t, "exact-review")
+	mapping, err := kb.Load(f.Repository())
+	fixturekit.Must(t, err)
 	mapping.Entities = append(mapping.Entities, kb.Entity{ID: "proof-docs", Name: "Proof documents", Paths: []string{"docs"}})
-	must(t, kb.Store(context.Background(), f.repository(), mapping, f.clock.Now(), reviewerActor, "review-context"))
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		state, err := f.repository().Workflow(stream, trace.UnitSubject("resume"))
-		must(t, err)
-		if state.Value == UnitWaiting {
-			break
-		}
-		if time.Now().After(deadline) {
-			thread, _ := f.repository().Thread(stream, reviewerAgent("resume"))
-			f.engine.Mu.Lock()
-			runs := append([]string(nil), f.engine.Runs...)
-			f.engine.Mu.Unlock()
-			t.Fatalf("waiting for reviewer question: state %s, reviews %d, thread %+v, runs %v", state.Value, reviews.Load(), thread.Turns, runs)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	fixturekit.Must(t, kb.Store(context.Background(), f.Repository(), mapping, f.Clock.Now(), execution.ReviewerActor, "review-context"))
+	f.AwaitUnit(t, stream, "resume", intake.UnitWaiting)
+	intakefixture.Soon(t, "the reviewer's question turn to wait", func() bool {
+		turns := f.Thread(t, stream, intake.ReviewerAgent("resume")).Turns
+		return len(turns) >= 2 && turns[1].Status() == questions.Waiting
+	})
 	if reviews.Load() != 2 || old.Candidate.Revision == revised.Candidate.Revision || old.Candidate.BaseRevision != revised.Candidate.BaseRevision {
 		t.Fatalf("reviewed candidates: old %+v, revised %+v, turns %d", old, revised, reviews.Load())
 	}
-	f.stop(t)
-	f.start(t)
-	f.awaitUnit(t, stream, "resume", UnitWaiting)
-	f.rule(t, "1")
-	f.awaitUnit(t, stream, "resume", UnitMerged)
+	f.Stop(t)
+	f.Start(t)
+	f.AwaitUnit(t, stream, "resume", intake.UnitWaiting)
+	f.Rule(t, "1")
+	f.AwaitUnit(t, stream, "resume", intake.UnitMerged)
 	if reviews.Load() != 2 {
 		t.Fatalf("review turns: %d", reviews.Load())
 	}
-	if reason := staleReview(old, revised); !strings.HasPrefix(reason, "stale candidate revision") {
+	if reason := execution.StaleReview(old, revised); !strings.HasPrefix(reason, "stale candidate revision") {
 		t.Fatalf("old candidate accepted: %q", reason)
 	}
-	var results []UnitReviewResult
-	docs, err := trace.Read[trace.Document](f.repository(), stream)
-	must(t, err)
+	var results []service.UnitReviewResult
+	docs, err := trace.Read[trace.Document](f.Repository(), stream)
+	fixturekit.Must(t, err)
 	for _, d := range docs {
-		if d.ID == reviewDocument("resume") {
-			var result UnitReviewResult
+		if d.ID == execution.ReviewDocument("resume") {
+			var result service.UnitReviewResult
 			if json.Unmarshal([]byte(d.Content), &result) == nil && result.Turn != "" {
 				results = append(results, result)
 			}
 		}
 	}
-	if len(results) != 2 || results[0].Verdict.Decision != "material_findings" || results[1].Verdict.Decision != "satisfactory" || results[1].Verdict.Summary != reviewSummary {
+	if len(results) != 2 || results[0].Verdict.Decision != "material_findings" || results[1].Verdict.Decision != "satisfactory" || results[1].Verdict.Summary != fixturekit.ReviewSummary {
 		t.Fatalf("review trace: %+v", results)
 	}
 	if results[1].Identity != revised || results[1].Identity.Candidate.SpecRevision == "" || results[1].Identity.Candidate.PlanRevision == "" {
@@ -169,18 +161,18 @@ func TestExactReviewDemonstration(t *testing.T) {
 	}
 
 	var refreshed, approved bool
-	for _, move := range allTransitions(t, f.s.cfg.Root, f.project, stream) {
+	for _, move := range intakefixture.AllTransitions(t, f.S.Cfg.Root, f.Project, stream) {
 		if move.Subject != trace.UnitSubject("resume") {
 			continue
 		}
-		refreshed = refreshed || move.From == UnitReviewing && move.To == UnitReviewing
-		approved = approved || move.To == UnitApproved && strings.Contains(move.Reason, revised.Candidate.Revision)
+		refreshed = refreshed || move.From == intake.UnitReviewing && move.To == intake.UnitReviewing
+		approved = approved || move.To == intake.UnitApproved && strings.Contains(move.Reason, revised.Candidate.Revision)
 	}
-	if refreshed || !approved || f.question(t, stream, "1").State != trace.QuestionAnswered {
+	if refreshed || !approved || f.Question(t, stream, "1").State != trace.QuestionAnswered {
 		t.Fatalf("missing exact approval or ruling: refreshed %t, approved %t", refreshed, approved)
 	}
-	thread := f.thread(t, stream, reviewerAgent("resume"))
-	if thread.Identity.Role != reviewerRole || len(thread.Turns) != 3 || thread.Turns[1].Status() != questions.Waiting {
+	thread := f.Thread(t, stream, intake.ReviewerAgent("resume"))
+	if thread.Identity.Role != intake.ReviewerRole || len(thread.Turns) != 3 || thread.Turns[1].Status() != questions.Waiting {
 		t.Fatalf("reviewer requests and responses: %+v", thread.Turns)
 	}
 	masons.Check(t)

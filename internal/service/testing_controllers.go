@@ -92,11 +92,11 @@ func (d *TestFinalDriver) Governing(ctx context.Context, w config.WorkstreamID) 
 }
 
 // RefusePublicationForTest records a local publication refusal for inbox fixtures.
-func RefusePublicationForTest(ctx context.Context, s *Service, r *trace.Repository, w config.WorkstreamID, in publishInput, reason string) (coreadapter.OperationResult, error) {
+func RefusePublicationForTest(ctx context.Context, s *Service, r *trace.Repository, w config.WorkstreamID, in delivery.PublishInput, reason string) (coreadapter.OperationResult, error) {
 	return (&delivery.Publisher{S: s.delivery(), Repository: r}).Refuse(ctx, w, in, reason)
 }
 
-// TestUnitWorkspaces exposes only opening and snapshotting fixture workspaces.
+// TestUnitWorkspaces exposes opening fixture workspaces.
 type TestUnitWorkspaces struct{ unitWorkspaces }
 
 func UnitWorkspacesForTest(c *config.Config, r *trace.Repository) TestUnitWorkspaces {
@@ -104,9 +104,6 @@ func UnitWorkspacesForTest(c *config.Config, r *trace.Repository) TestUnitWorksp
 }
 func (d TestUnitWorkspaces) Open(ctx context.Context, w config.WorkstreamID, u string) (workspace.Worktree, string, error) {
 	return d.open(ctx, w, u)
-}
-func (d TestUnitWorkspaces) Snapshot(ctx context.Context, w config.WorkstreamID, u string) (workspace.Worktree, string, string, error) {
-	return d.snapshot(ctx, w, u)
 }
 
 type TestFinalInput = finalReviewInput
@@ -134,14 +131,9 @@ func BaseRefreshForTest(s *Service, repo *trace.Repository, now func() time.Time
 	return &baseRefresher{S: s.lifecycle(), Repository: repo}
 }
 
-type TestBaseObservation = baseObservation
-
 var TestBaseObservationAt = baseObservationAt
 var TestResolved = resolved
 
-const TestBaseObservationDocument = baseObservationDocument
-
-const TestDriftPath = driftPath
 const TestDriftReplayed = driftReplayed
 
 var TestDependentBaseChanged = dependentBaseChanged

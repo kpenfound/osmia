@@ -66,8 +66,7 @@ func (s *Service) PruneEngine(ctx context.Context, control EngineControl) error 
 	return s.checkSlots.engineAction(ctx, control, "prune", control.Prune)
 }
 
-// activeChecks requires mu. Snapshots never expose the held map to callers.
-func (p *checkSlotPool) activeChecks() []CheckSlotRun {
+func (p *checkSlotPool) activeChecksLocked() []CheckSlotRun {
 	checks := make([]CheckSlotRun, 0, len(p.held))
 	for w := range p.held {
 		checks = append(checks, w.run)
@@ -78,8 +77,6 @@ func (p *checkSlotPool) activeChecks() []CheckSlotRun {
 	return checks
 }
 
-// startEngineTurn waits before the thread runner claims the turn or records an
-// attempt. The lease lasts until the dispatched operation has settled.
 func (p *checkSlotPool) startEngineTurn(ctx context.Context, turn EngineTurn) (func(), error) {
 	for {
 		p.mu.Lock()
@@ -131,7 +128,7 @@ func (p *checkSlotPool) engineAction(ctx context.Context, control EngineControl,
 				continue
 			}
 		}
-		busy := &EngineBusyError{Action: action, Checks: p.activeChecks()}
+		busy := &EngineBusyError{Action: action, Checks: p.activeChecksLocked()}
 		for turn := range p.turns {
 			busy.Turns = append(busy.Turns, *turn)
 		}
@@ -148,7 +145,7 @@ func (p *checkSlotPool) engineAction(ctx context.Context, control EngineControl,
 			p.mu.Lock()
 			close(p.maintenance)
 			p.maintenance = nil
-			p.admit()
+			p.admitLocked()
 			p.mu.Unlock()
 			p.notify()
 		}()

@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// A ruling Jev decided is written by Jev and a ruling of anyone else never is,
-// so a Jev decision cannot read as the owner's. The chief of staff's relay of
-// it is the one later revision another actor writes.
 func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
@@ -24,7 +21,6 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 	}
 	chief := Actor{Kind: "agent", ID: ChiefOfStaff}
 	owner := Actor{Kind: "owner", ID: "local"}
-	// The first revision of a decision names its decider as its actor.
 	for name, bad := range map[string]Ruling{
 		"Jev's decision with the owner as actor":          ruling("b1", 1, DecidedByJev, "judgment_ab12", owner, ""),
 		"Jev's decision with the chief of staff as actor": ruling("b2", 1, DecidedByJev, "judgment_ab12", chief, ""),
@@ -42,7 +38,6 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 			t.Fatalf("ruling %s: %v", good.ID, err)
 		}
 	}
-	// The one later revision another actor writes is the chief of staff's relay.
 	for name, bad := range map[string]Ruling{
 		"a relay of Jev's decision by the owner":      ruling("r1", 2, DecidedByJev, "judgment_ab12", owner, "Files."),
 		"a relay of Jev's decision that returns none": ruling("r1", 2, DecidedByJev, "judgment_ab12", chief, ""),
@@ -57,8 +52,6 @@ func TestJevRulingsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 	}
 }
 
-// The documents that record a ratification and an amendment decision agree
-// with the decider they name: Jev's is written by Jev, and the owner's never is.
 func TestJevDecisionDocumentsAreWrittenByJevAndNeverByAnotherActor(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
@@ -93,16 +86,11 @@ func TestJevDecisionDocumentsAreWrittenByJevAndNeverByAnotherActor(t *testing.T)
 			t.Fatalf("%s: %v", good.Path, err)
 		}
 	}
-	// A document that is no decision is free to carry any actor.
 	if err := r.RecordDocuments(ctx, []Document{document("spec", "spec.md", jevRatification, JevActor)}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// Jev rules on an escalation through the same path the owner does: the ruling
-// is the ordinary ruling, recorded with Jev as its actor and its judgment, the
-// notice tells the chief of staff Jev decided, and the chief of staff relays it
-// as it relays the owner's. The owner's own ruling is still the owner's.
 func TestJevRulesOnAnEscalationAndTheChiefOfStaffRelaysIt(t *testing.T) {
 	ctx := context.Background()
 	r, _, _ := create(t)
@@ -162,11 +150,9 @@ func TestJevRulesOnAnEscalationAndTheChiefOfStaffRelaysIt(t *testing.T) {
 		t.Fatalf("notices: %q", notices)
 	}
 
-	// Ruling again is refused, whoever asks.
 	if err := second(r.RuleDecided(ctx, 1, "Resume.", JevActor, "judgment_ab12", when)); err == nil {
 		t.Fatal("an escalation ruled twice")
 	}
-	// The relay is the chief of staff's revision of the same decision.
 	if _, err := r.RelayRuling(ctx, "chief", chief, "1", "Resume.", ScopeLocal, when.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}

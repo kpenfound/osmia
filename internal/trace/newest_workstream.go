@@ -37,8 +37,6 @@ func (r *Repository) NewestWorkstreamCreated() (time.Time, bool, error) {
 	return newest, found, nil
 }
 
-// createdAt returns the workstream's creation time from the cache, reading
-// its manifest on the first use.
 func (r *Repository) createdAt(id config.WorkstreamID) (time.Time, bool) {
 	r.createdMu.Lock()
 	at, ok := r.created[id]

@@ -31,18 +31,12 @@ func (p *Publisher) Bound(op coreadapter.Operation) bool { return PublicationAct
 // failing opens its inbox entry (see PublicationEntry).
 func (p *Publisher) Failing(context.Context, coreadapter.Operation, int, string) error { return nil }
 
-// verdict is what the read-only reconcile of a publication found.
 type verdict int
 
 const (
-	// verdictAbsent means the remote shows the effect is not there.
 	verdictAbsent verdict = iota
-	// verdictReady means the pull request is ready for review as approved.
 	verdictReady
-	// verdictDraft means the approval is applied by recording the pull request
-	// as a draft, which changes nothing on it.
 	verdictDraft
-	// verdictOpened means the pushed branch and its pull request are as approved.
 	verdictOpened
 )
 
@@ -71,8 +65,6 @@ func (p *Publisher) GiveUp(ctx context.Context, op coreadapter.Operation, why re
 		return coreadapter.OperationResult{}, err
 	}
 	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(p.Repository.Project()), Workstream: string(stream)})
-	// An outcome the publication recorded stands: a restart between its record
-	// and the controller's result keeps it.
 	if result, err := p.Outcome(stream, in.Approval); err != nil || result != nil {
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -112,9 +104,6 @@ func (p *Publisher) GiveUp(ctx context.Context, op coreadapter.Operation, why re
 	return p.refuse(write, stream, in, recorded, fmt.Sprintf("Whether the pull request was marked ready for review could not be determined: %s. The workstream stays assembled; check the pull request, and the owner can mark it ready again.", reason))
 }
 
-// readReady reads the draft pull request of the push that signed the reviewed
-// commit, as MarkReady does before it acts. An error means the remote or the
-// recorded evidence cannot be read.
 func (p *Publisher) readReady(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput) (reading, error) {
 	approval, err := ApprovalAt(p.Repository, stream, in.Approval)
 	if err != nil {
@@ -174,7 +163,7 @@ func (p *Publisher) readReady(ctx context.Context, stream config.WorkstreamID, o
 	if unresolved || in.Draft {
 		return reading{verdict: verdictDraft, push: push, reference: reference}, nil
 	}
-	title, description := PublishedTitle(approval, stream), approval.Description
+	title, description := approval.Title, approval.Description
 	described := pr.Title == title && pr.Body == description
 	switch {
 	case !pr.Draft && described:
@@ -187,9 +176,6 @@ func (p *Publisher) readReady(ctx context.Context, stream config.WorkstreamID, o
 	return reading{evidence: fmt.Sprintf("pull request #%d of %s is still a draft and does not have the approved description", pr.Number, push.Upstream)}, nil
 }
 
-// readMaintenance reads the branch and pull request a delivery maintenance
-// publication pushes and opens, as Apply does before it acts. An error means
-// the remote or the recorded evidence cannot be read.
 func (p *Publisher) readMaintenance(ctx context.Context, stream config.WorkstreamID, op coreadapter.Operation, in PublishInput) (reading, error) {
 	cfg := p.S.About(p.Repository)
 	if !cfg.HasProject() || cfg.Project.ID != p.Repository.Project() {
@@ -209,7 +195,6 @@ func (p *Publisher) readMaintenance(ctx context.Context, stream config.Workstrea
 			record = &prior[i]
 		}
 	}
-	// The push is recorded before it is made: without a record nothing was pushed.
 	if record == nil {
 		return reading{evidence: "no push of this publication is recorded, so nothing was pushed or opened"}, nil
 	}
@@ -232,7 +217,7 @@ func (p *Publisher) readMaintenance(ctx context.Context, stream config.Workstrea
 	if err != nil {
 		return reading{}, err
 	}
-	title := PublishedTitle(approval, stream)
+	title := approval.Title
 	if len(prs) != 1 || !MatchingPublicationPR(prs[0], in, record.Branch, title, approval.Description, record.Commit) {
 		return reading{evidence: fmt.Sprintf("%s of %s holds the pushed commit %s, but %d pull requests of %s are open against %s with the approved description at it", record.Branch, record.Fork, record.Commit, len(prs), in.Upstream, in.Base)}, nil
 	}

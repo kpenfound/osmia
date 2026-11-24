@@ -40,7 +40,7 @@ func ArchiveRecord(t *testing.T, store *runtime.Store, stream config.WorkstreamI
 func OnlyRun[R any](t *testing.T, repository *trace.Repository, stream config.WorkstreamID, read func(*trace.Repository, config.WorkstreamID) ([]R, error)) R {
 	t.Helper()
 	runs, err := read(repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if len(runs) != 1 {
 		t.Fatalf("check runs %+v, want one", runs)
 	}
@@ -76,7 +76,7 @@ func HeldCheck(ctx context.Context, links []string, entered chan []string, relea
 	}
 }
 
-func CleanupCheckpoint(ctx context.Context, step string, reached, released chan struct{}, once *sync.Once) error {
+func CleanupCheckpoint(ctx context.Context, step string, reached chan struct{}, released <-chan struct{}, once *sync.Once) error {
 	if step != "archive-cleanup-ready" {
 		return nil
 	}
@@ -101,14 +101,14 @@ func AwaitCleanup(t *testing.T, reached chan struct{}) {
 func MissingVerdictContest(t *testing.T, state func(*testing.T) trace.WorkflowState, pass func(context.Context, trace.WorkflowState) error, capture func(), readContest func() (trace.Transition, bool, error)) trace.Transition {
 	t.Helper()
 	ctx := context.Background()
-	Must(t, pass(ctx, state(t)))
+	fixturekit.Must(t, pass(ctx, state(t)))
 	capture()
-	Must(t, pass(ctx, state(t)))
+	fixturekit.Must(t, pass(ctx, state(t)))
 	if state := state(t); state.Value != intake.UnitContested {
 		t.Fatalf("a review turn without a verdict left the unit %s", state.Value)
 	}
 	contest, contested, err := readContest()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !contested || !strings.Contains(contest.Reason, "ended without recording a verdict") {
 		t.Fatalf("contest %+v", contest)
 	}
@@ -121,7 +121,7 @@ func LandingReview(ctx context.Context, unit string, req agent.Request, tools *m
 		return nil, err
 	}
 	record(unit, identity)
-	body, err := CallTool(ctx, tools, "verdict", map[string]any{"decision": "satisfactory", "summary": "The candidate does the task and its acceptance holds", "findings": []api.ReviewFinding{}})
+	body, err := fixturekit.CallTool(ctx, tools, "verdict", map[string]any{"decision": "satisfactory", "summary": "The candidate does the task and its acceptance holds", "findings": []api.ReviewFinding{}})
 	if err != nil || !strings.Contains(body, `"recorded":true`) {
 		return nil, fmt.Errorf("verdict %s: %v", body, err)
 	}
@@ -137,7 +137,7 @@ func PrepareJujutsuLanding[B any](t *testing.T, repository *trace.Repository, st
 
 	for unit, report := range map[string]string{"upload": upload, "audit": audit} {
 		b, found, err := d.Read(stream)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !found {
 			t.Fatal("the workstream is not building")
 		}
@@ -149,22 +149,22 @@ func PrepareJujutsuLanding[B any](t *testing.T, repository *trace.Repository, st
 
 	for unit, files := range filesByUnit {
 		w, _, found, err := find(ctx, stream, unit)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !found {
 			t.Fatalf("unit %s has no workspace", unit)
 		}
 		for name, content := range files {
 			if content == "" {
-				Must(t, os.Remove(filepath.Join(w.Path, name)))
+				fixturekit.Must(t, os.Remove(filepath.Join(w.Path, name)))
 				continue
 			}
-			Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
-			Must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
+			fixturekit.Must(t, os.MkdirAll(filepath.Dir(filepath.Join(w.Path, name)), 0700))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, name), []byte(content), 0600))
 		}
 	}
 	landed := move(map[string]string{fixturekit.MasonWrote: "package trace\n\n// landed\n", "internal/trace/git.go": "package trace\n\n// landed git\n"})
 
-	Must(t, pass(ctx))
+	fixturekit.Must(t, pass(ctx))
 	ops := map[string]coreadapter.Operation{}
 	for _, unit := range []string{"resume", "upload", "audit"} {
 		asked := operations(unit)
@@ -179,7 +179,7 @@ func PrepareJujutsuLanding[B any](t *testing.T, repository *trace.Repository, st
 func UnitOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, identify func(coreadapter.Operation) (string, error)) []trace.OperationRecord {
 	t.Helper()
 	ops, err := repository.Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return slices.DeleteFunc(ops, func(o trace.OperationRecord) bool {
 		found, err := identify(o.Operation)
 		return err != nil || found != unit
@@ -189,7 +189,7 @@ func UnitOperations(t *testing.T, repository *trace.Repository, stream config.Wo
 func Workspace(t *testing.T, provider workspace.Provider, stream config.WorkstreamID) workspace.Worktree {
 	t.Helper()
 	w, found, err := provider.Workspace(context.Background(), string(stream))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("the workstream has no drift resolution workspace")
 	}
@@ -199,6 +199,6 @@ func Workspace(t *testing.T, provider workspace.Provider, stream config.Workstre
 func VerdictOutcome(t *testing.T, verdict any, status string) *coreadapter.Outcome {
 	t.Helper()
 	data, err := json.Marshal(verdict)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return &coreadapter.Outcome{Status: status, Report: string(data)}
 }

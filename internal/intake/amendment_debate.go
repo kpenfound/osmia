@@ -28,7 +28,7 @@ const (
 
 type AmendmentDebate struct{ *Debate }
 
-// amendmentOperation identifies the amendment and the debate round of an
+// AmendmentOperation identifies the amendment and the debate round of an
 // amendment round or reply operation. A missing round is round 1.
 type AmendmentOperation struct {
 	ID    string `json:"id"`
@@ -47,7 +47,7 @@ func AmendmentReplyPath(id string, round int) string {
 
 func AmendmentPacketPath(id string) string { return "amendments/" + id + "/packet.json" }
 
-// amendmentStep is the ID of the transition that moves an amendment to the
+// AmendmentStep is the ID of the transition that moves an amendment to the
 // given state in the given debate round. Round 1 keeps the plain ID.
 func AmendmentStep(id string, round int, to string) string {
 	if round > 1 {
@@ -56,7 +56,7 @@ func AmendmentStep(id string, round int, to string) string {
 	return "amendment-" + id + "-" + to
 }
 
-// amendmentReplyPrefix is the turn ID prefix of the architect's reply to one
+// AmendmentReplyPrefix is the turn ID prefix of the architect's reply to one
 // debate round of an amendment.
 func AmendmentReplyPrefix(id string, round int) string {
 	if round > 1 {
@@ -65,7 +65,7 @@ func AmendmentReplyPrefix(id string, round int) string {
 	return "amend-" + id + "-reply-"
 }
 
-// amendmentRecords returns the committee's records of every debate round of
+// AmendmentRecords returns the committee's records of every debate round of
 // an amendment, ordered by round and member.
 func AmendmentRecords(repo *trace.Repository, stream config.WorkstreamID, id string) ([]shed.Record, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
@@ -101,7 +101,7 @@ func AmendmentRecords(repo *trace.Repository, stream config.WorkstreamID, id str
 	return out, nil
 }
 
-// roundRecords returns the records of one debate round.
+// RoundRecords returns the records of one debate round.
 func RoundRecords(records []shed.Record, round int) []shed.Record {
 	var out []shed.Record
 	for _, r := range records {
@@ -160,7 +160,7 @@ func (a AmendmentDebate) Pass(ctx context.Context) error {
 	return nil
 }
 
-// one moves one amendment on from the state it is in.
+// One moves one amendment on from the state it is in.
 func (a AmendmentDebate) One(ctx context.Context, stream config.WorkstreamID, req trace.Amendment) error {
 	if handled, err := a.S.RetireAmendment(ctx, a.Repository, stream, req.ID); err != nil || handled {
 		return err
@@ -213,7 +213,6 @@ func (a AmendmentDebate) One(ctx context.Context, stream config.WorkstreamID, re
 }
 
 func (a AmendmentDebate) Start(ctx context.Context, stream config.WorkstreamID, id string, round int, state trace.WorkflowState, from, action, to string) error {
-	// A paused workstream is asked for nothing until the pause is lifted.
 	if _, paused := a.S.Pausing(a.Repository.Project(), stream); paused {
 		return nil
 	}
@@ -360,7 +359,7 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				records[i], waiting[i], failures[i] = a.Member(trace.Beside(ctx), trace.Beside(running), cfg, stream, op.ID, in, member)
+				records[i], waiting[i], failures[i] = a.Member(ctx, running, cfg, stream, op.ID, in, member)
 			}()
 		}
 		wg.Wait()
@@ -387,19 +386,19 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 			}
 			docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: fmt.Sprintf("amendment_%s_round_%d_%s", id, n, r.Member), Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "agent", ID: r.Member}, Cause: op.ID, Depth: 1}, Path: AmendmentRoundPath(id, n, r.Member), Content: string(data)})
 		}
-		if err := trace.Relock(ctx, func() error { return a.Repository.RecordDocuments(ctx, docs) }); err != nil {
+		if err := a.Repository.RecordDocuments(ctx, docs); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 	}
 	var result coreadapter.OperationResult
-	err = trace.Relock(ctx, func() error {
+	err = func() error {
 		result, err = a.Heard(ctx, op, stream, id, n, members, records, all)
 		return err
-	})
+	}()
 	return result, err
 }
 
-// heard moves the amendment to heard once round n has a record of every
+// Heard moves the amendment to heard once round n has a record of every
 // member.
 func (a AmendmentDebate) Heard(ctx context.Context, op coreadapter.Operation, stream config.WorkstreamID, id string, n int, members []string, records, all []shed.Record) (coreadapter.OperationResult, error) {
 	if result, err := a.Outcome(stream, id, op.ID); err != nil || result != nil {
@@ -441,8 +440,6 @@ func (a AmendmentDebate) Reply(ctx context.Context, op coreadapter.Operation, st
 	}
 	prefix := AmendmentReplyPrefix(id, n)
 	var queued *trace.QueuedTurn
-	// A turn a hard pause stopped is continued within its attempt, so only
-	// the attempts' own turns count.
 	attempts := 0
 	for i := range t.Turns {
 		if strings.HasPrefix(t.Turns[i].Request.TurnID, prefix) {
@@ -553,7 +550,6 @@ func (a AmendmentDebate) Reply(ctx context.Context, op coreadapter.Operation, st
 				break
 			}
 		}
-		// The next run continues the turn once the pause is lifted.
 		if StoppedTurn(queued) {
 			return coreadapter.OperationResult{}, fmt.Errorf("%w: a hard pause stopped architect turn %s", ErrPaused, turn)
 		}
@@ -590,7 +586,7 @@ func (a AmendmentDebate) Reply(ctx context.Context, op coreadapter.Operation, st
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: tx.Transition.Reason}, nil
 }
 
-// replied returns what the attempt of the architect's reply that turn q
+// Replied returns what the attempt of the architect's reply that turn q
 // belongs to answered, or nil when it answered nothing: the answers every
 // turn of the attempt kept, a later answer to an objection replacing an
 // earlier one, as the reply of q.

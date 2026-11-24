@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
@@ -49,8 +51,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	opts := fixture(t)
 	var logs bytes.Buffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	files := configFiles(t, opts)
-	// The hooks endpoint is a local fake: the running project publishes to it.
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	hooks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+token {
 			t.Errorf("a post did not carry the publisher's token")
@@ -59,7 +60,7 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 	}))
 	defer hooks.Close()
 	tables := strings.Replace(hearsayTables, "https://hooks.example", hooks.URL, 1)
-	files.write(t, files.topText+tables, files.projectText)
+	files.Write(t, files.TopText+tables)
 	s, c := start(t, opts)
 	ctx := context.Background()
 
@@ -67,9 +68,9 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 		t.Fatal("the publisher token is not registered for redaction")
 	}
 	view, err := c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	raw, err := json.Marshal(view)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if strings.Contains(string(raw), token) || !strings.Contains(string(raw), `"token_env":"TEST_HEARSAY_PUBLISHER_TOKEN"`) || view.Effective.Hearsay.Publish == nil {
 		t.Fatalf("configuration response: %s", raw)
 	}
@@ -77,16 +78,14 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 		t.Fatal("a complete publish table did not enable publishing")
 	}
 
-	// A reload that fails on the publish table, even one whose value spells the
-	// token, names the field and none of the value.
-	bad := strings.Replace(files.topText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
-	files.write(t, bad, files.projectText)
+	bad := strings.Replace(files.TopText+tables, `hooks_url = "`+hooks.URL+`"`, `hooks_url = "https://user:`+token+`@hooks.example"`, 1)
+	files.Write(t, bad)
 	_, err = c.Reload(ctx)
 	if err == nil || !strings.Contains(err.Error(), "hearsay.publish.hooks_url") || strings.Contains(err.Error(), token) {
 		t.Fatalf("reload error: %v", err)
 	}
 	view, err = c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	raw, _ = json.Marshal(view)
 	if strings.Contains(string(raw), token) || view.LastError == nil || view.LastError.Field != "hearsay.publish.hooks_url" {
 		t.Fatalf("configuration after the failed reload: %s", raw)
@@ -99,12 +98,12 @@ func TestPublisherTokenNeverAppearsInConfigResponsesErrorsOrLogs(t *testing.T) {
 func TestPublishAbsentLeavesConfigurationUnpublished(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	withoutPublish, _, _ := strings.Cut(hearsayTables, "[hearsay.publish]")
-	files.write(t, files.topText+withoutPublish, files.projectText)
+	files.Write(t, files.TopText+withoutPublish)
 	s, c := start(t, opts)
 	view, err := c.Configuration(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if view.Effective.Hearsay.URL == "" || view.Effective.Hearsay.Publish != nil || view.Effective.Hearsay.Publishing() || s.current().HearsayScope() != "" {
 		t.Fatalf("publishing enabled without the table: %+v", view.Effective.Hearsay)
 	}
@@ -114,7 +113,7 @@ func memoryTurnConfig(t *testing.T, hearsay config.Hearsay, scope string) (*conf
 	t.Helper()
 	_, cfg := conversationFixture(t, "memory-tools-")
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	cfg.Hearsay = hearsay
 	cfg.Project.HearsayScope = scope
@@ -133,7 +132,7 @@ func memoryTurnTools(t *testing.T, cfg *config.Config, repo *trace.Repository) (
 	for role, grant := range turns.Grants {
 		granted[role] = grant.Tools
 		tools, err := turns.Scoped(context.Background(), coreadapter.Scope{Project: string(repo.Project()), Role: role})
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, tool := range tools {
 			scoped[role] = append(scoped[role], tool.Name)
 		}
@@ -164,8 +163,7 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 				t.Errorf("%s %s write tools: %v", role, class.role, names[class.role])
 			}
 		}
-		// Sessions get no project_context.
-		if slices.Contains(names[sessionRole], projectContextTool) {
+		if slices.Contains(names[sessionRole], ProjectContextTool) {
 			t.Errorf("%s session: %v", role, names[sessionRole])
 		}
 	}
@@ -173,7 +171,6 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 		t.Fatalf("the session lost its own tool: %v", granted[sessionRole])
 	}
 
-	// An override alone, without a work source, also turns the tools on.
 	override := publishing
 	override.Publish = nil
 	cfg, repo = memoryTurnConfig(t, override, "code:owner/repo")
@@ -182,7 +179,6 @@ func TestHearsayReadToolsFollowTheResolvedEntityAndTheRoleClass(t *testing.T) {
 		t.Fatalf("override grants: %v", granted)
 	}
 
-	// Without a work source and without an override the roles stay as before.
 	cfg, repo = memoryTurnConfig(t, override, "")
 	granted, scoped = memoryTurnTools(t, cfg, repo)
 	for role, names := range map[string][]string{"granted": slices.Concat(granted[masonRole], granted[sessionRole], granted[trace.ChiefOfStaff]), "scoped": slices.Concat(scoped[masonRole], scoped[sessionRole])} {

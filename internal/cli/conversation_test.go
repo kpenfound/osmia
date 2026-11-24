@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"os/exec"
@@ -16,19 +17,18 @@ import (
 	wire "github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// answering is a fake chief of staff that answers every prompt at once.
 type answering struct{}
 
 func (answering) Run(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 	return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "claude", ID: "session"}, FinalResponse: "Noted.\nThe plan is next."}, nil
 }
 
-// ticking returns a clock that starts at written and advances a minute per read.
 func ticking() func() time.Time {
 	var mu sync.Mutex
 	now := written
@@ -40,13 +40,11 @@ func ticking() func() time.Time {
 	}
 }
 
-// withConversation creates the project trace with two workstreams and runs
-// chief-of-staff turns with the fake chief of staff.
 func withConversation(t *testing.T) service.Options {
 	t.Helper()
 	ctx := context.Background()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
+	cfg, err := projectstore.LoadConfig(opts.Config)
 	must(t, err)
 	cmd := exec.Command("git", "init", "--quiet", cfg.Project.Clone)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull}
@@ -69,32 +67,47 @@ func withConversation(t *testing.T) service.Options {
 	return opts
 }
 
-func TestSendAndConversation(t *testing.T) {
+func startConversation(t *testing.T) (string, *service.Service) {
+	t.Helper()
 	opts := withConversation(t)
 	s, err := service.Start(context.Background(), opts)
 	must(t, err)
 	t.Cleanup(func() { s.Close() })
-	root := opts.Config.Root
+	return opts.Config.Root, s
+}
 
+func TestSendQueuesAMessageForTheChiefOfStaff(t *testing.T) {
+	root, _ := startConversation(t)
 	var sent wire.ConversationEntry
 	must(t, json.Unmarshal([]byte(successful(t, root, "send", stream, "Start with uploads.", "--json")), &sent))
 	if sent.Kind != "message" || sent.State != wire.TurnQueued || sent.Text != "Start with uploads." || !strings.HasPrefix(sent.Turn, "message_") {
 		t.Fatalf("send --json: %+v", sent)
 	}
-	var list wire.ConversationResponse
-	deadline := time.Now().Add(5 * time.Minute)
-	for {
+}
+
+func TestSendPrintsTheQueuedMessage(t *testing.T) {
+	root, _ := startConversation(t)
+	out := successful(t, root, "send", quiet, "Hold this one.")
+	if !strings.HasPrefix(out, "Message message_") || !strings.HasSuffix(out, " sent to the chief of staff of "+quiet+": queued\n") {
+		t.Fatalf("send: %q", out)
+	}
+}
+
+func answeredConversation(t *testing.T, root string) (sent wire.ConversationEntry, list wire.ConversationResponse) {
+	t.Helper()
+	must(t, json.Unmarshal([]byte(successful(t, root, "send", stream, "Start with uploads.", "--json")), &sent))
+	eventually(t, 5*time.Minute, func() (bool, string) {
 		var current service.ConversationResponse
 		must(t, json.Unmarshal([]byte(successful(t, root, "conversation", stream, "--json")), &current))
-		if len(current.Entries) == 2 {
-			list = current
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no response: %+v", current)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		list = current
+		return len(current.Entries) == 2, fmt.Sprintf("no response: %+v", current)
+	})
+	return sent, list
+}
+
+func TestConversationJSONHoldsTheMessageAndTheChiefsResponse(t *testing.T) {
+	root, _ := startConversation(t)
+	sent, list := answeredConversation(t, root)
 	answered := list.Entries[1].At
 	want := wire.ConversationResponse{Workstream: stream, Entries: []wire.ConversationEntry{
 		{Turn: sent.Turn, Kind: "message", Text: "Start with uploads.", At: sent.At, State: wire.TurnDone},
@@ -103,6 +116,11 @@ func TestSendAndConversation(t *testing.T) {
 	if !reflect.DeepEqual(list, want) || !answered.After(sent.At) {
 		t.Fatalf("conversation --json: %+v", list)
 	}
+}
+
+func TestConversationJSONEntriesCarryExactlyFiveFields(t *testing.T) {
+	root, _ := startConversation(t)
+	answeredConversation(t, root)
 	var raw struct {
 		Workstream string                       `json:"workstream"`
 		Entries    []map[string]json.RawMessage `json:"entries"`
@@ -117,18 +135,22 @@ func TestSendAndConversation(t *testing.T) {
 			t.Fatalf("entry keys: %v", keys)
 		}
 	}
+}
 
-	if want := "Conversation: " + stream + "\n" +
+func TestConversationTextShowsEachEntryWithItsAuthorAndTurn(t *testing.T) {
+	root, _ := startConversation(t)
+	sent, list := answeredConversation(t, root)
+	answered := list.Entries[1].At
+	want := "Conversation: " + stream + "\n" +
 		sent.At.Format(time.RFC3339) + " owner [" + sent.Turn + " done]\n  Start with uploads.\n" +
-		answered.Format(time.RFC3339) + " chief of staff [" + sent.Turn + " done]\n  Noted.\n  The plan is next.\n"; successful(t, root, "conversation", stream) != want {
-		t.Fatalf("conversation:\n%s\nwant:\n%s", successful(t, root, "conversation", stream), want)
+		answered.Format(time.RFC3339) + " chief of staff [" + sent.Turn + " done]\n  Noted.\n  The plan is next.\n"
+	if got := successful(t, root, "conversation", stream); got != want {
+		t.Fatalf("conversation:\n%s\nwant:\n%s", got, want)
 	}
+}
 
-	out := successful(t, root, "send", quiet, "Hold this one.")
-	if !strings.HasPrefix(out, "Message message_") || !strings.HasSuffix(out, " sent to the chief of staff of "+quiet+": queued\n") {
-		t.Fatalf("send: %q", out)
-	}
-
+func TestSendAndConversationRefuseAnUnknownWorkstream(t *testing.T) {
+	root, _ := startConversation(t)
 	unknown := "w_00000000000000000000000000000009"
 	for _, args := range [][]string{{"send", unknown, "hello"}, {"conversation", unknown}} {
 		code, out, diag := invoke(t, root, args...)
@@ -136,17 +158,27 @@ func TestSendAndConversation(t *testing.T) {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}
+}
+
+func TestSendRefusesEmptyText(t *testing.T) {
+	root, _ := startConversation(t)
 	code, out, diag := invoke(t, root, "send", stream, "  ")
 	if code != 4 || out != "" || diag != "validation: text must not be empty\n" {
 		t.Fatalf("empty message: %d %q %q", code, out, diag)
 	}
+}
+
+func TestSendAndConversationRefuseInvalidArguments(t *testing.T) {
+	root, _ := startConversation(t)
 	for _, args := range [][]string{{"send", stream}, {"send", "not-a-workstream", "hello"}, {"send", stream, "a", "b"}, {"conversation"}, {"conversation", project}, {"conversation", stream, quiet}, {"send", stream, "hello", "--hard"}} {
 		code, out, diag := invoke(t, root, args...)
 		if code != 2 || out != "" || !strings.Contains(diag, "invalid arguments") {
 			t.Fatalf("%v: %d %q %q", args, code, out, diag)
 		}
 	}
+}
 
+func TestSendAndConversationWithoutAProjectNameProjectAdd(t *testing.T) {
 	empty, _ := emptyFixture(t)
 	idle, err := service.Start(context.Background(), empty)
 	must(t, err)
@@ -157,8 +189,12 @@ func TestSendAndConversation(t *testing.T) {
 			t.Fatalf("no project %v: %d %q %q", args, code, out, diag)
 		}
 	}
+}
+
+func TestSendWithAStoppedServiceNamesTheUnreachableService(t *testing.T) {
+	root, s := startConversation(t)
 	s.Close()
-	code, out, diag = invoke(t, root, "send", stream, "hello")
+	code, out, diag := invoke(t, root, "send", stream, "hello")
 	if code != 3 || out != "" || !strings.Contains(diag, "cannot reach service") {
 		t.Fatalf("stopped service: %d %q %q", code, out, diag)
 	}

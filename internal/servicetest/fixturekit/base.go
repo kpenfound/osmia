@@ -10,9 +10,8 @@ import (
 // operations. Remotes and Fetches count calls made by the controller.
 type BaseProvider struct {
 	workspace.Provider
-	Upstream, Tip string
-	IsAncestor    bool
-	// Remotes and Fetches count remote operations.
+	Upstream, Tip    string
+	IsAncestor       bool
 	Remotes, Fetches int
 }
 

@@ -70,9 +70,7 @@ type ProductionDesign struct {
 	Scheduled         func() (*config.Config, []ScheduledProject)
 	LastEdgePoll      func(config.ProjectID, config.WorkstreamID) (time.Time, bool)
 	EdgeObservationAt func(*trace.Repository, config.WorkstreamID) (int, time.Time, error)
-	// IdleRefresh reports whether a base refresh found nothing that the passing
-	// of time could change, so its next cadence is not a deadline to advance to.
-	IdleRefresh func(trace.Transition) bool
+	IdleRefresh       func(trace.Transition) bool
 
 	ContextMode              func(config.ProjectID) bundle.Mode
 	Project, Project2        *config.ProjectID
@@ -105,13 +103,12 @@ type ProductionDesign struct {
 	ScriptDrafts             func(*testing.T)
 	Workspaces               func(*config.Config, string, string) workspace.Provider
 	ReadBuilding             func(*trace.Repository, config.WorkstreamID) (bool, error)
-	Holds                    func(config.ProjectID, config.WorkstreamID, *trace.Repository, scheduler.Candidate) (bool, error)
+	Holds                    func(config.ProjectID, *trace.Repository, scheduler.Candidate) (bool, error)
 	EdgeWaiting              func(*trace.Repository, config.WorkstreamID) (bool, error)
 	Builder                  func(*trace.Repository) coreadapter.Reconciler
 	Land                     func(context.Context, *trace.Repository, config.WorkstreamID) (coreadapter.OperationResult, error)
 	LeastWorkstream          func([]config.WorkstreamID) config.WorkstreamID
 	NextReadyTurn            func(trace.Thread) (trace.QueuedTurn, bool)
-	LibrarianWorkstream      func(config.ProjectID) config.WorkstreamID
 }
 
 const ProductionBrief = "Decisions: keep the acknowledged offset contract stable.\nIntent and tradeoffs: implement chunk storage in the server and resumption in the client, changing both repos.\nRejected options: client-only retries.\n"
@@ -126,7 +123,7 @@ func (f *ProductionDesign) CheckRepos(t *testing.T) {
 		}
 		provider := f.Workspaces(cfg, intake.BranchesDirectory, config.WorkspacesGit)
 		remote, err := provider.Remote(ctx, cfg.Project.Upstream)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if remote != "upstream" {
 			t.Fatalf("repo %s resolved remote %q, want upstream", expected.ID, remote)
 		}
@@ -135,7 +132,7 @@ func (f *ProductionDesign) CheckRepos(t *testing.T) {
 			t.Fatalf("repo %s remote URL %q, want %q", expected.ID, url, expected.Remote)
 		}
 		commit, found, err := provider.RemoteBranch(ctx, remote, cfg.Project.BaseBranch)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !found || commit != expected.Main {
 			t.Fatalf("repo %s upstream main=%q exists=%v, want %q", expected.ID, commit, found, expected.Main)
 		}
@@ -148,13 +145,20 @@ func (f *ProductionDesign) Wait(t *testing.T, phase string, done func() bool) {
 		f.WaitMode(t, phase, done)
 		return
 	}
-	deadline := time.Now().Add(DemoTimeout)
+	wake, release := fixturekit.Ticks(20 * time.Millisecond)
+	defer release()
+	deadline := time.NewTimer(fixturekit.DemoTimeout)
+	defer deadline.Stop()
 	for !done() {
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline.C:
 			f.Timeout(t, phase)
+		default:
 		}
 		f.Clock.Advance(time.Second)
-		time.Sleep(20 * time.Millisecond)
+		if err := wake(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -196,9 +200,6 @@ func (f *ProductionDesign) Timeout(t *testing.T, phase string) {
 			t.Logf("member=%s operations error=%v", member, err)
 		}
 		for _, op := range ops {
-			// A finished base refresh repeats on every cadence of the fixture
-			// clock, thousands of times by the end of a stalled wait, and would
-			// push the operations that explain the stall out of the log.
 			if op.Operation.Action == "base-refresh" && op.Acknowledged {
 				continue
 			}
@@ -363,11 +364,11 @@ func (f *ProductionDesign) RecordSelection(t *testing.T, projects ...config.Proj
 	t.Helper()
 	ctx := context.Background()
 	r, err := f.Repository(*f.Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	streams, err := r.Workstreams()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.Contains(streams, *f.Origin) {
-		Must(t, r.CreateWorkstream(ctx, *f.Origin, f.Clock.Now(), intake.OwnerActor))
+		fixturekit.Must(t, r.CreateWorkstream(ctx, *f.Origin, f.Clock.Now(), intake.OwnerActor))
 	}
 	selected := intake.DesignSelection{Group: config.WorkgroupID("g_" + strings.TrimPrefix(string(*f.Origin), "w_"))}
 	for _, p := range projects {
@@ -378,25 +379,25 @@ func (f *ProductionDesign) RecordSelection(t *testing.T, projects ...config.Proj
 		selected.Members = append(selected.Members, intake.DesignMember{Repo: p, Workstream: m})
 	}
 	data, err := json.Marshal(selected)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	h := intake.OwnerHeader(intake.DesignSelectionDocument, *f.Project, *f.Origin, intake.DesignStartTransition, f.Clock.Now())
 	h.Schema = "osmia.trace.document"
-	Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignSelectionPath, Content: string(data)}}))
+	fixturekit.Must(t, r.RecordDocuments(ctx, []trace.Document{{Header: h, Path: intake.DesignSelectionPath, Content: string(data)}}))
 }
 
 // RecordBriefProjects supplies the confirmed project list for owner-start journeys.
 func (f *ProductionDesign) RecordBriefProjects(t *testing.T, projects ...config.ProjectID) {
 	t.Helper()
 	repo, err := f.Repository(*f.Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	brief, revision, err := intake.LatestDesignBrief(repo, *f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	brief.Projects = projects
 	data, err := json.Marshal(brief)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	h := intake.OwnerHeader(intake.DesignDraftDocument, *f.Project, *f.Origin, intake.DraftBriefToolName, f.Clock.Now())
 	h.Schema, h.Revision = "osmia.trace.document", revision+1
-	Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(data)}}))
+	fixturekit.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: intake.DesignDraftPath, Content: string(data)}}))
 }
 
 func (f *ProductionDesign) StartOwner(t *testing.T) {
@@ -407,11 +408,11 @@ func (f *ProductionDesign) StartOwner(t *testing.T) {
 	}
 	f.RecordBriefProjects(t, projects...)
 	_, err := f.Client().DesignStart(context.Background(), *f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	repo, err := f.Repository(*f.Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	*f.Handed, err = trace.Get[trace.Document](repo, *f.Origin, intake.HandedDocument, 1)
-	Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func (f *ProductionDesign) AwaitPacket(t *testing.T) api.PacketResponse {
@@ -434,10 +435,10 @@ func (f *ProductionDesign) AwaitPacket(t *testing.T) api.PacketResponse {
 			project = *f.Project2
 		}
 		repo, err := f.Repository(project)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		for n := 1; n <= 2; n++ {
 			th, err := repo.Thread(member, intake.CommitteeAgent(n))
-			Must(t, err)
+			fixturekit.Must(t, err)
 			if len(th.Turns) != 1 {
 				t.Fatalf("member %s committee %d has %d turns", member, n, len(th.Turns))
 			}
@@ -463,11 +464,11 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 			p = *f.Project2
 		}
 		repo, err := f.Repository(p)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		streams, err := repo.Workstreams()
-		Must(t, err)
+		fixturekit.Must(t, err)
 		features := slices.DeleteFunc(slices.Clone(streams), func(stream config.WorkstreamID) bool {
-			return stream == f.LibrarianWorkstream(p) || stream == *f.Origin
+			return stream == *f.Origin
 		})
 		if !slices.Equal(features, []config.WorkstreamID{m}) {
 			t.Fatalf("repo has lost or duplicated its allocated member: %v", features)
@@ -476,7 +477,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 			t.Fatal("production path requires Hearsay")
 		}
 		handed, err := trace.Get[trace.Document](repo, m, intake.HandedDocument, 1)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if handed.Content != f.Handed.Content || handed.Source != f.Handed.Source {
 			t.Fatal("member input differs from the immutable brief")
 		}
@@ -490,15 +491,15 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 			t.Fatalf("member retains an independent chief: %v", err)
 		}
 		groups, _, err := trace.Workgroups(repo)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if _, found := trace.WorkgroupOf(groups, m); found {
 			t.Fatal("member retains a one-workstream group")
 		}
 		target, host, _, close, err := f.ChiefRepository(ctx, repo, m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		chief, err := target.Thread(host, trace.ChiefOfStaff)
 		close()
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if len(chief.Turns) < len(f.Before.Turns) {
 			t.Fatal("design turns were lost")
 		}
@@ -507,33 +508,33 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		}
 	}
 	repo, err := f.Repository(*f.Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(*f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	_, group, _, err := repo.CrossRepoProjectSpec(id)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if group.Conversation == nil || group.Conversation.Workstream != *f.Origin || group.Conversation.Project != *f.Project ||
 		len(group.Members) != 3 || group.Members[0] != *f.Origin ||
 		!slices.Contains(group.Members[1:], *f.Stream1) || !slices.Contains(group.Members[1:], *f.Stream2) {
 		t.Fatalf("continued conversation or exact member coverage changed: %+v", group)
 	}
 	groups, err := os.ReadDir(filepath.Join(f.Config().Root.String(), "workgroups"))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if len(groups) != 1 || groups[0].Name() != string(id) {
 		t.Fatalf("start or recovery duplicated workgroup authority: %v", groups)
 	}
 	handed, err := trace.Get[trace.Document](repo, *f.Origin, intake.HandedDocument, 1)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !EqualJSONTest(handed, *f.Handed) {
 		t.Fatal("immutable handed brief changed")
 	}
 	alias, err := f.Client().Status(ctx, *f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if alias.Workstream != *f.Stream1 || alias.Project != *f.Project {
 		t.Fatalf("design status did not resolve to its member: %+v", alias)
 	}
 	listed, err := f.Client().Statuses(ctx)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if slices.ContainsFunc(listed.Workstreams, func(w api.WorkstreamStatus) bool { return w.Workstream == *f.Origin }) {
 		t.Fatal("status list exposes the adopted design host as independent work")
 	}
@@ -541,12 +542,12 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		t.Fatal("source retains an authoritative queue")
 	}
 	historical, err := trace.Read[trace.TurnRequest](repo, *f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if len(f.Before.Turns) > 0 && !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Before.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
 	chief, _, _, closeChief, err := f.ChiefRepository(ctx, repo, *f.Stream1)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	defer closeChief()
 	matching, err := readview.Consistent(func() (bool, error) {
 		var entries []api.ConversationEntry
@@ -571,7 +572,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		}
 		return true, nil
 	}, chief.Generation)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !matching {
 		t.Fatal("continued address and member endpoints resolve to different conversations or feeds")
 	}
@@ -580,7 +581,7 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 	t.Helper()
 	alias, err := f.Client().Status(context.Background(), *f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if alias.Workstream != *f.Stream1 || (alias.State != nil && (*alias.State == intake.RatifiedState || *alias.State == intake.BuildingState)) {
 		t.Fatalf("design status bypassed pending group authority: %+v", alias)
 	}
@@ -590,21 +591,21 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 			p = *f.Project2
 		}
 		repo, err := f.Repository(p)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		approved, err := repo.GroupApproved(m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if approved {
 			t.Fatal("incomplete group is approved")
 		}
 		approval, found, err := repo.GroupApprovalOf(m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !found || approval.Complete || len(approval.Members) != 2 || !slices.ContainsFunc(approval.Members, func(pin trace.GroupMemberApproval) bool {
 			return pin.Project == p && pin.Workstream == m && pin.Spec == 1 && pin.Plan == 1
 		}) {
 			t.Fatal("pending group decision lost its exact member pins")
 		}
 		st, err := f.Client().Status(context.Background(), m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if st.State != nil && (*st.State == intake.RatifiedState || *st.State == intake.BuildingState) {
 			t.Fatalf("partial effective member state: %+v", st)
 		}
@@ -614,8 +615,8 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 		if ok, err := f.ReadBuilding(repo, m); err != nil || ok {
 			t.Fatalf("unit admission bypasses approval: %v %v", ok, err)
 		}
-		held, err := f.Holds(p, f.LibrarianWorkstream(p), repo, scheduler.Candidate{Workstream: m, Thread: trace.Thread{Identity: trace.Agent{Role: MasonRole}}, Turn: trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Unit: "accept"}}}})
-		Must(t, err)
+		held, err := f.Holds(p, repo, scheduler.Candidate{Workstream: m, Thread: trace.Thread{Identity: trace.Agent{Role: intake.MasonRole}}, Turn: trace.QueuedTurn{Request: trace.TurnRequest{Header: trace.Header{Unit: "accept"}}}})
+		fixturekit.Must(t, err)
 		if !held {
 			t.Fatal("scheduler bypasses group barrier")
 		}
@@ -625,17 +626,17 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 		_, event := intake.BuildIDs(1)
 		build := coreadapter.Operation{ID: trace.OperationID(p, m, event), Boundary: coreadapter.RepositoryBoundary, Action: intake.BuildAction, Input: json.RawMessage(`{"seal":1}`)}
 		result, err := f.Builder(repo).Apply(context.Background(), build)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if result.Outcome != "failed" {
 			t.Fatalf("direct build bypassed completion: %+v", result)
 		}
 		result, err = f.Land(context.Background(), repo, m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if result.Outcome != "failed" || !strings.Contains(result.Evidence, "workgroup seal preparations") {
 			t.Fatalf("direct landing bypassed completion: %+v", result)
 		}
 		ops, err := repo.Operations(m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if slices.ContainsFunc(ops, func(o trace.OperationRecord) bool { return o.Operation.Action == intake.BuildAction }) {
 			t.Fatal("build admitted before group completion")
 		}
@@ -646,9 +647,9 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 	t.Helper()
 	f.Wait(t, "group approval completion", func() bool {
 		repo, err := f.Repository(*f.Project)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		ok, err := repo.GroupApproved(*f.Stream1)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		return ok
 	})
 	for i, m := range []config.WorkstreamID{*f.Stream1, *f.Stream2} {
@@ -657,9 +658,9 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 			p = *f.Project2
 		}
 		repo, err := f.Repository(p)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		record, _, ok, err := seal.Latest(repo, m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !ok || record.Revision.Spec != 1 || record.Revision.Plan != 1 {
 			t.Fatalf("wrong pinned seal: %+v", record)
 		}
@@ -672,7 +673,7 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 			t.Fatalf("repo %s fetched main=%q, want %q", p, fetched, expected.Main)
 		}
 		docs, err := trace.Read[trace.Document](repo, m)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		seals, decisions := 0, 0
 		for _, d := range docs {
 			if d.ID == seal.DocumentID {
@@ -691,9 +692,9 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 func ConfigureProductionDesign(t *testing.T, root string) {
 	t.Helper()
 	file, err := os.OpenFile(filepath.Join(root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	_, err = file.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 2\n[shed]\nmax_rounds = 1\n")
-	Must(t, errors.Join(err, file.Close()))
+	fixturekit.Must(t, errors.Join(err, file.Close()))
 }
 
 // BindProductionDesign wraps the fake worker boundary around production thread dispatch.
@@ -760,25 +761,25 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	t.Helper()
 	ctx := context.Background()
 	added, err := f.Client().AddProject(ctx, fixturekit.Request(f.Clone))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	*f.Project, *f.Trace = added.Project.ID, added.Project.Trace
 	f.WriteCharter(t, added.Project.ID, ShedCharter)
 	main := f.Upstream(t)
 	*f.Repos = append(*f.Repos, ProductionDesignRepo{*f.Project, f.Clone, "dagger/dagger", filepath.Join(filepath.Dir(f.Clone), "remotes", "dagger", "dagger.git"), main})
 	home := filepath.Dir(f.Clone)
 	second := filepath.Join(home, "client")
-	Must(t, os.MkdirAll(filepath.Join(second, "internal", "trace"), 0700))
+	fixturekit.Must(t, os.MkdirAll(filepath.Join(second, "internal", "trace"), 0700))
 	fixturekit.DemoGit(t, home, "init", "--quiet", second)
-	Must(t, os.WriteFile(filepath.Join(second, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(second, "internal", "trace", "git.go"), []byte("package trace\n"), 0600))
 	fixturekit.DemoGit(t, home, "-C", second, "add", "internal")
 	fixturekit.DemoGit(t, home, "-C", second, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
 	fixturekit.DemoGit(t, home, "-C", second, "branch", "-M", "main")
 	bare := filepath.Join(home, "remotes", "owner", "client.git")
-	Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(bare), 0700))
 	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", second, bare)
 	fixturekit.DemoGit(t, home, "-C", second, "remote", "add", "upstream", bare)
 	other, err := f.Client().AddProject(ctx, api.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, repo := range other.Project.Repos {
 		if repo.Clone == second {
 			*f.Project2 = repo.ID
@@ -794,7 +795,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 		*f.Origin = intake.HandInWorkstream(*f.Project, "production-handin")
 	} else {
 		opened, err := f.Client().OpenDesign(ctx, *f.Project)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		*f.Origin = opened.Design.Workstream
 	}
 	*f.Stream1 = intake.HandInWorkstream(*f.Project, "design-"+string(*f.Origin))
@@ -826,7 +827,7 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 			return nil, err
 		}
 		if slices.Contains(names, intake.DraftBriefToolName) {
-			_, err = CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief, "projects": []config.ProjectID{*f.Project, *f.Project2}})
+			_, err = fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": ProductionBrief, "projects": []config.ProjectID{*f.Project, *f.Project2}})
 			return QuestionResult(req, "session-design", ProductionBrief), err
 		}
 		return QuestionResult(req, "session-chief", "The service is following the agreed design."), nil
@@ -836,16 +837,16 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 		return
 	}
 	_, err = f.Client().DesignMessage(ctx, *f.Origin, "Build resumable uploads in both the server and client repos.")
-	Must(t, err)
+	fixturekit.Must(t, err)
 	f.Wait(t, "design reply", func() bool {
 		conversation, err := f.Client().DesignConversation(ctx, *f.Origin)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		return len(conversation.Entries) == 2 && conversation.Entries[1].State == api.TurnDone
 	})
 	repo, err := f.Repository(*f.Project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	*f.Before, err = repo.ChiefOfStaffThread(*f.Origin)
-	Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 // ScheduledProject exposes only the deadlines needed by the fixture clock.
@@ -860,7 +861,7 @@ func (f *ProductionDesign) LifecycleAwait(t *testing.T, phase string, ready func
 	t.Helper()
 	changes, closeChanges := f.Changes(t)
 	defer closeChanges()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for !ready() {
 		if time.Now().After(deadline) {
 			f.Timeout(t, phase)
@@ -874,7 +875,7 @@ func (f *ProductionDesign) LifecycleAdvanceScheduled(t *testing.T) {
 	t.Helper()
 	if *f.Stream1 != "" && *f.Project != "" {
 		repo, err := f.Repository(*f.Project)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		decision, found, err := repo.GroupApprovalOf(*f.Origin)
 		if err != nil || !found || !decision.Complete {
 			return
@@ -895,15 +896,12 @@ func (f *ProductionDesign) LifecycleAdvanceScheduled(t *testing.T) {
 		interval := active.Interval
 		record(active.NextPoll)
 		streams, err := active.Repository.Workstreams()
-		Must(t, err)
+		fixturekit.Must(t, err)
 		for _, stream := range streams {
 			transitions, err := trace.Read[trace.Transition](active.Repository, stream)
 			if err == nil {
 				for _, transition := range slices.Backward(transitions) {
 					if transition.Subject == "base-refresh" {
-						// An idle refresh has no next deadline: its cadence would
-						// only wake the service to find the same thing, and each
-						// refresh is itself a change that wakes this loop.
 						if f.IdleRefresh == nil || !f.IdleRefresh(transition) {
 							record(transition.At.Add(interval))
 						}
@@ -921,7 +919,7 @@ func (f *ProductionDesign) LifecycleAdvanceScheduled(t *testing.T) {
 			ops, err := active.Repository.Operations(stream)
 			if err != nil {
 				continue
-			} // A concurrently moved trace is not a deadline.
+			}
 			for _, op := range ops {
 				if !op.Acknowledged {
 					record(op.RetryAt)
@@ -949,16 +947,16 @@ func (f *ProductionDesign) LifecycleAdvanceScheduled(t *testing.T) {
 func (f *ProductionDesign) LifecycleWorker(t *testing.T, project config.ProjectID, stream config.WorkstreamID, worker, turn, prompt string) {
 	t.Helper()
 	repo, err := f.Repository(project)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	threads, err := repo.Threads(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !slices.ContainsFunc(threads, func(th trace.Thread) bool { return th.Identity.ID == worker }) {
 		h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: worker, Project: project, Workstream: stream, At: f.Clock.Now(), Actor: fixturekit.OwnerActor, Cause: "workstream_created"}
-		Must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: MasonRole, ThreadID: worker}))
+		fixturekit.Must(t, repo.CreateThread(context.Background(), trace.Agent{Header: h, Role: intake.MasonRole, ThreadID: worker}))
 	}
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn + "_" + worker, Project: project, Workstream: stream, At: f.Clock.Now(), Actor: fixturekit.OwnerActor, Cause: "workstream_created"}
 	_, err = repo.EnqueueTurn(context.Background(), trace.TurnRequest{Header: h, AgentID: worker, ThreadID: worker, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are a member mason.", Prompt: prompt})
-	Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 // DesignInterruption pauses one durable checkpoint until that service lifetime ends.

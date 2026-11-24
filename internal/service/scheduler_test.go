@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,29 +15,31 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// queueTurn accepts an owner message without publishing any intent to run it.
 func queueTurn(t *testing.T, repo *trace.Repository, turn string, at time.Time) {
 	t.Helper()
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: project, Workstream: stream, At: at, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "message_" + turn, Depth: 1},
-		AgentID: demoAgent, ThreadID: demoThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: " + turn}
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + turn, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: at, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "message_" + turn, Depth: 1},
+		AgentID: fixturekit.DemoAgent, ThreadID: fixturekit.DemoThread, TurnID: turn, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: " + turn}
 	_, err := repo.EnqueueTurn(context.Background(), req)
-	must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func turnOperations(t *testing.T, repo *trace.Repository) map[string]trace.OperationRecord {
 	t.Helper()
-	ops, err := repo.Operations(stream)
-	must(t, err)
+	ops, err := repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	byTurn := map[string]trace.OperationRecord{}
 	for _, op := range ops {
 		var in thread.TurnInput
-		must(t, json.Unmarshal(op.Operation.Input, &in))
+		fixturekit.Must(t, json.Unmarshal(op.Operation.Input, &in))
 		byTurn[in.Turn] = op
 	}
 	return byTurn
@@ -48,27 +49,27 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sc-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	queueTurn(t, repo, "first", clock.Now())
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	reply := func(turn string) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer " + turn}}
 	}
-	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first"), reply("second"))}, Hooks: map[string]func(context.Context){}}
+	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply("first"), reply("second"))}, Hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -80,8 +81,6 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(root, "sessions", in.Agent, in.Turn)}, nil
 			}}, nil
 	}
-	// Ticks are never sent in the first lifetime: nothing outside the service
-	// triggers the turn.
 	ticks := make(chan time.Time)
 	opts.Reconciliation.Now, opts.Reconciliation.Ticks = clock.Now, ticks
 
@@ -91,32 +90,31 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 		<-ctx.Done()
 	}
 	s, err := Start(ctx, opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		s.Close()
 		t.Fatal("queued turn did not start")
 	}
 	bound.Lock()
 	repo = live
 	bound.Unlock()
-	// A message queued mid-turn waits; the thread keeps a single turn in flight.
 	queueTurn(t, repo, "second", clock.Now())
-	th, err := repo.Thread(stream, demoAgent)
-	must(t, err)
+	th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if th.Active != "first" || len(th.Turns) != 2 || th.Turns[1].Claim != nil {
 		t.Fatalf("mid-turn thread: %+v", th)
 	}
 	if ops := turnOperations(t, repo); len(ops) != 1 || ops["first"].Claim == nil {
 		t.Fatalf("mid-turn operations: %+v", ops)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	th, err = repo.Thread(stream, demoAgent)
-	must(t, err)
+	fixturekit.Must(t, err)
+	th, err = repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if th.Active != "" || th.Turns[0].CompletedAt.IsZero() || th.Turns[1].Claim != nil {
 		t.Fatalf("stopped thread: %+v", th)
 	}
@@ -124,25 +122,24 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	if len(ops) != 1 || ops["first"].Result != nil || ops["first"].Acknowledged {
 		t.Fatalf("stopped operations: %+v", ops)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
-	// Second lifetime: the startup pass recovers the first turn and runs the second.
 	s, err = Start(ctx, opts)
-	must(t, err)
-	awaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+	fixturekit.Must(t, err)
+	fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
 		bound.Lock()
 		defer bound.Unlock()
-		ops, err := live.Operations(stream)
-		must(t, err)
+		ops, err := live.Operations(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		if len(ops) != 2 {
 			return nil
 		}
 		return ops
 	})
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
 	calls := turns.Fake.Calls()
 	var ran []string
@@ -152,8 +149,8 @@ func TestServiceRunsQueuedTurnsAcrossRestart(t *testing.T) {
 	if !slices.Equal(ran, []string{"first", "second"}) {
 		t.Fatalf("backend runs %v", ran)
 	}
-	th, err = repo.Thread(stream, demoAgent)
-	must(t, err)
+	th, err = repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if th.Active != "" || th.Status != "idle" || len(th.Turns) != 2 {
 		t.Fatalf("final thread: %+v", th)
 	}
@@ -180,21 +177,21 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sp-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
-	must(t, repo.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	turns := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}
@@ -216,7 +213,7 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		t.Helper()
 		select {
 		case ticks <- clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("reconciliation pass did not finish")
 		}
 	}
@@ -227,12 +224,9 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		}
 		return out
 	}
-	// await ticks until the turns that ran are want. A pass dispatches a
-	// turn without waiting for it, so the ticks that follow a pass may come
-	// before the turn runs.
 	await := func(what string, want []string) {
 		t.Helper()
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for !slices.Equal(ran(), want) {
 			if time.Now().After(deadline) {
 				t.Fatalf("%s runs %v, want %v", what, ran(), want)
@@ -240,14 +234,10 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 			tick()
 		}
 	}
-	// awaitPasses drives ticks until n further reconciliation passes have
-	// completed their schedule stage - the stage that runs the scheduler's
-	// dispatch pass - so a held turn has demonstrably had that many chances
-	// to start, rather than a fixed number of ticks.
 	awaitPasses := func(n int64) {
 		t.Helper()
 		base := passed.Load()
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(fixturekit.DemoTimeout)
 		for passed.Load()-base < n {
 			if time.Now().After(deadline) {
 				t.Fatalf("only %d of %d further reconciliation passes completed; runs %v", passed.Load()-base, n, ran())
@@ -256,17 +246,14 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		}
 	}
 
-	target := runtime.Target{Scope: "workstream", Project: project, Workstream: stream}
-	mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
+	target := runtime.Target{Scope: "workstream", Project: fixturekit.Project, Workstream: fixturekit.Stream}
+	intakefixture.Mutation(t, c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Source: "owner"})
 	queueTurn(t, repo, "held", clock.Now())
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_chief", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_chief", Depth: 1},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "chief", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message: chief"}
 	_, err = repo.EnqueueTurn(ctx, req)
-	must(t, err)
+	fixturekit.Must(t, err)
 	await("paused", []string{"chief"})
-	// Two full reconciliation passes complete since the held turn was
-	// queued, so the scheduler demonstrably had the chance to start it and
-	// left it held, rather than simply not having reached it yet.
 	awaitPasses(2)
 	if got := ran(); !slices.Equal(got, []string{"chief"}) {
 		t.Fatalf("paused runs %v", got)
@@ -275,33 +262,31 @@ func TestServicePauseHoldsWorkerTurnsUntilCleared(t *testing.T) {
 		t.Fatal("paused worker turn was dispatched")
 	}
 
-	// Clearing the pause is enough: the periodic pass runs the held turn with
-	// no new message or operation.
-	mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
+	intakefixture.Mutation(t, c, "DELETE", "pause", ClearPauseRequest(target))
 	await("resumed", []string{"chief", "held"})
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 }
 
 func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sw-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: fixturekit.DemoAgent, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: fixturekit.DemoThread}
+	fixturekit.Must(t, repo.CreateThread(ctx, identity))
 	queueTurn(t, repo, "ask", clock.Now())
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	waiting := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Question", Outcome: &coreadapter.Outcome{Status: "waiting", Report: "Owner answer needed"}}}
 	answered := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Thanks"}}
@@ -320,7 +305,7 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 		t.Helper()
 		select {
 		case ticks <- clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("reconciliation pass did not finish")
 		}
 	}
@@ -333,24 +318,24 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	}
 	parked := func(r *trace.Repository) bool {
 		t.Helper()
-		th, err := r.Thread(stream, demoAgent)
-		must(t, err)
+		th, err := r.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+		fixturekit.Must(t, err)
 		return th.Parked()
 	}
 
 	s, err := Start(ctx, opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	repo = <-lives
 	tick()
 	tick()
-	soon(t, "the first lifetime to park the thread", func() bool { return parked(repo) })
+	intakefixture.Soon(t, "the first lifetime to park the thread", func() bool { return parked(repo) })
 	if got := ran(); !slices.Equal(got, []string{"ask"}) {
 		t.Fatalf("first lifetime ran %v, parked %v", got, parked(repo))
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	s, err = Start(ctx, opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	repo = <-lives
 	tick()
 	tick()
@@ -364,52 +349,48 @@ func TestServiceParksWaitingThreadAcrossRestart(t *testing.T) {
 	}
 	tick()
 	tick()
-	soon(t, "the answer turn to run and unpark the thread", func() bool {
+	intakefixture.Soon(t, "the answer turn to run and unpark the thread", func() bool {
 		return slices.Equal(ran(), []string{"ask", "answer"}) && !parked(repo)
 	})
 	if got := ran(); !slices.Equal(got, []string{"ask", "answer"}) || parked(repo) {
 		t.Fatalf("unparked runs %v, parked %v", got, parked(repo))
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 }
 
 func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sc-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	// The project's per_workstream (1) overrides the top-level one (3).
 	top := filepath.Join(opts.Config.Root, "config.toml")
 	body, err := os.ReadFile(top)
-	must(t, err)
-	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 4\nper_workstream = 3\n[profiles.default]", 1)), 0600))
-	proj := filepath.Join(opts.Config.Root, "projects", string(project), "config.toml")
-	body, err = os.ReadFile(proj)
-	must(t, err)
-	must(t, os.WriteFile(proj, append(body, []byte("[capacity]\nper_workstream = 1\n")...), 0600))
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 4\nper_workstream = 3\n[profiles.default]", 1)), 0600))
+	fixturekit.EditProjectSettings(t, opts.Config.Root, fixturekit.Project, func(text string) string { return text + "[capacity]\nper_workstream = 1\n" })
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	if cfg.Capacity.PerWorkstream != 3 || cfg.Project.Capacity.PerWorkstream != 1 {
 		t.Fatalf("capacity %+v, project %+v", cfg.Capacity, cfg.Project.Capacity)
 	}
 	root := cfg.Root.String()
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstream(ctx, fixturekit.Stream, clock.Now(), owner))
 	for _, id := range []string{"mason1", "mason2"} {
-		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: id}
-		must(t, repo.CreateThread(ctx, identity))
-		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "message_" + id, Depth: 1},
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: id}
+		fixturekit.Must(t, repo.CreateThread(ctx, identity))
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: clock.Now(), Actor: owner, Cause: "message_" + id, Depth: 1},
 			AgentID: id, ThreadID: id, TurnID: id, Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message"}
 		_, err = repo.EnqueueTurn(ctx, req)
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	started, release := make(chan string, 2), make(chan struct{})
@@ -419,7 +400,7 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		case <-ctx.Done():
 		}
 	}
-	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
+	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
 	for _, id := range []string{"mason1", "mason2"} {
 		turns.Hooks[id] = func(ctx context.Context) { started <- id; block(ctx) }
 	}
@@ -440,11 +421,10 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		if id != "mason1" {
 			t.Fatalf("first turn %s", id)
 		}
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("no turn started")
 	}
-	// Periodic passes run while mason1 is in flight; none dispatches mason2.
-	awaitPasses(t, &passed, 3)
+	intakefixture.AwaitPasses(t, &passed, 3)
 	select {
 	case id := <-started:
 		t.Fatalf("%s started beside mason1", id)
@@ -459,53 +439,51 @@ func TestServiceBoundsTurnsByProjectCapacity(t *testing.T) {
 		if id != "mason2" {
 			t.Fatalf("second turn %s", id)
 		}
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("mason2 did not run after mason1 completed")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 }
 
 func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "sc-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
 	top := filepath.Join(opts.Config.Root, "config.toml")
 	body, err := os.ReadFile(top)
-	must(t, err)
-	must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 1\n[profiles.default]", 1)), 0600))
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(top, []byte(strings.Replace(string(body), "[profiles.default]", "[capacity]\nmasons = 1\n[profiles.default]", 1)), 0600))
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	root := cfg.Root.String()
 
-	// The second workstream sorts after the first by ID but comes first in the
-	// project's priority order.
 	const second config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	for _, ws := range []config.WorkstreamID{stream, second} {
-		must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
+	fixturekit.Must(t, err)
+	for _, ws := range []config.WorkstreamID{fixturekit.Stream, second} {
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
 		id := "mason_" + string(ws)
-		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: id}
-		must(t, repo.CreateThread(ctx, identity))
-		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "message_" + id, Depth: 1},
+		identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: id, Project: fixturekit.Project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: id}
+		fixturekit.Must(t, repo.CreateThread(ctx, identity))
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_" + id, Project: fixturekit.Project, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "message_" + id, Depth: 1},
 			AgentID: id, ThreadID: id, TurnID: string(ws), Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, Prompt: "Owner message"}
 		_, err = repo.EnqueueTurn(ctx, req)
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	must(t, repo.Close())
-	priority, err := json.Marshal(runtime.State{Version: runtime.Version, Priorities: []runtime.Priority{{Project: project, Workstreams: []config.WorkstreamID{second}}}})
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(root, "runtime.json"), priority, 0600))
+	fixturekit.Must(t, repo.Close())
+	priority, err := json.Marshal(runtime.State{Version: runtime.Version, Priorities: []runtime.Priority{{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{second}}}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(root, "runtime.json"), priority, 0600))
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Answer"}}
 	started := make(chan string, 2)
-	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
-	for _, ws := range []config.WorkstreamID{stream, second} {
+	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply)}, Hooks: map[string]func(context.Context){}}
+	for _, ws := range []config.WorkstreamID{fixturekit.Stream, second} {
 		turns.Hooks[string(ws)] = func(context.Context) { started <- string(ws) }
 	}
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -520,12 +498,12 @@ func TestServiceOffersFreedSlotsInRuntimePriorityOrder(t *testing.T) {
 		select {
 		case ws := <-started:
 			order = append(order, ws)
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatalf("turns started %v", order)
 		}
 	}
-	if want := []string{string(second), string(stream)}; !slices.Equal(order, want) {
+	if want := []string{string(second), string(fixturekit.Stream)}; !slices.Equal(order, want) {
 		t.Fatalf("turns started %v, want %v", order, want)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 }

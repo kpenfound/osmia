@@ -31,10 +31,6 @@ func Secrets(s string, secrets ...string) string {
 // Jev and of Whisper transcription.
 var EnvSecrets = []string{"GITHUB_TOKEN", "TS_AUTHKEY", "OPENROUTER_API_KEY", "WHISPER_API_KEY"}
 
-// registered holds secret values Register has recorded: configured values
-// with no fixed environment variable name, such as Jev's or Whisper
-// transcription's API key when an owner points api_key_env at a name other
-// than EnvSecrets' default.
 var (
 	registerMu sync.Mutex
 	registered = map[string]struct{}{}

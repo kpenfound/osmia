@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -15,24 +16,21 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// jevDeliveryFixture is deliveryFixture with Jev answering through p, under the
-// [jev] table extra adds to.
 func jevDeliveryFixture(t *testing.T, p *gateJev, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, gateJevConfig(gateKey(t, true))+extra, func(o *Options) { o.JevProvider = p.Factory() })
 	stream, repository := f.buildFixture().SeedGit(t, "delivery")
-	a := &finalReviewer{s: f.s, repository: repository}
+	a := &delivery.FinalReviewer{S: f.s.delivery(), Repository: repository}
 	intakefixture.SeedDelivery(t, repository, stream, func(unit string, files map[string]string) string {
 		return mergeDirectly(t, f, repository, stream, unit, files)
 	}, a.Pass, func(ctx context.Context) (FinalReport, error) {
-		in, sealed, err := a.governing(ctx, stream)
+		in, sealed, err := a.Governing(ctx, stream)
 		return FinalReport{Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base}, err
 	}, finalReviewActor, finalReportDocument, finalReportPath, finalReviewed)
 	f.s.setSole(&activeProject{id: repository.Project(), repository: repository})
 	return f, stream, repository
 }
 
-// deliveryGateOf is the gate of the workstream's open delivery card.
 func deliveryGateOf(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, *intake.Gate) {
 	t.Helper()
 	ctx := context.Background()
@@ -41,7 +39,7 @@ func deliveryGateOf(t *testing.T, s *Service, repository *trace.Repository, stre
 		t.Fatalf("delivery card open %v: %v", open, err)
 	}
 	g, err := s.deliveryGate(ctx, repository, stream, e)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if g == nil || g.Kind != jev.KindDeliveryApproval || len(g.Options) != 1 || g.Options[0].Name != "approve" {
 		t.Fatalf("delivery gate %+v", g)
 	}
@@ -65,7 +63,7 @@ func TestAConfidentJevApprovesTheDeliveryCardAtTheOwnerThreshold(t *testing.T) {
 	w.handle(ctx, *g)
 
 	_, doc, approval, err := delivery.DeliveryDocuments(repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	judgment, record, ok := decisionJudgment(t, repository, stream, jev.KindDeliveryApproval, g.Key)
 	if !ok || record.Acceptance != "owner_threshold=0.9" || record.Occurrence.Threshold != 0.9 {
 		t.Fatalf("judgment %s %+v", judgment, record)
@@ -77,7 +75,7 @@ func TestAConfidentJevApprovesTheDeliveryCardAtTheOwnerThreshold(t *testing.T) {
 		t.Fatalf("approval %+v does not pin the card's identity %+v", approval, e.Answer.Body)
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	approved := false
 	for _, tr := range transitions {
 		if tr.Subject == delivery.DeliverySubject && tr.To == "approved-1" {
@@ -96,10 +94,6 @@ func TestAConfidentJevApprovesTheDeliveryCardAtTheOwnerThreshold(t *testing.T) {
 	}
 }
 
-// Below the owner threshold the delivery card reaches the owner with Jev's
-// pick and confidence as its recommendation, and nothing is approved. The
-// owner threshold is independent of the decision threshold: a pick the
-// decision threshold would accept stays the owner's.
 func TestADeliveryPickBelowTheOwnerThresholdLeavesTheCardToTheOwner(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -114,10 +108,10 @@ func TestADeliveryPickBelowTheOwnerThresholdLeavesTheCardToTheOwner(t *testing.T
 		t.Fatalf("approval %+v: %v", approval, err)
 	}
 	card, err := f.s.intake().OpenDecisions(ctx, repository, statusOf(t, repository, stream))
-	must(t, err)
+	fixturekit.Must(t, err)
 	var found *InboxEntry
 	for i := range card {
-		if card[i].Kind == InboxDelivery {
+		if card[i].Kind == api.InboxDelivery {
 			found = &card[i]
 		}
 	}
@@ -126,11 +120,10 @@ func TestADeliveryPickBelowTheOwnerThresholdLeavesTheCardToTheOwner(t *testing.T
 	}
 }
 
-// statusOf is the workstream's status as the inbox reads it.
 func statusOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) trace.WorkstreamStatus {
 	t.Helper()
 	statuses, err := repository.Statuses()
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, w := range statuses {
 		if w.Workstream == stream {
 			return w
@@ -149,19 +142,17 @@ func containsGate(gates []intake.Gate, id string) bool {
 	return false
 }
 
-// presentCancellation records a presented cancellation of the fixture's
-// one-member workgroup, as the change journal presents it.
 func presentCancellation(t *testing.T, f *gateFixture) lifecycle.WorkgroupChange {
 	t.Helper()
 	ctx := context.Background()
 	stream := fixturekit.Stream
 	groups, err := trace.EnsureWorkgroups(ctx, f.repo, []config.WorkstreamID{stream}, f.now(), serviceActor, "fixture")
-	must(t, err)
+	fixturekit.Must(t, err)
 	_, err = f.repo.EnsureChiefOfStaff(ctx, stream, f.now(), serviceActor)
-	must(t, err)
+	fixturekit.Must(t, err)
 	c := lifecycle.WorkgroupChange{ID: "cancel", Workgroup: groups[0].ID, Origin: stream, Host: stream, State: "presented",
 		Request: lifecycle.ChangeRequest{Key: "cancel", Kind: "cancel", Scope: "workgroup", Change: "Superseded by the owner"}}
-	must(t, f.s.lifecycle().SaveChange(ctx, f.repo, &c))
+	fixturekit.Must(t, f.s.lifecycle().SaveChange(ctx, f.repo, &c))
 	return c
 }
 
@@ -175,13 +166,13 @@ func TestAConfidentJevDecidesACancellationImpactSummary(t *testing.T) {
 	f := newGateFixture(t, p)
 	c := presentCancellation(t, f)
 	gates, err := f.s.cancellationGates(ctx, f.repo, fixturekit.Stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(gates) != 1 || gates[0].Kind != jev.KindCancellation || gates[0].Key != jev.CancellationKey(c.ID, c.Revision) || len(gates[0].Options) != 3 {
 		t.Fatalf("gates %+v", gates)
 	}
 	f.w.handle(ctx, gates[0])
 	changes, err := readChanges(f.repo, fixturekit.Stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	judgment, record, _ := decisionJudgment(t, f.repo, fixturekit.Stream, jev.KindCancellation, gates[0].Key)
 	if len(changes) != 1 || changes[0].Decision == nil || changes[0].Decision.Decision != "approve" || changes[0].Decision.PullRequests != "draft" ||
 		changes[0].Decision.DecidedBy != trace.DecidedByJev || changes[0].Decision.Judgment != judgment || judgment == "" || record.Acceptance != "owner_threshold=0.9" {
@@ -204,13 +195,13 @@ func TestACancellationPickBelowTheOwnerThresholdStaysTheOwners(t *testing.T) {
 	f := newGateFixture(t, &gateJev{confidence: 0.85})
 	presentCancellation(t, f)
 	gates, err := f.s.cancellationGates(ctx, f.repo, fixturekit.Stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(gates) != 1 {
 		t.Fatalf("gates %+v", gates)
 	}
 	f.w.handle(ctx, gates[0])
 	changes, err := readChanges(f.repo, fixturekit.Stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(changes) != 1 || changes[0].Decision != nil || changes[0].State != "presented" {
 		t.Fatalf("changes %+v", changes)
 	}

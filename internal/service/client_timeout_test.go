@@ -7,13 +7,16 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestClientTimeoutBudgetsAndTransportMessages(t *testing.T) {
 	t.Parallel()
 	socket := filepath.Join(t.TempDir(), "service.sock")
 	listener, err := net.Listen("unix", socket)
-	must(t, err)
+	fixturekit.Must(t, err)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(80 * time.Millisecond)
 		w.Write([]byte("{}"))
@@ -28,23 +31,23 @@ func TestClientTimeoutBudgetsAndTransportMessages(t *testing.T) {
 	c.defaultTimeout = 20 * time.Millisecond
 	c.addProjectTimeout = 200 * time.Millisecond
 	_, err = c.Health(context.Background())
-	apiError(t, err, Unavailable, "no response within 20ms")
+	intakefixture.ApiError(t, err, Unavailable, "no response within 20ms")
 	if _, err = c.AddProject(context.Background(), ProjectAddRequest{}); err != nil {
 		t.Fatalf("project add should have the heavy budget: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err = c.AddProject(ctx, ProjectAddRequest{})
-	apiError(t, err, Unavailable, "no response before caller's context deadline")
+	intakefixture.ApiError(t, err, Unavailable, "no response before caller's context deadline")
 	cancelled, stop := context.WithCancel(context.Background())
 	stop()
 	_, err = c.Health(cancelled)
-	apiError(t, err, Unavailable, "cannot reach Osmia Unix socket")
+	intakefixture.ApiError(t, err, Unavailable, "cannot reach Osmia Unix socket")
 
 	dead := NewClient(filepath.Join(t.TempDir(), "missing.sock"))
 	defer dead.Close()
 	_, err = dead.Health(context.Background())
-	apiError(t, err, Unavailable, "cannot reach Osmia Unix socket")
+	intakefixture.ApiError(t, err, Unavailable, "cannot reach Osmia Unix socket")
 }
 
 func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
@@ -52,10 +55,7 @@ func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
 	opts, clone := projectFixture(t)
 	opts.WriteTimeout = 20 * time.Millisecond
 	s, c := start(t, opts)
-	// The contract is that the write timeout alone does not cut the call
-	// short; the client budget here is generous so that registration work
-	// slowed by parallel load, not the write timeout, cannot fail the test.
-	c.addProjectTimeout = demoTimeout
+	c.addProjectTimeout = fixturekit.DemoTimeout
 	entered := make(chan struct{})
 	handler := s.server.Handler
 	s.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func TestProjectAddOutlivesDefaultWriteTimeout(t *testing.T) {
 	s.projectMu.Lock()
 	result := make(chan error, 1)
 	go func() {
-		_, err := c.AddProject(context.Background(), request(clone))
+		_, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 		result <- err
 	}()
 	<-entered

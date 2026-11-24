@@ -4,28 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/intake"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// loopGuardSubject is the workflow subject that tracks the loop guard's
-// pauses of a workstream: paused-<k> once it sets pause k, then released-<k>
-// once the pause is gone.
 const loopGuardSubject = "loop-guard"
 
-// loopGuard pauses a workstream that runs loop.max_sessions agent sessions
-// without progress, with a soft pause attributed to the loop guard and a
-// notice, and records the pause and its release in the workstream's trace.
-// A pause anyone else set on the workstream, its project or the factory
-// holds the guard back, and a released pause counts as progress, so the
-// count starts over once the owner resumes the workstream.
 type loopGuard struct {
 	s          *Service
 	cfg        *config.Config
@@ -42,11 +33,7 @@ func (g loopGuard) Pass(ctx context.Context) error {
 	}
 	state, _ := g.s.store.Snapshot()
 	var costs []trace.Cost
-	librarian := librarianWorkstream(g.repository.Project())
 	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -99,9 +86,6 @@ func (g loopGuard) Pass(ctx context.Context) error {
 	return nil
 }
 
-// sessionsSince counts the agent sessions of the workstream recorded after
-// since. Every request to Jev costs one, whoever asked it, so a routed move
-// counts toward the loop guard like any other session.
 func sessionsSince(costs []trace.Cost, stream config.WorkstreamID, since time.Time) int {
 	sessions := 0
 	for _, c := range costs {
@@ -112,9 +96,6 @@ func sessionsSince(costs []trace.Cost, stream config.WorkstreamID, since time.Ti
 	return sessions
 }
 
-// pause records the loop guard's next pause of the workstream, with a notice
-// for the chief of staff, then sets it. A pause set on the workstream since
-// the snapshot stays, and the guard records the release on its next pass.
 func (g loopGuard) pause(ctx context.Context, stream config.WorkstreamID, guard trace.WorkflowState, target runtime.Target, sessions int, since time.Time, what string) error {
 	k := 1
 	if n, ok := strings.CutPrefix(guard.Value, "released-"); ok {
@@ -141,7 +122,6 @@ func (g loopGuard) pause(ctx context.Context, stream config.WorkstreamID, guard 
 	return err
 }
 
-// release records that the loop guard's pause k of the workstream is gone.
 func (g loopGuard) release(ctx context.Context, stream config.WorkstreamID, guard trace.WorkflowState, k string) error {
 	id := fmt.Sprintf("%s-released-%s", loopGuardSubject, k)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: g.repository.Project(), Workstream: stream, At: g.s.now(), Actor: loopGuardActor, Cause: fmt.Sprintf("%s-paused-%s", loopGuardSubject, k)}
@@ -154,14 +134,8 @@ func (g loopGuard) release(ctx context.Context, stream config.WorkstreamID, guar
 
 var loopGuardActor = trace.Actor{Kind: "service", ID: loopGuardSubject}
 
-// unitProgress are the states a unit moves into as it makes progress.
 var unitProgress = []string{UnitPlanned, UnitReady, UnitImplementing, UnitWaiting, UnitChecking, UnitReviewing, UnitApproved, UnitMerged}
 
-// lastProgress returns when the workstream last made progress, and what that
-// was: its creation; anything the owner recorded; a change of state of the
-// feature, a unit (other than into contested), the shed, an amendment, the
-// final review or the publication; a drift rebase that moved the feature
-// branch; or the release of a loop guard pause.
 func lastProgress(repository *trace.Repository, stream config.WorkstreamID) (time.Time, string, error) {
 	records, err := trace.Read[trace.Record](repository, stream)
 	if err != nil {
@@ -184,7 +158,6 @@ func lastProgress(repository *trace.Repository, stream config.WorkstreamID) (tim
 			case r.Subject == trace.FeatureSubject:
 				mark(r.At, "the workstream moving to "+featureState(r.To))
 			case strings.HasPrefix(r.Subject, "unit-") && r.Actor == chiefActor:
-				// A recovery instruction is not evidence of progress.
 			case strings.HasPrefix(r.Subject, "unit-") && slices.Contains(unitProgress, r.To):
 				mark(r.At, fmt.Sprintf("unit %s moving to %s", strings.TrimPrefix(r.Subject, "unit-"), r.To))
 			case r.Subject == shedSubject, strings.HasPrefix(r.Subject, amendmentSubject("")), r.Subject == finalReviewSubject, r.Subject == publicationSubject:

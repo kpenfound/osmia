@@ -13,26 +13,19 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordWaiver records, as the router does when a dependency is dropped, the
-// waiver in the dependent's trace and the decision subject's move to waived.
 func recordWaiver(t *testing.T, f *publisherFixture, waiver lifecycle.EdgeWaiver, routing trace.Routing) {
 	t.Helper()
 	ctx := context.Background()
 	data, err := json.Marshal(lifecycle.EdgeWaivers{Waivers: []lifecycle.EdgeWaiver{waiver}})
-	must(t, err)
+	fixturekit.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.EdgeWaiverDocument, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: fixturekit.OwnerActor, Cause: "fixture"}, Path: lifecycle.EdgeWaiverPath, Content: string(data)}
 	subject := lifecycle.DependencySubject(waiver.Upstream, waiver.Type)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject + "-1", Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "upstream-abandoned"}
 	tx := trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, To: lifecycle.DependencyWaived, Reason: waiver.Reason, DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
 	_, err = f.repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
-	must(t, err)
+	fixturekit.Must(t, err)
 }
 
-// A dropped dependency is posted once, as the waiver it recorded: Jev's decision
-// on the work source with no author when Jev dropped it, and no second decision
-// for the transition that moved the decision subject. The decision says the
-// dependent goes on without the dependency, never that the upstream merged, and
-// a later pass posts nothing again.
 func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 	f := newPublisherFixture(t)
 	fixturekit.RecordHanded(t, f.repo, fixturekit.Stream, "stdin", fixturekit.DemoStart)
@@ -42,12 +35,12 @@ func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 		trace.Routing{DecidedBy: trace.DecidedByJev, Judgment: jevJudgment, DefaultTo: lifecycle.DependencyKept})
 
 	posts, _ := f.pass()
-	var waivers []hooksPost
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-jev-route-") {
+	var waivers []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-jev-route-") {
 			t.Fatalf("the drop was posted as a departure too: %s", d.Raw)
 		}
-		if strings.Contains(d.str("decision"), "-jev-waiver-") {
+		if strings.Contains(d.Str("decision"), "-jev-waiver-") {
 			waivers = append(waivers, d)
 		}
 	}
@@ -56,12 +49,12 @@ func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 	}
 	d := waivers[0]
 	requireWorkDecision(t, d, jevJudgment)
-	if !strings.Contains(d.str("outcome"), "goes on without it") || strings.Contains(strings.ToLower(d.str("outcome")), "merged:") || !strings.Contains(d.str("outcome"), "not recorded as merged") {
+	if !strings.Contains(d.Str("outcome"), "goes on without it") || strings.Contains(strings.ToLower(d.Str("outcome")), "merged:") || !strings.Contains(d.Str("outcome"), "not recorded as merged") {
 		t.Fatalf("the waiver's outcome: %s", d.Raw)
 	}
 	posts, _ = f.pass()
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-jev-waiver-") {
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-jev-waiver-") {
 			t.Fatalf("the waiver was posted again: %s", d.Raw)
 		}
 	}
@@ -78,13 +71,13 @@ func TestAnOwnersWaiverIsPostedAsTheOwnersDecision(t *testing.T) {
 		trace.Routing{DecidedBy: trace.DecidedByOwner, DefaultTo: lifecycle.DependencyKept})
 
 	posts, _ := f.pass()
-	var waivers []hooksPost
-	for _, d := range decisions(posts) {
-		if strings.Contains(d.str("decision"), "-waiver-") {
+	var waivers []fixturekit.HooksPost
+	for _, d := range fixturekit.Decisions(posts) {
+		if strings.Contains(d.Str("decision"), "-waiver-") {
 			waivers = append(waivers, d)
 		}
 	}
-	if len(waivers) != 1 || waivers[0].Source != "osmia-owner" || waivers[0].str("decider") != "owner" || strings.Contains(waivers[0].Raw, "Decided by Jev") {
+	if len(waivers) != 1 || waivers[0].Source != "osmia-owner" || waivers[0].Str("decider") != "owner" || strings.Contains(waivers[0].Raw, "Decided by Jev") {
 		t.Fatalf("the owner's waiver: %v %v", waivers, kinds(posts))
 	}
 }

@@ -30,7 +30,7 @@ const MaxHandedBytes = 512 << 10
 const (
 	HandedDocument   = "handed"
 	HandInTransition = "handin"
-	// handInSkipReason is why a hand-in that skipped debate recorded its
+	// HandInSkipReason is why a hand-in that skipped debate recorded its
 	// skip; the ratification packet carries it as its conclusion.
 	HandInSkipReason = "the owner skipped debate at hand-in; the workstream still needs the owner's ratification of the spec and the plan"
 	// HandedState is the feature state of a newly handed workstream.
@@ -128,12 +128,9 @@ func (s *Controller) HandInAs(ctx context.Context, req HandInRequest, origin *Ha
 		return HandInResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot resolve the trace repository of workstream %s", stream)}
 	}
 	h := HandIn{S: s.HandInDependencies(), Repository: repository, Req: req, Stream: stream, Source: source, Name: name, Trace: workstreamTrace, Origin: origin}
-	// A key whose input is already copied finishes without reading it again.
 	if out, done, api := h.Record(ctx, nil); done || api != nil {
 		return out, api
 	}
-	// The input is read without holding the hand-in lock, so a slow fetch does
-	// not hold up other hand-ins.
 	content, api := s.ReadHanded(ctx, req)
 	if api != nil {
 		return HandInResponse{}, api
@@ -153,7 +150,6 @@ type HandIn struct {
 	Origin *HandInOrigin
 }
 
-// actor is the actor the hand-in's records name.
 func (h HandIn) actor() trace.Actor {
 	if h.Origin != nil {
 		return h.Origin.Actor
@@ -165,7 +161,7 @@ func (h HandIn) Failed(step string) (HandInResponse, bool, *APIError) {
 	return HandInResponse{}, false, &APIError{Code: Internal, Message: fmt.Sprintf("hand-in to project %s failed while %s workstream %s; retry with the same key, or check %s", h.Req.Project, step, h.Stream, h.Trace)}
 }
 
-// record finishes the hand-in under the hand-in lock. With the input already
+// Record finishes the hand-in under the hand-in lock. With the input already
 // copied it checks the copy matches the request and records the transition.
 // Otherwise, with content nil it reports not done; with content it creates
 // the workstream, copies content and records the transition.
@@ -182,7 +178,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		return HandInResponse{}, false, &APIError{Code: Conflict, Message: "workstream is permanently archived; use a new hand-in key"}
 	}
 	_, archivedBase := h.S.ArchivedWorkstream(string(req.Base))
-	if len(req.Projects) < 2 && req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base) || req.Base == LibrarianWorkstream(req.Project)) {
+	if len(req.Projects) < 2 && req.Base != "" && (archivedBase || req.Base == stream || !slices.Contains(streams, req.Base)) {
 		return HandInResponse{}, false, &APIError{Code: Validation, Message: "base must name another feature workstream in the same project"}
 	}
 	var selected DesignSelection
@@ -233,8 +229,6 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			return h.Failed("reading")
 		}
 		handed = slices.ContainsFunc(transitions, func(t trace.Transition) bool { return t.ID == HandInTransition })
-		// Only the skip the hand-in recorded counts: a later skip through the
-		// shed is the owner's action on the workstream, not part of the request.
 		skipped = slices.ContainsFunc(transitions, SkippedAtHandIn)
 	}
 	if doc != nil && len(projects) > 1 && !selectionFound {
@@ -243,9 +237,6 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 	if doc != nil && (doc.Source != h.Source || req.Stdin != nil && doc.Content != *req.Stdin) {
 		return HandInResponse{}, false, &APIError{Code: Conflict, Message: fmt.Sprintf("key %s already handed in other input as workstream %s; use a new key", req.Key, stream)}
 	}
-	// Whether debate is skipped is part of the request: a retry asks for what
-	// the recorded hand-in did, and a hand-in interrupted before recording
-	// its skip records it on the retry.
 	if (handed || skipped) && skipped != req.SkipDebate {
 		did := "without skipping debate"
 		if skipped {
@@ -264,8 +255,6 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		if exists {
 			_, err = repository.EnsureChiefOfStaff(ctx, stream, now, h.actor())
 		} else {
-			// A new workstream records the backend its workspaces use; it
-			// keeps it until it is delivered or abandoned.
 			backend, checkErr := h.S.NewWorkspaces(ctx, h.S.About(h.Repository))
 			if checkErr != nil {
 				return HandInResponse{}, false, &APIError{Code: Unavailable, Message: fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
@@ -275,11 +264,6 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		if err != nil {
 			return h.Failed("creating")
 		}
-		// The hand-in creates the workstream's one-workstream workgroup at
-		// once, rather than waiting for the next start's migration pass, so
-		// the fast path never runs briefly without one: a workstream never
-		// has a chief of staff of its own, and ensureWorkgroups backfilling
-		// this on a later start changes nothing further.
 		if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, h.actor(), HandInTransition); err != nil {
 			return h.Failed("recording the workgroup of")
 		}
@@ -292,9 +276,6 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 				return HandInResponse{}, false, &APIError{Code: Validation, Message: "base must form an acyclic graph of available workstreams in this project"}
 			}
 		}
-		// The workstream may be new: the runtime store learns it before the
-		// input is copied, so a retried hand-in resolves it again and a
-		// priority or pause may name it as soon as this hand-in finishes.
 		if err := h.S.RefreshRuntime(); err != nil {
 			return h.Failed("resolving the runtime workstreams of")
 		}
@@ -312,17 +293,12 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			return h.Failed("recording factory authority for")
 		}
 	}
-	// The skip is recorded as the owner's skip of debate before the handed
-	// state, so the debate controller never finds the workstream without it.
-	// It carries the handed document's timestamp like the transition below.
 	if req.SkipDebate && !skipped {
 		tx := trace.Transaction{Transition: trace.Transition{Header: OwnerHeader(SkipTransition, req.Project, stream, HandInTransition, doc.At), Subject: OwnerSubject, To: SkippedValue, Reason: HandInSkipReason}}
 		if _, err := repository.Transact(ctx, tx); err != nil {
 			return h.Failed("recording the skipped debate of")
 		}
 	}
-	// The transition carries the handed document's timestamp, so a retry
-	// repeats the committed transition exactly.
 	header := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: HandInTransition, Revision: 1, Project: req.Project, Workstream: stream, At: doc.At, Actor: h.actor(), Cause: HandInTransition}
 	reason := "the owner handed in " + doc.Path + " from " + h.Source
 	if h.Origin != nil {
@@ -338,7 +314,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value, Source: h.Source, SkipDebate: req.SkipDebate}, true, nil
 }
 
-// handInSource returns the recorded source of the request's input and the
+// HandInSource returns the recorded source of the request's input and the
 // name of its copy under handed/.
 func HandInSource(req HandInRequest) (source, name string, api *APIError) {
 	switch {
@@ -362,22 +338,20 @@ func HandInSource(req HandInRequest) (source, name string, api *APIError) {
 	}
 }
 
-// validHandedName reports whether name is accepted as a file name under
+// ValidHandedName reports whether name is accepted as a file name under
 // handed/ by the trace.
 func ValidHandedName(name string) bool {
 	return name != "" && path.Clean(name) == name && !strings.HasPrefix(name, ".") && strings.TrimSpace(name) == name &&
 		!strings.ContainsAny(name, "/\\\x00\r\n:")
 }
 
-// readHanded reads the request's input: the file, the fetched issue or the
+// ReadHanded reads the request's input: the file, the fetched issue or the
 // stdin text.
 func (s *Controller) ReadHanded(ctx context.Context, req HandInRequest) (string, *APIError) {
 	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(req.Project)})
 	var content string
 	switch {
 	case req.Path != "":
-		// Only a regular file is opened, and without blocking: opening a FIFO
-		// would wait for a writer.
 		info, err := os.Stat(req.Path)
 		if err != nil {
 			return "", &APIError{Code: Validation, Message: fmt.Sprintf("cannot read %s; check that the file exists and is readable", req.Path)}

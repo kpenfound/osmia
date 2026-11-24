@@ -54,7 +54,6 @@ func (f *fixture) newStore(repo *trace.Repository) *Store {
 	return &Store{Repository: repo, Now: func() time.Time { f.clock = f.clock.Add(time.Minute); return f.clock }}
 }
 
-// restart reopens the project's trace, as a service restart does.
 func (f *fixture) restart() {
 	f.t.Helper()
 	f.repo.Close()
@@ -198,7 +197,6 @@ func TestADecisionOnceSetIsReturnedUnchanged(t *testing.T) {
 		}
 	}
 
-	// The group has an open workstream now, so a pending occurrence joins it.
 	j, err := f.store.Reserve(ctx, groupA, joined.Run)
 	if err != nil || j.State != Joined || j.Workstream != done.Workstream {
 		t.Fatalf("reserve into an open group: %+v, %v", j, err)
@@ -264,7 +262,6 @@ func TestClosingTheWorkstreamAdvancesTheGeneration(t *testing.T) {
 	if _, err := f.store.Opened(ctx, groupA, first.Run, ""); err != nil {
 		t.Fatal(err)
 	}
-	// A second occurrence, still pending, and an unrelated closure.
 	if closed, err := f.store.CloseWorkstream(ctx, "w_00000000000000000000000000000099"); err != nil || len(closed) != 0 {
 		t.Fatalf("closing a stranger: %v, %v", closed, err)
 	}
@@ -283,19 +280,16 @@ func TestClosingTheWorkstreamAdvancesTheGeneration(t *testing.T) {
 	if g.Generation != 1 || g.Open != nil || len(g.Closed) != 1 || g.Closed[0].Workstream != reserved.Workstream {
 		t.Fatalf("group after closing: %+v", g)
 	}
-	// The occurrence that opened keeps its own key and workstream.
 	if o, _ := g.Find(first.Run); o.Decision.State != Opened || o.Decision.Key != reserved.Key || o.Decision.Workstream != reserved.Workstream || o.Decision.Generation != 0 {
 		t.Fatalf("opened occurrence: %+v", o.Decision)
 	}
 	if again, err := f.store.Reserve(ctx, groupA, first.Run); err != nil || again.Key != reserved.Key || again.State != Opened {
 		t.Fatalf("replaying the open of a closed workstream: %+v, %v", again, err)
 	}
-	// A pending occurrence recorded before the closure gets the next generation.
 	next, err := f.store.Reserve(ctx, groupA, second.Run)
 	if err != nil || next.State != Opening || next.Generation != 1 || next.Key != HandInKey(project, groupA, 1) || next.Key == reserved.Key || next.Workstream == reserved.Workstream {
 		t.Fatalf("occurrence after closing: %+v, %v", next, err)
 	}
-	// So does one recorded after it, and the new hand-in carries the history.
 	third := recordOne(t, f, groupA, "3")
 	if d, err := f.store.Reserve(ctx, groupA, third.Run); err != nil || d.State != Opening || d.Key != next.Key {
 		t.Fatalf("third occurrence: %+v, %v", d, err)
@@ -315,12 +309,9 @@ func TestAnOpeningLeftByAnInterruptionStillClosesAndKeepsItsKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.restart()
-	// The workstream was created, but never recorded as open, and is gone.
 	if closed, err := f.store.CloseWorkstream(ctx, reserved.Workstream); err != nil || len(closed) != 1 {
 		t.Fatalf("closing: %v, %v", closed, err)
 	}
-	// Completing the opening afterwards still names its own workstream, and
-	// does not make a closed workstream the group's open one.
 	done, err := f.store.Opened(ctx, groupA, o.Run, "")
 	if err != nil || done.State != Opened || done.Key != reserved.Key || done.Workstream != reserved.Workstream {
 		t.Fatalf("completing: %+v, %v", done, err)
@@ -395,7 +386,6 @@ func TestAnnouncementMarkersAndMootNotesArePerDestinationAndSurviveARestart(t *t
 			t.Fatal(err)
 		}
 	}
-	// A destination that was written is never closed as moot afterwards.
 	if err := f.store.MarkMoot(ctx, groupA, o.Run, Moot{Destination: DestinationOrigin, ArchivedBy: "owner"}); err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +425,6 @@ func TestAReservationKeepsTheChiefsNotesAcrossARestart(t *testing.T) {
 		t.Fatalf("reserving: %+v, %v", reserved, err)
 	}
 	f.restart()
-	// A later reservation of the same occurrence keeps the first one's notes.
 	again, err := f.store.ReserveWithNotes(ctx, groupA, o.Run, "Other notes.")
 	if err != nil || again.Notes != "Look at the shared fixture." || again.Key != reserved.Key {
 		t.Fatalf("reserving again: %+v, %v", again, err)

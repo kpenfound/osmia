@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// The daily budget's pause and the day it was set on are written together,
-// survive reopening, and follow the pause replacement rule.
 func TestBudgetPauseRecordsItsDay(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)

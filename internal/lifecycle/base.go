@@ -21,7 +21,7 @@ var ErrBaseUnavailable = errors.New("workstream base is unavailable")
 // dependency remains on the owner's local feature branch until integrated.
 // Once a durable observation records that the dependency has integrated
 // into upstream, resolveBase returns that recorded base without a Git
-// fetch or any pull-request lookup, parent or own (spec#8): the check runs
+// fetch or any pull-request lookup, parent or own: the check runs
 // before any remote operation.
 func (s *Controller) ResolveBase(ctx context.Context, cfg *config.Config, repo *trace.Repository, stream config.WorkstreamID, g workspace.Provider) (seal.Base, error) {
 	ctx = ghlog.WithScope(ctx, ghlog.Scope{Project: string(cfg.Project.ID), Workstream: string(stream)})
@@ -57,8 +57,6 @@ func (s *Controller) ResolveBase(ctx context.Context, cfg *config.Config, repo *
 	if state.Value == AbandonedState {
 		return seal.Base{}, fmt.Errorf("%w: base %s was abandoned", ErrBaseUnavailable, dependency.Base)
 	}
-	// Upstream held the branch of a base the owner merged there outside the
-	// factory when the merge was recorded.
 	if _, merged, err := deliveryMerge(repo, dependency.Base); err != nil || merged {
 		return resolved, err
 	}
@@ -79,8 +77,6 @@ func (s *Controller) ResolveBase(ctx context.Context, cfg *config.Config, repo *
 			return seal.Base{}, err
 		}
 	}
-	// A newly sealed branch starts on upstream too. Only a delivered parent's
-	// published revision can establish integration, not its initial base commit.
 	if exists && state.Value == DeliveredState {
 		integrated, err := g.Ancestor(ctx, tip, upstream)
 		if err != nil {
@@ -91,8 +87,6 @@ func (s *Controller) ResolveBase(ctx context.Context, cfg *config.Config, repo *
 		}
 	}
 	if state.Value == DeliveredState && s.Options.PullRequests != nil {
-		// The hosting record also detects squash and rebase merges, whose upstream
-		// commit need not be an ancestor of the local feature tip.
 		records, err := publications(repo, dependency.Base)
 		if err != nil {
 			return seal.Base{}, err
@@ -171,10 +165,6 @@ func BaseWaiting(repo *trace.Repository, stream config.WorkstreamID) (bool, erro
 	return state.Value == "waiting", err
 }
 
-// baseWaitReason returns why the workstream of dependency is parked on its
-// base, or "" when the base is available, with the revision of the base
-// observation it read. An unavailable ancestor parks the whole dependent
-// chain.
 func (s *Controller) baseWaitReason(ctx context.Context, repo *trace.Repository, dependency trace.WorkstreamBase) (string, int, error) {
 	stream := dependency.Workstream
 	own, _, sealed, err := seal.Latest(repo, stream)
@@ -190,7 +180,6 @@ func (s *Controller) baseWaitReason(ctx context.Context, repo *trace.Repository,
 		parent = ""
 	}
 	reason := ""
-	// An unavailable ancestor parks the whole dependent chain.
 	for parent != "" {
 		state, err := repo.Workflow(parent, trace.FeatureSubject)
 		if err != nil {

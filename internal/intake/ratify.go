@@ -13,7 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// presentPacket records the workstream's ratification packet as the next
+// PresentPacket records the workstream's ratification packet as the next
 // revision of shed/round-<n>/packet.json whenever it differs from the packet
 // already recorded. A workstream whose debate has neither concluded nor been
 // skipped is at no decision point and gets none; every owner action that
@@ -39,9 +39,6 @@ func (d *Debate) PresentPacket(ctx context.Context, stream config.WorkstreamID, 
 			recorded = doc
 		}
 	}
-	// The comparison is against the latest revision alone, which is the one
-	// the API serves: a packet that says again what an earlier revision said
-	// is recorded, or the owner would read a stale decision.
 	if recorded.Content == string(content) {
 		return nil
 	}
@@ -50,7 +47,7 @@ func (d *Debate) PresentPacket(ctx context.Context, stream config.WorkstreamID, 
 	return d.Repository.RecordDocuments(ctx, []trace.Document{doc})
 }
 
-// packet builds the workstream's current ratification packet, or nothing when
+// Packet builds the workstream's current ratification packet, or nothing when
 // its debate has neither concluded nor been skipped. The conclusion it carries
 // is the recorded reason debate ended, the revisions are the latest recorded
 // ones and the dissent record is the dissent that stands now.
@@ -62,8 +59,6 @@ func (d *Debate) Packet(stream config.WorkstreamID, skipped bool) (*shed.Packet,
 	kind, round, ok := ShedState(state.Value)
 	switch {
 	case skipped:
-		// A skipped debate is the decision point from the moment it is
-		// recorded, whether a round ran before it or not.
 		if !ok {
 			round = 1
 		}
@@ -94,7 +89,7 @@ func (d *Debate) Packet(stream config.WorkstreamID, skipped bool) (*shed.Packet,
 	return &packet, nil
 }
 
-// packet serves the workstream's recorded ratification packet. ProjectSpec
+// Packet serves the workstream's recorded ratification packet. ProjectSpec
 // is set when the workstream belongs to a multi-member workgroup whose
 // project spec is already drafted, so the owner sees it alongside this
 // workstream's own packet before ratifying either.
@@ -155,7 +150,7 @@ func (s *Controller) Packet(raw string) (PacketResponse, *APIError) {
 	return out, nil
 }
 
-// ratify records the owner's approval of the exact revisions of the spec and
+// Ratify records the owner's approval of the exact revisions of the spec and
 // the plan they read in the packet. It changes no state of its own: the
 // ratification is the record, the record asks for the sealing, and the
 // sealing moves the workstream on. For a workstream whose workgroup spans
@@ -222,10 +217,8 @@ func (s *Controller) RatifyBy(ctx context.Context, raw string, req RatifyRequest
 	return s.RatifyWorkgroup(ctx, o, workgroup, asked, req.ProjectSpecRevision)
 }
 
-// ratifyMember is the single-workstream ratification: unchanged from what
-// ratify always did, parameterized by the pin to ratify at instead of
-// reading the request directly, so a multi-member workgroup's other
-// members can be ratified at their own current pin by the same logic.
+// RatifyMember ratifies one workstream at the given pin, so each member of a
+// workgroup can be ratified at its own current pin.
 func (s *Controller) RatifyMember(ctx context.Context, o *ShedOwner, asked shed.Pin) (RatifyResponse, *APIError) {
 	return s.ratifyMember(ctx, o, asked, Deciding{})
 }
@@ -236,9 +229,6 @@ func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.
 		return RatifyResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the ratifications of workstream %s; check the trace repository", o.Stream)}
 	}
 	if ratified && latest.Revision == asked {
-		// The revisions are approved already: the gate reports the sealing
-		// their record asked for, and records the ratification again only
-		// when that sealing failed.
 		return s.Sealing(ctx, o, latest, fmt.Sprintf("workstream %s is ratified at %s already", o.Stream, asked))
 	}
 	entries, err := Dissent(o.Repository, o.Stream)
@@ -272,10 +262,6 @@ func (s *Controller) ratifyMember(ctx context.Context, o *ShedOwner, asked shed.
 	return RatifyResponse{Project: o.Project, Workstream: o.Stream, Round: record.Round, Spec: asked.Spec, Plan: asked.Plan, Sealing: "requested", Detail: reason + "; the sealing is asked for"}, nil
 }
 
-// recordRatification applies the ratification as a pinned move: the owner's
-// decision, or one of Jev's gate decisions, enters ratified-<round> on the
-// owner subject with the ratification file and its notice, through the router's
-// commit and hard-prerequisite check. Nothing is asked of Jev.
 func (s *Controller) recordRatification(ctx context.Context, o *ShedOwner, d Deciding, content, reason string) *APIError {
 	at := o.Now()
 	id := shed.RatificationDocumentID(o.Round)
@@ -297,7 +283,7 @@ func (s *Controller) recordRatification(ctx context.Context, o *ShedOwner, d Dec
 
 const ProjectSpecCatchingUp = "the project spec is catching up with the latest member revisions; read the packet again"
 
-// ratifyWorkgroup validates the entire draft before recording one durable
+// RatifyWorkgroup validates the entire draft before recording one durable
 // owner decision. Member decisions and seals are preparations; only durable
 // group completion grants effective ratification and production admission.
 func (s *Controller) RatifyWorkgroup(ctx context.Context, o *ShedOwner, id config.WorkgroupID, asked shed.Pin, projectSpecRevision int) (RatifyResponse, *APIError) {
@@ -422,7 +408,7 @@ func (s *Controller) RatifyWorkgroup(ctx context.Context, o *ShedOwner, id confi
 	return GroupApprovalResponse(o.Project, o.Stream, decision), nil
 }
 
-// sealing reports the state of the sealing a ratification's record asked
+// Sealing reports the state of the sealing a ratification's record asked
 // for: requested until the controller publishes it, then pending or running.
 // One that failed is asked for again by recording the ratification again as
 // its next revision, which the controller seals afresh.
@@ -462,7 +448,7 @@ func (s *Controller) Sealing(ctx context.Context, o *ShedOwner, r Ratification, 
 	return out, nil
 }
 
-// refusals lists every reason the workstream cannot be ratified at the given
+// Refusals lists every reason the workstream cannot be ratified at the given
 // revisions: a blocking objection the owner has not disposed of, a plan that
 // does not validate, revisions that are not the current ones, and a workstream
 // that is not at its decision point. Every reason that applies is listed, so
@@ -496,7 +482,7 @@ func (s *Controller) Refusals(ctx context.Context, o *ShedOwner, asked shed.Pin,
 	return out, nil
 }
 
-// planProblems validates the workstream's latest recorded spec and plan, the
+// PlanProblems validates the workstream's latest recorded spec and plan, the
 // revisions a ratification approves, exactly as the architect's draft is
 // validated.
 func (s *Controller) PlanProblems(ctx context.Context, o *ShedOwner) ([]string, error) {
@@ -510,9 +496,6 @@ func (s *Controller) PlanProblems(ctx context.Context, o *ShedOwner) ([]string, 
 	if !drafted || !planned {
 		return nil, errors.New("the workstream has no recorded spec and plan")
 	}
-	// The upstream head is fetched and the entity map re-seeded from it
-	// before the plan is validated, so a directory that landed upstream
-	// after drafting does not refuse the ratification.
 	s.ReseedEntities(ctx, o.Repository)
 	return dr.Validate(spec, graph)
 }

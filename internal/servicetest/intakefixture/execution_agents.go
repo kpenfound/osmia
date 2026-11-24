@@ -20,7 +20,7 @@ func ScriptLanding(engine *fixturekit.DemoEngine, masons *FakeMasons, turnID fun
 	defer engine.Mu.Unlock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent("resume")+"-review-") {
-			body, err := CallTool(ctx, tools, "verdict", map[string]any{"decision": "satisfactory", "summary": "The candidate does the task and its acceptance holds", "findings": []api.ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, "verdict", map[string]any{"decision": "satisfactory", "summary": "The candidate does the task and its acceptance holds", "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("verdict %s: %v", body, err)
 			}

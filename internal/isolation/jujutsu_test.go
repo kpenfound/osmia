@@ -18,17 +18,12 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// jujutsuWorkspaces lends one existing Jujutsu workspace to every turn.
 type jujutsuWorkspaces struct{ w workspace.Worktree }
 
 func (p jujutsuWorkspaces) Acquire(_ context.Context, req a.WorkspaceRequest) (a.WorkspaceLease, error) {
 	return a.WorkspaceLease{Workspace: a.Workspace{Directory: p.w.Path, Access: req.Access}, Lease: leaseFunc(func(context.Context) error { return nil })}, nil
 }
 
-// fakeAgent stands in for a real model session: it runs the mason closure
-// synchronously in the test's own process rather than a real sandboxed
-// backend, so it leaves unverified that a real agent process is as confined
-// to the view as the closure here finds it to be.
 type fakeAgent func(context.Context, *enforcertest.Turn) (*agent.Result, error)
 
 func (e fakeAgent) Enforcer(settings a.ExecutionSettings) (agent.Enforcer, error) {
@@ -47,10 +42,6 @@ func hostGit(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// A turn in a Jujutsu workspace works on a copy of its files alone: it holds
-// no VCS access, cannot read or write the workspace's .jj, the repository
-// behind it or the clone's Git metadata, cannot run jj or git, and the
-// metadata it plants in its copy never reaches the workspace.
 func TestTurnInAJujutsuWorkspaceGetsFilesOnly(t *testing.T) {
 	if _, err := exec.LookPath("jj"); err != nil {
 		if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
@@ -82,7 +73,6 @@ func TestTurnInAJujutsuWorkspaceGetsFilesOnly(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(w.Path, ".jj")); err != nil {
 				t.Fatalf("the workspace has no .jj to hide: %v", err)
 			}
-			// The metadata the workspace's own access names is what a turn must not reach.
 			metadata := append(slices.Clone(w.VCS().Mounts), filepath.Join(w.Path, ".jj"))
 			for _, mount := range w.VCS().Mounts {
 				metadata = append(metadata, filepath.Join(mount, "config"), filepath.Join(mount, "HEAD"))

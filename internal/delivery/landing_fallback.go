@@ -92,13 +92,6 @@ func (l *Lander) GiveUp(ctx context.Context, op coreadapter.Operation, why recon
 	return run.fail(write, fmt.Sprintf("%s (%s); the fetched %s of %s at %s does not hold %s, so the landing is confirmed absent", RefusedAfterRetries, why.Summary(), run.branch, cfg.Project.Upstream, fetched, in.Commit))
 }
 
-// fallback delivers the workstream by its draft pull request after the upstream
-// refused the landing push: the draft is marked ready under an approval of its
-// drafted title and description, through the publication that marks a draft
-// ready, and the workstream is delivered with a notice saying why it did not
-// land. The refusal is recorded before this runs, and a restart runs it again:
-// what the pull request and the trace already show is not repeated, and
-// nothing is pushed.
 func (r *landingRun) fallback(ctx context.Context, intent LandingIntent) (coreadapter.OperationResult, error) {
 	feature, err := r.Repository.Workflow(r.stream, trace.FeatureSubject)
 	if err != nil {
@@ -115,8 +108,6 @@ func (r *landingRun) fallback(ctx context.Context, intent LandingIntent) (coread
 	return r.completeFallback(ctx, intent)
 }
 
-// completeFallback records the fallback's outcome with the notice of why the
-// workstream did not land.
 func (r *landingRun) completeFallback(ctx context.Context, intent LandingIntent) (coreadapter.OperationResult, error) {
 	push, _, err := pushNumbered(r.Repository, r.stream, intent.Push)
 	if err != nil {
@@ -127,10 +118,6 @@ func (r *landingRun) completeFallback(ctx context.Context, intent LandingIntent)
 	return r.finish(ctx, LandOutcomeFellBack, reason, notice)
 }
 
-// markReady puts the draft pull request of the landing's push ready for review
-// through the publication's own marking, under an approval of its drafted
-// title and description. It returns a result when the marking was refused or
-// cannot be carried out, nil once the workstream is delivered.
 func (r *landingRun) markReady(ctx context.Context, intent LandingIntent) (*coreadapter.OperationResult, error) {
 	report, found, err := LatestFinalReport(r.Repository, r.stream)
 	if err != nil {
@@ -169,11 +156,6 @@ func (r *landingRun) markReady(ctx context.Context, intent LandingIntent) (*core
 	return nil, nil
 }
 
-// fallbackApproval returns the approval the marking rests on: the one standing
-// approval of the current review when there is one, as the owner's "Approve and
-// land" records, and otherwise a new approval of the drafted title and
-// description that the service records for the decider, with the delivery
-// subject's transition. It returns the approval's revision.
 func (r *landingRun) fallbackApproval(ctx context.Context, report FinalReport) (DeliveryApproval, int, error) {
 	review, decision, approval, err := DeliveryDocuments(r.Repository, r.stream)
 	if err != nil {
@@ -198,11 +180,6 @@ func (r *landingRun) fallbackApproval(ctx context.Context, report FinalReport) (
 	return recorded, next, nil
 }
 
-// recordDecidedApproval records, for the decider, an approval of the drafted
-// title and description of the report's delivery, with the delivery subject's
-// transition, and returns it with its revision. The service records it where
-// the owner has not: because says why. The publication applies it as it applies
-// the owner's approval.
 func (s *Controller) recordDecidedApproval(ctx context.Context, repository *trace.Repository, cfg *config.Config, stream config.WorkstreamID, report FinalReport, decider LandDecider, because string) (DeliveryApproval, int, error) {
 	review, decision, _, err := DeliveryDocuments(repository, stream)
 	if err != nil {
@@ -246,7 +223,6 @@ func (s *Controller) recordDecidedApproval(ctx context.Context, repository *trac
 	return recorded, next, nil
 }
 
-// pushNumbered returns the workstream's recorded push numbered n.
 func pushNumbered(repository *trace.Repository, stream config.WorkstreamID, n int) (Push, bool, error) {
 	pushes, err := Pushes(repository, stream)
 	if err != nil {

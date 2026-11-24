@@ -16,13 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// crossRepoProject derives the synthetic project identity stamped on every
-// record of a cross-repo workgroup's own trace: the workgroup's own
-// identity with its "g_" prefix exchanged for "p_", so Header.Project still
-// passes config.CheckProjectIDs. It is deterministic, so the same workgroup
-// always reopens the same identity without storing it separately, and it is
-// never a registered project's own identity: nothing registers a project,
-// or reads one, by looking inside a workgroup's own trace.
 func crossRepoProject(id config.WorkgroupID) config.ProjectID {
 	return config.ProjectID("p_" + strings.TrimPrefix(string(id), "g_"))
 }
@@ -154,12 +147,6 @@ func CreateWorkgroupTrace(ctx context.Context, root config.Root, members []Cross
 	return r, g, nil
 }
 
-// recordWorkgroup appends g to the trace's own recorded workgroups, the way
-// CreateWorkgroup does for a workgroup confined to one repo, but with g's
-// identity already chosen: a cross-repo workgroup's identity is fixed the
-// moment its own trace directory and synthetic project identity are
-// derived from it, before anything can be recorded in that trace, so
-// CreateWorkgroup's own minting cannot be reused here.
 func recordWorkgroup(ctx context.Context, r *Repository, g Workgroup, at time.Time, actor Actor, cause string) error {
 	existing, revision, err := Workgroups(r)
 	if err != nil {
@@ -206,40 +193,20 @@ func OpenWorkgroupTrace(root config.Root, id config.WorkgroupID, members []Cross
 	return r, nil
 }
 
-// sharedWorkgroupTrace is the one registry entry a cross-repo workgroup id
-// created or opened through the registry has in this process at a time:
-// its mutex serializes every attempt to open or close that one instance,
-// repo is that instance while any caller holds it and nil otherwise, and
-// refs counts how many callers currently do.
 type sharedWorkgroupTrace struct {
 	sync.Mutex
-	repo *Repository
-	refs int
-	// resolved survives handle closure and is cleared by resolution-invalidating writes.
-	resolved atomic.Bool
-	opens    atomic.Uint64
-	// diskOpens counts opens that acquired the directory and scanned it,
-	// rather than reusing an instance another holder had open.
-	diskOpens        atomic.Uint64
-	projectSpecReads atomic.Uint64
-	// approvalDecodes counts approval document decodes on the shared trace.
-	approvalDecodes atomic.Uint64
-	// approval is the decoded approval answer, dropped when the last holder
-	// closes.
-	approval approvalCache
-	// projectSpecDecodes counts project spec and workgroup revision document
-	// decodes on the shared trace.
+	repo               *Repository
+	refs               int
+	resolved           atomic.Bool
+	opens              atomic.Uint64
+	diskOpens          atomic.Uint64
+	projectSpecReads   atomic.Uint64
+	approvalDecodes    atomic.Uint64
+	approval           approvalCache
 	projectSpecDecodes atomic.Uint64
-	// projectSpec is the effective project spec, dropped with the approval
-	// when the last holder closes.
-	projectSpec projectSpecCache
+	projectSpec        projectSpecCache
 }
 
-// workgroupTraces holds one *sharedWorkgroupTrace per workgroup ID this
-// process has ever created or opened through the registry, kept
-// indefinitely (with repo reset to nil between uses) rather than removed
-// once unused, so a new opener and an about-to-finish closer of the same
-// id can never race over whether the registry entry itself still exists.
 var workgroupTraces sync.Map
 
 func sharedWorkgroupTraceFor(id config.WorkgroupID) *sharedWorkgroupTrace {
@@ -247,21 +214,6 @@ func sharedWorkgroupTraceFor(id config.WorkgroupID) *sharedWorkgroupTrace {
 	return v.(*sharedWorkgroupTrace)
 }
 
-// openSharedWorkgroupTrace opens, or reuses this process's own already open
-// instance of, the cross-repo workgroup id's own trace. The first caller
-// while none is open does the real work (checkGit, acquireWorkgroupTrace,
-// and the same recovery and scan OpenWorkgroupTrace always ran), under the
-// shared entry's own mutex, which by itself already serializes this
-// process's own goroutines the way acquireWorkgroupTrace's process lock
-// used to; every later caller, while that instance is still open, takes
-// the same mutex only briefly, finds repo already set, and returns it
-// directly; no exclusive hold on the directory is taken or waited on
-// again until every such caller has closed it. Non-nil members refresh
-// bindings under the brief membership lock, preserving fixed membership
-// and project identities. A journal-only caller may pass nil without
-// changing bindings. Each caller must Close the returned repository once;
-// Close decrements refs and only truly closes, releasing the
-// directory, once the count reaches zero.
 func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members map[config.WorkstreamID]CrossRepoMember) (*Repository, error) {
 	shared := sharedWorkgroupTraceFor(id)
 	shared.opens.Add(1)
@@ -286,12 +238,6 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 		return nil, err
 	}
 	r.members = members
-	// r.shared stays nil, and the registry entry unfilled, until recovery
-	// and scanning below actually succeed: an earlier failure's own Close
-	// must run as an ordinary, non-shared close (this function still
-	// holds shared's own lock, so a shared-aware Close trying to take it
-	// again here would deadlock), and nothing has claimed the registry
-	// entry yet for a second opener to reuse.
 	if err := checkStoreFiles(r.directory); err != nil {
 		r.Close()
 		return nil, err
@@ -300,10 +246,6 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 		r.Close()
 		return nil, err
 	}
-	// Registered for another caller to reuse only once the database opened
-	// and scanned: a failure here is returned with r left unshared, exactly
-	// as an ordinary, single-use open always has, rather than handing a
-	// second caller a reference whose health this call never confirmed.
 	if err := r.openLocked(false); err != nil {
 		return r, err
 	}
@@ -316,34 +258,13 @@ func openSharedWorkgroupTrace(root config.Root, id config.WorkgroupID, members m
 	return r, nil
 }
 
-// workgroupLocks holds one *sync.Mutex per workgroup ID, shared by every
-// Repository instance this process opens on that workgroup's own trace.
 var workgroupLocks sync.Map
 
-// workgroupProcessLock returns the one mutex this process uses to serialize
-// every attempt, from any of its own goroutines, to acquire the workgroup
-// id's own trace. Member passes and direct reads (CrossRepoProjectSpec)
-// can open and close the shared authority concurrently, often on the
-// same reconciliation cadence. Handing the OS-level flock off through this
-// in-process mutex, rather than having every caller poll and back off
-// against the others at the OS level, avoids a standing collision a shared
-// tick cadence could otherwise synchronize into.
 func workgroupProcessLock(id config.WorkgroupID) *sync.Mutex {
 	v, _ := workgroupLocks.LoadOrStore(id, &sync.Mutex{})
 	return v.(*sync.Mutex)
 }
 
-// acquireWorkgroupTrace acquires r's exclusive lock: a cross-repo
-// workgroup's own trace can be opened and closed by several callers, so
-// contention between this process's own goroutines is expected, not a
-// second process racing for the same trace. It first takes this process's
-// own mutex for r's workgroup, blocking until whichever of this process's
-// own goroutines holds it finishes and calls Close; with that serialized,
-// the OS-level flock itself almost never meets contention from anything
-// but a genuinely separate process, so it is still retried only briefly
-// before giving up and returning ErrLocked. The process mutex is recorded
-// on r and released by closeFiles once r.Close runs; on any failure here,
-// it is released before returning.
 func acquireWorkgroupTrace(r *Repository) error {
 	id, ok := WorkgroupProjectID(r.project)
 	if !ok {
@@ -377,12 +298,6 @@ func acquireWorkgroupTrace(r *Repository) error {
 	}
 }
 
-// createWorkgroupTraceDirectory builds and commits a new, empty workgroup
-// trace at root.WorkgroupTrace(id), under the project identity
-// crossRepoProject(id) derives,
-// exactly as a project's own trace does, but with none of a project's
-// charter, knowledge base or entity map, which a workgroup's own trace
-// never needs.
 func createWorkgroupTraceDirectory(ctx context.Context, root config.Root, id config.WorkgroupID, at time.Time, actor Actor, cause string) (*Repository, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -390,8 +305,6 @@ func createWorkgroupTraceDirectory(ctx context.Context, root config.Root, id con
 	if at.IsZero() || !validActor(actor) || !present(cause) {
 		return nil, fmt.Errorf("timestamp, actor and cause required")
 	}
-	// Creation and later opens share one authority from the first published
-	// manifest. Callers may publish member locators before closing this handle.
 	shared := sharedWorkgroupTraceFor(id)
 	shared.Lock()
 	defer shared.Unlock()
@@ -438,8 +351,6 @@ func createWorkgroupTraceDirectory(ctx context.Context, root config.Root, id con
 	if err := r.openLocked(true); err != nil {
 		return nil, err
 	}
-	// The workgroup trace's own root instance is project-shaped: a
-	// "project.json" manifest naming its own synthetic identity.
 	manifest := Header{Schema: "osmia.trace.project", Version: Version, ID: string(project), Revision: 1, Project: project, At: at, Actor: actor, Cause: cause}
 	if err := r.createManifest(ctx, "project.json", manifest, nil, "Create workgroup trace"); err != nil {
 		return nil, err

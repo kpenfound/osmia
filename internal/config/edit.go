@@ -1,19 +1,15 @@
 package config
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"github.com/BurntSushi/toml"
 )
 
-// skipBlanks advances over spaces and tabs, staying on the current line.
 func skipBlanks(text string, i, limit int) int {
 	for i < limit && (text[i] == ' ' || text[i] == '\t') {
 		i++
@@ -50,7 +46,6 @@ func ProjectConfigBytes(p Project) ([]byte, error) {
 	return []byte(text), nil
 }
 
-// tomlString quotes a basic string, escaping control characters portably.
 func tomlString(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -67,63 +62,4 @@ func tomlString(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
-}
-
-// replaceFile keeps the original mode and replaces the file atomically.
-func replaceFile(path string, data []byte) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%s: expected a regular file", path)
-	}
-	return writeAtomically(path, data, info.Mode().Perm())
-}
-
-// writeAtomically publishes data through a synced temporary file and rename.
-func writeAtomically(path string, data []byte, mode os.FileMode) error {
-	return writeAtomicallyBefore(path, data, mode, nil)
-}
-
-// writeAtomicallyBefore is writeAtomically with a step that runs on the
-// synced temporary file just before it replaces path.
-func writeAtomicallyBefore(path string, data []byte, mode os.FileMode, beforeRename func(tmp string) error) error {
-	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
-		return fmt.Errorf("%s: expected a regular file", path)
-	}
-	tmp := filepath.Join(filepath.Dir(path), ".config-"+rand.Text()+".tmp")
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp)
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if beforeRename != nil {
-		if err := beforeRename(tmp); err != nil {
-			return err
-		}
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-		return err
-	}
-	return nil
 }

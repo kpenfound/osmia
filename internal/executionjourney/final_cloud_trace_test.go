@@ -8,12 +8,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// traceReads is a Dagger Cloud trace reader that answers each request with
-// the command it was asked for, and counts what it was asked.
 type traceReads struct {
 	mu    sync.Mutex
 	asked []string
@@ -33,16 +35,14 @@ func (r *traceReads) requests() []string {
 	return slices.Clone(r.asked)
 }
 
-// The final reader can fetch the output of a Dagger Cloud trace, whole or
-// narrowed to a check, and the service records it as a workstream document.
 func TestFinalReaderFetchesATraceOutput(t *testing.T) {
 	t.Parallel()
 	d := newDraftFixture(t, "squash")
 	reads := &traceReads{}
-	d.f.s.options.CloudTrace = reads
+	d.f.S.Options.CloudTrace = reads
 	var listedTools []string
 	var results []string
-	d.f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+	d.f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
 		listed, err := tools.ListTools(ctx, nil)
 		if err != nil {
 			return err
@@ -51,13 +51,13 @@ func TestFinalReaderFetchesATraceOutput(t *testing.T) {
 			listedTools = append(listedTools, tool.Name)
 		}
 		for _, input := range []map[string]any{{"trace_id": "trace1"}, {"trace_id": "trace1", "check": "test:a"}, {"trace_id": "trace1", "check": "test:a"}} {
-			out, err := callTool(ctx, tools, checkrun.TraceToolName, input)
+			out, err := fixturekit.CallTool(ctx, tools, checkrun.TraceToolName, input)
 			if err != nil {
 				return err
 			}
 			results = append(results, out)
 		}
-		_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
+		_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume.", "findings": []any{}})
 		return err
 	})
 	result, err := d.a.Apply(context.Background(), d.first)
@@ -86,12 +86,12 @@ func TestFinalReaderFetchesATraceOutput(t *testing.T) {
 	}
 	for _, path := range []string{got[0].Path, got[1].Path} {
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "traces/"), ".json")
-		docs := streamDocuments(t, d.repository, d.stream, id)
+		docs := intakefixture.StreamDocuments(t, d.repository, d.stream, id)
 		if len(docs) != 1 || docs[0].Path != path || docs[0].Actor.ID != "final-review" {
 			t.Fatalf("recorded %q: %+v", path, docs)
 		}
 	}
-	// A request after a restart returns the record without fetching again.
+
 	d.reopen(t)
 	got1, found, err := (checkrun.TraceFetcher{Repository: d.repository, Runner: reads}).Lookup(d.stream, "trace1", "test:a")
 	if err != nil || !found || got1.Output != "trace trace1 check test:a\n" || len(reads.requests()) != 2 {

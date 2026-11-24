@@ -53,9 +53,6 @@ const (
 // holding it does.
 const DriftRetried = "retried"
 
-// routeExit routes an exit. A scheduling pass hands it to the router's worker,
-// which asks Jev beside the pass, and the pass treats the subject as handled
-// until a later pass finds it moved. Any other caller waits in place.
 func (s *Controller) routeExit(ctx context.Context, x router.Exit) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing dependency and drift exits is unavailable")
@@ -67,7 +64,6 @@ func (s *Controller) routeExit(ctx context.Context, x router.Exit) (router.Resul
 	return s.Router.Route(ctx, x)
 }
 
-// waitNotice is the kind of notice a dependency wait's transition carries.
 func waitNotice(subject string) string {
 	if subject == EdgeWaitSubject {
 		return "edge"
@@ -120,34 +116,18 @@ func RegisterRoutingEffects(reg *router.Effects, load func() *Controller) {
 	})
 }
 
-// clearing is what the exit from a dependency wait that has cleared is built
-// from.
 type clearing struct {
-	Subject, Trigger string
-	// Notice is the kind of the notice the transition carries.
-	Notice string
-	// Cause identifies the observation the wait cleared on, so a wait Jev kept
-	// is asked about once for it; HeaderCause is the cause the cleared wait's
-	// transition has always cited.
+	Subject, Trigger   string
+	Notice             string
 	Cause, HeaderCause string
 	Reason             string
-	// Doubt is the question the router asks to depart to keeping the wait.
-	Doubt   router.Question
-	Facts   map[string]any
-	Records []router.Entry
-	// Dependency is the single upstream workstream or base the wait is on; the
-	// exit's intent evidence summarises it. A wait with no single upstream
-	// gets the summary of the workstream instead.
-	Dependency *dependencyCase
-	// Unresolved returns why the wait does not clear now, or "" while it does.
-	Unresolved func(ctx context.Context) (string, error)
+	Doubt              router.Question
+	Facts              map[string]any
+	Records            []router.Entry
+	Dependency         *dependencyCase
+	Unresolved         func(ctx context.Context) (string, error)
 }
 
-// clearingExit returns the exit from the wait of state: its default ends the
-// wait, entered as the wait pass always entered it; keeping the dependent
-// waiting is the one other target. The wait is derived from records the pass
-// reads again, so the exit is raised again for the same observation only until
-// Jev has kept the wait for it.
 func (s *Controller) clearingExit(repo *trace.Repository, stream config.WorkstreamID, state trace.WorkflowState, c clearing) router.Exit {
 	id := fmt.Sprintf("%s-%d", c.Subject, state.Version+1)
 	intent, entries, facts := s.waitIntent(repo, stream, c.Dependency)
@@ -177,9 +157,6 @@ func (s *Controller) clearingExit(repo *trace.Repository, stream config.Workstre
 	}
 }
 
-// keptWaiting reports whether Jev already kept the wait of subject for the
-// observation cause names: its latest transition is a departure to waiting
-// that cites it.
 func keptWaiting(repo *trace.Repository, stream config.WorkstreamID, subject, cause string) (bool, error) {
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	if err != nil {
@@ -194,17 +171,11 @@ func keptWaiting(repo *trace.Repository, stream config.WorkstreamID, subject, ca
 	return last.Departed() && last.To == DependencyWaiting && last.Cause == cause, nil
 }
 
-// codeDefault marks a transition the router did not choose between targets for
-// as the default its machine takes.
 func codeDefault(t trace.Transition) trace.Transition {
 	t.DecidedBy, t.DefaultTo = trace.DecidedByCode, t.To
 	return t
 }
 
-// heldExit returns the exit that holds a drift rebase whose conflict
-// resolution stopped. Holding it for the owner is the default; the other
-// target asks for the drift rebase again from the start. The hold is entered
-// as the drift always held it.
 func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState, rebase DriftRebase, operation string, held DriftHeldError) router.Exit {
 	transition, _ := DriftIDs(rebase.Drift)
 	trigger := held.Trigger
@@ -237,9 +208,9 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 	return router.Exit{
 		Repo: d.repository, Project: d.repository.Project(), Workstream: stream, Machine: DriftMachine,
 		Subject: DriftSubject, From: state.Value, Version: state.Version, Trigger: trigger, Cause: fmt.Sprintf("%s-held", transition), HeaderCause: operation, Actor: foremanActor,
-		At:      d.s.Now(),
-		Default: DriftHoldTarget,
-		Targets: targets,
+		At:        d.s.Now(),
+		Default:   DriftHoldTarget,
+		Targets:   targets,
 		Questions: held.questions(),
 		Evidence:  router.Evidence{Intent: "Keep the workstream's feature branch current with upstream without losing its work.", Facts: facts, Records: records},
 		TransitionID: func(t router.Target) string {
@@ -254,13 +225,10 @@ func (d Drifter) heldExit(stream config.WorkstreamID, state trace.WorkflowState,
 	}
 }
 
-// corroborate says what the answers must show for the router to ask for the
-// drift rebase again.
 func (e DriftHeldError) corroborate() []router.Condition {
 	return []router.Condition{{Question: "transient", AtLeast: router.LevelModest}, {Question: "repeats", AtMost: router.LevelHalf}}
 }
 
-// questions are the trigger's own narrow questions of a held drift rebase.
 func (e DriftHeldError) questions() []router.Question {
 	return []router.Question{
 		question("transient", "The failure looks like infrastructure and not like the behaviour of the work."),

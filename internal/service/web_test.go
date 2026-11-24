@@ -1,41 +1,30 @@
 package service
 
 import (
-	bytes "bytes"
-	context "context"
-	json "encoding/json"
-	errors "errors"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
 
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
-	net "net"
-	http "net/http"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
-
-// withWeb appends a listen.web setting to the fixture's top-level file.
-func withWeb(t *testing.T, opts Options, addr string) {
-	t.Helper()
-	intakefixture.WithWeb(t, opts.Config.Root, addr)
-}
-
-var exchange = intakefixture.Exchange
 
 func socketHTTP(socket string) *http.Client {
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}}
 }
-
-var webHTTP = intakefixture.WebHTTP
-
-var errorCode = intakefixture.ErrorCode
 
 // Without listen.web the service binds only its Unix socket.
 func TestWebListenerDisabledByDefault(t *testing.T) {
@@ -45,7 +34,7 @@ func TestWebListenerDisabledByDefault(t *testing.T) {
 		t.Fatalf("web listener bound without listen.web: %s", s.WebAddr())
 	}
 	cfg, err := c.Configuration(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Effective.Listen.Web != "" {
 		t.Fatalf("effective listen: %+v", cfg.Effective.Listen)
 	}
@@ -57,26 +46,26 @@ func TestWebListenerDisabledByDefault(t *testing.T) {
 func TestWebListenerServesTheSocketAPI(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 	s, c := start(t, opts)
 	addr := s.WebAddr()
 	if host, _, err := net.SplitHostPort(addr); err != nil || host != "127.0.0.1" {
 		t.Fatalf("web address %q", addr)
 	}
-	web, base := webHTTP(), "http://"+addr
+	web, base := intakefixture.WebHTTP(), "http://"+addr
 	pause, err := json.Marshal(PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "travel", Source: "owner"})
-	must(t, err)
-	code, body := exchange(t, web, "PUT", base+Prefix+"/runtime/pause", "application/json; charset=utf-8", string(pause), "")
+	fixturekit.Must(t, err)
+	code, body := intakefixture.Exchange(t, web, "PUT", base+Prefix+"/runtime/pause", "application/json; charset=utf-8", string(pause), "")
 	if code != 200 {
 		t.Fatalf("pause over web: %d %s", code, body)
 	}
 	state, err := c.Runtime(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(state.Effective.Pauses) != 1 {
 		t.Fatalf("pause written over web is not seen over the socket: %+v", state.Effective)
 	}
-	code, body = exchange(t, web, "GET", base+"/index.html", "", "", "")
-	if code != 404 || errorCode(t, body) != NotFound {
+	code, body = intakefixture.Exchange(t, web, "GET", base+"/index.html", "", "", "")
+	if code != 404 || intakefixture.ErrorCode(t, body) != NotFound {
 		t.Fatalf("unknown page path: %d %s", code, body)
 	}
 }
@@ -87,75 +76,73 @@ func TestWebListenerServesTheSocketAPI(t *testing.T) {
 func TestWebListenerRefusesCrossSiteRequests(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "localhost:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "localhost:0")
 	s, c := start(t, opts)
-	web, base := webHTTP(), "http://"+s.WebAddr()
+	web, base := intakefixture.WebHTTP(), "http://"+s.WebAddr()
 	_, port, err := net.SplitHostPort(s.WebAddr())
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	for _, host := range []string{"localhost:" + port, "127.0.0.1:" + port, "[::1]:" + port, "LOCALHOST"} {
-		if code, body := exchange(t, web, "GET", base+Prefix+"/health", "", "", host); code != 200 {
+		if code, body := intakefixture.Exchange(t, web, "GET", base+Prefix+"/health", "", "", host); code != 200 {
 			t.Fatalf("host %s: %d %s", host, code, body)
 		}
 	}
 	for _, host := range []string{"attacker.example:" + port, "attacker.example", "10.0.0.1:" + port, "osmia"} {
-		code, body := exchange(t, web, "GET", base+Prefix+"/health", "", "", host)
-		if code != 403 || errorCode(t, body) != Forbidden {
+		code, body := intakefixture.Exchange(t, web, "GET", base+Prefix+"/health", "", "", host)
+		if code != 403 || intakefixture.ErrorCode(t, body) != Forbidden {
 			t.Fatalf("host %s: %d %s", host, code, body)
 		}
 	}
 	pause := `{"target":{"scope":"factory"},"mode":"soft","reason":"travel","source":"owner"}`
 	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
-		code, body := exchange(t, web, "PUT", base+Prefix+"/runtime/pause", contentType, pause, "")
-		if code != 403 || errorCode(t, body) != Forbidden {
+		code, body := intakefixture.Exchange(t, web, "PUT", base+Prefix+"/runtime/pause", contentType, pause, "")
+		if code != 403 || intakefixture.ErrorCode(t, body) != Forbidden {
 			t.Fatalf("content type %q: %d %s", contentType, code, body)
 		}
 	}
 	state, err := c.Runtime(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(state.Effective.Pauses) != 0 {
 		t.Fatalf("a refused web request changed the runtime: %+v", state.Effective)
 	}
-	if code, body := exchange(t, socketHTTP(s.Socket()), "PUT", "http://attacker.example"+Prefix+"/runtime/pause", "text/plain", pause, ""); code != 200 {
+	if code, body := intakefixture.Exchange(t, socketHTTP(s.Socket()), "PUT", "http://attacker.example"+Prefix+"/runtime/pause", "text/plain", pause, ""); code != 200 {
 		t.Fatalf("socket write: %d %s", code, body)
 	}
 }
 
-// A changed or removed listen.web keeps the bound listener and is named in
-// restart_required; an invalid one fails the reload by its field.
 func TestReloadKeepsTheWebListener(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
-	files := configFiles(t, opts)
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	addr := s.WebAddr()
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "[::1]:0", 1), files.projectText)
+	files.Write(t, strings.Replace(files.TopText, "127.0.0.1:0", "[::1]:0", 1))
 	reloaded, err := c.Reload(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) {
 		t.Fatalf("restart required: %+v", reloaded)
 	}
 	now, err := c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if now.Effective.Listen.Web != "127.0.0.1:0" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.WebAddr() != addr {
 		t.Fatalf("after reload: %+v, bound %s", now, s.WebAddr())
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", ""); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", ""); code != 200 {
 		t.Fatalf("web after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1), files.projectText)
+	files.Write(t, strings.Replace(files.TopText, "[listen]\nweb = \"127.0.0.1:0\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.web"}) || s.WebAddr() != addr {
 		t.Fatalf("removed listen.web: %+v, bound %s", reloaded, s.WebAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "127.0.0.1:0", "0.0.0.0:0", 1), files.projectText)
-	reloadFails(t, c, files.top, "listen.web")
+	files.Write(t, strings.Replace(files.TopText, "127.0.0.1:0", "0.0.0.0:0", 1))
+	intakefixture.ReloadFails(t, c.Reload, files.Top, "listen.web")
 }
 
 // A web address that cannot be bound fails startup and leaves neither the
@@ -163,10 +150,10 @@ func TestReloadKeepsTheWebListener(t *testing.T) {
 func TestWebListenerBindFailureFailsStartup(t *testing.T) {
 	t.Parallel()
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer taken.Close()
 	opts := fixture(t)
-	withWeb(t, opts, taken.Addr().String())
+	intakefixture.WithWeb(t, opts.Config.Root, taken.Addr().String())
 	s, err := Start(context.Background(), opts)
 	if err == nil {
 		s.Close()
@@ -180,8 +167,8 @@ func TestWebListenerBindFailureFailsStartup(t *testing.T) {
 	}
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, bytes.Replace(top, []byte(taken.Addr().String()), []byte("127.0.0.1:0"), 1), 0600))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(path, bytes.Replace(top, []byte(taken.Addr().String()), []byte("127.0.0.1:0"), 1), 0600))
 	start(t, opts)
 }
 
@@ -189,16 +176,14 @@ func TestWebListenerBindFailureFailsStartup(t *testing.T) {
 func TestShutdownClosesBothListeners(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withWeb(t, opts, "127.0.0.1:0")
+	intakefixture.WithWeb(t, opts.Config.Root, "127.0.0.1:0")
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	addr, socket := s.WebAddr(), s.Socket()
-	if code, _ := exchange(t, webHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", ""); code != 200 {
+	if code, _ := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", ""); code != 200 {
 		t.Fatalf("web before shutdown: %d", code)
 	}
-	must(t, s.Close())
-	// Dialing the freed port could reach another test's listener, so ask the
-	// listener itself whether it is closed.
+	fixturekit.Must(t, s.Close())
 	web := s.web.(*net.TCPListener)
 	web.SetDeadline(time.Now().Add(time.Second))
 	if conn, err := web.Accept(); !errors.Is(err, net.ErrClosed) {

@@ -6,30 +6,25 @@ and keep target-project factory state outside the repository Osmia works on.
 
 ## Check a change
 
-Run the complete check suite through Dagger from the repository root:
-
-```sh
-dagger check --progress=report
-```
-
-The check needs a working Dagger container engine. It runs the Go suite,
-including browser tests, and release checks in containers. `--progress=report`
-prints each check's result and the output of failing tests. For selected tests
-or one package, use the Go check's selection flags:
+Run focused checks for what you changed. The check service runs the full suite on
+every change, so you do not need the whole suite passing before you finish. Select
+tests by name or package with the Go check's flags, from the repository root:
 
 ```sh
 dagger check --progress=report --go-test=TestA --go-test=TestB
 dagger check --progress=report --go-package=internal/service
 ```
 
-Add `--env=race` to run them with the race detector when changing concurrent
-scheduling, recovery or shared state. [AGENTS.md](AGENTS.md#validation) covers
-listing tests and rerunning a failing check.
+The checks need a working Dagger container engine and run in containers. The Go
+check's container provides the Go toolchain, `jj` and Chromium, so the browser
+tests run there too. Add `--env=race` to run the selected tests with the race
+detector when changing concurrent scheduling, recovery or shared state.
+[docs/testing.md](docs/testing.md#run-the-checks) covers listing tests,
+rerunning a failing check, cached results, lint and known flakes.
 
-Validate only through Dagger, from the view root or the repository root. The
-lint check is `dagger check --progress=report 'dag+check://?check=lint&staticcheck-project=.'`.
-Do not use Docker, Compose, a copy of the tree or a toolchain installed in a
-sandbox for validation.
+Validate only through Dagger, from the view root or the repository root. Do not
+use Docker, Compose, a copy of the tree or a toolchain installed in a sandbox for
+validation.
 
 Never run `go test` on the host, including for a single test or a flaky test.
 Tests can leave processes behind on the machine that runs them. `gofmt`,
@@ -44,7 +39,7 @@ Tests must not launch live model sessions or perform remote pushes or delivery.
 - Format Go with `gofmt` and document user-visible behavior or configuration.
 - After changing an API route or its request or response types, update
   `service.Routes` and run `dagger generate` to refresh `docs/openapi.json`.
-  `dagger check` fails while the committed file is stale.
+  The generate check fails while the committed file is stale.
 - Check the diff for local state, secrets, generated files and unrelated edits.
 - Report each check actually run and its result. If a check cannot run, give the
   exact blocker.

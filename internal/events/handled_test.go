@@ -7,8 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// An event is handled once a turn that claimed it has ended in any status,
-// and not while that turn is queued or running or before any turn claimed it.
 func TestHandledFollowsTheTurnsThatClaimedTheEvent(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)

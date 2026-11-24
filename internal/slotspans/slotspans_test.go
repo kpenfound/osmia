@@ -85,7 +85,7 @@ func TestIntervalSendsOneSpanWhenItEndsWithItsRecordedTimes(t *testing.T) {
 	if _, began := rec.Begin(iv); began {
 		t.Fatal("the same work opened a second interval")
 	}
-	r.clock.Advance(time.Hour) // the time of export plays no part
+	r.clock.Advance(time.Hour)
 	if got := r.spans(); len(got) != 0 {
 		t.Fatalf("a span before the interval ended: %d", len(got))
 	}
@@ -151,7 +151,6 @@ func TestOpenIntervalsSurviveARestartWithTheirOriginalStartAndIdentity(t *testin
 	r.clock.Advance(time.Minute)
 	rec = r.recorder()
 	defer rec.Close()
-	// The owner asks to open the same work again and finds the recorded interval.
 	again := wait
 	again.Start = r.clock.Now()
 	got, began := rec.Begin(again)
@@ -208,7 +207,6 @@ func TestRecoveredIntervalsNoOwnerTakesUpExpireAsInterrupted(t *testing.T) {
 	if len(spans) != 1 || !spans[0].EndTime.Equal(t0.Add(time.Minute)) {
 		t.Fatalf("spans %+v", spans)
 	}
-	// An interval an owner took up is its owner's to end.
 	rec.Begin(check("u2", Held, "2", t0))
 	rec.Expire(r.clock.Now().Add(2 * RecoveryGrace))
 	if len(r.spans()) != 1 {
@@ -243,7 +241,6 @@ func TestReservationWaitsSurviveARestartAndAreNotAbandonedBeforeTheirOwnerAsksAg
 	id := wait.SpanID()
 	rec.Close()
 
-	// The service was down for longer than a wait stays open without a refusal.
 	r.clock.Advance(time.Hour)
 	rec = r.recorder()
 	defer rec.Close()

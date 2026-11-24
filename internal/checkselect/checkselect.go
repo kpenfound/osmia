@@ -42,7 +42,6 @@ func Links(output string) []string {
 	return links
 }
 
-// linkGuide tells Jev how to read a check link.
 const linkGuide = "Each question names a Dagger check by its link: dag+check://<path>?<filters> or dag+check://?check=<name>&<filters>. " +
 	"The path or check name says what the check is, such as a module's tests or a check that generated files are up to date. " +
 	"Filters narrow a collection to some of its items; for Go, go-package names a package directory and go-test a test function. " +
@@ -179,8 +178,6 @@ func Narrow(filtered, listed []string, limit int) ([]string, bool) {
 	return out, true
 }
 
-// parentLink returns link without its last filter, and false for a link
-// without filters.
 func parentLink(link string) (string, bool) {
 	base, query, found := strings.Cut(link, "?")
 	if !found || query == "" {

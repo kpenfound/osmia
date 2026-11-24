@@ -23,9 +23,6 @@ type networkPollTasks struct {
 	group   sync.WaitGroup
 }
 
-// pollTask admits an independent observer without workflow ordering. A full
-// pool leaves cadence and evidence untouched. Outside the background driver,
-// callers can reconcile an observer synchronously with the same evidence rules.
 func (s *Service) pollTask(ctx context.Context, repository *trace.Repository, kind string, stream config.WorkstreamID, poll func(context.Context) error) error {
 	tasks, _ := ctx.Value(pollTaskContext{}).(*networkPollTasks)
 	if tasks == nil {
@@ -74,10 +71,6 @@ func pollCursor(ctx context.Context, kind string) config.WorkstreamID {
 	return tasks.cursor[kind]
 }
 
-// runNetworkPolls keeps remote observation independent of scheduling. Each
-// observer has one caller across reloads; durable evidence and cadence state
-// decide whether a lookup is due. Shutdown stops admission and joins every
-// observer before the project's trace closes.
 func (s *Service) runNetworkPolls(ctx context.Context, repository *trace.Repository, p *pipeline) {
 	tasks := &networkPollTasks{running: map[pollTaskKey]bool{}, cursor: map[string]config.WorkstreamID{}}
 	ctx = context.WithValue(ctx, pollTaskContext{}, tasks)
@@ -104,7 +97,6 @@ func (s *Service) runNetworkPolls(ctx context.Context, repository *trace.Reposit
 					var err error
 					switch name {
 					case "base-refresh", "edge-refresh":
-						// These scans enqueue independent workstream observers.
 						err = poll.pass(ctx)
 					default:
 						err = s.pollTask(ctx, repository, name, "", poll.pass)

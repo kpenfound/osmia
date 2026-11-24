@@ -30,8 +30,6 @@ func TestCheckCommandRecordsEachRunAndLimitsParallelism(t *testing.T) {
 	}
 }
 
-// installLoggingDagger puts a fake dagger on PATH that appends each invocation
-// to the returned log, which body can read as $LOG, and then runs body.
 func installLoggingDagger(t *testing.T, body string) (log string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -49,7 +47,6 @@ func checkInvocations(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksReportARefusalFromTheRunThatDecided(t *testing.T) {
 	links := []string{"dag+check://?check=test&go-package=a", "dag+check://?check=test&go-package=b&go-test=T"}
 	t.Run("a later run refused after an earlier one passed", func(t *testing.T) {
@@ -74,7 +71,6 @@ printf 'CHECKS  ✔ 2 passed\n'
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksRunEachFilteredViewSeparately(t *testing.T) {
 	const (
 		packages = "dag+check://?check=test&go-package=a&go-package=b"
@@ -159,7 +155,6 @@ printf 'CHECKS  ✔ 2 passed\n'
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksRerunFailedChecksOnce(t *testing.T) {
 	const (
 		flags = "check --progress=report --fail-fast --parallel 4 "
@@ -169,12 +164,9 @@ func TestDaggerChecksRerunFailedChecksOnce(t *testing.T) {
 		other = "dag://?check=test&go-package=q&go-test=C"
 		skipA = flags + "--skip " + a + " " + view
 	)
-	// fails prints a report of the links failing and exits 1.
 	const fails = `fails() { printf 'CHECKS  ✘ %s failed\n' "$#"; for l in "$@"; do printf '✘ %s 1s ERROR\n    %s went wrong\n' "$l" "$l"; done; printf 'RUN LOCALLY\n'; for l in "$@"; do printf 'dagger check "%s"\n' "$l"; done; exit 1; }
 passes() { printf 'CHECKS  ✔ %s passed\n' "$#"; for l in "$@"; do printf '✔ %s 1s OK\n' "$l"; done; exit 0; }
 `
-	// script answers each exact command with a shell statement. Any other
-	// command means the runner asked for something unexpected.
 	script := func(commands [][2]string) string {
 		body := fails + "case \"$*\" in\n"
 		for _, c := range commands {
@@ -363,7 +355,6 @@ passes() { printf 'CHECKS  ✔ %s passed\n' "$#"; for l in "$@"; do printf '✔ 
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksKeepOneOutputShapeForOneView(t *testing.T) {
 	log := installLoggingDagger(t, "printf 'CHECKS  ✔ 1 passed\\n'\n")
 	result, err := (DaggerChecks{}).Check(context.Background(), t.TempDir(), Identity{}, []string{"dag+check://release/version"})
@@ -376,7 +367,6 @@ func TestDaggerChecksKeepOneOutputShapeForOneView(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksPrepareCandidateIdentityOnceForEveryView(t *testing.T) {
 	bin := t.TempDir()
 	clone := t.TempDir()
@@ -403,7 +393,6 @@ func TestDaggerChecksPrepareCandidateIdentityOnceForEveryView(t *testing.T) {
 	}
 }
 
-// serial: sets PATH, GITHUB_TOKEN, ANTHROPIC_API_KEY, SSH_AUTH_SOCK and EXPECTED_HOST_HOME via t.Setenv
 func TestDaggerChecksCaptureOutputWithholdCredentialsAndDisableColor(t *testing.T) {
 	bin := t.TempDir()
 	script := `#!/bin/sh
@@ -439,7 +428,6 @@ exit 3
 	}
 }
 
-// serial: sets PATH and credentials via t.Setenv.
 func TestDaggerChecksListings(t *testing.T) {
 	for _, name := range []string{"top-level", "expanded", "scoped"} {
 		args := "list checks --format=link"
@@ -486,7 +474,6 @@ echo 'dag+check://release/version'
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksTopLevelListingFailures(t *testing.T) {
 	t.Run("failure leaves the expanded listing usable and redacts diagnostics", func(t *testing.T) {
 		installLoggingDagger(t, `case "$*" in
@@ -524,7 +511,6 @@ esac
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksScopedListingFailures(t *testing.T) {
 	const root = "dag+check://?check=go/modules/packages/tests/test"
 	t.Run("failure is redacted and leaves the full listing usable", func(t *testing.T) {

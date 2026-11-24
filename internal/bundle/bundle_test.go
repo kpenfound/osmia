@@ -81,7 +81,6 @@ func setup(t *testing.T) fixture {
 	return f
 }
 
-// charter records content as the owner's next charter revision.
 func (f fixture) charter(t *testing.T, content string) {
 	t.Helper()
 	ctx := context.Background()
@@ -94,8 +93,6 @@ func (f fixture) charter(t *testing.T, content string) {
 	}
 }
 
-// oldProse records content as the next revision of the prose file an older
-// trace holds for subsystem, which no bundle serves.
 func (f fixture) oldProse(t *testing.T, subsystem, content string) {
 	t.Helper()
 	revision := 1
@@ -108,8 +105,6 @@ func (f fixture) oldProse(t *testing.T, subsystem, content string) {
 			revision = d.Revision + 1
 		}
 	}
-	// An entity's prose is named by its entity ID, whose dots a record ID
-	// cannot hold.
 	id := "subsystem-" + strings.ReplaceAll(subsystem, ".", "-")
 	d := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: project, At: timestamp, Actor: owner, Cause: "test"}, Path: "kb/" + subsystem + ".md", Content: content}
 	if err := f.repo.Append(context.Background(), d); err != nil {
@@ -166,9 +161,6 @@ func TestUnscopedBundleHoldsWholeProject(t *testing.T) {
 	}
 }
 
-// Prose files an older trace holds are neither read into a bundle nor
-// reported missing: the bundle has no knowledge or missing field and no
-// knowledge section, scoped or not.
 func TestBundleCarriesNoProse(t *testing.T) {
 	f := setup(t)
 	for _, scope := range []bundle.Scope{{}, {Entities: []string{"cmd", "knowledge", "internal"}}} {
@@ -198,8 +190,6 @@ func TestBundleCarriesNoProse(t *testing.T) {
 
 func TestScopedBundleExpandsPartOf(t *testing.T) {
 	f := setup(t)
-	// "knowledge" is an alias of internal.kb, which has its part
-	// internal.kb.seed. docs has no paths.
 	b := f.assemble(t, bundle.Scope{Entities: []string{"cmd", "knowledge", "docs", "nowhere", "internal.kb"}})
 	if got := ids(b); !reflect.DeepEqual(got, []string{"cmd", "internal.kb", "internal.kb.seed"}) {
 		t.Fatalf("entities %v", got)
@@ -232,9 +222,6 @@ func TestBundleReadsTheLatestRevisionsAtEachCall(t *testing.T) {
 	}
 }
 
-// The charter's Markdown, without the owner's HTML comments, is guidance in
-// every bundle; numbered items in it are also listed as citable rules. A
-// charter with nothing but comments, like the template, is empty.
 func TestBundleCarriesCharterGuidance(t *testing.T) {
 	f := setup(t)
 	f.charter(t, "<!-- a note to myself -->\n## Style\n\nPrefer table-driven tests.\n\n1. Keep the API stable.\n")
@@ -320,9 +307,6 @@ func TestBundleDecisions(t *testing.T) {
 	}
 }
 
-// A ruling relayed with scope notify is a notice in every bundle on the
-// project, whatever workstream the bundle is scoped to; a local ruling and an
-// unrelayed one are decisions of their own workstream only.
 func TestBundleNotices(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -342,11 +326,8 @@ func TestBundleNotices(t *testing.T) {
 	wide.OwnerResponse, wide.ReturnedAnswer = "No new dependencies", ""
 	relayed := wide
 	relayed.Revision, relayed.ReturnedAnswer, relayed.Scope = 2, "The owner allows no new\ndependencies.", trace.ScopeNotify
-	// The same relay reached a second question of the batch.
 	sibling := relayed
 	sibling.ID, sibling.QuestionID, sibling.Revision = "wide2", "q-wide2", 1
-	// Another relay in the workstream is a notice of its own, whether it
-	// differs in its text or in its time.
 	wider := sibling
 	wider.ID, wider.QuestionID, wider.ReturnedAnswer = "wider", "q-wider", "Logs stay JSON."
 	later := sibling
@@ -389,11 +370,6 @@ func TestBundleNotices(t *testing.T) {
 	}
 }
 
-// TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves shows
-// spec#22 at the bundle level: a multi-workstream workgroup's ratified
-// project spec stays in the bundle of every member while any member is
-// unresolved, and leaves every bundle only once the whole workgroup
-// resolves, though its trace history stays directly readable.
 func TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -417,7 +393,6 @@ func TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves(t *testing
 		t.Fatal(err)
 	}
 
-	// Available in both unresolved members' own bundles.
 	if b := f.assemble(t, bundle.Scope{Workstream: first}); b.ProjectSpec == nil || b.ProjectSpec.Workgroup != wg.ID {
 		t.Fatalf("first member's bundle before resolution: %#v", b.ProjectSpec)
 	}
@@ -425,8 +400,6 @@ func TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves(t *testing
 		t.Fatalf("second member's bundle before resolution: %#v", b.ProjectSpec)
 	}
 
-	// Resolving one member leaves the project spec in the still-unresolved
-	// member's bundle: resolving one does not retire it for the rest.
 	resolvedSet := map[config.WorkstreamID]bool{first: true}
 	resolved := func(s config.WorkstreamID) (bool, error) { return resolvedSet[s], nil }
 	if _, err := trace.MarkWorkgroupsResolved(ctx, f.repo, []trace.Workgroup{wg}, resolved, timestamp.Add(time.Minute), owner, "first-member-resolved"); err != nil {
@@ -436,8 +409,6 @@ func TestBundleProjectSpecStaysUntilEveryMemberOfTheWorkgroupResolves(t *testing
 		t.Fatalf("unresolved member's bundle after the other member resolves: %#v", b.ProjectSpec)
 	}
 
-	// Resolving every member leaves the project spec out of every bundle,
-	// though its trace history, read directly, stays intact.
 	resolvedSet[second] = true
 	if _, err := trace.MarkWorkgroupsResolved(ctx, f.repo, []trace.Workgroup{wg}, resolved, timestamp.Add(2*time.Minute), owner, "every-member-resolved"); err != nil {
 		t.Fatal(err)
@@ -539,9 +510,6 @@ func TestRenderedBundleTravelsInTurnRequest(t *testing.T) {
 	}
 }
 
-// A charter rule the owner ratified from a ruling is a notice in every bundle
-// on the project once the charter records it; a proposal still waiting, a
-// declined one and a ratified one the charter does not record yet are not.
 func TestBundleCharterNotices(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -550,8 +518,6 @@ func TestBundleCharterNotices(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// record moves the proposal of question q through the states, one
-	// charter.json revision each.
 	record := func(q string, states ...string) {
 		t.Helper()
 		p := trace.CharterProposal{Question: q, Ruling: "workstreams/" + string(first) + "/questions/" + q + "/rulings.jsonl", RulingRevision: 2, OwnerResponse: "Keep uploads resumable.", Rule: "Uploads resume.", Number: 3}

@@ -26,7 +26,7 @@ func TestStaleReviewIdentifiesEachRevision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			reviewed := current
 			tc.change(&reviewed)
-			if got := staleReview(reviewed, current); !strings.Contains(got, tc.name) {
+			if got := StaleReview(reviewed, current); !strings.Contains(got, tc.name) {
 				t.Fatal(got)
 			}
 		})
@@ -53,7 +53,7 @@ func TestReviewerVerdictToolAndOutcome(t *testing.T) {
 	}
 	turns := &verdictTurns{Turns: staticVerdictTurn{}, reports: reports}
 	result, err := turns.Run(context.Background(), coreadapter.PreparedTurn{Scope: scope})
-	if err != nil || result.Outcome == nil || result.Outcome.Status != verdictOutcome {
+	if err != nil || result.Outcome == nil || result.Outcome.Status != VerdictOutcome {
 		t.Fatalf("outcome %+v %v", result.Outcome, err)
 	}
 	var got UnitVerdict
@@ -87,10 +87,6 @@ func TestValidateVerdictNamesTheProblem(t *testing.T) {
 	}
 }
 
-// staticVerdictTurn is a fake model session that always completes with no
-// output; it never exercises a real reviewer's reasoning, so this test only
-// checks that verdictTurns.Run reports the verdict already recorded through
-// the tool, not that a model session actually produces one.
 type staticVerdictTurn struct{}
 
 func (staticVerdictTurn) Run(context.Context, coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {

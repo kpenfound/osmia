@@ -13,29 +13,17 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// recordCache holds every record of a trace decoded and checked, in seq
-// order. Records are immutable once committed, so the cache only ever loads
-// the rows committed after the last one it holds, and each row is decoded
-// once per handle. Its own lock, not the handle's, guards it, so reads never
-// wait on a write in progress.
 type recordCache struct {
-	mu sync.Mutex
-	// loaded reports that the cache's maps are set.
-	loaded bool
-	// seq is the highest row loaded.
-	seq     int64
-	records []Record
-	errs    []error
-	// latest holds each record's latest valid revision by recordKey, and
-	// documents each document path's identity by its scoped path.
+	mu        sync.Mutex
+	loaded    bool
+	seq       int64
+	records   []Record
+	errs      []error
 	latest    map[string]Record
 	documents map[string]string
-	// origins holds the conversation import of each workstream adopted from
-	// another project, by workstream.
-	origins map[config.WorkstreamID]*conversationImport
+	origins   map[config.WorkstreamID]*conversationImport
 }
 
-// decodeRow decodes and validates one stored record body, counting it.
 func (r *Repository) decodeRow(body string) (Record, error) {
 	r.decoded.Add(1)
 	v, err := decodeRecord([]byte(body))
@@ -45,8 +33,6 @@ func (r *Repository) decodeRow(body string) (Record, error) {
 	return v, err
 }
 
-// refresh requires r.cache.mu. It checks the trace's manifest and loads and
-// checks the rows committed since the last refresh.
 func (r *Repository) refresh() error {
 	c := &r.cache
 	if r.reads == nil {
@@ -101,7 +87,6 @@ func (r *Repository) refresh() error {
 	return rows.Err()
 }
 
-// checkManifest reads and checks the trace's manifest.
 func (r *Repository) checkManifest() error {
 	if r.stream == "" {
 		_, err := r.readManifest("project.json", "osmia.trace.project", "")
@@ -111,9 +96,6 @@ func (r *Repository) checkManifest() error {
 	return err
 }
 
-// records returns a copy of every valid record of the trace that keep
-// accepts, in seq order, and the diagnostics of every damaged row. It takes
-// only the cache's lock.
 func (r *Repository) records(keep func(Record) bool) ([]Record, error) {
 	c := &r.cache
 	c.mu.Lock()
@@ -130,10 +112,6 @@ func (r *Repository) records(keep func(Record) bool) ([]Record, error) {
 	return records, errors.Join(c.errs...)
 }
 
-// cachedDocument returns the latest valid revision of the document at path
-// in scope's documents, from the cache's index of document paths, without
-// copying any other record. It reports the diagnostics of every damaged row
-// as records does, and takes only the cache's lock.
 func (r *Repository) cachedDocument(scope config.WorkstreamID, path string) (Document, bool, error) {
 	c := &r.cache
 	c.mu.Lock()
@@ -152,10 +130,6 @@ func (r *Repository) cachedDocument(scope config.WorkstreamID, path string) (Doc
 	return d, ok, nil
 }
 
-// scan returns every valid record of this trace, in seq order, and the
-// workstreams it holds: a workstream instance holds its own, the project's
-// own instance none. A damaged row is reported in the error alongside the
-// valid records.
 func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 	records, err := r.records(nil)
 	var streams []config.WorkstreamID
@@ -165,7 +139,6 @@ func (r *Repository) scan() ([]Record, []config.WorkstreamID, error) {
 	return records, streams, err
 }
 
-// resetCache drops every cached record. It requires r.cache.mu.
 func (r *Repository) resetCache() {
 	r.cache.loaded, r.cache.seq, r.cache.records, r.cache.errs, r.cache.latest, r.cache.documents, r.cache.origins = false, 0, nil, nil, nil, nil, nil
 	r.manifestsMu.Lock()
@@ -173,14 +146,11 @@ func (r *Repository) resetCache() {
 	r.manifestsMu.Unlock()
 }
 
-// querier runs a query on a database or in a transaction.
 type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// latestRevision returns the latest committed revision of the record v
-// revises, or nil when none is committed. It decodes only that revision.
 func (r *Repository) latestRevision(ctx context.Context, q querier, v Record) (Record, error) {
 	h := v.header()
 	var body string
@@ -198,8 +168,6 @@ func (r *Repository) latestRevision(ctx context.Context, q querier, v Record) (R
 	return previous, nil
 }
 
-// documentIdentity returns the record ID of the document at path in scope's
-// documents, if any revision of one is committed.
 func documentIdentity(ctx context.Context, q querier, scope config.WorkstreamID, path string) (string, bool, error) {
 	var id string
 	err := q.QueryRowContext(ctx, "SELECT id FROM records WHERE schema = 'osmia.trace.document' AND path = ? AND CASE WHEN json_valid(body) THEN json_extract(body, '$.path') END = ? ORDER BY seq LIMIT 1", scopePath(Header{Workstream: scope})+"documents.jsonl", path).Scan(&id)
@@ -209,8 +177,6 @@ func documentIdentity(ctx context.Context, q querier, scope config.WorkstreamID,
 	return id, err == nil, err
 }
 
-// latestDocument returns the latest revision of the document at path in
-// scope's documents. A missing document is fs.ErrNotExist.
 func (r *Repository) latestDocument(ctx context.Context, q querier, scope config.WorkstreamID, path string) (Document, error) {
 	var body string
 	err := q.QueryRowContext(ctx, "SELECT body FROM records WHERE schema = 'osmia.trace.document' AND path = ? AND CASE WHEN json_valid(body) THEN json_extract(body, '$.path') END = ? ORDER BY seq DESC LIMIT 1", scopePath(Header{Workstream: scope})+"documents.jsonl", path).Scan(&body)
@@ -231,21 +197,11 @@ func (r *Repository) latestDocument(ctx context.Context, q querier, scope config
 	return d, nil
 }
 
-// The latest revision of a document, by its stored path and identity. Both
-// queries order by revision so that SQLite answers them from the unique
-// (path, id, revision) index with a single lookup. A document's revisions are
-// committed in order, so its highest revision is also its highest seq;
-// ordering by seq instead makes SQLite walk the (path, seq) index through
-// every document of the scope.
 const (
 	latestDocumentSeqQuery  = "SELECT seq FROM records WHERE path = ? AND id = ? AND schema = 'osmia.trace.document' ORDER BY revision DESC LIMIT 1"
 	latestDocumentByIDQuery = "SELECT body, revision FROM records WHERE path = ? AND id = ? AND schema = 'osmia.trace.document' ORDER BY revision DESC LIMIT 1"
 )
 
-// latestDocumentByID selects by stored identity, so even malformed JSON in
-// the latest revision is decoded and reported instead of hiding that revision.
-// The unique (path, id, revision) index supports this lookup without the
-// document-path index's dependency on a valid JSON body.
 func (r *Repository) latestDocumentByID(scope config.WorkstreamID, id, path string) (Document, error) {
 	target, err := r.scoped(scope)
 	if err != nil {
@@ -285,7 +241,6 @@ func (r *Repository) LatestProjectDocument(id, path string) (Document, bool, err
 	return d, err == nil, err
 }
 
-// recordedIDs returns which of ids have a record committed at path.
 func recordedIDs(ctx context.Context, q querier, path string, ids []string) (map[string]bool, error) {
 	found := map[string]bool{}
 	for _, id := range ids {
@@ -302,9 +257,6 @@ func recordedIDs(ctx context.Context, q querier, path string, ids []string) (map
 	return found, nil
 }
 
-// file reads the trace file name: a row of files, or the latest revision of
-// the document at that logical path. A document whose latest revision is
-// empty knowledge-base prose was removed. A missing file is fs.ErrNotExist.
 func (r *Repository) file(name string) ([]byte, error) {
 	db := r.reads
 	if db == nil {
@@ -341,8 +293,6 @@ type scopedPath struct {
 	path   string
 }
 
-// cutWorkstreamPrefix splits workstreams/<w>/<path> into its workstream and
-// path.
 func cutWorkstreamPrefix(name string) (scopedPath, bool) {
 	const prefix = "workstreams/"
 	if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
@@ -400,7 +350,6 @@ func cloneRecord(record Record) Record {
 		if v.Classification != nil {
 			v.Classification.ToolCounts = maps.Clone(v.Classification.ToolCounts)
 		}
-		v.ClassifierUsage = slices.Clone(v.ClassifierUsage)
 		v.Stop = clonePointer(v.Stop)
 		return v
 	case Status:

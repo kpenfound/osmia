@@ -25,19 +25,17 @@ type briefResult struct {
 	Commit         string `json:"commit"`
 }
 
-// briefCall calls tool with the fields of in and decodes its ordinary result.
 func briefCall(t *testing.T, tool coreadapter.Tool, in map[string]any) briefResult {
 	t.Helper()
 	raw, err := json.Marshal(in)
-	must(t, err)
+	fixturekit.Must(t, err)
 	out, err := tool.Handle(context.Background(), raw)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var result briefResult
-	must(t, json.Unmarshal(out, &result))
+	fixturekit.Must(t, json.Unmarshal(out, &result))
 	return result
 }
 
-// briefFixture is a delivery fixture with the brief tool of a chief turn.
 func briefFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport, coreadapter.Tool) {
 	t.Helper()
 	f, stream, repository, report := deliveryFixture(t)
@@ -47,36 +45,32 @@ func briefFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repos
 	return f, stream, repository, report, controls.deliveryBrief(repository, scope)
 }
 
-// recordFinalReview records final review k of the fixture's branch as reviewed,
-// with its notice, and returns the revision of its report.
 func recordFinalReview(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, report FinalReport, k int) int {
 	t.Helper()
 	next := report
 	next.Review, next.Operation, next.Outcome = k, fmt.Sprintf("final-operation-%d", k), finalReviewed
 	_, err := (&delivery.FinalReviewer{S: f.s.delivery(), Repository: repository}).Record(context.Background(), stream, next)
-	must(t, err)
+	fixturekit.Must(t, err)
 	review, _, _, err := deliveryDocuments(repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return review.Revision
 }
 
-// previewCapture records what the preview tool records for a capture of
-// stream at commit and returns the image's ID.
 func previewCapture(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, commit, name string) string {
 	t.Helper()
 	ctx := context.Background()
-	image, err := repository.RecordImage(ctx, trace.Header{Project: repository.Project(), Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", attachmentPNG(t), "turn")
-	must(t, err)
+	image, err := repository.RecordImage(ctx, trace.Header{Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, name, "image/png", attachmentPNG(t), "turn")
+	fixturekit.Must(t, err)
 	content, err := json.Marshal(previewOperation{Workstream: stream, Commit: commit, Result: &previewResult{ImageID: image.ID, Workstream: stream, Commit: commit}})
-	must(t, err)
-	must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: repository.Project(), Workstream: stream, At: demoStart, Actor: serviceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "preview-" + name, Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "preview"}, Path: "tools/preview-" + name + ".json", Content: string(content)}}))
 	return image.ID
 }
 
 func briefDocuments(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, review int) int {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, d := range docs {
 		if d.ID == delivery.BriefDocument(review) {
@@ -116,7 +110,7 @@ func TestDeliveryBriefIsRecordedWithTheReviewItNamesAndReplaced(t *testing.T) {
 		t.Fatalf("call: %+v", result)
 	}
 	brief, found, err := delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != text || !slices.Equal(brief.BeforeYouShip, items) || brief.Review != 1 || brief.ReviewRevision != p.ReviewRevision || brief.Commit != report.Commit {
 		t.Fatalf("stored %+v, %v", brief, found)
 	}
@@ -124,7 +118,7 @@ func TestDeliveryBriefIsRecordedWithTheReviewItNamesAndReplaced(t *testing.T) {
 		t.Fatalf("replacement: %+v", result)
 	}
 	brief, found, err = delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != "Replaced." || len(brief.BeforeYouShip) != 0 || briefDocuments(t, repository, stream, 1) != 2 {
 		t.Fatalf("replaced %+v, %v", brief, found)
 	}
@@ -172,12 +166,10 @@ func TestDeliveryBriefRefusals(t *testing.T) {
 		}
 	}
 	brief, found, err := delivery.ReadBrief(repository, stream, 1, revision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found || brief.Text != "Kept." || len(brief.Screenshots) != 0 || briefDocuments(t, repository, stream, 1) != 1 {
 		t.Fatalf("a refused call changed the brief: %+v, %v", brief, found)
 	}
-	// A screenshot of this member at the reviewed commit is accepted, and
-	// screenshots do not count toward the text limit.
 	result := briefCall(t, tool, map[string]any{"review": 1, "review_revision": revision, "text": strings.Repeat("x", delivery.MaxBriefText), "screenshots": []string{current}})
 	if !result.Recorded {
 		t.Fatalf("screenshot of the reviewed commit: %+v", result)
@@ -191,7 +183,7 @@ func TestDeliveryBriefRefusals(t *testing.T) {
 func TestDeliveryBriefOfASharedChiefNamesTheMember(t *testing.T) {
 	t.Parallel()
 	s, chief, group := workgroupFeedFixture(t, false, 2)
-	scope := previewScope(t, chief, group.Members[0], func() time.Time { return demoStart })
+	scope := previewScope(t, chief, group.Members[0], func() time.Time { return fixturekit.DemoStart })
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 	tool := controls.deliveryBrief(chief, scope)
@@ -234,7 +226,7 @@ func TestDeliveryBriefIsClosedByApproval(t *testing.T) {
 		t.Fatalf("after approval: %+v", result)
 	}
 	brief, _, err := delivery.ReadBrief(repository, stream, 1, p.ReviewRevision)
-	must(t, err)
+	fixturekit.Must(t, err)
 	after, api := f.s.deliveryPresentation(ctx, string(stream))
 	if brief.Text != "Before approval." || briefDocuments(t, repository, stream, 1) != 1 || api != nil || after.Approval == nil || after.Approval.Description != approved.Description || after.Brief == nil || after.Brief.State != delivery.BriefRecorded {
 		t.Fatalf("approval did not close the brief: %+v %v", after.Brief, api)
@@ -248,7 +240,7 @@ func TestFinalReviewNoticeAsksForTheBrief(t *testing.T) {
 	f, stream, repository, report := deliveryFixture(t)
 	revision := recordFinalReview(t, f, repository, stream, report, 2)
 	entries, err := repository.Outbox(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var body string
 	for _, e := range entries {
 		if e.TransitionID == "final-review-2-reviewed" {
@@ -269,51 +261,56 @@ func TestFinalReviewNoticeAsksForTheBrief(t *testing.T) {
 	}
 }
 
-// The delivery inbox entry waits for the brief of its review, appears with
-// the fallback once the chief's turn for the notice ends without one, and a
-// brief for an earlier review never counts for a later one.
-func TestDeliveryEntryWaitsForTheBriefOfItsReview(t *testing.T) {
-	t.Parallel()
+type briefReview struct {
+	t          *testing.T
+	f          *shedFixture
+	stream     config.WorkstreamID
+	repository *trace.Repository
+	report     FinalReport
+	c          *delivery.Controller
+	revision   int
+}
+
+type chiefThreadFunc = func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error)
+
+func newBriefReview(t *testing.T) *briefReview {
+	t.Helper()
 	f, stream, repository, report := deliveryFixture(t)
-	ctx := context.Background()
 	c := f.s.delivery()
-	revision := recordFinalReview(t, f, repository, stream, report, 2)
-	thread := func(turns ...trace.QueuedTurn) func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error) {
-		return func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error) {
-			return trace.Thread{Turns: turns}, true, nil
-		}
+	return &briefReview{t: t, f: f, stream: stream, repository: repository, report: report, c: c, revision: recordFinalReview(t, f, repository, stream, report, 2)}
+}
+
+func chiefThreadOf(turns ...trace.QueuedTurn) chiefThreadFunc {
+	return func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error) {
+		return trace.Thread{Turns: turns}, true, nil
 	}
-	state := func(want string, listed bool, fallback bool) {
-		t.Helper()
-		p, api := c.PresentDelivery(ctx, repository.Project(), stream, repository)
-		if api != nil {
-			t.Fatal(api)
-		}
-		if p.Brief == nil || p.Brief.State != want {
-			t.Fatalf("brief %+v, want state %s", p.Brief, want)
-		}
-		e, open, err := c.DeliveryEntry(ctx, repository, stream)
-		must(t, err)
-		if open != listed {
-			t.Fatalf("entry open %v, want %v (brief state %s)", open, listed, want)
-		}
-		if open && strings.Contains(e.Question, delivery.NoBriefRecorded) != fallback {
-			t.Fatalf("entry %q, fallback %v", e.Question, fallback)
-		}
+}
+
+func (r *briefReview) state(want string, listed bool, fallback bool) {
+	r.t.Helper()
+	ctx := context.Background()
+	p, api := r.c.PresentDelivery(ctx, r.repository.Project(), r.stream, r.repository)
+	if api != nil {
+		r.t.Fatal(api)
 	}
-	// No chief turn can run: the entry is not held.
-	c.ChiefThread = nil
-	state(delivery.BriefNoneRecorded, true, true)
-	unrunnable := func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error) {
-		return trace.Thread{}, false, nil
+	if p.Brief == nil || p.Brief.State != want {
+		r.t.Fatalf("brief %+v, want state %s", p.Brief, want)
 	}
-	c.ChiefThread = unrunnable
-	state(delivery.BriefNoneRecorded, true, true)
-	// The notice is not delivered yet, then its turn is running.
-	c.ChiefThread = thread()
-	state(delivery.BriefWaiting, false, false)
-	entries, err := repository.Outbox(stream)
-	must(t, err)
+	e, open, err := r.c.DeliveryEntry(ctx, r.repository, r.stream)
+	fixturekit.Must(r.t, err)
+	if open != listed {
+		r.t.Fatalf("entry open %v, want %v (brief state %s)", open, listed, want)
+	}
+	if open && strings.Contains(e.Question, delivery.NoBriefRecorded) != fallback {
+		r.t.Fatalf("entry %q, fallback %v", e.Question, fallback)
+	}
+}
+
+func (r *briefReview) claimReviewNotice() trace.QueuedTurn {
+	r.t.Helper()
+	ctx := context.Background()
+	entries, err := r.repository.Outbox(r.stream)
+	fixturekit.Must(r.t, err)
 	var notice trace.OutboxEntry
 	for _, e := range entries {
 		if e.TransitionID == "final-review-2-reviewed" {
@@ -321,63 +318,119 @@ func TestDeliveryEntryWaitsForTheBriefOfItsReview(t *testing.T) {
 		}
 	}
 	token := "delivery_brief"
-	_, err = repository.Claim(ctx, stream, notice.Event.ID, token, events.Actor.ID, time.Now().UTC(), time.Minute)
-	must(t, err)
-	running := trace.QueuedTurn{Request: trace.TurnRequest{TurnID: events.TurnID(token)}}
-	c.ChiefThread = thread(running)
-	state(delivery.BriefWaiting, false, false)
-	// A brief for another review does not release the entry.
-	stale, reason, err := briefOf(ctx, c, repository, stream, 1, revision, "Stale.")
-	must(t, err)
+	_, err = r.repository.Claim(ctx, r.stream, notice.Event.ID, token, events.Actor.ID, time.Now().UTC(), time.Minute)
+	fixturekit.Must(r.t, err)
+	return trace.QueuedTurn{Request: trace.TurnRequest{TurnID: events.TurnID(token)}}
+}
+
+func (r *briefReview) record(review, revision int, text string) {
+	r.t.Helper()
+	recorded, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, review, revision, text)
+	fixturekit.Must(r.t, err)
+	if !recorded {
+		r.t.Fatalf("brief refused: %s", reason)
+	}
+}
+
+func TestDeliveryEntryOpensWithTheNoBriefTextWhenNoChiefTurnCanWriteOne(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	r.c.ChiefThread = nil
+	r.state(delivery.BriefNoneRecorded, true, true)
+	r.c.ChiefThread = func(context.Context, *trace.Repository, config.WorkstreamID) (trace.Thread, bool, error) {
+		return trace.Thread{}, false, nil
+	}
+	r.state(delivery.BriefNoneRecorded, true, true)
+}
+
+func TestDeliveryEntryWaitsWhileTheChiefsBriefTurnIsQueuedOrRunning(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	r.c.ChiefThread = chiefThreadOf()
+	r.state(delivery.BriefWaiting, false, false)
+	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
+	r.state(delivery.BriefWaiting, false, false)
+}
+
+func TestABriefOfAnEarlierReviewIsRefusedAndTheEntryKeepsWaiting(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
+	stale, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, 1, r.revision, "Stale.")
+	fixturekit.Must(t, err)
 	if stale || reason == "" {
 		t.Fatalf("a brief for review 1 was accepted after review 2: %q", reason)
 	}
-	state(delivery.BriefWaiting, false, false)
-	// The turn ends without a brief: the entry appears with the fallback.
+	r.state(delivery.BriefWaiting, false, false)
+}
+
+func TestDeliveryEntryOpensWithTheNoBriefTextOnceTheBriefTurnEndedWithoutOne(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	ended := r.claimReviewNotice()
+	ended.Response, ended.CompletedAt = &trace.TurnResponse{}, time.Now().UTC()
+	r.c.ChiefThread = chiefThreadOf(ended)
+	r.state(delivery.BriefNoneRecorded, true, true)
+}
+
+func TestABriefRecordedAfterItsTurnEndedOpensTheEntryWithTheBrief(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	running := r.claimReviewNotice()
 	ended := running
 	ended.Response, ended.CompletedAt = &trace.TurnResponse{}, time.Now().UTC()
-	c.ChiefThread = thread(ended)
-	state(delivery.BriefNoneRecorded, true, true)
-	// A brief for the same review before approval replaces the fallback.
-	recorded, reason, err := briefOf(ctx, c, repository, stream, 2, revision, "Recorded late.")
-	must(t, err)
-	if !recorded {
-		t.Fatalf("brief refused: %s", reason)
-	}
-	state(delivery.BriefRecorded, true, false)
-	c.ChiefThread = thread(running)
-	state(delivery.BriefRecorded, true, false)
-	// A new final review makes that brief stale: the card waits again.
-	next := recordFinalReview(t, f, repository, stream, report, 3)
-	state(delivery.BriefWaiting, false, false)
-	p, api := c.PresentDelivery(ctx, repository.Project(), stream, repository)
+	r.c.ChiefThread = chiefThreadOf(ended)
+	r.record(2, r.revision, "Recorded late.")
+	r.state(delivery.BriefRecorded, true, false)
+	r.c.ChiefThread = chiefThreadOf(running)
+	r.state(delivery.BriefRecorded, true, false)
+}
+
+func TestANewFinalReviewWaitsForItsOwnBriefWithoutTheEarlierOne(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	running := r.claimReviewNotice()
+	r.c.ChiefThread = chiefThreadOf(running)
+	r.record(2, r.revision, "Recorded late.")
+	next := recordFinalReview(t, r.f, r.repository, r.stream, r.report, 3)
+	r.state(delivery.BriefWaiting, false, false)
+	p, api := r.c.PresentDelivery(context.Background(), r.repository.Project(), r.stream, r.repository)
 	if api != nil || p.Brief.Text != "" || p.Brief.Review != 3 || p.Brief.ReviewRevision != next || len(p.Brief.BeforeYouShip) != 0 {
 		t.Fatalf("the earlier review's brief is presented for the new one: %+v, %v", p.Brief, api)
 	}
-	// A delayed call naming review 2 is refused, leaves review 2's brief alone
-	// and does not release review 3.
-	delayed, reason, err := briefOf(ctx, c, repository, stream, 2, revision, "Delayed.")
-	must(t, err)
+	if b, found, err := delivery.ReadBrief(r.repository, r.stream, 2, r.revision); err != nil || !found || b.Text != "Recorded late." {
+		t.Fatalf("review 2's brief %+v, %v, %v", b, found, err)
+	}
+	if _, found, err := delivery.ReadBrief(r.repository, r.stream, 3, next); err != nil || found {
+		t.Fatalf("a brief for review 3 exists: %v %v", found, err)
+	}
+}
+
+func TestADelayedBriefOfTheSupersededReviewIsRefused(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
+	recordFinalReview(t, r.f, r.repository, r.stream, r.report, 3)
+	delayed, reason, err := briefOf(context.Background(), r.c, r.repository, r.stream, 2, r.revision, "Delayed.")
+	fixturekit.Must(t, err)
 	if delayed || !strings.Contains(reason, "not the current") {
 		t.Fatalf("delayed call: %v %q", delayed, reason)
 	}
-	state(delivery.BriefWaiting, false, false)
-	if b, found, err := delivery.ReadBrief(repository, stream, 2, revision); err != nil || !found || b.Text != "Recorded late." {
-		t.Fatalf("review 2's brief %+v, %v, %v", b, found, err)
+	if _, found, err := delivery.ReadBrief(r.repository, r.stream, 2, r.revision); err != nil || found {
+		t.Fatalf("a refused delayed call stored a brief for review 2: %v %v", found, err)
 	}
-	if _, found, err := delivery.ReadBrief(repository, stream, 3, next); err != nil || found {
-		t.Fatalf("a brief for review 3 exists: %v %v", found, err)
-	}
-	recorded, reason, err = briefOf(ctx, c, repository, stream, 3, next, "For the new review.")
-	must(t, err)
-	if !recorded {
-		t.Fatalf("brief refused: %s", reason)
-	}
-	state(delivery.BriefRecorded, true, false)
+	r.state(delivery.BriefWaiting, false, false)
 }
 
-// briefOf records a brief with no screenshots through the delivery controller
-// and returns whether it was accepted, or the reason it was not.
+func TestABriefOfTheNewFinalReviewOpensTheEntryWithTheBrief(t *testing.T) {
+	t.Parallel()
+	r := newBriefReview(t)
+	r.c.ChiefThread = chiefThreadOf(r.claimReviewNotice())
+	next := recordFinalReview(t, r.f, r.repository, r.stream, r.report, 3)
+	r.record(3, next, "For the new review.")
+	r.state(delivery.BriefRecorded, true, false)
+}
+
 func briefOf(ctx context.Context, c *delivery.Controller, repository *trace.Repository, stream config.WorkstreamID, review, revision int, text string) (bool, string, error) {
 	_, _, reason, err := c.RecordBrief(ctx, repository, stream, delivery.BriefInput{Review: review, ReviewRevision: revision, Text: text, Turn: "turn"}, nil)
 	return reason == "" && err == nil, reason, err

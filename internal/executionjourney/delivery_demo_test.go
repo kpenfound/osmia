@@ -7,7 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
@@ -18,44 +26,41 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestDeliveryDemonstration follows one feature from ordinary unit turns
-// through a final review with an advisory finding, which builds nothing, to
-// the owner's decision to mark the pull request ready for review.
 func TestDeliveryDemonstration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 1, validPlan)
-	defer f.stop(t)
+	f, masons := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer f.Stop(t)
 	factory := runtime.Target{Scope: "factory"}
-	masons.Play[masonTurnID("resume")] = reportDone("Resume uploads")
-	masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[execution.MasonTurnID("resume")] = intakefixture.ReportDone("Resume uploads")
+	masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
-		ok, why, err := done(ctx, tools, map[string]any{"outcome": "Skip acknowledged chunks"})
+		ok, why, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Skip acknowledged chunks"})
 		if err != nil || !ok {
 			return fmt.Errorf("dedupe report: %s: %v", why, err)
 		}
 		return nil
 	}
-	f.engine.Mu.Lock()
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
 			if _, err := reviewtools.IdentityInPrompt(req.Prompt); err != nil {
 				return nil, err
 			}
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("review: %s: %v", body, err)
 			}
 		case strings.HasPrefix(req.Name, "final-1-"):
-			upstream, err := readTool(ctx, tools, "branch/UPSTREAM.md")
+			upstream, err := intakefixture.ReadTool(ctx, tools, "branch/UPSTREAM.md")
 			if err != nil || upstream != "upstream moved\n" {
 				return nil, fmt.Errorf("final review did not read rebased upstream: %q: %v", upstream, err)
 			}
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{
+			body, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{
 				map[string]any{"severity": "advisory", "criteria": []any{"spec#2"}, "finding": "No test shows acknowledged chunks are skipped after a restart."}}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				return nil, fmt.Errorf("final report: %s: %v", body, err)
@@ -65,77 +70,69 @@ func TestDeliveryDemonstration(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
+	f.Engine.Mu.Unlock()
 
-	// The service holds a pull request credential: its final review pushes the
-	// feature branch to a local bare fork and opens the draft there.
 	var stream config.WorkstreamID
 	fork, hosted := hostRunningService(t, f, func() config.WorkstreamID { return stream })
-	stream = f.builtPaused(t, factory, "delivery")[0]
-	// Move upstream after the seal. The final reviewer must inspect the
-	// rebased assembly, not the original feature tip.
-	advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
-	mutation(t, f.c, "DELETE", "pause", factory)
-	f.awaitMerged(t, stream, "resume")
-	f.awaitMerged(t, stream, "dedupe")
-	f.awaitFeature(t, stream, AssembledState)
-	deadline := time.Now().Add(demoTimeout)
-	for len(streamDocuments(t, f.repository(), stream, finalReportDocument)) < 1 {
-		if time.Now().After(deadline) {
-			t.Fatal("first final review did not report")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if added, err := followup.Read(f.repository(), stream); err != nil || len(added) != 0 {
+	stream = builtPaused(f, t, factory, "delivery")[0]
+
+	journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream moved\n"})
+	intakefixture.Mutation(t, f.C, "DELETE", "pause", factory)
+	f.AwaitMerged(t, stream, "resume")
+	f.AwaitMerged(t, stream, "dedupe")
+	f.AwaitFeature(t, stream, intake.AssembledState)
+	intakefixture.Soon(t, "the first final review to report", func() bool {
+		return len(intakefixture.StreamDocuments(t, f.Repository(), stream, delivery.FinalReportDocument)) >= 1
+	})
+	if added, err := followup.Read(f.Repository(), stream); err != nil || len(added) != 0 {
 		t.Fatalf("an advisory finding built follow-ups %+v: %v", added, err)
 	}
 	masons.Check(t)
-	presented, err := f.c.Delivery(ctx, stream)
-	must(t, err)
-	// The draft is a short spec summary, not an account of the work: it does
-	// not carry the review's findings (spec#3).
+	presented, err := f.C.Delivery(ctx, stream)
+	fixturekit.Must(t, err)
+
 	if presented.Report.Review != 1 || presented.Report.Criteria[1].Evidence == "" || len(presented.Report.Findings) != 1 || presented.Title == "" || strings.Contains(presented.Draft, "after a restart") {
 		t.Fatalf("presentation %+v", presented)
 	}
-	f.stop(t)
-	repository, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	f.Stop(t)
+	repository, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
 	defer repository.Close()
-	f.s.setSole(&activeProject{repository: repository})
-	f.s.cfg.Project.Landing = "commit-per-unit"
-	p := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: presented.Report, fork: fork, pulls: hosted}
-	f.s.options.PullRequests = p.pulls
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	f.S.Cfg.Project.Landing = "commit-per-unit"
+	p := &journey.PublicationFixture{ShedFixture: f, Stream: stream, Repository: repository, Report: presented.Report, Fork: fork, Pulls: hosted}
+	f.S.Options.PullRequests = p.Pulls
 	edited := presented.Draft + "\nOwner's delivery note.\n"
-	approval := p.approve(t, &edited)
+	approval := p.Approve(t, &edited)
 	if approval.Commit != presented.Report.Commit || approval.Description != edited {
 		t.Fatalf("approval %+v", approval)
 	}
-	op := p.request(t)
-	result, err := p.publisher().Apply(ctx, op)
+	op := p.Request(t)
+	result, err := p.Publisher().Apply(ctx, op)
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("publication %+v: %v", result, err)
 	}
-	if len(p.pulls.Prs) != 1 || p.pulls.Creates != 1 || p.pulls.Updates != 1 || p.pulls.Readies != 1 || p.pulls.Prs[0].Draft || p.feature(t) != DeliveredState {
-		t.Fatalf("duplicate delivery: %+v", p.pulls)
+	if len(p.Pulls.Prs) != 1 || p.Pulls.Creates != 1 || p.Pulls.Updates != 1 || p.Pulls.Readies != 1 || p.Pulls.Prs[0].Draft || p.Feature(t) != intake.DeliveredState {
+		t.Fatalf("duplicate delivery: %+v", p.Pulls)
 	}
-	tip, _ := p.forkBranch(t)
-	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
+	tip, _ := p.ForkBranch(t)
+	g := intake.Workspaces(f.S.Cfg, intake.BranchesDirectory, config.WorkspacesGit)
 	reviewed, err := g.Commit(ctx, approval.Commit)
-	must(t, err)
+	fixturekit.Must(t, err)
 	delivered, err := g.Commit(ctx, tip)
-	must(t, err)
-	if delivered.Tree != reviewed.Tree || p.pulls.Prs[0].Body != edited {
-		t.Fatalf("wrong delivered tree or description: %s, %+v", tip, p.pulls.Prs[0])
+	fixturekit.Must(t, err)
+	if delivered.Tree != reviewed.Tree || p.Pulls.Prs[0].Body != edited {
+		t.Fatalf("wrong delivered tree or description: %s, %+v", tip, p.Pulls.Prs[0])
 	}
 	if tip == approval.Commit {
 		t.Fatalf("commit-per-unit tip %s, reviewed %s", tip, approval.Commit)
 	}
-	records, err := publications(p.repository, stream)
-	must(t, err)
-	if len(records) != 2 || records[1].Push != 1 || records[1].Status != publicationOpened || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].PullRequest != p.pulls.Prs[0].Number {
+	records, err := delivery.Publications(p.Repository, stream)
+	fixturekit.Must(t, err)
+	if len(records) != 2 || records[1].Push != 1 || records[1].Status != delivery.PublicationOpened || records[1].Reviewed != approval.Commit || records[1].Commit != tip || records[1].PullRequest != p.Pulls.Prs[0].Number {
 		t.Fatalf("publication provenance %+v", records)
 	}
-	if len(streamDocuments(t, p.repository, stream, finalReportDocument)) != 1 || len(streamDocuments(t, p.repository, stream, deliveryDocument)) != 1 {
+	if len(intakefixture.StreamDocuments(t, p.Repository, stream, delivery.FinalReportDocument)) != 1 || len(intakefixture.StreamDocuments(t, p.Repository, stream, delivery.DeliveryDocument)) != 1 {
 		t.Fatal("review or owner ruling missing from trace")
 	}
 }

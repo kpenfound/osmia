@@ -1,6 +1,7 @@
 package browsertest
 
 import (
+	"github.com/kpenfound/osmia/internal/service"
 	"strings"
 	"testing"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// serial: the preview journey puts its fake engine CLIs on PATH.
 func TestBrowserChiefPreviewThroughMemberArchive(t *testing.T) {
 	f := servicetest.NewPreviewJourney(t)
 	p := openBrowser(t)
@@ -31,7 +31,7 @@ func TestBrowserChiefPreviewThroughMemberArchive(t *testing.T) {
 	fresh.Run(chromedp.Navigate("http://" + f.S.WebAddr() + "/#workgroup=" + string(f.Group.ID)))
 	fresh.AwaitText(entry+` [data-field=placeholder]`, placeholder)
 	for _, path := range fresh.Paths() {
-		if strings.HasPrefix(path, Prefix+"/images/") {
+		if strings.HasPrefix(path, service.Prefix+"/images/") {
 			t.Fatalf("archived preview requested image bytes: %s", path)
 		}
 	}

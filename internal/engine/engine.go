@@ -199,7 +199,6 @@ func (c *Controller) Restart(ctx context.Context) error {
 				return err
 			}
 		}
-		// No -v: cache volumes survive removal.
 		if _, err := c.invoke(ctx, "docker", false, "rm", config.ManagedDaggerEngineName); err != nil {
 			return err
 		}
@@ -359,8 +358,6 @@ func (c *Controller) invokeTimeout(ctx context.Context, timeout time.Duration, n
 
 func (c *Controller) environment(engine bool) []string {
 	var env []string
-	// DAGGER_X_RELEASE selects the CLI release in every mode, so the reported
-	// and defaulted CLI version matches the one check runs use.
 	for _, name := range []string{"PATH", "HOME", "USER", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "SSH_AUTH_SOCK", "DAGGER_X_RELEASE"} {
 		if value := c.options.Getenv(name); value != "" {
 			env = append(env, name+"="+value)
@@ -417,7 +414,6 @@ func displayDockerHost(value string) string {
 		return ""
 	}
 	display := &url.URL{Scheme: u.Scheme, Host: u.Host}
-	// A local Docker socket has no host authority; its absolute path names it.
 	if u.Scheme == "unix" && strings.HasPrefix(u.Path, "/") {
 		display.Path = u.Path
 	} else if u.Host == "" {

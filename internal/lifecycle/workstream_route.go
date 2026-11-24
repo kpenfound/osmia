@@ -14,17 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// workstreamMoveRecords defines, once, what moving a workstream to a feature
-// state records, for every way the move is made: the owner's command, the
-// chief of staff's tool and the transition router. It checks the move can be
-// made from the state it reads and returns the move, its document, its
-// transaction on the move subject and the reason; the feature's own
-// transition is the router's, or the exit's, to make. A move to building
-// reopens an assembled workstream, or a delivered one whose pull request is
-// open, on its existing feature branch for repair units; to assembled asks
-// for a fresh final review of the branch as it is; and to delivered returns a
-// reopened workstream whose branch is still the one its open pull request
-// carries.
 func (s *Controller) workstreamMoveRecords(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string, at time.Time) (workstreamMoveRecord, *APIError) {
 	if action, err := PublicationInFlight(repo, stream); err != nil {
 		return workstreamMoveRecord{}, &APIError{Code: Internal, Message: "cannot read the workstream's operations"}
@@ -118,18 +107,14 @@ func (s *Controller) workstreamMoveRecords(ctx context.Context, repo *trace.Repo
 	return workstreamMoveRecord{move: move, doc: doc, tx: tx, reason: reason, id: id}, nil
 }
 
-// workstreamMoveRecord is what entering a feature state by a move records.
 type workstreamMoveRecord struct {
 	move   WorkstreamMove
 	doc    trace.Document
 	tx     trace.Transaction
 	reason string
-	// id is the move's document ID, which the feature transition's ID derives
-	// from.
-	id string
+	id     string
 }
 
-// latestWorkstreamMove returns the workstream's latest recorded move.
 func latestWorkstreamMove(repo *trace.Repository, stream config.WorkstreamID) (WorkstreamMove, bool, error) {
 	moves, err := WorkstreamMoves(repo, stream)
 	if err != nil || len(moves) == 0 {
@@ -138,7 +123,6 @@ func latestWorkstreamMove(repo *trace.Repository, stream config.WorkstreamID) (W
 	return moves[len(moves)-1], true, nil
 }
 
-// The targets of a workstream move, as Jev reads them.
 var workstreamMoveTargets = map[string]router.Target{
 	BuildingState:  {Name: BuildingState, Description: "Reopen the workstream on its feature branch for repair units; its final review runs again afterwards.", Bar: router.BarStrict, Works: true},
 	AssembledState: {Name: AssembledState, Description: "Run a fresh final review of the branch as it is.", Bar: router.BarModest, Works: true},
@@ -151,22 +135,12 @@ var workstreamMoveTargets = map[string]router.Target{
 // have found blocking problems maxFinalRounds times, and a return to delivered.
 const NoMoveTarget = "no_move"
 
-// moveDefault is how the policies of the chief of staff set the default of a
-// proposal to move a workstream.
 type moveDefault struct {
-	// Stay says the default leaves the workstream where it is.
-	Stay bool
-	// Why says which policy applies, in words for the target and the answer.
+	Stay  bool
 	Why   string
 	Facts map[string]any
 }
 
-// workstreamMovePolicy reads what bears on a proposal to move the workstream to
-// a feature state. The chief of staff's proposal is the default when it moves
-// the workstream to building or assembled, except that after final reviews have
-// found blocking problems maxFinalRounds times reopening it for further
-// revisions is not the default; any other move is not made by default. The
-// owner's move is pinned and has no default to set.
 func (s *Controller) workstreamMovePolicy(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to string, actor trace.Actor) (moveDefault, error) {
 	p := moveDefault{Facts: map[string]any{"state": feature.Value, "target": to}}
 	if actor.Kind == ownerActor.Kind {
@@ -180,12 +154,6 @@ func (s *Controller) workstreamMovePolicy(repo *trace.Repository, stream config.
 	return p, nil
 }
 
-// routeWorkstreamMove routes a move to building, assembled or delivered. The
-// owner's move is a pinned move: the router enters exactly the target the owner
-// named, and asks Jev nothing. A move of the chief of staff's own is a
-// proposal: its target is the default unless a policy of the chief of staff sets
-// the default to leave the workstream where it is, and the router judges it with
-// the other legal targets.
 func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string, policy moveDefault) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing a workstream's moves is unavailable")
@@ -197,8 +165,6 @@ func (s *Controller) routeWorkstreamMove(ctx context.Context, repo *trace.Reposi
 	return s.Router.Route(ctx, x)
 }
 
-// workstreamMoveExit returns the exit of a move to building, assembled or
-// delivered, raised at the given time.
 func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.WorkstreamID, feature trace.WorkflowState, to, note string, actor trace.Actor, turn string, policy moveDefault, now time.Time) (router.Exit, error) {
 	trigger := intake.TriggerMoveProposal
 	var authority *router.Authority
@@ -208,23 +174,17 @@ func (s *Controller) workstreamMoveExit(repo *trace.Repository, stream config.Wo
 		trigger, authority = intake.TriggerMoveOwner, &router.Authority{Kind: router.AuthorityOwner, Target: to}
 		names = []string{to}
 	case !policy.Stay:
-		// The chief of staff's move is its own decision: the router enters
-		// exactly the target, after its hard prerequisites.
 		authority = &router.Authority{Kind: router.AuthorityChief, Target: to}
 		names = []string{to}
 	}
 	targets := make([]router.Target, 0, len(names)+1)
 	for _, name := range names {
 		t := workstreamMoveTargets[name]
-		// A move to the state the workstream is in asks for a fresh review or
-		// restarts the stage: it records the move and changes no state.
 		t.NoMove = name == feature.Value
 		targets = append(targets, t)
 	}
 	def := to
 	if policy.Stay {
-		// The policy sets the default: the workstream stays, and making the
-		// move is a departure at the target's bar.
 		def = NoMoveTarget
 		targets = append([]router.Target{{Name: NoMoveTarget, Stay: true, NoMove: true,
 			Description: "Leave the workstream where it is: " + policy.Why + ".",
@@ -328,8 +288,6 @@ func (s *Controller) StalledExit(repo *trace.Repository, stream config.Workstrea
 		targets = append(targets, t)
 	}
 	id := fmt.Sprintf("ws-stalled-%d", feature.Version)
-	// The watchdog's own facts and records stay as they are; the workstream's
-	// approved intent comes from the records, whatever they hold.
 	intent, entries, facts := workstreamIntentOrMissing(repo, stream)
 	in.Evidence = withIntentEvidence(in.Evidence, intent, entries, facts)
 	return router.Exit{
@@ -380,8 +338,6 @@ func (s *Controller) StalledRecovery(repo *trace.Repository, stream config.Works
 		return router.Target{}, false
 	}
 	t := intake.ExitTarget(intake.TriggerStalled, workstreamMoveTargets[AssembledState])
-	// A fresh review of an assembled workstream records the move and changes no
-	// state; a building workstream moves to assembled.
 	t.NoMove = state == AssembledState
 	if state == BuildingState {
 		t.Description = "Move the workstream to assembled for a fresh final review: every unit has merged and no discovery or revision is pending, so nothing is left to build."
@@ -389,7 +345,6 @@ func (s *Controller) StalledRecovery(repo *trace.Repository, stream config.Works
 	return t, true
 }
 
-// nextMove returns the number the workstream's next move will take.
 func (s *Controller) nextMove(repo *trace.Repository, stream config.WorkstreamID) int {
 	moves, err := WorkstreamMoves(repo, stream)
 	if err != nil {
@@ -398,10 +353,6 @@ func (s *Controller) nextMove(repo *trace.Repository, stream config.WorkstreamID
 	return len(moves) + 1
 }
 
-// proposeToOwner routes the chief of staff's proposal of a move that is an owner
-// gate, ratification or abandonment. A proposal carries no authority for a
-// gate, so the router commits nothing and leaves the move as a pending owner
-// decision, with a notice that names where the owner decides it.
 func (s *Controller) proposeToOwner(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor, turn string) (router.Result, error) {
 	if s.Router == nil {
 		return router.Result{}, errors.New("routing a workstream's moves is unavailable")
@@ -460,8 +411,6 @@ func RegisterWorkstreamEffects(reg *router.Effects, load func() *Controller) {
 			}
 			out := router.Effect{Documents: []trace.Document{records.doc}, With: []trace.Transaction{records.tx}, Reason: records.reason}
 			if x.Subject != trace.FeatureSubject && feature.Value != to {
-				// The exit belongs to another subject, as a final review's round
-				// does: the workstream's own transition is recorded beside it.
 				h := records.tx.Transition.Header
 				h.ID = records.id + "-" + to
 				out.With = append(out.With, trace.Transaction{ExpectedVersion: feature.Version, Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, From: feature.Value, To: to, Reason: records.reason}})

@@ -16,11 +16,8 @@ import (
 
 var daggerSettings = a.ExecutionSettings{Mode: agent.SandboxSbx, Dagger: &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}}
 
-// sbxEndpoint is the host loopback address a sandbox reaches the service's MCP
-// server at.
 const sbxEndpoint = "http://127.0.0.1:8080/mcp"
 
-// gitIn runs a read-only git command in dir with no host configuration.
 func gitIn(t *testing.T, dir string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -29,16 +26,10 @@ func gitIn(t *testing.T, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// A view for a turn whose execution settings carry Dagger has a Git repository
-// at its root, and the repository is empty whatever the host's Git templates,
-// configuration and environment say.
-// serial: sets Git environment variables via t.Setenv
 func TestDaggerViewsHoldAnEmptyRepository(t *testing.T) {
 	source, views, host := t.TempDir(), Views{Directory: t.TempDir()}, t.TempDir()
 	put(t, source, "src/main.go", "original")
 	put(t, source, ".git/config", "[remote \"origin\"]\n\turl = https://example.invalid/clone.git\n")
-	// A hostile host: a template with a hook, a configured hooks path and
-	// template directory, and a Git directory in the environment.
 	put(t, host, "template/hooks/pre-commit", "#!/bin/sh\necho hook\n")
 	put(t, host, "template/info/exclude", "excluded\n")
 	put(t, host, "gitconfig", "[init]\n\ttemplateDir = "+filepath.Join(host, "template")+"\n[core]\n\thooksPath = "+filepath.Join(host, "template", "hooks")+"\n[remote \"host\"]\n\turl = https://example.invalid/host.git\n")
@@ -127,7 +118,6 @@ func TestViewsWithoutDaggerHoldNoRepository(t *testing.T) {
 	}
 }
 
-// The repository stays out of reach of the file tools and goes with the view.
 func TestDaggerViewRepositoryIsHiddenAndReleasedWithTheView(t *testing.T) {
 	source := t.TempDir()
 	put(t, source, "src/main.go", "original")
@@ -176,9 +166,6 @@ func TestViewRepositoryFailureReleasesTheView(t *testing.T) {
 	}
 }
 
-// A Dagger turn's view holds its repository before the sandbox is prepared, the
-// turn's isolation still denies version control, and the repository goes with
-// the view.
 func TestDaggerTurnRunsInAViewWithItsRepositoryAndNoVCS(t *testing.T) {
 	r, p, h, engine, input := fixture(t, "mason", agent.SandboxSbx)
 	h.url = sbxEndpoint
@@ -231,7 +218,6 @@ func TestDaggerTurnRunsInAViewWithItsRepositoryAndNoVCS(t *testing.T) {
 	}
 }
 
-// A turn without Dagger runs in a view with no repository.
 func TestTurnWithoutDaggerRunsInAViewWithNoRepository(t *testing.T) {
 	r, _, h, engine, input := fixture(t, "mason", agent.SandboxSbx)
 	h.url = sbxEndpoint

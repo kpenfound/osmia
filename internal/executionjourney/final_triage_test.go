@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -21,11 +25,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// triageKit is a chief-of-staff turn with the decide, triage_finding and
-// route_amendment tools over a workstream whose final review found two
-// blocking findings and one advisory one.
 type triageKit struct {
-	f          *shedFixture
+	f          *journey.ShedFixture
 	stream     string
 	decide     func(subject string) string
 	triage     func(finding, decision, note string) string
@@ -33,38 +34,36 @@ type triageKit struct {
 	repository *trace.Repository
 }
 
-// newTriageKit builds the kit with Jev answering provider, or unconfigured when
-// provider is nil.
 func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageKit {
 	t.Helper()
-	f, stream, repository, a := newFinalFixture(t, key)
-	_, op := assembleBoth(t, f, repository, a, stream,
+	f, stream, repository, a := journey.NewFinalFixture(t, key)
+	_, op := journey.AssembleBoth(t, f, repository, a, stream,
 		map[string]string{"internal/trace/resume.go": "package trace\n"},
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
-	f.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
+	f.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+		_, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."},
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#1"}, "finding": "Resume ignores the last acknowledged chunk."},
 			map[string]any{"severity": "advisory", "finding": "The resume log is noisy."}}})
 		return err
 	})
-	if result := settleOperation(t, f.s, repository, stream, op, a); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, op, a); result.Outcome != "succeeded" {
 		t.Fatalf("the review %+v", result)
 	}
-	f.s.setSole(&activeProject{repository: repository})
-	inspect := service.InspectForTest(f.s.core())
-	now := func() time.Time { return demoStart }
+	f.S.SetSole(&journey.ActiveProject{Repository: repository})
+	inspect := service.InspectForTest(f.S.Core())
+	now := func() time.Time { return fixturekit.DemoStart }
 	if provider == nil {
 		inspect.SetJudge(jevfixture.Unconfigured(now))
 	} else {
 		inspect.SetJudge(jevfixture.Answering(now, provider))
 	}
-	scope := intakefixture.ClaimChiefTurn(t, repository, f.project, stream, now, intakefixture.ChiefTurnInput{
-		Turn: "events_1", Prompt: "The final review is recorded.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
+	scope := intakefixture.ClaimChiefTurn(t, repository, f.Project, stream, now, intakefixture.ChiefTurnInput{
+		Turn: "events_1", Prompt: "The final review is recorded.", Actor: intake.ServiceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	decide, triage := inspect.DecideTool(repository, scope), inspect.TriageTool(repository, scope)
-	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.s.now)
-	must(t, err)
+	list, err := questions.Tools(repository, trace.ChiefOfStaff, scope, f.S.Now)
+	fixturekit.Must(t, err)
 	i := slices.IndexFunc(list, func(tool coreadapter.Tool) bool { return tool.Name == questions.RouteAmendmentTool })
 	if i < 0 {
 		t.Fatal("no route_amendment tool")
@@ -80,11 +79,6 @@ func newTriageKit(t *testing.T, key string, provider *jevtest.Provider) *triageK
 		amend: func(input string) string { return intakefixture.Handle(t, route, input) }}
 }
 
-// A confident Jev decides each blocking finding of a final review on its own:
-// decide asks once per finding, triage_finding is refused before decide and for
-// the other outcome and records Jev's decision for the picked one. The finding
-// Jev picked as needing code goes into the next plan revision, and the one it
-// left to the owner is presented to the owner.
 func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 	t.Parallel()
 	provider := &jevtest.Provider{Results: []jevtest.Result{jevfixture.Pick("code", 0.96, "owner"), jevfixture.Pick("owner", 0.95, "code")}}
@@ -136,7 +130,7 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 	}
 
 	all, _, err := followup.ReadTriage(k.repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(all) != 2 || all[0].Finding != "finding-1" || all[0].Outcome != followup.TriageCode || all[1].Finding != "finding-2" || all[1].Outcome != followup.TriageOwner {
 		t.Fatalf("triage %+v", all)
 	}
@@ -146,29 +140,26 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 			t.Fatalf("triage %+v against %+v: %v", d, res, err)
 		}
 	}
-	for _, d := range streamDocuments(t, k.repository, stream, followup.TriageDocumentID) {
+	for _, d := range intakefixture.StreamDocuments(t, k.repository, stream, followup.TriageDocumentID) {
 		if d.Actor != trace.JevActor {
 			t.Fatalf("a Jev decision written by %+v", d.Actor)
 		}
 	}
 
-	// The owner reads what was left to them, and what Jev decided.
 	notes, err := delivery.TriageNotes(k.repository, stream, 1)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, want := range []string{"Left to you:", "Resume ignores the last acknowledged chunk.", "The resume unit already restarts from the last chunk.", "decided by Jev, judgment " + all[1].Judgment, "needing code"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("the owner's notes lack %q: %s", want, notes)
 		}
 	}
 
-	// The next plan revision takes the finding that needs code and not the
-	// one left to the owner.
 	out := k.amend(`{"citations":["spec#2"],"change":"Call Dedupe before sending a chunk.","reason":"The final review found it unwired."}`)
 	if !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("route_amendment: %s", out)
 	}
 	filed, err := trace.Read[trace.Amendment](k.repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(filed) == 0 {
 		t.Fatal("no amendment was filed")
 	}
@@ -177,7 +168,7 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 		t.Fatalf("the revision states %q", change)
 	}
 	after, _, err := followup.ReadTriage(k.repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(after) != 2 || after[0].Amendment != filed[len(filed)-1].ID || after[1].Amendment != "" {
 		t.Fatalf("triage after the revision %+v", after)
 	}
@@ -189,9 +180,6 @@ func TestFinalReviewTriageAsksJevOncePerBlockingFinding(t *testing.T) {
 	}
 }
 
-// With a pick below the threshold, or Jev unconfigured, decide leaves each
-// finding to the chief of staff, and triage_finding records either outcome as
-// the chief of staff's own decision.
 func TestFinalReviewTriageThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 	t.Parallel()
 	for name, provider := range map[string]*jevtest.Provider{
@@ -217,7 +205,7 @@ func TestFinalReviewTriageThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 				t.Fatalf("triage finding-2: %s", out)
 			}
 			all, _, err := followup.ReadTriage(k.repository, stream)
-			must(t, err)
+			fixturekit.Must(t, err)
 			if len(all) != 2 || all[0].Outcome != followup.TriageOwner || all[1].Outcome != followup.TriageCode || all[0].ByJev() || all[1].ByJev() {
 				t.Fatalf("triage %+v", all)
 			}

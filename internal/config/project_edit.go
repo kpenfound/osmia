@@ -61,7 +61,7 @@ func (p Project) SettingValue(name string) any {
 
 // ProjectSettingsLabel names the stored settings of project id where an error
 // stands in for a file path: a FieldError about stored settings carries it as
-// its Path, so the owner is never pointed at a file Osmia no longer reads.
+// its Path.
 func ProjectSettingsLabel(id ProjectID) string {
 	return "project " + string(id) + " settings"
 }
@@ -127,14 +127,11 @@ type ProjectEdit struct {
 	ClearEntities []string
 }
 
-// Settings that hold a string or an integer, and those that must stay set.
 var (
 	stringSettings   = []string{"name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "hearsay_scope"}
 	intSettings      = []string{"capacity.per_workstream", "capacity.git_operations"}
 	boolSettings     = []string{"hearsay_declare_repo", "flake_fixes"}
 	requiredSettings = []string{"upstream", "clone"}
-	// optionalSettings have an empty string for a default: an empty value
-	// clears them.
 	optionalSettings = []string{"name", "fork", "hearsay_scope"}
 )
 
@@ -235,9 +232,3 @@ func sortedKeys[V any](m map[string]V) []string {
 	slices.Sort(keys)
 	return keys
 }
-
-// ReplaceFile replaces the existing regular file at path atomically, keeping
-// its mode. A failure leaves the old bytes and no temporary file; the one
-// failure that may follow the replacement is syncing the directory, so a
-// caller that must know reads the file back.
-func ReplaceFile(path string, data []byte) error { return replaceFile(path, data) }

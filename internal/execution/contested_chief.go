@@ -17,25 +17,17 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const resolveContestedTool = "resolve_contested"
+const ResolveContestedTool = "resolve_contested"
 
-// chiefContestLimit marks delegated recovery as unbounded by a per-unit counter.
-// The service budget and loop guard bound execution.
-const chiefContestLimit = -1
+const ChiefContestLimit = -1
 
-// escalateContest is the chief of staff's decision to raise a contest to the
-// owner.
-const escalateContest = "escalate"
+const EscalateContest = "escalate"
 
-func chiefContestPath(unit, contest string) string {
+func ChiefContestPath(unit, contest string) string {
 	return fmt.Sprintf("units/%s/chief-%s.json", trace.UnitSubject(unit), trace.EventID(contest, "chief"))
 }
 
-// chiefDecisionDocument uses a bounded stable key; the contest already names
-// the unit, so repeating the subject could exceed the trace's key limit.
-// A non-empty judgment is the Jev judgment record behind a decision Jev's
-// binding pick called for; the decision then names Jev as its actor.
-func chiefDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
+func ChiefDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, unit, contest, decision, note, turn string, at time.Time) trace.Document {
 	return judgedDecisionDocument(repo, stream, unit, contest, decision, note, turn, at, "")
 }
 
@@ -46,23 +38,19 @@ func judgedDecisionDocument(repo *trace.Repository, stream config.WorkstreamID, 
 	}
 	data, _ := json.MarshalIndent(d, "", "  ")
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.EventID(contest, "chief"), Revision: 1, Project: repo.Project(), Workstream: stream, Unit: unit, At: at, Actor: chiefActor, Cause: contest}
-	return trace.Document{Header: h, Path: chiefContestPath(unit, contest), Content: string(data) + "\n"}
+	return trace.Document{Header: h, Path: ChiefContestPath(unit, contest), Content: string(data) + "\n"}
 }
 
-// unitContest returns the unit's latest move to contested, and whether the
-// unit is contested by it now.
-func unitContest(repo *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, bool, error) {
+func UnitContest(repo *trace.Repository, stream config.WorkstreamID, unit string) (trace.Transition, bool, error) {
 	state, err := repo.Workflow(stream, trace.UnitSubject(unit))
 	if err != nil || state.Value != UnitContested {
 		return trace.Transition{}, false, err
 	}
-	contest, _, err := masonContest(repo, stream, unit)
+	contest, _, err := MasonContest(repo, stream, unit)
 	return contest, err == nil && contest.ID != "", err
 }
 
-// chiefDecisions returns the chief of staff's contest decisions on the unit,
-// in the order they were recorded.
-func chiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit string) ([]trace.Document, []ChiefContestDecision, error) {
+func ChiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit string) ([]trace.Document, []ChiefContestDecision, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		return nil, nil, err
@@ -83,23 +71,20 @@ func chiefDecisions(repo *trace.Repository, stream config.WorkstreamID, unit str
 	return records, decisions, nil
 }
 
-// chiefRulingsLeft returns -1: engineering recovery is not an owner gate.
-func chiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
+func ChiefRulingsLeft(repo *trace.Repository, stream config.WorkstreamID, unit string) (int, error) {
 	return -1, nil
 }
 
-// contestRaised reports explicit escalation or an owner-held contest.
-func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (bool, string, error) {
-	if moveContest(contest, unit) {
+func ContestRaised(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (bool, string, error) {
+	if MoveContest(contest, unit) {
 		note, err := moveNote(repo, stream, unit, contest)
 		return err == nil, note, err
 	}
-	_, decisions, err := chiefDecisions(repo, stream, unit)
+	_, decisions, err := ChiefDecisions(repo, stream, unit)
 	if err != nil {
 		return false, "", err
 	}
 	if i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }); i >= 0 {
-		// A ruling that left the unit on this contest did not resolve it.
 		return true, decisions[i].Note, nil
 	}
 	return false, "", nil
@@ -109,29 +94,22 @@ func contestRaised(repo *trace.Repository, stream config.WorkstreamID, unit stri
 // the owner, and its note. A contest the owner moved the unit into, or one the
 // chief of staff ruled on, is not an escalation.
 func ContestEscalated(repo *trace.Repository, stream config.WorkstreamID, unit string, contest trace.Transition) (string, bool, error) {
-	if moveContest(contest, unit) {
+	if MoveContest(contest, unit) {
 		return "", false, nil
 	}
-	_, decisions, err := chiefDecisions(repo, stream, unit)
+	_, decisions, err := ChiefDecisions(repo, stream, unit)
 	if err != nil {
 		return "", false, err
 	}
-	i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID && d.Decision == escalateContest })
+	i := slices.IndexFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID && d.Decision == EscalateContest })
 	if i < 0 {
 		return "", false, nil
 	}
 	return decisions[i].Note, true, nil
 }
 
-// resolveContested returns the resolve_contested tool of one claimed
-// chief-of-staff turn. The chief of staff rules on a contested unit of its
-// workstream on the owner's behalf, or explicitly escalates it
-// to the owner; in a turn answering the owner, it records the owner's own
-// ruling. A decision the service refuses is an ordinary result,
-// {"recorded":false,"reason":...}, and records nothing. A shared chief of
-// staff names the member whose unit is contested.
 func (c *Controls) resolveContested(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	tool := coreadapter.Tool{Name: resolveContestedTool, Effect: coreadapter.ToolMemory,
+	tool := coreadapter.Tool{Name: ResolveContestedTool, Effect: coreadapter.ToolMemory,
 		Description: "Resolve a contested unit of this workstream. unit: its ID; decision: review (its reviewer reviews the candidate again), revise (its mason revises the unit) or escalate (the owner rules); note: for review and revise, what the resumed role must do differently, which it receives; for escalate, in a few short sentences for the owner, what is stuck, the finding that matters and what you recommend they rule. " +
 			"Rule only when you are confident the ruling resolves the contest; otherwise escalate. owner_decided: true only when the owner ruled in the message this turn answers, with the owner's words as the note. The rulings a contest takes are in units/<unit>/activity.json. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"unit":{"type":"string"},"decision":{"type":"string","enum":["review","revise","escalate"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["unit","decision","note"],"additionalProperties":false}`)}
@@ -169,7 +147,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		if note == "" {
 			return priorityRefusal("a note is required")
 		}
-		contest, contested, err := unitContest(target, stream, input.Unit)
+		contest, contested, err := UnitContest(target, stream, input.Unit)
 		if err != nil {
 			return nil, err
 		}
@@ -185,14 +163,12 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			if !owner {
 				return priorityRefusal("owner_decided is only for a ruling the owner gave in the message this turn answers")
 			}
-			if input.Decision == escalateContest {
+			if input.Decision == EscalateContest {
 				return priorityRefusal("the owner rules review or revise")
 			}
-			if bounceContest(contest, input.Unit) {
-				decision := chiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
-				// The owner may be answering this chief's escalation. Retain
-				// that decision's identity and append its ruling revision.
-				docs, prior, err := chiefDecisions(target, stream, input.Unit)
+			if BounceContest(contest, input.Unit) {
+				decision := ChiefDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now())
+				docs, prior, err := ChiefDecisions(target, stream, input.Unit)
 				if err != nil {
 					return nil, err
 				}
@@ -205,10 +181,10 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			}
 			return rulingResult(s.RecordContestedRuling(ctx, target, stream, input.Unit, request, turn.Actor))
 		}
-		if moveContest(contest, input.Unit) {
+		if MoveContest(contest, input.Unit) {
 			return priorityRefusal(fmt.Sprintf("unit %s was moved to contested for the owner; the owner rules on it", input.Unit))
 		}
-		_, decisions, err := chiefDecisions(target, stream, input.Unit)
+		_, decisions, err := ChiefDecisions(target, stream, input.Unit)
 		if err != nil {
 			return nil, err
 		}
@@ -229,14 +205,14 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			judgment, actor = bound.Judgment, trace.JevActor
 		}
 		record := func(decision trace.Document) error {
-			if bounceContest(contest, input.Unit) {
+			if BounceContest(contest, input.Unit) {
 				_, err := target.RecordDocumentsWith(ctx, []trace.Document{decision})
 				return err
 			}
 			return target.RecordDocuments(ctx, []trace.Document{decision})
 		}
 		decision := judgedDecisionDocument(target, stream, input.Unit, contest.ID, input.Decision, note, scope.Turn, s.Now(), judgment)
-		if input.Decision == escalateContest {
+		if input.Decision == EscalateContest {
 			if err := record(decision); err != nil {
 				return nil, err
 			}
@@ -248,7 +224,7 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 		}
 		var out ContestedRulingResponse
 		var api *APIError
-		if bounceContest(contest, input.Unit) {
+		if BounceContest(contest, input.Unit) {
 			out, api = s.RecordContestedRulingJudged(ctx, target, stream, input.Unit, request, actor, judgment, decision)
 		} else {
 			if out, api = s.RecordContestedRulingJudged(ctx, target, stream, input.Unit, request, actor, judgment); api == nil {
@@ -258,11 +234,8 @@ func (c *Controls) resolveContested(repository *trace.Repository, scope coreadap
 			}
 		}
 		if api != nil && bound != nil && api.Code != Internal {
-			// The service refused the transition Jev's binding pick calls for.
-			// The contest goes to the owner with Jev's judgment, and Jev is not
-			// asked about it again.
 			handed := fmt.Sprintf("Jev decided %s with confidence %.2f (judgment %s), but the service refused it: %s. The decision is yours. The chief of staff's note: %s", bound.Pick, bound.Confidence, bound.Judgment, api.Message, note)
-			if err := record(judgedDecisionDocument(target, stream, input.Unit, contest.ID, escalateContest, handed, scope.Turn, s.Now(), judgment)); err != nil {
+			if err := record(judgedDecisionDocument(target, stream, input.Unit, contest.ID, EscalateContest, handed, scope.Turn, s.Now(), judgment)); err != nil {
 				return nil, err
 			}
 			return json.Marshal(struct {

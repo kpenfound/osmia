@@ -152,7 +152,6 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 	return []coreadapter.Tool{object, concede}, nil
 }
 
-// checkObjection returns *Invalid for an objection the round refuses.
 func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 	if !slices.Contains(Kinds, o.Kind) {
 		return invalid("kind %q is not one of charter, charter_conflict, fit, size or acceptance", o.Kind)
@@ -182,8 +181,6 @@ func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 	return nil
 }
 
-// checkPart requires part to name the pinned spec or plan, or a criterion or
-// unit of them; size and acceptance objections concern a unit.
 func (t Turn) checkPart(kind Kind, part string) error {
 	_, criterion := plan.ParseCitation(part)
 	unit := strings.HasPrefix(part, planCitation)
@@ -203,8 +200,6 @@ func (t Turn) checkPart(kind Kind, part string) error {
 	return invalid("part %q is not one of %s", part, PartForms)
 }
 
-// pinned resolves a spec#<n> or plan#<unit> reference against the pinned
-// revision.
 func (t Turn) pinned(reference string) error {
 	if n, ok := plan.ParseCitation(reference); ok {
 		if _, ok := t.Spec.Criterion(n); !ok {
@@ -252,8 +247,6 @@ func (t Turn) Resolve(ctx context.Context, citation string) error {
 	return invalid("citation %q is not one of %s", citation, CitationForms)
 }
 
-// checkConcession requires the objection to be the member's own, made in an
-// earlier round or earlier in this turn, and still standing.
 func (t Turn) checkConcession(c Concession) error {
 	if strings.TrimSpace(c.Reason) == "" {
 		return invalid("a concession requires a reason")
@@ -275,9 +268,6 @@ func (t Turn) checkConcession(c Concession) error {
 	if !made {
 		return invalid("no objection %s is recorded", c.Objection)
 	}
-	// The turn in progress has accepted nothing yet, so what stands is the
-	// dissent of the earlier rounds and this turn's own objections, less
-	// what this turn already conceded.
 	stands := slices.ContainsFunc(OpenDissent(t.Earlier), func(d Dissent) bool { return d.ID == c.Objection }) ||
 		slices.ContainsFunc(t.Record.Objections, func(o Objection) bool { return o.ID == c.Objection })
 	if !stands || slices.ContainsFunc(t.Record.Concessions, func(old Concession) bool { return old.Objection == c.Objection }) {
@@ -286,8 +276,6 @@ func (t Turn) checkConcession(c Concession) error {
 	return nil
 }
 
-// refuse turns an invalid contribution into the tool's result and passes
-// other errors on.
 func refuse(err error) (json.RawMessage, error) {
 	var refused *Invalid
 	if errors.As(err, &refused) {
@@ -296,8 +284,6 @@ func refuse(err error) (json.RawMessage, error) {
 	return nil, err
 }
 
-// encode writes a tool result without escaping the angle brackets of the
-// citation forms.
 func encode(v any) (json.RawMessage, error) {
 	var b bytes.Buffer
 	e := json.NewEncoder(&b)

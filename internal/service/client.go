@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+// Client calls the service API over its Unix socket.
 type Client struct {
 	http                *http.Client
 	transport           *http.Transport
@@ -31,11 +32,6 @@ type Client struct {
 const defaultClientTimeout = 15 * time.Second
 const addProjectTimeout = 60 * time.Second
 
-// sessionCheckTimeout is the client's response budget for a session check.
-// A check runs inline on the server (session_controls.go, sessionCheck) and
-// the caller waits for it to finish, so the budget must outlive any
-// project's configured checks_timeout; config.MaxChecksTimeout bounds how
-// large that can be, plus a margin for recording the result.
 const sessionCheckTimeout = config.MaxChecksTimeout + time.Minute
 
 // NewClient never reads state files and never dials TCP or follows redirects.
@@ -91,7 +87,6 @@ func (c *Client) do(ctx context.Context, method, path string, input, output any,
 	return nil
 }
 
-// errorResponse decodes the API error of a failed response.
 func errorResponse(ctx context.Context, d *json.Decoder, timeout time.Duration) error {
 	var out api.ErrorResponse
 	if err := d.Decode(&out); err != nil {
@@ -144,8 +139,6 @@ func (c *Client) Events(ctx context.Context, handle func(api.Event) error) error
 	return err
 }
 
-// readEvents parses server-sent events and passes each one to handle. Comments,
-// fields other than event and data, and events without data are skipped.
 func readEvents(r *bufio.Reader, handle func(api.Event) error) error {
 	var kind string
 	var data []string
@@ -618,9 +611,8 @@ func (c *Client) SessionCommit(ctx context.Context, id config.WorkstreamID, mess
 	return v, err
 }
 
-// SessionCheck checks a session's head commit. It runs inline on the
-// server, so it uses the heavier sessionCheckTimeout budget rather than the
-// default, the same way AddProject uses addProjectTimeout.
+// SessionCheck checks a session's head commit. The check runs inline on the
+// server, so the call waits up to the maximum checks timeout plus a minute.
 func (c *Client) SessionCheck(ctx context.Context, id config.WorkstreamID) (api.SessionCheckRun, error) {
 	var v api.SessionCheckRun
 	err := c.do(ctx, "POST", api.Prefix+"/sessions/"+url.PathEscape(string(id))+"/check", nil, &v, c.sessionCheckTimeout)

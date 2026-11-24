@@ -14,9 +14,6 @@ import (
 
 const traceToken = "dct_fixture_cloud_token_7f3a9"
 
-// fakeTraceCLI writes a Dagger CLI that records each call, its arguments one
-// per line and its environment, and then runs body. It returns the program,
-// the call log and the environment log of the last call.
 func fakeTraceCLI(t *testing.T, body string) (program, calls, environment string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -161,8 +158,6 @@ func TestFetchTraceKeepsTheEndOfOutputLargerThanTheBound(t *testing.T) {
 
 func TestFetchTraceBoundsOutputBeyondWhatItCaptures(t *testing.T) {
 	t.Parallel()
-	// More than the capture holds, with the token straddling no boundary the
-	// kept end could show.
 	program, _, _ := fakeTraceCLI(t, "i=0\nwhile [ $i -lt 40000 ]; do printf 'line %05d %s padding padding padding\\n' $i \"$DAGGER_CLOUD_TOKEN\"; i=$((i+1)); done\nprintf 'end\\n'\n")
 	out, failure := (DaggerChecks{CloudToken: traceToken, Program: program}).FetchTrace(context.Background(), "t1", "")
 	if failure != nil {

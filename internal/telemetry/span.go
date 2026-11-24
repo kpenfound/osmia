@@ -12,7 +12,6 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// scopeName is the instrumentation scope of every span the sink sends.
 const scopeName = "github.com/kpenfound/osmia"
 
 // Span is one finished span, described by recorded identities and times. It
@@ -38,8 +37,6 @@ type Event struct {
 	Attrs []Attr
 }
 
-// attributes returns the allow-listed attributes of attrs and how many were
-// dropped.
 func attributes(attrs []Attr) (kept []attribute.KeyValue, dropped int) {
 	seen := map[attribute.Key]bool{}
 	for _, a := range attrs {
@@ -53,8 +50,6 @@ func attributes(attrs []Attr) (kept []attribute.KeyValue, dropped int) {
 	return kept, dropped
 }
 
-// snapshot converts s to an exportable span, or reports it unusable: it needs
-// a name built by a naming helper, IDs, and an end that is not before its start.
 func (s Span) snapshot(res *resource.Resource) (sdktrace.ReadOnlySpan, int, bool) {
 	if !s.Name.Valid() || !s.Trace.IsValid() || !s.ID.IsValid() || s.Start.IsZero() || s.End.Before(s.Start) {
 		return nil, 0, false

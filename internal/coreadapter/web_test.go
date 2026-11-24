@@ -14,14 +14,12 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 )
 
-// webToolNames are the web tools of every backend.
 var webToolNames = []string{"WebSearch", "WebFetch", "web_search", "websearch", "webfetch"}
 
 func hasWebTool(tools []string) bool {
 	return slices.ContainsFunc(tools, func(name string) bool { return slices.Contains(webToolNames, name) })
 }
 
-// webTurn is a read-only turn of backend in a container that holds Web.
 func webTurn(t *testing.T, backend string) a.PreparedTurn {
 	t.Helper()
 	turn := toolTurn(t, "container")
@@ -34,7 +32,6 @@ func runWebTurn(turn a.PreparedTurn, engine *adaptertest.Engine) (a.SessionResul
 	return (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
 }
 
-// refuseWebGrants is an engine refusing any grants that name a web tool.
 func refuseWebGrants(err error) func(agent.Grants) error {
 	return func(g agent.Grants) error {
 		if hasWebTool(g.Tools) {
@@ -44,7 +41,6 @@ func refuseWebGrants(err error) func(agent.Grants) error {
 	}
 }
 
-// dropWebTools is a policy that leaves out the web tools of its grants.
 func dropWebTools(_ agent.Grants, p *agent.Policy) {
 	p.Tools = slices.DeleteFunc(p.Tools, func(name string) bool { return slices.Contains(webToolNames, name) })
 }
@@ -148,15 +144,11 @@ func TestWebAdmitsNoFetchTool(t *testing.T) {
 func TestSessionPolicyHoldsWebToolsToTheGrant(t *testing.T) {
 	for backend := range webBackends {
 		t.Run(backend, func(t *testing.T) {
-			// A session with the web tools of a web grant is accepted: the
-			// unaltered fake session carries them.
 			turn := webTurn(t, backend)
 			engine := &adaptertest.Engine{}
 			if _, err := runWebTurn(turn, engine); err != nil || len(engine.Requests) != 1 {
 				t.Fatalf("err=%v launches=%d", err, len(engine.Requests))
 			}
-			// A session with web tools its grant lacks is refused without a
-			// fallback.
 			turn = toolTurn(t, "container")
 			turn.Profile.Backend = backend
 			engine = &adaptertest.Engine{Policy: func(p *agent.Policy) { p.Tools = append(p.Tools, backendWeb[backend]...) }}

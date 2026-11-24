@@ -17,8 +17,6 @@ import (
 type loggerKey struct{}
 type scopeKey struct{}
 
-// discard is the logger used when no logger reaches the context: logging
-// stays silent rather than writing to a stream nobody configured.
 var discard = slog.New(slog.NewJSONHandler(io.Discard, nil))
 
 // WithLogger attaches logger to ctx. Every record ctx produces, service

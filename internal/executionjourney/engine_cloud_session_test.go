@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -19,24 +22,24 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 	const traceURL = "https://dagger.cloud/example/traces/service123"
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", token)
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
-	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
+	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *journey.Options) {
 		path := filepath.Join(o.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
-		must(t, err)
+		fixturekit.Must(t, err)
 		data = append(data, []byte("\n[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_ENGINE_TEST_TOKEN'\n")...)
-		must(t, os.WriteFile(path, data, 0600))
+		fixturekit.Must(t, os.WriteFile(path, data, 0600))
 	})
-	// Use production check composition, with the fixture retaining fake agent turns.
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 	run, err := c.SessionCheck(t.Context(), w)
-	must(t, err)
-	if run.Status != ChecksPassed || run.TraceURL != traceURL || run.CIIdentityFallback != "" {
+	fixturekit.Must(t, err)
+	if run.Status != checks.ChecksPassed || run.TraceURL != traceURL || run.CIIdentityFallback != "" {
 		t.Fatalf("session run: %+v", run)
 	}
-	repo, err := s.repository(project)
-	must(t, err)
+	repo, err := s.Repository(project)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
-	must(t, err)
+	fixturekit.Must(t, err)
 	captured := ""
 	for _, d := range docs {
 		if d.Path == run.OutputPath {
@@ -52,7 +55,7 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 		}
 	}
 	var feed api.FeedResponse
-	must(t, c.Do(t.Context(), "GET", api.Prefix+"/feed/"+string(w), nil, &feed))
+	fixturekit.Must(t, c.Do(t.Context(), "GET", api.Prefix+"/feed/"+string(w), nil, &feed))
 	found := false
 	for _, e := range feed.Entries {
 		if e.SessionChecks != nil && e.SessionChecks.TraceURL == traceURL {
@@ -68,28 +71,27 @@ func TestServiceCloudSessionChecks(t *testing.T) {
 	}
 }
 
-// Serial: session checks use fake CLIs in the process environment.
 func TestServiceDockerSessionChecks(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("DOCKER_HOST", "tcp://engine.example.ts.net:2375")
 	t.Setenv("DOCKER_CONTEXT", "default")
-	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *Options) {
+	s, c, _, project, w, _, _ := newSessionControlsFixture(t, func(o *journey.Options) {
 		path := filepath.Join(o.Config.Root, "config.toml")
 		data, err := os.ReadFile(path)
-		must(t, err)
+		fixturekit.Must(t, err)
 		data = append(data, []byte("\n[dagger]\nengine = 'managed'\nversion = 'v0.20.5'\n")...)
-		must(t, os.WriteFile(path, data, 0600))
+		fixturekit.Must(t, os.WriteFile(path, data, 0600))
 	})
-	service.InspectForTest(s.core()).SetReviewChecks(nil)
+	service.InspectForTest(s.Core()).SetReviewChecks(nil)
 	run, err := c.SessionCheck(t.Context(), w)
-	must(t, err)
-	if run.Status != ChecksPassed {
+	fixturekit.Must(t, err)
+	if run.Status != checks.ChecksPassed {
 		t.Fatalf("%+v", run)
 	}
-	repo, err := s.repository(project)
-	must(t, err)
+	repo, err := s.Repository(project)
+	fixturekit.Must(t, err)
 	docs, err := trace.Read[trace.Document](repo, w)
-	must(t, err)
+	fixturekit.Must(t, err)
 	captured := ""
 	for _, d := range docs {
 		if d.Path == run.OutputPath {
@@ -102,7 +104,7 @@ func TestServiceDockerSessionChecks(t *testing.T) {
 		}
 	}
 	log, err := os.ReadFile(fake.Environments)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !strings.Contains(string(log), "dagger|check --progress=report --fail-fast --parallel 4|docker-container://osmia-dagger-engine|tcp://engine.example.ts.net:2375\n") {
 		t.Fatalf("session check environment: %s", log)
 	}

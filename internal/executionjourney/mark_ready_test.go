@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/jev/jevtest"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -17,58 +19,50 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordBrief records the chief of staff's brief for the latest final review
-// of the fixture's workstream.
 func (d *draftFixture) recordBrief(t *testing.T, items ...string) {
 	t.Helper()
-	report, _, err := latestFinalReport(d.repository, d.stream)
-	must(t, err)
+	report, _, err := delivery.LatestFinalReport(d.repository, d.stream)
+	fixturekit.Must(t, err)
 	review, _, _, err := delivery.DeliveryDocuments(d.repository, d.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	brief := delivery.Brief{Review: report.Review, ReviewRevision: review.Revision, Commit: report.Commit, Text: "Uploads resume after a restart.", BeforeYouShip: items}
 	content, err := json.Marshal(brief)
-	must(t, err)
+	fixturekit.Must(t, err)
 	revision, err := intake.NextRevision(d.repository, d.stream, delivery.BriefDocument(brief.Review))
-	must(t, err)
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.BriefDocument(brief.Review), Revision: revision, Project: d.repository.Project(), Workstream: d.stream, At: d.f.s.now(), Actor: chiefActor, Cause: "fixture"},
+	fixturekit.Must(t, err)
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.BriefDocument(brief.Review), Revision: revision, Project: d.repository.Project(), Workstream: d.stream, At: d.f.S.Now(), Actor: intake.ChiefActor, Cause: "fixture"},
 		Path: delivery.BriefPath(brief.Review), Content: string(content) + "\n"}
-	must(t, d.repository.RecordDocuments(context.Background(), []trace.Document{doc}))
+	fixturekit.Must(t, d.repository.RecordDocuments(context.Background(), []trace.Document{doc}))
 }
 
-func (d *draftFixture) present(t *testing.T) DeliveryPresentation {
+func (d *draftFixture) present(t *testing.T) api.DeliveryPresentation {
 	t.Helper()
-	presented, apiErr := d.f.s.deliveryPresentation(context.Background(), string(d.stream))
+	presented, apiErr := d.f.S.DeliveryPresentation(context.Background(), string(d.stream))
 	if apiErr != nil {
 		t.Fatal(apiErr)
 	}
 	return presented
 }
 
-func (d *draftFixture) decide(presented DeliveryPresentation) (DeliveryApproval, *APIError) {
-	return d.f.s.approveDelivery(context.Background(), string(d.stream), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+func (d *draftFixture) decide(presented api.DeliveryPresentation) (api.DeliveryApproval, *api.APIError) {
+	return d.f.S.ApproveDelivery(context.Background(), string(d.stream), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
 }
 
-// settleReady runs the publication pass and its operation to a recorded
-// result, as the reconciler does.
 func (d *draftFixture) settleReady(t *testing.T) {
 	t.Helper()
-	p := &publisher{s: d.f.s, repository: d.repository}
-	op := fixturekit.RequestPublication(t, d.repository, d.stream, PublishAction, p.Pass)
-	if result := settleOperation(t, d.f.s, d.repository, d.stream, op, p); result.Outcome != "succeeded" {
+	p := &journey.Publisher{S: d.f.S, Repository: d.repository}
+	op := fixturekit.RequestPublication(t, d.repository, d.stream, delivery.PublishAction, p.Pass)
+	if result := journey.SettleOperation(t, d.f.S, d.repository, d.stream, op, p); result.Outcome != "succeeded" {
 		t.Fatalf("marking ready %+v", result)
 	}
 }
 
-// Approving "Mark ready for review" puts the approved description, with the
-// brief's Before you ship items, on the draft pull request that final review
-// opened, marks it ready, opens no second pull request, pushes nothing and
-// delivers the workstream. Jev is not asked.
 func TestApprovingMarkReadyUpdatesTheDraftMarksItReadyAndDeliversTheWorkstream(t *testing.T) {
 	t.Parallel()
 	d := newDraftFixture(t, "commit-per-unit")
 	ctx := context.Background()
 	judge := &jevtest.Provider{}
-	d.f.s.jev = &jev.Judge{Config: func() config.Jev { return d.f.s.cfg.Jev }, Provider: judge.Factory(), Getenv: func(string) string { return "key" }, Now: d.f.s.now}
+	d.f.S.Jev = &jev.Judge{Config: func() config.Jev { return d.f.S.Cfg.Jev }, Provider: judge.Factory(), Getenv: func(string) string { return "key" }, Now: d.f.S.Now}
 	d.read(1)
 	if result := d.settle(t, d.first); result.Outcome != "succeeded" {
 		t.Fatalf("final review %+v", result)
@@ -91,8 +85,8 @@ func TestApprovingMarkReadyUpdatesTheDraftMarksItReadyAndDeliversTheWorkstream(t
 	if !strings.Contains(presented.Draft, "Before you ship:\n- Set OSMIA_TOKEN\n- Restart the service\n") {
 		t.Fatalf("the description to publish lacks the items: %q", presented.Draft)
 	}
-	entry, found, err := d.f.s.delivery().DeliveryEntry(ctx, d.repository, d.stream)
-	must(t, err)
+	entry, found, err := d.f.S.Delivery().DeliveryEntry(ctx, d.repository, d.stream)
+	fixturekit.Must(t, err)
 	if !found || !strings.HasPrefix(entry.Question, "Mark ready for review: ") || !strings.Contains(entry.Question, "Checks passed.") || entry.Blocked != "Marking the pull request ready for review." {
 		t.Fatalf("the inbox entry %+v", entry)
 	}
@@ -116,37 +110,33 @@ func TestApprovingMarkReadyUpdatesTheDraftMarksItReadyAndDeliversTheWorkstream(t
 	if tip, _ := d.forkBranch(t); tip != pushed || d.pushCount(t) != pushes {
 		t.Fatalf("marking ready pushed: the branch is at %s, was %s, %d pushes, were %d", tip, pushed, d.pushCount(t), pushes)
 	}
-	if got := d.feature(t); got != DeliveredState {
+	if got := d.feature(t); got != intake.DeliveredState {
 		t.Fatalf("the workstream is %s, want delivered", got)
 	}
 	ready, recorded, err := delivery.ReadyAt(d.repository, d.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !recorded || ready.Source != api.ReadyByApproval || ready.PullRequest != pr.Number || ready.Approval != 1 || ready.Commit != pr.HeadCommit {
 		t.Fatalf("the ready record %+v", ready)
 	}
 	if n := len(judge.Requests()); n != 0 {
 		t.Fatalf("Jev was asked %d times", n)
 	}
-	// The owner's approval is applied through the router as a pinned move: the
-	// workstream's transition to delivered names the owner as its decider and the
-	// route records the owner as its authority.
+
 	delivered := latestOf(t, d.repository, d.stream, trace.FeatureSubject)
-	if delivered.To != DeliveredState || delivered.DecidedBy != trace.DecidedByOwner || delivered.Judgment != "" || delivered.DefaultTo != DeliveredState || delivered.Departed() {
+	if delivered.To != intake.DeliveredState || delivered.DecidedBy != trace.DecidedByOwner || delivered.Judgment != "" || delivered.DefaultTo != intake.DeliveredState || delivered.Departed() {
 		t.Fatalf("the delivered transition %+v", delivered)
 	}
-	if rec := routeOf(t, d.repository, d.stream, intake.TriggerDeliveryApproved); rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested || rec.State != router.StateCommitted || rec.Target != intake.TargetDelivered {
+	if rec := journey.RouteOf(t, d.repository, d.stream, intake.TriggerDeliveryApproved); rec.Authority != router.AuthorityOwner || rec.Rule != "pinned" || rec.Outcome != router.OutcomeFollowed || rec.JevRequested || rec.State != router.StateCommitted || rec.Target != intake.TargetDelivered {
 		t.Fatalf("route %+v", rec)
 	}
-	// A later pass asks for nothing more and writes nothing to the pull request.
-	operations := len(fixturekit.PublicationOperations(t, d.repository, d.stream, PublishAction))
-	must(t, (&publisher{s: d.f.s, repository: d.repository}).Pass(ctx))
-	if got := len(fixturekit.PublicationOperations(t, d.repository, d.stream, PublishAction)); got != operations || d.pulls.Readies != 1 || d.pulls.Updates != 1 {
+
+	operations := len(fixturekit.PublicationOperations(t, d.repository, d.stream, delivery.PublishAction))
+	fixturekit.Must(t, (&journey.Publisher{S: d.f.S, Repository: d.repository}).Pass(ctx))
+	if got := len(fixturekit.PublicationOperations(t, d.repository, d.stream, delivery.PublishAction)); got != operations || d.pulls.Readies != 1 || d.pulls.Updates != 1 {
 		t.Fatalf("a later pass asked again: %d operations, were %d; %d ready calls, %d updates", got, operations, d.pulls.Readies, d.pulls.Updates)
 	}
 }
 
-// An approval pinned to a review whose commit a later automatic push replaced
-// is refused as stale, and its pull request stays a draft.
 func TestAnApprovalOfAReplacedPushIsRefusedAsStale(t *testing.T) {
 	t.Parallel()
 	d := newDraftFixture(t, "commit-per-unit")
@@ -161,15 +151,14 @@ func TestAnApprovalOfAReplacedPushIsRefusedAsStale(t *testing.T) {
 	if result := d.settle(t, second); result.Outcome != "succeeded" {
 		t.Fatalf("second final review %+v", result)
 	}
-	if _, apiErr := d.decide(stale); apiErr == nil || apiErr.Code != Conflict {
+	if _, apiErr := d.decide(stale); apiErr == nil || apiErr.Code != api.Conflict {
 		t.Fatalf("the approval of the replaced push: %v", apiErr)
 	}
 	d.noApproval(t)
-	if d.pulls.Readies != 0 || !d.pulls.Prs[0].Draft || d.feature(t) != AssembledState {
+	if d.pulls.Readies != 0 || !d.pulls.Prs[0].Draft || d.feature(t) != intake.AssembledState {
 		t.Fatalf("the stale approval changed the pull request or the workstream: %+v, %s", d.pulls.Prs[0], d.feature(t))
 	}
 
-	// An approval recorded before the push does not mark the new commit ready.
 	fresh := d.present(t)
 	if _, apiErr := d.decide(fresh); apiErr != nil {
 		t.Fatal(apiErr)
@@ -179,10 +168,10 @@ func TestAnApprovalOfAReplacedPushIsRefusedAsStale(t *testing.T) {
 	if result := d.settle(t, third); result.Outcome != "succeeded" {
 		t.Fatalf("third final review %+v", result)
 	}
-	p := &publisher{s: d.f.s, repository: d.repository}
-	before := len(fixturekit.PublicationOperations(t, d.repository, d.stream, PublishAction))
-	must(t, p.Pass(context.Background()))
-	if after := len(fixturekit.PublicationOperations(t, d.repository, d.stream, PublishAction)); after != before || d.pulls.Readies != 0 || !d.pulls.Prs[0].Draft {
+	p := &journey.Publisher{S: d.f.S, Repository: d.repository}
+	before := len(fixturekit.PublicationOperations(t, d.repository, d.stream, delivery.PublishAction))
+	fixturekit.Must(t, p.Pass(context.Background()))
+	if after := len(fixturekit.PublicationOperations(t, d.repository, d.stream, delivery.PublishAction)); after != before || d.pulls.Readies != 0 || !d.pulls.Prs[0].Draft {
 		t.Fatalf("an approval of a replaced push was applied: %d operations, were %d, %d ready calls", after, before, d.pulls.Readies)
 	}
 }

@@ -12,40 +12,27 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// ArchiveCleanup permanently deletes the independent storage of a project's
-// terminal, idle archived workstreams: their own dedicated trace
-// repositories and their temporary workspaces. It never rewrites or prunes
-// Git history; it only deletes files. It also migrates archive records
-// kept from before this feature, filling their title, outcome and delivery
-// link while the trace is still present.
+// ArchiveCleanup deletes the trace repository and temporary workspaces of a
+// project's terminal, idle archived workstreams, and fills each archive
+// record's title, outcome and delivery link while the trace is still present.
+// It only deletes files; it never rewrites Git history.
 //
-// Deletion of a workstream's trace is deferred, with a logged reason,
-// while it has an unfinished turn, a pending or unacknowledged operation,
-// or a temporary workspace still being cleaned; while a retained
-// workstream still depends on it as a base.
-// Once every deferral clears, the trace repository is moved aside by one
-// atomic rename -- durable, restart-safe intent to delete it, after which
-// it is never again discoverable as live -- and its actual removal runs in
-// a background goroutine that holds no repository lock, so deleting even a
-// large trace never delays a read, a write or reconciliation of any other
-// workstream. The archive record is marked clean only once the storage is
-// confirmed gone, which a later pass reconciles whether an earlier attempt
-// was interrupted by a crash or is simply still in flight.
+// A deletion is deferred, with a logged reason, while the workstream has an
+// unfinished turn, a pending or unacknowledged operation or a workspace still
+// being cleaned, or while a retained workstream depends on it as a base. Once
+// nothing defers it, the trace is renamed aside atomically, which records the
+// intent to delete and makes it undiscoverable as live, and removed in the
+// background without holding a repository lock. The archive record is marked
+// clean only once the storage is gone, whether the removal finished in this
+// process or an earlier one.
 type ArchiveCleanup struct {
 	S          *Controller
 	Workspaces *WorkspaceCleanup
 	mu         sync.Mutex
-	// removing tracks, by workstream, a deletion a background goroutine of
-	// this instance is already carrying out, so a later pass does not start
-	// a second one for the same deletion.
-	removing map[config.WorkstreamID]bool
-	// deferred is the reason this instance last logged for not deleting a
-	// workstream's trace, by workstream, so a steady deferral is logged
-	// once, not every pass.
-	deferred map[config.WorkstreamID]string
-	// finish performs a workstream's actual, possibly slow, trace removal.
-	// It is trace.FinishWorkstreamTraceDeletion unless a test replaces it to
-	// observe or hold a deletion in flight.
+	removing   map[config.WorkstreamID]bool
+	deferred   map[config.WorkstreamID]string
+	// Finish removes the trace renamed aside for deletion. It defaults to
+	// trace.FinishWorkstreamTraceDeletion.
 	Finish func(config.Root, config.ProjectID, config.WorkstreamID) error
 }
 

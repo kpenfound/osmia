@@ -184,7 +184,6 @@ func TestRetiredMemberSliceIsFrozenAndGetsNoEffect(t *testing.T) {
 		t.Fatalf("survivor revision: %+v", survivor)
 	}
 
-	// A contract change still re-evaluates the live dependent.
 	contract := after
 	contract.Contracts = []trace.Contract{{Name: "offset", Text: "string"}}
 	got, err = ClassifyImpact("delta", before, contract, members)

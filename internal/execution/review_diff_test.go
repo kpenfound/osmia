@@ -17,7 +17,7 @@ func TestReviewDiffToolServesThePinnedCandidate(t *testing.T) {
 	_, identity, err := r.prepareUnitReview(context.Background(), stream, "resume")
 	must(t, err)
 	scope := coreadapter.Scope{Project: string(f.cfg.Project.ID), Workstream: string(stream), Unit: "resume", Thread: reviewerAgent("resume"), Turn: "review-1", Role: reviewerRole}
-	tool := reviewDiffTool(f.cfg, repo, scope, identity)
+	tool := ReviewDiffTool(f.cfg, repo, scope, identity)
 	type response struct {
 		To    string                    `json:"to"`
 		Files []reviewtools.ChangedFile `json:"files"`
@@ -53,7 +53,7 @@ func TestReviewDiffToolServesThePinnedCandidate(t *testing.T) {
 	}
 	stale := identity
 	stale.DiffSHA256 = strings.Repeat("0", 64)
-	if _, err := reviewDiffTool(f.cfg, repo, scope, stale).Handle(context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "pinned") {
+	if _, err := ReviewDiffTool(f.cfg, repo, scope, stale).Handle(context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "pinned") {
 		t.Fatalf("served a diff that differs from the pinned digest: %v", err)
 	}
 }

@@ -13,17 +13,8 @@ import (
 // unchanged before health reports the backend degraded on its account.
 const ActivityStallThreshold = 30 * time.Second
 
-// ActivityFailureExpiry bounds how long a failed entry may degrade health
-// and stay listed after nothing has retried it. Many operations key the
-// activity record by the trace event that requested them (trace.OperationID),
-// not by a retry-stable identity, so a check run superseded by a new run
-// number, a turn whose next attempt is a new operation, or a workstream that
-// is abandoned after a failure never issues a fresh start under the same key
-// to supersede it. Without a bound, that one failure would degrade /health
-// forever. Ten minutes comfortably exceeds this project's own automatic
-// check retry delay (unit_checks.go, checkRetryDelay), so an operation that
-// is actually being retried stays visible through its retry; one that is not
-// stops degrading health and drops out of the record shortly after.
+// ActivityFailureExpiry is how long a failed entry degrades health and stays
+// listed when nothing starts the operation again under its key.
 const ActivityFailureExpiry = 10 * time.Minute
 
 type activityRecord struct {
@@ -31,21 +22,12 @@ type activityRecord struct {
 	reported bool
 }
 
-// Registry is the service's in-process record of long-running
-// backend operations: archive cleanup, Git and workspace operations,
-// reconcile-controller operations, checks, agent turns and startup or
-// project recovery. It is separate from the trace and the runtime store, a
-// small mutex-guarded map handing out snapshot copies, so reporting and
-// reading it never wait on the trace mutex or on operationMu.
-//
-// Entries are keyed by the caller's own identity for "the same operation",
-// such as a reconciled operation's stable ID or a fixed name for a startup
-// recovery step. A successful finish removes the entry at once; a failure
-// keeps it, recorded, until a fresh start under the same key supersedes it or
-// ActivityFailureExpiry passes since the failure, whichever comes first, so
-// a repeatedly failing operation never grows the record, a stale failure
-// never outlives the operation it reported, and an operation that fails and
-// is never retried under the same key does not degrade health forever.
+// Registry is the service's in-process record of long-running backend
+// operations. Entries are keyed by the caller's identity for the same
+// operation. A successful finish removes the entry; a failure keeps it until a
+// fresh start under the key supersedes it or ActivityFailureExpiry passes. It
+// holds no trace or operation lock, so reporting and reading never wait on
+// them.
 type Registry struct {
 	now    func() time.Time
 	Notify func()
@@ -82,8 +64,6 @@ func (r *Registry) Start(key string, kind api.ActivityKind, project config.Proje
 	return &Handle{r: r, key: key, entry: e}
 }
 
-// live reports whether h's entry is still the one the registry holds under
-// its key, and runs update on it, under the registry's lock, when it is.
 func (h *Handle) live(update func(*activityRecord)) bool {
 	h.r.mu.Lock()
 	ok := h.r.entries[h.key] == h.entry
@@ -136,10 +116,6 @@ func (r *Registry) changed() {
 	}
 }
 
-// snapshot returns every entry, oldest first, as copies readers may hold
-// without the registry's lock. A failed entry older than ActivityFailureExpiry
-// is dropped from the record as it is read, so a failure nothing retries
-// stops being reported, by this call or any later one, once it expires.
 func (r *Registry) snapshot() []activityRecord {
 	if r == nil {
 		return nil
@@ -164,31 +140,11 @@ func (r *Registry) snapshot() []activityRecord {
 	return out
 }
 
-// Status reports the activity record's effect on health: ready unless
-// an operation is recovering, failing or stalled, in which case it names the
-// operation as the cause. A recovering operation reports not ready; a
-// failing or stalled one reports degraded. It never touches the trace mutex
-// or operationMu.
-//
-// "No progress for ActivityStallThreshold" only counts against an entry
-// whose kind is stall-tracked (stallTracked) and that has reported progress
-// at least once (activityRecord.reported): an entry's own reporting has
-// demonstrably started moving, so a later gap of ActivityStallThreshold with
-// no further report means it has stopped, not merely that it has not begun.
-// Ordinary Git and workspace operations are reconciled as one Apply call
-// with no progress report in between (activityOf), so gating on reported
-// keeps a Git operation that simply takes longer than the threshold out of
-// this rule, while archive cleanup and recovery, which do report progress
-// through their phases, are still caught once they stall for real.
-//
-// An agent turn or a check run is excluded by stallTracked regardless of
-// reported: they are reported once at start and once at finish, with
-// nothing in between, and routinely run for minutes under this project's
-// own checks_timeout and profile timeout — so the same rule would call a
-// perfectly healthy turn or check "degraded" for simply still running.
-// Those kinds are bounded by their own configured timeout instead: when one
-// is exceeded, the wrapped call returns an error and the operation is
-// reported failed, which the failure check above already catches.
+// Status reports the record's effect on health. A recovering operation makes
+// the backend not ready. A failed operation, or an operation that reported
+// progress and then made none for ActivityStallThreshold, makes it degraded.
+// Agent turns and checks are exempt from the stall rule; their own timeouts end
+// them as failures. Each cause names the operation.
 func (r *Registry) Status() (status, cause string) {
 	if r == nil {
 		return api.BackendReady, ""
@@ -213,11 +169,6 @@ func (r *Registry) Status() (status, cause string) {
 	return api.BackendReady, ""
 }
 
-// stallTracked reports whether kind is subject to the no-progress stall
-// rule in Status. Agent turns and checks are excluded: they report
-// only start and finish, run for minutes by design, and are bounded by
-// their own configured timeout rather than by elapsed time since the last
-// activity report.
 func stallTracked(kind api.ActivityKind) bool {
 	return kind != api.ActivityAgentTurn && kind != api.ActivityCheck
 }

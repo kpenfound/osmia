@@ -8,10 +8,6 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 )
 
-// resumeExecutor stands in for a real Executor's resume check, which would
-// ask a costly, nondeterministic backend whether a saved session is still
-// usable. It leaves unverified whether a real backend's answer is accurate;
-// this test only checks that TurnRunner validates the session and delegates.
 type resumeExecutor struct {
 	calls int
 	err   error

@@ -151,10 +151,6 @@ func showTrace(w io.Writer, result any) {
 	}
 }
 
-// departedByJev is the label of a transition Jev departed from the default to
-// make, with its separator, and empty for any other transition: one that
-// followed the default, fell back to it, was pinned by an owner or a gate
-// decision, or was never routed.
 func departedByJev(departed bool) string {
 	if departed {
 		return " (decided by Jev)"
@@ -162,8 +158,6 @@ func departedByJev(departed bool) string {
 	return ""
 }
 
-// decidedByJev is the label of a decision Jev made, with its separator, and
-// empty for any other decider.
 func decidedByJev(by string) string {
 	if by == trace.DecidedByJev {
 		return " (decided by Jev)"

@@ -31,8 +31,6 @@ func defaultTelemetry() Telemetry { return Telemetry{Protocol: TelemetryProtocol
 // Enabled reports whether an export endpoint is configured.
 func (t Telemetry) Enabled() bool { return t.Endpoint != "" }
 
-// The settings are validated whether or not telemetry is on, so setting the
-// endpoint never reveals a broken protocol or variable name.
 func (t Telemetry) validate(path string) error {
 	switch t.Protocol {
 	case TelemetryProtocolGRPC, TelemetryProtocolHTTP:
@@ -50,8 +48,6 @@ func (t Telemetry) validate(path string) error {
 	return nil
 }
 
-// validateTelemetryEndpoint returns why endpoint is not host[:port], with a
-// path when the transport allows one, or "" when it is.
 func validateTelemetryEndpoint(endpoint string, allowPath bool) string {
 	const shape = "must be host or host:port without a scheme, credentials, query or fragment"
 	if strings.ContainsAny(endpoint, " \t\r\n@?#%\\") || strings.Contains(endpoint, "://") {

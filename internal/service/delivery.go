@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -12,8 +13,6 @@ import (
 const FinalReviewAction = delivery.FinalReviewAction
 
 const finalReviewSubject = delivery.FinalReviewSubject
-
-const finalRebaseDocument = delivery.FinalRebaseDocument
 
 const finalReportPath = delivery.FinalReportPath
 
@@ -25,25 +24,11 @@ var finalReviewActor = delivery.FinalReviewActor
 
 type finalReviewInput = delivery.FinalReviewInput
 
-type FinalRebase = delivery.FinalRebase
-
 const FindingBlocking = delivery.FindingBlocking
-
-var finalTurnID = delivery.FinalTurnID
-
-var decodeFinalReview = delivery.DecodeFinalReview
-
-var countSeverity = delivery.CountSeverity
-
-var finalRoundsWithBlocking = delivery.FinalRoundsWithBlocking
 
 var latestFinalReport = delivery.LatestFinalReport
 
 type FinalCheckRun = delivery.FinalCheckRun
-
-type FinalCheckAttempt = delivery.FinalCheckAttempt
-
-var finalCheckAttemptDocument = delivery.FinalCheckAttemptDocument
 
 const deliveryPath = delivery.DeliveryPath
 
@@ -63,17 +48,9 @@ func (s *Service) approveAndLand(ctx context.Context, raw string, req DeliveryLa
 	return s.delivery().ApproveAndLand(ctx, raw, req)
 }
 
-func (s *Service) answerChecksChoice(ctx context.Context, raw string, req ChecksChoiceRequest) (ChecksChoiceResponse, *APIError) {
-	return s.delivery().AnswerChecksChoice(ctx, raw, req)
-}
-
-var publicationAction = delivery.PublicationAction
-
 const PublishAction = delivery.PublishAction
 
 const landDeliveryAction = delivery.LandDeliveryAction
-
-var landingBusy = delivery.LandingBusy
 
 const publicationSubject = delivery.PublicationSubject
 
@@ -83,31 +60,17 @@ const publicationDocument = delivery.PublicationDocument
 
 const publicationOpened = delivery.PublicationOpened
 
-type publishInput = delivery.PublishInput
-
-const ownPullRequestOutcomeDocument = delivery.OwnPullRequestOutcomeDocument
-
-const ownPullRequestOutcomeMerged = delivery.OwnPullRequestOutcomeMerged
-
-const ownPullRequestOutcomeClosed = delivery.OwnPullRequestOutcomeClosed
-
-type ownPullRequestOutcome = delivery.OwnPullRequestOutcome
-
 const mergePath = delivery.MergePath
 
 const mergeDocument = delivery.MergeDocument
 
-func (s *Service) recordMerge(ctx context.Context, raw string) (MergeResponse, *APIError) {
+func (s *Service) recordMerge(ctx context.Context, raw string) (api.MergeResponse, *APIError) {
 	return s.delivery().RecordMerge(ctx, raw)
 }
 
 func (s *Service) publicationEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
 	return s.delivery().PublicationEntry(repository, w)
 }
-
-var finalChecksEntry = delivery.FinalChecksEntry
-
-var checksChoiceEntry = delivery.ChecksChoiceEntry
 
 func (s *Service) deliveryEntry(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool, error) {
 	return s.delivery().DeliveryEntry(ctx, repository, stream)
@@ -118,4 +81,3 @@ func (s *Service) deliveryRouteGate(ctx context.Context, repository *trace.Repos
 }
 
 const FinalReportTool = delivery.FinalReportTool
-const FindingAdvisory = delivery.FindingAdvisory

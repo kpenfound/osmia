@@ -28,21 +28,14 @@ import (
 // candidate before review.
 const CheckAction = "unit-checks"
 
-const checksRole = "checks"
+const ChecksRole = "checks"
 
-var checksActor = trace.Actor{Kind: "service", ID: checksRole}
+var ChecksActor = trace.Actor{Kind: "service", ID: ChecksRole}
 
-// checkRetryDelay is how long a unit whose checks did not complete waits
-// before they run again.
-const checkRetryDelay = 10 * time.Minute
+const CheckRetryDelay = 10 * time.Minute
 
-// maxIncompleteChecks is how many check runs of one candidate in a row may
-// fail to complete, since the unit last moved into checking, before the unit
-// is contested instead of its checks running again.
-const maxIncompleteChecks = 3
+const MaxIncompleteChecks = 3
 
-// checkInput is a check operation's input: the run and the candidate it is
-// bound to, from the unit's report revision Report.
 type checkInput struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Unit       string              `json:"unit"`
@@ -98,20 +91,16 @@ func (r UnitCheckRun) FlakeEvidence() api.CheckEvidence {
 	if r.Evidence != nil {
 		evidence = *r.Evidence
 	} else {
-		evidence = checkrun.RecordedEvidence(checkrun.RecordedLocalRun{Selection: r.Selection, Engines: r.Engines, Output: r.Output, OutputPath: r.OutputPath, OutputRevision: r.OutputRevision, TraceURL: r.TraceURL, Record: checkPath(r.Unit, r.Run)}, r.Flaky)
+		evidence = checkrun.RecordedEvidence(checkrun.RecordedLocalRun{Selection: r.Selection, Engines: r.Engines, Output: r.Output, OutputPath: r.OutputPath, OutputRevision: r.OutputRevision, TraceURL: r.TraceURL, Record: CheckPath(r.Unit, r.Run)}, r.Flaky)
 	}
 	evidence.Engines, evidence.Flaky = r.Engines, slices.Clone(r.Flaky)
 	return evidence
 }
 
-// matches reports whether the run checked the identity's candidate, base and
-// diff.
-func (r UnitCheckRun) matches(identity UnitReviewIdentity) bool {
+func (r UnitCheckRun) Matches(identity UnitReviewIdentity) bool {
 	return r.Candidate == identity.Candidate.Revision && r.Base == identity.Candidate.BaseRevision && r.DiffSHA256 == identity.DiffSHA256
 }
 
-// unitReport returns the latest revision of the unit's report and its
-// revision number, 0 when it has none.
 func unitReport(repo *trace.Repository, stream config.WorkstreamID, unit string) (UnitReport, int, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -119,7 +108,7 @@ func unitReport(repo *trace.Repository, stream config.WorkstreamID, unit string)
 	}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reportDocument(unit) && d.Revision > latest.Revision {
+		if d.ID == ReportDocument(unit) && d.Revision > latest.Revision {
 			latest = d
 		}
 	}
@@ -133,37 +122,26 @@ func unitReport(repo *trace.Repository, stream config.WorkstreamID, unit string)
 	return report, latest.Revision, nil
 }
 
-func checkDocumentID(unit string, run int) string {
+func CheckDocumentID(unit string, run int) string {
 	return fmt.Sprintf("%s-checks-%d", trace.UnitSubject(unit), run)
 }
 
-func checkRequestID(unit string, run int) string { return checkDocumentID(unit, run) + "-requested" }
+func checkRequestID(unit string, run int) string { return CheckDocumentID(unit, run) + "-requested" }
 
-func checkPath(unit string, run int) string { return fmt.Sprintf("units/%s/checks-%d.json", unit, run) }
+func CheckPath(unit string, run int) string { return fmt.Sprintf("units/%s/checks-%d.json", unit, run) }
 
-var checkPathPattern = regexp.MustCompile(`^units/[^/]+/checks-[0-9]+\.json$`)
+var CheckPathPattern = regexp.MustCompile(`^units/[^/]+/checks-[0-9]+\.json$`)
 
-// checksSubject is the workflow subject of a unit's check runs: requested-<k>
-// once run k is asked for, and incomplete-<k> once run k did not complete.
-func checksSubject(unit string) string { return trace.UnitSubject(unit) + "-checks" }
+func ChecksSubject(unit string) string { return trace.UnitSubject(unit) + "-checks" }
 
-// checksThread names a unit's check runs in a Jev judgment's scope.
 func checksThread(unit string) string {
-	return checksRole + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
+	return ChecksRole + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
 }
 
-// scope is the scope of a check run's Jev judgment.
-func (c *checkers) scope(in checkInput) coreadapter.Scope {
-	return coreadapter.Scope{Project: string(c.repository.Project()), Workstream: string(in.Workstream), Unit: in.Unit, Thread: checksThread(in.Unit), Turn: checkDocumentID(in.Unit, in.Run), Role: checksRole}
+func (c *checkers) Scope(in checkInput) coreadapter.Scope {
+	return coreadapter.Scope{Project: string(c.repository.Project()), Workstream: string(in.Workstream), Unit: in.Unit, Thread: checksThread(in.Unit), Turn: CheckDocumentID(in.Unit, in.Run), Role: ChecksRole}
 }
 
-// checkers is the checks controller. Its pass runs each checking unit's
-// candidate checks once, as an operation, and moves the unit on the result:
-// passing checks to reviewing, failing checks back to implementing as a
-// send-back, or contested once send-backs reach shed.max_bounces. A run that
-// did not complete leaves the unit checking, tells the chief of staff, and
-// runs again after checkRetryDelay. A workstream runs one check operation at a
-// time.
 type checkers struct{ *masons }
 
 var _ coreadapter.Reconciler = (*checkers)(nil)
@@ -175,9 +153,6 @@ func (c *checkers) Pass(ctx context.Context) error {
 	}
 	state, _ := c.s.Effective()
 	for _, stream := range streams {
-		if stream == librarianWorkstream(c.repository.Project()) {
-			continue
-		}
 		if session, err := isSession(c.repository, stream); err != nil {
 			return err
 		} else if session {
@@ -196,7 +171,7 @@ func (c *checkers) Pass(ctx context.Context) error {
 			}
 			continue
 		}
-		runs, err := checkRuns(c.repository, stream)
+		runs, err := CheckRuns(c.repository, stream)
 		if err != nil {
 			return err
 		}
@@ -223,9 +198,6 @@ func (c *checkers) Pass(ctx context.Context) error {
 	return nil
 }
 
-// one moves a checking unit on the latest run of the candidate its report
-// records, or requests a run unless hold. It reports whether it requested
-// one. It reads recorded state alone; the run computes everything else.
 func (c *checkers) one(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, runs []UnitCheckRun, ops []checkOperation, hold bool) (bool, error) {
 	report, revision, err := unitReport(c.repository, stream, unit)
 	if err != nil {
@@ -245,17 +217,17 @@ func (c *checkers) one(ctx context.Context, stream config.WorkstreamID, unit str
 		case ChecksPassed:
 			return false, c.pass(ctx, stream, unit, state, *latest)
 		case ChecksFailed:
-			return false, c.fail(ctx, stream, unit, state, *latest)
+			return false, c.Fail(ctx, stream, unit, state, *latest)
 		case ChecksIncomplete:
-			if err := c.incomplete(ctx, stream, *latest); err != nil {
+			if err := c.Incomplete(ctx, stream, *latest); err != nil {
 				return false, err
 			}
-			if n, err := c.incompleteSinceEntry(stream, unit, *latest, runs); err != nil {
+			if n, err := c.IncompleteSinceEntry(stream, unit, *latest, runs); err != nil {
 				return false, err
-			} else if n >= maxIncompleteChecks {
+			} else if n >= MaxIncompleteChecks {
 				return false, c.contestIncomplete(ctx, stream, unit, state, *latest, n)
 			}
-			if c.s.Now().Before(latest.FinishedAt.Add(checkRetryDelay)) {
+			if c.s.Now().Before(latest.FinishedAt.Add(CheckRetryDelay)) {
 				return false, nil
 			}
 		}
@@ -272,12 +244,10 @@ func (c *checkers) one(ctx context.Context, stream config.WorkstreamID, unit str
 	return true, c.request(ctx, stream, checkInput{Workstream: stream, Unit: unit, Run: run, Candidate: report.Candidate, Base: report.Base, Report: revision})
 }
 
-// sinceMove returns runs without the unit's runs requested before its latest
-// move into checking, so a move into checking runs the checks again.
 func sinceMove(transitions []trace.Transition, runs []UnitCheckRun, unit string) []UnitCheckRun {
 	moved := -1
 	for i, t := range transitions {
-		if isMove(t, unit) && t.To == UnitChecking {
+		if IsMove(t, unit) && t.To == UnitChecking {
 			moved = i
 		}
 	}
@@ -286,7 +256,7 @@ func sinceMove(transitions []trace.Transition, runs []UnitCheckRun, unit string)
 	}
 	requested := map[string]bool{}
 	for _, t := range transitions[moved+1:] {
-		if t.Subject == checksSubject(unit) {
+		if t.Subject == ChecksSubject(unit) {
 			requested[t.ID] = true
 		}
 	}
@@ -295,23 +265,22 @@ func sinceMove(transitions []trace.Transition, runs []UnitCheckRun, unit string)
 	})
 }
 
-// request records the operation that runs in's checks.
 func (c *checkers) request(ctx context.Context, stream config.WorkstreamID, in checkInput) error {
 	data, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
-	subject, err := c.repository.Workflow(stream, checksSubject(in.Unit))
+	subject, err := c.repository.Workflow(stream, ChecksSubject(in.Unit))
 	if err != nil {
 		return err
 	}
 	id := checkRequestID(in.Unit, in.Run)
 	event := trace.EventID(id, "run")
 	op := coreadapter.Operation{ID: trace.OperationID(c.repository.Project(), stream, event), Boundary: coreadapter.RunnerBoundary, Action: CheckAction, Input: data}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: in.Unit, At: c.s.Now(), Actor: checksActor, Cause: reportDocument(in.Unit)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: in.Unit, At: c.s.Now(), Actor: ChecksActor, Cause: ReportDocument(in.Unit)}
 	reason := fmt.Sprintf("run %d checks candidate %s of unit %s, from %s, before review", in.Run, in.Candidate, in.Unit, in.Base)
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: subject.Version,
-		Transition: trace.Transition{Header: h, Subject: checksSubject(in.Unit), From: subject.Value, To: fmt.Sprintf("requested-%d", in.Run), Reason: reason},
+		Transition: trace.Transition{Header: h, Subject: ChecksSubject(in.Unit), From: subject.Value, To: fmt.Sprintf("requested-%d", in.Run), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: CheckAction, Body: fmt.Sprintf("Run the checks of unit %s", in.Unit), Operation: &op}}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
@@ -319,10 +288,9 @@ func (c *checkers) request(ctx context.Context, stream config.WorkstreamID, in c
 	return err
 }
 
-// pass moves a unit whose candidate's checks passed to reviewing.
 func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), UnitReviewing, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
+	reason := fmt.Sprintf("check run %d passed on candidate %s from %s, recorded in %s: %s", run.Run, run.Candidate, run.Base, CheckPath(unit, run.Run), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		reason += "; " + flaky
 	}
@@ -330,38 +298,34 @@ func (c *checkers) pass(ctx context.Context, stream config.WorkstreamID, unit st
 		reason += "; " + open
 	}
 	_, err := c.s.raise(ctx, true, UnitExitInput{
-		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksPassed, Cause: checkDocumentID(unit, run.Run),
-		Default: UnitReviewing, Targets: []string{UnitReviewing, UnitChecking}, Actor: checksActor,
-		ID: id, HeaderCause: checkDocumentID(unit, run.Run), Reason: reason, Events: []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))},
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksPassed, Cause: CheckDocumentID(unit, run.Run),
+		Default: UnitReviewing, Targets: []string{UnitReviewing, UnitChecking}, Actor: ChecksActor,
+		ID: id, HeaderCause: CheckDocumentID(unit, run.Run), Reason: reason, Events: []trace.Event{trace.Progress(id, "unit", fmt.Sprintf("Unit %s is reviewing: %s.", unit, reason))},
 		Note:     reason,
-		Evidence: router.Evidence{Facts: map[string]any{"run": run.Run, "flaky": len(run.Flaky) > 0}, Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, run.Run), Text: reason}}},
+		Evidence: router.Evidence{Facts: map[string]any{"run": run.Run, "flaky": len(run.Flaky) > 0}, Records: []router.Entry{{Kind: "check run", ID: CheckDocumentID(unit, run.Run), Text: reason}}},
 	})
 	return err
 }
 
-// fail records a unit's failed checks as a send-back in its review result,
-// counted with the reviewer's toward shed.max_bounces, and moves the unit to
-// implementing with the failures for its mason, or to contested once the
-// send-backs reach the bound.
-func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
-	_, identity, err := c.candidateEvidence(ctx, stream, unit)
+func (c *checkers) Fail(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, run UnitCheckRun) error {
+	_, identity, err := c.CandidateEvidence(ctx, stream, unit)
 	if err != nil {
 		if ctx.Err() != nil {
 			return err
 		}
 		return c.block(ctx, stream, unit, fmt.Sprintf("unit %s stays checking: its checks failed, and its candidate's evidence cannot be read: %v", unit, err))
 	}
-	if !run.matches(identity) {
+	if !run.Matches(identity) {
 		return c.block(ctx, stream, unit, fmt.Sprintf("unit %s stays checking: check run %d does not match its candidate's diff", unit, run.Run))
 	}
 	docs, err := trace.Read[trace.Document](c.repository, stream)
 	if err != nil {
 		return err
 	}
-	result := UnitReviewResult{Identity: identity, Turn: checkDocumentID(unit, run.Run), Checks: run.Run, Verdict: checkVerdict(run)}
+	result := UnitReviewResult{Identity: identity, Turn: CheckDocumentID(unit, run.Run), Checks: run.Run, Verdict: checkVerdict(run)}
 	var latest trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
+		if d.ID == ReviewDocument(unit) {
 			latest = d
 			var prior UnitReviewResult
 			if json.Unmarshal([]byte(d.Content), &prior) == nil && prior.Verdict.Decision == "material_findings" && prior.Bounces > result.Bounces {
@@ -375,54 +339,43 @@ func (c *checkers) fail(ctx context.Context, stream config.WorkstreamID, unit st
 		return err
 	}
 	at := c.s.Now()
-	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reviewDocument(unit), Revision: latest.Revision + 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: at, Actor: checksActor, Cause: checkDocumentID(unit, run.Run)},
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: ReviewDocument(unit), Revision: latest.Revision + 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: at, Actor: ChecksActor, Cause: CheckDocumentID(unit, run.Run)},
 		Path: fmt.Sprintf("units/%s/review.json", unit), Content: string(content) + "\n"}
 	to := UnitImplementing
 	if result.Bounces >= c.cfg.Shed.MaxBounces {
 		to = UnitContested
 	}
 	id := fmt.Sprintf("%s-%s-checks-%d-%d", trace.UnitSubject(unit), to, run.Run, state.Version)
-	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, checkPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
+	reason := fmt.Sprintf("check run %d failed on candidate %s from %s, recorded in %s: %s failed; %s", run.Run, run.Candidate, run.Base, CheckPath(unit, run.Run), checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048), checkrun.DescribeSelectionRun(*run.Selection, run.Engines))
 	if flaky := checkrun.DescribeFlaky(run.Flaky); flaky != "" {
 		reason += "; " + flaky
 	}
 	if to == UnitContested {
 		reason += fmt.Sprintf("; %d send-backs reached shed.max_bounces; the owner must rule review or revise before the unit moves", result.Bounces)
 	}
-	// The failed run is counted as a send-back whichever state is entered. A
-	// unit sent back to its mason has the failures queued by the mason pass,
-	// which finds the send-back in the trace.
 	res, err := c.s.raise(ctx, true, UnitExitInput{
-		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksFailed, Cause: checkDocumentID(unit, run.Run),
-		Default: to, Targets: []string{UnitImplementing, UnitChecking, UnitContested}, Actor: checksActor,
-		ID: id, HeaderCause: reviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s checks failed: %s.", unit, reason))},
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksFailed, Cause: CheckDocumentID(unit, run.Run),
+		Default: to, Targets: []string{UnitImplementing, UnitChecking, UnitContested}, Actor: ChecksActor,
+		ID: id, HeaderCause: ReviewDocument(unit), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s checks failed: %s.", unit, reason))},
 		Note: reason, Documents: []trace.Document{doc},
 		Evidence: router.Evidence{Facts: map[string]any{"run": run.Run, "send_backs": result.Bounces, "max_send_backs": c.cfg.Shed.MaxBounces, "flaky": len(run.Flaky) > 0},
-			Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, run.Run), Text: reason}}},
+			Records: []router.Entry{{Kind: "check run", ID: CheckDocumentID(unit, run.Run), Text: reason}}},
 	})
 	if err == nil && sentBack(res) {
-		// A pass run directly waits for the router, so the failures are queued
-		// here; a scheduler's pass hands the exit off and the mason pass finds
-		// the send-back.
 		return (&reviewers{masons: c.masons}).enqueueFindings(ctx, stream, unit, result)
 	}
 	return err
 }
 
-// checkVerdict is the send-back a failed check run records: one finding for
-// each failed check.
 func checkVerdict(run UnitCheckRun) UnitVerdict {
 	v := UnitVerdict{Decision: "material_findings", Summary: fmt.Sprintf("Check run %d failed on candidate %s: %s.", run.Run, run.Candidate, checkrun.DescribeSelectionRun(*run.Selection, run.Engines))}
 	for _, link := range run.Failed {
-		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkrun.CheckLinkLabel(link), checkPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkrun.CheckLinkLabel(link))})
+		v.Findings = append(v.Findings, ReviewFinding{Severity: "blocking", Evidence: fmt.Sprintf("check %s failed in %s", checkrun.CheckLinkLabel(link), CheckPath(run.Unit, run.Run)), Action: fmt.Sprintf("make %s pass", checkrun.CheckLinkLabel(link))})
 	}
 	return v
 }
 
-// incompleteSinceEntry counts the unit's check runs of latest's candidate
-// and base that did not complete and were requested since the unit last
-// moved into checking.
-func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string, latest UnitCheckRun, runs []UnitCheckRun) (int, error) {
+func (c *checkers) IncompleteSinceEntry(stream config.WorkstreamID, unit string, latest UnitCheckRun, runs []UnitCheckRun) (int, error) {
 	transitions, err := trace.Read[trace.Transition](c.repository, stream)
 	if err != nil {
 		return 0, err
@@ -435,7 +388,7 @@ func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string,
 	}
 	requested := map[string]bool{}
 	for _, t := range transitions[entered+1:] {
-		if t.Subject == checksSubject(unit) {
+		if t.Subject == ChecksSubject(unit) {
 			requested[t.ID] = true
 		}
 	}
@@ -448,33 +401,25 @@ func (c *checkers) incompleteSinceEntry(stream config.WorkstreamID, unit string,
 	return n, nil
 }
 
-// contestIncomplete contests a checking unit whose latest n check runs of
-// its candidate did not complete, with a notice for the chief of staff.
-// maxIncompleteChecks stays a hard limit: the checks are not offered again, so
-// the exit has the one target. A
-// ruling of review runs its checks again before review, and revise returns it
-// to its mason.
 func (c *checkers) contestIncomplete(ctx context.Context, stream config.WorkstreamID, unit string, state trace.WorkflowState, latest UnitCheckRun, n int) error {
-	id := checkDocumentID(unit, latest.Run) + "-contested"
+	id := CheckDocumentID(unit, latest.Run) + "-contested"
 	reason := fmt.Sprintf("%d check runs in a row on candidate %s of unit %s did not complete, the latest because %s", n, latest.Candidate, unit, latest.Error)
 	if cloud := checkrun.DescribeAttribution(latest.Engines); cloud != "" {
 		reason += "; " + strings.TrimSuffix(cloud, ".")
 	}
 	reason += "; the unit is contested instead of its checks running again"
 	_, err := c.s.raise(ctx, true, UnitExitInput{
-		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksIncomplete, Cause: checkDocumentID(unit, latest.Run),
-		Default: UnitContested, Targets: []string{UnitContested}, Actor: checksActor,
-		ID: id, HeaderCause: checkDocumentID(unit, latest.Run), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
+		Repo: c.repository, Stream: stream, Unit: unit, State: state, Trigger: TriggerChecksIncomplete, Cause: CheckDocumentID(unit, latest.Run),
+		Default: UnitContested, Targets: []string{UnitContested}, Actor: ChecksActor,
+		ID: id, HeaderCause: CheckDocumentID(unit, latest.Run), Reason: reason, Events: []trace.Event{trace.Notice(id, "unit", fmt.Sprintf("Unit %s is contested: %s.", unit, reason))},
 		Note:     reason,
-		Evidence: router.Evidence{Facts: map[string]any{"incomplete_runs": n, "max_incomplete_runs": maxIncompleteChecks}, Records: []router.Entry{{Kind: "check run", ID: checkDocumentID(unit, latest.Run), Text: reason}}},
+		Evidence: router.Evidence{Facts: map[string]any{"incomplete_runs": n, "max_incomplete_runs": MaxIncompleteChecks}, Records: []router.Entry{{Kind: "check run", ID: CheckDocumentID(unit, latest.Run), Text: reason}}},
 	})
 	return err
 }
 
-// incomplete tells the chief of staff, once, that a unit's check run did not
-// complete.
-func (c *checkers) incomplete(ctx context.Context, stream config.WorkstreamID, run UnitCheckRun) error {
-	subject, err := c.repository.Workflow(stream, checksSubject(run.Unit))
+func (c *checkers) Incomplete(ctx context.Context, stream config.WorkstreamID, run UnitCheckRun) error {
+	subject, err := c.repository.Workflow(stream, ChecksSubject(run.Unit))
 	if err != nil {
 		return err
 	}
@@ -482,15 +427,15 @@ func (c *checkers) incomplete(ctx context.Context, stream config.WorkstreamID, r
 	if subject.Value != fmt.Sprintf("requested-%d", run.Run) {
 		return nil
 	}
-	id := checkDocumentID(run.Unit, run.Run) + "-incomplete"
+	id := CheckDocumentID(run.Unit, run.Run) + "-incomplete"
 	reason := fmt.Sprintf("check run %d on candidate %s of unit %s did not complete: %s", run.Run, run.Candidate, run.Unit, run.Error)
 	if cloud := checkrun.DescribeAttribution(run.Engines); cloud != "" {
 		reason += "; " + strings.TrimSuffix(cloud, ".")
 	}
-	reason += fmt.Sprintf("; the unit stays checking and its checks run again after %s", checkRetryDelay)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: run.Unit, At: c.s.Now(), Actor: checksActor, Cause: checkDocumentID(run.Unit, run.Run)}
+	reason += fmt.Sprintf("; the unit stays checking and its checks run again after %s", CheckRetryDelay)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: run.Unit, At: c.s.Now(), Actor: ChecksActor, Cause: CheckDocumentID(run.Unit, run.Run)}
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: subject.Version,
-		Transition: trace.Transition{Header: h, Subject: checksSubject(run.Unit), From: subject.Value, To: to, Reason: reason},
+		Transition: trace.Transition{Header: h, Subject: ChecksSubject(run.Unit), From: subject.Value, To: to, Reason: reason},
 		Events:     []trace.Event{trace.Notice(id, "chief", "Unit "+run.Unit+" is held in checking: "+reason+".")}})
 	if errors.Is(err, trace.ErrConflict) {
 		return nil
@@ -498,12 +443,10 @@ func (c *checkers) incomplete(ctx context.Context, stream config.WorkstreamID, r
 	return err
 }
 
-func checkBlockedSubject(unit string) string { return "blocked-" + checksThread(unit) }
+func CheckBlockedSubject(unit string) string { return "blocked-" + checksThread(unit) }
 
-// block records, once for each reason, why a checking unit's checks cannot be
-// requested, with a notice to the chief of staff.
 func (c *checkers) block(ctx context.Context, stream config.WorkstreamID, unit, reason string) error {
-	subject := checkBlockedSubject(unit)
+	subject := CheckBlockedSubject(unit)
 	state, err := c.repository.Workflow(stream, subject)
 	if err != nil {
 		return err
@@ -519,7 +462,7 @@ func (c *checkers) block(ctx context.Context, stream config.WorkstreamID, unit, 
 	}
 	k := state.Version + 1
 	id := fmt.Sprintf("%s-%d", subject, k)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: checksActor, Cause: reportDocument(unit)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: c.repository.Project(), Workstream: stream, Unit: unit, At: c.s.Now(), Actor: ChecksActor, Cause: ReportDocument(unit)}
 	_, err = c.repository.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version,
 		Transition: trace.Transition{Header: h, Subject: subject, From: state.Value, To: fmt.Sprintf("blocked-%d", k), Reason: reason},
 		Events:     []trace.Event{trace.Notice(id, "chief", "The unit checks are blocked: "+reason+".")}})
@@ -529,7 +472,7 @@ func (c *checkers) block(ctx context.Context, stream config.WorkstreamID, unit, 
 	return err
 }
 
-func (c *checkers) decode(op coreadapter.Operation) (checkInput, error) {
+func (c *checkers) Decode(op coreadapter.Operation) (checkInput, error) {
 	var in checkInput
 	if op.Action != CheckAction || op.Boundary != coreadapter.RunnerBoundary {
 		return in, errors.New("invalid check operation")
@@ -543,13 +486,12 @@ func (c *checkers) decode(op coreadapter.Operation) (checkInput, error) {
 	return in, nil
 }
 
-// Inspect reports a check run recorded for the operation as completed.
 func (c *checkers) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
-	in, err := c.decode(op)
+	in, err := c.Decode(op)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
-	runs, err := checkRuns(c.repository, in.Workstream)
+	runs, err := CheckRuns(c.repository, in.Workstream)
 	if err != nil {
 		return coreadapter.Observation{}, err
 	}
@@ -559,15 +501,11 @@ func (c *checkers) Inspect(_ context.Context, op coreadapter.Operation) (coreada
 			return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: result.Evidence, Result: &result}, nil
 		}
 	}
-	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "check run " + checkPath(in.Unit, in.Run) + " is not recorded"}, nil
+	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "check run " + CheckPath(in.Unit, in.Run) + " is not recorded"}, nil
 }
 
-// Apply runs the checks on a fresh export of the operation's candidate,
-// bounded by the project's checks_timeout, and records the run. A failure to
-// export or run them, or a run that outlasts the timeout, is an incomplete
-// run; the service stopping leaves the operation to run again.
 func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
-	in, err := c.decode(op)
+	in, err := c.Decode(op)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
@@ -593,7 +531,7 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if checks == nil {
 		return incomplete(errors.New("candidate check runner is unavailable"))
 	}
-	g, err := newUnitWorkspaces(c.cfg, c.repository).Of(in.Workstream)
+	g, err := NewUnitWorkspaces(c.cfg, c.repository).Of(in.Workstream)
 	if err != nil {
 		return incomplete(err)
 	}
@@ -620,7 +558,6 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		return coreadapter.OperationResult{}, err
 	}
 	defer release()
-	// The candidate may have changed while this run waited for capacity.
 	if reason, err := c.superseded(in); err != nil {
 		return coreadapter.OperationResult{}, err
 	} else if reason != "" {
@@ -651,7 +588,6 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 		err = fmt.Errorf("checks did not finish within checks_timeout %s", timeout)
 	}
 	run.Selection, run.Command, run.Engines = &ran, checkrun.ResultCommand(result, ran.Links), engines
-	// A run that printed no link keeps the one an earlier attempt of it did.
 	if result.TraceURL != "" {
 		run.TraceURL = result.TraceURL
 	}
@@ -660,10 +596,9 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	captured, run.ExitCode = result.Output, result.ExitCode
 	run.Output, run.Truncated = checkrun.SummarizeCheckOutput(result.Output, result.ExitCode)
 	run.Truncated = run.Truncated || result.Truncated
-	run.OutputPath = checkrun.CheckOutputPath(checkPath(in.Unit, in.Run))
+	run.OutputPath = checkrun.CheckOutputPath(CheckPath(in.Unit, in.Run))
 	run.OutputRevision = 1
 	evidence := checkrun.LocalEvidence(ran, engines, result.Output, run.OutputPath, run.OutputRevision, run.TraceURL)
-	// The record's own Engines says which engine ran each invocation.
 	evidence.Engines = nil
 	run.Evidence = &evidence
 	if run.Status, run.Failed, err = checkrun.ClassifyChecks(result, err); run.Status == ChecksIncomplete {
@@ -672,9 +607,6 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	return c.record(ctx, in, run, captured)
 }
 
-// superseded returns why a run no longer checks its unit's candidate: the
-// workstream was abandoned, the unit left checking, or its report names
-// another candidate.
 func (c *checkers) superseded(in checkInput) (string, error) {
 	if gone, err := abandoned(c.repository, in.Workstream); err != nil || gone {
 		if gone {
@@ -699,16 +631,14 @@ func (c *checkers) superseded(in checkInput) (string, error) {
 	return "", nil
 }
 
-// record records the run as units/<unit>/checks-<run>.json and returns its
-// operation result. A run already recorded is returned as it was recorded.
 func (c *checkers) record(ctx context.Context, in checkInput, run UnitCheckRun, captured string) (coreadapter.OperationResult, error) {
 	run.FinishedAt = c.s.Now()
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: checkDocumentID(in.Unit, in.Run), Revision: 1, Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit, At: run.FinishedAt, Actor: checksActor, Cause: checkRequestID(in.Unit, in.Run)}
-	docs := []trace.Document{{Header: h, Path: checkPath(in.Unit, in.Run), Content: string(data) + "\n"}}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: CheckDocumentID(in.Unit, in.Run), Revision: 1, Project: c.repository.Project(), Workstream: in.Workstream, Unit: in.Unit, At: run.FinishedAt, Actor: ChecksActor, Cause: checkRequestID(in.Unit, in.Run)}
+	docs := []trace.Document{{Header: h, Path: CheckPath(in.Unit, in.Run), Content: string(data) + "\n"}}
 	if run.OutputPath != "" {
 		h.ID += "-output"
 		docs = append(docs, trace.Document{Header: h, Path: run.OutputPath, Content: captured})
@@ -733,16 +663,14 @@ func mustJSON(v any) json.RawMessage {
 }
 
 func checkResult(run UnitCheckRun) coreadapter.OperationResult {
-	evidence := fmt.Sprintf("check run %d on candidate %s %s, recorded in %s", run.Run, run.Candidate, run.Status, checkPath(run.Unit, run.Run))
+	evidence := fmt.Sprintf("check run %d on candidate %s %s, recorded in %s", run.Run, run.Candidate, run.Status, CheckPath(run.Unit, run.Run))
 	if run.Error != "" {
 		evidence += ": " + run.Error
 	}
 	return coreadapter.OperationResult{Outcome: run.Status, Evidence: evidence}
 }
 
-// checkRuns returns every check run recorded in the workstream, at its
-// latest revision.
-func checkRuns(repo *trace.Repository, stream config.WorkstreamID) ([]UnitCheckRun, error) {
+func CheckRuns(repo *trace.Repository, stream config.WorkstreamID) ([]UnitCheckRun, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
 		return nil, err
@@ -750,7 +678,7 @@ func checkRuns(repo *trace.Repository, stream config.WorkstreamID) ([]UnitCheckR
 	latest := map[string]trace.Document{}
 	var order []string
 	for _, d := range docs {
-		if !checkPathPattern.MatchString(d.Path) {
+		if !CheckPathPattern.MatchString(d.Path) {
 			continue
 		}
 		if _, seen := latest[d.ID]; !seen {
@@ -771,8 +699,6 @@ func checkRuns(repo *trace.Repository, stream config.WorkstreamID) ([]UnitCheckR
 	return runs, nil
 }
 
-// checkOperation is a check operation of the workstream and whether its
-// result is recorded.
 type checkOperation struct {
 	input checkInput
 	done  bool
@@ -797,25 +723,22 @@ func checkOperations(repo *trace.Repository, stream config.WorkstreamID) ([]chec
 	return ops, nil
 }
 
-// latestRunFor returns the latest passed or failed check run of the
-// identity's candidate, which is what its review receives.
-func latestRunFor(repo *trace.Repository, stream config.WorkstreamID, unit string, identity UnitReviewIdentity) (UnitCheckRun, bool, error) {
-	runs, err := checkRuns(repo, stream)
+func LatestRunFor(repo *trace.Repository, stream config.WorkstreamID, unit string, identity UnitReviewIdentity) (UnitCheckRun, bool, error) {
+	runs, err := CheckRuns(repo, stream)
 	if err != nil {
 		return UnitCheckRun{}, false, err
 	}
 	var latest UnitCheckRun
 	for _, r := range runs {
-		if r.Unit == unit && (r.Status == ChecksPassed || r.Status == ChecksFailed) && r.matches(identity) && r.Run > latest.Run {
+		if r.Unit == unit && (r.Status == ChecksPassed || r.Status == ChecksFailed) && r.Matches(identity) && r.Run > latest.Run {
 			latest = r
 		}
 	}
 	return latest, latest.Run > 0, nil
 }
 
-// checkEvidence is how a review prompt carries a check run.
 func checkEvidence(run UnitCheckRun) string {
-	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelectionRun(*run.Selection, run.Engines), checkrun.CheckExcerpt(strings.Join(quoteLinks(run.Command), " "), 2048))
+	out := fmt.Sprintf("The service ran the project's Dagger checks on this exact candidate before review; you do not run them. Check run %d %s: %s.\nCommand: %s", run.Run, run.Status, checkrun.DescribeSelectionRun(*run.Selection, run.Engines), checkrun.CheckExcerpt(strings.Join(QuoteLinks(run.Command), " "), 2048))
 	if len(run.Failed) > 0 {
 		out += "\nFailed: " + checkrun.CheckExcerpt(strings.Join(run.Failed, ", "), 2048)
 	}
@@ -825,8 +748,7 @@ func checkEvidence(run UnitCheckRun) string {
 	return out + checkrun.OutputEvidence(run.Output, run.OutputPath, run.OutputRevision, run.Truncated)
 }
 
-// quoteLinks quotes the arguments of a command that a shell would split.
-func quoteLinks(args []string) []string {
+func QuoteLinks(args []string) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
 		if a != "&&" && strings.ContainsAny(a, "?&") {

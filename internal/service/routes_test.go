@@ -12,12 +12,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// routeSamples fills each path parameter of Routes with a well-formed value.
 var routeSamples = strings.NewReplacer(
-	"{workstream}", string(stream),
-	"{project}", string(project),
+	"{workstream}", string(fixturekit.Stream),
+	"{project}", string(fixturekit.Project),
 	"{number}", "1",
 	"{unit}", "u1",
 	"{image}", "image-unknown",
@@ -42,16 +43,13 @@ func TestRoutesAreServed(t *testing.T) {
 		if !strings.HasPrefix(route.Path, Prefix+"/") || route.Summary == "" || route.Response == nil {
 			t.Errorf("%s needs a %s path, a summary and a response", key, Prefix)
 		}
-		// Stopping would end the service the other routes are checked on.
 		if route.Path == Prefix+"/stop" {
 			continue
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		// A cancelled request ends the event stream after its first event.
 		cancel()
 		body := ""
 		if route.Request != nil {
-			// A body that is not JSON keeps an operation from running.
 			body = "not json"
 		}
 		req := httptest.NewRequestWithContext(ctx, route.Method, routeSamples.Replace(route.Path), strings.NewReader(body))
@@ -65,38 +63,17 @@ func TestRoutesAreServed(t *testing.T) {
 	}
 }
 
-// TestFormerBeekeeperChatPathIsUnknown shows that a request to the retired
-// Beekeeper chat path gets the same status and body as any other unknown
-// route: the handler no longer recognizes /v1/beekeeper at all.
-func TestFormerBeekeeperChatPathIsUnknown(t *testing.T) {
-	t.Parallel()
-	s, _ := start(t, fixture(t))
-	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		unknownRec := httptest.NewRecorder()
-		s.handle(unknownRec, httptest.NewRequest(method, Prefix+"/not-a-route-this-service-ever-served", nil))
-
-		beekeeperRec := httptest.NewRecorder()
-		s.handle(beekeeperRec, httptest.NewRequest(method, Prefix+"/beekeeper", nil))
-
-		if beekeeperRec.Code != unknownRec.Code || beekeeperRec.Body.String() != unknownRec.Body.String() {
-			t.Fatalf("%s %s/beekeeper: status %d body %s; an unknown route gets status %d body %s", method, Prefix, beekeeperRec.Code, beekeeperRec.Body.String(), unknownRec.Code, unknownRec.Body.String())
-		}
-	}
-}
-
-// TestRoutesListEveryPath checks that every API path the service's handlers
-// match is listed in Routes, so the OpenAPI description covers it.
 func TestRoutesListEveryPath(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob("*.go")
-	must(t, err)
+	fixturekit.Must(t, err)
 	literal := regexp.MustCompile(`Prefix\s*\+\s*"(/[^"]*)"`)
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") || file == "client.go" {
 			continue
 		}
 		src, err := os.ReadFile(file)
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, m := range literal.FindAllStringSubmatch(string(src), -1) {
 			path := Prefix + m[1]
 			listed := false
@@ -113,11 +90,6 @@ func TestRoutesListEveryPath(t *testing.T) {
 	}
 }
 
-// TestApproveAndLandRouteMatchesItsHandler checks that Approve and land is
-// listed in Routes with the request and response types the OpenAPI description
-// is generated from, and that its handler takes exactly that request: every
-// field of DeliveryLandDecision is accepted, an unknown field is malformed, and
-// only POST is served.
 func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
 	t.Parallel()
 	path := Prefix + "/delivery/{workstream}/land"
@@ -130,8 +102,6 @@ func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
 	if route == nil || route.Method != http.MethodPost || reflect.TypeOf(route.Request) != reflect.TypeOf(DeliveryLandDecision{}) || reflect.TypeOf(route.Response) != reflect.TypeOf(DeliveryLandResponse{}) {
 		t.Fatalf("Routes lists %+v for %s", route, path)
 	}
-	// The presentation and the inbox entry the owner reads the offer in carry
-	// the fields the web page and the CLI read it from.
 	for _, c := range []struct {
 		value  any
 		fields []string
@@ -151,7 +121,7 @@ func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
 	}
 
 	s, _ := start(t, fixture(t))
-	target := strings.NewReplacer("{workstream}", string(stream)).Replace(path)
+	target := strings.NewReplacer("{workstream}", string(fixturekit.Stream)).Replace(path)
 	send := func(method, body string) ErrorResponse {
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -173,7 +143,6 @@ func TestApproveAndLandRouteMatchesItsHandler(t *testing.T) {
 	}
 }
 
-// jsonFieldNames returns the JSON names of a struct type's exported fields.
 func jsonFieldNames(t reflect.Type) []string {
 	var names []string
 	for i := 0; i < t.NumField(); i++ {

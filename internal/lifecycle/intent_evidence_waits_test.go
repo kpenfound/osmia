@@ -6,30 +6,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The sentences the exits from a cleared edge wait and base wait carried before
-// they read the approved intent.
 const (
 	genericEdgeIntent = "A dependent workstream starts its work only after the workstreams it hard-depends on have merged."
 	genericBaseIntent = "A workstream that builds on another workstream's branch waits while that base is abandoned, unsealed or missing."
 )
 
-// edgeWaitCleared parks the dependent of the fixture on its hard-block edge and
-// merges the upstream outside the factory, so that the wait clears and raises
-// its exit. It returns the one request Jev got for it.
 func (f *edgeGraphFixture) edgeWaitCleared(t *testing.T, p *jevfixture.Transitions) string {
 	t.Helper()
-	routeJev(f.s, p)
+	journey.InspectForTest(f.s).SetRouterJudge(jevfixture.TransitionJudge(f.s.Now, p))
 	f.resolvePasses(t)
 	f.recordOwnerMerge(t, f.upstream, "b1c2d3e4f5a6b1c2d3e4f5a6b1c2d3e4f5a6b1c2")
 	f.resolvePasses(t)
@@ -37,21 +36,17 @@ func (f *edgeGraphFixture) edgeWaitCleared(t *testing.T, p *jevfixture.Transitio
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
 	}
-	if n := len(requestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
+	if n := len(intakefixture.RequestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
 		t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
 	}
 	return requestText(t, requests[0])
 }
 
-// The request for the exit from a cleared edge wait holds the approved intent of
-// the dependent, not a generic sentence: its sealed intent and acceptance
-// outcomes, its contracts, the plan units that rely on the upstream, and the
-// upstream's planned deliverables and final outcome.
 func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
-	at := f.s.now()
+	at := f.s.Now()
 	recordSealed(t, f.repository, f.downstream, at,
 		"# Dependent\n\n## Intent\n\nDEPENDENT-INTENT keeps uploads resumable.\n\n```go\nfunc codeInIntent() {}\n```\n\n## Intended behaviour\n\nNOT-THE-INTENT\n\n## Acceptance criteria\n\n1. OUTCOME-ONE resumes uploads.\n2. OUTCOME-TWO speaks the widget protocol.\n",
 		[]plan.Unit{
@@ -64,13 +59,13 @@ func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	recordFinalReport(t, f.repository, f.upstream, at, api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "UPSTREAM-SUMMARY says the endpoint is done",
 		Findings: []api.FinalFinding{{Severity: delivery.FindingAdvisory, Finding: "The endpoint reads oddly."}}})
 	groups, _, err := trace.Workgroups(f.repository)
-	must(t, err)
-	must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
 		Behavior:  "Downstream depends on upstream.",
 		Contracts: []trace.Contract{{Name: "widget-protocol", Text: "WIDGET-CONTRACT the upstream speaks widgets."}},
 		Graph:     []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}},
 		Slices:    []trace.Slice{{Workstream: f.downstream, ContractCriteria: []int{2}}},
-	}, at, ownerActor, "fixture"))
+	}, at, intake.OwnerActor, "fixture"))
 
 	text := f.edgeWaitCleared(t, &jevfixture.Transitions{})
 	requireIn(t, "the request", text,
@@ -79,7 +74,6 @@ func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 		"unit client", "unit wire", `"relying_units":2`, `"dependent_plan_units":3`,
 		"Upstream endpoint", "Upstream auth", `"upstream_planned_units":2`, `"dependent_acceptance_outcomes":2`,
 		"UPSTREAM-SUMMARY", "was merged into", "its latest final report is review 1",
-		// The exit's own facts and records stay.
 		`"blocking_edges":1`, `"observation_revision":`, "observed merged",
 	)
 	requireNotIn(t, "the request", text, genericEdgeIntent, "NOT-THE-INTENT", "codeInIntent", "unit docs (Docs)", "[cut:")
@@ -88,8 +82,6 @@ func TestAnEdgeWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	}
 }
 
-// A dependent that was never sealed and an upstream with no plan or outcome still
-// route their cleared edge wait, and the request says what the records lack.
 func TestAnEdgeWaitExitWithMissingRecordsStillRoutes(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
@@ -105,15 +97,13 @@ func TestAnEdgeWaitExitWithMissingRecordsStillRoutes(t *testing.T) {
 	}
 }
 
-// With large records the request for an edge-wait exit stays within 72 KiB, holds
-// no code, counts what the records hold and says what was cut.
 func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T) {
 	t.Parallel()
 	const code = "CODE-MARKER-FUNC"
 	long := func(word string, n int) string { return strings.Repeat(word+" ", n) }
 	ctx := context.Background()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
-	at := f.s.now()
+	at := f.s.Now()
 	var criteria []string
 	var units, upstreamUnits []plan.Unit
 	for i := 1; i <= 300; i++ {
@@ -135,9 +125,9 @@ func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 		contracts = append(contracts, trace.Contract{Name: fmt.Sprintf("contract-%d", i), Text: long("clause", 500)})
 	}
 	groups, _, err := trace.Workgroups(f.repository)
-	must(t, err)
-	must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
-		Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, ownerActor, "fixture"))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
+		Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, intake.OwnerActor, "fixture"))
 
 	text := f.edgeWaitCleared(t, &jevfixture.Transitions{})
 	requireIn(t, "the request", text, "[cut:", `"dependent_acceptance_outcomes":300`, `"contracts":60`, `"dependent_plan_units":150`, `"upstream_planned_units":150`, "[code omitted]", "shortened", `"blocking_edges":1`)
@@ -147,35 +137,30 @@ func TestAnEdgeWaitExitOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 	}
 }
 
-// The request for the exit from a cleared base wait holds the approved intent of
-// the dependent, not a generic sentence: its sealed intent and acceptance
-// outcomes, the plan units that build on the base, and the base's planned
-// deliverables and final outcome.
 func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	t.Parallel()
-	f := newDebateFixture(t, 1, 1)
+	f := journey.NewDebateFixture(t, 1, 1)
 	p := &jevfixture.Transitions{}
-	routeJev(f.s, p)
+	journey.InspectForTest(f.S).SetRouterJudge(jevfixture.TransitionJudge(f.S.Now, p))
 	repo, stream := parkAndRelease(t, f)
 	base, err := repo.WorkstreamBase(stream)
-	must(t, err)
-	// A final report on the base, with more findings than a request can hold.
+	fixturekit.Must(t, err)
 	var findings []api.FinalFinding
 	for i := 0; i < 100; i++ {
 		findings = append(findings, api.FinalFinding{Severity: delivery.FindingAdvisory, Finding: strings.Repeat("finding ", 400)})
 	}
-	recordFinalReport(t, repo, base.Base, f.s.now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
+	recordFinalReport(t, repo, base.Base, f.S.Now(), api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "BASE-SUMMARY says the base was abandoned", Findings: findings})
 
-	must(t, f.s.baseWaitPass(context.Background(), repo))
+	fixturekit.Must(t, f.S.Lifecycle().BaseWaitPass(context.Background(), repo))
 	requests := p.TransitionRequests()
 	if len(requests) != 1 {
 		t.Fatalf("Jev got %d transition requests, want 1", len(requests))
 	}
-	if n := len(requestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
+	if n := len(intakefixture.RequestJSON(t, requests[0])); n > jev.MaxDecisionBytes {
 		t.Fatalf("the request is %d bytes, over %d", n, jev.MaxDecisionBytes)
 	}
 	text := requestText(t, requests[0])
-	spec := plan.ParseSpec(intakefixture.ValidSpec)
+	spec := plan.ParseSpec(fixturekit.ValidSpec)
 	if len(spec.Criteria) == 0 {
 		t.Fatal("the fixture spec has no acceptance criteria")
 	}
@@ -183,14 +168,14 @@ func TestABaseWaitExitCarriesTheApprovedIntentForJev(t *testing.T) {
 		requireIn(t, "the request", text, c.Text)
 	}
 	opening := ""
-	for _, line := range strings.Split(intakefixture.ValidSpec, "\n") {
+	for _, line := range strings.Split(fixturekit.ValidSpec, "\n") {
 		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
 			opening = line
 			break
 		}
 	}
-	graph, err := plan.Parse([]byte(intakefixture.ValidPlan))
-	must(t, err)
+	graph, err := plan.Parse([]byte(fixturekit.ValidPlan))
+	fixturekit.Must(t, err)
 	if len(graph.Units) == 0 {
 		t.Fatal("the fixture plan has no units")
 	}

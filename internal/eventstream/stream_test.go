@@ -18,24 +18,19 @@ import (
 
 const project = fixturekit.Project
 const stream = fixturekit.Stream
-const librarian = config.WorkstreamID("w_00000000000000000000000000000001")
 
-// A commit announces only the views its paths hold, once each, and a
-// workflow commit announces the conversation only when the chief of staff's
-// thread in it changed.
 func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 	t.Parallel()
 	h := New()
 	sub, _ := h.Subscribe()
 	sub.Take()
-	observe := h.TraceEvents(project, librarian)
+	observe := h.TraceEvents(project)
 	prefix := "workstreams/" + string(stream) + "/"
 	ws := api.Event{Kind: api.EventWorkstream, Project: project, Workstream: stream}
 	chat := api.Event{Kind: api.EventConversation, Project: project, Workstream: stream}
 	inbox := api.Event{Kind: api.EventInbox, Project: project, Workstream: stream}
 	spend := api.Event{Kind: api.EventSpend, Project: project}
 	wf := prefix + "workflow.json"
-	librarian := "workstreams/" + string(librarian) + "/"
 	for _, c := range []struct {
 		name   string
 		commit trace.Commit
@@ -45,14 +40,12 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		{"question", trace.Commit{Paths: []string{prefix + "questions/1/question.jsonl", prefix + "questions/1/rulings.jsonl", wf}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}}}, []api.Event{ws, inbox, chat}},
 		{"another thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason"}}}, []api.Event{ws}},
 		{"chief thread", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Threads: []string{"agent_mason", trace.ChiefOfStaff}}}, []api.Event{ws, chat}},
-		// An acknowledged event can raise a contest to the owner's inbox.
 		{"deliveries", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{Deliveries: true}}, []api.Event{ws, inbox}},
 		{"transactions only", trace.Commit{Paths: []string{wf}, Workflow: &trace.WorkflowChange{}}, []api.Event{ws}},
 		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []api.Event{ws, chat}},
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []api.Event{ws, inbox}},
 		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []api.Event{ws, inbox}},
 		{"cost", trace.Commit{Paths: []string{prefix + "ledger.jsonl"}}, []api.Event{spend, ws}},
-		{"librarian", trace.Commit{Paths: []string{librarian + "ledger.jsonl", librarian + "workflow.json", librarian + "questions/1/question.jsonl"}, Workflow: &trace.WorkflowChange{Threads: []string{trace.ChiefOfStaff}, Deliveries: true}}, []api.Event{spend}},
 		{"project files", trace.Commit{Paths: []string{"charter.md", "documents.jsonl", "kb/entities.json"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
 		{"charter", trace.Commit{Paths: []string{"charter.md"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
 		{"knowledge files", trace.Commit{Paths: []string{"kb/entities.json"}}, nil},
@@ -64,8 +57,6 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 	}
 }
 
-// Events already waiting are not queued twice, and the event beyond the
-// queue's bound replaces what waits with a resync, which later events follow.
 func TestSubscriberQueueIsBoundedAndCoalesced(t *testing.T) {
 	t.Parallel()
 	h := New()
@@ -96,8 +87,6 @@ func TestSubscriberQueueIsBoundedAndCoalesced(t *testing.T) {
 	}
 }
 
-// A reader that stops reading neither delays publishers nor another
-// subscriber, and its stream ends once a write outlasts the write timeout.
 func TestStalledEventReaderIsDroppedWithoutBlockingOthers(t *testing.T) {
 	t.Parallel()
 	s := New()
@@ -107,7 +96,6 @@ func TestStalledEventReaderIsDroppedWithoutBlockingOthers(t *testing.T) {
 		s.Serve(stalled, httptest.NewRequest("GET", api.Prefix+"/events", nil), 200*time.Millisecond)
 		close(served)
 	}()
-	// The stream has subscribed once its resync is written.
 	<-stalled.wrote
 	began := time.Now()
 	for i := range 10 * eventQueue {
@@ -131,9 +119,6 @@ func TestStalledEventReaderIsDroppedWithoutBlockingOthers(t *testing.T) {
 	}
 }
 
-// stalledWriter is a stream response whose reader stopped reading: every write
-// after the first blocks until its write deadline passes. It closes wrote once
-// the first write returns.
 type stalledWriter struct {
 	header   http.Header
 	wrote    chan struct{}

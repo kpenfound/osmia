@@ -15,12 +15,12 @@ type InboxClient interface {
 	Inbox(context.Context) (api.InboxResponse, error)
 }
 
-// decisionCard is the selector of the page's card of an inbox entry.
+// DecisionCard is the selector of the page's card of an inbox entry.
 func DecisionCard(e api.InboxEntry) string {
 	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
 }
 
-// entriesOf returns the listed inbox entries of one kind.
+// EntriesOf returns the listed inbox entries of one kind.
 func EntriesOf(t *testing.T, c InboxClient, kind string) []api.InboxEntry {
 	t.Helper()
 	inbox, err := c.Inbox(context.Background())

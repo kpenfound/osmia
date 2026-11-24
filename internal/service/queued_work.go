@@ -19,29 +19,19 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// queuedWorkTools are the chief-of-staff action tools whose results report
-// the work queued or running in the workstream they acted on.
 var queuedWorkTools = []string{moveUnitTool, moveWorkstreamTool, resolveContestedTool, requestChangeTool, decideChangeTool, questions.RouteAmendmentTool, decideAmendmentTool, discoveryTool, questions.AnswerTool, questions.RelayRulingTool, handBackDriftTool, triageTool, checksTool, dropDependencyTool, retryChangeTool, resolveObjectionTool}
 
-// queuedItem is one piece of work queued or running in a workstream.
 type queuedItem struct {
 	Role string `json:"role"`
 	Unit string `json:"unit,omitempty"`
 	What string `json:"what"`
 }
 
-// queuedReport is the work queued or running in a workstream, and, when there
-// is none, why nothing will run and until when.
 type queuedReport struct {
 	Items []queuedItem
 	Why   string
 }
 
-// queuedWork reads, from the workstream's records alone, the work that is
-// queued or running in it: unfinished worker turns, operations without a
-// result that nothing holds, units in a state the scheduler starts work for,
-// answers awaiting delivery and filed amendments awaiting their draft. s, when
-// not nil, supplies the pauses and holds that keep work from running.
 func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (queuedReport, error) {
 	var out queuedReport
 	busy := map[string]bool{}
@@ -218,11 +208,6 @@ func queuedWork(s *Service, r *trace.Repository, stream config.WorkstreamID) (qu
 	return out, nil
 }
 
-// reportQueued wraps the chief's action tools so that each accepted result
-// carries the work its workstream now has queued or running, or why nothing
-// will run, and an action that queued nothing schedules a check-back of the
-// chief's thread at the stall window. It wraps set_status so that an
-// attention item for the owner counts as the end a stall notice's turn asks for.
 func (c *runtimeControls) reportQueued(cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, now func() time.Time, tools []coreadapter.Tool) []coreadapter.Tool {
 	for i, tool := range tools {
 		handle := tool.Handle
@@ -256,7 +241,6 @@ func (c *runtimeControls) reportQueued(cfg *config.Config, r *trace.Repository, 
 	return tools
 }
 
-// refusedResult reports whether a tool result says it recorded nothing.
 func refusedResult(out json.RawMessage) bool {
 	var result struct {
 		Recorded *bool `json:"recorded"`
@@ -264,8 +248,6 @@ func refusedResult(out json.RawMessage) bool {
 	return json.Unmarshal(out, &result) == nil && result.Recorded != nil && !*result.Recorded
 }
 
-// withQueuedWork returns out with the queued work of the workstream raw names,
-// and records what that work means for the turn's check-back.
 func (c *runtimeControls) withQueuedWork(ctx context.Context, cfg *config.Config, r *trace.Repository, scope coreadapter.Scope, now func() time.Time, raw, out json.RawMessage) json.RawMessage {
 	var result map[string]json.RawMessage
 	if json.Unmarshal(out, &result) != nil || result == nil {

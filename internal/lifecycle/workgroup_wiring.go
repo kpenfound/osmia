@@ -74,19 +74,12 @@ func (s *Controller) CrossRepoMemberRepos(ctx context.Context, g trace.Workgroup
 			if len(local.Members) != 1 {
 				return nil, fmt.Errorf("workstream %s has conflicting local and shared membership", m)
 			}
-			// Member and project traces commit independently. A published
-			// locator keeps routing valid, but admission awaits local removal.
 			return nil, errWorkgroupJoining
 		}
 	}
 	return members, nil
 }
 
-// retiredMemberRepo binds an archived member of group to its project's open
-// repository without reading its history, which archive cleanup may already
-// have removed. It reports false for a member with no archive record. An
-// archive naming another workgroup, an inactive project or a trace missing
-// without cleanup intent is an error, never retirement.
 func (s *Controller) retiredMemberRepo(group config.WorkgroupID, stream config.WorkstreamID) (*trace.Repository, bool, error) {
 	for _, a := range s.MemberArchives() {
 		if a.Workstream != stream {

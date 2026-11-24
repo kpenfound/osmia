@@ -48,7 +48,6 @@ func TestViewsStripGroupWorldModesAndRejectSpecialFiles(t *testing.T) {
 			t.Fatalf("failed view leaked: %v %v", entries, err)
 		}
 	}
-	// Within a selected directory the special file is left out.
 	v, err = views.Create(context.Background(), a.Workspace{Directory: source, Access: a.ReadOnly}, []string{"src"})
 	if err != nil {
 		t.Fatal(err)

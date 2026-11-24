@@ -38,7 +38,6 @@ func (t Transition) Routing() Routing {
 	return Routing{DecidedBy: t.DecidedBy, Judgment: t.Judgment, DefaultTo: t.DefaultTo}
 }
 
-// withRouting returns t recording r.
 func (t Transition) withRouting(r Routing) Transition {
 	t.DecidedBy, t.Judgment, t.DefaultTo = r.DecidedBy, r.Judgment, r.DefaultTo
 	return t

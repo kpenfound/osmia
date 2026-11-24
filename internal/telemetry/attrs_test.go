@@ -49,8 +49,6 @@ func TestAllowListedAttributes(t *testing.T) {
 	}
 }
 
-// No free text can be attached: an unlisted key, a value of the wrong kind and
-// a value with whitespace or a line break all give an attribute the span drops.
 func TestAttributesOutsideTheAllowListAreRefused(t *testing.T) {
 	for name, a := range map[string]Attr{
 		"unlisted key":            String("osmia.prompt", "hello"),

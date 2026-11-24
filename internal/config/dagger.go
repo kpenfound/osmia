@@ -22,7 +22,6 @@ const (
 // which cannot finish on the service's engine on the Cloud engine.
 const DaggerCheckFallbackCloud = "cloud"
 
-// daggerOrganization is a Dagger Cloud organization name.
 var daggerOrganization = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // DaggerConfig selects the service's engine and names its optional Cloud

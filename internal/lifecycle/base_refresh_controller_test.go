@@ -26,23 +26,10 @@ func deliverWithPullRequest(t *testing.T, repo *trace.Repository, cfg *config.Co
 	t.Helper()
 	return fixturekit.RecordDeliveredPublication(t, repo, cfg, stream, featureBranch(stream), pr, foremanActor)
 }
-func baseRefreshOperationCount(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
-	t.Helper()
-	return fixturekit.OperationCount(t, repo, stream, BaseRefreshAction)
-}
-
-func recordIntegration(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, commit string) {
-	t.Helper()
-	fixturekit.RecordBaseIntegration(t, repo, stream, at, commit, foremanActor)
-}
 
 var actionOperation = fixturekit.ActionOperation
 var jump = fixturekit.Jump
 
-// TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDependency
-// covers spec#1: an undelivered workstream whose dependency has not
-// integrated, and which is not abandoned, keeps getting base-refresh at the
-// existing cadence.
 func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDependency(t *testing.T) {
 	t.Parallel()
 	_, repo, host, refresh, clock := stopFixture(t)
@@ -58,8 +45,6 @@ func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDepend
 	if host.Finds != 0 {
 		t.Fatalf("an undelivered workstream made %d own-PR lookups", host.Finds)
 	}
-	// The dependency has not integrated, so once the check's cooldown has
-	// elapsed the next Pass asks for another refresh.
 	jump(clock, refresh.S.Now().Add(11*time.Minute))
 	must(t, refresh.Pass(ctx))
 	next := actionOperation(t, repo, stream, BaseRefreshAction)
@@ -68,17 +53,12 @@ func TestBaseRefreshPassKeepsSchedulingUndeliveredWorkstreamWithUnresolvedDepend
 	}
 }
 
-// TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolvedDependency
-// covers spec#11: a workstream delivered without a pull request of its own
-// (merged outside the factory) is not finished, so while its dependency has
-// not integrated it keeps getting base-refresh, and those refreshes make no
-// own-PR lookup.
 func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolvedDependency(t *testing.T) {
 	t.Parallel()
 	_, repo, host, refresh, clock := stopFixture(t)
 	ctx := context.Background()
 	sealStream(t, repo)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DeliveredState, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: DeliveredState, Revision: 1, Project: project, Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}
 	_, err := repo.SetFeatureState(ctx, h, DeliveredState, "delivered by merging outside the factory")
 	must(t, err)
 	must(t, refresh.Pass(ctx))
@@ -107,11 +87,6 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithoutOwnPullRequestAndUnresolv
 	}
 }
 
-// TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresolvedDependency
-// covers spec#2: a delivered workstream whose own pull request is open, with
-// no outcome recorded yet, is not finished, so while its dependency has not
-// integrated and it is not abandoned, it keeps getting base-refresh at the
-// existing cadence, with each refresh looking the open pull request up.
 func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresolvedDependency(t *testing.T) {
 	t.Parallel()
 	cfg, repo, host, refresh, clock := stopFixture(t)
@@ -148,12 +123,6 @@ func TestBaseRefreshPassKeepsSchedulingDeliveredWithOpenOwnPullRequestAndUnresol
 	}
 }
 
-// TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRecorded
-// covers spec#3, spec#7, spec#8 and spec#12: once a durable observation
-// records that the dependency has integrated into upstream, Pass schedules
-// no further base-refresh, that holds across a restart, resolveBase returns
-// the recorded upstream base with no Git fetch and no pull-request lookup,
-// and the declared dependency and its history stay intact.
 func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRecorded(t *testing.T) {
 	t.Parallel()
 	cfg, repo, host, refresh, _ := stopFixture(t)
@@ -161,11 +130,11 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	sealStream(t, repo)
 	before, err := repo.WorkstreamBase(stream)
 	must(t, err)
-	recordIntegration(t, repo, stream, demoStart, "recorded-upstream-sha")
+	fixturekit.RecordBaseIntegration(t, repo, stream, fixturekit.DemoStart, "recorded-upstream-sha", foremanActor)
 
 	for i := 0; i < 3; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, repo, stream); n != 0 {
+		if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 0 {
 			t.Fatalf("pass %d scheduled a base-refresh after integration was recorded: %d operations", i, n)
 		}
 	}
@@ -173,7 +142,6 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 		t.Fatalf("Pass made %d pull-request lookups", host.Finds)
 	}
 
-	// A restart loses nothing: the stopping fact is durable (spec#7).
 	repo.Close()
 	reopened, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -181,7 +149,7 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	refresh.Repository = reopened
 	for i := 0; i < 2; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, reopened, stream); n != 0 {
+		if n := fixturekit.OperationCount(t, reopened, stream, BaseRefreshAction); n != 0 {
 			t.Fatalf("pass %d after a restart scheduled a base-refresh: %d operations", i, n)
 		}
 	}
@@ -192,9 +160,6 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 		t.Fatalf("the declared dependency changed after refreshes stopped: before %+v after %+v", before, after)
 	}
 
-	// resolveBase itself checks the recorded integration before any remote
-	// operation, so it makes no Git fetch, no parent pull-request lookup
-	// and no own pull-request lookup (spec#8).
 	g := &fixturekit.BaseProvider{Upstream: "upstream-sha", Tip: "base-sha"}
 	selected, err := refresh.S.ResolveBase(ctx, cfg, reopened, stream, g)
 	must(t, err)
@@ -209,10 +174,6 @@ func TestBaseRefreshPassStopsAndResolveBaseMakesNoRemoteCallOnceIntegrationIsRec
 	}
 }
 
-// testBaseRefreshPassStopsAfterOwnPullRequestOutcome covers spec#4 and
-// spec#14: once a refresh has recorded the workstream's own pull request
-// merged or closed, Pass schedules no further base-refresh, even though the
-// dependency (quiet) has never integrated, and that holds across a restart.
 func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged bool) {
 	cfg, repo, host, refresh, _ := stopFixture(t)
 	ctx := context.Background()
@@ -243,7 +204,7 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 
 	for i := 0; i < 3; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, repo, stream); n != 1 {
+		if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 1 {
 			t.Fatalf("pass %d scheduled a base-refresh for a finished workstream: %d operations", i, n)
 		}
 	}
@@ -251,7 +212,6 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 		t.Fatalf("a later pass made an own-PR lookup for a finished workstream: %d", host.Finds)
 	}
 
-	// A restart loses nothing: the recorded outcome is durable (spec#7).
 	repo.Close()
 	reopened, err := trace.Open(cfg.Root, cfg.Project)
 	must(t, err)
@@ -259,7 +219,7 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 	refresh.Repository = reopened
 	for i := 0; i < 2; i++ {
 		must(t, refresh.Pass(ctx))
-		if n := baseRefreshOperationCount(t, reopened, stream); n != 1 {
+		if n := fixturekit.OperationCount(t, reopened, stream, BaseRefreshAction); n != 1 {
 			t.Fatalf("pass %d after a restart scheduled a base-refresh: %d operations", i, n)
 		}
 	}
@@ -267,8 +227,6 @@ func testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t *testing.T, merged boo
 		t.Fatalf("a pass after a restart made an own-PR lookup: %d", host.Finds)
 	}
 
-	// The dependency never integrated, and its declared record is untouched
-	// (spec#12).
 	after, err := reopened.WorkstreamBase(stream)
 	must(t, err)
 	if after != before {
@@ -287,9 +245,6 @@ func TestBaseRefreshPassStopsAfterOwnPullRequestRecordedClosed(t *testing.T) {
 	testBaseRefreshPassStopsAfterOwnPullRequestOutcome(t, false)
 }
 
-// TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration
-// covers spec#4 and spec#14: an abandoned workstream gets no base-refresh,
-// whether or not its dependency has integrated into upstream.
 func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration(t *testing.T) {
 	t.Parallel()
 	for _, integrated := range []bool{false, true} {
@@ -302,14 +257,14 @@ func TestBaseRefreshPassStopsForAbandonedWorkstreamRegardlessOfParentIntegration
 			ctx := context.Background()
 			sealStream(t, repo)
 			if integrated {
-				recordIntegration(t, repo, stream, demoStart, "recorded-upstream-sha")
+				fixturekit.RecordBaseIntegration(t, repo, stream, fixturekit.DemoStart, "recorded-upstream-sha", foremanActor)
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "owner-abandoned", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "fixture"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "owner-abandoned", Revision: 1, Project: project, Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}
 			_, err := repo.SetFeatureState(ctx, h, AbandonedState, "no longer needed")
 			must(t, err)
 			for i := 0; i < 3; i++ {
 				must(t, refresh.Pass(ctx))
-				if n := baseRefreshOperationCount(t, repo, stream); n != 0 {
+				if n := fixturekit.OperationCount(t, repo, stream, BaseRefreshAction); n != 0 {
 					t.Fatalf("pass %d scheduled a base-refresh for an abandoned workstream: %d operations", i, n)
 				}
 			}

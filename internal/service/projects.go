@@ -14,20 +14,13 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// pendingProject is the journal of one project registration in progress. It is
-// written before any other file and removed last, so a restart finds every
-// interrupted registration and finishes it with the same identity.
-type pendingProject struct {
-	Version     int                     `json:"version"`
-	Project     config.Project          `json:"project"`
-	CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
-	// Creation is set when the registration is the end of a project creation,
-	// which first creates and clones the repository.
+type PendingProject struct {
+	Version  int              `json:"version"`
+	Project  config.Project   `json:"project"`
 	Creation *projectCreation `json:"creation,omitempty"`
 }
 
@@ -48,13 +41,10 @@ func (s *Service) setBoundary(boundary func(string) error) {
 }
 
 func projectView(root config.Root, p config.Project) ProjectView {
-	// ProjectTrace resolves the shadow project to its own directory outside
-	// "projects", so this must not hand-join the shared-layout path.
 	directory, _ := root.ProjectTrace(p.ID)
 	return ProjectView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Trace: directory, Repos: []RepoView{repoView(root, p)}}
 }
 
-// repoView names one repo's own settings and trace.
 func repoView(root config.Root, p config.Project) RepoView {
 	directory, _ := root.ProjectTrace(p.ID)
 	return RepoView{ID: p.ID, Name: p.Name, Upstream: p.Upstream, Fork: p.Fork, Clone: p.Clone, BaseBranch: p.BaseBranch, Landing: p.Landing, Trace: directory, KB: filepath.Join(directory, "kb"), EntityMap: filepath.Join(directory, trace.EntitiesPath)}
@@ -64,15 +54,10 @@ func (s *Service) viewProject(p config.Project) ProjectView {
 	return projectView(s.current().Root, p)
 }
 
-// validateAdd checks a request before anything is written. Every failure names
-// the field at fault; the clone is read, never written.
 func (s *Service) validateAdd(req ProjectAddRequest) (config.Project, *APIError) {
 	return s.validateRepo(req.Name, req.Upstream, req.Fork, req.Clone, req.BaseBranch)
 }
 
-// validateRepo checks one repo's own fields before anything is written. Every
-// failure names the field at fault; the clone is read, never written. It is
-// used by project creation.
 func (s *Service) validateRepo(name, upstream, fork, clone, baseBranch string) (config.Project, *APIError) {
 	invalid := func(message string) (config.Project, *APIError) {
 		return config.Project{}, &APIError{Code: Validation, Message: message}
@@ -121,9 +106,6 @@ func sameRegistration(a, b config.Project) bool {
 	return a.Name == b.Name && a.Upstream == b.Upstream && a.Fork == b.Fork && a.Clone == b.Clone && a.BaseBranch == b.BaseBranch
 }
 
-// addProject registers a project. An interrupted registration is completed
-// before a new one is considered. Repeating the active project's registration
-// returns it. Distinct projects use separate clones and traces.
 func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (ProjectResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -166,7 +148,7 @@ func (s *Service) addProject(ctx context.Context, req ProjectAddRequest) (Projec
 	if err := s.step("journal-written"); err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
 	}
-	p, err = s.complete(ctx, pendingProject{Version: 1, Project: p}, true)
+	p, err = s.complete(ctx, PendingProject{Version: 1, Project: p}, true)
 	if err != nil {
 		return ProjectResponse{}, incomplete(p.ID, err)
 	}
@@ -193,7 +175,6 @@ func (s *Service) added(p config.Project) ProjectResponse {
 	return ProjectResponse{Project: view, NextStep: "Write the charter with: osmia edit charter " + string(view.ID)}
 }
 
-// reserve generates an identity with no directory under projects and journals it.
 func (s *Service) reserve(p *config.Project) error {
 	root := s.current().Root
 	for attempt := 0; attempt < 8; attempt++ {
@@ -209,12 +190,12 @@ func (s *Service) reserve(p *config.Project) error {
 			continue
 		}
 		p.ID = id
-		return s.writePending(pendingProject{Version: 1, Project: *p})
+		return s.writePending(PendingProject{Version: 1, Project: *p})
 	}
 	return errors.New("no free project identity")
 }
 
-func (s *Service) writePending(p pendingProject) error {
+func (s *Service) writePending(p PendingProject) error {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {
 		return err
@@ -226,10 +207,10 @@ func (s *Service) writePending(p pendingProject) error {
 	if err := writeFileSynced(path, append(data, '\n')); err != nil {
 		return err
 	}
-	return projectmigration.SyncDirectory(filepath.Dir(path))
+	return syncDirectory(filepath.Dir(path))
 }
 
-func (s *Service) readPending() (*pendingProject, error) {
+func (s *Service) readPending() (*PendingProject, error) {
 	path, err := s.current().Root.PendingProject()
 	if err != nil {
 		return nil, err
@@ -241,83 +222,23 @@ func (s *Service) readPending() (*pendingProject, error) {
 	if err != nil {
 		return nil, err
 	}
-	var stored struct {
-		Version int `json:"version"`
-		Project struct {
-			config.Project
-			Source config.ProjectID `json:"group_id,omitempty"`
-		} `json:"project"`
-		CharterCopy *projectmigration.Split `json:"charter_copy,omitempty"`
-		Creation    *projectCreation        `json:"creation,omitempty"`
-	}
+	var p PendingProject
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
-	if err := d.Decode(&stored); err != nil {
+	if err := d.Decode(&p); err != nil {
 		return nil, err
 	}
-	p := pendingProject{Version: stored.Version, Project: stored.Project.Project, CharterCopy: stored.CharterCopy, Creation: stored.Creation}
 	if p.Version != 1 || config.CheckProjectIDs(p.Project.ID) != nil || !filepath.IsAbs(p.Project.Clone) {
 		return nil, errors.New("invalid project registration journal")
 	}
 	if c := p.Creation; c != nil && (!validRepoName(c.Owner, c.Repo) || c.Owner+"/"+c.Repo != p.Project.Upstream || strings.TrimSpace(c.Charter) == "" || c.Visibility != api.VisibilityPrivate && c.Visibility != api.VisibilityPublic) {
 		return nil, errors.New("invalid project creation journal")
 	}
-	if stored.Project.Source != "" && p.CharterCopy == nil {
-		cfg := s.current()
-		if !cfg.Active(stored.Project.Source) {
-			// Until the import, an earlier version's project files are the
-			// settings; after it the store holds them.
-			imported, err := s.settingsStore().Imported()
-			if err != nil {
-				return nil, err
-			}
-			if imported {
-				cfg, _, err = s.withStoredProject(cfg, stored.Project.Source)
-			} else {
-				cfg, err = cfg.AddProject(stored.Project.Source, s.options.Config.Home)
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-		if err := projectmigration.MigrateTrace(context.Background(), cfg.Root, stored.Project.Source); err != nil {
-			return nil, err
-		}
-		r, err := trace.Open(cfg.Root, cfg.For(stored.Project.Source).Project)
-		if err != nil {
-			if r != nil {
-				r.Close()
-			}
-			return nil, err
-		}
-		charter, readErr := r.Charter(context.Background())
-		if err := errors.Join(readErr, r.Close()); err != nil {
-			return nil, err
-		}
-		charter.At = time.Now().UTC()
-		p.CharterCopy = &projectmigration.Split{Project: p.Project, Source: stored.Project.Source, Charter: charter}
-		if err := s.writePending(p); err != nil {
-			return nil, err
-		}
-		if err := s.step("project-charter-pinned"); err != nil {
-			return nil, err
-		}
-	}
 	return &p, nil
 }
 
-// tracePublished reports whether the trace at directory is complete:
-// creation commits the project manifest in its first and only commit, so the
-// manifest proves completion.
-func tracePublished(directory string) (bool, error) {
-	return trace.Published(directory)
-}
-
-// discardUnpublished removes an interrupted trace creation that never
-// committed, keeping a project file an earlier version wrote. A complete trace is never
-// touched.
 func discardUnpublished(directory string) error {
-	if published, err := tracePublished(directory); err != nil {
+	if published, err := trace.Published(directory); err != nil {
 		return err
 	} else if published {
 		return fmt.Errorf("%s: trace has history", directory)
@@ -327,9 +248,6 @@ func discardUnpublished(directory string) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.Name() == "config.toml" {
-			continue
-		}
 		if err := os.RemoveAll(filepath.Join(directory, e.Name())); err != nil {
 			return err
 		}
@@ -337,30 +255,9 @@ func discardUnpublished(directory string) error {
 	return nil
 }
 
-// errImportPending reports a registration that has done every step that does
-// not need the project store and waits for the project import to complete: a
-// root that is not imported yet has no registry to list the project in. The
-// journal stays, and the registration finishes once the import has.
-var errImportPending = errors.New("the project import is not complete")
-
-// complete runs every registration step that is not yet done, in order, and
-// activates the project unless startup will. The journal goes last, once the
-// project is registered and running. Each step inspects the disk before
-// acting, so running it again after an interruption neither repeats an effect
-// nor skips one. A root whose import is not complete yet is the root of an
-// earlier version's interrupted registration: its steps run up to the
-// registration, which waits for the import (errImportPending).
-func (s *Service) complete(ctx context.Context, pending pendingProject, activate bool) (config.Project, error) {
+func (s *Service) complete(ctx context.Context, pending PendingProject, activate bool) (config.Project, error) {
 	p := pending.Project
 	root := s.current().Root
-	imported, err := s.settingsStore().Imported()
-	if err != nil {
-		return p, err
-	}
-	projectPath, err := root.ProjectConfig(p.ID)
-	if err != nil {
-		return p, err
-	}
 	directory, err := root.ProjectTrace(p.ID)
 	if err != nil {
 		return p, err
@@ -369,15 +266,13 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err != nil {
 		return p, err
 	}
-	published, err := tracePublished(directory)
+	published, err := trace.Published(directory)
 	if err != nil {
 		return p, err
 	}
 	if !published {
-		if imported {
-			if err := s.storeFirstSettings(p); err != nil {
-				return p, err
-			}
+		if err := s.storeFirstSettings(p); err != nil {
+			return p, err
 		}
 		if err := s.step("project-config-written"); err != nil {
 			return p, err
@@ -411,27 +306,6 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := s.step("trace-created"); err != nil {
 		return p, err
 	}
-	if pending.CharterCopy != nil {
-		if err := projectmigration.CopyCharter(ctx, root, *pending.CharterCopy, pending.CharterCopy.Charter.At); err != nil {
-			return p, err
-		}
-		if err := s.step("project-charter-copied"); err != nil {
-			return p, err
-		}
-		if !imported {
-			// Until the import reads it, the project file an earlier version
-			// wrote still names the group.
-			if err := config.RemoveProjectGroup(projectPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return p, err
-			}
-		}
-		if err := s.step("project-group-removed"); err != nil {
-			return p, err
-		}
-	}
-	if !imported {
-		return p, errImportPending
-	}
 	if err := s.register(p); err != nil {
 		return p, err
 	}
@@ -446,14 +320,12 @@ func (s *Service) complete(ctx context.Context, pending pendingProject, activate
 	if err := os.Remove(journal); err != nil && !os.IsNotExist(err) {
 		return p, err
 	}
-	if err := projectmigration.SyncDirectory(filepath.Dir(journal)); err != nil {
+	if err := syncDirectory(filepath.Dir(journal)); err != nil {
 		return p, err
 	}
 	return p, s.step("journal-removed")
 }
 
-// storeFirstSettings stores the settings a newly registered project starts with
-// as its first revision. A project that already has settings keeps them.
 func (s *Service) storeFirstSettings(p config.Project) error {
 	data, err := config.ProjectConfigBytes(p)
 	if err != nil {
@@ -463,8 +335,6 @@ func (s *Service) storeFirstSettings(p config.Project) error {
 	return err
 }
 
-// register stores p's first settings, if they are not stored yet, and adds p
-// to the end of the registry. A project already registered keeps its place.
 func (s *Service) register(p config.Project) error {
 	if err := s.storeFirstSettings(p); err != nil {
 		return err
@@ -472,11 +342,6 @@ func (s *Service) register(p config.Project) error {
 	return s.settingsStore().Add(p.ID)
 }
 
-// resolveRuntime points the runtime store at cfg and the workstreams of the
-// traces of projects, re-reading them so overrides may name workstreams
-// created since the last resolve. For an active project without a trace the
-// configured identities stand in. Callers hold their own ordering against
-// configuration changes.
 func (s *Service) resolveRuntime(cfg *config.Config, projects []*activeProject) error {
 	in, err := s.runtimeInputs(cfg, projects)
 	if err != nil {
@@ -485,15 +350,11 @@ func (s *Service) resolveRuntime(cfg *config.Config, projects []*activeProject) 
 	return s.store.Resolve(in)
 }
 
-// refreshRuntime resolves the runtime store against the loaded configuration
-// and the open traces.
 func (s *Service) refreshRuntime() error {
 	cfg, projects := s.runtimes()
 	return s.resolveRuntime(cfg, projects)
 }
 
-// runtimeInputs returns the runtime store's inputs for cfg: the workstreams
-// of every active project, read from its trace among projects.
 func (s *Service) runtimeInputs(cfg *config.Config, projects []*activeProject) (runtime.Inputs, error) {
 	workstreams := map[config.ProjectID][]config.WorkstreamID{}
 	for _, id := range cfg.ProjectIDs() {
@@ -512,8 +373,6 @@ func (s *Service) runtimeInputs(cfg *config.Config, projects []*activeProject) (
 	return runtime.Inputs{Config: cfg, Workstreams: workstreams}, nil
 }
 
-// activate loads the project into the running configuration and opens its
-// trace and reconciliation loop the way startup does.
 func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -550,10 +409,6 @@ func (s *Service) activate(id config.ProjectID) (config.Project, error) {
 	return cfg.For(id).Project, nil
 }
 
-// recoverPending finishes an interrupted registration at startup, leaving the
-// trace to open through the ordinary startup path. Failure keeps the journal
-// for a later retry and starts the service with the configuration as loaded,
-// reporting the problem through configuration diagnostics.
 func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*config.Config, error) {
 	s.cfg = cfg
 	pending, err := s.readPending()
@@ -567,20 +422,12 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 		return cfg, conflict
 	}
 	if pending.Creation != nil {
-		// A creation first needs its repository and clone, which the creation
-		// steps find or make; registration alone would run on a clone that may
-		// not exist yet.
 		if _, err := s.runCreation(ctx, pending, false); err != nil {
-			if errors.Is(err, errImportPending) {
-				return cfg, err
-			}
 			return cfg, &creationError{ID: pending.Project.ID, Err: err}
 		}
 	} else if _, err := s.complete(ctx, *pending, false); err != nil {
 		return cfg, err
 	}
-	// Only the registered project's own settings are read: the other projects
-	// are as cfg holds them.
 	if cfg.Active(pending.Project.ID) {
 		return cfg, nil
 	}
@@ -591,9 +438,6 @@ func (s *Service) recoverPending(ctx context.Context, cfg *config.Config) (*conf
 	return loaded, nil
 }
 
-// removeProject takes an active project out of configuration and closes its
-// runtime state; the other active projects keep running. Its trace and the
-// owner's clone stay where they are.
 func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -652,10 +496,6 @@ func (s *Service) removeProject(req ProjectRemoveRequest) (ProjectResponse, *API
 
 func (s *Service) finishDraining(active *activeProject) error {
 	err := <-active.done
-	// The project's runtime has stopped and its trace is still open: commit its
-	// removal and its pending Hearsay records where the service reconciles them
-	// after the runtime is gone. Hearsay is not reached, and a failure here
-	// never keeps the project from being removed.
 	if kerr := s.keepForRemoval(context.Background(), active.repository); kerr != nil {
 		s.log().Warn("hearsay removal could not be kept", "project", string(active.id), "error", kerr.Error())
 	}

@@ -240,13 +240,10 @@ func stamp(t time.Time) string {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// inline makes s safe inside a Markdown code span on one line.
 func inline(s string) string {
 	return strings.NewReplacer("`", "'", "\n", " ", "\r", " ", "|", "/").Replace(s)
 }
 
-// fenced puts s in a code block whose fence is longer than any run of
-// backticks in s.
 func fenced(s string) string {
 	longest, run := 0, 0
 	for _, c := range s {

@@ -92,8 +92,6 @@ func NewEnforcer(r agent.Runner, settings ExecutionSettings) (agent.Enforcer, er
 	return agent.NewHostNone(r), nil
 }
 
-// checkMode refuses settings no enforcer is built for: a host mode with an
-// image, a container without one, or an unknown mode.
 func checkMode(settings ExecutionSettings) error {
 	switch settings.Mode {
 	case agent.SandboxNone, agent.SandboxClaude:
@@ -177,11 +175,8 @@ func (e CoreExecutor) Check(ctx context.Context, iso Isolation, settings Executi
 	return validateFileTree(iso.Workspace.Directory, settings.RunsDagger())
 }
 
-// environmentName is a variable name the service may read a credential from.
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// turnEnvironment admits the public environment and, for a Dagger Cloud turn
-// alone, the Dagger Cloud variables with DAGGER_ENGINE selecting Dagger Cloud.
 func turnEnvironment(env map[string]string, settings ExecutionSettings) error {
 	public := maps.Clone(env)
 	if settings.DaggerCloudTokenEnv != "" {
@@ -197,9 +192,6 @@ func turnEnvironment(env map[string]string, settings ExecutionSettings) error {
 	return PublicEnvironment(public)
 }
 
-// checkDagger admits Dagger only for an sbx turn that may execute commands:
-// a host engine at an address and CLI release core accepts, or Dagger Cloud
-// with the name of the token's variable, never both.
 func checkDagger(iso Isolation, settings ExecutionSettings) error {
 	if settings.DaggerCloudTokenEnv != "" {
 		switch {
@@ -249,10 +241,6 @@ func PublicEnvironment(env map[string]string) error {
 	return nil
 }
 
-// validateFileTree admits regular files and directories under dir, and no
-// VCS metadata. A Dagger turn's view alone may hold a Git repository at its
-// root, which the service created empty; it holds no symlinks or special files
-// either.
 func validateFileTree(dir string, repository bool) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return unsupported("workspace", "requires a canonical absolute directory")
@@ -326,11 +314,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		return nil, err
 	}
 	engine := e.Runner
-	// Core refuses whatever the grants do not cover. These are the request
-	// fields grants do not describe; they also protect callers that invoke
-	// Run without the normal turn translator. A request that carries grants
-	// carries the turn's full grants; a turn that runs without its web tools
-	// runs under narrower ones.
 	if req.Workspace == nil || req.Workspace.Directory() != iso.Workspace.Directory || req.Workspace.VCS() != nil ||
 		len(req.VCSEnv) != 0 || len(req.VCSContainerEnv) != 0 || len(req.VCSContainerPath) != 0 || len(req.ContainerEnv) != 0 || !slices.Equal(req.Profile.Skills, turnSkills(settings, req.Profile.Agent)) || req.Profile.ContainerUseEnvironment != "" || !reflect.DeepEqual(req.Profile.Dagger, settings.Dagger) || req.HostMCP != nil ||
 		len(req.Profile.SandboxDomains) != 0 || req.Profile.Sandbox != settings.Mode || req.Profile.SandboxImage != settings.Image || req.Profile.SandboxCPUs != settings.CPUs || req.Profile.SandboxMemory != settings.Memory ||
@@ -348,8 +331,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 		return nil, err
 	}
 	if iso.Workspace.Access == ReadOnly {
-		// Core runs a session in a writable directory; a read-only view is
-		// mounted beside an empty scratch directory the session starts in.
 		scratch := filepath.Join(grants.Mounts[1].Path, scratchDirectory)
 		if err = os.Mkdir(scratch, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 			return nil, err
@@ -374,9 +355,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	}
 	session, fallback, err := e.prepare(ctx, engine, full, reduced, settings)
 	if fallback {
-		// The backend or placement cannot hold the turn to its granted tools
-		// with the web tools in them. The turn runs again without them, held to
-		// the reduced grants as strictly, and says so.
 		full = *reduced
 		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + webUnavailable)
 		session, _, err = e.prepare(ctx, engine, full, nil, settings)
@@ -393,8 +371,6 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	return result, refusal(err)
 }
 
-// refusal wraps core's refusals of a turn in ErrUnsupported, keeping core's
-// reason. A turn whose session policy changed since Prepare is one of them.
 func refusal(err error) error {
 	for _, refused := range []error{agent.ErrUnsupported, agent.ErrNotGranted, agent.ErrNoGrants, agent.ErrPolicyChanged} {
 		if errors.Is(err, refused) {
@@ -404,23 +380,13 @@ func refusal(err error) error {
 	return err
 }
 
-// webUnavailable tells a turn that was granted web tools but runs without them
-// that it has none, whatever its other instructions say.
 const webUnavailable = "Web search and page fetching are not available on this turn: the execution environment could not keep it to its granted tools with them. Work without them, and cite no URL you did not read."
 
-// attempt is one set of grants for a turn and the isolation they were built from.
 type attempt struct {
 	iso    Isolation
 	grants agent.Grants
 }
 
-// prepare has the engine prepare a session for the attempt's grants and holds
-// its policy to them. A session whose policy does not match is released and
-// never returned. When the attempt grants Web, fallback reports that the
-// refusal or mismatch is only the web tools' and the turn may be prepared once
-// more as the reduced attempt: the engine refused the grants as unsupported or
-// not granted, or the policy matches the reduced grants once the backend's web
-// tools are set aside. Any other failure is final.
 func (e CoreExecutor) prepare(ctx context.Context, engine Engine, att attempt, reduced *attempt, settings ExecutionSettings) (session agent.Session, fallback bool, err error) {
 	web := reduced != nil
 	enforcer, err := engine.Enforcer(settings)
@@ -445,13 +411,10 @@ func (e CoreExecutor) prepare(ctx context.Context, engine Engine, att attempt, r
 	return session, false, nil
 }
 
-// agentRefusal reports whether err is core refusing grants as unsupported or
-// not granted.
 func agentRefusal(err error) bool {
 	return errors.Is(err, agent.ErrUnsupported) || errors.Is(err, agent.ErrNotGranted)
 }
 
-// withoutWebTools is tools less the backend's web tools; nil stays nil.
 func withoutWebTools(tools []string, backend string) []string {
 	if tools == nil {
 		return nil
@@ -460,22 +423,12 @@ func withoutWebTools(tools []string, backend string) []string {
 	return slices.DeleteFunc(slices.Clone(tools), func(name string) bool { return slices.Contains(web, name) })
 }
 
-// scratchDirectory is the session subdirectory a read-only turn starts in.
 const scratchDirectory = "work"
 
-// viewLocation tells a read-only turn where its view is, since the turn starts
-// in the scratch directory and the view keeps its host path in every sandbox.
 func viewLocation(view string) string {
 	return fmt.Sprintf("Your view is the read-only directory %s. The paths your instructions name are relative to it. You start in a separate, empty scratch directory.", view)
 }
 
-// coreGrants are the complete capabilities of a turn in iso: the view with its
-// access, the session directory read-only, a writable scratch directory inside
-// it when the view is read-only, each skill directory read-only, the service
-// environment, one MCP server grant per scoped endpoint and the settings'
-// Dagger engine, with role-selected native tools and no VCS. A Dagger turn's
-// view mount is marked as holding only an empty repository. A turn with skill
-// directories also holds the Skill tool when it runs on Claude.
 func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, backend string, servers map[string]agent.MCPEntry, skillDirs []string) (agent.Grants, error) {
 	mode := settings.Mode
 	access := agent.ReadOnly
@@ -505,9 +458,6 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 		grants.DaggerEngine = settings.Dagger.Engine
 	}
 	if settings.RunsDagger() {
-		// The service created the view's root repository empty so the Dagger
-		// client finds its workspace; core checks it stays empty and admits the
-		// mount without granting VCS.
 		grants.Mounts[0].EmptyRepository = true
 	}
 	for _, server := range slices.Sorted(maps.Keys(servers)) {
@@ -529,12 +479,6 @@ func coreGrants(iso Isolation, sessionDir string, settings ExecutionSettings, ba
 	return grants, nil
 }
 
-// checkPolicy refuses a session whose policy is not the one the grants
-// describe: another sandbox or image, a view that is not readable or whose
-// write access differs from the isolation's, a writable pinned directory, VCS
-// granted or a VCS executable left undenied, native tools other than those the
-// isolation's capabilities give the backend (web tools included only when Web
-// is granted), or MCP servers other than the granted ones.
 func checkPolicy(p agent.Policy, iso Isolation, settings ExecutionSettings, grants agent.Grants, pinned []string) error {
 	if p.DaggerEngine != grants.DaggerEngine || !slices.Equal(p.HostServers, grants.HostServers) {
 		return unsupported("session policy", "host services differ from the grants")

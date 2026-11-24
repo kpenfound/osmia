@@ -1,6 +1,7 @@
 package browsertest
 
 import (
+	"github.com/kpenfound/osmia/internal/service"
 	"slices"
 	"strings"
 	"testing"
@@ -10,12 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The page, opened through the web listener, lists the workstreams beside
-// the one it shows, and shows its goal, workspace backend and units by state,
-// and a feed of its statuses, sessions and unit state changes, with the
-// capacity and the pauses from the /v1 views; it follows a status change
-// without a reload, at phone and laptop widths, and after its event stream is
-// lost it reconnects and reads again what changed meanwhile.
 func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
@@ -48,16 +43,12 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	} {
 		p.AwaitText(selector, want)
 	}
-	// The header's nest tube holds one cell per unit, named for its unit and
-	// state, in place of counts per state.
 	var cells []string
 	p.Eval(`[...document.querySelectorAll(`+quote(card+"[data-field=units] [data-unit-state]")+`)].map((c) => c.dataset.unitState + '=' + c.getAttribute('aria-label'))`, &cells)
 	if want := "merged=Unit resume: merged,implementing=Unit upload: implementing,ready=Unit audit: ready,planned=Unit index: planned"; strings.Join(cells, ",") != want {
 		t.Fatalf("the nest tube cells are %q, want %q", cells, want)
 	}
 	p.Await("the mason meter full", `document.querySelector('[data-meter=mason]').dataset.full === 'true'`)
-	// Conversation holds the latest status alone and notes no unit change or
-	// session; Activity holds those.
 	p.Await("only the latest status and no machine event in Conversation", `document.querySelectorAll('#workstreams [data-kind=status]').length === 1 &&
 		!document.querySelector('#workstreams [data-kind=session], #workstreams [data-kind=transition], #workstreams [data-kind=unit_checks]')`)
 	p.OpenActivity()
@@ -73,8 +64,6 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	if shown {
 		t.Fatal("the page shows an attention or a problem the views do not hold")
 	}
-	// A workstream without an attention item, and one without a status,
-	// show no "null" text.
 	noNull := func(c string) {
 		t.Helper()
 		var text string
@@ -90,7 +79,6 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	noNull(quietCard)
 	p.SelectWorkstream(stream)
 
-	// A status change appears without a reload.
 	p.Eval(`window.notReloaded = true`, nil)
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads with dedupe.", Attention: "Rule on the upload API.", Note: "Upload waits for a ruling.", Agents: []string{"A mason builds upload."}})
 	p.AwaitText(card+"[data-field=goal]", "Ship resumable uploads with dedupe.")
@@ -104,9 +92,6 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.OpenConversation()
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// Laptop widths show the list beside the workstream. Phone widths
-	// collapse the list behind a button; opened, it covers the page until a
-	// workstream is picked. Neither scrolls sideways.
 	type layout struct {
 		Overflow, Fits, SideBySide, ListShown, Covers bool
 	}
@@ -145,8 +130,6 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.SelectWorkstream(stream)
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// The stream is lost; what changes meanwhile is read once the page
-	// reconnects.
 	link := newLinkProxy(t, f.s.WebAddr())
 	p.Run(chromedp.Navigate("http://" + link.Listener.Addr().String() + "/"))
 	p.Await("the live connection through the link", `document.body.dataset.connection === 'live'`)
@@ -156,7 +139,7 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	link.Cut()
 	p.Await("the lost connection", `document.body.dataset.connection === 'lost'`)
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads with dedupe.", Note: "The ruling came; upload continues.", Agents: []string{"A mason builds upload."}})
-	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "workstream", Project: project, Workstream: quiet})
+	mutation(t, f.c, "DELETE", "pause", service.ClearPauseRequest{Scope: "workstream", Project: project, Workstream: quiet})
 	var stale string
 	p.Eval(textOf(latest+"[data-field=note]"), &stale)
 	if stale != "Upload waits for a ruling." {
@@ -170,37 +153,30 @@ func TestBrowserPageShowsActiveWorkAndStaysCurrent(t *testing.T) {
 	p.Await("no pause count", `document.getElementById('pause-count').textContent === ''`)
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// A pause set while the stream is live appears without a reload.
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Hold the uploads", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Hold the uploads", Source: runtime.PauseOwner})
 	livePause := `[data-pause="workstream:` + string(stream) + `"] `
 	p.AwaitText(livePause+"[data-field=reason]", "Hold the uploads")
 	p.AwaitText(livePause+"[data-field=source]", "the owner")
 	p.AwaitText(`[data-select="`+string(stream)+`"] [data-field=paused]`, "paused")
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// Everything the page showed came from the page's own files and /v1.
 	var views []string
 	for _, path := range p.Paths() {
 		switch {
 		case path == "/" || path == "/app.js" || path == "/style.css" || path == "/favicon.svg" || strings.HasPrefix(path, "/fonts/") && strings.HasSuffix(path, ".woff2"):
-		case strings.HasPrefix(path, Prefix+"/"):
+		case strings.HasPrefix(path, service.Prefix+"/"):
 			views = append(views, path)
 		default:
 			t.Errorf("the page requested %s", path)
 		}
 	}
-	for _, want := range []string{Prefix + "/status", Prefix + "/runtime", Prefix + "/events"} {
+	for _, want := range []string{service.Prefix + "/status", service.Prefix + "/runtime", service.Prefix + "/events"} {
 		if !slices.Contains(views, want) {
 			t.Errorf("the page never requested %s: %v", want, views)
 		}
 	}
 }
 
-// A workstream that changes while the owner looks at another is marked, and
-// looking at it clears the mark. What the page first reads counts as seen,
-// and the selection and what was seen survive a reload. Selecting a
-// workstream, a status change on one not shown and a reload never change the
-// sidebar's order, which the server already sorts by last activity.
 func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
@@ -211,8 +187,6 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Await("both workstreams listed", `document.querySelectorAll('#workstream-list [data-select]').length === 2`)
 	p.Await("the feeds read", `document.querySelector('.feed [data-state=loading]') === null`)
-	// markSeen runs synchronously inside app.js's render(), so there is no
-	// transient window to wait out: this await is itself the readiness check.
 	p.Await("nothing marked", `document.querySelector('[data-field=unread]') === null`)
 
 	order := p.SidebarIDs()
@@ -230,13 +204,11 @@ func TestBrowserSelectionMarksActivityWithoutReordering(t *testing.T) {
 	p.SelectWorkstream(quiet)
 	sameOrder("selecting quiet again")
 
-	// A status change on the workstream not shown marks it, without moving it.
 	f.status(t, trace.StatusContent{Goal: "Ship resumable uploads.", Note: "Upload landed.", Agents: []string{"A mason builds upload."}})
 	p.Await("the changed workstream marked", `document.querySelector(`+quote(streamRow+"[data-field=unread]")+`) !== null`)
 	p.Await("the shown workstream unmarked", `document.querySelector(`+quote(`[data-select="`+string(quiet)+`"] [data-field=unread]`)+`) === null`)
 	sameOrder("a status change on the workstream not shown")
 
-	// Looking at it clears the mark, without moving it.
 	p.SelectWorkstream(stream)
 	p.Await("the mark cleared", `document.querySelector('[data-field=unread]') === null`)
 	sameOrder("clearing the mark")

@@ -6,6 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -13,74 +18,69 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A handed workstream whose drafting stopped after MaxDrafts refused drafts
-// starts a new run of MaxDrafts drafts when the chief of staff or the owner
-// moves it to sketched with a note. Every draft of the run carries the note,
-// its first draft says why the last one was refused, the run stops by itself
-// again, and a move to in-shed is refused with where drafting stands.
 func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
-	defer f.stop(t)
+	f := journey.NewArchitectFixture(t)
+	defer f.Stop(t)
 	ctx := context.Background()
-	for n := 1; n <= 3*maxDrafts; n++ {
-		f.script(fmt.Sprintf("draft-%d-1", n), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan}, nil)
+	for n := 1; n <= 3*intake.MaxDrafts; n++ {
+		f.Script(fmt.Sprintf("draft-%d-1", n), map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.CyclicPlan}, nil)
 	}
-	f.script(fmt.Sprintf("draft-%d-1", 2*maxDrafts+1), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, draftAt("exhausted"))
+	f.Script(fmt.Sprintf("draft-%d-1", 2*intake.MaxDrafts+1), map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.Await(t, stream, intakefixture.DraftAt("exhausted"))
 
-	_, err := f.c.MoveWorkstream(ctx, stream, InShedState, "Debate it.")
-	if !failed(err, Conflict) || !strings.Contains(err.Error(), "drafting stopped after 3 refused drafts") || !strings.Contains(err.Error(), "move it to sketched with a note") {
+	_, err := f.C.MoveWorkstream(ctx, stream, intake.InShedState, "Debate it.")
+	if !intakefixture.Failed(err, api.Conflict) || !strings.Contains(err.Error(), "drafting stopped after 3 refused drafts") || !strings.Contains(err.Error(), "move it to sketched with a note") {
 		t.Fatalf("in-shed move on a stopped workstream: %v", err)
 	}
 
-	moves := service.InspectForTest(f.s.core()).LifecycleController()
+	moves := service.InspectForTest(f.S.Core()).LifecycleController()
 	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
 	note := "Drop the dependency between the units; they share no state."
-	out, api := moves.MoveWorkstream(ctx, f.repository(), stream, lifecycle.WorkstreamMoveRequest{To: SketchedState, Note: note}, chief, "chief-turn-1")
-	if api != nil {
-		t.Fatal(api)
+	out, apiErr := moves.MoveWorkstream(ctx, f.Repository(), stream, lifecycle.WorkstreamMoveRequest{To: intake.SketchedState, Note: note}, chief, "chief-turn-1")
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	if out.State != HandedState || !strings.Contains(out.Detail, "new run of up to 3 drafts") {
+	if out.State != intake.HandedState || !strings.Contains(out.Detail, "new run of up to 3 drafts") {
 		t.Fatalf("chief's move: %+v", out)
 	}
-	last := fmt.Sprintf("draft-%d-exhausted", 2*maxDrafts)
-	f.await(t, stream, f.transitionRecorded(t, stream, last))
-	if runs := f.runs(); len(runs) != 2*maxDrafts {
+	last := fmt.Sprintf("draft-%d-exhausted", 2*intake.MaxDrafts)
+	f.Await(t, stream, f.TransitionRecorded(t, stream, last))
+	if runs := f.Runs(); len(runs) != 2*intake.MaxDrafts {
 		t.Fatalf("backend runs %v", runs)
 	}
 	byID := map[string]trace.Transition{}
-	for _, tr := range f.transitions(t, stream) {
+	for _, tr := range f.Transitions(t, stream) {
 		byID[tr.ID] = tr
 	}
-	first := byID[fmt.Sprintf("draft-%d", maxDrafts+1)]
+	first := byID[fmt.Sprintf("draft-%d", intake.MaxDrafts+1)]
 	if first.Actor != chief || first.Cause != intake.DraftAgainCause || first.From != "exhausted" || !strings.Contains(first.Reason, "the chief of staff asked for another run of 3 drafts: "+note) {
 		t.Fatalf("first draft of the new run: %+v", first)
 	}
-	if stopped := byID[last]; stopped.From != fmt.Sprintf("invalid-%d", 2*maxDrafts) || stopped.To != "exhausted" || !strings.Contains(stopped.Reason, "none of the architect's 3 drafts") {
+	if stopped := byID[last]; stopped.From != fmt.Sprintf("invalid-%d", 2*intake.MaxDrafts) || stopped.To != "exhausted" || !strings.Contains(stopped.Reason, "none of the architect's 3 drafts") {
 		t.Fatalf("second stop: %+v", stopped)
 	}
-	th := f.architectThread(t, stream)
-	if len(th.Turns) != 2*maxDrafts {
+	th := f.ArchitectThread(t, stream)
+	if len(th.Turns) != 2*intake.MaxDrafts {
 		t.Fatalf("thread: %d turns", len(th.Turns))
 	}
-	for i := maxDrafts; i < 2*maxDrafts; i++ {
+	for i := intake.MaxDrafts; i < 2*intake.MaxDrafts; i++ {
 		if !strings.Contains(th.Turns[i].Request.Prompt, note) {
 			t.Fatalf("draft %d prompt lacks the note: %s", i+1, th.Turns[i].Request.Prompt)
 		}
 	}
-	if p := th.Turns[maxDrafts].Request.Prompt; !strings.Contains(p, fmt.Sprintf("Draft %d was not accepted", maxDrafts)) || !strings.Contains(p, "dependency cycle") {
+	if p := th.Turns[intake.MaxDrafts].Request.Prompt; !strings.Contains(p, fmt.Sprintf("Draft %d was not accepted", intake.MaxDrafts)) || !strings.Contains(p, "dependency cycle") {
 		t.Fatalf("first draft of the run lacks the last refusal: %s", p)
 	}
 	if strings.Contains(th.Turns[0].Request.Prompt, note) {
 		t.Fatal("a draft before the move carries its note")
 	}
-	outbox, err := f.repository().Outbox(stream)
-	must(t, err)
+	outbox, err := f.Repository().Outbox(stream)
+	fixturekit.Must(t, err)
 	notices := map[string]int{}
 	for _, e := range outbox {
-		if e.Event.Operation == nil && chiefEvent(e.Event) {
+		if e.Event.Operation == nil && intakefixture.ChiefEvent(e.Event) {
 			notices[e.TransitionID]++
 		}
 	}
@@ -89,12 +89,12 @@ func TestAMoveToSketchedDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	}
 
 	note = "Keep one unit."
-	if _, err := f.c.MoveWorkstream(ctx, stream, SketchedState, note); err != nil {
+	if _, err := f.C.MoveWorkstream(ctx, stream, intake.SketchedState, note); err != nil {
 		t.Fatal(err)
 	}
-	f.await(t, stream, sketched)
-	if tr := f.transitions(t, stream); !containsTransition(tr, func(tr trace.Transition) bool {
-		return tr.ID == fmt.Sprintf("draft-%d", 2*maxDrafts+1) && tr.Actor == ownerActor && tr.Cause == intake.DraftAgainCause
+	f.Await(t, stream, intakefixture.Sketched)
+	if tr := f.Transitions(t, stream); !containsTransition(tr, func(tr trace.Transition) bool {
+		return tr.ID == fmt.Sprintf("draft-%d", 2*intake.MaxDrafts+1) && tr.Actor == intake.OwnerActor && tr.Cause == intake.DraftAgainCause
 	}) {
 		t.Fatalf("owner's run not recorded: %+v", tr)
 	}
@@ -109,38 +109,35 @@ func containsTransition(transitions []trace.Transition, match func(trace.Transit
 	return false
 }
 
-// The owner's shed actions on a handed workstream say that drafting has no
-// accepted spec and plan yet, and the owner's redraft of one whose drafting
-// stopped starts a new run of drafts with the note.
 func TestTheOwnersRedraftDraftsAStoppedWorkstreamAgain(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t)
-	defer f.stop(t)
+	f := journey.NewArchitectFixture(t)
+	defer f.Stop(t)
 	ctx := context.Background()
-	for n := 1; n <= maxDrafts; n++ {
-		f.script(fmt.Sprintf("draft-%d-1", n), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: cyclicPlan}, nil)
+	for n := 1; n <= intake.MaxDrafts; n++ {
+		f.Script(fmt.Sprintf("draft-%d-1", n), map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.CyclicPlan}, nil)
 	}
-	f.script(fmt.Sprintf("draft-%d-1", maxDrafts+1), map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, nil)
-	stream := f.handIn(t, "design", handedDesign)
-	f.await(t, stream, draftAt("exhausted"))
+	f.Script(fmt.Sprintf("draft-%d-1", intake.MaxDrafts+1), map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, nil)
+	stream := f.HandIn(t, "design", fixturekit.HandedDesign)
+	f.Await(t, stream, intakefixture.DraftAt("exhausted"))
 
-	if _, err := f.c.ShedObject(ctx, stream, "No."); !failed(err, Conflict) || !strings.Contains(err.Error(), "has no accepted spec and plan in the shed yet") || !strings.Contains(err.Error(), "drafting stopped after 3 refused drafts") {
+	if _, err := f.C.ShedObject(ctx, stream, "No."); !intakefixture.Failed(err, api.Conflict) || !strings.Contains(err.Error(), "has no accepted spec and plan in the shed yet") || !strings.Contains(err.Error(), "drafting stopped after 3 refused drafts") {
 		t.Fatalf("shed objection on a stopped workstream: %v", err)
 	}
-	if _, err := f.c.ShedRedraft(ctx, stream, " "); !failed(err, Validation) {
+	if _, err := f.C.ShedRedraft(ctx, stream, " "); !intakefixture.Failed(err, api.Validation) {
 		t.Fatalf("redraft without a note: %v", err)
 	}
 	note := "Drop the dependency between the units."
-	if _, err := f.c.ShedRedraft(ctx, stream, note); err != nil {
+	if _, err := f.C.ShedRedraft(ctx, stream, note); err != nil {
 		t.Fatal(err)
 	}
-	f.await(t, stream, sketched)
-	if tr := f.transitions(t, stream); !containsTransition(tr, func(tr trace.Transition) bool {
-		return tr.ID == fmt.Sprintf("draft-%d", maxDrafts+1) && tr.Actor == ownerActor && tr.Cause == intake.DraftAgainCause && strings.Contains(tr.Reason, note)
+	f.Await(t, stream, intakefixture.Sketched)
+	if tr := f.Transitions(t, stream); !containsTransition(tr, func(tr trace.Transition) bool {
+		return tr.ID == fmt.Sprintf("draft-%d", intake.MaxDrafts+1) && tr.Actor == intake.OwnerActor && tr.Cause == intake.DraftAgainCause && strings.Contains(tr.Reason, note)
 	}) {
 		t.Fatalf("owner's run not recorded: %+v", tr)
 	}
-	if _, err := f.c.ShedRedraft(ctx, stream, note); err == nil || strings.Contains(err.Error(), "has no accepted spec and plan") {
+	if _, err := f.C.ShedRedraft(ctx, stream, note); err == nil || strings.Contains(err.Error(), "has no accepted spec and plan") {
 		t.Fatalf("a sketched workstream's redraft took the handed path: %v", err)
 	}
 }

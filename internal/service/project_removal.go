@@ -9,8 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// projectRemovalGate requires resolution evidence for this project's members;
-// another project's unfinished member never prevents removing this one.
 func (s *Service) projectRemovalGate(id config.ProjectID) *APIError {
 	refuse := func(group config.WorkgroupID) *APIError {
 		return &APIError{Code: Validation, Message: fmt.Sprintf("project %s has an unresolved member in workgroup %s; resolve it before removing the project", id, group)}

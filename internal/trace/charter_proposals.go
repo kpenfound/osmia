@@ -126,7 +126,6 @@ func (r *Repository) CharterProposals() ([]CharterProposalState, error) {
 	return out, nil
 }
 
-// charterProposals returns the charter proposals of one workstream.
 func charterProposals(records []Record, v *workflowView, stream config.WorkstreamID) ([]CharterProposalState, error) {
 	byPath := map[string]*CharterProposalState{}
 	for _, rec := range records {
@@ -201,8 +200,6 @@ func CharterDecisions(docs []Document) ([]CharterDecision, error) {
 	return out, nil
 }
 
-// charterProposalPath reports whether parts name a charter proposal of a
-// workstream, questions/<n>/charter.json, where the question is a key.
 func charterProposalPath(parts []string) bool {
 	return len(parts) == 3 && parts[0] == "questions" && key(parts[1]) && parts[2] == "charter.json"
 }
@@ -299,8 +296,6 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	originStream, originQuestion, originProject := stream, id, project.Project()
 	ruling := existing[i].Ruling
 	if amends != "" && destination.Project != originProject {
-		// Store the proposal in the target member's trace, using an origin-qualified
-		// question key so independent member questions cannot collide.
 		targetProject, err := authority.charterMemberRepository(destination)
 		if err != nil {
 			return CharterProposal{}, err
@@ -330,8 +325,6 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	if number < 1 {
 		return CharterProposal{}, fmt.Errorf("a charter rule number starts at 1")
 	}
-	// The owner's words are in the ruling's first revision; the relay keeps
-	// them.
 	proposal := CharterProposal{Question: id, Ruling: recordPath(*ruling), RulingRevision: ruling.Revision, OwnerResponse: ruling.OwnerResponse, Rule: rule, Number: number}
 	if amends != "" {
 		proposal.SourceProject, proposal.SourceWorkstream, proposal.SourceQuestion, proposal.Amends = originProject, originStream, originQuestion, amends
@@ -364,7 +357,6 @@ func (r *Repository) ProposeCharterFor(ctx context.Context, agent string, scope 
 	return proposal, nil
 }
 
-// charterMemberRepository borrows a target member handle from the shared authority.
 func (r *Repository) charterMemberRepository(member MemberCharter) (*Repository, error) {
 	if m, ok := r.memberBinding(member.Workstream); ok {
 		return m.Project, nil

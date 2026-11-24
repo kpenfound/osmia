@@ -11,27 +11,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// upstreamMovedEvents returns the workstream's upstream moved events in the
-// order they were raised.
 func upstreamMovedEvents(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OutboxEntry {
 	t.Helper()
 	outbox, err := repository.Outbox(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	outbox = slices.DeleteFunc(outbox, func(e trace.OutboxEntry) bool { return e.Event.Kind != trace.UpstreamMovedKind })
 	slices.SortStableFunc(outbox, func(a, b trace.OutboxEntry) int { return a.At.Compare(b.At) })
 	return outbox
 }
 
-// checkMoved fails unless an upstream moved event names the workstream, the
-// drift rebase, the upstream commits and each of wants.
 func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, move trace.UpstreamMove, wants ...string) {
 	t.Helper()
 	for _, want := range append([]string{string(stream), fmt.Sprintf("drift rebase %d ", move.Drift), "from " + move.From, "to " + move.To}, wants...) {
@@ -44,27 +47,24 @@ func checkMoved(t *testing.T, e trace.OutboxEntry, stream config.WorkstreamID, m
 	}
 }
 
-// chiefDeliverer returns an event deliverer over the trace that delivers at
-// once, creating the workstream's chief-of-staff thread when it is missing.
-func chiefDeliverer(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
+func chiefDeliverer(t *testing.T, f *journey.ShedFixture, repository *trace.Repository, stream config.WorkstreamID) *events.Deliverer {
 	t.Helper()
 	if _, err := repository.ChiefOfStaffThread(stream); errors.Is(err, os.ErrNotExist) {
-		must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.s.now(), Actor: foremanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
+		fixturekit.Must(t, repository.CreateThread(context.Background(), trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: trace.ChiefOfStaff, Revision: 1, Project: repository.Project(), Workstream: stream, At: f.S.Now(), Actor: execution.ForemanActor, Cause: "test"}, Role: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff}))
 	} else {
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
-	d, err := events.New(repository, events.Options{Now: f.s.now, Profile: func() (coreadapter.Profile, error) {
+	d, err := events.New(repository, events.Options{Now: f.S.Now, Profile: func() (coreadapter.Profile, error) {
 		return coreadapter.Profile{Name: "default", Backend: "fake", Model: "test"}, nil
 	}})
-	must(t, err)
+	fixturekit.Must(t, err)
 	return d
 }
 
-// deliveredTurns counts the chief-of-staff turns whose prompt carries body.
 func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, body string) int {
 	t.Helper()
 	th, err := repository.ChiefOfStaffThread(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	n := 0
 	for _, q := range th.Turns {
 		if strings.Contains(q.Request.Prompt, body) {
@@ -74,63 +74,52 @@ func deliveredTurns(t *testing.T, repository *trace.Repository, stream config.Wo
 	return n
 }
 
-var handle = intakefixture.Handle
-
-// A drift rebase whose feature branch conflicts with upstream tells the
-// chief of staff once, with the conflict: one upstream moved event, raised
-// with drift-<k>-conflicted, delivered in one chief-of-staff turn that a
-// restart does not deliver again. The drift mason resolving the conflict may
-// file an amendment that cites the upstream commit: it raises a second
-// event, parks nothing and waits for the owner, and the turn that recovers
-// the mason's interrupted turn gets the request already filed. The approved
-// resolution raises no event of its own, and status lists both.
 func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, _ := newFinalFixture(t, "drift-moved")
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
+	f, stream, repository, _ := journey.NewFinalFixtureWith(t, "drift-moved", "")
+	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
 	ctx := context.Background()
-	from := seals(t, repository, stream)[0].Base.Commit
-	_, upstream, op := conflictedDrift(t, f, d, stream)
+	from := intakefixture.Seals(t, repository, stream)[0].Base.Commit
+	_, upstream, op := journey.ConflictedDrift(t, f, d, stream)
 	move := trace.UpstreamMove{Drift: 1, From: from, To: upstream}
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
 	moved := upstreamMovedEvents(t, repository, stream)
 	if len(moved) != 1 || moved[0].TransitionID != "drift-1-conflicted" {
 		t.Fatalf("upstream moved events of a conflicted drift rebase %+v", moved)
 	}
-	checkMoved(t, moved[0], stream, move, "feature branch "+featureBranch(stream)+" conflicts with upstream in CODEOWNERS")
+	checkMoved(t, moved[0], stream, move, "feature branch "+intake.FeatureBranch(stream)+" conflicts with upstream in CODEOWNERS")
 	conflicted := moved[0].Event.Body
-	must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
+	fixturekit.Must(t, chiefDeliverer(t, f, repository, stream).Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("the conflict was delivered in %d turns", n)
 	}
 
-	// The drift mason files an amendment from its resolve turn.
-	threads := filepath.Join(f.s.cfg.Root.String(), "threads", string(f.project), string(stream), driftMasonAgent)
-	turn := driftResolveTurnID(1, 1)
-	_, err := repository.ClaimTurn(ctx, stream, driftMasonAgent, "resolving", filepath.Join(threads, turn), f.clock.Now())
-	must(t, err)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Thread: driftMasonAgent, Turn: turn, Role: masonRole}
-	tools, err := driftMasonTools(repository, scope, f.s.now)
-	must(t, err)
+	threads := filepath.Join(f.S.Cfg.Root.String(), "threads", string(f.Project), string(stream), intake.DriftMasonAgent)
+	turn := lifecycle.DriftResolveTurnID(1, 1)
+	_, err := repository.ClaimTurn(ctx, stream, intake.DriftMasonAgent, "resolving", filepath.Join(threads, turn), f.Clock.Now())
+	fixturekit.Must(t, err)
+	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Thread: intake.DriftMasonAgent, Turn: turn, Role: intake.MasonRole}
+	tools, err := service.TestDriftMasonTools(repository, scope, f.S.Now)
+	fixturekit.Must(t, err)
 	if len(tools) != 2 {
 		t.Fatalf("the drift mason's question tools %+v", tools)
 	}
-	amend := askTool(t, tools, questions.AmendTool)
+	amend := intakefixture.AskTool(t, tools, questions.AmendTool)
 	input := `{"citations":["spec#1"],"change":"Name the upstream owner in the spec","reason":"Upstream moved ownership of internal/"}`
-	if got := handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
+	if got := intakefixture.Handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatalf("the drift mason's amend returned %s", got)
 	}
 	requests, err := trace.Read[trace.Amendment](repository, stream)
-	must(t, err)
-	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "" || requests[0].Requester.ID != driftMasonAgent {
+	fixturekit.Must(t, err)
+	if len(requests) != 1 || requests[0].Upstream == nil || *requests[0].Upstream != move || requests[0].Unit != "" || requests[0].Requester.ID != intake.DriftMasonAgent {
 		t.Fatalf("the drift mason's amendment %+v", requests)
 	}
-	if state, err := repository.Workflow(stream, amendmentSubject("1")); err != nil || state.Value != "filed" {
+	if state, err := repository.Workflow(stream, intake.AmendmentSubject("1")); err != nil || state.Value != "filed" {
 		t.Fatalf("the amendment is %+v: %v", state, err)
 	}
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, tr := range transitions {
 		if tr.Cause == "amendment_1_filed" {
 			t.Fatalf("the drift mason's amendment parked %s", tr.Subject)
@@ -142,29 +131,27 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 	}
 	checkMoved(t, moved[1], stream, move, "amendment 1 was filed by the mason", "spec#1")
 
-	// A restart interrupts the turn; its recovery files nothing new, and
-	// nothing is delivered twice.
 	restart := func() {
 		t.Helper()
-		must(t, repository.Close())
-		repository, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-		must(t, err)
-		d = drifter{&foreman{masons: newMasonController(f.s, repository)}}
+		fixturekit.Must(t, repository.Close())
+		repository, err = trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+		fixturekit.Must(t, err)
+		d = journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
 	}
 	restart()
 	defer func() { repository.Close() }()
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	awaitResolution(t, f.s, d, stream, op, "its mason's resolution")
-	recovered, err := repository.ClaimTurn(ctx, stream, driftMasonAgent, "recovering", filepath.Join(threads, "recover"), f.clock.Now())
-	must(t, err)
-	if recovered.Request.TurnID != driftMasonAgent+"-recover-1" {
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
+	journey.AwaitResolution(t, f.S, d, stream, op, "its mason's resolution")
+	recovered, err := repository.ClaimTurn(ctx, stream, intake.DriftMasonAgent, "recovering", filepath.Join(threads, "recover"), f.Clock.Now())
+	fixturekit.Must(t, err)
+	if recovered.Request.TurnID != intake.DriftMasonAgent+"-recover-1" {
 		t.Fatalf("the recovering turn is %s", recovered.Request.TurnID)
 	}
 	scope.Turn = recovered.Request.TurnID
-	tools, err = driftMasonTools(repository, scope, f.s.now)
-	must(t, err)
-	amend = askTool(t, tools, questions.AmendTool)
-	if got := handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
+	tools, err = service.TestDriftMasonTools(repository, scope, f.S.Now)
+	fixturekit.Must(t, err)
+	amend = intakefixture.AskTool(t, tools, questions.AmendTool)
+	if got := intakefixture.Handle(t, amend, input); !strings.Contains(got, `"amendment":"1"`) {
 		t.Fatalf("the recovering turn's amend returned %s", got)
 	}
 	if requests, err := trace.Read[trace.Amendment](repository, stream); err != nil || len(requests) != 1 {
@@ -174,15 +161,13 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("upstream moved events after a restart %+v", moved)
 	}
 	deliverer := chiefDeliverer(t, f, repository, stream)
-	must(t, deliverer.Pass(ctx))
+	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, moved[1].Event.Body); n != 0 {
 		t.Fatalf("the amendment's event was queued behind the conflict's turn in %d turns", n)
 	}
-	// The chief of staff takes the conflict's turn, and the amendment's
-	// event, which waited for it, goes out in the next.
-	completeDriftTurn(t, f, repository, stream, trace.ChiefOfStaff, nil)
-	must(t, deliverer.Pass(ctx))
-	must(t, deliverer.Pass(ctx))
+	journey.CompleteDriftTurn(t, f, repository, stream, trace.ChiefOfStaff, nil)
+	fixturekit.Must(t, deliverer.Pass(ctx))
+	fixturekit.Must(t, deliverer.Pass(ctx))
 	if n := deliveredTurns(t, repository, stream, conflicted); n != 1 {
 		t.Fatalf("after a restart the conflict was delivered in %d turns", n)
 	}
@@ -190,57 +175,50 @@ func TestConflictedDriftTellsTheChiefOnceAndItsMasonMayAmend(t *testing.T) {
 		t.Fatalf("the amendment's event was delivered in %d turns", n)
 	}
 
-	// The approved resolution moves the branch and raises nothing more.
-	w := resolutionWorkspace(t, f, stream)
-	must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
-	completeClaimedTurn(t, f, repository, stream, driftMasonAgent, recovered, resolvedDone("Kept both owners"))
-	awaitResolution(t, f.s, d, stream, op, "review 1")
-	completeDriftTurn(t, f, repository, stream, driftReviewerAgent, driftVerdict(t, approvedResolution))
-	if result, err := attemptOperation(t, f.s, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
+	w := journey.ResolutionWorkspace(t, f, stream)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, "CODEOWNERS"), []byte("/internal/ @upstream @feature\n"), 0600))
+	journey.CompleteClaimedTurn(t, f, repository, stream, intake.DriftMasonAgent, recovered, journey.ResolvedDone("Kept both owners"))
+	journey.AwaitResolution(t, f.S, d, stream, op, "review 1")
+	journey.CompleteDriftTurn(t, f, repository, stream, intake.DriftReviewerAgent, journey.DriftVerdict(t, journey.ApprovedResolution))
+	if result, err := journey.AttemptOperation(t, f.S, repository, stream, op, d); err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("the approved drift rebase %+v %v", result, err)
 	}
 	if again := upstreamMovedEvents(t, repository, stream); len(again) != 2 {
 		t.Fatalf("upstream moved events after the drift rebase %+v", again)
 	}
-	if state, err := repository.Workflow(stream, amendmentSubject("1")); err != nil || state.Value != "filed" {
+	if state, err := repository.Workflow(stream, intake.AmendmentSubject("1")); err != nil || state.Value != "filed" {
 		t.Fatalf("the amendment is %+v after the drift rebase: %v", state, err)
 	}
 	states, err := repository.WorkflowStates(stream)
-	must(t, err)
-	st, err := latestDrift(repository, stream, states)
-	must(t, err)
-	if st == nil || st.Outcome != driftRebased || !reflect.DeepEqual(st.Moved, []string{conflicted, moved[1].Event.Body}) {
+	fixturekit.Must(t, err)
+	st, err := lifecycle.LatestDrift(repository, stream, states)
+	fixturekit.Must(t, err)
+	if st == nil || st.Outcome != lifecycle.DriftRebased || !reflect.DeepEqual(st.Moved, []string{conflicted, moved[1].Event.Body}) {
 		t.Fatalf("status drift %+v", st)
 	}
 }
 
-// A drift rebase that carries approved units onto the rebased feature
-// branch sends their approvals back to review and tells the chief of staff
-// with each: one upstream moved event per unit, raised with its return to
-// review. The unit's reviewer then holds an amend that cites the upstream
-// commit, is told so in its review prompt, and its request parks the unit
-// for the owner once, however often it is repeated.
 func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	t.Parallel()
-	f, stream, repository := newApprovedFixture(t, "drift-approved")
+	f, stream, repository := journey.NewApprovedFixture(t, "drift-approved")
 	t.Cleanup(func() { repository.Close() })
 	ctx := context.Background()
-	from := seals(t, repository, stream)[0].Base.Commit
-	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	op := requestDrift(t, d, stream)
+	from := intakefixture.Seals(t, repository, stream)[0].Base.Commit
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
+	op := journey.RequestDrift(t, d, stream)
 	if _, err := d.Apply(ctx, op); err == nil || !strings.Contains(err.Error(), "awaits unit carryover") {
 		t.Fatalf("the drift rebase did not carry the approved units: %v", err)
 	}
 	for _, unit := range []string{"resume", "dedupe"} {
-		for _, o := range rebaseOperations(t, repository, stream, unit) {
-			settleOperation(t, f.s, repository, stream, o.Operation, rebaser(d))
+		for _, o := range journey.RebaseOperations(t, repository, stream, unit) {
+			journey.SettleOperation(t, f.S, repository, stream, o.Operation, journey.Rebaser(d))
 		}
 	}
-	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
+	if result := journey.SettleOperation(t, f.S, repository, stream, op, d); result.Outcome != "succeeded" {
 		t.Fatalf("the drift rebase %+v", result)
 	}
-	tip := featureTip(t, f, stream)
+	tip := journey.FeatureTip(t, f, stream)
 	move := trace.UpstreamMove{Drift: 1, From: from, To: upstream}
 	moved := upstreamMovedEvents(t, repository, stream)
 	if len(moved) != 2 {
@@ -252,25 +230,24 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 			t.Fatalf("an upstream moved event of %s", e.TransitionID)
 		}
 		checkMoved(t, e, stream, move, fmt.Sprintf("unit %s's approval no longer holds", unit), tip)
-		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != UnitChecking {
+		if state, err := repository.Workflow(stream, trace.UnitSubject(unit)); err != nil || state.Value != execution.UnitChecking {
 			t.Fatalf("unit %s is %+v: %v", unit, state, err)
 		}
 	}
 
-	// dedupe's reviewer reads the carried candidate once its checks pass.
-	runChecks(t, f.s, repository, stream)
-	r := &reviewers{masons: newMasonController(f.s, repository)}
-	agent := reviewerAgent("dedupe")
+	journey.RunChecks(t, f.S, repository, stream)
+	r := &journey.Reviewers{Masons: journey.NewMasonController(f.S, repository)}
+	agent := intake.ReviewerAgent("dedupe")
 	if th, err := repository.Thread(stream, agent); err == nil && th.Active != "" {
-		must(t, repository.AbandonTurn(ctx, stream, agent, th.Active, f.s.now()))
+		fixturekit.Must(t, repository.AbandonTurn(ctx, stream, agent, th.Active, f.S.Now()))
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
 	state, err := repository.Workflow(stream, trace.UnitSubject("dedupe"))
-	must(t, err)
-	must(t, r.one(ctx, stream, "dedupe", state, false))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, r.One(ctx, stream, "dedupe", state, false))
 	th, err := repository.Thread(stream, agent)
-	must(t, err)
+	fixturekit.Must(t, err)
 	review := th.Turns[len(th.Turns)-1]
 	if want := fmt.Sprintf("drift rebase 1 moved its upstream base from %s to %s", from, upstream); !strings.Contains(review.Request.Prompt, want) {
 		t.Fatalf("the review prompt lacks %q:\n%s", want, review.Request.Prompt)
@@ -278,34 +255,29 @@ func TestDriftCarryReturnsApprovalsAndTheirReviewerMayAmend(t *testing.T) {
 	if !strings.Contains(review.Request.Prompt, "call "+questions.AskTool+" to raise it") || !strings.Contains(review.Request.Prompt, "citing upstream commit "+upstream) {
 		t.Fatalf("the review prompt does not send upstream's change to the chief of staff:\n%s", review.Request.Prompt)
 	}
-	// The reviewer of a carried candidate asks; it files no amendment.
-	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.s.cfg.Root.String(), "threads", "reviewing"), f.clock.Now())
-	must(t, err)
-	scope := coreadapter.Scope{Project: string(f.project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: reviewerRole}
-	tools, err := questions.Tools(repository, agent, scope, f.s.now)
-	must(t, err)
+	q, err := repository.ClaimTurn(ctx, stream, agent, "reviewing", filepath.Join(f.S.Cfg.Root.String(), "threads", "reviewing"), f.Clock.Now())
+	fixturekit.Must(t, err)
+	scope := coreadapter.Scope{Project: string(f.Project), Workstream: string(stream), Unit: "dedupe", Thread: agent, Turn: q.Request.TurnID, Role: intake.ReviewerRole}
+	tools, err := questions.Tools(repository, agent, scope, f.S.Now)
+	fixturekit.Must(t, err)
 	if len(tools) != 1 || tools[0].Name != questions.AskTool {
 		t.Fatalf("the reviewer's question tools %+v", tools)
 	}
 
-	// resume's reviewer reads a carried candidate too.
-	if _, drifted, err := unitDrift(repository, stream, "resume"); err != nil || !drifted {
+	if _, drifted, err := lifecycle.UnitDrift(repository, stream, "resume"); err != nil || !drifted {
 		t.Fatalf("resume's carried candidate: %t %v", drifted, err)
 	}
 }
 
-// A drift rebase that moves the seal's base under an assembled workstream's
-// completed final report tells the chief of staff the report no longer
-// authorises delivery, with the move.
 func TestDriftUnderAFinalReportTellsTheChief(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, repository, report := journey.DeliveryFixture(t)
 	ctx := context.Background()
-	from := seals(t, repository, stream)[0].Base.Commit
-	upstream := advanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
-	d := drifter{&foreman{masons: newMasonController(f.s, repository)}}
-	op := requestDrift(t, d, stream)
-	if result := settleOperation(t, f.s, repository, stream, op, d); result.Outcome != "succeeded" {
+	from := intakefixture.Seals(t, repository, stream)[0].Base.Commit
+	upstream := journey.AdvanceUpstream(t, f, map[string]string{"UPSTREAM.md": "upstream\n"})
+	d := journey.Drifter{Foreman: &journey.Foreman{Masons: journey.NewMasonController(f.S, repository)}}
+	op := journey.RequestDrift(t, d, stream)
+	if result := journey.SettleOperation(t, f.S, repository, stream, op, d); result.Outcome != "succeeded" {
 		t.Fatalf("the drift rebase %+v", result)
 	}
 	moved := upstreamMovedEvents(t, repository, stream)
@@ -313,14 +285,13 @@ func TestDriftUnderAFinalReportTellsTheChief(t *testing.T) {
 		t.Fatalf("upstream moved events %+v", moved)
 	}
 	checkMoved(t, moved[0], stream, trace.UpstreamMove{Drift: 1, From: from, To: upstream}, fmt.Sprintf("final review %d read the feature branch on the old upstream base", report.Review))
-	reviewer := &finalReviewer{s: f.s, repository: repository}
-	if _, reason, err := reviewer.finalGate(ctx, stream); err != nil || reason == "" {
+	reviewer := &journey.FinalReviewer{S: f.S, Repository: repository}
+	if _, reason, err := reviewer.FinalGate(ctx, stream); err != nil || reason == "" {
 		t.Fatalf("the final gate after the drift rebase: %q %v", reason, err)
 	}
 
-	// Another drift rebase moves nothing a report reads, and says nothing.
-	op = requestDrift(t, d, stream)
-	settleOperation(t, f.s, repository, stream, op, d)
+	op = journey.RequestDrift(t, d, stream)
+	journey.SettleOperation(t, f.S, repository, stream, op, d)
 	if again := upstreamMovedEvents(t, repository, stream); len(again) != 1 {
 		t.Fatalf("upstream moved events after a second drift rebase %+v", again)
 	}

@@ -9,36 +9,37 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestDesignProductionSharedChiefActsOnAMember covers a cross-repo
-// workgroup's shared chief of staff, whose conversation belongs to the
-// workgroup trace's host: naming a member with workstream, its tools read
-// that member's records and code and act on its own trace in its own repo,
-// and a workstream outside the workgroup is refused.
 func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{wait: lifecycleAwait})
-	defer f.stop(t)
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
-	f.awaitApproved(t)
-	repo, err := f.s.repository(f.project2)
-	must(t, err)
-	f.wait(t, "member building", func() bool {
-		feature, err := repo.Workflow(f.stream2, trace.FeatureSubject)
-		must(t, err)
-		return feature.Value == BuildingState
+	f := journey.NewConfiguredProductionDesignFixture(t, journey.ProductionDesignConfiguration{Wait: journey.LifecycleAwait})
+	defer f.Stop(t)
+	f.StartOwner(t)
+	packet := f.AwaitPacket(t)
+	_, err := f.C.Ratify(ctx, f.Stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
+	fixturekit.Must(t, err)
+	f.AwaitApproved(t)
+	repo, err := f.S.Repository(f.Project2)
+	fixturekit.Must(t, err)
+	f.Wait(t, "member building", func() bool {
+		feature, err := repo.Workflow(f.Stream2, trace.FeatureSubject)
+		fixturekit.Must(t, err)
+		return feature.Value == intake.BuildingState
 	})
 
-	member := string(f.stream2)
+	member := string(f.Stream2)
 	const marker = "Settle the client's discovered work."
 	type call struct {
 		tool  string
@@ -52,39 +53,37 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		{"inspect_code", map[string]any{"workstream": member, "path": "internal/trace/git.go"}},
 	}
 	results := make([]string, len(calls))
-	f.engine.Mu.Lock()
-	fallback := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	fallback := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if !strings.HasPrefix(req.Name, "message_") || !strings.HasSuffix(strings.TrimSpace(req.Prompt), marker) {
 			return fallback(ctx, req, verified, tools)
 		}
-		// A failed call is a result too, so the turn completes and the
-		// assertions below name it.
 		for i, c := range calls {
-			result, err := callTool(ctx, tools, c.tool, c.input)
+			result, err := fixturekit.CallTool(ctx, tools, c.tool, c.input)
 			if err != nil {
 				result = fmt.Sprintf("%s failed: %v", c.tool, err)
 			}
 			results[i] = result
 		}
-		return questionResult(req, "session-chief", "Client work settled."), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Client work settled."), nil
 	}
-	f.engine.Mu.Unlock()
-	sent, err := f.c.Send(ctx, f.stream1, marker)
-	must(t, err)
-	f.wait(t, "shared chief member turn completion", func() bool {
-		entries, err := f.c.Conversation(ctx, f.stream1)
-		must(t, err)
+	f.Engine.Mu.Unlock()
+	sent, err := f.C.Send(ctx, f.Stream1, marker)
+	fixturekit.Must(t, err)
+	f.Wait(t, "shared chief member turn completion", func() bool {
+		entries, err := f.C.Conversation(ctx, f.Stream1)
+		fixturekit.Must(t, err)
 		for _, e := range entries.Entries {
-			if e.Turn == sent.Turn && e.State == TurnDone {
+			if e.Turn == sent.Turn && e.State == api.TurnDone {
 				return true
 			}
 		}
 		return false
 	})
 
-	docs, err := trace.Read[trace.Document](repo, f.stream2)
-	must(t, err)
+	docs, err := trace.Read[trace.Document](repo, f.Stream2)
+	fixturekit.Must(t, err)
 	var listed map[string]int
 	_ = json.Unmarshal([]byte(results[0]), &listed)
 	var units []string
@@ -92,7 +91,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	for _, d := range docs {
 		if d.Path == plan.PlanPath {
 			graph, err := plan.Parse([]byte(d.Content))
-			must(t, err)
+			fixturekit.Must(t, err)
 			units = units[:0]
 			for _, u := range graph.Units {
 				units = append(units, u.ID)
@@ -114,8 +113,8 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	if len(units) == 0 || !strings.Contains(results[3], "units "+strings.Join(units, ", ")+" have not merged") {
 		t.Fatalf("move_workstream did not read the member's sealed plan %v: %s", units, results[3])
 	}
-	clone := f.repos[1].Clone
-	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+featureBranch(f.stream2))
+	clone := f.Repos[1].Clone
+	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+intake.FeatureBranch(f.Stream2))
 	if tip == "" {
 		tip = gitOutput(t, clone, "rev-parse", "HEAD")
 	}
@@ -128,12 +127,11 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		t.Fatalf("inspect_code did not read the member's clone at %s: %s", tip, results[4])
 	}
 
-	// The host conversation's own trace records none of the member's work.
-	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, f.stream2)
-	must(t, err)
+	authority, host, _, closeAuthority, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream2)
+	fixturekit.Must(t, err)
 	hosted, err := trace.Read[trace.Document](authority, host)
 	closeAuthority()
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, d := range hosted {
 		if strings.HasPrefix(d.Path, "discoveries/") {
 			t.Fatalf("the member's discovery was recorded on the host: %s", d.Path)
@@ -141,8 +139,6 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	}
 }
 
-// gitOutput runs git in dir and returns its trimmed output, or nothing when
-// git exits unsuccessfully.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

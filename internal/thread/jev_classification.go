@@ -12,35 +12,24 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// classificationTask is the Jev judgment that classifies a clean mason
-// response. Bump classificationVersion whenever its questions, their
-// interpretation or the thresholds below change.
 const (
 	classificationTask    = "mason-classification"
 	classificationVersion = 1
 )
 
-// The probabilities a judgment's answers must reach to be accepted. A
-// gave_up class contests the unit, so it needs more than the others, and
-// every class but unclear needs a passage of the response supporting it.
 const (
 	classThreshold  = 0.7
 	gaveUpThreshold = 0.9
 	spanThreshold   = 0.5
 )
 
-// maxSpans bounds the passages offered as evidence; a longer response offers
-// its last ones. maxSpanRunes bounds one passage.
 const (
 	maxSpans     = 64
 	maxSpanRunes = 500
 )
 
-// noSpan is the evidence option that no passage supports a class.
 const noSpan = "none"
 
-// classOptions are the classes a judgment chooses from, as the model sees
-// them.
 var classOptions = []systemone.Option{
 	{Name: "asked_in_prose", Description: "The agent asks a question, or asks for a decision or clarification, in its text instead of calling ask."},
 	{Name: "claims_done", Description: "The agent states that the work is finished or that its acceptance holds."},
@@ -48,8 +37,6 @@ var classOptions = []systemone.Option{
 	{Name: "unclear", Description: "None of these: the agent reports progress or next steps, or the message is ambiguous."},
 }
 
-// evidenceQuestions ask, for each class but unclear, which passage of the
-// response supports it.
 var evidenceQuestions = map[string]string{
 	"asked_in_prose": "Which passage of the message asks a question or asks for a decision or clarification?",
 	"claims_done":    "Which passage of the message states that the work is finished or that its acceptance holds?",
@@ -58,9 +45,6 @@ var evidenceQuestions = map[string]string{
 
 func evidenceQuestion(class string) string { return "evidence-" + class }
 
-// judgeClassification asks Jev to classify response's clean mason turn and
-// reports whether it replaced the rule's classification with its own. Any
-// fallback leaves the classification as it was.
 func (r Runner) judgeClassification(ctx context.Context, req trace.TurnRequest, scope coreadapter.Scope, response *trace.TurnResponse) bool {
 	c := response.Classification
 	spans := responseSpans(c.Window)
@@ -107,10 +91,6 @@ func (r Runner) judgeClassification(ctx context.Context, req trace.TurnRequest, 
 
 func spanOption(i int) string { return fmt.Sprintf("span-%d", i+1) }
 
-// interpretClassification returns the class a response chose and its
-// evidence: the supporting passage, or for unclear the class's probability.
-// It returns why the answers are not accepted instead when the class falls
-// below its threshold or no passage supports it.
 func interpretClassification(resp systemone.Response, spans []string) (class, evidence, reason string) {
 	a := resp.Answers["class"]
 	class, p := a.Choice, a.Probabilities[a.Choice]
@@ -133,9 +113,6 @@ func interpretClassification(resp systemone.Response, spans []string) (class, ev
 	return "", "", fmt.Sprintf("no passage supports class %s with probability %.2f", class, spanThreshold)
 }
 
-// responseSpans splits a response into the passages offered as evidence:
-// its sentences and lines, each at most maxSpanRunes, the last maxSpans of
-// them.
 func responseSpans(window string) []string {
 	var spans []string
 	add := func(s []rune) {

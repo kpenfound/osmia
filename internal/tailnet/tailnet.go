@@ -1,3 +1,6 @@
+// Package tailnet serves the service's HTTP surface on the owner's tailnet and
+// tells a request which listener it arrived on and whether its caller is
+// allowed.
 package tailnet
 
 import (
@@ -42,15 +45,8 @@ type Listener interface {
 // and listens for HTTP on its port 80.
 type Join func(hostname, dir string) (Listener, error)
 
-// loginURLPattern finds the login URL embedded Tailscale's logger prints
-// while the node waits for approval, so it can travel as a field of its own
-// rather than only within the logged message text.
 var loginURLPattern = regexp.MustCompile(`https?://\S+`)
 
-// tailscaleLogf adapts logger to embedded Tailscale's logf signature: every
-// line it logs becomes one structured record, with any URL the line
-// mentions, such as the tailnet login URL shown while the node waits for
-// approval, as its own field.
 func tailscaleLogf(logger *slog.Logger) func(string, ...any) {
 	return func(format string, args ...any) {
 		line := strings.TrimSpace(fmt.Sprintf(format, args...))
@@ -66,9 +62,6 @@ func tailscaleLogf(logger *slog.Logger) func(string, ...any) {
 	}
 }
 
-// certificateLogf forwards, as tailscaleLogf does, only the lines embedded
-// Tailscale's backend logs about the node's TLS certificate, so a slow or
-// failed issuance shows its progress without the backend's other output.
 func certificateLogf(logger *slog.Logger) func(string, ...any) {
 	logf := tailscaleLogf(logger)
 	return func(format string, args ...any) {
@@ -127,7 +120,6 @@ func listenHTTPS(ctx context.Context, client certificateClient, listen func(stri
 	if !containsFold(status.CertDomains, name) {
 		return nil, "", errors.New("enable HTTPS certificates in the tailnet admin console for " + name)
 	}
-	// Fetch ahead of serving so issuance failures are visible without a handshake.
 	certPEM, keyPEM, err := client.CertPair(ctx, name)
 	if err == nil {
 		_, err = tls.X509KeyPair(certPEM, keyPEM)
@@ -161,8 +153,6 @@ func (l tsnetListener) State(ctx context.Context) api.TailnetStatus {
 	return tailnetState(status.BackendState, status.AuthURL)
 }
 
-// tailnetState maps a Tailscale backend state and its login URL to the
-// listener's state.
 func tailnetState(backend, authURL string) api.TailnetStatus {
 	switch backend {
 	case "Running":
@@ -266,8 +256,8 @@ func containsFold(names []string, host string) bool {
 // there.
 type Link struct {
 	mu   sync.Mutex
-	node Listener // nil while the tailnet is down
-	down string   // why there is no node
+	node Listener
+	down string
 	// HTTPSEnabled is fixed at startup.
 	HTTPSEnabled                          bool
 	httpsState, httpsReason, httpsAddress string
@@ -336,7 +326,6 @@ func WebAllowed(r *http.Request) bool {
 	return config.LoopbackHost(requestHost(r)) && jsonOrRead(r)
 }
 
-// requestHost is r's Host header without its port or IPv6 brackets.
 func requestHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.Host)
 	if err != nil {
@@ -345,8 +334,6 @@ func requestHost(r *http.Request) string {
 	return host
 }
 
-// jsonOrRead reports whether r is a GET or HEAD, or carries a JSON content
-// type.
 func jsonOrRead(r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true

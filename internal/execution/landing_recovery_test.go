@@ -84,7 +84,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 				if tr.Subject == trace.UnitSubject("resume") && tr.To == UnitMerged {
 					merged = append(merged, tr.ID)
 				}
-				if tr.Subject == landingSubject("resume") && strings.HasPrefix(tr.To, "landed-") {
+				if tr.Subject == LandingSubject("resume") && strings.HasPrefix(tr.To, "landed-") {
 					landed = append(landed, tr.ID)
 				}
 			}
@@ -95,7 +95,7 @@ func TestInterruptedLandingIsReconciled(t *testing.T) {
 			must(t, err)
 			var landing UnitLanding
 			for _, d := range docs {
-				if d.ID == landingDocument("resume") {
+				if d.ID == LandingDocument("resume") {
 					must(t, json.Unmarshal([]byte(d.Content), &landing))
 				}
 			}

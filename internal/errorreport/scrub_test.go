@@ -29,9 +29,9 @@ func TestScrubCases(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
-		want    []string // fragments that must be present
-		absent  []string // fragments that must be gone
-		exactly string   // the whole result, when set
+		want    []string
+		absent  []string
+		exactly string
 	}{
 		{name: "target repository stays", in: "failed on " + targetRepo + " and other/thing", want: []string{targetRepo, PlaceholderRepo}, absent: []string{"other/thing"}},
 		{name: "target repository matches without case", in: "failed on KPenfound/Osmia", want: []string{"KPenfound/Osmia"}},
@@ -94,7 +94,6 @@ func TestScrubCases(t *testing.T) {
 }
 
 func TestScrubRemovesKnownAndExtraSecrets(t *testing.T) {
-	// serial: the known secrets come from the environment.
 	t.Setenv("GITHUB_TOKEN", "plain-secret-value-1")
 	s := NewScrubber(ScrubOptions{Repository: targetRepo, Secrets: []string{"extra-secret-value-2"}})
 	got, err := s.Scrub("a plain-secret-value-1 b extra-secret-value-2 c")

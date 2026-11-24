@@ -23,12 +23,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// awaitOwnerTurn reads the production runner's completed durable turn, including
-// the routing note originally recorded by the conversation endpoint.
 func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member config.WorkstreamID) {
 	t.Helper()
-	deadline := time.Now().Add(browserTimeout)
-	for {
+	awaitCondition(t, "owner turn "+text+" completing", func() bool {
 		thread, err := f.repo.ChiefOfStaffThread(stream)
 		must(t, err)
 		for _, q := range thread.Turns {
@@ -42,20 +39,15 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 			if member != "" && !strings.Contains(q.Request.SystemPrompt, note+string(member)) {
 				t.Fatalf("member message lost note: %s", q.Request.SystemPrompt)
 			}
-			return
+			return true
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("owner turn %q did not complete", text)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 }
 
-// runChief uses the production dispatcher, grants and thread runner with a fake
-// execution backend; only its scripted replies replace model execution.
 func (f *workgroupPageFixture) runChief(t *testing.T) {
 	t.Helper()
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Keep worker activity stable during chief conversation", Source: runtime.PauseOwner})
 	f.c.Close()
 	must(t, f.s.Close())
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
@@ -121,7 +113,6 @@ func TestBrowserMemberConversationRoutingAcrossRestart(t *testing.T) {
 	f.awaitOwnerTurn(t, "Question for the whole group", "")
 	p.AwaitText("#workgroup-content .feed", "Both repos will coordinate their changes.")
 	p.Await("both production send paths were used once", `memberPosts.filter(x => x === `+quote("/v1/conversation/"+string(quiet))+`).length === 1 && memberPosts.filter(x => x === `+quote("/v1/workgroups/"+string(f.group.ID)+"/conversation")+`).length === 1`)
-	// Shared status changes and messages affect only the group's unread state.
 	p.SelectWorkstream(quiet)
 	p.AwaitText("#workstream-head [data-field=chief-status]", "Chief status after Question for the whole group")
 	p.Click("#project-home")
@@ -166,9 +157,6 @@ func TestBrowserOpenSingleMemberGainsFollowup(t *testing.T) {
 	p.Await("single-member chat and no group row", `document.querySelector('#workstreams .composer textarea') && !document.querySelector('[data-select-workgroup]')`)
 	p.TypeInto("#workstreams .composer textarea", "Unsent single-member draft")
 	p.Eval(`window.membershipDocument = 'same document'`, nil)
-	// This is the production membership path used when an approved amendment
-	// adds a follow-up. It allocates and joins the member through the controller,
-	// preserving the existing group's authority and conversation.
 	sl := trace.Slice{Workstream: stream, Spec: fixturekit.ValidSpec, Plan: fixturekit.ValidPlan}
 	change := lifecycle.WorkgroupChange{ID: "browser-followup", Host: stream, Workgroup: f.group.ID,
 		State: "presented", Request: lifecycle.ChangeRequest{Kind: "amend", Scope: "workgroup", Change: "Add the approved follow-up"},

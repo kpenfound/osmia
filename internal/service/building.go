@@ -6,16 +6,13 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// unitStates returns states, latest cards, landings and deferrals, taken from
-// the given workflow states, reports, landing and dispatch documents, of the
-// units of the workstream's sealed plan and final-review follow-ups, in
-// order: none before their unit states are recorded.
 func unitStates(repository *trace.Repository, stream config.WorkstreamID, states map[string]trace.WorkflowState) ([]UnitStatus, error) {
 	latest, _, found, err := seal.Latest(repository, stream)
 	if err != nil || !found {
@@ -44,7 +41,7 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	landings := map[string]*UnitLanding{}
 	dispatches := map[string]trace.Document{}
 	for _, document := range documents {
-		if document.Unit != "" && document.ID == dispatchDocument(document.Unit) {
+		if document.Unit != "" && document.ID == execution.DispatchDocument(document.Unit) {
 			dispatches[document.Unit] = document
 			continue
 		}
@@ -74,7 +71,7 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 			continue
 		}
 		status := UnitStatus{Unit: u.ID, State: state.Value, Card: cards[u.ID], Landing: landings[u.ID]}
-		if status.Deferral, err = currentDeferral(dispatches[u.ID], state); err != nil {
+		if status.Deferral, err = execution.CurrentDeferral(dispatches[u.ID], state); err != nil {
 			return nil, err
 		} else if status.Deferral != nil {
 			status.Reason = status.Deferral.Message

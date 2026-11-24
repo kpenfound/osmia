@@ -6,7 +6,14 @@ import (
 	fmt "fmt"
 	fs "io/fs"
 	os "os"
-	exec "os/exec"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	filepath "path/filepath"
 	reflect "reflect"
 	slices "slices"
@@ -38,12 +45,7 @@ type delivered struct {
 }
 
 func TestJujutsuWorkspacesDemonstration(t *testing.T) {
-	if _, err := exec.LookPath("jj"); err != nil {
-		if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
-			t.Fatalf("jj is required but not on PATH: %v", err)
-		}
-		t.Skip("jj is not installed")
-	}
+	intakefixture.RequireJJ(t)
 	t.Parallel()
 	var mu sync.Mutex
 	runs := map[string]delivered{}
@@ -86,30 +88,30 @@ func deliverOn(t *testing.T, backend string) delivered {
 func deliverOnProject(t *testing.T, backend string, sameRepository bool) delivered {
 	t.Helper()
 	ctx := context.Background()
-	f, masons := newMasonFixture(t, 1, validPlan)
-	defer func() { f.stop(t) }()
+	f, masons := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+	defer func() { f.Stop(t) }()
 
-	f.stop(t)
-	configPath := filepath.Join(f.opts.Config.Root, "config.toml")
+	f.Stop(t)
+	configPath := filepath.Join(f.Opts.Config.Root, "config.toml")
 	text, err := os.ReadFile(configPath)
-	must(t, err)
+	fixturekit.Must(t, err)
 	lines := strings.Split(string(text), "\n")
 	for i, line := range lines {
 		if strings.HasPrefix(line, "workspaces = ") {
 			lines[i] = fmt.Sprintf("workspaces = %q", backend)
 		}
 	}
-	must(t, os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0600))
+	fixturekit.Must(t, os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0600))
 
 	var stream config.WorkstreamID
-	home := filepath.Dir(f.clone)
+	home := filepath.Dir(f.Clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
+	fixturekit.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
 	if sameRepository {
 		fork = filepath.Join(home, "remotes", "dagger", "dagger.git")
-		demoGit(t, home, "-C", f.clone, "remote", "rename", "upstream", "origin")
-		fixturekit.EditProjectSettings(t, f.opts.Config.Root, f.s.cfg.Project.ID, func(text string) string {
+		fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "rename", "upstream", "origin")
+		fixturekit.EditProjectSettings(t, f.Opts.Config.Root, f.S.Cfg.Project.ID, func(text string) string {
 			var kept []string
 			for _, line := range strings.Split(text, "\n") {
 				if !strings.HasPrefix(strings.TrimSpace(line), "fork") {
@@ -119,43 +121,43 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 			return strings.Join(kept, "\n")
 		})
 	} else {
-		demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+		fixturekit.DemoGit(t, home, "-C", f.Clone, "remote", "add", "origin", fork)
 	}
-	originalBase := strings.TrimSpace(demoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "main"))
+	originalBase := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "main"))
 	forkBranch := func() string {
-		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
+		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}
-	prs := &fakePulls{Fork: forkBranch, SyncHead: true}
-	f.opts.PullRequests = prs
+	prs := &fixturekit.FakePulls{Fork: forkBranch, SyncHead: true}
+	f.Opts.PullRequests = prs
 
 	problems := &demoProblems{}
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	answered := questions.TurnID("1")
 	masons.Mu.Lock()
-	masons.Play[answered] = reportDone("Uploads resume")
-	masons.Play[masonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
+	masons.Play[answered] = intakefixture.ReportDone("Uploads resume")
+	masons.Play[execution.MasonTurnID("dedupe")] = func(ctx context.Context, req agent.Request, tools *mcp.ClientSession) error {
 		if err := os.WriteFile(filepath.Join(req.Workspace.Directory(), "internal/trace/dedupe.go"), []byte("package trace\n// Skip acknowledged chunks.\n"), 0600); err != nil {
 			return err
 		}
-		if recorded, reason, err := done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
+		if recorded, reason, err := intakefixture.Done(ctx, tools, map[string]any{"outcome": "Acknowledged chunks are skipped"}); err != nil || !recorded {
 			return fmt.Errorf("done refused: %q %v", reason, err)
 		}
 		return nil
 	}
 	masons.Mu.Unlock()
-	f.engine.Mu.Lock()
-	f.engine.Turns[masonTurnID("resume")] = masons.Asking(p, "", "1")
-	f.engine.Turns[answered] = masons.Turn
-	chief := f.engine.Turns["*"]
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[execution.MasonTurnID("resume")] = masons.Asking(p, "", "1")
+	f.Engine.Turns[answered] = masons.Turn
+	chief := f.Engine.Turns["*"]
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		switch {
 		case strings.HasPrefix(req.Name, "reviewer-") || strings.HasPrefix(req.Name, "reviewer_"):
-			body, err := callTool(ctx, tools, verdictTool, map[string]any{"decision": "satisfactory", "summary": reviewSummary, "findings": []ReviewFinding{}})
+			body, err := fixturekit.CallTool(ctx, tools, execution.VerdictTool, map[string]any{"decision": "satisfactory", "summary": fixturekit.ReviewSummary, "findings": []api.ReviewFinding{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("review %s: %s: %v", req.Name, body, err)
 			}
 		case strings.HasPrefix(req.Name, "final-"):
-			body, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
+			body, err := fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Resumable uploads", "findings": []any{}})
 			if err != nil || !strings.Contains(body, `"recorded":true`) {
 				problems.report("final report %s: %s: %v", req.Name, body, err)
 			}
@@ -164,12 +166,12 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 		return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
-	f.engine.Mu.Unlock()
-	f.start(t)
+	f.Engine.Mu.Unlock()
+	f.Start(t)
 
 	noJJ := func(when string) {
 		t.Helper()
-		must(t, filepath.WalkDir(f.clone, func(path string, d fs.DirEntry, err error) error {
+		fixturekit.Must(t, filepath.WalkDir(f.Clone, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					return nil
@@ -183,37 +185,37 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}))
 	}
 
-	all, err := f.c.Statuses(ctx)
-	must(t, err)
+	all, err := f.C.Statuses(ctx)
+	fixturekit.Must(t, err)
 	if all.Workspaces.Setting != backend || all.Workspaces.Backend != backend {
 		t.Fatalf("service status workspaces %+v, want %s", all.Workspaces, backend)
 	}
-	stream = f.shedAs(t, "jujutsu-workspaces")
-	st, err := f.c.Status(ctx, stream)
-	must(t, err)
+	stream = f.ShedAs(t, "jujutsu-workspaces")
+	st, err := f.C.Status(ctx, stream)
+	fixturekit.Must(t, err)
 	if st.Workspaces != backend {
 		t.Fatalf("workstream %s status reports %q workspaces, want %q", stream, st.Workspaces, backend)
 	}
 	noJJ("sealed")
-	f.ratifiedBuild(t, stream)
+	f.RatifiedBuild(t, stream)
 
-	eventually(t, "question 1 was never escalated", func() bool {
-		asked, err := f.repository().Questions(stream)
-		must(t, err)
+	intakefixture.Eventually(t, "question 1 was never escalated", func() bool {
+		asked, err := f.Repository().Questions(stream)
+		fixturekit.Must(t, err)
 		return slices.ContainsFunc(asked, func(q trace.QuestionState) bool { return q.Asked.ID == "1" && q.State == trace.QuestionEscalated })
 	})
-	f.rule(t, "1")
+	f.Rule(t, "1")
 
-	f.awaitMerged(t, stream, "resume")
+	f.AwaitMerged(t, stream, "resume")
 	noJJ("resume landed")
-	f.awaitMerged(t, stream, "dedupe")
+	f.AwaitMerged(t, stream, "dedupe")
 	noJJ("dedupe landed")
-	cfg := f.s.current()
-	for name, w := range map[string]streamWorkspaces{
-		"unit":    newUnitWorkspaces(cfg, f.repository()).streamWorkspaces,
-		"feature": featureWorkspaces(cfg, f.repository()),
+	cfg := f.S.Current()
+	for name, w := range map[string]intake.StreamWorkspaces{
+		"unit":    journey.NewUnitWorkspaces(cfg, f.Repository()).StreamWorkspaces,
+		"feature": intake.FeatureWorkspaces(cfg, f.Repository()),
 	} {
-		provider := providerOf(t, w, stream)
+		provider := intakefixture.ProviderOf(t, w, stream)
 		_, onJJ := provider.(*workspace.Jujutsu)
 		if onJJ != (backend == config.WorkspacesJujutsu) {
 			t.Fatalf("the %s workspaces of workstream %s are %T on %s", name, stream, provider, backend)
@@ -224,15 +226,15 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		}
 	}
 
-	f.awaitFeature(t, stream, AssembledState)
-	var presented DeliveryPresentation
-	eventually(t, "final review never presented the delivery", func() bool {
-		presented, err = f.c.Delivery(ctx, stream)
+	f.AwaitFeature(t, stream, intake.AssembledState)
+	var presented api.DeliveryPresentation
+	intakefixture.Eventually(t, "final review never presented the delivery", func() bool {
+		presented, err = f.C.Delivery(ctx, stream)
 		return err == nil
 	})
-	_, err = f.c.ApproveDelivery(ctx, stream, DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
-	must(t, err)
-	f.awaitFeature(t, stream, DeliveredState)
+	_, err = f.C.ApproveDelivery(ctx, stream, api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash})
+	fixturekit.Must(t, err)
+	f.AwaitFeature(t, stream, intake.DeliveredState)
 	problems.check(t)
 	p.Check(t)
 	masons.Check(t)
@@ -241,16 +243,16 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		t.Fatalf("pull requests %+v", prs.Prs)
 	}
 	prs.Mu.Unlock()
-	st, err = f.c.Status(ctx, stream)
-	must(t, err)
+	st, err = f.C.Status(ctx, stream)
+	fixturekit.Must(t, err)
 	if st.Workspaces != backend {
 		t.Fatalf("delivered workstream %s status reports %q workspaces, want %q", stream, st.Workspaces, backend)
 	}
 	noJJ("delivered")
 
-	base := strings.TrimSpace(demoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "refs/heads/main"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", filepath.Join(home, "remotes", "dagger", "dagger.git"), "rev-parse", "refs/heads/main"))
 	var out delivered
-	out.Refs = strings.Fields(strings.ReplaceAll(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(refname)"), string(stream), "<workstream>"))
+	out.Refs = strings.Fields(strings.ReplaceAll(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(refname)"), string(stream), "<workstream>"))
 	wantRefs := []string{"refs/heads/osmia/<workstream>"}
 	if sameRepository {
 		wantRefs = []string{"refs/heads/main", "refs/heads/osmia/<workstream>"}
@@ -261,8 +263,8 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 	if !slices.Equal(out.Refs, wantRefs) {
 		t.Fatalf("the fork's refs %v", out.Refs)
 	}
-	for _, commit := range strings.Fields(demoGit(t, home, "-C", fork, "rev-list", "--reverse", "--topo-order", base+".."+forkBranch())) {
-		raw := demoGit(t, home, "-C", fork, "cat-file", "commit", commit)
+	for _, commit := range strings.Fields(fixturekit.DemoGit(t, home, "-C", fork, "rev-list", "--reverse", "--topo-order", base+".."+forkBranch())) {
+		raw := fixturekit.DemoGit(t, home, "-C", fork, "cat-file", "commit", commit)
 		header, message, _ := strings.Cut(raw, "\n\n")
 		c := forkCommit{Message: runIndependent(message, stream)}
 		for line := range strings.SplitSeq(header, "\n") {
@@ -288,7 +290,7 @@ func deliverOnProject(t *testing.T, backend string, sameRepository bool) deliver
 		if !slices.Contains(c.Headers, "gpgsig") || c.Author != "Delivery Owner <delivery@example.invalid" {
 			t.Fatalf("commit lacks owner attribution or signature: %+v", c)
 		}
-		c.Paths = strings.Fields(demoGit(t, home, "-C", fork, "ls-tree", "-r", "--name-only", commit))
+		c.Paths = strings.Fields(fixturekit.DemoGit(t, home, "-C", fork, "ls-tree", "-r", "--name-only", commit))
 		for _, path := range c.Paths {
 			if slices.Contains(strings.Split(path, "/"), ".jj") {
 				t.Fatalf("commit %s on the fork holds %s", commit, path)
@@ -304,12 +306,7 @@ func TestDeliveryWithoutForkOnBothWorkspaceBackends(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
-				if _, err := exec.LookPath("jj"); err != nil {
-					if os.Getenv("OSMIA_REQUIRE_JJ") != "" {
-						t.Fatal(err)
-					}
-					t.Skip("jj is not installed")
-				}
+				intakefixture.RequireJJ(t)
 			}
 			deliverOnProject(t, backend, true)
 		})

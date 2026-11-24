@@ -8,7 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// committeePerspectives is the review focus each committee perspective adds
+// CommitteePerspectives is the review focus each committee perspective adds
 // to a member's shed system prompt.
 var CommitteePerspectives = map[string]string{
 	"correctness": "Your primary perspective is correctness and charter compliance. Look for criteria that contradict each other, the charter or the handed design, behavior the spec leaves unobservable, and acceptance a reviewer could not verify from a unit's work. Explain the concrete failure behind each objection. You may raise any valid objection; this focus does not limit your authority.",
@@ -16,7 +16,7 @@ var CommitteePerspectives = map[string]string{
 	"scope":       "Your primary perspective is scope and size. Challenge requirements the handed design does not ask for, expansion beyond it, and work that exceeds the assigned profile's practical capacity. Broad coherent units are valid; splitting must justify its coordination cost. Require a concrete consequence for each objection you raise, and accept sufficient work without demanding every possible refinement. You may raise any valid objection; this focus does not limit your authority.",
 }
 
-// committeeMember returns the member number of a committee agent.
+// CommitteeMember returns the member number of a committee agent.
 func CommitteeMember(agent string) (int, bool) {
 	rest, ok := strings.CutPrefix(agent, CommitteeAgentPrefix)
 	if !ok {
@@ -26,7 +26,7 @@ func CommitteeMember(agent string) (int, bool) {
 	return n, err == nil && n > 0
 }
 
-// memberPerspective returns the review focus of a committee member's shed
+// MemberPerspective returns the review focus of a committee member's shed
 // turns: committee.perspectives taken in turn by member number.
 func MemberPerspective(cfg *config.Config, agent string) string {
 	n, ok := CommitteeMember(agent)
@@ -37,7 +37,7 @@ func MemberPerspective(cfg *config.Config, agent string) string {
 	return CommitteePerspectives[perspectives[(n-1)%len(perspectives)]]
 }
 
-// agentProfile returns the profile of an agent's new turn. A committee member
+// AgentProfile returns the profile of an agent's new turn. A committee member
 // runs on committee.profiles taken in turn by member number, or on the first
 // profile of that profile's fallback chain whose provider is not limited. The
 // owner's committee override, an empty committee.profiles, a chain with every

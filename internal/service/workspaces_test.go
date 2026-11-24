@@ -1,79 +1,72 @@
 package service
 
 import (
-	context "context"
-	errors "errors"
-	fmt "fmt"
-	os "os"
-	filepath "path/filepath"
-	strings "strings"
-	testing "testing"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	workspace "github.com/kpenfound/osmia/internal/workspace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
-
-var providerOf = intakefixture.ProviderOf
 
 var (
 	errJJMissing = fmt.Errorf("%w: exec: \"jj\": executable file not found in $PATH", workspace.ErrJJMissing)
 	errJJTooOld  = fmt.Errorf("%w: found jj 0.44.0, Osmia needs %s or later", workspace.ErrJJTooOld, workspace.MinimumJJ)
 )
 
-// workspacesFixture is a hand-in fixture whose configuration sets
-// workspaces to setting and whose jj check is jj.
 type workspacesFixture struct {
 	*handInFixture
 	opts Options
-	jj   *fakeJJ
+	jj   *fixturekit.FakeJJ
 	top  string
 }
 
 func newWorkspacesFixture(t *testing.T, setting string) *workspacesFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
-	jj := &fakeJJ{Version: "0.45.1"}
+	jj := &fixturekit.FakeJJ{Version: "0.45.1"}
 	opts.checkJJ = jj.Check
 	top := filepath.Join(opts.Config.Root, "config.toml")
 	f := &workspacesFixture{opts: opts, jj: jj, top: top}
 	f.setting(t, setting)
 	s, c := start(t, opts)
-	added, err := c.AddProject(context.Background(), request(clone))
-	must(t, err)
-	writeCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
+	fixturekit.Must(t, err)
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	f.handInFixture = &handInFixture{s: s, c: c, project: added.Project.ID, trace: added.Project.Trace, home: filepath.Dir(clone)}
 	return f
 }
 
-// setting writes workspaces = setting to the top-level configuration file.
 func (f *workspacesFixture) setting(t *testing.T, setting string) {
 	t.Helper()
 	text, err := os.ReadFile(f.top)
-	must(t, err)
+	fixturekit.Must(t, err)
 	lines := strings.Split(string(text), "\n")
 	for i, line := range lines {
 		if strings.HasPrefix(line, "workspaces = ") {
 			lines[i] = fmt.Sprintf("workspaces = %q", setting)
 		}
 	}
-	must(t, os.WriteFile(f.top, []byte(strings.Join(lines, "\n")), 0600))
+	fixturekit.Must(t, os.WriteFile(f.top, []byte(strings.Join(lines, "\n")), 0600))
 }
 
-// handInKey hands in a design under key and returns the result.
 func (f *workspacesFixture) handInKey(key string) (HandInResponse, error) {
 	text := "# " + key + "\n"
 	return f.c.HandIn(context.Background(), HandInRequest{Project: f.project, Key: key, Stdin: &text})
 }
 
-// backend reports the workstream's backend as status, the recorded
-// manifest and every kind of workspace the service reaches see it.
 func (f *workspacesFixture) backend(t *testing.T, stream config.WorkstreamID) string {
 	t.Helper()
 	st, err := f.c.Status(context.Background(), stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	recorded, err := f.repository().Workspaces(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if st.Workspaces != recorded {
 		t.Fatalf("status reports workstream %s on %q; its manifest records %q", stream, st.Workspaces, recorded)
 	}
@@ -84,7 +77,7 @@ func (f *workspacesFixture) backend(t *testing.T, stream config.WorkstreamID) st
 		"drift":   driftWorkspaces(cfg, f.repository()),
 	} {
 		var got string
-		switch providerOf(t, w, stream).(type) {
+		switch intakefixture.ProviderOf(t, w, stream).(type) {
 		case *workspace.Git:
 			got = config.WorkspacesGit
 		case *workspace.Jujutsu:
@@ -97,11 +90,6 @@ func (f *workspacesFixture) backend(t *testing.T, stream config.WorkstreamID) st
 	return recorded
 }
 
-// Each workspaces value, with jj supported, missing or too old, gives a new
-// workstream the backend it names, and service status reports what new
-// workstreams get. Only workspaces = "jujutsu" without a supported jj
-// refuses to start one, naming the problem and the version found in the
-// refusal and in status.
 func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -123,7 +111,7 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 			f.jj.Set(c.version, c.jj)
 			ctx := context.Background()
 			all, err := f.c.Statuses(ctx)
-			must(t, err)
+			fixturekit.Must(t, err)
 			ws := all.Workspaces
 			jj := c.version
 			if c.setting == config.WorkspacesGit {
@@ -153,7 +141,7 @@ func TestWorkspacesKeyPicksTheBackendOfANewWorkstream(t *testing.T) {
 				}
 				return
 			}
-			must(t, err)
+			fixturekit.Must(t, err)
 			if got := f.backend(t, out.Workstream); got != c.want {
 				t.Fatalf("workstream on %q, want %q", got, c.want)
 			}
@@ -169,16 +157,16 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 	ctx := context.Background()
 	f := newWorkspacesFixture(t, config.WorkspacesAuto)
 	first, err := f.handInKey("first")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, first.Workstream); got != config.WorkspacesJujutsu {
 		t.Fatalf("the first workstream is on %q", got)
 	}
 
 	f.setting(t, config.WorkspacesGit)
 	_, err = f.c.Reload(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	second, err := f.handInKey("second")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, second.Workstream); got != config.WorkspacesGit {
 		t.Fatalf("the workstream created after the change is on %q", got)
 	}
@@ -186,7 +174,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 		t.Fatalf("after the reload the first workstream is on %q", got)
 	}
 
-	must(t, f.s.Close())
+	fixturekit.Must(t, f.s.Close())
 	f.jj.Set("", errJJMissing)
 	f.setting(t, config.WorkspacesAuto)
 	s, c := start(t, f.opts)
@@ -197,7 +185,7 @@ func TestWorkstreamKeepsItsBackendAcrossARestartAfterTheKeyChanges(t *testing.T)
 		}
 	}
 	third, err := f.handInKey("third")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if got := f.backend(t, third.Workstream); got != config.WorkspacesGit {
 		t.Fatalf("a workstream created without jj under auto is on %q", got)
 	}
@@ -209,7 +197,7 @@ func TestStatusChecksJJWithADeadline(t *testing.T) {
 	t.Parallel()
 	f := newWorkspacesFixture(t, config.WorkspacesAuto)
 	_, err := f.c.Statuses(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !f.jj.LastBounded() {
 		t.Fatal("status checked jj without a deadline")
 	}

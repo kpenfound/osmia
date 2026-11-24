@@ -52,8 +52,6 @@ func validPath(name string) error {
 	return nil
 }
 
-// checkPath rejects even in-tree symlinks and special files. os.Root additionally
-// confines each filesystem operation if an ancestor changes during resolution.
 func checkPath(root *os.Root, name string, missing bool) error {
 	if err := validPath(name); err != nil {
 		return err

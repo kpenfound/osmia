@@ -2,10 +2,27 @@ package fixturekit
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/api"
 	"slices"
 	"sync"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
 )
+
+// NotifyRetry is the interval at which a fixture service retries a failed
+// notification delivery.
+const NotifyRetry = 10 * time.Millisecond
+
+// NewNotifyInbox returns an empty scripted inbox and, when webhook is not
+// empty, writes it into the notify settings of the configuration under root.
+func NewNotifyInbox(t *testing.T, root, webhook string) *NotificationInbox {
+	t.Helper()
+	if webhook != "" {
+		SetWebhook(t, root, webhook)
+	}
+	return &NotificationInbox{}
+}
 
 // NotificationInbox supplies scripted inbox reads and change notifications.
 type NotificationInbox struct {

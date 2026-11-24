@@ -8,8 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 )
 
-// entries is the dissent record of one member's objections, each with the
-// given kind and disposition.
 func entry(id string, kind shed.Kind, disposition shed.Disposition) shed.Entry {
 	e := shed.Entry{Dissent: shed.Dissent{Objection: shed.Objection{ID: id, Kind: kind, Part: "spec#1", Argument: "It does not hold."}, Member: alice, Round: 1, Revision: one}}
 	e.Blocking = e.Dissent.Blocking()
@@ -19,8 +17,6 @@ func entry(id string, kind shed.Kind, disposition shed.Disposition) shed.Entry {
 	return e
 }
 
-// An overruled objection is the owner's recorded disposition: it stays in the
-// dissent record, blocks no longer and leaves the debate.
 func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 	t.Parallel()
 	records := []shed.Record{record(1, alice, one, 2)}
@@ -38,15 +34,12 @@ func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 	if e := entries[1]; e.ID != advice || e.Blocking || e.Disposition != "" {
 		t.Fatalf("the advisory objection %+v", e)
 	}
-	// Neither the architect nor a further round answers a settled objection,
-	// and nothing blocks ratification.
 	if standing := shed.Standing(entries); len(standing) != 1 || standing[0].ID != advice {
 		t.Fatalf("standing %+v", standing)
 	}
 	if blocked := shed.Blocked(entries); len(blocked) != 0 {
 		t.Fatalf("blocked %+v", blocked)
 	}
-	// A sustained objection blocks, and is neither settled nor ratifiable.
 	sustained := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: veto, Disposition: shed.Sustained})}, nil)
 	if blocked := shed.Blocked(sustained); len(blocked) != 1 || blocked[0].ID != veto {
 		t.Fatalf("a sustained veto %+v", blocked)
@@ -57,7 +50,6 @@ func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 	if !shed.Overruled.Settled() || !shed.Dismissed.Settled() || shed.Sustained.Settled() {
 		t.Fatal("what a disposition settles")
 	}
-	// An overrule is a recorded disposition like any other.
 	data, err := shed.EncodeRulings(overruled)
 	if err != nil {
 		t.Fatal(err)
@@ -67,8 +59,6 @@ func TestOverruledObjectionIsSettledAndBlocksNoLonger(t *testing.T) {
 	}
 }
 
-// The packet puts what blocks ratification first and recommends what the
-// dissent that stands calls for.
 func TestPacketPresentsWhatBlocksFirstAndRecommends(t *testing.T) {
 	t.Parallel()
 	advice := entry("a-r1-1", shed.Fit, "")
@@ -98,8 +88,6 @@ func TestPacketPresentsWhatBlocksFirstAndRecommends(t *testing.T) {
 	if got := shed.Recommend([]shed.Entry{veto}); !strings.Contains(got, "blocked by 1 objection (a-r1-2)") {
 		t.Fatalf("recommendation with one blocking: %q", got)
 	}
-	// The order the packet presents is the order it is recorded in, and the
-	// entries it holds are the dissent record's own.
 	data, err := shed.EncodePacket(packet)
 	if err != nil {
 		t.Fatal(err)
@@ -134,8 +122,6 @@ func packetIDs(p shed.Packet) []string {
 	return out
 }
 
-// A packet, a ratification and a request for a redraft each require what they
-// are about, and are read back by the round they belong to.
 func TestGateFilesRequireTheirContentAndRoundTrip(t *testing.T) {
 	t.Parallel()
 	packet := shed.Present(1, one, true, "the owner skipped debate", nil)
@@ -168,7 +154,6 @@ func TestGateFilesRequireTheirContentAndRoundTrip(t *testing.T) {
 	if got, err := shed.ParseRatification(data); err != nil || !reflect.DeepEqual(got, ratification) {
 		t.Fatalf("round trip %+v %v", got, err)
 	}
-	// A blocking objection is not ratified, whatever the caller passes.
 	if _, err := shed.EncodeRatification(shed.Ratify(1, one, []shed.Entry{entry("a-r1-3", shed.Charter, "")})); err == nil {
 		t.Fatal("a blocking objection was ratified")
 	}
@@ -198,8 +183,6 @@ func TestGateFilesRequireTheirContentAndRoundTrip(t *testing.T) {
 	}
 }
 
-// The files of the gate are read back by round, and none of them is a
-// member's record: a committee member cannot carry their names.
 func TestGateFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -245,7 +228,6 @@ func TestGateFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 	if err != nil || len(requests) != 1 || requests[0].Note != "Split the resume unit." {
 		t.Fatalf("requests %+v %v", requests, err)
 	}
-	// The architect's report of a redraft is not one of its replies.
 	reports, err := shed.Redrafted(f.repo, stream)
 	if err != nil || len(reports) != 1 || reports[0].Redraft == nil || *reports[0].Redraft != two {
 		t.Fatalf("redrafts %+v %v", reports, err)
@@ -258,7 +240,6 @@ func TestGateFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 			t.Fatalf("a member named %s was encoded", name)
 		}
 	}
-	// A file whose content disagrees with its path is an error.
 	elsewhere, err := shed.EncodePacket(shed.Present(2, one, false, "debate concluded", nil))
 	if err != nil {
 		t.Fatal(err)

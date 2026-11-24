@@ -22,7 +22,6 @@ const (
 	DemoAgent  = "agent_mason"
 	DemoThread = "thread_mason"
 	DemoRole   = "mason"
-	// Delivery credentials exist in the service process but never reach a turn.
 	DemoSecret = "ghp_demo_delivery_credential_must_not_leak"
 )
 
@@ -140,23 +139,18 @@ func (e *DemoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	e.Runs = append(e.Runs, req.Name)
 	turn := e.Turns[req.Name]
 	if turn == nil {
-		// Turns the service names itself, such as event turns, share a script.
 		turn = e.Turns["*"]
 	}
 	e.Mu.Unlock()
 	e.Sessions.Mu.Lock()
 	tools := e.Sessions.ByKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.Sessions.Mu.Unlock()
-	// Session test callbacks may use a separate fake host when they need to
-	// exercise show_image.
 	if turn == nil || (tools == nil && req.Profile.Name != SessionRole) {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
 	return turn(ctx, req, verified, tools)
 }
 
-// decisions are the decide calls that precede a chief-of-staff outcome tool
-// call: the kind and subject of each subject the call decides.
 func decisions(name string, args map[string]any) (calls []map[string]any) {
 	text := func(key string) string { s, _ := args[key].(string); return s }
 	add := func(kind, subject string) {

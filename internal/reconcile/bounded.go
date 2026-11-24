@@ -121,7 +121,6 @@ func (g GiveUpReason) Summary() string {
 	return fmt.Sprintf("%d consecutive failures since %s; last failure: %s", g.Status.Failures, g.Status.FirstFailure.UTC().Format(time.RFC3339), g.Status.LastFailure)
 }
 
-// boundedAdapter returns the adapter's Bounded capability when it bounds op.
 func boundedAdapter(adapter coreadapter.Reconciler, op coreadapter.Operation) (Bounded, bool) {
 	b, ok := adapter.(Bounded)
 	return b, ok && b.Bound(op)
@@ -150,11 +149,6 @@ func (c *Controller) reconcileDeadline() time.Duration {
 	return DefaultReconcileDeadline
 }
 
-// attemptFailure names why an Inspect or Apply that returned err failed. A
-// contention or recovery failure of the workspace layer, and an attempt that
-// ran into its deadline while the parent context was still live, each have
-// their own words, so the retry says which. attempt is the context the call ran
-// under and parent the context of the controller.
 func attemptFailure(parent, attempt context.Context, deadline time.Duration, err error) string {
 	timedOut := parent.Err() == nil && errors.Is(attempt.Err(), context.DeadlineExceeded)
 	switch {

@@ -33,12 +33,6 @@ type WorkflowChange struct {
 	Deliveries bool
 }
 
-// change is the content of one trace commit: records appended in order,
-// files set by logical path, and, when workflow is set, the complete new
-// workflow of stream, whose difference from the committed workflow is
-// written. view, when set, is workflow's view; otherwise it is replayed
-// when the workflow's lists changed. The rows at each of replace's record
-// paths are removed before records are added.
 type change struct {
 	replace  []string
 	records  []Record
@@ -49,8 +43,6 @@ type change struct {
 	message  string
 }
 
-// add appends o's records, files and workflow to c. o's workflow, when set,
-// replaces c's.
 func (c *change) add(o change) {
 	c.records = append(c.records, o.records...)
 	if len(o.files) > 0 {
@@ -67,7 +59,6 @@ func (c *change) add(o change) {
 	}
 }
 
-// setFile sets the logical file name to data.
 func (c *change) setFile(name string, data []byte) {
 	if c.files == nil {
 		c.files = map[string][]byte{}
@@ -75,8 +66,6 @@ func (c *change) setFile(name string, data []byte) {
 	c.files[name] = data
 }
 
-// commitBoundary lets tests interrupt a commit before and after the database
-// transaction commits.
 const (
 	boundaryBeforeCommit = "before-commit"
 	boundaryCommitted    = "committed"
@@ -89,11 +78,6 @@ func (r *Repository) boundary(name string) error {
 	return nil
 }
 
-// publish requires r.mu. It writes c as one database transaction: every
-// record, file and workflow change lands, or none does. The caller has
-// validated the records against the trace. A failure before the transaction
-// commits leaves the trace unchanged; after it commits, cancellation cannot
-// undo it.
 func (r *Repository) publish(ctx context.Context, c change) error {
 	stream := r.stream
 	if stream == "" {
@@ -117,9 +101,6 @@ func (r *Repository) publish(ctx context.Context, c change) error {
 	if message == "" {
 		message = "Record workflow transaction"
 	}
-	// The caller's cancellation is checked above. Once the transaction begins
-	// it runs to its commit or rollback, so a cancellation cannot leave it
-	// half closed.
 	ctx = context.WithoutCancel(ctx)
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -185,8 +166,6 @@ func (r *Repository) publish(ctx context.Context, c change) error {
 	if err := r.boundary(boundaryBeforeCommit); err != nil {
 		return err
 	}
-	// Replaced rows free their seqs for reuse, so no read may load rows past
-	// the cached ones between the commit and dropping the cache.
 	if len(c.replace) > 0 {
 		r.cache.mu.Lock()
 	}
@@ -216,11 +195,6 @@ func (r *Repository) publish(ctx context.Context, c change) error {
 	return r.boundary(boundaryCommitted)
 }
 
-// writeWorkflow writes the difference between log, the complete new workflow
-// of stream, and the committed workflow cached for it: the entries appended
-// to each list, and each thread whose stored form changed, added or removed.
-// It returns the workflow to cache once the transaction commits, and what
-// changed, which is nil when nothing did.
 func (r *Repository) writeWorkflow(ctx context.Context, tx *sql.Tx, stream config.WorkstreamID, log workflowLog, view *workflowView) (*cachedWorkflow, *WorkflowChange, error) {
 	old := r.workflows[stream]
 	if old == nil {

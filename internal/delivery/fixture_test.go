@@ -9,7 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -30,7 +29,7 @@ func deliveryTrace(t *testing.T) (*config.Config, *trace.Repository) {
 	fixturekit.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	var docs []trace.Document
-	for _, d := range []struct{ id, path, content string }{{plan.SpecDocument, plan.SpecPath, intakefixture.ValidSpec}, {plan.PlanDocument, plan.PlanPath, intakefixture.ValidPlan}} {
+	for _, d := range []struct{ id, path, content string }{{plan.SpecDocument, plan.SpecPath, fixturekit.ValidSpec}, {plan.PlanDocument, plan.PlanPath, fixturekit.ValidPlan}} {
 		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: d.id, Revision: 1, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "fixture"}, Path: d.path, Content: d.content})
 	}
 	fixturekit.Must(t, repo.RecordDocuments(context.Background(), docs))

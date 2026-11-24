@@ -31,12 +31,9 @@ type TestHooks struct {
 	ConversationTicks <-chan time.Time
 	Enforcement       *TestEnforcementBinding
 	ReviewChecks      ReviewChecks
-	CloudChecks       ReviewChecks
 	Boundary          func(context.Context, string) error
 	SchedulePassed    func()
 	NotifyInbox       func(context.Context) (InboxResponse, *APIError)
-	CheckJJ           func(context.Context) (string, error)
-	SandboxBinary     string
 	// TelemetryExporter receives the service's spans in place of an OTLP
 	// exporter and turns telemetry on without an endpoint. The service never
 	// shuts it down, so a test reads an in-memory exporter after the service
@@ -57,9 +54,6 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	if hooks.ReviewChecks != nil {
 		opts.reviewChecks = hooks.ReviewChecks
 	}
-	if hooks.CloudChecks != nil {
-		opts.cloudChecks = hooks.CloudChecks
-	}
 	if hooks.Boundary != nil {
 		opts.boundary = hooks.Boundary
 	}
@@ -69,17 +63,11 @@ func StartForTest(ctx context.Context, opts Options, hooks TestHooks) (*Service,
 	if hooks.NotifyInbox != nil {
 		opts.notifyInbox = hooks.NotifyInbox
 	}
-	if hooks.CheckJJ != nil {
-		opts.checkJJ = hooks.CheckJJ
-	}
 	if hooks.TelemetryExporter != nil {
 		opts.telemetryExporter = hooks.TelemetryExporter
 	}
 	if hooks.Getenv != nil {
 		opts.getenv = hooks.Getenv
-	}
-	if hooks.SandboxBinary != "" {
-		opts.sbxBin = hooks.SandboxBinary
 	}
 	return Start(ctx, opts)
 }
@@ -128,11 +116,16 @@ func (a TestAccess) RefreshRuntime() error { return a.s.refreshRuntime() }
 // Changes subscribes before the caller's first read. The wait must be released.
 // Notifications are hints; a timer also wakes reads of unannounced trace state.
 func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
+	return a.ChangesEvery(time.Second)
+}
+
+// ChangesEvery is Changes with a fallback timer of the given period.
+func (a TestAccess) ChangesEvery(fallback time.Duration) (wait func() error, release func(), ok bool) {
 	sub, ok := a.s.hub.Subscribe()
 	if !ok {
 		return nil, nil, false
 	}
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(fallback)
 	return func() error {
 		select {
 		case <-sub.Wake():
@@ -147,11 +140,6 @@ func (a TestAccess) Changes() (wait func() error, release func(), ok bool) {
 
 // Now returns the service's configured fixture clock.
 func (a TestAccess) Now() time.Time { return a.s.now() }
-
-// LibrarianWorkstreamForTest identifies the librarian workstream an older trace can hold.
-func LibrarianWorkstreamForTest(id config.ProjectID) config.WorkstreamID {
-	return librarianWorkstream(id)
-}
 
 // EnforceThreadsForTest binds session execution while leaving workflow runners
 // under the fixture's control.
@@ -208,7 +196,7 @@ func (a TestAccess) SetProviderLimit(limit runtime.ProviderLimit) error {
 }
 
 // SessionBranchForTest returns the production branch identity of a session.
-func SessionBranchForTest(id config.WorkstreamID) string { return sessionBranch(id) }
+func SessionBranchForTest(id config.WorkstreamID) string { return SessionBranch(id) }
 
 // SessionTurnRunning reports whether a session turn is still completing.
 func (a TestAccess) SessionTurnRunning(stream config.WorkstreamID) bool {
@@ -219,7 +207,7 @@ func (a TestAccess) SessionTurnRunning(stream config.WorkstreamID) bool {
 
 // SessionGit returns the service's session workspace provider for assertions.
 func (a TestAccess) SessionGit(project config.ProjectID) *workspace.Git {
-	return sessionGit(a.s.current().For(project))
+	return SessionGit(a.s.current().For(project))
 }
 
 // Intake exposes the composed owner-gate dependencies to controller fixtures.
@@ -270,9 +258,6 @@ func (a TestAccess) Feed(raw string) (FeedResponse, *APIError) { return a.s.feed
 func (a TestAccess) Delivery(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
 	return a.s.deliveryPresentation(ctx, raw)
 }
-func (a TestAccess) ApproveAndLand(ctx context.Context, raw string, r DeliveryLandDecision) (DeliveryLandResponse, *APIError) {
-	return a.s.approveAndLand(ctx, raw, r)
-}
 func (a TestAccess) ApproveDelivery(ctx context.Context, raw string, r DeliveryDecision) (DeliveryApproval, *APIError) {
 	return a.s.approveDelivery(ctx, raw, r)
 }
@@ -282,8 +267,8 @@ func (a TestAccess) RuleContested(ctx context.Context, w, u string, r ContestedR
 func (a TestAccess) DispatchHolds(c *config.Config, r *trace.Repository) func(scheduler.Candidate) (bool, error) {
 	return a.s.dispatchHolds(c, r)
 }
-func (a TestAccess) Holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
-	return a.s.holds(p, w, r, c)
+func (a TestAccess) Holds(p config.ProjectID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
+	return a.s.holds(p, r, c)
 }
 func (a TestAccess) Halt(p config.ProjectID) error {
 	_, active := a.s.runtimeOf(p)
@@ -293,9 +278,7 @@ func (a TestAccess) Halt(p config.ProjectID) error {
 	return a.s.halt(active)
 }
 
-type TestPollAttempt = lifecycle.TestPollAttempt
-
-func (a TestAccess) PollAttempts() []TestPollAttempt {
+func (a TestAccess) PollAttempts() []lifecycle.TestPollAttempt {
 	return a.s.polls.AttemptsForTest()
 }
 
@@ -359,14 +342,6 @@ func (a TestAccess) DecideTool(r *trace.Repository, scope coreadapter.Scope) cor
 	return controls.decide(r, scope)
 }
 
-// FlakeFixTool returns the flake_fix tool of the claimed chief-of-staff turn
-// scope names, as the service composes it.
-func (a TestAccess) FlakeFixTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	controls := &runtimeControls{}
-	controls.service.Store(a.s)
-	return controls.flakeFix(r, scope)
-}
-
 // TriageTool returns the triage_finding tool of the claimed chief-of-staff turn
 // scope names, as the service composes it.
 func (a TestAccess) TriageTool(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
@@ -390,7 +365,6 @@ func (a TestAccess) SetJudge(j *jev.Judge) {
 	defer a.s.mu.Unlock()
 	a.s.jev = j
 	a.s.router.Judge = j
-	// Final reviewers retain the dependencies composed for their stages.
 	for _, p := range a.s.projects {
 		if p.pipeline == nil {
 			continue

@@ -21,15 +21,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// buildFixture drives stopped controllers against a real trace and local workspaces.
-// The fake turns, checks, clock and sealed-document seeding are shared primitives.
 type buildFixture struct {
 	unitsFixture
 	s     *Controller
 	clock *fixturekit.DemoClock
-	// jev answers the router's transition requests: the default fits unless a
-	// test scripts it.
-	jev *jevfixture.Transitions
+	jev   *jevfixture.Transitions
 }
 
 func newBuildFixture(t *testing.T, key string) *buildFixture {
@@ -86,7 +82,7 @@ func newBuildFixture(t *testing.T, key string) *buildFixture {
 	must(t, err)
 	acquired, err := provider.Acquire(ctx, vcs.Request{Name: string(stream), Ref: u.base, Branch: featureBranch(stream)})
 	must(t, err)
-	fixturekit.RecordBuild(t, u.repository, fixturekit.BuildInput{Stream: stream, At: demoStart, Key: key, Graph: independentPlan, Spec: intakefixture.ValidSpec, Branch: featureBranch(stream), Workspace: acquired.Directory(), Base: u.base, BaseBranch: u.cfg.Project.BaseBranch})
+	fixturekit.RecordBuild(t, u.repository, fixturekit.BuildInput{Stream: stream, At: demoStart, Key: key, Graph: independentPlan, Spec: fixturekit.ValidSpec, Branch: featureBranch(stream), Workspace: acquired.Directory(), Base: u.base, BaseBranch: u.cfg.Project.BaseBranch})
 	return f
 }
 
@@ -123,9 +119,9 @@ const passedReport = fixturekit.PassedReport
 const masonWrote = fixturekit.MasonWrote
 const resumeReport = "resume from the last chunk"
 
-const independentPlan = `{"version": 1, "units": [
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.trace"]}
+const independentPlan = `{"version": 2, "units": [
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.trace"]}
 ]}
 `
 
@@ -145,7 +141,7 @@ func approveDirectly(t *testing.T, s *Controller, repository *trace.Repository, 
 	r := &reviewers{masons: newMasonController(s, repository)}
 	intakefixture.ApproveDirectly(t, repository, stream, unit, r.prepareUnitReview, func(identity UnitReviewIdentity, turn string) ([]byte, error) {
 		return json.Marshal(UnitReviewResult{Identity: identity, Turn: turn, Verdict: UnitVerdict{Decision: "satisfactory", Summary: reviewSummary}})
-	}, reviewTurnID, reviewDocument, r.one, UnitApproved)
+	}, ReviewTurnID, ReviewDocument, r.one, UnitApproved)
 }
 func approvedReview(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) (trace.Document, UnitReviewResult) {
 	t.Helper()
@@ -154,7 +150,7 @@ func approvedReview(t *testing.T, repository *trace.Repository, stream config.Wo
 }
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
-	return intakefixture.LandOperations(t, repository, stream, LandAction)
+	return intakefixture.OperationsOf(t, repository, stream, LandAction)
 }
 func (f *buildFixture) landedCommits(t *testing.T, stream config.WorkstreamID, base string) []string {
 	t.Helper()

@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,8 +20,6 @@ const browserMarkdown = "# Rendered heading\n\nA **bold** and *italic* reply wit
 	"[secure](https://example.invalid/path) [web](http://example.invalid) [mail](mailto:owner@example.invalid)\n\n" +
 	"| Name | Description | Count |\n| :--- | :---: | ---: |\n| Alpha | A wide description that should scroll within the table box at phone widths | 12 |\n| Beta | Another description | 3 |"
 
-// watchMarkdownEvents observes the page's real EventSource, with periodic
-// refresh disabled so an arriving reply must be delivered by the live path.
 func watchMarkdownEvents(p *page) {
 	p.T.Helper()
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
@@ -101,13 +100,11 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 		t.Fatal("feed did not retain raw Markdown")
 	}
 
-	// The exploratory reply travels through the real session runtime; its
-	// owner echo is created by the composer rather than an API-only send.
 	s, c, project, engine, _ := sessionWebFixture(t)
 	engine.Turn = func(context.Context, agent.Request) (*agent.Result, error) {
 		return &agent.Result{ClaudeID: "markdown-session", ResultText: browserMarkdown}, nil
 	}
-	opened, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	opened, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	ps := openBrowser(t)
 	watchMarkdownEvents(ps)
@@ -146,8 +143,6 @@ func TestBrowserAgentMarkdownAcrossConversations(t *testing.T) {
 	pd.AwaitText("#design-result", "the design agent answers in its next turn")
 	awaitFeedEvent(pd, id)
 	design := `#design-feed [data-kind=response] [data-field=text] > .markdown`
-	// The surrounding segment ends at the disclosure boundary, after the
-	// same Markdown document and a trailing newline (no visible structure).
 	got := assertMarkdown(pd, design)
 	if strings.TrimSpace(got) != strings.TrimSpace(expected) {
 		t.Fatalf("design structure differs from chief: %s", got)
@@ -191,8 +186,6 @@ func TestBrowserMarkdownStatusAndReportsStayExpanded(t *testing.T) {
 	assertMarkdown(p, report)
 	assertMarkdownPhone(p, report)
 	p.Eval(`window.feedEvents.length = 0`, nil)
-	// A new reply forces replacement of the entries while the report
-	// remains open. The existing anchor still addresses this agent turn.
 	p.OpenConversation()
 	f.sendAndAnswer(t, p, stream, "Refresh while I read the report.", "A new reply.")
 	awaitFeedEvent(p, stream)

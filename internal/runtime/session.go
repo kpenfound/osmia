@@ -7,8 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// modelSessionsDirectory is the directory under the root holding a session's
-// model-session state, outside the worktree and every other workspace kind.
 const modelSessionsDirectory = "session-models"
 
 // ModelSessionDirectory is the directory a session's model session keeps its

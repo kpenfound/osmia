@@ -54,11 +54,6 @@ func TestParseRefresh(t *testing.T) {
 	}
 }
 
-// fakeGit stands in for the git binary: it clones by copying the fixture
-// directory the URL names and records every command, so it leaves
-// unverified that the real git CLI accepts the arguments Manager builds and
-// reaches a remote over the network. TestPrepareClonesWithGit exercises that
-// against the real git on PATH instead.
 type fakeGit struct {
 	mu       sync.Mutex
 	fixtures map[string]string
@@ -98,8 +93,6 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-// fixtures lays out a single skill, a skills collection, a plugin that also
-// carries hooks, MCP servers and agents, and a plugin without skills.
 func fixtures(t *testing.T) map[string]string {
 	t.Helper()
 	dir := t.TempDir()
@@ -150,7 +143,6 @@ func entries(t *testing.T, dir string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// WalkDir does not follow the skills/ symlinks, so list what they expose.
 	for _, link := range []string{"skills", "skills/*"} {
 		matches, _ := filepath.Glob(filepath.Join(dir, link))
 		for _, m := range matches {
@@ -175,7 +167,6 @@ func TestPrepareExposesOnlySkills(t *testing.T) {
 		{"https://x/single", []string{".claude-plugin/plugin.json", "skills/single/.git", "skills/single/SKILL.md"}},
 		{"https://x/coll", []string{".claude-plugin/plugin.json", "skills/a", "skills/b"}},
 		{"https://x/coll#skills/b", []string{".claude-plugin/plugin.json", "skills/coll-b/SKILL.md"}},
-		// A plugin's hooks, MCP servers and agents stay in the clone.
 		{"https://x/plug", []string{".claude-plugin/plugin.json", "skills/c"}},
 	} {
 		t.Run(c.ref, func(t *testing.T) {
@@ -310,7 +301,6 @@ func TestConcurrentPrepareClonesOnce(t *testing.T) {
 	}
 }
 
-// A clone of a local repository through the git on PATH, pinned to a tag.
 func TestPrepareClonesWithGit(t *testing.T) {
 	repo := t.TempDir()
 	write(t, filepath.Join(repo, "skills", "tdd", "SKILL.md"), "---\nname: tdd\n---\n")

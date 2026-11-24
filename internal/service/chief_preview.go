@@ -43,7 +43,6 @@ type previewResult struct {
 	Limitation string              `json:"limitation,omitempty"`
 }
 
-// previewService preserves the durable JSON representation of service pins.
 type previewService struct {
 	Call    []string `json:"call"`
 	Port    int      `json:"port"`
@@ -51,9 +50,6 @@ type previewService struct {
 	Timeout string   `json:"timeout"`
 }
 
-// previewOperation pins the exact target and service arguments before capture.
-// The member image is the receipt; shared references, view copies and results
-// are independently reconciled.
 type previewOperation struct {
 	AgentChosen bool                  `json:"agent_chosen,omitempty"`
 	Scope       coreadapter.Scope     `json:"scope"`
@@ -213,7 +209,6 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 			}
 			if runErr != nil {
 				result := previewResult{Limitation: previewDiagnostic(runErr.Error())}
-				// A cancelled turn may be reclaimed; without an image it must capture again.
 				if ctx.Err() == nil {
 					op.Result = &result
 					doc.Revision++
@@ -242,8 +237,6 @@ func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, sc
 			}
 		}
 		output, _ := json.Marshal(result)
-		// This also completes the original audit record when recovery happens before
-		// the model repeats its call. BeginTool and its completion are idempotent.
 		if err := finishPreviewTool(ctx, repo, scope, raw, output, now); err != nil {
 			return limitation(err.Error())
 		}
@@ -328,8 +321,6 @@ func reconcilePreviewImage(ctx context.Context, repo, target *trace.Repository, 
 			return previewResult{}, err
 		}
 	}
-	// Only the service writes this read-only view. The name is derived from a
-	// stored image ID; the model retains no write or execution capability.
 	root, err := os.OpenRoot(view.Workspace().Directory)
 	if err != nil {
 		return previewResult{}, err
@@ -348,8 +339,6 @@ func reconcilePreviewImage(ctx context.Context, repo, target *trace.Repository, 
 	return previewResult{ImageID: image.ID, Workstream: op.Workstream, Commit: op.Commit, Path: filepath.ToSlash(path)}, nil
 }
 
-// restorePreviewImages reconciles receipts before a resumed chief reads its new
-// view. A capture with no receipt runs again using its original source pin.
 func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *runtimeControls, repo *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) error {
 	docs, err := trace.Read[trace.Document](repo, config.WorkstreamID(scope.Workstream))
 	if err != nil {
@@ -370,8 +359,6 @@ func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *run
 		if err := json.Unmarshal([]byte(doc.Content), &op); err != nil {
 			return err
 		}
-		// An interrupted chief is continued in a new physical turn. Reconcile its
-		// durable preview before that continuation runs, using the original key.
 		audit := latest[trace.ToolCallID(op.Scope, "preview", op.Call)]
 		if op.Scope != scope && op.Result != nil && audit.Revision == 2 {
 			continue
@@ -402,9 +389,6 @@ func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *run
 	return nil
 }
 
-// finishPreviewTool completes a started audit even after the original turn was
-// abandoned on restart. This is service reconciliation of an already accepted
-// operation; it grants no new agent action on an inactive turn.
 func finishPreviewTool(ctx context.Context, repo *trace.Repository, scope coreadapter.Scope, raw, output json.RawMessage, now func() time.Time) error {
 	doc, err := latestPreviewDocument(repo, config.WorkstreamID(scope.Workstream), trace.ToolCallID(scope, "preview", raw))
 	if err != nil {

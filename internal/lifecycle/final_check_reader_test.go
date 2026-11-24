@@ -9,35 +9,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// A final review reads the Dagger Cloud statuses of the commit it pushed and
-// the reader's turn starts from what they settle, through the running
-// service, a fake pull request host and a fake `dagger`:
-//
-//   - `load` success, a successful run and at least one check, all successful,
-//     record passed;
-//   - a failed run, or a failed check, records failed after the one rerun of
-//     the failed checks, whose fresh statuses settle it;
-//   - a successful run with no checks, or with a pending check, records
-//     incomplete: no pass is recorded and the reader is not asked.
-//
-// Where a result is recorded, the reader's prompt has it in its check result
-// section before the criteria, and the reader's view holds the record.
 func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 	cases := []struct {
-		name string
-		// post shows the statuses of the commit; again shows the rerun's.
+		name        string
 		post, again func(j *flowJourney, commit string)
 		status      string
-		// detail is what an incomplete record says is missing.
-		detail string
-		// failed names the check a failed record lists.
-		failed string
+		detail      string
+		failed      string
 	}{
 		{name: "every check passed", status: "passed", post: func(j *flowJourney, commit string) {
 			j.host.loaded(commit)
@@ -70,22 +59,22 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			j := newFlowJourney(t)
-			stream := j.stream
+			stream := j.Stream
 			var mu sync.Mutex
 			var viewed, tracePath, traceViewed string
 			var viewErr, traceErr error
 			tracePath = "final/checks-1-traces/" + checkrun.TraceDocumentID("abc123", "test:resume") + ".json"
-			j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-				content, err := callTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
+			j.FinalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
+				content, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": delivery.FinalChecksPath(1)})
 				var traced string
 				var terr error
 				if c.failed != "" {
-					traced, terr = callTool(ctx, tools, "file_read", map[string]any{"path": tracePath})
+					traced, terr = fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": tracePath})
 				}
 				mu.Lock()
 				viewed, viewErr, traceViewed, traceErr = content, err, traced, terr
 				mu.Unlock()
-				_, err = callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+				_, err = fixturekit.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 				return err
 			})
 			j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
@@ -109,7 +98,7 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 				if _, started := j.reportOf(t, 1); started || len(j.rerunCalls(t)) != 0 {
 					t.Fatalf("a result that is not settled started the final read (reruns %q)", j.rerunCalls(t))
 				}
-				if reader, err := j.live().Thread(stream, committeeAgent(1)); err == nil && len(reader.Turns) != 0 {
+				if reader, err := j.live().Thread(stream, intake.CommitteeAgent(1)); err == nil && len(reader.Turns) != 0 {
 					t.Fatalf("the reader was asked %d times without a result", len(reader.Turns))
 				}
 				return
@@ -139,10 +128,8 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 			}
 			j.awaitReport(t, 1)
 
-			// The reader's turn starts with the result in its own section,
-			// before the criteria, and not at the end.
-			reader, err := j.live().Thread(stream, committeeAgent(1))
-			must(t, err)
+			reader, err := j.live().Thread(stream, intake.CommitteeAgent(1))
+			fixturekit.Must(t, err)
 			prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt
 			section, view, criteria := strings.Index(prompt, "Check result:\n"), strings.Index(prompt, "Your view holds:"), strings.Index(prompt, "Every criterion and the merged units")
 			if section < 0 || view < 0 || criteria < 0 || section > criteria {
@@ -163,8 +150,6 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 				t.Fatalf("the check result is at the end of the prompt:\n%s", prompt)
 			}
 
-			// A failed check that names a trace has its output fetched once, narrowed
-			// to it, recorded for the workstream and held by the reader's view.
 			wantCalls := 0
 			if c.failed != "" {
 				wantCalls = 1
@@ -173,7 +158,7 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 				t.Fatalf("the fake dagger fetched traces %q", calls)
 			}
 			if c.failed != "" {
-				docs := streamDocuments(t, j.live(), stream, checkrun.TraceDocumentID("abc123", "test:resume"))
+				docs := intakefixture.StreamDocuments(t, j.live(), stream, checkrun.TraceDocumentID("abc123", "test:resume"))
 				var rec checkrun.TraceRecord
 				if len(docs) != 1 || docs[0].Path != checkrun.TraceDocumentPath("abc123", "test:resume") || json.Unmarshal([]byte(docs[0].Content), &rec) != nil ||
 					!strings.Contains(rec.Output, "trace output of: cloud traces view --check=test:resume abc123") || strings.Contains(rec.Output, flowToken) {
@@ -190,8 +175,7 @@ func TestFinalReviewSettlesTheStatusesOfThePushedCommit(t *testing.T) {
 				}
 			}
 
-			// The reader's view holds the record as it was recorded.
-			recorded := streamDocuments(t, j.live(), stream, delivery.FinalChecksDocument(1))
+			recorded := intakefixture.StreamDocuments(t, j.live(), stream, delivery.FinalChecksDocument(1))
 			mu.Lock()
 			defer mu.Unlock()
 			var content string

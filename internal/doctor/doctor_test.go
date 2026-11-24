@@ -18,21 +18,17 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/trace/legacytrace"
 )
 
 const projectID = "p_0123456789abcdef0123456789abcdef"
 
 const topLevel = `version = 1
-active_projects = [%q]
 
 [profiles.default]
 agent = "claude"
 model = "opus"
 `
 
-// host is a fake toolchain: every executable is on PATH and answers, except
-// those named missing.
 type host struct{ missing map[string]bool }
 
 func (h host) lookPath(name string) (string, error) {
@@ -49,8 +45,6 @@ func (host) command(_ context.Context, path string, args ...string) (string, err
 	return filepath.Base(path) + " 1.0.0\n", nil
 }
 
-// github is a fake GitHub API that accepts the token "good" and knows the
-// repositories listed.
 func github(t *testing.T, repositories ...string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,8 +77,6 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// fixture is a root with one active project whose clone has a local
-// upstream remote, and the options that check it against a fake host.
 func fixture(t *testing.T) (Options, string) {
 	t.Helper()
 	base := t.TempDir()
@@ -99,15 +91,17 @@ func fixture(t *testing.T) (Options, string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 	dir := filepath.Join(base, "r")
 	must(t, os.MkdirAll(filepath.Join(dir, "projects", projectID), 0o700))
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), fmt.Appendf(nil, topLevel, projectID), 0o600))
-	project := fmt.Sprintf("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = %q\n", clone)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "config.toml"), []byte(project), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel), 0o600))
 	root, err := config.ResolveRoot(dir, "")
 	must(t, err)
+	store := projectstore.Open(root)
+	_, err = store.WriteFirst(projectID, fmt.Appendf(nil, "version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = %q\n", clone))
+	must(t, err)
+	must(t, store.Add(projectID))
 	h := host{}
 	return Options{
 		Root: root, LookPath: h.lookPath, Command: h.command,
-		CheckJJ:   func(context.Context) (string, error) { return "0.45.1", nil },
+		CheckJJ:     func(context.Context) (string, error) { return "0.45.1", nil },
 		Token:       "good",
 		Getenv:      func(name string) string { return map[string]string{"OPENROUTER_API_KEY": "key"}[name] },
 		TotalMemory: func() (uint64, error) { return 16 << 30, nil },
@@ -174,57 +168,12 @@ func TestHealthyRoot(t *testing.T) {
 	if Failed(checks) {
 		t.Fatal("a healthy root failed")
 	}
-	// Doctor releases the ownership lock it took.
 	lock, err := os.OpenFile(filepath.Join(dir, lockFile), os.O_RDWR, 0)
 	must(t, err)
 	defer lock.Close()
 	must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
-// TestGitTraceIsMigrated gives the project a Git trace, which doctor moves
-// to its database as serve would before opening it.
-func TestGitTraceIsMigrated(t *testing.T) {
-	o, dir := fixture(t)
-	directory := filepath.Join(dir, "projects", projectID)
-	must(t, legacytrace.Build(directory, map[string][]byte{"project.json": legacytrace.ProjectManifest(projectID, time.Unix(0, 0).UTC()), "documents.jsonl": nil}))
-
-	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "widgets trace"), Pass, "0 workstreams")
-	if _, err := os.Lstat(filepath.Join(directory, "trace.db")); err != nil {
-		t.Fatalf("the trace was not migrated: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(directory, ".git")); !os.IsNotExist(err) {
-		t.Fatalf("the Git trace was kept: %v", err)
-	}
-}
-
-// TestTraceMigrationIncompleteIsReported gives the project a Git trace whose
-// HEAD holds a file migration does not know, so Migrate cannot complete, and
-// confirms doctor reports it as a failed check naming the migration, leaving
-// the Git trace as it was.
-func TestTraceMigrationIncompleteIsReported(t *testing.T) {
-	o, dir := fixture(t)
-	directory := filepath.Join(dir, "projects", projectID)
-	must(t, legacytrace.Build(directory, map[string][]byte{"project.json": legacytrace.ProjectManifest(projectID, time.Unix(0, 0).UTC()), "documents.jsonl": nil, "stray.txt": []byte("unknown\n")}))
-	head, err := legacytrace.Head(directory)
-	must(t, err)
-
-	checks := Run(context.Background(), o)
-	expect(t, find(t, checks, "widgets trace"), Fail, "trace migration is incomplete")
-	if !Failed(checks) {
-		t.Fatal("an incomplete trace migration passed")
-	}
-	if after, err := legacytrace.Head(directory); err != nil || after != head {
-		t.Fatalf("doctor altered the unmigrated trace: %s %v", after, err)
-	}
-	if _, err := os.Lstat(filepath.Join(directory, "trace.db")); !os.IsNotExist(err) {
-		t.Fatalf("a failed migration left a trace database: %v", err)
-	}
-}
-
-// TestDamagedTraceDatabaseIsReported damages a project's closed trace
-// database past its first page, so its integrity check fails, and confirms
-// doctor reports the database by path.
 func TestDamagedTraceDatabaseIsReported(t *testing.T) {
 	o, dir := fixture(t)
 	root, err := config.ResolveRoot(dir, "")
@@ -284,8 +233,12 @@ func TestConfigurationErrorsNameTheField(t *testing.T) {
 }
 
 func TestProjectConfigurationError(t *testing.T) {
-	o, dir := fixture(t)
-	must(t, os.WriteFile(filepath.Join(dir, "projects", projectID, "config.toml"), []byte("version = 1\nname = \"widgets\"\nupstream = \"https://github.com/acme/widgets\"\nclone = \"/x\"\n"), 0o600))
+	o, _ := fixture(t)
+	store := projectstore.Open(o.Root)
+	current, err := store.Current(projectID)
+	must(t, err)
+	_, err = store.Replace(projectID, current.Pin, []byte("version = 1\nname = \"widgets\"\nupstream = \"https://github.com/acme/widgets\"\nclone = \"/x\"\n"))
+	must(t, err)
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "project "+projectID), Fail, "upstream")
 	absent(t, checks, "widgets clone")
@@ -293,7 +246,7 @@ func TestProjectConfigurationError(t *testing.T) {
 
 func TestToolchainFollowsConfiguration(t *testing.T) {
 	o, dir := fixture(t)
-	cfg := "workspaces = \"jujutsu\"\n" + fmt.Sprintf(topLevel, projectID) + `[profiles.backup]
+	cfg := "workspaces = \"jujutsu\"\n" + topLevel + `[profiles.backup]
 agent = "codex"
 model = "gpt"
 [profiles.main]
@@ -319,7 +272,7 @@ sandbox = "sbx"
 	expect(t, find(t, checks, "dagger"), Warn, "not on PATH")
 	expect(t, find(t, checks, "jj"), Fail, "jj is missing")
 
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), fmt.Appendf(nil, topLevel, projectID), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte(topLevel), 0o600))
 	checks = Run(context.Background(), o)
 	expect(t, find(t, checks, "jj"), Warn, "Git worktrees")
 	absent(t, checks, "codex")
@@ -373,7 +326,6 @@ func TestProjectRemotes(t *testing.T) {
 
 	git(t, clone, "remote", "add", "origin", filepath.Join(filepath.Dir(dir), "remotes", "acme", "widgets"))
 	project := fmt.Sprintf("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nfork = \"me/widgets\"\nbase_branch = \"trunk\"\nclone = %q\n", clone)
-	// The first run imported the project, so its settings change in the store.
 	store := projectstore.Open(o.Root)
 	current, err := store.Current(projectID)
 	must(t, err)
@@ -406,7 +358,6 @@ func TestUnopenableState(t *testing.T) {
 	expect(t, find(t, checks, "widgets trace"), Fail, "trace.db")
 	expect(t, find(t, checks, "runtime.json"), Fail, "runtime.json")
 
-	// A project directory holding only its configuration has no trace.
 	must(t, os.Remove(filepath.Join(dir, "projects", projectID, "trace.db")))
 	must(t, os.RemoveAll(filepath.Join(dir, "projects", projectID, "osmia.lock")))
 	expect(t, find(t, Run(context.Background(), o), "widgets trace"), Warn, "no trace")
@@ -429,66 +380,30 @@ func TestJevNeedsItsKey(t *testing.T) {
 	}
 }
 
-// Doctor imports a legacy root's projects into the store as serve does, and
-// from then on reads no project file: its checks pass with the retired file
-// unreadable, and it changes nothing.
-func TestImportsProjectsThenReadsOnlyTheStore(t *testing.T) {
+func TestDoctorChangesNoTopLevelFile(t *testing.T) {
 	o, dir := fixture(t)
-	file := filepath.Join(dir, "projects", projectID, "config.toml")
-	original, err := os.ReadFile(file)
+	before, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	must(t, err)
-	top, err := os.ReadFile(filepath.Join(dir, "config.toml"))
-	must(t, err)
-
 	checks := Run(context.Background(), o)
 	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
-	store := projectstore.Open(o.Root)
-	if done, err := store.Imported(); err != nil || !done {
-		t.Fatalf("import complete: %t %v", done, err)
-	}
-	retired, err := os.ReadFile(file)
-	must(t, err)
-	if string(retired) != projectstore.RetiredMark+string(original) {
-		t.Fatalf("retired file %q", retired)
-	}
-
-	must(t, os.Remove(file))
-	must(t, os.Mkdir(file, 0o700))
-	var steps []string
-	o.Step = func(name string) error { steps = append(steps, name); return nil }
-	checks = Run(context.Background(), o)
-	expect(t, find(t, checks, "project "+projectID), Pass, "widgets (acme/widgets)")
-	if len(steps) != 0 {
-		t.Fatalf("a completed import ran steps: %v", steps)
-	}
 	after, err := os.ReadFile(filepath.Join(dir, "config.toml"))
 	must(t, err)
-	if string(after) != string(top) {
+	if string(after) != string(before) {
 		t.Fatal("doctor changed the top-level file")
 	}
 }
 
-// A listed file that does not load stops the import with nothing changed, and
-// the check names the project's file and field.
-func TestImportRefusesAListedFileThatDoesNotLoad(t *testing.T) {
-	o, dir := fixture(t)
-	file := filepath.Join(dir, "projects", projectID, "config.toml")
-	must(t, os.WriteFile(file, []byte("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = \"/x\"\nlanding = \"sideways\"\n"), 0o600))
-	before, err := os.ReadFile(file)
+func TestStoredSettingsThatDoNotLoadNameTheFieldWithoutItsValue(t *testing.T) {
+	o, _ := fixture(t)
+	store := projectstore.Open(o.Root)
+	current, err := store.Current(projectID)
+	must(t, err)
+	_, err = store.Replace(projectID, current.Pin, []byte("version = 1\nname = \"widgets\"\nupstream = \"acme/widgets\"\nclone = \"/x\"\nlanding = \"sideways\"\n"))
 	must(t, err)
 	checks := Run(context.Background(), o)
 	c := find(t, checks, "project "+projectID)
-	expect(t, c, Fail, file)
 	expect(t, c, Fail, "landing")
-	if strings.Contains(c.Detail, "sideways") || !Failed(checks) {
+	if strings.Contains(c.Detail, "sideways") || strings.Contains(c.Detail, "config.toml") || !Failed(checks) {
 		t.Fatalf("%+v", c)
-	}
-	after, err := os.ReadFile(file)
-	must(t, err)
-	if string(before) != string(after) {
-		t.Fatal("a refused import changed the file")
-	}
-	if done, err := projectstore.Open(o.Root).Imported(); err != nil || done {
-		t.Fatalf("imported: %t %v", done, err)
 	}
 }

@@ -132,7 +132,7 @@ func TestCheckAcceptanceProblemsOnlyChangedText(t *testing.T) {
 	}
 	newSpec := strings.Replace(oldSpec, "accepts input", "accepts new syntax", 1)
 	if got := CheckAcceptanceProblems(newSpec, string(after), oldSpec, string(before)); len(got) != 0 {
-		t.Fatalf("legacy carryover: %v", got)
+		t.Fatalf("carried-over criterion: %v", got)
 	}
 	graph.Units[0].Acceptance = append(graph.Units[0].Acceptance, "All checks pass")
 	after, err = Encode(graph)

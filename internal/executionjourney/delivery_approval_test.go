@@ -3,178 +3,226 @@ package executionjourney
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kpenfound/agentcore/vcs"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
-	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 func TestDeliveryRejectsFinalReportOnPreviousUpstreamBase(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, repository, report := journey.DeliveryFixture(t)
 	defer repository.Close()
 	ctx := context.Background()
-	reviewer := &finalReviewer{s: f.s, repository: repository}
-	must(t, reviewer.request(ctx, stream))
-	if ops := finalOperations(t, repository, stream); len(ops) != 0 {
+	reviewer := &journey.FinalReviewer{S: f.S, Repository: repository}
+	fixturekit.Must(t, reviewer.Request(ctx, stream))
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 0 {
 		t.Fatalf("fresh report prompted another final read: %+v", ops)
 	}
 	latest, doc, found, err := seal.Latest(repository, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !found {
 		t.Fatal("no seal")
 	}
 	latest.Base.Commit = strings.Repeat("a", 40)
 	content, err := seal.Encode(latest)
-	must(t, err)
+	fixturekit.Must(t, err)
 	doc.Revision++
 	doc.Content = string(content)
-	must(t, repository.RecordDocuments(ctx, []trace.Document{doc}))
-	if _, reason, err := reviewer.finalGate(ctx, stream); err != nil || !strings.Contains(reason, "upstream base changed") {
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{doc}))
+	if _, reason, err := reviewer.FinalGate(ctx, stream); err != nil || !strings.Contains(reason, "upstream base changed") {
 		t.Fatalf("final gate accepted the old upstream base: %q %v", reason, err)
 	}
-	must(t, reviewer.request(ctx, stream))
-	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
+	fixturekit.Must(t, reviewer.Request(ctx, stream))
+	if ops := journey.FinalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("stale report did not prompt a fresh final read: %+v", ops)
 	}
-	if _, api := f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: report.Review, Commit: report.Commit}); api == nil || api.Code != Conflict {
-		t.Fatalf("delivery accepted the old upstream base: %v", api)
+	if _, apiErr := f.S.ApproveDelivery(ctx, string(stream), api.DeliveryDecision{Review: report.Review, Commit: report.Commit}); apiErr == nil || apiErr.Code != api.Conflict {
+		t.Fatalf("delivery accepted the old upstream base: %v", apiErr)
 	}
-}
-
-func deliveryFixture(t *testing.T) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
-	t.Helper()
-	return deliveryFixtureWith(t, "")
-}
-
-// deliveryFixtureWith is deliveryFixture with extra configuration appended.
-func deliveryFixtureWith(t *testing.T, extra string) (*shedFixture, config.WorkstreamID, *trace.Repository, FinalReport) {
-	t.Helper()
-	f, stream, repository, a := newFinalFixtureWith(t, "delivery", extra)
-	report := intakefixture.SeedDelivery(t, repository, stream, func(unit string, files map[string]string) string {
-		return mergeDirectly(t, f, repository, stream, unit, files)
-	}, a.Pass, func(ctx context.Context) (FinalReport, error) {
-		in, sealed, err := a.governing(ctx, stream)
-		return FinalReport{Commit: in.Commit, Seal: in.Seal, SpecHash: sealed.SpecHash, Spec: in.Spec, Plan: in.Plan, Charter: in.Charter, Upstream: &sealed.Base}, err
-	}, finalReviewActor, finalReportDocument, finalReportPath, finalReviewed)
-	f.s.setSole(&activeProject{repository: repository})
-	return f, stream, repository, report
 }
 
 func TestDeliveryPresentationOrdersGapsAndKeepsEvidence(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, repository, report := journey.DeliveryFixture(t)
 	report.Criteria[1].Evidence = ""
 	report.Criteria[1].Gap = "No duplicate test"
 	content, err := json.Marshal(report)
-	must(t, err)
-	must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: finalReportDocument, Revision: 2, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: finalReviewActor, Cause: "final-review"}, Path: finalReportPath, Content: string(content)}}))
-	p, api := f.s.deliveryPresentation(context.Background(), string(stream))
-	if api != nil {
-		t.Fatal(api)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: 2, Project: repository.Project(), Workstream: stream, At: time.Now().UTC(), Actor: delivery.FinalReviewActor, Cause: "final-review"}, Path: delivery.FinalReportPath, Content: string(content)}}))
+	p, apiErr := f.S.DeliveryPresentation(context.Background(), string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
 	if len(p.Report.Criteria) != 2 || p.Report.Criteria[0].Criterion != "spec#2" || p.Report.Criteria[0].Gap != "No duplicate test" || p.Report.Criteria[1].Evidence != "resume.go and TestResume" {
 		t.Fatalf("presentation %+v", p.Report.Criteria)
 	}
-	// The drafted body is a short spec summary, not an account of the work:
-	// it never held the criteria evidence or gap, only the report the
-	// presentation carries alongside it does (spec#3, spec#9).
+
 	if strings.Contains(p.Draft, "No duplicate test") || strings.Contains(p.Draft, "resume.go and TestResume") {
 		t.Fatalf("draft %q", p.Draft)
 	}
-	if _, api := f.s.approveDelivery(context.Background(), string(stream), DeliveryDecision{Review: 1, ReviewRevision: p.ReviewRevision, Commit: report.Commit, DraftHash: p.DraftHash}); api == nil || api.Code != Conflict {
-		t.Fatalf("approved a gap: %v", api)
+	if _, apiErr := f.S.ApproveDelivery(context.Background(), string(stream), api.DeliveryDecision{Review: 1, ReviewRevision: p.ReviewRevision, Commit: report.Commit, DraftHash: p.DraftHash}); apiErr == nil || apiErr.Code != api.Conflict {
+		t.Fatalf("approved a gap: %v", apiErr)
 	}
 }
 
-func TestDeliveryApprovalAcceptEditRetryAndInvalidation(t *testing.T) {
+const editedDeliveryText = "Owner edited description\n"
+
+func approveEditedDelivery(t *testing.T, f *journey.ShedFixture, stream config.WorkstreamID, p api.DeliveryPresentation) api.DeliveryApproval {
+	t.Helper()
+	decision := api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
+	edited := editedDeliveryText
+	decision.Description = &edited
+	approval, apiErr := f.S.ApproveDelivery(context.Background(), string(stream), decision)
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	return approval
+}
+
+func TestDeliveryApprovalAcceptsTheDraftAndTheOwnersEdit(t *testing.T) {
 	t.Parallel()
-	f, stream, repository, report := deliveryFixture(t)
+	f, stream, _, _ := journey.DeliveryFixture(t)
 	ctx := context.Background()
-	p, api := f.s.deliveryPresentation(ctx, string(stream))
-	if api != nil {
-		t.Fatal(api)
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	decision := DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
-	accepted, api := f.s.approveDelivery(ctx, string(stream), decision)
-	if api != nil || accepted.Description != p.Draft {
-		t.Fatalf("accept %+v %v", accepted, api)
+	decision := api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
+	accepted, apiErr := f.S.ApproveDelivery(ctx, string(stream), decision)
+	if apiErr != nil || accepted.Description != p.Draft {
+		t.Fatalf("accept %+v %v", accepted, apiErr)
 	}
-	editedText := "Owner edited description\n"
-	decision.Description = &editedText
-	edited, api := f.s.approveDelivery(ctx, string(stream), decision)
-	if api != nil || edited.Description != editedText || edited.DescriptionHash != descriptionHash(editedText) {
-		t.Fatalf("edit %+v %v", edited, api)
+	edited := approveEditedDelivery(t, f, stream, p)
+	if edited.Description != editedDeliveryText || edited.DescriptionHash != delivery.DescriptionHash(editedDeliveryText) {
+		t.Fatalf("edit %+v", edited)
 	}
-	again, api := f.s.approveDelivery(ctx, string(stream), decision)
-	if api != nil || !reflect.DeepEqual(again, edited) {
-		t.Fatalf("retry %+v %v", again, api)
+}
+
+func TestDeliveryApprovalRetriesLeaveTheEditAndRecordTwoRevisions(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	ctx := context.Background()
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	acceptRetry, api := f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash})
-	if api != nil || !reflect.DeepEqual(acceptRetry, edited) {
-		t.Fatalf("accept retry replaced the edit: %+v %v", acceptRetry, api)
+	accept := api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash}
+	if _, apiErr := f.S.ApproveDelivery(ctx, string(stream), accept); apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	if docs := streamDocuments(t, repository, stream, deliveryDocument); len(docs) != 2 {
+	edited := approveEditedDelivery(t, f, stream, p)
+	again := approveEditedDelivery(t, f, stream, p)
+	if !reflect.DeepEqual(again, edited) {
+		t.Fatalf("retry %+v, want %+v", again, edited)
+	}
+	acceptRetry, apiErr := f.S.ApproveDelivery(ctx, string(stream), accept)
+	if apiErr != nil || !reflect.DeepEqual(acceptRetry, edited) {
+		t.Fatalf("accept retry replaced the edit: %+v %v", acceptRetry, apiErr)
+	}
+	if docs := intakefixture.StreamDocuments(t, repository, stream, delivery.DeliveryDocument); len(docs) != 2 {
 		t.Fatalf("delivery revisions %+v", docs)
 	}
-	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, editedText); err != nil || reason != "" {
+}
+
+func TestDeliveryGateHoldsOnlyForTheApprovedText(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	p, apiErr := f.S.DeliveryPresentation(context.Background(), string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	approveEditedDelivery(t, f, stream, p)
+	ctx := context.Background()
+	if _, reason, err := f.S.DeliveryGate(ctx, repository, stream, editedDeliveryText); err != nil || reason != "" {
 		t.Fatalf("edited approval: %q %v", reason, err)
 	}
-	if _, reason, err := f.s.deliveryGate(ctx, repository, stream, p.Draft); err != nil || !strings.Contains(reason, "description differs") {
+	if _, reason, err := f.S.DeliveryGate(ctx, repository, stream, p.Draft); err != nil || !strings.Contains(reason, "description differs") {
 		t.Fatalf("replaced edit: %q %v", reason, err)
 	}
-	repository.Close()
-	reopened, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
-	defer reopened.Close()
-	f.s.setSole(&activeProject{repository: reopened})
-	after, api := f.s.deliveryPresentation(ctx, string(stream))
-	if api != nil || after.Approval == nil || after.Approval.Description != editedText {
-		t.Fatalf("restart %+v %v", after.Approval, api)
+}
+
+func TestDeliveryApprovalSurvivesARestart(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	ctx := context.Background()
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
-	if _, reason, err := f.s.deliveryGate(ctx, reopened, stream, editedText); err != nil || reason != "" {
+	approveEditedDelivery(t, f, stream, p)
+	repository.Close()
+	reopened, err := trace.Open(f.S.Cfg.Root, f.S.Cfg.Project)
+	fixturekit.Must(t, err)
+	defer reopened.Close()
+	f.S.SetSole(&journey.ActiveProject{Repository: reopened})
+	after, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil || after.Approval == nil || after.Approval.Description != editedDeliveryText {
+		t.Fatalf("restart %+v %v", after.Approval, apiErr)
+	}
+	if _, reason, err := f.S.DeliveryGate(ctx, reopened, stream, editedDeliveryText); err != nil || reason != "" {
 		t.Fatalf("restart gate: %q %v", reason, err)
 	}
-	moveFeature(t, f, stream, map[string]string{"late.go": "package demo\n"})
-	if _, reason, err := f.s.deliveryGate(ctx, reopened, stream, editedText); err != nil || !strings.Contains(reason, "stale") {
+}
+
+func TestDeliveryApprovalIsStaleWhenTheFeatureBranchMoves(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	ctx := context.Background()
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	approveEditedDelivery(t, f, stream, p)
+	journey.MoveFeature(t, f, stream, map[string]string{"late.go": "package demo\n"})
+	if _, reason, err := f.S.DeliveryGate(ctx, repository, stream, editedDeliveryText); err != nil || !strings.Contains(reason, "stale") {
 		t.Fatalf("branch change: %q %v", reason, err)
 	}
-	// Restore the branch and revise a governing criterion.
-	g := workspaces(f.s.cfg, branchesDirectory, config.WorkspacesGit)
-	acquired, err := g.Acquire(ctx, vcs.Request{Name: string(stream), Branch: featureBranch(stream)})
-	must(t, err)
-	current, _, err := g.Branch(ctx, featureBranch(stream))
-	must(t, err)
-	must(t, g.Move(ctx, acquired.(workspace.Worktree), current, report.Commit))
-	spec := streamDocuments(t, reopened, stream, plan.SpecDocument)[0]
+}
+
+func TestDeliveryApprovalIsInvalidatedWhenACriterionChanges(t *testing.T) {
+	t.Parallel()
+	f, stream, repository, _ := journey.DeliveryFixture(t)
+	ctx := context.Background()
+	p, apiErr := f.S.DeliveryPresentation(ctx, string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	approveEditedDelivery(t, f, stream, p)
+	spec := intakefixture.StreamDocuments(t, repository, stream, plan.SpecDocument)[0]
 	spec.Revision++
 	spec.At = time.Now().UTC()
 	spec.Content = strings.Replace(spec.Content, "never sent again", "never sent twice", 1)
-	must(t, reopened.RecordDocuments(ctx, []trace.Document{spec}))
-	if _, reason, err := f.s.deliveryGate(ctx, reopened, stream, editedText); err != nil || !strings.Contains(reason, "spec revision") {
+	fixturekit.Must(t, repository.RecordDocuments(ctx, []trace.Document{spec}))
+	if _, reason, err := f.S.DeliveryGate(ctx, repository, stream, editedDeliveryText); err != nil || !strings.Contains(reason, "spec revision") {
 		t.Fatalf("criterion change: %q %v", reason, err)
 	}
 }
 
 func TestDeliveryApprovalRejectsPrivateCheckTraceLinks(t *testing.T) {
 	t.Parallel()
-	f, w, repo, _ := deliveryFixture(t)
+	f, w, repo, _ := journey.DeliveryFixture(t)
 	defer repo.Close()
-	p, api := f.s.deliveryPresentation(t.Context(), string(w))
-	if api != nil {
-		t.Fatal(api)
+	p, apiErr := f.S.DeliveryPresentation(t.Context(), string(w))
+	if apiErr != nil {
+		t.Fatal(apiErr)
 	}
 	text := p.Draft + "\nhttps://dagger.cloud/private-org/traces/check123\n"
-	_, api = f.s.approveDelivery(t.Context(), string(w), DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash, Description: &text})
-	if api == nil || api.Code != Validation || !strings.Contains(api.Message, "private Dagger Cloud") {
-		t.Fatalf("private description accepted: %v", api)
+	_, apiErr = f.S.ApproveDelivery(t.Context(), string(w), api.DeliveryDecision{Review: p.Report.Review, ReviewRevision: p.ReviewRevision, Commit: p.Report.Commit, DraftHash: p.DraftHash, Description: &text})
+	if apiErr == nil || apiErr.Code != api.Validation || !strings.Contains(apiErr.Message, "private Dagger Cloud") {
+		t.Fatalf("private description accepted: %v", apiErr)
 	}
 }

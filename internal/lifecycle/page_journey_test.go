@@ -12,15 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/chromedp/chromedp"
+	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-// journeyViewport is one size the journey walks the page at: the size of
-// the whole walk, and the short height the page is checked at once more.
 type journeyViewport struct {
 	name          string
 	width, height int64
@@ -36,54 +38,39 @@ func (v journeyViewport) emulate(height int64) chromedp.Action {
 	return chromedp.EmulateViewport(v.width, height)
 }
 
-// journey is a project with two assembled workstreams, each waiting for the
-// owner to mark its draft pull request ready for review, on a fake pull
-// request host that follows each workstream's branch, running behind the real service with a fake
-// chief of staff. The first has check runs recorded for its units, so
-// Activity has something to fold and filter.
-type journey struct {
+type pageJourney struct {
 	*briefJourney
 	other      config.WorkstreamID
 	screenshot string
 }
 
-func newJourney(t *testing.T) *journey {
+func newJourney(t *testing.T) *pageJourney {
 	t.Helper()
-	j := newBriefFixture(t, listenWeb)
-	first, repository := j.buildFixture().SeedGit(t, "journey")
-	j.stream, j.repository = first, repository
+	j := newBriefFixture(t, journey.ListenWeb)
+	first, repository := j.BuildFixture().SeedGit(t, "journey")
+	j.Stream, j.Repository = first, repository
 	j.host(t)
-	j.s.setSole(&activeProject{repository: repository})
+	j.S.SetSole(&journey.ActiveProject{Repository: repository})
 	other := j.secondMember(t, "journey-other")
 	j.assemble(t, first, "internal/trace", "resume", "dedupe")
 	j.assemble(t, other, "internal/trace", "other-resume", "other-dedupe")
-	screenshot := j.captureImage(t, "uploads", j.report.Commit, previewPicture(t))
+	screenshot := j.captureImage(t, "uploads", j.Report.Commit, previewPicture(t))
 	for n := 1; n <= 3; n++ {
 		status := "passed"
 		if n == 1 {
 			status = "failed"
 		}
-		at := demoStart.Add(time.Duration(n) * time.Minute)
+		at := fixturekit.DemoStart.Add(time.Duration(n) * time.Minute)
 		fixturekit.FeedDocument(t, repository, first, fmt.Sprintf("unit-resume-checks-%d", n), fmt.Sprintf("units/resume/checks-%d.json", n), 1, at,
 			service.UnitCheckRun{Unit: "resume", Run: n, Status: status, StartedAt: at, FinishedAt: at})
 	}
-	at := demoStart.Add(10 * time.Minute)
+	at := fixturekit.DemoStart.Add(10 * time.Minute)
 	fixturekit.FeedDocument(t, repository, first, "unit-dedupe-checks-1", "units/dedupe/checks-1.json", 1, at,
 		service.UnitCheckRun{Unit: "dedupe", Run: 1, Status: "passed", StartedAt: at, FinishedAt: at})
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}, Screenshots: []string{screenshot}})
-	return &journey{briefJourney: j, other: other, screenshot: screenshot}
+	return &pageJourney{briefJourney: j, other: other, screenshot: screenshot}
 }
 
-// The owner walks the redesigned page against the running service, on a
-// desktop and on a phone: home leads with what needs them, a workstream
-// opens on its Conversation, a nest-tube cell opens Activity on its unit, an
-// opened entry and the unit filter survive loading the copied address, the
-// milestones lead back to Activity, the delivery card is answered with its
-// primary button, Settings shows its sections, and the abandon dialog both
-// cancels and confirms. At each stop the page keeps to the design rules it
-// can be read for, and on a phone every control is a 44px target; at a short
-// height the sticky regions leave room for the conversation and the dialog
-// fits.
 func TestBrowserJourneyWalksTheRedesignedPage(t *testing.T) {
 	t.Parallel()
 	for _, v := range []journeyViewport{
@@ -99,21 +86,19 @@ func TestBrowserJourneyWalksTheRedesignedPage(t *testing.T) {
 
 func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	j := newJourney(t)
-	stream, other := j.stream, j.other
+	stream, other := j.Stream, j.other
 	j.run(t)
 	first, second := j.awaitEntry(t, stream), j.awaitEntry(t, other)
 	card := intakefixture.DecisionCard(first)
 	cardSelector := strings.TrimSpace(card)
 	hash := "#workstream=" + string(stream)
 
-	p := openBrowser(t)
+	p := browsertest.OpenBrowser(t)
 	audit := func(step string) { p.T.Helper(); p.Audit(v.name+": "+step, v.phone) }
 	shot := func(view string, position ...string) { p.T.Helper(); p.Screenshot(v.name+"-"+view, position...) }
-	p.Run(v.emulate(v.height), chromedp.Navigate("http://"+j.s.WebAddr()+"/"))
+	p.Run(v.emulate(v.height), chromedp.Navigate("http://"+j.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
-	// Home leads with what needs the owner, above the project cards, and the
-	// sidebar counts it per workstream.
 	p.Await("the home view listing both deliveries", `(() => {
   const home = document.querySelector('[data-view=project-pane]');
   return !home.hidden && home.querySelectorAll('[data-field=needs-you] .needs-list > li').length === 2;
@@ -151,9 +136,8 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	shot("home")
 	audit("home")
 
-	// The needs-you item opens the workstream on its Conversation.
 	p.Click(`[data-needs-workstream="` + string(stream) + `"] a`)
-	p.Await("the workstream", `!document.querySelector('.view[data-view=workstream]').hidden && document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream)))
+	p.Await("the workstream", `!document.querySelector('.view[data-view=workstream]').hidden && document.getElementById('workstream-head').dataset.workstream === `+browsertest.Quote(string(stream)))
 	p.Await("both units in the nest tube", `document.querySelectorAll('#workstream-head [data-field=units] button.cell').length === 2`)
 	var head struct {
 		State, ID, Cells, Tab, Hash string
@@ -174,8 +158,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 		t.Fatalf("the workstream header: %+v", head)
 	}
 
-	// Conversation holds the quiet milestones, the brief on the delivery card
-	// above the message field, and no machine events.
 	p.AwaitText(card+"[data-field=brief-text]", briefText)
 	var conversation struct {
 		Milestones, Machine, Allowed string
@@ -186,7 +168,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	}
 	p.Eval(`(() => {
   const feed = document.querySelector('.view[data-view=workstream]');
-  const card = document.querySelector(`+quote(cardSelector)+`);
+  const card = document.querySelector(`+browsertest.Quote(cardSelector)+`);
   const composer = card.closest('article.workstream').querySelector('.composer');
   const parts = ['[data-field=brief]', '[data-field=review]', '[data-field=criteria-section]', '[data-field=preview]', 'button[type=submit]'].map(s => card.querySelector(s));
   const milestones = [...feed.querySelectorAll('[data-kind=milestone]')].map(n => n.dataset.milestone);
@@ -209,11 +191,10 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 		t.Fatalf("Conversation: %+v", conversation)
 	}
 	shot("conversation", `document.querySelector('[data-panel=conversation] [data-kind=milestone]').scrollIntoView({block: 'center'})`)
-	// The delivery card is shown whole, on a viewport tall enough to hold it.
 	p.Run(v.emulate(v.tallHeight))
 	p.Await("the tall viewport", `innerHeight === `+fmt.Sprint(v.tallHeight))
 	shot("delivery-card", `(() => {
-  const card = document.querySelector(`+quote(cardSelector)+`);
+  const card = document.querySelector(`+browsertest.Quote(cardSelector)+`);
   card.scrollIntoView({block: 'start'});
   document.getElementById('main').scrollTop -= document.querySelector('.workstream-top').getBoundingClientRect().bottom - card.getBoundingClientRect().top + 12;
 })()`)
@@ -221,10 +202,9 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p.Await("the full viewport", `innerHeight === `+fmt.Sprint(v.height))
 	audit("conversation")
 
-	// A nest-tube cell opens Activity on its unit.
 	p.Click(`#workstream-head [data-cell=resume]`)
 	activityHash := hash + "&tab=activity&unit=resume"
-	p.Await("Activity on the resume unit", `!document.querySelector('[data-panel=activity]').hidden && document.querySelector('[data-tab=activity]').getAttribute('aria-selected') === 'true' && location.hash === `+quote(activityHash))
+	p.Await("Activity on the resume unit", `!document.querySelector('[data-panel=activity]').hidden && document.querySelector('[data-tab=activity]').getAttribute('aria-selected') === 'true' && location.hash === `+browsertest.Quote(activityHash))
 	p.Await("only the resume unit's events", `(() => {
   const log = document.querySelector('#workstream-activity');
   const units = [...log.querySelectorAll('[data-unit]')].map(n => n.dataset.unit);
@@ -251,36 +231,32 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	shot("activity")
 	audit("activity")
 
-	// An entry opened in place is kept in the location.
 	p.Click(`#workstream-activity .fold > summary`)
-	p.Await("the run of events open and named in the location", `document.querySelector('#workstream-activity .fold').open && location.hash.startsWith(`+quote(activityHash+"&open=")+`)`)
+	p.Await("the run of events open and named in the location", `document.querySelector('#workstream-activity .fold').open && location.hash.startsWith(`+browsertest.Quote(activityHash+"&open=")+`)`)
 	var shared string
 	p.Eval(`location.href`, &shared)
 
-	// Loading the copied address, in a page of its own, restores the view.
 	p.Run(chromedp.Navigate("about:blank"), chromedp.Navigate(shared))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Await("the same Activity, unit and opened run", `(() => {
   const log = document.querySelector('#workstream-activity');
   return !document.querySelector('[data-panel=activity]').hidden && document.querySelector('[data-tab=activity]').getAttribute('aria-selected') === 'true' &&
     log.querySelector('[data-field=unit-filter]')?.value === 'resume' && log.querySelectorAll('.fold[open]').length === 1 &&
-    log.querySelectorAll('[data-kind=unit_checks][data-unit=resume]').length === 3 && location.href === `+quote(shared)+`;
+    log.querySelectorAll('[data-kind=unit_checks][data-unit=resume]').length === 3 && location.href === `+browsertest.Quote(shared)+`;
 })()`)
 	p.Run(chromedp.Reload())
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.Await("the view again after a reload", `document.querySelector('#workstream-activity [data-field=unit-filter]')?.value === 'resume' && document.querySelectorAll('#workstream-activity .fold[open]').length === 1`)
 
-	// Back on Conversation the milestones lead to their entries in Activity.
 	p.Click(`[data-tab=conversation]`)
-	p.Await("Conversation and its milestones", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === `+quote(hash)+` && document.querySelectorAll('[data-panel=conversation] [data-kind=milestone]').length >= 2`)
+	p.Await("Conversation and its milestones", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === `+browsertest.Quote(hash)+` && document.querySelectorAll('[data-panel=conversation] [data-kind=milestone]').length >= 2`)
 	p.Click(`[data-panel=conversation] [data-milestone=final_review] a`)
-	p.Await("Activity at the final review", `!document.querySelector('[data-panel=activity]').hidden && location.hash.startsWith(`+quote(hash+"&tab=activity")+`) && location.hash.includes('&entry=') &&
+	p.Await("Activity at the final review", `!document.querySelector('[data-panel=activity]').hidden && location.hash.startsWith(`+browsertest.Quote(hash+"&tab=activity")+`) && location.hash.includes('&entry=') &&
     document.querySelector('#workstream-activity [data-kind=final_review]')?.dataset.focus === 'true' && document.querySelector('#workstream-activity [data-field=unit-filter]').value === ''`)
 	p.Click(`[data-tab=conversation]`)
-	p.Await("Conversation again", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === `+quote(hash))
+	p.Await("Conversation again", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === `+browsertest.Quote(hash))
 
-	// The delivery card is answered with its primary button.
-	p.Await("the delivery card ready to approve", `!document.querySelector(`+quote(cardSelector+" button.primary")+`).disabled`)
+	p.Await("the delivery card ready to approve", `!document.querySelector(`+browsertest.Quote(cardSelector+" button.primary")+`).disabled`)
 	drafted := j.present(t, stream)
 	p.Click(card + "button.primary")
 	p.AwaitOutcome("Approved marking final review 1")
@@ -294,7 +270,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	}
 	p.Await("one delivery left in the needs-you count", `document.querySelector('[data-field=needs-count]').textContent === '1' && document.querySelectorAll('.needs-list > li').length === 1`)
 
-	// The New menu holds every create action.
 	p.Click("#new-workstream")
 	p.Await("the New menu", `document.getElementById('create-menu').matches(':popover-open')`)
 	var created []string
@@ -311,7 +286,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	audit("new menu")
 	p.ClosePopovers()
 
-	// Settings has a section for each concern, one at a time.
 	p.Click("#settings-button")
 	p.Await("Settings", `!document.getElementById('settings-menu').hidden`)
 	sections := map[string]string{"projects": "Projects", "priority": "Priority", "profiles": "Profiles and usage", "config": "Configuration", "engine": "Dagger engine"}
@@ -319,7 +293,7 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 		p.Click(`#settings-nav [data-open="` + name + `"]`)
 		p.Await("the "+name+" section alone", `(() => {
   const shown = [...document.querySelectorAll('#settings-menu [data-section]')].filter(s => !s.hidden).map(s => s.dataset.section);
-  return shown.length === 1 && shown[0] === `+quote(name)+` && document.querySelector('#settings-nav [data-open="`+name+`"]').getAttribute('aria-current') === 'true';
+  return shown.length === 1 && shown[0] === `+browsertest.Quote(name)+` && document.querySelector('#settings-nav [data-open="`+name+`"]').getAttribute('aria-current') === 'true';
 })()`)
 		p.AwaitText(`#settings-menu [data-section="`+name+`"]`, sections[name])
 		shot("settings-" + name)
@@ -327,8 +301,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	}
 	p.Await("Restart and Prune in the engine section", `!!document.querySelector('#settings-menu [data-section=engine] #engine-restart') && !!document.querySelector('#settings-menu [data-section=engine] #engine-prune')`)
 
-	// The abandon dialog keeps the workstream on cancel and abandons it on
-	// confirm, naming the consequence either way.
 	p.SelectWorkstream(other)
 	openAbandon := func() {
 		p.T.Helper()
@@ -338,8 +310,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
     document.getElementById('confirm-dialog').getAnimations().every(a => a.playState === 'finished')`)
 	}
 
-	// At a short height the sticky regions leave room for the conversation and
-	// the dialog fits the viewport.
 	p.Run(v.emulate(v.shortHeight))
 	p.Await("the short viewport", `innerHeight === `+fmt.Sprint(v.shortHeight))
 	sticky := p.MeasureSticky()
@@ -385,10 +355,10 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 
 	p.Click("#confirm-cancel")
 	p.Await("the dialog closed and focus back on the menu button", `!document.getElementById('confirm-dialog').open && document.activeElement === document.getElementById('workstream-menu-button')`)
-	statuses, err := j.c.Statuses(t.Context())
-	must(t, err)
+	statuses, err := j.C.Statuses(t.Context())
+	fixturekit.Must(t, err)
 	for _, w := range statuses.Workstreams {
-		if w.Workstream == other && (w.State == nil || *w.State == AbandonedState) {
+		if w.Workstream == other && (w.State == nil || *w.State == intake.AbandonedState) {
 			t.Fatalf("cancelling the dialog left the workstream %v", w.State)
 		}
 	}
@@ -399,11 +369,11 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	p.Click("#confirm-accept")
 	p.Await("the dialog closed", `!document.getElementById('confirm-dialog').open`)
 	intakefixture.Eventually(t, "the service never abandoned the workstream the dialog confirmed", func() bool {
-		statuses, err := j.c.Statuses(t.Context())
-		must(t, err)
+		statuses, err := j.C.Statuses(t.Context())
+		fixturekit.Must(t, err)
 		for _, w := range statuses.Workstreams {
 			if w.Workstream == other {
-				return w.State != nil && *w.State == AbandonedState
+				return w.State != nil && *w.State == intake.AbandonedState
 			}
 		}
 		return false
@@ -415,8 +385,6 @@ func walkTheRedesignedPage(t *testing.T, v journeyViewport) {
 	audit("after abandoning")
 }
 
-// previewPicture is a small picture of an uploads page, standing for the
-// preview a delivery brief shows.
 func previewPicture(t *testing.T) []byte {
 	t.Helper()
 	const width, height = 640, 400
@@ -436,6 +404,6 @@ func previewPicture(t *testing.T) []byte {
 		fill(image.Rect(180, top+22, progress, top+28), color.RGBA{0x5b, 0xa4, 0xe8, 0xff})
 	}
 	var data bytes.Buffer
-	must(t, png.Encode(&data, picture))
+	fixturekit.Must(t, png.Encode(&data, picture))
 	return data.Bytes()
 }

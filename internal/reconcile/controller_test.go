@@ -30,7 +30,6 @@ type fakeClock struct {
 func (f *fakeClock) Now() time.Time          { f.mu.Lock(); defer f.mu.Unlock(); return f.at }
 func (f *fakeClock) Advance(d time.Duration) { f.mu.Lock(); defer f.mu.Unlock(); f.at = f.at.Add(d) }
 
-// External state outlives both the controller and its trace handle.
 type fakeSystem struct {
 	mu                        sync.Mutex
 	boundary                  coreadapter.OperationBoundary
@@ -79,7 +78,6 @@ func (f *fakeSystem) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	if f.failBeforeEffect {
 		return coreadapter.OperationResult{}, errInjected
 	}
-	// Deliberately not idempotent: a repeated Apply must be caught by assertions.
 	result := coreadapter.OperationResult{Outcome: "complete", Evidence: string(f.boundary) + " resource persisted", Data: json.RawMessage(`{"resource":"local"}`)}
 	f.effects[op.ID] = result
 	return result, f.applyErr
@@ -200,7 +198,7 @@ func TestRestartAtEveryBoundary(t *testing.T) {
 				t.Fatalf("boundary %s: %v", step, err)
 			}
 			before, _ := f.system.counts()
-			f.reopen(t) // Fresh handle has no wakeup; old claim is discovered from disk.
+			f.reopen(t)
 			must(t, f.controller(t).Pass(context.Background()))
 			must(t, f.controller(t).Pass(context.Background()))
 			f.completed(t)
@@ -282,7 +280,6 @@ func TestAmbiguousInspectionNeverAppliesOrAcknowledges(t *testing.T) {
 					t.Fatal("ambiguous effect applied")
 				}
 				f.reopen(t)
-				// The second failure waits twice as long as the first.
 				f.clock.Advance(2 * time.Minute)
 			}
 			f.system.unknown, f.system.inspectErr = false, nil
@@ -299,7 +296,6 @@ func TestConcurrentControllersCannotOverlapEffect(t *testing.T) {
 	errs := make(chan error, 2)
 	go func() { errs <- first.Pass(context.Background()) }()
 	<-f.system.entered
-	// Advancing far beyond a delivery lease cannot permit a second in-flight effect.
 	f.clock.Advance(24 * time.Hour)
 	reached := make(chan struct{})
 	second.boundary = func(step string) error {
@@ -345,26 +341,22 @@ func TestRunScansOnStartupTicksAndDuplicateWakeups(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("startup did not scan")
 	}
-	// Synchronize with the first durable retry before changing the fake system.
 	<-retried
 	f.system.mu.Lock()
 	f.system.unknown = false
 	f.system.mu.Unlock()
 	f.clock.Advance(time.Minute)
-	ticks <- f.clock.Now() // No notify: periodic scanning must discover due work.
+	ticks <- f.clock.Now()
 	select {
 	case <-inspected:
 	case <-time.After(10 * time.Second):
 		t.Fatal("tick did not scan")
 	}
-	// Transactions emit duplicate latency hints, but contain no new effect.
 	for i := range 2 {
 		tx := trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: fmt.Sprintf("hint-%d", i), Revision: 1, Project: projectID, Workstream: streamID, At: epoch, Actor: trace.Actor{Kind: "service", ID: "test"}, Cause: "test", Depth: 0}, Subject: fmt.Sprintf("hint-%d", i), To: "done", Reason: "wake"}}
 		_, err := f.repository.Transact(ctx, tx)
 		must(t, err)
 	}
-	// Admission never joins an active attempt. Wait for the recorded result
-	// before cancellation, then confirm that duplicate hints apply nothing.
 	awaitAcknowledged(t, f, streamID, "prepare")
 	must(t, f.controller(t).Pass(ctx))
 	cancel()
@@ -521,9 +513,6 @@ func TestOperationDiscoveryExcludesTraceRemoval(t *testing.T) {
 	must(t, c.Pass(context.Background()))
 }
 
-// Priority orders a pass across workstreams; equal priorities keep the order
-// the workstreams hold them in, and without it a pass goes workstream by
-// workstream.
 func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t, coreadapter.RepositoryBoundary)
@@ -555,7 +544,6 @@ func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
 	if want := []string{"early", "early", "prepare", "late", "late"}; !slices.Equal(got, want) {
 		t.Fatalf("applied %v, want %v", got, want)
 	}
-	// Equal priorities keep the order the workstreams hold them in.
 	for i, stream := range map[int]config.WorkstreamID{0: streamID, 1: other, 3: streamID, 4: other} {
 		name := "early"
 		if i > 2 {
@@ -567,8 +555,6 @@ func TestPriorityOrdersAPassAcrossWorkstreams(t *testing.T) {
 	}
 }
 
-// A held operation is neither inspected, applied nor recorded in the pass,
-// and the first pass that no longer holds it reconciles it.
 func TestHoldLeavesAnOperationUntouchedUntilReleased(t *testing.T) {
 	ctx := context.Background()
 	f := setup(t, coreadapter.RunnerBoundary)

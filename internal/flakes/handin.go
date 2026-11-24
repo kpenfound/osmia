@@ -119,7 +119,6 @@ func engineLine(engine string) string {
 	return "`" + engine + "`"
 }
 
-// otherFlaky are the run's flaky checks not among the group's links.
 func otherFlaky(all, links []string) []string {
 	var out []string
 	for _, l := range all {
@@ -134,8 +133,6 @@ func otherFlaky(all, links []string) []string {
 	return out
 }
 
-// whereToRead says where the run's output and diagnostics can be read when the
-// record does not hold them: the Dagger Cloud traces, then the run record.
 func whereToRead(o Occurrence) string {
 	var refs []string
 	for _, t := range o.Evidence.Traces {
@@ -252,8 +249,6 @@ func codeList(items []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// fenced writes text as a code block whose fence is longer than any run of
-// backticks in it.
 func fenced(text string) string {
 	longest, run := 0, 0
 	for _, r := range text {

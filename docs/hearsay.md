@@ -207,7 +207,7 @@ ratified, or that an amendment the owner decided produced, stay on the owner
 source with the owner as author.
 
 A final-review follow-up unit records no decider, so none is Jev's and they are
-posted as the chief of staff's, as before. Contest resolutions, objection
+posted as the chief of staff's. Contest resolutions, objection
 decisions, ratification decisions and final-review triage are not posted for
 anyone, Jev included; only the spec a ratification sealed is.
 
@@ -217,8 +217,7 @@ on the work source and without an author, for every subsystem added, removed,
 renamed or moved under a different `part_of` parent. A subsystem is renamed when
 its name changed, or when its id is gone and its primary path now belongs to a
 new id. The update is dated with the revision, and names the re-seed and the commit it
-seeded from. An update for a revision an older trace recorded through a knowledge-base
-extraction or refresh names that workstream or extraction. Edits to aliases, paths or
+seeded from. Edits to aliases, paths or
 owners change nothing posted, and a re-seed that records no revision posts nothing.
 
 ### Never sent
@@ -228,7 +227,6 @@ owners change nothing posted, and a re-seed that records no revision posts nothi
 - Spec drafts, committee debate rounds and amendment requests before a decision.
 - Plans and footprints, unit landings, mason reports and per-unit review
   findings.
-- Knowledge-base prose and `kb/sources.json` in older traces.
 - Engineering answers that came from reading code.
 - The chief's fixes to a stuck workstream (`move_workstream` and similar).
 - Private role notes (`notes/`), CODEOWNERS handles, entity owners, runtime
@@ -237,7 +235,7 @@ owners change nothing posted, and a re-seed that records no revision posts nothi
 - Anything that came out of a Hearsay bundle. Nothing flows from Hearsay back
   into what Osmia posts, and Hearsay posts nothing to Osmia.
 
-A librarian workstream in an older trace and exploratory sessions produce no posts.
+Exploratory sessions produce no posts.
 
 ## Delivery
 
@@ -322,7 +320,7 @@ the project that produced it, and `status` tells a reader why the project's work
 stopped. `abandoned` is the closest of Hearsay's core states, which have no
 removal of their own; nothing about the project's own workstreams, documents or
 decisions changes. A project removed before its first post is posted once, as
-removed. Its repository declaration follows the project's opt-in as before.
+removed. Its repository declaration follows the project's opt-in.
 Adding the project again registers a new project under a new id, which Hearsay
 holds as a new project.
 
@@ -347,7 +345,7 @@ posted. The loop for removed projects keeps the same cadence. A pass posts the p
 not attempt a record whose parent was refused.
 
 **Eligible workstreams** are the project's feature workstreams. Exploratory
-sessions, design sessions and a librarian workstream in an older trace post nothing.
+sessions and design sessions post nothing.
 
 **Core states.** A workstream's `status` is Osmia's own state; its `state` is
 one of Hearsay's core states:

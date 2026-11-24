@@ -10,6 +10,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -41,6 +42,6 @@ func SessionWebFixture(t *testing.T) (*service.Service, *service.Client, config.
 	s, c := Start(t, opts)
 	added, err := c.AddProject(context.Background(), fixturekit.Request(clone))
 	fixturekit.Must(t, err)
-	WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
+	intakefixture.WriteCharter(t, c, added.Project.ID, "1. Keep changes small.\n")
 	return s, c, added.Project.ID, engine, clone
 }

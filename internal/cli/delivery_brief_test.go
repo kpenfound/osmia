@@ -10,8 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// The delivery command prints the brief text, each "Before you ship" item and
-// a link per screenshot, or says why there is no brief.
 func TestDeliveryPrintsTheBrief(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -61,7 +59,6 @@ func TestDeliveryPrintsTheBrief(t *testing.T) {
 	}
 }
 
-// The feed command prints a brief entry with its items and screenshot links.
 func TestFeedPrintsTheBriefEntry(t *testing.T) {
 	var out strings.Builder
 	showFeed(&out, []wire.FeedEntry{{Kind: "brief", Brief: &wire.FeedBrief{Review: 2, Text: "Owners see the new page.", BeforeYouShip: []string{"Set OSMIA_TOKEN"},

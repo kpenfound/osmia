@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/intake"
 	"math/big"
 	"strconv"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -80,15 +80,12 @@ func (b budgetSignals) check(ctx context.Context, stream config.WorkstreamID, li
 	return err
 }
 
-// spendTotal is the exact sum of known costs and the number of costs that are
-// unknown, which make the sum a lower bound.
 type spendTotal struct {
 	known     *big.Rat
 	precision int
 	unknown   int
 }
 
-// sumCosts adds the known costs exactly, as the decimals they print as.
 func sumCosts(costs []trace.Cost) (spendTotal, error) {
 	t := spendTotal{known: new(big.Rat)}
 	for _, cost := range costs {
@@ -109,17 +106,14 @@ func sumCosts(costs []trace.Cost) (spendTotal, error) {
 	return t, nil
 }
 
-// equal reports whether t and other print and count the same.
 func (t spendTotal) equal(other spendTotal) bool {
 	return t.known.Cmp(other.known) == 0 && t.precision == other.precision && t.unknown == other.unknown
 }
 
-// plus returns the sum of t and other.
 func (t spendTotal) plus(other spendTotal) spendTotal {
 	return spendTotal{known: new(big.Rat).Add(t.known, other.known), precision: max(t.precision, other.precision), unknown: t.unknown + other.unknown}
 }
 
-// String prints the known sum as a decimal without trailing zeros.
 func (t spendTotal) String() string {
 	spend := t.known.FloatString(t.precision)
 	if t.precision > 0 {

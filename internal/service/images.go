@@ -29,7 +29,6 @@ func memberImageEntries(repository *trace.Repository, stream config.WorkstreamID
 	return out, nil
 }
 
-// imageRequest uses the same handler and listener wrappers as every read endpoint.
 func (s *Service) imageRequest(w http.ResponseWriter, r *http.Request) bool {
 	rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/images/")
 	if !ok || r.Method != http.MethodGet {

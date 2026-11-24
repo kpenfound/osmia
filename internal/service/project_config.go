@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/redact"
@@ -37,11 +38,6 @@ func (s *Service) projectConfigRequest(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
-// readProjectConfig returns the editable snapshot of an active project's
-// stored settings: the current revision decoded once, so the values, the
-// markers and the pin describe the same revision. The loaded configuration
-// supplies the values in effect. Settings that do not load yield the loader's
-// error, the values in effect and no pin.
 func (s *Service) readProjectConfig(raw config.ProjectID) (ProjectConfigResponse, *APIError) {
 	id, api := s.projectFor(raw)
 	if api != nil {
@@ -58,15 +54,13 @@ func (s *Service) readProjectConfig(raw config.ProjectID) (ProjectConfigResponse
 	return s.projectConfigSnapshot(cfg, id, revision), nil
 }
 
-// projectConfigSnapshot decodes revision, the project's stored settings,
-// against the loaded configuration cfg.
 func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID, revision projectstore.Revision) ProjectConfigResponse {
 	out := ProjectConfigResponse{Project: id, Revision: revision.Number, Settings: []ProjectConfigSetting{}}
 	loaded := cfg.For(id).Project
 	file, err := cfg.DecodeProject(id, s.options.Config.Home, revision.Data)
 	if err != nil {
 		failed := reloadError(projectstore.Relabel(cfg.Root, id, err), time.Time{})
-		out.Error = &ProjectConfigError{Field: failed.Field, Message: failed.Message}
+		out.Error = &api.ProjectConfigError{Field: failed.Field, Message: failed.Message}
 	} else {
 		out.Pin = revision.Pin
 	}
@@ -83,20 +77,8 @@ func (s *Service) projectConfigSnapshot(cfg *config.Config, id config.ProjectID,
 	return out
 }
 
-// settingValue is the value a project holds for a setting of its file.
 func settingValue(p config.Project, name string) any { return p.SettingValue(name) }
 
-// saveProjectConfig applies a pinned edit to an active project's stored
-// settings.
-//
-// Under projectMu it checks the pin against the current stored revision, edits
-// the pinned revision's text, validates the result as loading does, and
-// prepares the running service's adoption of it before anything is written.
-// Any failure until then refuses the save and leaves the stored settings and
-// the loaded configuration as they were. Only the saved project's settings are
-// adopted; a revision saved earlier and not adopted stays pending until a save
-// builds on it. Once the revision is recorded the outcome is never a refusal: a
-// failure then is reported as saved but not applied.
 func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, edit ProjectConfigEdit) (ProjectConfigSaveResponse, *APIError) {
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -117,8 +99,6 @@ func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, e
 	if current.Pin != edit.Pin {
 		return ProjectConfigSaveResponse{}, stale
 	}
-	// Stored settings that do not load are repaired offline: no save applies
-	// to them.
 	if _, err := cfg.DecodeProject(id, s.options.Config.Home, current.Data); err != nil {
 		err = projectstore.Relabel(cfg.Root, id, err)
 		return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Validation, Message: "the stored settings do not load, so they cannot be saved here: " + reloadError(err, time.Time{}).Message + "; " + projectstore.RepairHint(id, err)})
@@ -145,8 +125,6 @@ func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, e
 		if errors.Is(werr, projectstore.ErrStale) {
 			return ProjectConfigSaveResponse{}, stale
 		}
-		// Only a recorded revision that holds the edited bytes is a save; a
-		// failure that leaves anything else is a refusal.
 		now, err := store.Current(id)
 		if err != nil || now.Number != current.Number+1 || !bytes.Equal(now.Data, edited) {
 			return ProjectConfigSaveResponse{}, refusedUnchanged(&APIError{Code: Internal, Message: fmt.Sprintf("the settings of project %s cannot be written: %s", id, redact.Secrets(werr.Error(), redact.KnownSecrets()...))})
@@ -161,24 +139,17 @@ func (s *Service) saveProjectConfig(ctx context.Context, raw config.ProjectID, e
 	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(adoption.next, id, saved), Outcome: ProjectConfigApplied}, nil
 }
 
-// refusedUnchanged finishes the message of a refusal with what it guarantees.
 func refusedUnchanged(e *APIError) *APIError {
 	e.Message += "; the stored settings and the loaded configuration are unchanged"
 	return e
 }
 
-// notApplied reports a save whose revision was recorded but not adopted. The
-// snapshot is of the saved revision against the configuration still in
-// effect, so the saved values read as not yet applied. They stay pending until
-// the project's next save, which builds on the revision, or a restart; a reload
-// does not adopt them.
 func (s *Service) notApplied(cfg *config.Config, id config.ProjectID, saved projectstore.Revision, reason string) ProjectConfigSaveResponse {
 	s.log().Error("project configuration saved but not applied", "project", string(id), "reason", reason)
 	s.hub.Publish(Event{Kind: EventConfig})
 	return ProjectConfigSaveResponse{ProjectConfigResponse: s.projectConfigSnapshot(cfg, id, saved), Outcome: ProjectConfigSavedNotApplied, Reason: reason}
 }
 
-// projectEdit translates a request into the settings the file edit changes.
 func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
 	out := config.ProjectEdit{Strings: map[string]string{}, Ints: map[string]int{}, Bools: map[string]bool{}, Entities: e.Set.HearsayEntities, Clear: e.Clear, ClearEntities: e.ClearHearsayEntities}
 	for name, value := range map[string]*string{"name": e.Set.Name, "upstream": e.Set.Upstream, "fork": e.Set.Fork, "clone": e.Set.Clone, "base_branch": e.Set.BaseBranch, "landing": e.Set.Landing, "delivery": e.Set.Delivery, "upstream_rebase": e.Set.UpstreamRebase, "pull_request_poll": e.Set.PullRequestPoll, "checks_timeout": e.Set.ChecksTimeout, "hearsay_scope": e.Set.HearsayScope} {
@@ -200,8 +171,6 @@ func projectEdit(e ProjectConfigEdit) config.ProjectEdit {
 	return out
 }
 
-// projectAdoption is everything the running service needs to adopt one
-// project's saved settings, prepared so that adopting it cannot fail.
 type projectAdoption struct {
 	next    *config.Config
 	runtime *activeProject
@@ -209,9 +178,6 @@ type projectAdoption struct {
 	resolve func()
 }
 
-// prepareProjectAdoption does the fallible work of adopting project p over
-// cfg, as a reload does: stages for the project's passes, the engine, and the
-// runtime state resolved against the candidate. It changes nothing.
 func (s *Service) prepareProjectAdoption(ctx context.Context, cfg *config.Config, projects []*activeProject, id config.ProjectID, p config.Project) (projectAdoption, error) {
 	if err := s.step("project-config-prepare"); err != nil {
 		return projectAdoption{}, err
@@ -240,11 +206,6 @@ func (s *Service) prepareProjectAdoption(ctx context.Context, cfg *config.Config
 	return a, nil
 }
 
-// adoptProject publishes a prepared adoption: the loaded configuration
-// changes, the project's passes and conversations take its stages from their
-// next step, and clients are told. revision is the stored revision the adopted
-// settings come from. A reload failure recorded for this project's settings is
-// stale once they are applied.
 func (s *Service) adoptProject(a projectAdoption, id config.ProjectID, revision int) {
 	s.mu.Lock()
 	s.cfg = a.next

@@ -1,19 +1,11 @@
 package service
 
 import (
-	config "github.com/kpenfound/osmia/internal/config"
+	"testing"
 
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-
-	testing "testing"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
-
-var requireJJ = intakefixture.RequireJJ
-
-func onWorkspaces(t *testing.T, opts Options, backend string) {
-	t.Helper()
-	intakefixture.OnWorkspaces(t, opts.Config.Root, backend)
-}
 
 func backendOf(t *testing.T, f *shedFixture, stream config.WorkstreamID) string {
 	t.Helper()

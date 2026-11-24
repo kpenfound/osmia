@@ -37,14 +37,12 @@ func (c *clock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); ret
 func (c *clock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.now = c.now.Add(d) }
 
 type fixture struct {
-	root    config.Root
-	project config.Project
-	clock   *clock
-	// failNext makes the next turn runAll completes fail.
+	root     config.Root
+	project  config.Project
+	clock    *clock
 	failNext bool
-	// failed is the prompt of the turn runAll failed.
-	failed string
-	claims int
+	failed   string
+	claims   int
 }
 
 func must(t *testing.T, err error) {
@@ -83,7 +81,6 @@ func (f *fixture) deliverer(t *testing.T, repo *trace.Repository, window time.Du
 	return d
 }
 
-// notify commits a state transition of subject id with one notice.
 func (f *fixture) notify(t *testing.T, repo *trace.Repository, id string) {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: id, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "test"}
@@ -92,7 +89,6 @@ func (f *fixture) notify(t *testing.T, repo *trace.Repository, id string) {
 	must(t, err)
 }
 
-// eventTurns returns the chief-of-staff turns the deliverer queued.
 func eventTurns(t *testing.T, repo *trace.Repository) []trace.QueuedTurn {
 	t.Helper()
 	th, err := repo.ChiefOfStaffThread(stream)
@@ -106,7 +102,6 @@ func eventTurns(t *testing.T, repo *trace.Repository) []trace.QueuedTurn {
 	return out
 }
 
-// claimNext reserves the chief of staff's next queued turn.
 func (f *fixture) claimNext(t *testing.T, repo *trace.Repository) trace.QueuedTurn {
 	t.Helper()
 	f.claims++
@@ -116,7 +111,6 @@ func (f *fixture) claimNext(t *testing.T, repo *trace.Repository) trace.QueuedTu
 	return q
 }
 
-// finish completes a turn claimed with claimNext, successfully or with a failure.
 func (f *fixture) finish(t *testing.T, repo *trace.Repository, q trace.QueuedTurn, ok bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -131,8 +125,6 @@ func (f *fixture) finish(t *testing.T, repo *trace.Repository, q trace.QueuedTur
 	must(t, repo.CompleteTurn(ctx, stream, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 }
 
-// runAll completes every queued chief-of-staff turn, successfully unless
-// failNext is set.
 func (f *fixture) runAll(t *testing.T, repo *trace.Repository) {
 	t.Helper()
 	th, err := repo.ChiefOfStaffThread(stream)
@@ -148,7 +140,6 @@ func (f *fixture) runAll(t *testing.T, repo *trace.Repository) {
 	}
 }
 
-// deliveries counts the event turns whose prompt carries the notice of id.
 func deliveries(t *testing.T, repo *trace.Repository, id string) int {
 	t.Helper()
 	n := 0
@@ -200,7 +191,6 @@ func TestEventsInsideTheWindowMakeOneTurn(t *testing.T) {
 	if req.AgentID != trace.ChiefOfStaff || req.ThreadID != trace.ChiefOfStaff || req.Profile != profile || req.Cause != "first" || !req.At.Equal(f.clock.Now()) || req.SystemPrompt != "" {
 		t.Fatalf("request %+v", req)
 	}
-	// The events stay unacknowledged until their turn completes.
 	if n := unacknowledged(t, repo); n != 3 {
 		t.Fatalf("%d events unacknowledged while the turn is queued", n)
 	}
@@ -210,7 +200,6 @@ func TestEventsInsideTheWindowMakeOneTurn(t *testing.T) {
 		t.Fatalf("%d events left unacknowledged", n)
 	}
 
-	// A later event opens a new window of its own.
 	f.notify(t, repo, "fourth")
 	f.clock.Advance(4 * time.Second)
 	must(t, d.Pass(ctx))
@@ -301,7 +290,6 @@ func TestEventTurnQueuesBehindTheTurnInFlight(t *testing.T) {
 	}
 }
 
-// steps are the deliverer's crash points, each with the occurrence to fail.
 var steps = []struct {
 	name string
 	n    int
@@ -310,7 +298,6 @@ var steps = []struct {
 	{"before-settle", 1}, {"before-settle", 2}, {"before-release", 1}, {"before-release", 2},
 }
 
-// crashAt fails the nth occurrence of step name and sets *fired when it does.
 func crashAt(name string, n int, fired *bool) func(string) error {
 	seen := 0
 	return func(step string) error {
@@ -326,8 +313,6 @@ func crashAt(name string, n int, fired *bool) func(string) error {
 }
 
 func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
-	// Every crash point fires as the first crash of some cell, and the
-	// release points fire once the first turn failed.
 	var mu sync.Mutex
 	fired := map[string]bool{}
 	t.Cleanup(func() {
@@ -360,10 +345,6 @@ func TestCrashAndRestartNeitherLoseNorRepeatEvents(t *testing.T) {
 	}
 }
 
-// crashAndRestart delivers three events across two crashing passes and a
-// clean one, restarting after each and running the queued turns between
-// passes. When failed is set, the first turn to run fails. It reports whether
-// the first crash point fired.
 func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second string, secondN int) bool {
 	ctx := context.Background()
 	f, repo := setup(t)
@@ -380,8 +361,6 @@ func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second
 		f.runAll(t, repo)
 	}
 
-	// Each restart is a new repository session; a later event joins
-	// whatever was not delivered.
 	repo = f.reopen(t, repo)
 	f.notify(t, repo, "third")
 	f.clock.Advance(time.Minute)
@@ -408,7 +387,6 @@ func crashAndRestart(t *testing.T, failed bool, first string, firstN int, second
 		t.Fatal("no turn failed")
 	}
 	for _, id := range []string{"first", "second", "third"} {
-		// An event of the failed turn goes out in exactly one more.
 		want := 1 + strings.Count(f.failed, "Notice "+id+"\n")
 		if n := deliveries(t, repo, id); n != want {
 			t.Fatalf("event %s delivered %d times, want %d", id, n, want)
@@ -426,7 +404,6 @@ func TestEventOfACompletedTurnIsNeverDeliveredAgain(t *testing.T) {
 	d := f.deliverer(t, repo, time.Second)
 	must(t, d.Pass(ctx))
 	f.runAll(t, repo)
-	// A restart before the acknowledgement settles the event without a turn.
 	repo = f.reopen(t, repo)
 	f.clock.Advance(time.Hour)
 	d = f.deliverer(t, repo, time.Second)
@@ -477,7 +454,6 @@ func TestEventOfAQueuedOrRunningTurnIsNotDeliveredTwice(t *testing.T) {
 				repo = f.reopen(t, repo)
 				d = f.deliverer(t, repo, time.Second)
 			}
-			// The claim's lease runs out while the turn is in flight.
 			f.clock.Advance(time.Hour)
 			must(t, d.Pass(ctx))
 			must(t, d.Pass(ctx))
@@ -560,7 +536,6 @@ func TestEventOfATurnARestartInterruptedIsDeliveredInOneNewTurn(t *testing.T) {
 	f.clock.Advance(time.Minute)
 	must(t, f.deliverer(t, repo, time.Second).Pass(ctx))
 	f.claimNext(t, repo)
-	// The service stops before the turn captures a result.
 	repo = f.reopen(t, repo)
 	d := f.deliverer(t, repo, time.Second)
 	must(t, d.Pass(ctx))
@@ -584,7 +559,6 @@ func TestProfileFailureKeepsEvents(t *testing.T) {
 	defer repo.Close()
 	d, err := New(repo, Options{Now: f.clock.Now, Profile: func() (coreadapter.Profile, error) { return coreadapter.Profile{}, errors.New("unused") }})
 	must(t, err)
-	// Without events, no profile is needed.
 	must(t, d.Pass(ctx))
 	f.notify(t, repo, "first")
 	if err := d.Pass(ctx); err == nil || !strings.Contains(err.Error(), "unused") {
@@ -608,7 +582,6 @@ func TestSystemPromptIsBuiltPerWorkstreamWhenATurnIsQueued(t *testing.T) {
 			return "Context of " + string(s), failing
 		}})
 	must(t, err)
-	// No system prompt is built without events, or inside the window.
 	must(t, d.Pass(ctx))
 	f.notify(t, repo, "first")
 	must(t, d.Pass(ctx))
@@ -616,7 +589,6 @@ func TestSystemPromptIsBuiltPerWorkstreamWhenATurnIsQueued(t *testing.T) {
 		t.Fatalf("system prompt built early: %v", asked)
 	}
 	f.clock.Advance(time.Second)
-	// A failing system prompt keeps the events for a later pass.
 	failing = fail
 	if err := d.Pass(ctx); !errors.Is(err, fail) {
 		t.Fatalf("system prompt error not reported: %v", err)
@@ -671,8 +643,6 @@ func TestSkippedWorkstreamKeepsItsEvents(t *testing.T) {
 	must(t, err)
 	f.notify(t, repo, "first")
 	f.clock.Advance(time.Minute)
-	// A failed turn leaves a claim this session holds; a skipped workstream
-	// keeps it and gets no new turn.
 	must(t, d.Pass(ctx))
 	f.finish(t, repo, f.claimNext(t, repo), false)
 	skip = true
@@ -740,9 +710,6 @@ func TestRepeatedEventFailuresBackOffAcrossRestart(t *testing.T) {
 	}
 }
 
-// An event whose delivery turns fail MaxDeliveryFailures times is held
-// instead of delivered again, however long the backoff, until the chief of
-// staff completes a turn answering the owner.
 func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
@@ -786,8 +753,6 @@ func TestRepeatedlyFailedEventIsHeldUntilTheChiefAnswersTheOwner(t *testing.T) {
 	}
 }
 
-// progress commits a state transition of subject id with one event of
-// routine progress.
 func (f *fixture) progress(t *testing.T, repo *trace.Repository, id string) {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: 1, Revision: 1, ID: id, Project: project, Workstream: stream, At: f.clock.Now(), Actor: owner, Cause: "test"}
@@ -796,8 +761,6 @@ func (f *fixture) progress(t *testing.T, repo *trace.Repository, id string) {
 	must(t, err)
 }
 
-// Events that arrive while an event turn is queued or running wait for the
-// next turn rather than queue another behind it.
 func TestEventsWaitForTheEventTurnInFlight(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
@@ -818,8 +781,6 @@ func TestEventsWaitForTheEventTurnInFlight(t *testing.T) {
 	}
 }
 
-// Routine progress waits for the progress window, unless another event goes
-// out first and carries it.
 func TestProgressWaitsForItsWindowOrTheNextNotice(t *testing.T) {
 	ctx := context.Background()
 	f, repo := setup(t)
@@ -855,22 +816,12 @@ func TestProgressWaitsForItsWindowOrTheNextNotice(t *testing.T) {
 	}
 }
 
-// TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelivery
-// covers Options.ChiefTarget: a member's outbox event is delivered as a
-// turn on the shared chief-of-staff thread of its cross-repo workgroup,
-// which lives in neither member's own repository, and is acknowledged
-// exactly once even when the service restarts partway through delivering
-// it (here, right after the event is claimed but before its chief-of-staff
-// turn is enqueued, the same crash point TestCrashAndRestartNeitherLoseNorRepeatEvents
-// already covers for a single-repo workstream).
 func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelivery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, repo := setup(t)
 	defer func() { repo.Close() }()
 
-	// A second member, in its own separate project and repository, makes
-	// this workgroup genuinely cross-repo.
 	home2 := t.TempDir()
 	root2, err := config.ResolveRoot(filepath.Join(home2, "osmia"), "")
 	must(t, err)
@@ -886,12 +837,6 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	must(t, err)
 	must(t, wt.Close())
 
-	// setup and CreateWorkstream already commit each member's own
-	// chief-of-staff thread (that is what eventTurns elsewhere relies on
-	// reading), so "the member has no chief thread" cannot be the signal
-	// that delivery went to the shared thread instead. Snapshot each
-	// member's own thread now, before any Pass, so we can later assert it
-	// never grew an event turn.
 	snapshotThread := func(repo *trace.Repository, stream config.WorkstreamID) []trace.QueuedTurn {
 		th, err := repo.ChiefOfStaffThread(stream)
 		must(t, err)
@@ -923,21 +868,15 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 		t.Fatal("crash point never fired")
 	}
 
-	// The simulated crash hit after the event was claimed but before its
-	// chief-of-staff turn was enqueued: nothing was delivered yet.
 	if n := unacknowledged(t, repo); n != 1 {
 		t.Fatalf("event state after the simulated crash: %d unacknowledged, want 1", n)
 	}
 
-	// Restart: a fresh repository session and a fresh deliverer, as a real
-	// service restart would build.
 	repo = f.reopen(t, repo)
 	d, err = New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil }, ChiefTarget: chiefTarget})
 	must(t, err)
 	must(t, d.Pass(ctx))
 
-	// Neither member's own chief-of-staff thread grew an event turn: the
-	// notice went only to the shared thread in the workgroup's own trace.
 	assertNoEventTurnAdded := func(repo *trace.Repository, stream config.WorkstreamID, snapshot []trace.QueuedTurn) {
 		t.Helper()
 		th, err := repo.ChiefOfStaffThread(stream)
@@ -973,10 +912,6 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 		t.Fatalf("queued turn is missing the notice: %+v", queued[0])
 	}
 
-	// Complete the queued turn by hand, the way claimNext/finish do for
-	// the single-repo case, but against the workgroup's own trace and its
-	// synthetic host workstream, which is where EnqueueTurn actually
-	// stores a chief-of-staff request.
 	host := g.Members[0]
 	q, err := wt2.ClaimTurn(ctx, host, trace.ChiefOfStaff, "run_1", "/sessions/run_1", f.clock.Now())
 	must(t, err)
@@ -987,7 +922,6 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 	must(t, wt2.CaptureTurn(ctx, q.Claim.Token, response))
 	must(t, wt2.CompleteTurn(ctx, host, trace.ChiefOfStaff, q.Request.TurnID, q.Claim.Token, f.clock.Now()))
 
-	// Settle: the chief's turn is now done, so the event is acknowledged.
 	must(t, d.Pass(ctx))
 
 	if n := unacknowledged(t, repo); n != 0 {
@@ -1005,7 +939,6 @@ func TestCrossRepoWorkgroupEventDeliveredToSharedChiefOnceAcrossRestartMidDelive
 		t.Fatalf("event acknowledged %d times, want 1: %+v", acked, entries)
 	}
 
-	// Delivered exactly once: one chief-of-staff turn carries the notice.
 	th, err = wt2.ChiefOfStaffThread(stream)
 	must(t, err)
 	n := 0

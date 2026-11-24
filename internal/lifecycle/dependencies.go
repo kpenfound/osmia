@@ -1,3 +1,8 @@
+// Package lifecycle holds the service's workstream lifecycle controllers:
+// workgroups and their changes, merge-order edges and waivers, drift rebases,
+// pull-request observation and polling, archiving and archive cleanup. Each
+// controller records its progress in the trace so a restarted service resumes
+// it without repeating a side effect.
 package lifecycle
 
 import (

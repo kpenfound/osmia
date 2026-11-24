@@ -16,20 +16,11 @@ import (
 const (
 	// OwnerMember is the member name of the owner's own objections. No
 	// committee member may carry it.
-	OwnerMember = "owner"
-	// rulingsName is the file name, without its extension, of the owner's
-	// rulings of a round.
-	rulingsName = "rulings"
-	// moreName is the file name, without its extension, of the owner's
-	// request for further rounds after a round concluded the debate.
-	moreName = "more"
-	// redraftName is the file name, without its extension, of the owner's
-	// request for a redraft of the spec and the plan, and redraftedName the
-	// architect's report of the redraft it wrote for it.
-	redraftName   = "redraft"
-	redraftedName = "redrafted"
-	// packetName is the file name, without its extension, of the ratification
-	// packet, and ratificationName of the owner's ratification.
+	OwnerMember      = "owner"
+	rulingsName      = "rulings"
+	moreName         = "more"
+	redraftName      = "redraft"
+	redraftedName    = "redrafted"
 	packetName       = "packet"
 	ratificationName = "ratification"
 )
@@ -39,9 +30,6 @@ const (
 // neither a part nor a citation. Like every kind but Fit it blocks.
 const Owner Kind = "owner"
 
-// reserved reports whether a shed file name, without its extension, belongs
-// to the architect, the chief of staff or the owner rather than to a
-// committee member.
 func reserved(name string) bool {
 	switch name {
 	case replyName, redraftedName, rulingsName, chiefName, moreName, redraftName, packetName, ratificationName:
@@ -50,7 +38,6 @@ func reserved(name string) bool {
 	return false
 }
 
-// reservedPath reports whether a shed path names one of the reserved files.
 func reservedPath(path string) bool {
 	name := path[strings.LastIndex(path, "/")+1:]
 	return strings.HasSuffix(name, ".json") && reserved(strings.TrimSuffix(name, ".json"))
@@ -236,8 +223,6 @@ func decodeFile(data []byte, out any, what string) error {
 	return nil
 }
 
-// shedFiles returns the latest revision of every recorded shed file of the
-// workstream whose name, without its extension, is the given one.
 func shedFiles(repository *trace.Repository, stream config.WorkstreamID, name string) (map[string]trace.Document, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -322,7 +307,6 @@ func Limit(configured int, requests []More, redrafts []Redraft) int {
 	return limit
 }
 
-// flatten returns the rulings of every round in order, latest last.
 func flatten(rounds []Rulings) []Ruling {
 	var out []Ruling
 	for _, r := range rounds {

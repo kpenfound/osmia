@@ -2,10 +2,8 @@ package intakefixture
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +11,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -33,47 +32,39 @@ func NewWiringSetup(t *testing.T, home string, cfgOptions config.Options, agents
 	t.Helper()
 	ctx := context.Background()
 	root := cfgOptions.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	Must(t, err)
-	listed := strings.Replace(string(top), fmt.Sprintf("active_projects = [%q]", fixturekit.Project), fmt.Sprintf("active_projects = [%q, %q]", fixturekit.Project, fixturekit.OtherProject), 1)
-	Must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(listed), 0600))
 	home2 := filepath.Join(home, "repo2")
-	Must(t, os.MkdirAll(filepath.Join(root, "projects", string(fixturekit.OtherProject)), 0700))
-	Must(t, os.WriteFile(filepath.Join(root, "projects", string(fixturekit.OtherProject), "config.toml"), []byte(`version = 1
+	fixturekit.RegisterProject(t, root, fixturekit.OtherProject, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+home2+`"
-`), 0600))
-	cfg, err := config.Load(cfgOptions)
-	Must(t, err)
+`)
+	cfg, err := projectstore.LoadConfig(cfgOptions)
+	fixturekit.Must(t, err)
 
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	f := &WiringSetup{Config: cfg, Clock: clock, Ticks: make(chan time.Time)}
 	for _, p := range cfg.Projects {
-		Must(t, os.MkdirAll(p.Clone, 0700))
+		fixturekit.Must(t, os.MkdirAll(p.Clone, 0700))
 		repo, err := trace.Create(ctx, cfg.Root, p, clock.Now(), owner)
-		Must(t, err)
-		ws, agentID, threadID := fixturekit.Stream, DemoAgent, DemoThread
+		fixturekit.Must(t, err)
+		ws, agentID, threadID := fixturekit.Stream, fixturekit.DemoAgent, fixturekit.DemoThread
 		if p.ID == fixturekit.OtherProject {
 			ws, agentID, threadID = fixturekit.OtherStream, "agent_mason2", "thread_mason2"
 		}
-		Must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
-		Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agentID, Project: p.ID, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: threadID}))
-		// The chief's answer to member1's question cites charter#1, which
-		// must resolve against member1's own project (through ProjectFor),
-		// as in newQuestionFixture.
+		fixturekit.Must(t, repo.CreateWorkstream(ctx, ws, clock.Now(), owner))
+		fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agentID, Project: p.ID, Workstream: ws, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: threadID}))
 		fixturekit.RecordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
-		Must(t, repo.Close())
+		fixturekit.Must(t, repo.Close())
 	}
 
 	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	f.Engine = &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]DemoTurn{}}
+	f.Engine = &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	f.Engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
-	Must(t, os.Mkdir(views, 0700))
+	fixturekit.Must(t, os.Mkdir(views, 0700))
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
 	f.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		observe(r)

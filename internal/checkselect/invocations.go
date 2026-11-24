@@ -70,16 +70,12 @@ func InvocationGroups(links []string) []Invocation {
 	return out
 }
 
-// address is a parsed check link: everything before its query, and the values
-// of each filter in the order they first appear. An opaque address has a form
-// this package does not read, and only combines with an identical link.
 type address struct {
 	raw     string
 	base    string
 	filters []filter
 	opaque  bool
-	// links are the links this address stands for.
-	links []string
+	links   []string
 }
 
 type filter struct {
@@ -99,7 +95,6 @@ func parseAddress(link string) *address {
 	for pair := range strings.SplitSeq(query, "&") {
 		key, value, keyed := strings.Cut(pair, "=")
 		if !keyed || key == "" || value == "" {
-			// A filter without a value selects the whole dimension.
 			return &address{base: link, opaque: true}
 		}
 		a.add(key, value)
@@ -144,8 +139,6 @@ func (a *address) String() string {
 	return a.base + "?" + strings.Join(pairs, "&")
 }
 
-// combine returns the one address selecting exactly what a and b select
-// together, and false when no such address exists.
 func combine(a, b *address) (*address, bool) {
 	if a.opaque || b.opaque {
 		return a, a.opaque && b.opaque && a.base == b.base
@@ -184,9 +177,6 @@ func combine(a, b *address) (*address, bool) {
 	return union, true
 }
 
-// covers reports whether a selects everything other selects: an address with
-// no path or filters selects every check of its scheme, and otherwise each of
-// a's filters must allow all of other's values for that filter.
 func (a *address) covers(other *address) bool {
 	if len(a.filters) == 0 && strings.HasSuffix(a.base, "://") {
 		return schemeOf(a.base) == schemeOf(other.base)

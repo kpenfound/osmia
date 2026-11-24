@@ -14,8 +14,6 @@ import (
 	time "time"
 )
 
-// Units are taken in the plan's dependency order: a unit follows the units
-// it depends on, and otherwise keeps its place in the plan.
 func TestNextReadyFollowsTheDependencyOrder(t *testing.T) {
 	t.Parallel()
 	unit := func(id string, deps ...string) plan.Unit { return plan.Unit{ID: id, DependsOn: deps} }
@@ -38,9 +36,6 @@ func TestNextReadyFollowsTheDependencyOrder(t *testing.T) {
 	}
 }
 
-// A ready unit entangled with a unit in flight is passed over for the next
-// ready unit that is not, and a unit whose footprint does not resolve waits
-// for every unit in flight.
 func TestNextReadySkipsEntangledUnits(t *testing.T) {
 	t.Parallel()
 	entities := kb.Map{Version: kb.Version, Entities: []kb.Entity{
@@ -73,9 +68,6 @@ func TestNextReadySkipsEntangledUnits(t *testing.T) {
 	}
 }
 
-// Workstreams are offered a slot in the project's priority order, those it
-// does not name last; among equals, the one that started a unit least
-// recently goes first, then the lower ID.
 func TestStartOrderIsPriorityThenRoundRobin(t *testing.T) {
 	t.Parallel()
 	at := func(minutes int) time.Time { return demoStart.Add(time.Duration(minutes) * time.Minute) }

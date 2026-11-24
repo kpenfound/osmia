@@ -17,16 +17,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// unconfiguredJudge is Jev without its API key: every judgment falls back and
-// nothing is sent.
 func unconfiguredJudge() *jev.Judge {
 	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "TEST_JEV_KEY", Timeout: "1s"}
 	return &jev.Judge{Config: func() config.Jev { return settings }, Getenv: func(string) string { return "" }}
 }
 
-// The final response is split into the sentence spans a classification
-// question offers as evidence, each bounded in rune length, with the spans
-// themselves bounded in count and blank responses yielding none.
 func TestResponseSpansSplitsSentencesWithRuneAndCountLimits(t *testing.T) {
 	got := responseSpans("Edited store.go. Should I keep the cache?\n\n  Tests pass!\nnext steps:  ")
 	want := []string{"Edited store.go.", "Should I keep the cache?", "Tests pass!", "next steps:"}
@@ -52,9 +47,6 @@ func TestResponseSpansSplitsSentencesWithRuneAndCountLimits(t *testing.T) {
 	}
 }
 
-// classification answers a mason-classification request: class with
-// probability p, and for each class but unclear the span or none its
-// evidence question selects.
 func classification(class string, p float64, evidence map[string]string) jevtest.Result {
 	var others []string
 	for _, o := range classOptions {
@@ -138,8 +130,6 @@ func TestJevClassification(t *testing.T) {
 			if state["message"] != final || len(r.Questions) != 4 || len(r.Questions[evidenceQuestion("gave_up")].Options) != 4 {
 				t.Fatalf("request %+v", r)
 			}
-			// The same judgment asked again, as after a restart, is the
-			// recorded decision.
 			decision := runner.Jev.Evaluate(context.Background(), repo, jev.Judgment{Scope: coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: "thread", Turn: "turn", Role: "mason"}, Cause: req.ID, Depth: req.Depth, Task: classificationTask, Version: classificationVersion, Request: r})
 			if !decision.Recovered || decision.Outcome != tc.outcome || decision.Reason != tc.reason || len(p.Requests()) != 1 {
 				t.Fatalf("recorded decision %+v", decision)

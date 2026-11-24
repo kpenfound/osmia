@@ -16,10 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A confident Jev ratifies a packet with no owner command and nobody reading
-// the inbox: the workstream builds, no ratification card is ever left, and the
-// workstream's feed on the page shows the ratification without the "decided by
-// Jev" label, which marks only a departure from the default.
 func TestBrowserDoesNotLabelAJevGateDecisionAsADeparture(t *testing.T) {
 	p := openBrowser(t)
 	provider := &jevfixture.Provider{Confidence: 0.97}

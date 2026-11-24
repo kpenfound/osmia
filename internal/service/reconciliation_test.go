@@ -14,7 +14,9 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -48,51 +50,50 @@ func (r *interruptedRunner) Apply(ctx context.Context, _ coreadapter.Operation) 
 func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	actor := trace.Actor{Kind: "service", ID: "test"}
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, now, actor)
-	must(t, err)
-	must(t, repository.CreateWorkstream(context.Background(), stream, now, actor))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, now, actor))
 	event := trace.Event{ID: "turn", Kind: "local-effect", Body: "authorized turn"}
-	event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, stream, event.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
-	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: project, Workstream: stream, At: now, Actor: actor, Cause: "owner"}, Subject: "turn", To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
-	must(t, err)
-	must(t, repository.Close())
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(fixturekit.Project, fixturekit.Stream, event.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: now, Actor: actor, Cause: "owner"}, Subject: "turn", To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 	runner := &interruptedRunner{applied: make(chan struct{})}
 	ticks := make(chan time.Time)
 	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: runner}}
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	select {
 	case <-runner.applied:
 	case <-time.After(10 * time.Second):
 		t.Fatal("startup did not apply")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	repository, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	records, err := repository.Operations(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
+	records, err := repository.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(records) != 1 || records[0].Claim == nil || records[0].Result != nil {
 		t.Fatalf("not interrupted: %+v", records)
 	}
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	s, err = Start(context.Background(), opts)
-	must(t, err)
-	// The loop accepts its first tick only after finishing the startup pass.
+	fixturekit.Must(t, err)
 	select {
 	case ticks <- now:
 	case <-time.After(10 * time.Second):
 		t.Fatal("restart did not finish startup pass")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	repository, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
-	records, err = repository.Operations(stream)
-	must(t, err)
+	records, err = repository.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if !records[0].Acknowledged || records[0].Result == nil {
 		t.Fatal(records)
 	}
@@ -106,10 +107,10 @@ func TestServiceResumesClaimedOperationWithoutWakeup(t *testing.T) {
 func TestServiceRejectsLockedTrace(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), trace.Actor{Kind: "service", ID: "test"})
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
 	s, err := Start(context.Background(), opts)
 	if s != nil {
@@ -133,18 +134,18 @@ func (f forbiddenRunner) Apply(context.Context, coreadapter.Operation) (coreadap
 
 func runnerIntent(t *testing.T, opts Options) config.Root {
 	t.Helper()
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	actor := trace.Actor{Kind: "service", ID: "test"}
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, now, actor)
-	must(t, err)
-	must(t, repository.CreateWorkstream(context.Background(), stream, now, actor))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.CreateWorkstream(context.Background(), fixturekit.Stream, now, actor))
 	event := trace.Event{ID: "turn", Kind: "local-effect", Body: "authorized turn"}
-	event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, stream, event.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
-	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: project, Workstream: stream, At: now, Actor: actor, Cause: "owner"}, Subject: "turn", To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
-	must(t, err)
-	must(t, repository.Close())
+	event.Operation = &coreadapter.Operation{ID: trace.OperationID(fixturekit.Project, fixturekit.Stream, event.ID), Boundary: coreadapter.RunnerBoundary, Action: "run", Input: json.RawMessage(`{}`)}
+	_, err = repository.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: now, Actor: actor, Cause: "owner"}, Subject: "turn", To: "pending", Reason: "owner requested"}, Events: []trace.Event{event}})
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 	return cfg.Root
 }
 
@@ -165,15 +166,15 @@ func TestServiceThreadsErrorReleasesTrace(t *testing.T) {
 	if !errors.Is(err, failure) || bound == nil {
 		t.Fatalf("start with failing threads binding: %v", err)
 	}
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	repository, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 	opts.Threads = nil
 	s, err = Start(context.Background(), opts)
-	must(t, err)
-	must(t, s.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, s.Close())
 }
 
 func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
@@ -185,32 +186,31 @@ func TestServiceThreadsReplaceRunnerAdapter(t *testing.T) {
 	forbidden := forbiddenRunner{t}
 	adapters := map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: forbidden}
 	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: adapters}
-	threads := &completedRunner{}
+	threads := &fixturekit.CompletedRunner{}
 	opts.Threads = func(*trace.Repository, *config.Config) (coreadapter.Reconciler, error) { return threads, nil }
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	select {
 	case ticks <- now:
 	case <-time.After(5 * time.Minute):
 		t.Fatal("startup pass did not finish")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	if len(adapters) != 1 || adapters[coreadapter.RunnerBoundary] != coreadapter.Reconciler(forbidden) {
 		t.Fatalf("caller adapters changed: %v", adapters)
 	}
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	repository, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repository.Close()
-	records, err := repository.Operations(stream)
-	must(t, err)
+	records, err := repository.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if threads.Inspections != 1 || len(records) != 1 || !records[0].Acknowledged || records[0].Result == nil || records[0].Result.Outcome != "from-threads" {
 		t.Fatalf("threads adapter did not handle the operation: %d %+v", threads.Inspections, records)
 	}
 }
 
-// orderedAdapter records the actions it applied, in order.
 type orderedAdapter struct {
 	mu      sync.Mutex
 	applied []string
@@ -231,40 +231,37 @@ func (a *orderedAdapter) Apply(_ context.Context, op coreadapter.Operation) (cor
 func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	ctx := context.Background()
 	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	actor := trace.Actor{Kind: "service", ID: "test"}
 	repository, err := trace.Create(ctx, cfg.Root, cfg.Project, now, actor)
-	must(t, err)
-	streams := []config.WorkstreamID{stream, "w_fedcba9876543210fedcba9876543210"}
+	fixturekit.Must(t, err)
+	streams := []config.WorkstreamID{fixturekit.Stream, "w_fedcba9876543210fedcba9876543210"}
 	for i, id := range streams {
-		must(t, repository.CreateWorkstream(ctx, id, now, actor))
-		// Each workstream holds a draft, a reply, a round and a turn, so the
-		// order workstreams are read in cannot produce the stage order.
+		fixturekit.Must(t, repository.CreateWorkstream(ctx, id, now, actor))
 		var events []trace.Event
 		for _, action := range []string{DraftAction, ReplyAction, RoundAction, thread.TurnAction} {
 			event := trace.Event{ID: fmt.Sprintf("%s-%d", action, i), Kind: "local-effect", Body: action}
-			event.Operation = &coreadapter.Operation{ID: trace.OperationID(project, id, event.ID), Boundary: coreadapter.ContainerBoundary, Action: action, Input: json.RawMessage(`{}`)}
+			event.Operation = &coreadapter.Operation{ID: trace.OperationID(fixturekit.Project, id, event.ID), Boundary: coreadapter.ContainerBoundary, Action: action, Input: json.RawMessage(`{}`)}
 			events = append(events, event)
 		}
-		_, err = repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: project, Workstream: id, At: now, Actor: actor, Cause: "owner"}, Subject: "work", To: "pending", Reason: "owner requested"}, Events: events})
-		must(t, err)
+		_, err = repository.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "start", Revision: 1, Project: fixturekit.Project, Workstream: id, At: now, Actor: actor, Cause: "owner"}, Subject: "work", To: "pending", Reason: "owner requested"}, Events: events})
+		fixturekit.Must(t, err)
 	}
-	must(t, repository.Close())
+	fixturekit.Must(t, repository.Close())
 	adapter := &orderedAdapter{}
 	ticks := make(chan time.Time)
 	opts.Reconciliation = reconcile.Options{Now: func() time.Time { return now }, Ticks: ticks, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.ContainerBoundary: adapter}}
 	s, err := Start(ctx, opts)
-	must(t, err)
-	// The loop accepts its first tick only after finishing the startup pass.
+	fixturekit.Must(t, err)
 	select {
 	case ticks <- now:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("the startup pass did not finish")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
 	if len(adapter.applied) != 8 {
@@ -283,11 +280,11 @@ func TestServiceReconcilesOperationsInStageOrder(t *testing.T) {
 func TestServiceReportsScheduleFailure(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), trace.Actor{Kind: "service", ID: "test"})
-	must(t, err)
-	must(t, repository.Close())
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.Close())
 	failure := errors.New("injected schedule failure")
 	var failing atomic.Bool
 	failing.Store(true)
@@ -311,17 +308,17 @@ func TestServiceReportsScheduleFailure(t *testing.T) {
 	var logs bytes.Buffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer s.Close()
 	for range 2 {
 		select {
 		case <-failed:
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("failed hook did not run")
 		}
 		select {
 		case ticks <- time.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			t.Fatal("failed hook stopped the project loop")
 		}
 	}
@@ -329,13 +326,13 @@ func TestServiceReportsScheduleFailure(t *testing.T) {
 	s.sole().repository.WakeWorkflow()
 	select {
 	case <-recovered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("hook did not recover")
 	}
 	c := NewClient(cfg.Listen.Socket)
 	if _, err := c.Configuration(context.Background()); err != nil {
 		t.Fatalf("service did not stay available: %v", err)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	requireFactoryLog(t, decodeFactoryLog(t, logs.String()), "reconciliation pass hook failed", map[string]any{"project": string(cfg.Project.ID), "hook": "configured", "error": failure.Error()})
 }

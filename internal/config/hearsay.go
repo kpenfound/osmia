@@ -39,8 +39,6 @@ type HearsayPublish struct {
 
 var hearsayName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// hearsayEntity is the form of a Hearsay entity id: a lowercase namespace and
-// a colon, then a body with no whitespace.
 var hearsayEntity = regexp.MustCompile(`^[a-z][a-z0-9_-]*:\S+$`)
 
 // ValidHearsayEntity reports whether s is a Hearsay entity id such as
@@ -83,9 +81,6 @@ func (h Hearsay) validate(path string) error {
 	return nil
 }
 
-// validate checks the publish table. The publisher is a dedicated agent: its
-// id and token variable are distinct from the owner's and the class agents',
-// so a role's read credentials are never the publisher's.
 func (p HearsayPublish) validate(path string, h Hearsay) error {
 	const prefix = "hearsay.publish."
 	if !hearsayName.MatchString(p.WorkSource) {

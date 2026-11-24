@@ -76,8 +76,6 @@ func (r *Repository) RecordHearsayPosted(ctx context.Context, entries []PostedRe
 			revisions[d.ID] = d
 		}
 	}
-	// An artifact posted in several versions arrives as several entries; the
-	// last is the one that was posted most recently.
 	var ids []string
 	latest := map[string]PostedRecord{}
 	for _, e := range entries {

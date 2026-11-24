@@ -22,7 +22,7 @@ import (
 
 const AmendmentDraftAction = "architect-amendment-draft"
 
-// amendmentWaiting is the state of an amendment whose draft is parked on the
+// AmendmentWaiting is the state of an amendment whose draft is parked on the
 // architect's question until the answer is queued on the architect's thread.
 const AmendmentWaiting = "waiting"
 
@@ -30,7 +30,7 @@ var ErrAmendmentText = errors.New("not UTF-8 text")
 
 type AmendmentDrafter struct{ *Drafter }
 
-// amendmentDraftInput names the amendment an operation drafts. Resume numbers
+// AmendmentDraftInput names the amendment an operation drafts. Resume numbers
 // the operation that drafts it again after it parked on the architect's
 // question, from 1; the amendment's own draft operation has none.
 type AmendmentDraftInput struct {
@@ -38,7 +38,7 @@ type AmendmentDraftInput struct {
 	Resume int    `json:"resume,omitempty"`
 }
 
-// runIDs returns the transition and event of the operation that drafts the
+// RunIDs returns the transition and event of the operation that drafts the
 // amendment: its own, or the resumption the input numbers.
 func (in AmendmentDraftInput) RunIDs() (transition, event string) {
 	transition = "amendment-" + in.ID + "-draft"
@@ -48,7 +48,7 @@ func (in AmendmentDraftInput) RunIDs() (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// parkedID is the transition that parks the draft the operation runs: the
+// ParkedID is the transition that parks the draft the operation runs: the
 // k-th park of the amendment follows its k-1-th resumption.
 func (in AmendmentDraftInput) ParkedID() string {
 	return fmt.Sprintf("amendment-%s-waiting-%d", in.ID, in.Resume+1)
@@ -64,7 +64,7 @@ func AmendmentTurnID(turn string) (string, bool) {
 
 func AmendmentSubject(id string) string { return "amendment_" + id }
 
-// amendmentChain maps the architect's turns that draft amendment id to the
+// AmendmentChain maps the architect's turns that draft amendment id to the
 // attempt each continues: the attempts, the turns that deliver the answers to
 // their questions and the turns that continue them after a hard pause. The
 // architect's other turns on the amendment, such as its replies in the
@@ -97,7 +97,6 @@ func (a *AmendmentDrafter) Pass(ctx context.Context) error {
 		if feature.Value != "building" && feature.Value != "assembled" {
 			continue
 		}
-		// A paused workstream is asked for nothing until the pause is lifted.
 		if _, paused := a.S.Pausing(a.Repository.Project(), stream); paused {
 			continue
 		}
@@ -132,7 +131,7 @@ func (a *AmendmentDrafter) Pass(ctx context.Context) error {
 	return nil
 }
 
-// request publishes the draft the input names as a durable operation and
+// Request publishes the draft the input names as a durable operation and
 // moves the amendment to drafting.
 func (a *AmendmentDrafter) Request(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, in AmendmentDraftInput, cause, reason string) error {
 	input, err := json.Marshal(in)
@@ -150,7 +149,7 @@ func (a *AmendmentDrafter) Request(ctx context.Context, stream config.Workstream
 	return err
 }
 
-// resume requests the draft of amendment id again once the answer to the
+// Resume requests the draft of amendment id again once the answer to the
 // architect's question is queued on its thread, caused by the transition
 // that parked the draft.
 func (a *AmendmentDrafter) Resume(ctx context.Context, stream config.WorkstreamID, state trace.WorkflowState, id string) error {
@@ -181,7 +180,7 @@ func (a *AmendmentDrafter) Resume(ctx context.Context, stream config.WorkstreamI
 	return a.Request(ctx, stream, state, AmendmentDraftInput{ID: id, Resume: len(parks)}, parks[len(parks)-1].ID, fmt.Sprintf("amendment %s resumes: the architect's question is answered", id))
 }
 
-// locate returns the workstream, the request and the input of an amendment
+// Locate returns the workstream, the request and the input of an amendment
 // draft operation.
 func (a *AmendmentDrafter) Locate(op coreadapter.Operation) (config.WorkstreamID, trace.Amendment, AmendmentDraftInput, error) {
 	var in AmendmentDraftInput
@@ -210,7 +209,7 @@ func (a *AmendmentDrafter) Locate(op coreadapter.Operation) (config.WorkstreamID
 	return "", trace.Amendment{}, in, fmt.Errorf("amendment draft operation %s has no request", op.ID)
 }
 
-// outcome returns the recorded result of the operation that drafts amendment
+// Outcome returns the recorded result of the operation that drafts amendment
 // id: succeeded once it proposed or declined the amendment, failed once it
 // recorded the draft invalid, waiting once it parked the draft on the
 // architect's question, nil before any of them.
@@ -318,9 +317,6 @@ func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 		origins := AmendmentChain(thread, request.ID, asked)
 		chain := ChainTurns(thread, origins)
 		tries := Attempts(chain, origins)
-		// Turns run in sequence, so the oldest unfinished turn of the chain is
-		// the one to drive: the answer to a question may be queued behind the
-		// turn that asked it while a service stop left that turn unfinished.
 		var last, pending *trace.QueuedTurn
 		if len(chain) > 0 {
 			last = &chain[len(chain)-1]
@@ -352,7 +348,6 @@ func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 			id := AskedBy(asked, ArchitectThread, last.Request.TurnID)
 			return a.End(ctx, op.ID, stream, request.ID, in.ParkedID(), AmendmentWaiting, coreadapter.OperationResult{Outcome: questions.Waiting, Evidence: fmt.Sprintf("amendment %s is parked: the architect waits for the answer to question %s", request.ID, id)}, nil)
 		case last == nil || last.Status() == "interrupted":
-			// A turn a hard pause stopped is continued within its attempt.
 			if !StoppedTurn(last) && len(tries) >= MaxDraftAttempts {
 				return a.Finish(ctx, op.ID, stream, request.ID, "invalid", "the architect turn was interrupted too many times", nil)
 			}
@@ -376,7 +371,7 @@ func (a *AmendmentDrafter) Apply(ctx context.Context, op coreadapter.Operation) 
 	}
 }
 
-// enqueue accepts the architect turn of one attempt to draft amendment id. An
+// Enqueue accepts the architect turn of one attempt to draft amendment id. An
 // attempt after one a service stop interrupted repeats the answers the
 // architect received in the earlier attempts.
 func (a *AmendmentDrafter) Enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, id string, attempt int, operation string, answers []string) error {
@@ -456,7 +451,7 @@ func AffectedRevision(oldSpec, newSpec string, oldPlan, newPlan plan.Plan) Amend
 	return a
 }
 
-// amendmentRevision is what an amendment attempt delivered: a decline with
+// AmendmentRevision is what an amendment attempt delivered: a decline with
 // its reason, or the revised spec and plan, the delivered documents in place
 // of the sealed ones, with every problem that makes the revision invalid.
 type AmendmentRevision struct {
@@ -468,7 +463,7 @@ type AmendmentRevision struct {
 	Problems      []string
 }
 
-// revision reads and validates what the amendment attempt turn delivered.
+// Revision reads and validates what the amendment attempt turn delivered.
 func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.WorkstreamID, turn string) (AmendmentRevision, error) {
 	latest, err := a.Latest(stream)
 	if err != nil {
@@ -520,8 +515,6 @@ func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.Workstrea
 	if !hasSpec && !hasPlan {
 		return AmendmentRevision{Problems: []string{"no revised document was delivered"}}, nil
 	}
-	// A directory that landed upstream since the sealing is in the entity map
-	// the draft is validated against.
 	if a.S.Reseed != nil {
 		a.S.Reseed(ctx, a.Repository)
 	}
@@ -555,7 +548,7 @@ func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.Workstrea
 	return AmendmentRevision{OldSpec: oldSpec, Spec: spec, Graph: graph, Before: before, After: after, Problems: problems}, nil
 }
 
-// judge is the draftJudge of an amendment draft.
+// Judge is the draftJudge of an amendment draft.
 func (a *AmendmentDrafter) Judge(ctx context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
 	r, err := a.Revision(ctx, stream, attempt)
 	switch {
@@ -595,7 +588,7 @@ func (a *AmendmentDrafter) Record(ctx context.Context, operation string, stream 
 	return a.Finish(ctx, operation, stream, request.ID, "proposed", "the architect proposed a validated amendment revision", docs)
 }
 
-// finish records the draft's terminal outcome, proposed, declined or invalid,
+// Finish records the draft's terminal outcome, proposed, declined or invalid,
 // with the candidate documents of a proposal.
 func (a *AmendmentDrafter) Finish(ctx context.Context, operation string, stream config.WorkstreamID, id, outcome, reason string, docs []trace.Document) (coreadapter.OperationResult, error) {
 	result := coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}
@@ -605,7 +598,7 @@ func (a *AmendmentDrafter) Finish(ctx context.Context, operation string, stream 
 	return a.End(ctx, operation, stream, id, "amendment-"+id+"-"+outcome, outcome, result, docs)
 }
 
-// end moves amendment id from drafting to the given state with the given
+// End moves amendment id from drafting to the given state with the given
 // transition, and the documents when there are any, and returns result. An
 // amendment no longer drafting returns what the operation recorded.
 func (a *AmendmentDrafter) End(ctx context.Context, operation string, stream config.WorkstreamID, id, transition, to string, result coreadapter.OperationResult, docs []trace.Document) (coreadapter.OperationResult, error) {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
@@ -17,22 +19,18 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// webToolsByBackend are the native tools the Web permission adds on each backend.
 var webToolsByBackend = map[string][]string{
 	"claude":   {"WebSearch", "WebFetch"},
 	"codex":    {"web_search"},
 	"opencode": {"websearch", "webfetch"},
 }
 
-// writeOrShellTools are the native tools a read-only turn never holds.
 var writeOrShellTools = []string{"Write", "Edit", "Bash", "apply_patch", "shell", "edit", "bash"}
 
-// enforcedTurns returns the production isolation.Turns Enforce builds for the
-// fixture's repository, running into a recording fake engine and host.
 func enforcedTurns(t *testing.T, f *shedFixture, repository *trace.Repository) (*isolation.Turns, *adaptertest.Engine, *adaptertest.RecordingHosts) {
 	t.Helper()
 	bound, err := Enforce(f.s.options, Enforcement{}).Threads(repository, f.s.cfg)
-	must(t, err)
+	fixturekit.Must(t, err)
 	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
 	engine, hosts := &adaptertest.Engine{}, &adaptertest.RecordingHosts{}
 	turns.Engine, turns.Hosts = engine, hosts
@@ -43,7 +41,7 @@ func runEnforced(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engin
 	t.Helper()
 	_, err := turns.Run(context.Background(), coreadapter.PreparedTurn{Scope: scope, Profile: coreadapter.Profile{Name: scope.Role, Backend: backend, Model: "test"}, SessionDirectory: t.TempDir(),
 		SystemPrompt: "You are the " + scope.Role + ".", Prompt: "Work."})
-	must(t, err)
+	fixturekit.Must(t, err)
 	got, ok := adaptertest.LastTurn(engine, hosts)
 	if !ok {
 		t.Fatal("the turn did not reach the engine")
@@ -51,10 +49,6 @@ func runEnforced(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engin
 	return got
 }
 
-// An ordinary chief-of-staff turn, run through Enforce's production turn path
-// into a fake engine, is granted the backend's web tools and told about them.
-// Its service tools are the ordinary chief's alone and its view stays
-// read-only, with no write, shell or Network grant.
 func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newReviewFixture(t, "chief-web")
@@ -78,13 +72,12 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 				}
 			}
 			names := slices.Clone(got.MCP)
-			want := slices.Clone(chiefOrdinaryTools)
+			want := slices.Clone(ChiefOrdinaryTools)
 			slices.Sort(names)
 			slices.Sort(want)
 			if !slices.Equal(names, want) {
 				t.Errorf("chief MCP tools %v, want %v", names, want)
 			}
-			// The service registers no web search or fetch tool of its own.
 			for _, name := range names {
 				if lower := strings.ToLower(name); strings.Contains(lower, "web") || strings.Contains(lower, "search") || strings.Contains(lower, "fetch") {
 					t.Errorf("service tool %s looks like a web tool", name)
@@ -106,11 +99,6 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 	}
 }
 
-// The grants and narrowings that decide web access for the roles whose turns
-// need a workstream's design or a session's worktree to run: a design session
-// is narrowed to its file tool and three service tools and keeps Web; an ordinary chief and
-// the exploratory session keep Web too. Their turns run end to end in the
-// design and session journeys.
 func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	t.Parallel()
 	f, _, repository := newReviewFixture(t, "design-web")
@@ -126,10 +114,6 @@ func TestWebIsGrantedToDesignAndSessionRoles(t *testing.T) {
 	}
 }
 
-// Turns of the roles that never hold web tools, run through Enforce's
-// production grants into a fake engine on every backend, get no web tool and
-// no web guidance. Their selections and service tools are stubbed, so the
-// grants, the role ceiling and the engine path are the ones under test.
 func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newReviewFixture(t, "no-web")
@@ -146,7 +130,7 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 			t.Run(name+"/"+backend, func(t *testing.T) {
 				turns, engine, hosts := enforcedTurns(t, f, repository)
 				workspace := t.TempDir()
-				must(t, os.WriteFile(filepath.Join(workspace, "README.md"), []byte("hi\n"), 0600))
+				fixturekit.Must(t, os.WriteFile(filepath.Join(workspace, "README.md"), []byte("hi\n"), 0600))
 				turns.Workspaces = stagedWorkspaces{}
 				turns.Capture, turns.ViewTools, turns.Context = nil, nil, nil
 				turns.Select = func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
@@ -171,7 +155,6 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 			})
 		}
 	}
-	// No service grant of a role outside the web roles sets Web.
 	turns, _, _ := enforcedTurns(t, f, repository)
 	for role, grant := range turns.Grants {
 		if grant.Web != (role == trace.ChiefOfStaff || role == sessionRole) {

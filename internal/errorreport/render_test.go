@@ -156,8 +156,6 @@ func TestMarkersAreRecognisedByFingerprintAndDay(t *testing.T) {
 	if MatchesIssue("", fp) || MatchesIssue(issue.Body, "") || MatchesIssue(issue.Body, "not-a-fingerprint") {
 		t.Error("malformed input must not match")
 	}
-	// The marker holds nothing but the fingerprint and day, so it does not
-	// depend on labels or any reloadable setting.
 	if strings.Count(IssueMarker(fp), fp) != 1 || strings.Contains(IssueMarker(fp), "label") {
 		t.Errorf("issue marker = %q", IssueMarker(fp))
 	}
@@ -204,7 +202,7 @@ func TestRenderFailsClosed(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(*Filing)
-		comment bool // whether the comment fails too
+		comment bool
 	}{
 		{"unknown source", func(f *Filing) { f.Report.Source = "x" }, true},
 		{"fingerprint", func(f *Filing) { f.Report.Fingerprint = "../../x" }, true},

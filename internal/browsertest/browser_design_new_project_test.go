@@ -3,6 +3,7 @@ package browsertest
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,9 +15,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// The design form offers New project. Opened from a project's card it hosts
-// the session in that project, and from the sidebar in the first active
-// project. The page shows the project the agent drafted, with its visibility.
 func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -27,7 +25,7 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("client\n"), 0600))
 	demoGit(t, filepath.Dir(clone), "-C", clone, "add", "README.md")
 	demoGit(t, filepath.Dir(clone), "-C", clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "base")
-	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
+	added, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "Client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	other := added.Project.ID
 	writeCharter(t, c, other, "1. Keep the client compatible.\n")
@@ -48,7 +46,6 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
-	// From the sidebar, with no project chosen: the first active project hosts it.
 	p.OpenNewItem("#sidebar-new-design")
 	p.AwaitText("#design-add-form", "New project")
 	p.Click("#design-add-form [name=new_project]")
@@ -62,7 +59,6 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	}
 	first := listed.Designs[0].Workstream
 
-	// From a project's card: that project hosts it.
 	p.Click("#project-home")
 	p.Click(`[data-project="` + string(other) + `"] [data-project-action="design-add"]`)
 	p.Await("the design action selects its project", `document.querySelector('#design-add-form [data-project-select]').value === `+quote(string(other)))
@@ -76,7 +72,6 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	}
 	second := listed.Designs[0].Workstream
 
-	// The drafted new project is shown before Start, private by default.
 	p.Await("the second session shown", fmt.Sprintf(`JSON.parse(localStorage.getItem('osmia.selected')) === %q`, second))
 	p.TypeInto("#design-form [name=text]", "Draft the gadget project.")
 	p.Click("#design-form [type=submit]")
@@ -91,8 +86,6 @@ func TestBrowserDesignFormOpensANewProjectSession(t *testing.T) {
 	}
 }
 
-// With no active project the New project form refuses with a clear message
-// and opens no session.
 func TestBrowserDesignFormRefusesANewProjectWithoutAnActiveProject(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)

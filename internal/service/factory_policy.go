@@ -2,19 +2,16 @@ package service
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/intake"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// checkGateReviewInstructions gives both reviewer roles the same test evidence rule.
 const checkGateReviewInstructions = " Test passing is decided by the service-owned check gate. When the gate passed for the candidate, every acceptance item or criterion requiring tests to pass (whole-suite, scoped or named) is satisfied as to passing: the passing gate is the evidence that required tests ran and passed. Never raise a finding by itself because only a smart-check selection ran, because you cannot see that a named test was selected, or because you cannot run tests yourself. Still judge from the work whether tests the unit was asked to add exist and exercise the stated behaviour."
 
-// factoryInstructions applies current authority to queued and resumed turns without
-// rewriting their original requests or changing task-specific owner requirements.
-func factoryInstructions(scope coreadapter.Scope) string {
+func FactoryInstructions(scope coreadapter.Scope) string {
 	var role string
 	switch scope.Role {
 	case trace.ChiefOfStaff:
@@ -28,9 +25,6 @@ func factoryInstructions(scope coreadapter.Scope) string {
 	default:
 		return ""
 	}
-	// The final reader's own system prompt says how it uses the recorded check
-	// result, so it gets none of the check gate wording written for plans and
-	// unit reviews.
 	final := scope.Role == committeeRole && delivery.IsFinalTurn(scope.Turn)
 	if scope.Role == architectRole || (scope.Role == committeeRole && !final) {
 		role += " Acceptance requiring the whole check suite to pass or run, or asking a reviewer to show which tests ran, is an engineering defect to correct: the service-owned check gate already runs checks with smart-check selection."
@@ -47,9 +41,6 @@ func (s *Service) reconcileFactoryPolicy(ctx context.Context, r *trace.Repositor
 		return err
 	}
 	for _, stream := range streams {
-		if stream == librarianWorkstream(r.Project()) {
-			continue
-		}
 		st, err := r.Workflow(stream, trace.FeatureSubject)
 		if err != nil {
 			return err

@@ -6,14 +6,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// driftEntry is the workstream's latest drift rebase while it is held for
-// the owner and the owner has not asked for another, opened when it was
-// held. It is answered by asking for a drift rebase of the project, or by a
-// handback of it.
 func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
 	value := w.Subjects[driftSubject].Value
 	if !strings.HasPrefix(value, driftHeld+"-") {
@@ -23,14 +22,14 @@ func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEn
 	if err != nil {
 		return InboxEntry{}, false, err
 	}
-	if requested, err := driftNumber(w.Subjects[driftRequestSubject].Value); err != nil || requested > k {
+	if requested, err := driftNumber(w.Subjects[lifecycle.DriftRequestSubject].Value); err != nil || requested > k {
 		return InboxEntry{}, false, err
 	}
 	transitions, err := trace.Read[trace.Transition](repository, w.Workstream)
 	if err != nil {
 		return InboxEntry{}, false, err
 	}
-	transition, _ := driftIDs(k)
+	transition, _ := lifecycle.DriftIDs(k)
 	i := slices.IndexFunc(transitions, func(t trace.Transition) bool { return t.ID == transition+"-"+driftHeld })
 	if i < 0 {
 		return InboxEntry{}, false, nil
@@ -43,10 +42,6 @@ func driftEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEn
 	return e, true, nil
 }
 
-// baseEntry is the workstream's park on an unavailable base, opened when it
-// was parked. When its own base workstream was abandoned, the owner can move
-// it onto upstream; otherwise it takes no decision here, and leaves the inbox
-// once the base is available again or the workstream is abandoned.
 func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEntry, bool, error) {
 	if w.Subjects[baseWaitSubject].Value != "waiting" {
 		return InboxEntry{}, false, nil
@@ -76,19 +71,16 @@ func baseEntry(repository *trace.Repository, w trace.WorkstreamStatus) (InboxEnt
 	e.Question = fmt.Sprintf("The workstream is parked: %s.", parked.Reason)
 	e.Blocked = "Everything on the workstream but the chief of staff and the check of its base."
 	if parent.Value == AbandonedState {
-		e.Options = []string{BaseDecisionUpstream}
+		e.Options = []string{api.BaseDecisionUpstream}
 		e.Question += fmt.Sprintf(" If upstream already holds the changes of %s this workstream builds on, it can continue from upstream: the service moves it there only once merging them into upstream changes nothing, and its next drift rebase replays its own commits onto upstream. Otherwise abandon it.", dependency.Base)
 	} else {
-		e.Answer = InboxAnswer{Method: http.MethodPost, Path: Prefix + "/abandon/" + string(w.Workstream), Body: map[string]any{}}
+		e.Answer = api.InboxAnswer{Method: http.MethodPost, Path: Prefix + "/abandon/" + string(w.Workstream), Body: map[string]any{}}
 		e.Question += " It continues once its base is available again; otherwise abandon it."
 	}
 	return e, true, nil
 }
 
-// contestOptions returns the rulings a contest takes: review alone after a
-// failed review turn, revise alone after a mason contest, and either after
-// send-backs by review or failed checks.
-func contestOptions(contest trace.Transition, unit string, mason bool) []string {
+func ContestOptions(contest trace.Transition, unit string, mason bool) []string {
 	switch {
 	case failedReview(contest, unit):
 		return []string{"review"}
@@ -98,9 +90,6 @@ func contestOptions(contest trace.Transition, unit string, mason bool) []string 
 	return []string{"review", "revise"}
 }
 
-// contestedEntry is a contested unit the chief of staff raised to the owner
-// that has no ruling yet, with the rulings its contest takes and the chief of
-// staff's note.
 func (s *Service) contestedEntry(repository *trace.Repository, stream config.WorkstreamID, unit string) (InboxEntry, bool, error) {
 	state, err := repository.Workflow(stream, trace.UnitSubject(unit))
 	if err != nil || state.Value != UnitContested {
@@ -110,31 +99,28 @@ func (s *Service) contestedEntry(repository *trace.Repository, stream config.Wor
 	if err != nil {
 		return InboxEntry{}, false, err
 	}
-	// The chief of staff rules on a contest first; it is the owner's once
-	// raised.
 	raised, note, err := contestRaised(repository, stream, unit, contest)
 	if err != nil || !raised {
 		return InboxEntry{}, false, err
 	}
-	options := contestOptions(contest, unit, mason)
+	options := ContestOptions(contest, unit, mason)
 	switch {
-	case failedReview(contest, unit), mason, moveContest(contest, unit), checksContest(contest, unit), rebaseContest(contest, unit):
+	case failedReview(contest, unit), mason, moveContest(contest, unit), execution.ChecksContest(contest, unit), execution.RebaseContest(contest, unit):
 	default:
 		r := &reviewers{masons: &masons{s: s, cfg: s.about(repository), repository: repository}}
-		result, ok, err := r.storedResult(stream, unit, state)
+		result, ok, err := r.driver().StoredResult(stream, unit, state)
 		if err != nil {
 			return InboxEntry{}, false, err
 		}
 		if ok {
-			if _, ruled, err := latestContestedRuling(repository, stream, unit, result.Bounces); err != nil || ruled {
+			if _, ruled, err := execution.LatestContestedRuling(repository, stream, unit, result.Bounces); err != nil || ruled {
 				return InboxEntry{}, false, err
 			}
 		}
 	}
-	e := decision(InboxContested, stream, contest.At, "/contested/"+string(stream)+"/"+unit, map[string]any{})
+	e := decision(api.InboxContested, stream, contest.At, "/contested/"+string(stream)+"/"+unit, map[string]any{})
 	e.Unit = unit
 	e.Question = fmt.Sprintf("Unit %s is contested: %s", unit, contest.Reason)
-	// A move's reason ends with its note, which the entry already carries.
 	if moveContest(contest, unit) {
 		e.Question = fmt.Sprintf("Unit %s is contested: you moved it here from %s.", unit, contest.From)
 		if rulerName(contest.Actor) != "owner" {

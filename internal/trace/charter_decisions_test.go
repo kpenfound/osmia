@@ -33,11 +33,9 @@ func TestCharterDecisionsReturnsOnlyDecidedProposalsAtTheirDecisionRevision(t *t
 	if len(got) != 2 {
 		t.Fatalf("decisions: %+v", got)
 	}
-	// Oldest decision first: the decline, then the ratification.
 	if got[0].Proposal.Question != "3" || got[0].Proposal.Decision != CharterDecline || got[0].Proposal.Note != "Too broad." || !got[0].Proposed.At.Equal(start) || !got[0].Decided.At.Equal(start.Add(30*time.Minute)) {
 		t.Fatalf("declined: %+v", got[0])
 	}
-	// The ratification is the revision that recorded the decision, not the later one that recorded the charter number.
 	if got[1].Proposal.Question != "1" || got[1].Decided.Revision != 2 || got[1].Proposal.Number != 0 || !got[1].Proposed.At.Equal(start) {
 		t.Fatalf("ratified: %+v", got[1])
 	}

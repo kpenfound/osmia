@@ -4,13 +4,11 @@ import (
 	"context"
 	"os"
 
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// reseederOf returns the re-seeder of the entity map of the project repo is
-// the trace of. Every trigger of the project shares it, so each upstream
-// commit is seeded once.
 func (s *Service) reseederOf(repo *trace.Repository) *kb.Reseeder {
 	if repo == nil {
 		return nil
@@ -25,15 +23,13 @@ func (s *Service) reseederOf(repo *trace.Repository) *kb.Reseeder {
 	return r.(*kb.Reseeder)
 }
 
-// seedTracked seeds the entity map a registration records from the clone's tracked
-// files, through the seed every re-seed uses.
 func seedTracked(ctx context.Context, clone string) (kb.Map, error) {
 	dir, err := os.MkdirTemp("", "osmia-seed-")
 	if err != nil {
 		return kb.Map{}, err
 	}
 	defer os.RemoveAll(dir)
-	if err := copyTracked(ctx, clone, dir); err != nil {
+	if err := intake.CopyTracked(ctx, clone, dir); err != nil {
 		return kb.Map{}, err
 	}
 	return kb.Seed(dir)

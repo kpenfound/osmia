@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,37 +14,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// unrelatedStream1 and unrelatedStream2 are each their own one-workstream
-// workgroup, in project and otherProject respectively, never joining the
-// cross-repo workgroup crossRepoInboxFixture also builds: their escalations
-// must stay separate from the consolidated one and from each other.
 const (
 	unrelatedStream1 config.WorkstreamID = "w_11111111111111111111111111111111"
 	unrelatedStream2 config.WorkstreamID = "w_22222222222222222222222222222222"
 )
 
-// crossRepoInboxFixture is two active projects, each holding one member of a
-// shared cross-repo workgroup plus one unrelated workstream of its own, with
-// a real chief-of-staff turn running the production question tools over MCP
-// against whatever repository Options.Threads is called with: either
-// project's own, for an unrelated workstream's ordinary chief, or the
-// cross-repo workgroup's own trace, for the shared chief
-// the conversation path resolves to.
 type crossRepoInboxFixture struct {
-	cfg                Options
-	clock              *fixedClock
-	engine             *demoEngine
+	cfg                journey.Options
+	clock              *fixturekit.FixedClock
+	engine             *fixturekit.DemoEngine
 	ticks              chan time.Time
 	project1, project2 config.ProjectID
 	stream1, stream2   config.WorkstreamID
@@ -56,35 +52,27 @@ type crossRepoInboxFixture struct {
 	passes             map[config.ProjectID]int
 }
 
-// newCrossRepoInboxFixture builds the two projects. Each has one member of
-// the eventual cross-repo workgroup and one unrelated workstream, every one
-// with its own mason thread. Asking turns are queued after the live join.
 func newCrossRepoInboxFixture(t *testing.T) *crossRepoInboxFixture {
 	t.Helper()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "wgi-")
-	must(t, err)
+	fixturekit.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
-	opts := fixtureAt(t, home)
+	opts := journey.FixtureAt(t, home)
 	root := opts.Config.Root
-	top, err := os.ReadFile(filepath.Join(root, "config.toml"))
-	must(t, err)
-	listed := strings.Replace(string(top), fmt.Sprintf("active_projects = [%q]", project), fmt.Sprintf("active_projects = [%q, %q]", project, otherProject), 1)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(listed), 0600))
 	home2 := filepath.Join(home, "repo2")
-	must(t, os.MkdirAll(filepath.Join(root, "projects", string(otherProject)), 0700))
-	must(t, os.WriteFile(filepath.Join(root, "projects", string(otherProject), "config.toml"), []byte(`version = 1
+	fixturekit.RegisterProject(t, root, fixturekit.OtherProject, `version = 1
 upstream = "upstream/other"
 fork = "owner/other"
 clone = "`+home2+`"
-`), 0600))
+`)
 	opts.Workstreams = nil
-	cfg, err := config.Load(opts.Config)
-	must(t, err)
+	cfg, err := projectstore.LoadConfig(opts.Config)
+	fixturekit.Must(t, err)
 
-	clock := &fixedClock{At: demoStart}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	f := &crossRepoInboxFixture{cfg: opts, clock: clock, project1: project, project2: otherProject, stream1: stream, stream2: otherStream,
+	f := &crossRepoInboxFixture{cfg: opts, clock: clock, project1: fixturekit.Project, project2: fixturekit.OtherProject, stream1: fixturekit.Stream, stream2: fixturekit.OtherStream,
 		ticks: make(chan time.Time), live: map[config.ProjectID]*trace.Repository{}}
 	f.cfg.Logger = slog.New(crossRepoInboxLog{fixture: f, Handler: slog.NewJSONHandler(os.Stderr, nil)})
 	type member struct {
@@ -92,38 +80,35 @@ clone = "`+home2+`"
 		agent, thread string
 	}
 	byProject := map[config.ProjectID][]member{
-		project:      {{f.stream1, demoAgent, demoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
-		otherProject: {{f.stream2, "agent_mason2", "thread_mason2"}, {unrelatedStream2, "agent_u2", "thread_u2"}},
+		fixturekit.Project:      {{f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread}, {unrelatedStream1, "agent_u1", "thread_u1"}},
+		fixturekit.OtherProject: {{f.stream2, "agent_mason2", "thread_mason2"}, {unrelatedStream2, "agent_u2", "thread_u2"}},
 	}
 	for _, p := range cfg.Projects {
-		must(t, os.MkdirAll(p.Clone, 0700))
+		fixturekit.Must(t, os.MkdirAll(p.Clone, 0700))
 		repo, err := trace.Create(ctx, cfg.Root, p, clock.Now(), owner)
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, m := range byProject[p.ID] {
-			must(t, repo.CreateWorkstream(ctx, m.stream, clock.Now(), owner))
-			must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: m.agent, Project: p.ID, Workstream: m.stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: m.thread}))
+			fixturekit.Must(t, repo.CreateWorkstream(ctx, m.stream, clock.Now(), owner))
+			fixturekit.Must(t, repo.CreateThread(ctx, trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: m.agent, Project: p.ID, Workstream: m.stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: "mason", ThreadID: m.thread}))
 		}
-		// The chief's answer to either cross-repo member's question cites
-		// charter#1, which must resolve against that member's own project
-		// (through ProjectFor), as in the workgroup-wiring fixture.
-		recordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
-		must(t, repo.Close())
+		fixturekit.RecordCharter(t, repo, "# Charter\n\n1. Keep state in files under the root.\n")
+		fixturekit.Must(t, repo.Close())
 	}
 
-	sessions := &demoSessions{ByKey: map[string]*mcp.ClientSession{}}
-	f.engine = &demoEngine{Sessions: sessions, Turns: map[string]demoTurn{}}
+	sessions := &fixturekit.DemoSessions{ByKey: map[string]*mcp.ClientSession{}}
+	f.engine = &fixturekit.DemoEngine{Sessions: sessions, Turns: map[string]fixturekit.DemoTurn{}}
 	f.engine.Resume = func(coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 		return coreadapter.ErrResumeUnavailable
 	}
 	views := filepath.Join(cfg.Root.String(), "views")
-	must(t, os.Mkdir(views, 0700))
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": demoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
+	fixturekit.Must(t, os.Mkdir(views, 0700))
+	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": fixturekit.DemoAgent, "thread_mason2": "agent_mason2", "thread_u1": "agent_u1", "thread_u2": "agent_u2"}
 	every := append([]string{"file_read", questions.AskTool}, questions.ChiefTools...)
 	f.cfg.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
 		f.mu.Unlock()
-		turns := &isolation.Turns{Workspaces: &demoWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: f.engine,
+		turns := &isolation.Turns{Workspaces: &fixturekit.DemoWorkspaces{}, Views: isolation.Views{Directory: views}, Engine: f.engine,
 			Grants: map[string]coreadapter.Capabilities{"mason": {Tools: every}, "reviewer": {Tools: every}, trace.ChiefOfStaff: {Tools: every}},
 			Select: func(context.Context, coreadapter.Scope) (isolation.Selection, error) {
 				return isolation.Selection{Execution: coreadapter.ExecutionSettings{Mode: "container", Image: "fixture-image"}}, nil
@@ -138,7 +123,7 @@ clone = "`+home2+`"
 				}
 				return list, nil
 			},
-			Hosts: &coreadapter.MCPHost{Transport: &demoTransport{Sessions: sessions}},
+			Hosts: &coreadapter.MCPHost{Transport: &fixturekit.DemoTransport{Sessions: sessions}},
 		}
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: &questions.Turns{Turns: turns, Repository: r}, Now: clock.Now},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
@@ -150,8 +135,6 @@ clone = "`+home2+`"
 	return f
 }
 
-// crossRepoInboxLog retains controller failures and stop reasons without
-// mixing another parallel test's logs into the boundary diagnostics.
 type crossRepoInboxLog struct {
 	slog.Handler
 	fixture *crossRepoInboxFixture
@@ -181,41 +164,36 @@ func (h crossRepoInboxLog) Handle(ctx context.Context, r slog.Record) error {
 	return err
 }
 
-// observePasses adds a read-only completion marker after each project's
-// production schedule hooks. The immutable stage copy is published through
-// the pipeline's existing atomic pointer; the live controller calls it.
-func (f *crossRepoInboxFixture) observePasses(s *Service) {
+func (f *crossRepoInboxFixture) observePasses(s *journey.Service) {
 	f.mu.Lock()
 	f.passes = map[config.ProjectID]int{}
 	f.mu.Unlock()
-	projects := s.projectViews()
+	projects := s.ProjectViews()
 	for _, p := range projects {
-		observed := *p.pipeline.Current.Load()
-		observed.Hooks = append(slices.Clone(observed.Hooks), scheduleHook{Name: "inbox-fixture-observer", Pass: func(context.Context) error {
+		observed := *p.Pipeline.Current.Load()
+		observed.Hooks = append(slices.Clone(observed.Hooks), service.TestScheduleHook{Name: "inbox-fixture-observer", Pass: func(context.Context) error {
 			f.mu.Lock()
-			f.passes[p.id]++
+			f.passes[p.Id]++
 			f.mu.Unlock()
 			return nil
 		}})
-		p.pipeline.Current.Store(&observed)
+		p.Pipeline.Current.Store(&observed)
 	}
 }
-func (f *crossRepoInboxFixture) diagnostics(s *Service) string {
+func (f *crossRepoInboxFixture) diagnostics(s *journey.Service) string {
 	f.mu.Lock()
 	problems, lifecycle := slices.Clone(f.problems), slices.Clone(f.lifecycle)
 	passes := fmt.Sprint(f.passes)
 	f.mu.Unlock()
 	state := "live"
 	select {
-	case <-s.done:
+	case <-s.Done:
 		state = fmt.Sprintf("stopped: %v", s.Wait())
 	default:
-		if !s.ready.Load() || s.lifetime.Err() != nil {
-			state = fmt.Sprintf("stopping: %v", s.lifetime.Err())
+		if !s.Ready.Load() || s.Lifetime.Err() != nil {
+			state = fmt.Sprintf("stopping: %v", s.Lifetime.Err())
 		}
 	}
-	// Trace diagnostics are bounded too: a stuck trace lock must not hide
-	// the service's stop reason or active backend operations.
 	durable := make(chan string, 1)
 	go func() {
 		_, details := f.snapshot(s)
@@ -227,13 +205,11 @@ func (f *crossRepoInboxFixture) diagnostics(s *Service) string {
 	case <-time.After(200 * time.Millisecond):
 		details = "trace snapshot blocked"
 	}
-	return fmt.Sprintf("service=%s ready=%v completed schedules=%s lifecycle=%v activity=%+v durable=%s tool problems=%v", state, s.ready.Load(), passes, lifecycle, s.activityView().Activity, details, problems)
+	return fmt.Sprintf("service=%s ready=%v completed schedules=%s lifecycle=%v activity=%+v durable=%s tool problems=%v", state, s.Ready.Load(), passes, lifecycle, journey.InspectForTest(s).ActivityView().Activity, details, problems)
 }
 
-// snapshot reads durable completion of every worker and chief turn and
-// acknowledgements of events whose delivery window has closed.
-func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
-	projects := s.projectViews()
+func (f *crossRepoInboxFixture) snapshot(s *journey.Service) (bool, string) {
+	projects := s.ProjectViews()
 	if len(projects) != 2 {
 		return false, fmt.Sprintf("active projects=%d", len(projects))
 	}
@@ -267,9 +243,9 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 			return
 		}
 		for _, e := range outbox {
-			window := s.current().EventWindow()
+			window := s.Current().EventWindow()
 			if e.Event.Kind == trace.ProgressKind {
-				window = s.current().EventProgressWindow()
+				window = s.Current().EventProgressWindow()
 			}
 			if e.Event.Operation == nil && !e.Acknowledged && (e.Claim != nil || !f.clock.Now().Before(e.At.Add(window))) {
 				complete = false
@@ -293,15 +269,15 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 		}
 	}
 	for _, p := range projects {
-		streams, err := p.repository.Workstreams()
+		streams, err := p.Repository.Workstreams()
 		if err != nil {
-			return false, fmt.Sprintf("%s streams: %v", p.id, err)
+			return false, fmt.Sprintf("%s streams: %v", p.Id, err)
 		}
 		for _, stream := range streams {
-			inspect(p.repository, stream)
+			inspect(p.Repository, stream)
 		}
 	}
-	target, host, _, close, err := s.chiefRepository(context.Background(), projects[0].repository, f.stream1)
+	target, host, _, close, err := s.Lifecycle().ChiefRepository(context.Background(), projects[0].Repository, f.stream1)
 	if err != nil {
 		return false, strings.Join(details, "; ") + fmt.Sprintf("; shared chief: %v", err)
 	}
@@ -309,7 +285,7 @@ func (f *crossRepoInboxFixture) snapshot(s *Service) (bool, string) {
 	close()
 	return complete, strings.Join(details, "; ")
 }
-func (f *crossRepoInboxFixture) waitCompleted(t *testing.T, s *Service, label string) {
+func (f *crossRepoInboxFixture) waitCompleted(t *testing.T, s *journey.Service, label string) {
 	t.Helper()
 	f.driveTicksUntil(t, s, label, func() bool {
 		complete, _ := f.snapshot(s)
@@ -322,29 +298,20 @@ func (f *crossRepoInboxFixture) problem(format string, args ...any) {
 	f.problems = append(f.problems, fmt.Sprintf(format, args...))
 }
 
-// repositories waits for both projects' own, now-live repository instances.
-func (f *crossRepoInboxFixture) repositories(t *testing.T, s *Service) (repo1, repo2 *trace.Repository) {
+func (f *crossRepoInboxFixture) repositories(t *testing.T, s *journey.Service) (repo1, repo2 *trace.Repository) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
+	intakefixture.Eventually(t, "both projects' own repositories were never opened", func() bool {
 		f.mu.Lock()
+		defer f.mu.Unlock()
 		repo1, repo2 = f.live[f.project1], f.live[f.project2]
-		f.mu.Unlock()
-		if repo1 != nil && repo2 != nil {
-			return repo1, repo2
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("both projects' own repositories were never opened: %s", f.diagnostics(s))
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return repo1 != nil && repo2 != nil
+	})
+	return repo1, repo2
 }
 
-// driveTicksUntil sends ticks, retrying on a short timeout, until condition
-// holds or demoTimeout passes.
-func (f *crossRepoInboxFixture) driveTicksUntil(t *testing.T, s *Service, label string, condition func() bool) {
+func (f *crossRepoInboxFixture) driveTicksUntil(t *testing.T, s *journey.Service, label string, condition func() bool) {
 	t.Helper()
-	deadline := time.NewTimer(demoTimeout)
+	deadline := time.NewTimer(fixturekit.DemoTimeout)
 	defer deadline.Stop()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
@@ -352,9 +319,6 @@ retry:
 	for {
 		checked := make(chan bool, 1)
 		go func(out chan<- bool) { out <- condition() }(checked)
-		// A blocked durable read must still reach the boundary diagnostics.
-		// Only one condition read is in flight, and only the live controller
-		// executes passes while we wait for it.
 		for {
 			select {
 			case complete := <-checked:
@@ -366,7 +330,7 @@ retry:
 				if checked == nil {
 					continue retry
 				}
-			case <-s.done:
+			case <-s.Done:
 				t.Fatalf("%s: %s", label, f.diagnostics(s))
 			case f.ticks <- f.clock.Now():
 			case <-deadline.C:
@@ -376,15 +340,6 @@ retry:
 	}
 }
 
-// TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers
-// is unit wg-inbox's own evidence (discovery-36f3f2dfce65f7e4d5dcf323fe85d19a1a9d066d7c4d02028b99e95cc60a6dbf): a
-// consolidated escalation spanning two repos' own members of one cross-repo
-// workgroup appears exactly once in the owner's inbox, an unrelated
-// escalation from each repo's own, separate one-workstream workgroup stays
-// its own entry (each project's own inbox counter is independent of the
-// workgroup's, and of the other project's), and the owner's ruling on the
-// consolidated entry resumes all and only the two cross-repo askers, never
-// the two unrelated ones.
 func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -394,13 +349,13 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 
 	f := newCrossRepoInboxFixture(t)
 
-	ask := func(question string) demoTurn {
+	ask := func(question string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+			out, err := fixturekit.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("%s ask: %s %v", req.Name, out, err)
 			}
-			return questionResult(req, "session-"+req.Name, "Asked"), nil
+			return intakefixture.QuestionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
 	f.engine.Turns["build1"] = ask(question1)
@@ -414,22 +369,19 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		flagMu.Lock()
 		switch {
-		// Each cross-repo member's own question numbering is local to its
-		// own workstream, so both questions of this consolidated batch are
-		// locally numbered "1": the ruling notice reads "questions 1, 1".
 		case !relayed && strings.Contains(req.Prompt, ", escalation_1 (questions 1, 1): "+ruling):
 			flagMu.Unlock()
-			out, err := callTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
+			out, err := fixturekit.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": string(f.stream1) + ":1", "text": ruling, "scope": "local"})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("relay_ruling: %s %v", out, err)
 			}
 			flagMu.Lock()
 			relayed = true
 			flagMu.Unlock()
-			return questionResult(req, "session-chief", "Relayed"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), nil
 		case !escalated1 && !escalated2 && strings.Contains(req.Prompt, "asked by the mason: "+question1) && strings.Contains(req.Prompt, "asked by the mason: "+question2):
 			flagMu.Unlock()
-			out, err := callTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(f.stream1) + ":1", string(f.stream2) + ":1"},
 				"rephrasing": "Is the chunk store part of the contract?", "blocked": "Both workstreams.", "options": []string{"Yes", "No"}, "recommendation": "Yes."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate consolidated: %s %v", out, err)
@@ -437,10 +389,10 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalated1, escalated2 = true, true
 			flagMu.Unlock()
-			return questionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
 		case !escalatedU1 && strings.Contains(req.Prompt, "asked by the mason: "+questionU1):
 			flagMu.Unlock()
-			out, err := callTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
 				"rephrasing": "May the index add a file?", "blocked": "The index unit.", "options": []string{}, "recommendation": "No."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate u1: %s %v", out, err)
@@ -448,10 +400,10 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU1 = true
 			flagMu.Unlock()
-			return questionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
 		case !escalatedU2 && strings.Contains(req.Prompt, "asked by the mason: "+questionU2):
 			flagMu.Unlock()
-			out, err := callTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
+			out, err := fixturekit.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{"1"},
 				"rephrasing": "Is the retry bound owner-set?", "blocked": "The retry unit.", "options": []string{}, "recommendation": "No."})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("escalate u2: %s %v", out, err)
@@ -459,21 +411,21 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			flagMu.Lock()
 			escalatedU2 = true
 			flagMu.Unlock()
-			return questionResult(req, "session-chief", "Escalated"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Escalated"), nil
 		}
 		flagMu.Unlock()
 		if strings.Contains(req.Prompt, "asked by the mason:") || strings.Contains(req.Prompt, "escalation_1") {
-			return questionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
 		}
 		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
-		return questionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		return questionResult(req, "session-"+req.Name, "Continued"), nil
+		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 
-	s, err := Start(ctx, f.cfg)
-	must(t, err)
+	s, err := journey.Start(ctx, f.cfg)
+	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed := false
 	defer func() {
@@ -482,47 +434,42 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		}
 	}()
 	repo1, repo2 := f.repositories(t, s)
-	c := NewClient(s.Socket())
+	c := journey.NewClient(s.Socket())
 	defer c.Close()
 
-	id, api := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatalf("draft workgroup: %v", api)
+	id, apiFault := s.Lifecycle().DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 	workgroupProject := config.ProjectID("p_" + strings.TrimPrefix(string(id), "g_"))
 
-	// No asking turn may run while DraftWorkgroup retracts the old chiefs
-	// and records member pointers. Start the live workers only after that
-	// join is complete; the live controllers remain their sole pass driver.
 	for _, m := range []struct {
 		repo                *trace.Repository
 		stream              config.WorkstreamID
 		agent, thread, turn string
 	}{
-		{repo1, f.stream1, demoAgent, demoThread, "build1"},
+		{repo1, f.stream1, fixturekit.DemoAgent, fixturekit.DemoThread, "build1"},
 		{repo2, f.stream2, "agent_mason2", "thread_mason2", "build2"},
 		{repo1, unrelatedStream1, "agent_u1", "thread_u1", "build_u1"},
 		{repo2, unrelatedStream2, "agent_u2", "thread_u2", "build_u2"},
 	} {
-		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + m.turn, Revision: 1, Project: m.repo.Project(), Workstream: m.stream, At: f.clock.Now(), Actor: ownerActor, Cause: "message_" + m.turn, Depth: 1}
+		h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + m.turn, Revision: 1, Project: m.repo.Project(), Workstream: m.stream, At: f.clock.Now(), Actor: intake.OwnerActor, Cause: "message_" + m.turn, Depth: 1}
 		_, err := m.repo.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: m.agent, ThreadID: m.thread, TurnID: m.turn,
 			Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: " + m.turn})
-		must(t, err)
+		fixturekit.Must(t, err)
 	}
 
-	// Each asker's own question notice is delivered to its chief of staff
-	// only once its event window closes.
 	f.waitCompleted(t, s, "first asking turns after the completed join")
 	for _, m := range []struct {
 		repo   *trace.Repository
 		stream config.WorkstreamID
 		agent  string
 	}{
-		{repo1, f.stream1, demoAgent}, {repo2, f.stream2, "agent_mason2"},
+		{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 		{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
 	} {
 		th, err := m.repo.Thread(m.stream, m.agent)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if len(th.Turns) != 1 || !th.Parked() || th.Turns[0].Status() != "waiting" {
 			t.Fatalf("first asking turn %s/%s: %+v; %s", m.stream, m.agent, th, f.diagnostics(s))
 		}
@@ -536,18 +483,18 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	f.waitCompleted(t, s, "escalations and event acknowledgements")
 
 	inbox, err := c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 3 {
 		t.Fatalf("inbox before any ruling: %+v; %s", inbox, f.diagnostics(s))
 	}
-	var consolidated, entryU1, entryU2 InboxEntry
+	var consolidated, entryU1, entryU2 api.InboxEntry
 	for _, e := range inbox.Entries {
 		switch e.Project {
 		case workgroupProject:
 			consolidated = e
-		case project:
+		case fixturekit.Project:
 			entryU1 = e
-		case otherProject:
+		case fixturekit.OtherProject:
 			entryU2 = e
 		default:
 			t.Fatalf("entry with an unexpected project %s: %+v", e.Project, e)
@@ -556,8 +503,6 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	if consolidated.Number == 0 {
 		t.Fatalf("no consolidated entry tagged with the workgroup's own project %s: %+v", workgroupProject, inbox)
 	}
-	// The consolidated escalation spans both members, in one entry, with
-	// both questions.
 	if consolidated.Batch != "escalation_1" || len(consolidated.Asked) != 2 {
 		t.Fatalf("consolidated entry: %+v", consolidated)
 	}
@@ -566,11 +511,6 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	if !(reflect.DeepEqual(gotQuestions, wantQuestions) || reflect.DeepEqual(gotQuestions, []string{question2, question1})) {
 		t.Fatalf("consolidated entry's questions: %v", gotQuestions)
 	}
-	// Each project's own unrelated escalation is its own entry, with its own
-	// project's inbox number: project's own counter and otherProject's own
-	// counter, and the workgroup's own counter, each start at 1
-	// independently, and the three entries are never merged or confused,
-	// because their Project differs.
 	if entryU1.Number != 1 || entryU1.Batch != "escalation_1" || entryU1.Question != "May the index add a file?" {
 		t.Fatalf("project's own unrelated entry: %+v", entryU1)
 	}
@@ -581,12 +521,10 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		t.Fatalf("workgroup's own first escalation should also start its own counter at 1, got %d", consolidated.Number)
 	}
 
-	// The owner rules on the consolidated entry alone. Both unrelated
-	// entries are untouched by it.
 	_, err = c.Answer(ctx, consolidated.Number, ruling, workgroupProject)
-	must(t, err)
+	fixturekit.Must(t, err)
 	inbox, err = c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 2 {
 		t.Fatalf("inbox after ruling on the consolidated entry: %+v", inbox)
 	}
@@ -618,12 +556,10 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			!th.Parked() && !th.Turns[i].CompletedAt.IsZero() && th.Turns[i].Response != nil && th.Turns[i].Status() == "idle"
 	}
 	f.driveTicksUntil(t, s, "both affected workers complete exactly one continuation", func() bool {
-		return resumedWith(repo1, f.stream1, demoAgent) && resumedWith(repo2, f.stream2, "agent_mason2")
+		return resumedWith(repo1, f.stream1, fixturekit.DemoAgent) && resumedWith(repo2, f.stream2, "agent_mason2")
 	})
 	f.waitCompleted(t, s, "ruling continuations and event acknowledgements")
 
-	// Neither unrelated asker was ever resumed: the consolidated ruling
-	// affected only the two cross-repo askers it named.
 	notResumed := func(repo *trace.Repository, stream config.WorkstreamID, agentID string) bool {
 		th, err := repo.Thread(stream, agentID)
 		if err != nil {
@@ -643,23 +579,17 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		t.Fatalf("otherProject's own unrelated asker was resumed by the cross-repo ruling: %+v", must2(repo2.Thread(unrelatedStream2, "agent_u2")))
 	}
 
-	// Each project's own unrelated entry still carries its own project's
-	// inbox number, unaffected by the workgroup's ruling and by the other
-	// project's own entry.
 	inbox, err = c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(inbox.Entries) != 2 {
 		t.Fatalf("inbox after the relay: %+v", inbox)
 	}
 	for _, e := range inbox.Entries {
-		if e.Number != 1 || (e.Project != project && e.Project != otherProject) {
+		if e.Number != 1 || (e.Project != fixturekit.Project && e.Project != fixturekit.OtherProject) {
 			t.Fatalf("unrelated entry after the relay: %+v", e)
 		}
 	}
 
-	// Freeze the durable thread and owner views after completed delivery,
-	// then restart the real service. Startup must neither rewrap members
-	// nor redeliver the consolidated escalation or either worker answer.
 	threadsSnapshot := func() []byte {
 		t.Helper()
 		var threads []trace.Thread
@@ -668,37 +598,37 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 			stream config.WorkstreamID
 			agent  string
 		}{
-			{repo1, f.stream1, demoAgent}, {repo2, f.stream2, "agent_mason2"},
+			{repo1, f.stream1, fixturekit.DemoAgent}, {repo2, f.stream2, "agent_mason2"},
 			{repo1, unrelatedStream1, "agent_u1"}, {repo2, unrelatedStream2, "agent_u2"},
 			{repo1, unrelatedStream1, trace.ChiefOfStaff}, {repo2, unrelatedStream2, trace.ChiefOfStaff},
 		} {
 			th, err := m.repo.Thread(m.stream, m.agent)
-			must(t, err)
+			fixturekit.Must(t, err)
 			threads = append(threads, th)
 		}
-		target, host, _, close, err := s.chiefRepository(ctx, repo1, f.stream1)
-		must(t, err)
+		target, host, _, close, err := s.Lifecycle().ChiefRepository(ctx, repo1, f.stream1)
+		fixturekit.Must(t, err)
 		defer close()
 		th, err := target.ChiefOfStaffThread(host)
-		must(t, err)
+		fixturekit.Must(t, err)
 		threads = append(threads, th)
 		data, err := json.Marshal(threads)
-		must(t, err)
+		fixturekit.Must(t, err)
 		return data
 	}
 	beforeThreads := threadsSnapshot()
 	beforeConversation1, err := c.Conversation(ctx, f.stream1)
-	must(t, err)
+	fixturekit.Must(t, err)
 	beforeConversation2, err := c.Conversation(ctx, f.stream2)
-	must(t, err)
+	fixturekit.Must(t, err)
 	c.Close()
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 	closed = true
-	s, err = Start(ctx, f.cfg)
-	must(t, err)
+	s, err = journey.Start(ctx, f.cfg)
+	fixturekit.Must(t, err)
 	f.observePasses(s)
 	closed = false
-	c = NewClient(s.Socket())
+	c = journey.NewClient(s.Socket())
 	defer c.Close()
 	repo1, repo2 = f.repositories(t, s)
 	f.waitCompleted(t, s, "completed state after restart")
@@ -707,14 +637,14 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 		t.Fatalf("restart changed durable worker or chief threads: before=%s after=%s", beforeThreads, afterThreads)
 	}
 	afterInbox, err := c.Inbox(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterInbox, inbox) {
 		t.Fatalf("restart changed the unaffected inbox or repeated the consolidated escalation: before=%+v after=%+v", inbox, afterInbox)
 	}
 	afterConversation1, err := c.Conversation(ctx, f.stream1)
-	must(t, err)
+	fixturekit.Must(t, err)
 	afterConversation2, err := c.Conversation(ctx, f.stream2)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(afterConversation1, beforeConversation1) || !reflect.DeepEqual(afterConversation2, beforeConversation2) {
 		t.Fatalf("restart changed member conversations: before=%+v / %+v after=%+v / %+v", beforeConversation1, beforeConversation2, afterConversation1, afterConversation2)
 	}
@@ -726,6 +656,4 @@ func TestCrossRepoWorkgroupInboxConsolidatesAndRulingResumesOnlyAffectedAskers(t
 	}
 }
 
-// must2 returns v for use inside a Fatalf argument list, discarding err; the
-// call site has already failed and only wants v for the failure message.
 func must2[T any](v T, _ error) T { return v }

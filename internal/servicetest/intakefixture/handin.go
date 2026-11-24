@@ -35,7 +35,7 @@ func HandIn(t *testing.T, client HandInClient, project config.ProjectID, req api
 	t.Helper()
 	req.Project = project
 	out, err := client.HandIn(context.Background(), req)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return out
 }
 
@@ -45,7 +45,7 @@ func (f *ArchitectScenario) HandIn(t *testing.T, project config.ProjectID, key, 
 	return out.Workstream
 }
 
-// HandInHead counts commits outside the librarian's workstream.
+// HandInHead counts the commits of the project trace and of each workstream.
 func HandInHead(t *testing.T, projectTrace string, streams func() []config.WorkstreamID, directory func(config.WorkstreamID) string) map[string]int {
 	t.Helper()
 	commits := map[string]int{"project": fixturekit.TraceCommits(t, projectTrace)}

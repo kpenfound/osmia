@@ -8,16 +8,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// A design session opened for a new project is hosted in an existing project
-// and its brief may describe the project to create. draft_brief records a
-// valid new_project alone or beside existing projects, refuses an invalid one
-// and a brief with neither, and the design view returns the latest new_project.
 func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 	t.Parallel()
 	_, c, home, engine := newDesignEnforcementFixture(t)
@@ -25,10 +26,10 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 	other := addDesignProject(t, c, "client")
 	inactive := addDesignProject(t, c, "inactive")
 	_, err := c.RemoveProject(ctx, inactive)
-	must(t, err)
+	fixturekit.Must(t, err)
 
 	opened, err := c.OpenNewProjectDesign(ctx, "")
-	must(t, err)
+	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 	if opened.Design.Project != home || len(opened.Design.Projects) != 0 || opened.Design.NewProject != nil {
 		t.Fatalf("new-project session opened in the first active project with no default list: %+v", opened.Design)
@@ -59,10 +60,10 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 				return nil, fmt.Errorf("design prompt lacks %q", want)
 			}
 		}
-		if !strings.HasPrefix(req.SystemPrompt, designRolePrompt) {
+		if !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
 			return nil, fmt.Errorf("design prompt does not start with the role prompt")
 		}
-		names, err := toolNames(ctx, tools)
+		names, err := intakefixture.ToolNames(ctx, tools)
 		if err != nil {
 			return nil, err
 		}
@@ -70,8 +71,8 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 			return nil, fmt.Errorf("design tools %v, want %v", names, want)
 		}
 		call := func(input map[string]any) (string, error) {
-			input["content"] = productionBrief
-			return callTool(ctx, tools, draftBriefToolName, input)
+			input["content"] = intakefixture.ProductionBrief
+			return fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, input)
 		}
 		refused := func(label string, input map[string]any) error {
 			out, err := call(input)
@@ -114,8 +115,8 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 	}
 	engine.Mu.Unlock()
 	_, err = c.DesignMessage(ctx, stream, "Design a gadget project.")
-	must(t, err)
-	conversation := awaitDesignConversation(t, c, stream, func(r ConversationResponse) bool {
+	fixturekit.Must(t, err)
+	conversation := awaitDesignConversation(t, c, stream, func(r api.ConversationResponse) bool {
 		return len(r.Entries) > 0 && (r.Entries[len(r.Entries)-1].State == api.TurnFailed || r.Entries[len(r.Entries)-1].Kind == "response")
 	})
 	if last := conversation.Entries[len(conversation.Entries)-1]; last.State == api.TurnFailed || last.Kind != "response" {
@@ -126,9 +127,8 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 	}
 
 	view, err := c.Design(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	got := view.Design
-	// Three recorded briefs: the last omitted new_project and kept the second's.
 	if got.BriefRevision != 3 || !slices.Equal(got.Projects, []config.ProjectID{other}) || got.NewProject == nil {
 		t.Fatalf("latest brief: %+v", got)
 	}
@@ -137,18 +137,16 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 	}
 }
 
-// Visibility is private when the agent leaves it out, the description stays
-// optional, and an explicit null removes the new project again.
 func TestDraftBriefNewProjectDefaultsToPrivateAndNullRemovesIt(t *testing.T) {
 	t.Parallel()
 	_, c, _, engine := newDesignEnforcementFixture(t)
 	ctx := context.Background()
 	opened, err := c.OpenNewProjectDesign(ctx, "")
-	must(t, err)
+	fixturekit.Must(t, err)
 	stream := opened.Design.Workstream
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		out, err := callTool(ctx, tools, draftBriefToolName, map[string]any{"content": productionBrief,
+		out, err := fixturekit.CallTool(ctx, tools, intake.DraftBriefToolName, map[string]any{"content": intakefixture.ProductionBrief,
 			"new_project": map[string]any{"name": " Gadget ", "repo": "gadget", "charter": "Rules."}})
 		if err != nil || !strings.Contains(out, `"recorded":true`) {
 			return nil, fmt.Errorf("new project: %s %v", out, err)
@@ -157,12 +155,12 @@ func TestDraftBriefNewProjectDefaultsToPrivateAndNullRemovesIt(t *testing.T) {
 	}
 	engine.Mu.Unlock()
 	_, err = c.DesignMessage(ctx, stream, "Draft it.")
-	must(t, err)
-	awaitDesignConversation(t, c, stream, func(r ConversationResponse) bool {
+	fixturekit.Must(t, err)
+	awaitDesignConversation(t, c, stream, func(r api.ConversationResponse) bool {
 		return len(r.Entries) > 1 && r.Entries[len(r.Entries)-1].Kind == "response"
 	})
 	view, err := c.Design(ctx, stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if np := view.Design.NewProject; np == nil || np.Name != "Gadget" || np.Visibility != api.VisibilityPrivate || np.Description != "" {
 		t.Fatalf("new project %+v, want private", np)
 	}
@@ -170,14 +168,12 @@ func TestDraftBriefNewProjectDefaultsToPrivateAndNullRemovesIt(t *testing.T) {
 		t.Fatalf("the host project joined the new-project brief: %v", view.Design.Projects)
 	}
 	listed, err := c.Designs(ctx, "")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(listed.Designs) != 1 || listed.Designs[0].NewProject == nil || listed.Designs[0].NewProject.Visibility != api.VisibilityPrivate {
 		t.Fatalf("design list: %+v", listed.Designs)
 	}
 }
 
-// A new-project session is hosted in the project named in the request, or the
-// first active project, and is refused when no project is active.
 func TestOpenNewProjectDesignChoosesItsHost(t *testing.T) {
 	t.Parallel()
 	_, c, home, _ := newDesignEnforcementFixture(t)
@@ -185,24 +181,23 @@ func TestOpenNewProjectDesignChoosesItsHost(t *testing.T) {
 	other := addDesignProject(t, c, "client")
 	for _, tc := range []struct{ asked, host config.ProjectID }{{"", home}, {other, other}, {home, home}} {
 		opened, err := c.OpenNewProjectDesign(ctx, tc.asked)
-		must(t, err)
+		fixturekit.Must(t, err)
 		if opened.Design.Project != tc.host {
 			t.Fatalf("asked %q: hosted in %s, want %s", tc.asked, opened.Design.Project, tc.host)
 		}
 	}
-	// An ordinary session still defaults to its host project.
 	ordinary, err := c.OpenDesign(ctx, other)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(ordinary.Design.Projects) != 1 || ordinary.Design.Projects[0] != other {
 		t.Fatalf("ordinary design: %+v", ordinary.Design)
 	}
 
-	empty, _ := projectFixture(t)
-	_, none := start(t, empty)
+	empty, _ := journey.ProjectFixture(t)
+	_, none := journey.StartT(t, empty)
 	_, err = none.OpenNewProjectDesign(ctx, "")
-	apiError(t, err, NoProject, "a new-project design session lives in an existing project, and no project is active; add one with osmia project add first")
+	intakefixture.ApiError(t, err, api.NoProject, "a new-project design session lives in an existing project, and no project is active; add one with osmia project add first")
 	designs, err := none.Designs(ctx, "")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(designs.Designs) != 0 {
 		t.Fatalf("a session opened without an active project: %+v", designs.Designs)
 	}

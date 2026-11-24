@@ -1,12 +1,12 @@
 package service
 
 import (
-	testing "testing"
+	"testing"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func runChecks(t *testing.T, s *Service, repository *trace.Repository, stream config.WorkstreamID) {

@@ -3,94 +3,74 @@ package executionjourney
 import (
 	context "context"
 	errors "errors"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/service"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	os "os"
 	filepath "path/filepath"
 	reflect "reflect"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
-
-// runChief binds the fake chief of staff through the thread dispatcher. It
-// exercises the Runner's resume mechanism directly, as chiefTurns always
-// authorizes resume; production confines that capability to the session role
-// alone (thread.Runner.ResumableRoles, set only in internal/service/enforcement.go).
-func runChief(opts *Options, cfg *config.Config, turns *chiefTurns) {
-	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
-		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: opts.Reconciliation.Now, ResumableRoles: func(string) bool { return true }},
-			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
-				return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(cfg.Root.String(), "sessions", in.Agent, in.Turn)}, nil
-			}}, nil
-	}
-}
-
-// awaitConversation polls the listing until done accepts it.
-func awaitConversation(t *testing.T, c *Client, done func(ConversationResponse) bool) ConversationResponse {
-	t.Helper()
-	return intakefixture.AwaitView(t, func() (ConversationResponse, error) {
-		return c.Conversation(context.Background(), stream)
-	}, done, "conversation did not settle: %+v")
-}
-
-var states = intakefixture.States
 
 func TestConversationRunsMessagesInOrder(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "cv-")
-	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	runChief(&opts, cfg, turns)
-	s, c := start(t, opts)
+	opts, cfg := journey.ConversationFixture(t, "cv-")
+	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	journey.RunChief(&opts, cfg, turns)
+	s, c := journey.StartT(t, opts)
 
-	first, err := c.Send(ctx, stream, "Where is the plan?")
-	must(t, err)
-	if first.Kind != "message" || first.State != TurnQueued || first.Text != "Where is the plan?" || !strings.HasPrefix(first.Turn, "message_") || first.At.IsZero() {
+	first, err := c.Send(ctx, fixturekit.Stream, "Where is the plan?")
+	fixturekit.Must(t, err)
+	if first.Kind != "message" || first.State != api.TurnQueued || first.Text != "Where is the plan?" || !strings.HasPrefix(first.Turn, "message_") || first.At.IsZero() {
 		t.Fatalf("acknowledgement: %+v", first)
 	}
-	// The acknowledged message is already in the trace.
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
+
+	th, err := s.Sole().Repository.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != first.Turn {
 		t.Fatalf("thread after send: %+v", th)
 	}
 	select {
 	case <-turns.Entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("message did not run as a turn")
 	}
-	second, err := c.Send(ctx, stream, "fail")
-	must(t, err)
-	cancelled, err := c.Send(ctx, stream, "cancel")
-	must(t, err)
-	silent, err := c.Send(ctx, stream, "silent")
-	must(t, err)
-	third, err := c.Send(ctx, stream, "Ship it")
-	must(t, err)
-	list, err := c.Conversation(ctx, stream)
-	must(t, err)
-	if got := states(list); !reflect.DeepEqual(got, []string{"message:running", "message:queued", "message:queued", "message:queued", "message:queued"}) {
+	second, err := c.Send(ctx, fixturekit.Stream, "fail")
+	fixturekit.Must(t, err)
+	cancelled, err := c.Send(ctx, fixturekit.Stream, "cancel")
+	fixturekit.Must(t, err)
+	silent, err := c.Send(ctx, fixturekit.Stream, "silent")
+	fixturekit.Must(t, err)
+	third, err := c.Send(ctx, fixturekit.Stream, "Ship it")
+	fixturekit.Must(t, err)
+	list, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	if got := intakefixture.States(list); !reflect.DeepEqual(got, []string{"message:running", "message:queued", "message:queued", "message:queued", "message:queued"}) {
 		t.Fatalf("mid-turn listing: %v", got)
 	}
 	close(turns.Hold)
 
-	list = awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 9 })
-	want := []ConversationEntry{
-		{Turn: first.Turn, Kind: "message", Text: "Where is the plan?", At: first.At, State: TurnDone},
-		{Turn: first.Turn, Kind: "response", Text: "Answer to Where is the plan?", State: TurnDone},
-		{Turn: second.Turn, Kind: "message", Text: "fail", At: second.At, State: TurnFailed},
-		{Turn: second.Turn, Kind: "response", Text: "partial", State: TurnFailed},
-		{Turn: cancelled.Turn, Kind: "message", Text: "cancel", At: cancelled.At, State: TurnFailed},
-		{Turn: cancelled.Turn, Kind: "response", Text: "stopped", State: TurnFailed},
-		{Turn: silent.Turn, Kind: "message", Text: "silent", At: silent.At, State: TurnDone},
-		{Turn: third.Turn, Kind: "message", Text: "Ship it", At: third.At, State: TurnDone},
-		{Turn: third.Turn, Kind: "response", Text: "Answer to Ship it", State: TurnDone},
+	list = intakefixture.AwaitConversation(t, c, func(l api.ConversationResponse) bool { return len(l.Entries) == 9 })
+	want := []api.ConversationEntry{
+		{Turn: first.Turn, Kind: "message", Text: "Where is the plan?", At: first.At, State: api.TurnDone},
+		{Turn: first.Turn, Kind: "response", Text: "Answer to Where is the plan?", State: api.TurnDone},
+		{Turn: second.Turn, Kind: "message", Text: "fail", At: second.At, State: api.TurnFailed},
+		{Turn: second.Turn, Kind: "response", Text: "partial", State: api.TurnFailed},
+		{Turn: cancelled.Turn, Kind: "message", Text: "cancel", At: cancelled.At, State: api.TurnFailed},
+		{Turn: cancelled.Turn, Kind: "response", Text: "stopped", State: api.TurnFailed},
+		{Turn: silent.Turn, Kind: "message", Text: "silent", At: silent.At, State: api.TurnDone},
+		{Turn: third.Turn, Kind: "message", Text: "Ship it", At: third.At, State: api.TurnDone},
+		{Turn: third.Turn, Kind: "response", Text: "Answer to Ship it", State: api.TurnDone},
 	}
 	for i, e := range list.Entries {
 		if e.Kind == "response" {
@@ -100,7 +80,7 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 			want[i].At = e.At
 		}
 	}
-	if list.Workstream != stream || !reflect.DeepEqual(list.Entries, want) {
+	if list.Workstream != fixturekit.Stream || !reflect.DeepEqual(list.Entries, want) {
 		t.Fatalf("listing:\n%+v\nwant:\n%+v", list.Entries, want)
 	}
 
@@ -113,24 +93,23 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		if p.Prompt != prompt || p.Scope.Role != trace.ChiefOfStaff || p.Scope.Thread != trace.ChiefOfStaff || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), "# Project context", "workstream: " + string(stream), "charter#1 [Rules]: Keep the upload API stable.", "## Latest status", "## Open inbox escalations"} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), "# Project context", "workstream: " + string(fixturekit.Stream), "charter#1 [Rules]: Keep the upload API stable.", "## Latest status", "## Open inbox escalations"} {
 			if !strings.Contains(p.SystemPrompt, part) {
 				t.Fatalf("turn %d system prompt lacks %q:\n%s", i, part, p.SystemPrompt)
 			}
 		}
 	}
 
-	// Turns the owner did not send are not part of the conversation.
-	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_question", Project: project, Workstream: stream, At: demoStart, Actor: trace.Actor{Kind: "agent", ID: "mason"}, Cause: "ask"}
-	_, err = s.sole().repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "question", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "A mason asks"})
-	must(t, err)
-	if again, err := c.Conversation(ctx, stream); err != nil || len(again.Entries) != 9 {
+	h := trace.Header{Schema: "osmia.trace.turn-request", Version: 1, Revision: 1, ID: "request_question", Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: trace.Actor{Kind: "agent", ID: "mason"}, Cause: "ask"}
+	_, err = s.Sole().Repository.EnqueueTurn(ctx, trace.TurnRequest{Header: h, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "question", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, Prompt: "A mason asks"})
+	fixturekit.Must(t, err)
+	if again, err := c.Conversation(ctx, fixturekit.Stream); err != nil || len(again.Entries) != 9 {
 		t.Fatalf("listing with an agent turn: %+v %v", again, err)
 	}
 
-	empty, err := c.Conversation(ctx, quiet)
-	must(t, err)
-	if empty.Workstream != quiet || empty.Entries == nil || len(empty.Entries) != 0 {
+	empty, err := c.Conversation(ctx, fixturekit.Quiet)
+	fixturekit.Must(t, err)
+	if empty.Workstream != fixturekit.Quiet || empty.Entries == nil || len(empty.Entries) != 0 {
 		t.Fatalf("quiet workstream: %+v", empty)
 	}
 }
@@ -138,96 +117,82 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 func TestConversationRejections(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, _ := conversationFixture(t, "cr-")
-	s, c := start(t, opts)
+	opts, _ := journey.ConversationFixture(t, "cr-")
+	s, c := journey.StartT(t, opts)
 	unknown := config.WorkstreamID("w_00000000000000000000000000000009")
-	expect := func(err error, code Code, message string) {
+	expect := func(err error, code api.Code, message string) {
 		t.Helper()
-		var api *APIError
-		if !errors.As(err, &api) || api.Code != code || !strings.Contains(api.Message, message) {
+		var apiErr *api.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != code || !strings.Contains(apiErr.Message, message) {
 			t.Fatalf("got %v, want %s %q", err, code, message)
 		}
 	}
 	_, err := c.Send(ctx, unknown, "hello")
-	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
+	expect(err, api.Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Conversation(ctx, unknown)
-	expect(err, Validation, "workstream "+string(unknown)+" is not in an active project")
+	expect(err, api.Validation, "workstream "+string(unknown)+" is not in an active project")
 	_, err = c.Send(ctx, "w_bad", "hello")
-	expect(err, Validation, "workstream must be a workstream ID")
+	expect(err, api.Validation, "workstream must be a workstream ID")
 	_, err = c.Conversation(ctx, "w_bad")
-	expect(err, Validation, "workstream must be a workstream ID")
-	_, err = c.Send(ctx, stream, " \n")
-	expect(err, Validation, "text must not be empty")
-	err = c.Do(ctx, "POST", Prefix+"/conversation/"+string(stream), map[string]string{"message": "hello"}, nil)
-	expect(err, Malformed, "")
-	err = c.Do(ctx, "PUT", Prefix+"/conversation/"+string(stream), SendRequest{Text: "hello"}, nil)
-	expect(err, Unsupported, "")
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
+	expect(err, api.Validation, "workstream must be a workstream ID")
+	_, err = c.Send(ctx, fixturekit.Stream, " \n")
+	expect(err, api.Validation, "text must not be empty")
+	err = c.Do(ctx, "POST", service.Prefix+"/conversation/"+string(fixturekit.Stream), map[string]string{"message": "hello"}, nil)
+	expect(err, api.Malformed, "")
+	err = c.Do(ctx, "PUT", service.Prefix+"/conversation/"+string(fixturekit.Stream), api.SendRequest{Text: "hello"}, nil)
+	expect(err, api.Unsupported, "")
+	th, err := s.Sole().Repository.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("rejected messages were recorded: %+v", th.Turns)
 	}
 
-	// The librarian's workstream is in the trace but not in status, and its
-	// chief of staff never gets a turn: it is unknown to the conversation too.
-	librarian := intakefixture.PlantLibrarian(t, s.sole().repository, demoStart, ownerActor)
-	_, err = c.Send(ctx, librarian, "hello")
-	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
-	_, err = c.Conversation(ctx, librarian)
-	expect(err, Validation, "workstream "+string(librarian)+" is not in an active project")
-	th, err = s.sole().repository.ChiefOfStaffThread(librarian)
-	must(t, err)
-	if len(th.Turns) != 0 {
-		t.Fatalf("a message to the librarian's workstream was recorded: %+v", th.Turns)
-	}
+	unbound := journey.Fixture(t)
+	_, c = journey.StartT(t, unbound)
+	_, err = c.Send(ctx, fixturekit.Stream, "hello")
+	expect(err, api.Validation, "workstream "+string(fixturekit.Stream)+" is not in an active project")
 
-	// Without a trace the workstream is unknown.
-	unbound := fixture(t)
-	_, c = start(t, unbound)
-	_, err = c.Send(ctx, stream, "hello")
-	expect(err, Validation, "workstream "+string(stream)+" is not in an active project")
-
-	empty, _ := projectFixture(t)
-	_, c = start(t, empty)
-	_, err = c.Send(ctx, stream, "hello")
-	expect(err, NoProject, "no project is configured")
-	_, err = c.Conversation(ctx, stream)
-	expect(err, NoProject, "no project is configured")
+	empty, _ := journey.ProjectFixture(t)
+	_, c = journey.StartT(t, empty)
+	_, err = c.Send(ctx, fixturekit.Stream, "hello")
+	expect(err, api.NoProject, "no project is configured")
+	_, err = c.Conversation(ctx, fixturekit.Stream)
+	expect(err, api.NoProject, "no project is configured")
 }
 
 func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "cp-")
+	opts, cfg := journey.ConversationFixture(t, "cp-")
 	file := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(file)
-	must(t, err)
-	must(t, os.WriteFile(file, append(data, []byte("\n[profiles.same]\nagent = \"claude\"\nmodel = \"same\"\n")...), 0600))
-	turns := &chiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
-	runChief(&opts, cfg, turns)
-	s, c := start(t, opts)
-	_, err = c.Send(ctx, stream, "first")
-	must(t, err)
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(file, append(data, []byte("\n[profiles.same]\nagent = \"claude\"\nmodel = \"same\"\n")...), 0600))
+	turns := &fixturekit.ChiefTurns{Hold: make(chan struct{}), Entered: make(chan struct{})}
+	journey.RunChief(&opts, cfg, turns)
+	s, c := journey.StartT(t, opts)
+	_, err = c.Send(ctx, fixturekit.Stream, "first")
+	fixturekit.Must(t, err)
 	select {
 	case <-turns.Entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("first turn did not start")
 	}
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: "same"})
+	intakefixture.Mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: trace.ChiefOfStaff, Profile: "same"})
 	if calls := turns.Calls(); len(calls) != 1 || calls[0].Profile.Name != "default" {
 		t.Fatalf("in-flight profile changed: %+v", calls)
 	}
 	close(turns.Hold)
-	awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 2 })
+	intakefixture.AwaitConversation(t, c, func(l api.ConversationResponse) bool { return len(l.Entries) == 2 })
 	for i, step := range []struct{ profile, prompt string }{{"same", "second"}, {"other", "third"}, {"", "fourth"}} {
 		if i == 2 {
-			mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: trace.ChiefOfStaff})
+			intakefixture.Mutation(t, c, "DELETE", "profile", api.ClearProfileRequest{Role: trace.ChiefOfStaff})
 		} else if i > 0 {
-			mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: step.profile})
+			intakefixture.Mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: trace.ChiefOfStaff, Profile: step.profile})
 		}
-		_, err := c.Send(ctx, stream, step.prompt)
-		must(t, err)
-		awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == (i+2)*2 })
+		_, err := c.Send(ctx, fixturekit.Stream, step.prompt)
+		fixturekit.Must(t, err)
+		intakefixture.AwaitConversation(t, c, func(l api.ConversationResponse) bool { return len(l.Entries) == (i+2)*2 })
 	}
 	calls := turns.Calls()
 	if len(calls) != 4 {
@@ -245,8 +210,8 @@ func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 			t.Fatalf("turn %d omitted owned log: %q", i, calls[i].History)
 		}
 	}
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err := s.Sole().Repository.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 4 || th.Turns[0].Request.Profile.Name != "default" || th.Turns[3].Request.Profile.Name != "default" {
 		t.Fatalf("recorded profiles: %+v", th.Turns)
 	}
@@ -254,13 +219,13 @@ func TestConversationProfileChangesResumeOrReplay(t *testing.T) {
 
 func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
 	t.Parallel()
-	opts, _ := conversationFixture(t, "cf-")
-	s, c := start(t, opts)
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: trace.ChiefOfStaff, Profile: "other"})
-	sent, err := c.Send(context.Background(), stream, "hello")
-	must(t, err)
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
+	opts, _ := journey.ConversationFixture(t, "cf-")
+	s, c := journey.StartT(t, opts)
+	intakefixture.Mutation(t, c, "PUT", "profile", api.ProfileRequest{Role: trace.ChiefOfStaff, Profile: "other"})
+	sent, err := c.Send(context.Background(), fixturekit.Stream, "hello")
+	fixturekit.Must(t, err)
+	th, err := s.Sole().Repository.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Request.Profile.Name != "other" || th.Turns[0].Request.Profile.Backend != "codex" {
 		t.Fatalf("accepted profile: %+v", th.Turns)
 	}
@@ -269,34 +234,33 @@ func TestConversationUsesOverrideOutsideFallbackChain(t *testing.T) {
 func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "cx-")
-	// First lifetime: no turn runner, so the message is acknowledged and the
-	// service stops before it runs.
-	s, c := start(t, opts)
-	sent, err := c.Send(ctx, stream, "Plan the upload work")
-	must(t, err)
+	opts, cfg := journey.ConversationFixture(t, "cx-")
+
+	s, c := journey.StartT(t, opts)
+	sent, err := c.Send(ctx, fixturekit.Stream, "Plan the upload work")
+	fixturekit.Must(t, err)
 	c.Close()
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	th, err := repo.ChiefOfStaffThread(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
+	th, err := repo.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 1 || th.Turns[0].Request.TurnID != sent.Turn || th.Turns[0].Claim != nil {
 		t.Fatalf("durable message: %+v", th.Turns)
 	}
-	must(t, repo.Close())
+	fixturekit.Must(t, repo.Close())
 
 	for lifetime := 2; lifetime <= 3; lifetime++ {
-		turns := &chiefTurns{}
-		runChief(&opts, cfg, turns)
-		s, c = start(t, opts)
-		list := awaitConversation(t, c, func(l ConversationResponse) bool { return len(l.Entries) == 2 })
-		if got := states(list); !reflect.DeepEqual(got, []string{"message:done", "response:done"}) || list.Entries[1].Text != "Answer to Plan the upload work" {
+		turns := &fixturekit.ChiefTurns{}
+		journey.RunChief(&opts, cfg, turns)
+		s, c = journey.StartT(t, opts)
+		list := intakefixture.AwaitConversation(t, c, func(l api.ConversationResponse) bool { return len(l.Entries) == 2 })
+		if got := intakefixture.States(list); !reflect.DeepEqual(got, []string{"message:done", "response:done"}) || list.Entries[1].Text != "Answer to Plan the upload work" {
 			t.Fatalf("lifetime %d listing: %+v", lifetime, list)
 		}
 		c.Close()
-		must(t, s.Close())
+		fixturekit.Must(t, s.Close())
 		want := 0
 		if lifetime == 2 {
 			want = 1
@@ -306,10 +270,10 @@ func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 		}
 	}
 	repo, err = trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer repo.Close()
-	ops, err := repo.Operations(stream)
-	must(t, err)
+	ops, err := repo.Operations(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(ops) != 1 {
 		t.Fatalf("turn operations: %+v", ops)
 	}
@@ -317,19 +281,19 @@ func TestConversationMessageRunsOnceAcrossRestart(t *testing.T) {
 
 func TestConversationUnusableProfileIsInternal(t *testing.T) {
 	t.Parallel()
-	opts, _ := conversationFixture(t, "cu-")
-	s, c := start(t, opts)
-	cfg := *s.current()
+	opts, _ := journey.ConversationFixture(t, "cu-")
+	s, c := journey.StartT(t, opts)
+	cfg := *s.Current()
 	cfg.Profiles = map[string]config.Profile{}
-	service.InspectForTest(s.core()).SetConfig(&cfg)
-	s.cfg = &cfg
-	_, err := c.Send(context.Background(), stream, "hello")
-	var api *APIError
-	if !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "role chief_of_staff has no usable profile \"default\"") {
+	service.InspectForTest(s.Core()).SetConfig(&cfg)
+	s.Cfg = &cfg
+	_, err := c.Send(context.Background(), fixturekit.Stream, "hello")
+	var apiErr *api.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != api.Internal || !strings.Contains(apiErr.Message, "role chief_of_staff has no usable profile \"default\"") {
 		t.Fatalf("unusable profile: %v", err)
 	}
-	th, err := s.sole().repository.ChiefOfStaffThread(stream)
-	must(t, err)
+	th, err := s.Sole().Repository.ChiefOfStaffThread(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if len(th.Turns) != 0 {
 		t.Fatalf("message recorded without a profile: %+v", th.Turns)
 	}
@@ -338,29 +302,27 @@ func TestConversationUnusableProfileIsInternal(t *testing.T) {
 func TestConversationListsInterruptedTurnAsFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	opts, cfg := conversationFixture(t, "ci-")
-	s, c := start(t, opts)
-	sent, err := c.Send(ctx, stream, "Plan the upload work")
-	must(t, err)
-	queued, err := c.Send(ctx, stream, "And the docs")
-	must(t, err)
+	opts, cfg := journey.ConversationFixture(t, "ci-")
+	s, c := journey.StartT(t, opts)
+	sent, err := c.Send(ctx, fixturekit.Stream, "Plan the upload work")
+	fixturekit.Must(t, err)
+	queued, err := c.Send(ctx, fixturekit.Stream, "And the docs")
+	fixturekit.Must(t, err)
 	c.Close()
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	// An earlier service session claimed the turn and stopped before
-	// capturing a result.
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "token", filepath.Join(cfg.Root.String(), "sessions", "lost"), demoStart.Add(time.Hour))
-	must(t, err)
-	must(t, repo.Close())
+	fixturekit.Must(t, err)
+	_, err = repo.ClaimTurn(ctx, fixturekit.Stream, trace.ChiefOfStaff, "token", filepath.Join(cfg.Root.String(), "sessions", "lost"), fixturekit.DemoStart.Add(time.Hour))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.Close())
 
-	_, c = start(t, opts)
-	list, err := c.Conversation(ctx, stream)
-	must(t, err)
-	want := []ConversationEntry{
-		{Turn: sent.Turn, Kind: "message", Text: "Plan the upload work", At: sent.At, State: TurnFailed},
-		{Turn: queued.Turn, Kind: "message", Text: "And the docs", At: queued.At, State: TurnQueued, QueuedReason: "starting"},
+	_, c = journey.StartT(t, opts)
+	list, err := c.Conversation(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
+	want := []api.ConversationEntry{
+		{Turn: sent.Turn, Kind: "message", Text: "Plan the upload work", At: sent.At, State: api.TurnFailed},
+		{Turn: queued.Turn, Kind: "message", Text: "And the docs", At: queued.At, State: api.TurnQueued, QueuedReason: "starting"},
 	}
 	if !reflect.DeepEqual(list.Entries, want) {
 		t.Fatalf("listing after restart:\n%+v\nwant:\n%+v", list.Entries, want)

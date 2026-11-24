@@ -80,8 +80,6 @@ func EdgeWaived(repo *trace.Repository, stream, upstream config.WorkstreamID, ed
 	return waivers.Waives(upstream, edgeType), err
 }
 
-// unwaived returns the edges the dependent still has: those no waiver in its
-// trace drops.
 func unwaived(repo *trace.Repository, stream config.WorkstreamID, edges []trace.Edge) ([]trace.Edge, error) {
 	if len(edges) == 0 {
 		return edges, nil
@@ -111,22 +109,6 @@ func EffectiveIncomingEdges(repo *trace.Repository, stream config.WorkstreamID) 
 		return nil, err
 	}
 	return unwaived(repo, stream, edges)
-}
-
-// UnresolvedEdges returns the edges of stream that still block it: effective
-// edges whose upstream observed does not record merged.
-func UnresolvedEdges(repo *trace.Repository, stream config.WorkstreamID, observed EdgeObservation) ([]trace.Edge, error) {
-	edges, err := EffectiveIncomingEdges(repo, stream)
-	if err != nil {
-		return nil, err
-	}
-	var out []trace.Edge
-	for _, e := range edges {
-		if !AllEdgesResolved(observed, []trace.Edge{e}) {
-			out = append(out, e)
-		}
-	}
-	return out, nil
 }
 
 // WorkgroupMergeOrderWaived returns a deterministic summary of the incoming

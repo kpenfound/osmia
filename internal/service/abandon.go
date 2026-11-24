@@ -19,9 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// abandon moves a workstream that is neither delivered nor abandoned to
-// abandoned, cancels the turns running for it in this service and completes
-// its other unfinished turns as cancelled. Nothing is deleted.
 func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (AbandonResponse, *APIError) {
 	project, stream, repository, api := s.conversationTrace(raw)
 	if api != nil {
@@ -47,8 +44,6 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	if state.Value == AbandonedState || state.Value == DeliveredState {
 		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is %s and cannot be abandoned", stream, state.Value)}
 	}
-	// Abandonment is an owner gate: the owner's decision is applied as a pinned
-	// move, through the router's commit and hard-prerequisite check.
 	body := fmt.Sprintf("Workstream state changed from %s to %s: %s", state.Value, AbandonedState, reason)
 	if state.Value == "" {
 		body = fmt.Sprintf("Workstream state changed to %s: %s", AbandonedState, reason)
@@ -68,9 +63,6 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	case !res.Committed:
 		return AbandonResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not abandoned: the router held it (%s). %s", stream, res.Hold, res.Reason)}
 	}
-	// A flake-fix workstream's group ends its association with it, so the
-	// group's next occurrence opens the next one. The flake pass repeats this
-	// if it fails here.
 	s.closeFlakeFix(ctx, repository, stream)
 	s.turns.cancel(stream)
 	if _, err := repository.CancelTurns(context.WithoutCancel(ctx), stream, s.now(), abandonActor, cancelReason); err != nil {
@@ -79,8 +71,6 @@ func (s *Service) abandon(ctx context.Context, raw string, req AbandonRequest) (
 	return AbandonResponse{Project: project, Workstream: stream, State: AbandonedState, Reason: reason}, nil
 }
 
-// cancelAbandoned completes the unfinished turns of every abandoned
-// workstream, finishing an abandonment a stopped service left partway.
 func cancelAbandoned(ctx context.Context, repository *trace.Repository, at func() time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
@@ -101,19 +91,12 @@ func cancelAbandoned(ctx context.Context, repository *trace.Repository, at func(
 	return nil
 }
 
-// runningTurns holds the turn operations this service is applying, by
-// workstream: the function that cancels each when its workstream is
-// abandoned and, for a thread turn a hard pause stops, the function that
-// stops it.
 type runningTurns struct {
 	mu      sync.Mutex
 	next    int
 	streams map[config.WorkstreamID]map[int]runningTurn
 }
 
-// runningTurn is one turn operation in flight. Stop is nil for a turn no
-// pause stops, and cancel nil for a turn whose operation abandonment cancels
-// through an entry of its own.
 type runningTurn struct {
 	project config.ProjectID
 	cancel  context.CancelFunc
@@ -124,7 +107,6 @@ func (r *runningTurns) add(stream config.WorkstreamID, cancel context.CancelFunc
 	return r.track(stream, runningTurn{cancel: cancel})
 }
 
-// track holds the turn until the returned function is called.
 func (r *runningTurns) track(stream config.WorkstreamID, turn runningTurn) func() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -154,9 +136,6 @@ func (r *runningTurns) cancel(stream config.WorkstreamID) {
 	}
 }
 
-// stopStream stops every held thread turn running for stream directly,
-// whatever its cause, and returns how many it stopped. It is used for an
-// owner-initiated session stop, which is not gated by any pause.
 func (r *runningTurns) stopStream(stream config.WorkstreamID, stop *thread.Stop) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -170,8 +149,6 @@ func (r *runningTurns) stopStream(stream config.WorkstreamID, stop *thread.Stop)
 	return stopped
 }
 
-// stop stops every held thread turn that a hard pause among pauses covers,
-// and returns how many it stopped.
 func (r *runningTurns) stop(pauses []runtime.Pause) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -190,13 +167,6 @@ func (r *runningTurns) stop(pauses []runtime.Pause) int {
 	return stopped
 }
 
-// abandonable runs turn operations through the bound thread reconciler under
-// a context that abandoning their workstream cancels. A turn of an abandoned
-// workstream is completed as cancelled instead of being run, and a turn that
-// finishes after its workstream was abandoned completes the thread's later
-// turns as cancelled. A turn of any thread but the chief of staff's can also
-// be stopped by a hard pause covering its workstream, whether the pause is set
-// while it runs or was set before it started.
 type abandonable struct {
 	coreadapter.Reconciler
 	s          *Service
@@ -217,7 +187,6 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		ctx, running.stop = thread.Stoppable(ctx)
 	}
 	defer a.s.turns.track(in.Workstream, running)()
-	// Held before the pause is read, the turn is stopped here or by the pause.
 	if running.stop != nil && a.s.store != nil {
 		state, _ := a.s.effective()
 		if p, ok := scheduler.Stopping(state.Pauses, running.project, in.Workstream); ok {
@@ -234,9 +203,6 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 	}
 	role, profile, unit := describeQueuedTurn(th, in.Turn)
-	// Sessions use the mason's execution settings, including its Dagger
-	// sandbox. Bind this decision to the same config as the turn reconciler.
-	// A turn on Dagger Cloud uses no engine of the service's.
 	if a.cfg != nil && (role == masonRole || role == sessionRole) && a.cfg.RoleExecution(masonRole).Dagger != nil {
 		release, err := a.s.checkSlots.startEngineTurn(ctx, EngineTurn{Project: running.project, Workstream: in.Workstream, Unit: unit, Agent: in.Agent, Turn: in.Turn})
 		if err != nil {
@@ -269,9 +235,6 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		}
 		logger.Info("agent turn finished", append(finished, "outcome", outcome)...)
 	}
-	// The operation's runner has returned. Abandon may have cancelled it
-	// before it could record its first attempt, leaving its claim reserved.
-	// Complete only that uncaptured turn, then cancel the queued successors.
 	if gone, _ := abandoned(a.repository, in.Workstream); gone {
 		if claimToken != "" {
 			if _, cancelErr := a.repository.CancelReturnedTurn(context.WithoutCancel(ctx), in.Workstream, in.Agent, in.Turn, claimToken, a.s.now(), abandonActor, cancelReason); cancelErr != nil {
@@ -285,10 +248,6 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	return result, err
 }
 
-// describeQueuedTurn returns the role of th's agent and, for the queued turn
-// named turnID, its profile name and unit, for the agent turn log records.
-// A thread or turn that cannot be found yields empty values rather than an
-// error: logging never changes the operation's outcome.
 func describeQueuedTurn(th trace.Thread, turnID string) (role, profile, unit string) {
 	role = th.Identity.Role
 	for _, q := range th.Turns {

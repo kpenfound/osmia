@@ -27,8 +27,6 @@ func git(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// fixture is a clone of a fork with a local bare upstream as a second remote,
-// and a scratch clone of upstream to move it with.
 type fixture struct {
 	clone, upstream, scratch string
 	provider                 *Git
@@ -76,7 +74,6 @@ func TestChangedPathsUsesRecordedCommits(t *testing.T) {
 	}
 }
 
-// advance commits on upstream main and returns the new commit.
 func (f fixture) advance(t *testing.T, name string) string {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(f.scratch, name), []byte(name+"\n"), 0600); err != nil {
@@ -217,7 +214,6 @@ func TestAcquireCreatesTheBranchAndTheWorktreeOnce(t *testing.T) {
 	if got := git(t, "-C", want, "rev-parse", "--abbrev-ref", "HEAD"); got != "osmia/w1" {
 		t.Fatalf("the worktree is on %s", got)
 	}
-	// The same request again creates nothing and returns what is there.
 	again, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1", Ref: "0000000000000000000000000000000000000000", Branch: "osmia/w1"})
 	if err != nil || again.Directory() != want {
 		t.Fatalf("acquiring again: %+v %v", again, err)
@@ -225,7 +221,6 @@ func TestAcquireCreatesTheBranchAndTheWorktreeOnce(t *testing.T) {
 	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Count(out, "worktree ") != 2 {
 		t.Fatalf("worktrees:\n%s", out)
 	}
-	// A worktree on another branch is not the one asked for.
 	if _, err := f.provider.Acquire(ctx, vcs.Request{Name: "w1", Ref: base, Branch: "osmia/w2"}); err == nil || !strings.Contains(err.Error(), `is on branch "osmia/w1", not "osmia/w2"`) {
 		t.Fatalf("a worktree on another branch: %v", err)
 	}
@@ -239,10 +234,6 @@ func TestAcquireCreatesTheBranchAndTheWorktreeOnce(t *testing.T) {
 	}
 }
 
-// Recovery after an interruption: a branch without its worktree gets the
-// worktree on that branch, a worktree whose directory is gone is forgotten
-// and made again, and a directory in the way that is no worktree is reported,
-// not removed.
 func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -256,7 +247,6 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	if got := git(t, "-C", ws.Directory(), "rev-parse", "--abbrev-ref", "HEAD"); got != "osmia/w1" {
 		t.Fatalf("the worktree is on %s", got)
 	}
-	// The owner's own worktree whose directory is gone is theirs to prune.
 	mine := filepath.Join(filepath.Dir(f.clone), "mine")
 	git(t, "-C", f.clone, "worktree", "add", "--quiet", "-b", "mine", mine, base)
 	if err := os.RemoveAll(mine); err != nil {
@@ -284,7 +274,6 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	if out := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); !strings.Contains(out, "worktree "+mine+"\n") {
 		t.Fatalf("Prune forgot the owner's worktree:\n%s", out)
 	}
-	// Prune forgets the provider's own.
 	if err := os.RemoveAll(ws.Directory()); err != nil {
 		t.Fatal(err)
 	}
@@ -309,8 +298,6 @@ func TestAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	}
 }
 
-// A worktree stopped while it was being added has a HEAD that names no
-// commit. It is made again on its branch rather than reported as on no branch.
 func TestAcquireMakesAgainAWorktreeWhoseAdditionWasStopped(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -386,8 +373,6 @@ func TestAncestorAndRelease(t *testing.T) {
 	}
 }
 
-// SSH runs in batch mode for a fetch unless the owner has an SSH command of
-// their own, in the environment or in their Git configuration.
 func TestFetchPutsSSHInBatchModeUnlessTheOwnerConfiguredIt(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -416,10 +401,6 @@ func TestFetchPutsSSHInBatchModeUnlessTheOwnerConfiguredIt(t *testing.T) {
 	}
 }
 
-// A snapshot commits the worktree's whole tree on top of its commit: changes,
-// deletions and untracked files, not what the repository ignores nor what the
-// clone's own excludes file names. The worktree's branch moves to it, and a
-// worktree with nothing new is its own snapshot.
 func TestSnapshotCommitsExactlyTheWorktreeOnTopOfItsBase(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -495,8 +476,6 @@ func TestSnapshotCommitsExactlyTheWorktreeOnTopOfItsBase(t *testing.T) {
 	}
 }
 
-// A worktree that does not descend from the base it is snapshotted against
-// is refused before anything is committed.
 func TestSnapshotRefusesAWorktreeThatDoesNotDescendFromItsBase(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -528,10 +507,6 @@ func TestSnapshotRefusesAWorktreeThatDoesNotDescendFromItsBase(t *testing.T) {
 	}
 }
 
-// A squash of a candidate that took two snapshots is one commit of its tree
-// on the base, made the same way twice. Advance moves the feature worktree's
-// branch, index and files to it once, and refuses a worktree at any other
-// commit.
 func TestSquashAndAdvanceLandOneCommit(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -605,8 +580,6 @@ func TestSquashAndAdvanceLandOneCommit(t *testing.T) {
 	}
 }
 
-// rebaseFixture is a feature branch osmia/w1 on base with a worktree, and a
-// unit worktree created from it; each is a Worktree of the fixture's provider.
 func rebaseFixture(t *testing.T, f fixture) (base string, feature, unit Worktree) {
 	t.Helper()
 	ctx := context.Background()
@@ -624,7 +597,6 @@ func rebaseFixture(t *testing.T, f fixture) (base string, feature, unit Worktree
 	return base, feature, acquired.(Worktree)
 }
 
-// commitFiles writes files into the worktree and snapshots it on base.
 func (f fixture) commitFiles(t *testing.T, w Worktree, base string, files map[string]string) string {
 	t.Helper()
 	for name, content := range files {
@@ -646,10 +618,6 @@ func (f fixture) commitFiles(t *testing.T, w Worktree, base string, files map[st
 	return commit
 }
 
-// A rebase merges the change a unit's snapshot holds since its base onto the
-// new feature branch tip as one commit on that tip, made the same way every
-// time, and moves nothing; Move then puts the unit's branch, index and files
-// on it, and completes a move interrupted after the branch moved.
 func TestRebaseMergesTheUnitsChangeOntoTheNewTip(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -718,7 +686,6 @@ func TestRebaseMergesTheUnitsChangeOntoTheNewTip(t *testing.T) {
 		t.Fatal(err)
 	}
 	check()
-	// Interrupted after the branch moved and before the files did.
 	git(t, "-C", unit.Path, "reset", "--hard", "--quiet", snapshot)
 	git(t, "-C", unit.Path, "update-ref", "HEAD", commit)
 	if err := f.provider.Move(ctx, unit, snapshot, commit); err != nil {
@@ -727,10 +694,6 @@ func TestRebaseMergesTheUnitsChangeOntoTheNewTip(t *testing.T) {
 	check()
 }
 
-// A rebase whose sides both changed a file, or one changed what the other
-// deleted, still makes its commit, with the conflicted paths: a changed file
-// carries conflict markers, and a deleted one is kept as the side that
-// changed it. Markers finds the conflicted files still carrying markers.
 func TestRebaseReportsConflictsAndMarkersFindsThem(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -770,7 +733,6 @@ func TestRebaseReportsConflictsAndMarkersFindsThem(t *testing.T) {
 	}
 }
 
-// replayLeftovers fails the test when Replay left its temporary worktree.
 func (f fixture) replayLeftovers(t *testing.T) {
 	t.Helper()
 	if list := git(t, "-C", f.clone, "worktree", "list", "--porcelain"); strings.Contains(list, ".replay-") {
@@ -781,11 +743,6 @@ func (f fixture) replayLeftovers(t *testing.T) {
 	}
 }
 
-// A replay applies each commit of the branch onto the new upstream commit in
-// order, keeping each message, author and committer, even where a later
-// commit changes what an earlier one added. It is made the same way every
-// time, moves no branch and leaves no worktree behind; a head already on
-// upstream is returned as it is.
 func TestReplayAppliesEachCommitOntoUpstream(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -835,9 +792,6 @@ func TestReplayAppliesEachCommitOntoUpstream(t *testing.T) {
 	}
 }
 
-// A replay whose commit conflicts with upstream returns the conflicted paths
-// and no commit, moves nothing and leaves no worktree or replay state behind,
-// so the next replay starts clean.
 func TestReplayReportsConflictsAndLeavesNothing(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -866,8 +820,6 @@ func TestReplayReportsConflictsAndLeavesNothing(t *testing.T) {
 	}
 }
 
-// Export writes a commit's tracked regular files, with their executable
-// bits, and leaves out symbolic links and the repository's metadata.
 func TestExportWritesTheCommitsTrackedFiles(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -911,11 +863,6 @@ func TestExportWritesTheCommitsTrackedFiles(t *testing.T) {
 	}
 }
 
-// A replay in a worktree stops at each commit that conflicts with the
-// conflict markers in the worktree, reports the stop and its paths, and goes
-// on from the worktree's resolved files, stop after stop, to a branch whose
-// commits keep their messages and authors on upstream. The feature branch
-// the worktree was made from does not move.
 func TestReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1007,12 +954,6 @@ func TestReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.
 	}
 }
 
-// A persistent replay stopped on a conflict stays resumable after a service
-// restart: a freshly made provider for the same clone reads the same state
-// from disk and reports the same stop. Continuing with a resolution that
-// still holds a conflict marker is refused, and nothing is committed; once
-// the marker is gone, continuing lands the expected candidate and moves the
-// worktree's branch to it.
 func TestReplayInFromResumesAfterARestartAndRefusesLingeringMarkers(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1039,16 +980,12 @@ func TestReplayInFromResumesAfterARestartAndRefusesLingeringMarkers(t *testing.T
 		t.Fatalf("replay %q %v: %v", commit, conflicts, err)
 	}
 
-	// A freshly made provider for the same clone, as a restarted service
-	// would make, reads the replay in progress from disk.
 	restarted := &Git{Clone: f.provider.Clone, Directory: f.provider.Directory}
 	stop, unmerged, replaying, err := restarted.Replaying(ctx, w)
 	if err != nil || !replaying || stop != head || !slices.Equal(unmerged, []string{"README"}) {
 		t.Fatalf("the restarted provider's view of the stop %s %v %t: %v", stop, unmerged, replaying, err)
 	}
 
-	// The file still holds a conflict marker: continuing is refused and
-	// nothing is committed.
 	if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("<<<<<<< mine\nupstream and feature\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -1080,13 +1017,6 @@ func TestReplayInFromResumesAfterARestartAndRefusesLingeringMarkers(t *testing.T
 	}
 }
 
-// A service stop between core's Replayer saving its own state on a
-// conflict and Osmia ever reattaching the branch to it leaves the worktree
-// detached, with Osmia's own record still naming its branch. A fresh
-// provider recovers from it: Workspace reports the branch, Acquire accepts
-// the workspace, and ContinueReplay reattaches the branch, reporting the
-// conflict again until it is resolved, and then lands the expected
-// candidate with HEAD attached.
 func TestReplayInFromRecoversAStopBeforeTheFirstReattach(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1108,9 +1038,6 @@ func TestReplayInFromRecoversAStopBeforeTheFirstReattach(t *testing.T) {
 	}
 	w := acquired.(Worktree)
 
-	// Simulate the stop: write the same record ReplayInFrom would write
-	// first, then drive core's Replayer directly, exactly as a service
-	// stop inside Osmia's call would leave it, without ever reattaching.
 	boundary, err := f.provider.MergeBase(ctx, upstream, head)
 	if err != nil {
 		t.Fatal(err)
@@ -1160,12 +1087,6 @@ func TestReplayInFromRecoversAStopBeforeTheFirstReattach(t *testing.T) {
 	}
 }
 
-// A service stop right after core's Replayer finished every commit and
-// removed its own state, before Osmia ever reattached the branch to the
-// result, also leaves the worktree detached, with only Osmia's own record
-// to recover from. A fresh provider recovers the branch, and a retried
-// ReplayInFrom lands the fully replayed candidate with HEAD attached,
-// never the detached, unreattached HEAD as if it were unfinished.
 func TestReplayInFromRecoversAFinishedReplayNeverReattached(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1182,10 +1103,6 @@ func TestReplayInFromRecoversAFinishedReplayNeverReattached(t *testing.T) {
 	}
 	w := acquired.(Worktree)
 
-	// Simulate the stop: write the same record ReplayInFrom would write
-	// first, then drive core's Replayer directly to completion, exactly
-	// as a service stop right after it returned would leave it, without
-	// ever reattaching.
 	boundary, err := f.provider.MergeBase(ctx, upstream, head)
 	if err != nil {
 		t.Fatal(err)
@@ -1230,10 +1147,6 @@ func TestReplayInFromRecoversAFinishedReplayNeverReattached(t *testing.T) {
 	}
 }
 
-// AbortReplay after a conflict stop returns the worktree's branch, index
-// and files to the branch's pre-replay tip, with HEAD attached to it, even
-// though reattach already moved the branch away from it, to the partly
-// replayed commit, while the conflict waited to be resolved.
 func TestAbortReplayRestoresThePreReplayTip(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -1260,9 +1173,6 @@ func TestAbortReplayRestoresThePreReplayTip(t *testing.T) {
 	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
 		t.Fatalf("replay %q %v: %v", commit, conflicts, err)
 	}
-	// The first commit replayed cleanly before the second conflicted, so
-	// reattach has already moved the branch away from both its pre-replay
-	// tip and the dependency's new base.
 	if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip == second || tip == upstream {
 		t.Fatalf("the branch before the abort is %s: %v", tip, err)
 	}
@@ -1289,91 +1199,9 @@ func TestAbortReplayRestoresThePreReplayTip(t *testing.T) {
 		t.Fatalf("an aborted replay is still replaying: %t %v", replaying, err)
 	}
 
-	// The unit can replay again from its restored tip.
 	commit, conflicts, err = f.provider.ReplayIn(ctx, w, upstream, at)
 	if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
 		t.Fatalf("replaying again after the abort %q %v: %v", commit, conflicts, err)
-	}
-}
-
-// A replay in Git's own native rebase state, detached in the worktree
-// rather than recorded in core-replay.json, is still continued or aborted
-// cleanly: continued, it lands the expected candidate; aborted instead,
-// the worktree is clean and the unit can replay again.
-func TestNativeRebaseReplayContinuesOrAborts(t *testing.T) {
-	for _, finish := range []string{"continue", "abort"} {
-		t.Run(finish, func(t *testing.T) {
-			t.Parallel()
-			f := newFixture(t)
-			ctx := context.Background()
-			base, feature, _ := rebaseFixture(t, f)
-			head := f.commitFiles(t, feature, base, map[string]string{"README": "feature\n"})
-			if err := os.WriteFile(filepath.Join(f.scratch, "README"), []byte("upstream\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			git(t, "-C", f.scratch, "commit", "--quiet", "-am", "upstream README")
-			git(t, "-C", f.scratch, "push", "--quiet", "origin", "main")
-			upstream, err := f.provider.Fetch(ctx, "upstream", "main")
-			if err != nil {
-				t.Fatal(err)
-			}
-			acquired, err := f.provider.Acquire(ctx, vcs.Request{Name: "drift/w1", Ref: head, Branch: "osmia-drift/w1/1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			w := acquired.(Worktree)
-
-			// Seed a replay in Git's own native rebase state, stopped on
-			// the same conflict, with no core-replay.json.
-			cmd := exec.CommandContext(ctx, "git", "-C", w.Path, "rebase", "--quiet", "--no-autostash", upstream)
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
-				"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost", "GIT_EDITOR=true"}
-			if err := cmd.Run(); err == nil {
-				t.Fatal("the seeded rebase did not conflict")
-			}
-			if _, native, err := f.provider.nativeRebaseDir(ctx, w.Path); err != nil || !native {
-				t.Fatalf("the seeded state is not a native rebase: %t %v", native, err)
-			}
-
-			switch finish {
-			case "continue":
-				if err := os.WriteFile(filepath.Join(w.Path, "README"), []byte("upstream and feature\n"), 0600); err != nil {
-					t.Fatal(err)
-				}
-				at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-				commit, conflicts, err := f.provider.ContinueReplay(ctx, w, at)
-				if err != nil || commit == "" || len(conflicts) != 0 {
-					t.Fatalf("finishing the native rebase %q %v: %v", commit, conflicts, err)
-				}
-				if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
-					t.Fatalf("a finished native rebase is replaying: %t %v", replaying, err)
-				}
-				if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != commit {
-					t.Fatalf("the worktree's branch is at %s, not %s: %v", tip, commit, err)
-				}
-				if got := git(t, "-C", f.clone, "show", commit+":README"); got != "upstream and feature" {
-					t.Fatalf("README holds %q", got)
-				}
-			case "abort":
-				if err := f.provider.AbortReplay(ctx, w); err != nil {
-					t.Fatalf("aborting the native rebase: %v", err)
-				}
-				if _, _, replaying, err := f.provider.Replaying(ctx, w); err != nil || replaying {
-					t.Fatalf("an aborted replay is still replaying: %t %v", replaying, err)
-				}
-				if tip, _, err := f.provider.Branch(ctx, "osmia-drift/w1/1"); err != nil || tip != head {
-					t.Fatalf("the worktree's branch is at %s, not its pre-replay tip %s: %v", tip, head, err)
-				}
-				if status := git(t, "-C", w.Path, "status", "--porcelain"); status != "" {
-					t.Fatalf("the aborted worktree is not clean:\n%s", status)
-				}
-				at := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-				commit, conflicts, err := f.provider.ReplayIn(ctx, w, upstream, at)
-				if err != nil || commit != "" || !slices.Equal(conflicts, []string{"README"}) {
-					t.Fatalf("replaying again after the abort %q %v: %v", commit, conflicts, err)
-				}
-			}
-		})
 	}
 }
 
@@ -1451,7 +1279,6 @@ func TestReplayInFromResumesAfterSquashedDependencyConflict(t *testing.T) {
 			if err != nil || !slices.Equal(conflicts, []string{"parent.go"}) {
 				t.Fatalf("conflict %v %v", conflicts, err)
 			}
-			// Recreate the provider while the durable replay is stopped.
 			switch p := g.(type) {
 			case *Git:
 				copy := *p
@@ -1480,9 +1307,6 @@ func TestReplayInFromResumesAfterSquashedDependencyConflict(t *testing.T) {
 	}
 }
 
-// Integrated finds a dependency's changes in upstream when upstream took them
-// squashed, as other commits, and not when upstream holds only some of them
-// or conflicting ones. It moves no ref.
 func TestIntegratedComparesContentNotHistory(t *testing.T) {
 	for _, backend := range []string{"git", "jujutsu"} {
 		t.Run(backend, func(t *testing.T) {

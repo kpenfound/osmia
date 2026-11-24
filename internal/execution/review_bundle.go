@@ -19,15 +19,13 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func reviewDocument(unit string) string { return trace.UnitSubject(unit) + "-review" }
+func ReviewDocument(unit string) string { return trace.UnitSubject(unit) + "-review" }
 
-// prepareUnitReview reads only recorded evidence. It records the identity
-// before a reviewer can be dispatched; failed preparation records a block.
 func (m *masons) prepareUnitReview(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	req, identity, err := m.unitReviewEvidence(ctx, stream, unit)
 	if err != nil {
 		if ctx.Err() == nil {
-			cause := checkingTransitionID(unit, 1)
+			cause := CheckingTransitionID(unit, 1)
 			blockErr := m.recordReviewPreparationError(ctx, stream, unit, cause, fmt.Sprintf("unit %s stays reviewing: its reviewer bundle cannot be assembled: %v", unit, err))
 			if blockErr != nil {
 				return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%w; record review error: %v", err, blockErr)
@@ -41,7 +39,7 @@ func (m *masons) prepareUnitReview(ctx context.Context, stream config.Workstream
 	}
 	var last trace.Document
 	for _, d := range docs {
-		if d.ID == reviewDocument(unit) {
+		if d.ID == ReviewDocument(unit) {
 			last = d
 		}
 	}
@@ -53,7 +51,7 @@ func (m *masons) prepareUnitReview(ctx context.Context, stream config.Workstream
 	if last.Content == content {
 		return req, identity, nil
 	}
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: reviewDocument(unit), Revision: last.Revision + 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: trace.Actor{Kind: "service", ID: "reviewer"}, Cause: reportDocument(unit)}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: ReviewDocument(unit), Revision: last.Revision + 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: trace.Actor{Kind: "service", ID: "reviewer"}, Cause: ReportDocument(unit)}
 	doc := trace.Document{Header: h, Path: fmt.Sprintf("units/%s/review.json", unit), Content: content}
 	if err := m.repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("record review identity: %w", err)
@@ -61,12 +59,12 @@ func (m *masons) prepareUnitReview(ctx context.Context, stream config.Workstream
 	return req, identity, nil
 }
 
-func reviewBlockedSubject(unit string) string {
+func ReviewBlockedSubject(unit string) string {
 	return "blocked-reviewer" + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
 }
 
 func (m *masons) recordReviewPreparationError(ctx context.Context, stream config.WorkstreamID, unit, cause, reason string) error {
-	subject := reviewBlockedSubject(unit)
+	subject := ReviewBlockedSubject(unit)
 	state, err := m.repository.Workflow(stream, subject)
 	if err != nil {
 		return err
@@ -101,20 +99,17 @@ func (m *masons) unitReviewEvidence(ctx context.Context, stream config.Workstrea
 	if state.Value != UnitReviewing {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("unit %s is %s, not reviewing", unit, state.Value)
 	}
-	return m.candidateEvidence(ctx, stream, unit)
+	return m.CandidateEvidence(ctx, stream, unit)
 }
 
-// candidateEvidence assembles the review request and identity of the unit's
-// recorded report, whatever the unit's state. A candidate that holds a
-// stored conflict has none.
-func (m *masons) candidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
+func (m *masons) CandidateEvidence(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
 	docs, err := trace.Read[trace.Document](m.repository, stream)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
 	}
 	var reportDoc trace.Document
 	for _, d := range docs {
-		if d.ID == reportDocument(unit) {
+		if d.ID == ReportDocument(unit) {
 			reportDoc = d
 		}
 	}
@@ -153,7 +148,7 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	if reason := checkReport(MasonReport{Outcome: report.Outcome}); reason != "" {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, fmt.Errorf("%s: %s", reportDoc.Path, reason)
 	}
-	g, err := newUnitWorkspaces(m.cfg, m.repository).Of(stream)
+	g, err := NewUnitWorkspaces(m.cfg, m.repository).Of(stream)
 	if err != nil {
 		return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
 	}
@@ -188,10 +183,6 @@ func (m *masons) candidateEvidence(ctx context.Context, stream config.Workstream
 	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: items}, identity, nil
 }
 
-// carried returns the reviewed identity with the current identity's seal,
-// spec and plan revisions when the amendments applied since the review leave
-// the review of the unit in force, and the reviewed identity unchanged
-// otherwise.
 func (m *masons) carried(stream config.WorkstreamID, unit string, reviewed, current UnitReviewIdentity) (UnitReviewIdentity, error) {
 	pin := func(i UnitReviewIdentity) (amendment.Pin, bool) {
 		spec, specErr := strconv.Atoi(i.Candidate.SpecRevision)

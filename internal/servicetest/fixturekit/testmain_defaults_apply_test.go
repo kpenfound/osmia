@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// newTestFlags builds a fresh FlagSet with shuffle and timeout flags,
-// so each case starts from a clean, unparsed set.
 func newTestFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("testmain-defaults", flag.ContinueOnError)
 	fs.String("test.shuffle", "off", "")

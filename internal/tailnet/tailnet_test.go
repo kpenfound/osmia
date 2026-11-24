@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 )
 
-// The embedded node's backend states map to the listener's states.
 func TestTailnetStateMapsBackendStates(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -31,12 +30,6 @@ func TestTailnetStateMapsBackendStates(t *testing.T) {
 	}
 }
 
-// TestTailscaleLogfRecordsAStructuredLineWithTheLoginURLAsAField shows that
-// a line embedded Tailscale logs becomes one structured record, with any
-// URL it mentions, such as the login URL shown while the node waits for
-// approval, as its own field, and known secrets redacted.
-//
-// serial: calls t.Setenv, which fails if run in parallel with another test.
 func TestTailscaleLogfRecordsAStructuredLineWithTheLoginURLAsAField(t *testing.T) {
 	t.Setenv("TS_AUTHKEY", "tskey-secret")
 	var buf bytes.Buffer
@@ -53,7 +46,6 @@ func TestTailscaleLogfRecordsAStructuredLineWithTheLoginURLAsAField(t *testing.T
 		}
 		records = append(records, r)
 	}
-	// The second logf call logged an empty line, which produces no record.
 	if len(records) != 2 {
 		t.Fatalf("records %+v", records)
 	}
@@ -65,8 +57,6 @@ func TestTailscaleLogfRecordsAStructuredLineWithTheLoginURLAsAField(t *testing.T
 	}
 }
 
-// Only the backend's certificate lines reach the service log, so issuance
-// progress is visible without the backend's other output.
 func TestCertificateLogfForwardsOnlyCertificateLines(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

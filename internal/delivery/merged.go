@@ -25,7 +25,7 @@ const (
 	MergeCause = "owner-merge"
 )
 
-// recordMerge records the assembled workstream named by raw delivered by
+// RecordMerge records the assembled workstream named by raw delivered by
 // the owner's own merge of its feature branch into upstream.
 func (s *Controller) RecordMerge(ctx context.Context, raw string) (MergeResponse, *APIError) {
 	_, stream, repository, api := s.ConversationTrace(raw)
@@ -35,7 +35,7 @@ func (s *Controller) RecordMerge(ctx context.Context, raw string) (MergeResponse
 	return s.MergedOutside(ctx, repository, stream)
 }
 
-// mergedOutside records the assembled workstream delivered by the owner's
+// MergedOutside records the assembled workstream delivered by the owner's
 // own merge of its feature branch into upstream. Upstream is fetched first
 // and must already hold the changes of the branch tip: their merge is clean
 // and changes nothing, so fast-forward, merge, squash and rebase merges
@@ -129,7 +129,7 @@ func (s *Controller) MergedOutside(ctx context.Context, repository *trace.Reposi
 	return MergeResponse{Project: project, Workstream: stream, State: DeliveredState, Merge: record, Refused: waiting}, nil
 }
 
-// DeliveryMerge returns the owner's recorded merge of the workstream's
+// ReadDeliveryMerge returns the owner's recorded merge of the workstream's
 // feature branch into upstream, and whether one is recorded.
 func ReadDeliveryMerge(repository *trace.Repository, stream config.WorkstreamID) (DeliveryMerge, bool, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)

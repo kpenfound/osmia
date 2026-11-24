@@ -15,8 +15,6 @@ import (
 
 const judgment = "judgment_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-// routedUnit moves unit to state to at recorded time at, recording how the
-// router chose the transition.
 func (h *harness) routedUnit(id, unit, to string, at time.Time, route trace.Routing) {
 	h.t.Helper()
 	subject := trace.UnitSubject(unit)
@@ -38,9 +36,6 @@ func boolValue(s tracetest.SpanStub, key string) (isTrue, present bool) {
 	return v.AsBool(), true
 }
 
-// A state span carries who decided the transition that ended the state, the
-// state its default would have entered, and whether it entered another. A
-// transition no router chose carries none of the three.
 func TestStateSpansCarryTheRouting(t *testing.T) {
 	h := newHarness(t)
 	h.unit("u1-1", "u1", "ready", minute(1), service, "first")
@@ -63,8 +58,6 @@ func TestStateSpansCarryTheRouting(t *testing.T) {
 		return routing{str(s, "osmia.decided_by"), str(s, "osmia.default_state"), d, hasDeviated}
 	}
 	units := named(spans, "osmia.unit.state")
-	// The first transition into a state begins its interval; each later one ends
-	// the interval before it and its routing is on that span.
 	want := []routing{
 		{"code", "implementing", false, true},
 		{"jev", "checking", true, true},
@@ -100,9 +93,6 @@ func routeFixture() Route {
 		Start: minute(5), End: minute(6)}
 }
 
-// A route span carries the trigger, the default and chosen states, the
-// outcome, the confidence band and the judgment record ID, and nothing else
-// but the identities.
 func TestRouteSpanCarriesTheSixAttributes(t *testing.T) {
 	h := newHarness(t)
 	rec := Recorder{Sink: h.sink}
@@ -129,7 +119,6 @@ func TestRouteSpanCarriesTheSixAttributes(t *testing.T) {
 	if s.Parent.SpanID() != telemetry.WorkstreamRoot(stream) || s.SpanContext.TraceID() != telemetry.WorkstreamTrace(stream) || !s.StartTime.Equal(minute(5)) || !s.EndTime.Equal(minute(6)) {
 		t.Errorf("route span placement: %s", describe(s))
 	}
-	// Every value is an ID or a fixed word: one word, no whitespace.
 	word := regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127}$`)
 	for _, kv := range s.Attributes {
 		if !word.MatchString(kv.Value.AsString()) {
@@ -141,9 +130,6 @@ func TestRouteSpanCarriesTheSixAttributes(t *testing.T) {
 	}
 }
 
-// An exit is one span: deciding it again sends the span with the same
-// identity, and a workstream exit carries no unit and a decision without a
-// judgment record carries none.
 func TestRouteSpanHasOneIdentityPerExit(t *testing.T) {
 	h := newHarness(t)
 	rec := Recorder{Sink: h.sink}
@@ -171,7 +157,6 @@ func TestRouteSpanHasOneIdentityPerExit(t *testing.T) {
 	}
 }
 
-// A value outside the fixed words never reaches a span.
 func TestRouteSpanRefusesValuesThatAreNotFixedWords(t *testing.T) {
 	h := newHarness(t)
 	rec := Recorder{Sink: h.sink}
@@ -195,8 +180,6 @@ func TestRouteSpanRefusesValuesThatAreNotFixedWords(t *testing.T) {
 	if spans := named(h.spans(), "osmia.transition.route"); len(spans) != 0 {
 		t.Fatalf("%d route spans were sent", len(spans))
 	}
-	// A judgment that is not an ID, and a state that is not a word, are dropped
-	// from the span, never sent as text.
 	r := routeFixture()
 	r.Judgment, r.Default = "Jev said so, with 93% confidence", "Needs Work"
 	if !rec.Route(r) {
@@ -224,7 +207,6 @@ func TestConfidenceBand(t *testing.T) {
 			t.Errorf("ConfidenceBand(%v, 0.9) = %q, want %q", c.p, got, c.want)
 		}
 	}
-	// A lower decision threshold starts binding earlier.
 	if got := ConfidenceBand(0.6, 0.6); got != ConfidenceBinding {
 		t.Errorf("ConfidenceBand(0.6, 0.6) = %q", got)
 	}

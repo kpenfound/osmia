@@ -19,7 +19,7 @@ func RefuseReport(format string, args ...any) (json.RawMessage, error) {
 	}{false, fmt.Sprintf(format, args...)})
 }
 
-// sealedUnit returns the unit of the latest sealed plan or follow-up scope names.
+// SealedUnit returns the unit of the latest sealed plan or follow-up scope names.
 func SealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Unit, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	latest, _, found, err := seal.Latest(repository, stream)

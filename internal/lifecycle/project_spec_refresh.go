@@ -68,9 +68,6 @@ func (s *Controller) RefreshProjectSpec(ctx context.Context, repository *trace.R
 	if err != nil || len(live) != len(g.Members)-1 {
 		return err
 	}
-	// A recorded approval, complete or not, ends refreshing. Answering it from
-	// the revision-keyed approval state keeps an idle workgroup from decoding
-	// the approval or opening its trace on every pass.
 	if status, err := repository.GroupApprovalStatusOf(id); err != nil || status.Found {
 		return err
 	}

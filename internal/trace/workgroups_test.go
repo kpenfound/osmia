@@ -25,8 +25,6 @@ func TestEnsureWorkgroupsCreatesOnePerMissingMemberAndIsIdempotent(t *testing.T)
 	}
 	firstID := groups[0].ID
 
-	// A second pass over the same member records nothing further: no new
-	// workgroup, and no new document revision.
 	again, err := EnsureWorkgroups(ctx, r, []config.WorkstreamID{streamID}, at, owner, "migrate-workgroups")
 	if err != nil {
 		t.Fatal(err)
@@ -48,8 +46,6 @@ func TestEnsureWorkgroupsCreatesOnePerMissingMemberAndIsIdempotent(t *testing.T)
 		t.Fatalf("workgroups.json revisions after idempotent pass: %v", revisions)
 	}
 
-	// A second, genuinely new member gets its own workgroup, read back
-	// alongside the first.
 	second := config.WorkstreamID("w_00000000000000000000000000000002")
 	if err := r.CreateWorkstream(ctx, second, at, owner); err != nil {
 		t.Fatal(err)
@@ -83,15 +79,6 @@ func TestWorkgroupsEmptyWhenNoneRecorded(t *testing.T) {
 	}
 }
 
-// TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup shows that a
-// one-workstream workgroup is its own host, and that a two-workstream
-// workgroup shares the first member's thread: the second member resolves
-// to the same host and the same member list, and has no chief-of-staff
-// thread of its own. second is created at the trace's own level, below
-// CreateWorkstreamOn, the way a future multi-repo workgroup's members would
-// need to be to join a group before either gets its own chief of staff;
-// CreateWorkstreamOn itself always creates the one-workstream workgroup
-// case's own thread, which is this test's streamID.
 func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -100,7 +87,6 @@ func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Before any workgroup is recorded, a stream is its own host.
 	host, err := r.ChiefOfStaffHost(streamID)
 	if err != nil || host != streamID {
 		t.Fatalf("unrecorded workstream's host: %s %v", host, err)
@@ -135,11 +121,6 @@ func TestChiefOfStaffHostAndMembersOfATwoWorkstreamWorkgroup(t *testing.T) {
 	}
 }
 
-// TestChiefQuestionTargetResolvesQualifiedAndUnqualifiedIDs shows that an
-// unqualified question ID always names the turn's own workstream, exactly
-// as it did before workgroups existed, and that a qualified
-// "<workstream>:<id>" names another member sharing its chief of staff, but
-// refuses a workstream outside the workgroup.
 func TestChiefQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -166,11 +147,6 @@ func TestChiefQuestionTargetResolvesQualifiedAndUnqualifiedIDs(t *testing.T) {
 	}
 }
 
-// TestMarkWorkgroupsResolvedFiresOnlyWhenEveryMemberIsResolved shows that
-// resolving one member of a two-workstream workgroup neither resolves it
-// nor fires the trigger, that resolving the second does, exactly once, and
-// that a later pass, including one standing in for a crash mid-way,
-// changes nothing further.
 func TestMarkWorkgroupsResolvedFiresOnlyWhenEveryMemberIsResolved(t *testing.T) {
 	r, _, _ := create(t)
 	ctx := context.Background()
@@ -190,8 +166,6 @@ func TestMarkWorkgroupsResolvedFiresOnlyWhenEveryMemberIsResolved(t *testing.T) 
 		t.Fatalf("no member resolved: %+v %v", newly, err)
 	}
 
-	// Resolving one member neither resolves the workgroup nor fires the
-	// trigger.
 	resolvedSet[streamID] = true
 	if newly, err := MarkWorkgroupsResolved(ctx, r, groups, resolved, at, owner, "one-member-resolved"); err != nil || len(newly) != 0 {
 		t.Fatalf("one member resolved: %+v %v", newly, err)
@@ -200,7 +174,6 @@ func TestMarkWorkgroupsResolvedFiresOnlyWhenEveryMemberIsResolved(t *testing.T) 
 		t.Fatalf("resolved workgroups after one member: %+v %v", read, err)
 	}
 
-	// Resolving the second fires the trigger, exactly once.
 	resolvedSet[second] = true
 	newly, err := MarkWorkgroupsResolved(ctx, r, groups, resolved, at, owner, "every-member-resolved")
 	if err != nil || len(newly) != 1 || newly[0] != groups[0].ID {
@@ -211,8 +184,6 @@ func TestMarkWorkgroupsResolvedFiresOnlyWhenEveryMemberIsResolved(t *testing.T) 
 		t.Fatalf("resolved workgroups after every member: %+v %v", read, err)
 	}
 
-	// A later pass, standing in for a crash that left the record written
-	// but was retried, changes nothing further and does not mark it twice.
 	again, err := MarkWorkgroupsResolved(ctx, r, groups, resolved, at, owner, "resumed-after-a-crash")
 	if err != nil || len(again) != 0 {
 		t.Fatalf("resumed pass: %+v %v", again, err)

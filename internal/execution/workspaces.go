@@ -8,13 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// checkpointed runs one local step and its durable progress write. External
-// calls belong before or after this span, using the original context. The
-// callback uses the supplied context to share the clone lock with workspace
-// methods. An interrupted step is recovered before another step can run. A
-// step that cannot take the clone lock before ctx ends returns a workspace
-// contention error without touching the clone, and one whose restoration
-// fails returns a workspace recovery error; both are retried by the caller.
 func checkpointed(ctx context.Context, operation string, at time.Time, providers []workspace.Provider, step func(context.Context) (coreadapter.OperationResult, error)) (result coreadapter.OperationResult, err error) {
 	err = workspace.LocalStep(ctx, operation, at, providers, func(local context.Context) error {
 		var stepErr error
@@ -24,11 +17,9 @@ func checkpointed(ctx context.Context, operation string, at time.Time, providers
 	return result, err
 }
 
-// captureFiles copies a durable view back and snapshots its files under the
-// same local lock. An interrupted copy is retried from that surviving view.
 func captureFiles(ctx context.Context, g workspace.Provider, source, path string) error {
 	return workspace.LocalStep(ctx, "capture/"+source, time.Now().UTC(), []workspace.Provider{g}, func(local context.Context) error {
-		if err := mirror(source, path); err != nil {
+		if err := Mirror(source, path); err != nil {
 			return err
 		}
 		_, err := g.Record(local, workspace.Worktree{Path: path})

@@ -180,7 +180,6 @@ func (p Poster) Post(ctx context.Context, source string, w Wire) error {
 	if p.HTTP != nil {
 		client = *p.HTTP
 	}
-	// A redirected post must never carry the publisher's token elsewhere.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)
 	if err != nil {
@@ -237,7 +236,6 @@ func Reconcile(ctx context.Context, poster Poster, records []Record, posted map[
 		}
 		prev := posted[rec.Ref()]
 		if prev.Digest == "" {
-			// A cleared record is posted afresh, with the times it first had.
 			prev = Posted{}
 		}
 		for _, w := range pending(rec.Versions, prev.Digest) {
@@ -282,10 +280,6 @@ func (r Record) Current() string {
 	return r.Versions[len(r.Versions)-1].Digest()
 }
 
-// pending selects the versions to post: those after the last one whose
-// digest equals posted, everything when nothing was posted, and only the
-// current version when the posted digest is not among them. Consecutive
-// versions with the same content count once.
 func pending(versions []Wire, posted string) []Wire {
 	var unique []Wire
 	for _, w := range versions {
@@ -307,9 +301,6 @@ func pending(versions []Wire, posted string) []Wire {
 	return unique[len(unique)-1:]
 }
 
-// updatedAt is the update time a post carries: its own, kept after the
-// record's creation and strictly after the previous post's, so a newer
-// revision is never mistaken for a stale one.
 func updatedAt(w Wire, previous time.Time) string {
 	at, err := time.Parse(time.RFC3339Nano, w.UpdatedAt)
 	if created, cerr := time.Parse(time.RFC3339Nano, w.CreatedAt); cerr == nil && (err != nil || at.Before(created)) {

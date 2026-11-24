@@ -10,23 +10,23 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordFinalChecks records the check result of final review k.
 func recordFinalChecks(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, k int, run delivery.FinalCheckRun) {
 	t.Helper()
 	run.Review, run.Operation = k, fmt.Sprintf("final-operation-%d", k)
 	content, err := json.MarshalIndent(run, "", "  ")
-	must(t, err)
-	must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalChecksDocument(k), Revision: 1, Project: repository.Project(), Workstream: stream, At: demoStart, Actor: serviceActor, Cause: run.Operation},
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalChecksDocument(k), Revision: 1, Project: repository.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: run.Operation},
 		Path: delivery.FinalChecksPath(k), Content: string(content) + "\n"}}))
 }
 
 func finalReviewNotice(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, k int) string {
 	t.Helper()
 	entries, err := repository.Outbox(stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, e := range entries {
 		if e.TransitionID == fmt.Sprintf("final-review-%d-reviewed", k) {
 			return e.Event.Body

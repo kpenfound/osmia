@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"io"
 	"mime"
 	"net/http"
@@ -17,8 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest"
 )
 
-// fakeMedia stands in for the microphone and for MediaRecorder in the page:
-// every recording yields one chunk of the bytes "voice".
 const fakeMedia = `
  window.recorders = [];
  Object.defineProperty(navigator, 'mediaDevices', {configurable: true, value: {
@@ -35,7 +34,6 @@ const fakeMedia = `
  };
 `
 
-// whisperRequest is what the fake Whisper server saw in one request.
 type whisperRequest struct {
 	path          string
 	contentType   string
@@ -46,8 +44,6 @@ type whisperRequest struct {
 	authorization string
 }
 
-// fakeWhisper is an OpenAI-compatible transcription server on loopback that
-// answers each request with the next of its texts.
 type fakeWhisper struct {
 	*httptest.Server
 	mu       sync.Mutex
@@ -93,9 +89,7 @@ func (f *fakeWhisper) seen() []whisperRequest {
 	return append([]whisperRequest(nil), f.requests...)
 }
 
-// dictationPage starts the real service with its web listener and the extra
-// top-level configuration, and opens the served conversation with fake media.
-func dictationPage(t *testing.T, prefix, transcribe string) (*page, string, *Client) {
+func dictationPage(t *testing.T, prefix, transcribe string) (*page, string, *service.Client) {
 	t.Helper()
 	opts, _ := servicetest.ConversationFixture(t, prefix)
 	withWeb(t, opts, "127.0.0.1:0")
@@ -142,8 +136,6 @@ func TestBrowserWhisperDictationFillsAndAppendsWithoutSending(t *testing.T) {
 	}
 	record(first)
 
-	// A selection over the whole draft is never replaced; the next text
-	// follows it after whitespace.
 	p.Run(chromedp.Focus(area, chromedp.ByQuery))
 	p.Eval(`(() => { const a = document.querySelector(`+quote(area)+`); a.setSelectionRange(0, a.value.length); })()`, nil)
 	record(first + " " + second)

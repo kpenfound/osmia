@@ -24,8 +24,7 @@ const (
 	DefaultFlushInterval = 2 * time.Second
 	DefaultExportTimeout = 10 * time.Second
 	// ShutdownWait is how long the service waits for pending spans on shutdown.
-	ShutdownWait = 5 * time.Second
-	// failureLogInterval spaces the log lines about failed exports.
+	ShutdownWait       = 5 * time.Second
 	failureLogInterval = time.Minute
 )
 
@@ -155,8 +154,6 @@ func positiveDuration(d, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// headersOf reads cfg's export headers from the environment variable it names.
-// A variable that is named but unset or empty sends no headers.
 func headersOf(cfg config.Telemetry, getenv func(string) string) (map[string]string, error) {
 	if cfg.HeadersEnv == "" {
 		return nil, nil
@@ -171,9 +168,6 @@ func headersOf(cfg config.Telemetry, getenv func(string) string) (map[string]str
 	return ParseHeaders(cfg.HeadersEnv, raw)
 }
 
-// resourceOf is the resource of every span: service.name and, when known, the
-// service version. It is built by hand and never from the environment, so
-// OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES have no effect.
 func resourceOf(version string) *resource.Resource {
 	attrs := []attribute.KeyValue{attribute.String("service.name", Namespace)}
 	if version != "" {
@@ -324,8 +318,6 @@ func (s *Sink) run() {
 	}
 }
 
-// export hands batch to the exporter within the export timeout. A refusal, a
-// timeout and a panic all drop the batch; none stops the sink.
 func (s *Sink) export(batch []sdktrace.ReadOnlySpan) {
 	ctx, cancel := context.WithTimeout(s.exportCtx, s.exportTimeout)
 	defer cancel()
@@ -345,8 +337,6 @@ func (s *Sink) export(batch []sdktrace.ReadOnlySpan) {
 	s.logFailure(err, len(batch))
 }
 
-// logFailure logs a failed export, at most once per failureLogInterval, with
-// every header value removed from the error.
 func (s *Sink) logFailure(err error, spans int) {
 	if s.logger == nil {
 		return

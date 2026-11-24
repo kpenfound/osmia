@@ -220,12 +220,8 @@ func (s *Controller) RebaseProject(ctx context.Context, req ProjectRebaseRequest
 	}
 	d := Drifter{&Foreman{masons: &masons{s: s, cfg: cfg, repository: active.Repository}}}
 	out := ProjectRebaseResponse{Project: cfg.Project.ID, Covered: []DriftCoverage{}, Skipped: []DriftSkip{}}
-	librarian := librarianWorkstream(cfg.Project.ID)
 	at := s.Now()
 	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
 		reason, err := d.Eligible(stream)
 		if err != nil {
 			return ProjectRebaseResponse{}, failed

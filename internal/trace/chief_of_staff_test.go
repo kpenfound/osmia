@@ -13,8 +13,6 @@ import (
 
 const threadlessStream config.WorkstreamID = "w_00000000000000000000000000000002"
 
-// threadlessWorkstream lays out a committed workstream, in its own dedicated
-// trace repository, whose chief-of-staff thread was never written.
 func threadlessWorkstream(t *testing.T, r *Repository, id config.WorkstreamID) {
 	t.Helper()
 	if err := createWorkstreamTrace(context.Background(), r.root, r.project, id, manifestRecord{}, "workstream-create", "Create workstream trace", at, owner); err != nil {

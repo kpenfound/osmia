@@ -10,24 +10,13 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// approvalSnapshot is the approval answer of one workgroup at a pair of
-// document revisions. decision is nil unless found, and is shared with the
-// cache: callers read it and never change or return it.
 type approvalSnapshot struct {
 	required bool
 	found    bool
 	decision *GroupApproval
-	// seq is the stored sequence of the approval document's latest revision,
-	// 0 when none is recorded or the answer was read without the cache.
-	seq int64
+	seq      int64
 }
 
-// approvalCache holds the decoded approval answer of one workgroup, keyed by
-// the stored sequence of the workgroups document and of the approval
-// document it was decoded from. It belongs to the workgroup's registry entry
-// and is dropped when the last holder of the workgroup trace closes. The
-// durable trace stays authoritative: every read probes both sequences and
-// decodes again when either changed.
 type approvalCache struct {
 	mu sync.Mutex
 
@@ -49,8 +38,6 @@ func (c *approvalCache) reset() {
 	c.mu.Unlock()
 }
 
-// documentSeq returns the stored sequence of the latest revision of the
-// document id at path in scope's documents, without decoding it.
 func (r *Repository) documentSeq(scope config.WorkstreamID, id, path string) (int64, bool, error) {
 	target, err := r.scoped(scope)
 	if err != nil {
@@ -67,8 +54,6 @@ func (r *Repository) documentSeq(scope config.WorkstreamID, id, path string) (in
 	return seq, err == nil, err
 }
 
-// groupAuthority reads the host and approval requirement of workgroup id
-// from the workgroups document of wt.
 func groupAuthority(wt *Repository, id config.WorkgroupID) (config.WorkstreamID, bool, error) {
 	groups, _, err := Workgroups(wt)
 	if err != nil {
@@ -82,8 +67,6 @@ func groupAuthority(wt *Repository, id config.WorkgroupID) (config.WorkstreamID,
 	return "", true, fmt.Errorf("workgroup %s has no authority", id)
 }
 
-// groupApprovalSnapshot answers from state decoded at most once per revision
-// of the workgroups and approval documents.
 func (r *Repository) groupApprovalSnapshot(id config.WorkgroupID) (approvalSnapshot, error) {
 	project := r
 	if r.parent != nil {
@@ -145,8 +128,6 @@ func (wt *Repository) approvalSnapshotOf(id config.WorkgroupID) (approvalSnapsho
 	return approvalSnapshot{required: c.required, found: c.approvalFound, decision: c.decision, seq: c.approvalSeq}, nil
 }
 
-// uncachedApprovalSnapshot reads the answer from the trace without keeping
-// it. It also reports the errors a read of a damaged or absent document gives.
 func (wt *Repository) uncachedApprovalSnapshot(id config.WorkgroupID) (approvalSnapshot, error) {
 	host, required, err := groupAuthority(wt, id)
 	if err != nil {
@@ -222,11 +203,6 @@ func (r *Repository) ApprovedMembersOf(g Workgroup) (map[config.WorkstreamID]con
 	return members, err == nil, err
 }
 
-// workgroupTraceHandle returns a handle on workgroup id's own trace for
-// reading from this project's instance, and the function that gives it back.
-// The project instance keeps one reference per workgroup until its own Close,
-// so repeated reads share one open handle instead of acquiring the trace each
-// time. After Close begins, the handle is opened for the one call.
 func (r *Repository) workgroupTraceHandle(id config.WorkgroupID) (*Repository, func(), error) {
 	r.groupTracesMu.Lock()
 	if r.groupTracesClosed {
@@ -272,8 +248,6 @@ func (r *Repository) transientWorkgroupTrace(id config.WorkgroupID) (*Repository
 	return wt, func() { wt.Close() }, nil
 }
 
-// releaseWorkgroupTraces gives back every workgroup trace reference this
-// project instance kept for approval reads, and stops it keeping more.
 func (r *Repository) releaseWorkgroupTraces() error {
 	return r.dropWorkgroupTraces(true)
 }
@@ -304,11 +278,6 @@ func (r *Repository) dropWorkgroupTraces(final bool) error {
 // shared trace in this process.
 func GroupApprovalDecodeCount(id config.WorkgroupID) uint64 {
 	return sharedWorkgroupTraceFor(id).approvalDecodes.Load()
-}
-
-// ApprovalDecodeCount reports approval document decodes by this handle.
-func (r *Repository) ApprovalDecodeCount() uint64 {
-	return r.approvalDecodes.Load()
 }
 
 // GroupApprovalCached reports whether workgroup id's registry entry holds a

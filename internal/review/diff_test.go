@@ -79,7 +79,6 @@ func TestSelectedDiffRendersLikeGitDiff(t *testing.T) {
 	}
 }
 
-// A recorded review prompt pins the identity of the candidate it reviewed.
 func TestReviewIdentityInPromptReadsThePinnedIdentity(t *testing.T) {
 	t.Parallel()
 	identity := UnitReviewIdentity{Subject: "stream/resume", Candidate: coreadapter.Candidate{Revision: "candidate", BaseRevision: "base", SpecRevision: "1", PlanRevision: "2"}, DiffSHA256: "digest", Report: "report", Seal: 1}
@@ -90,8 +89,6 @@ func TestReviewIdentityInPromptReadsThePinnedIdentity(t *testing.T) {
 	}
 }
 
-// A tool serving several changes needs the change named, and serves each
-// with its own commits.
 func TestDiffToolSelectsTheNamedChange(t *testing.T) {
 	t.Parallel()
 	serve := func(text string) func(context.Context) (string, error) {

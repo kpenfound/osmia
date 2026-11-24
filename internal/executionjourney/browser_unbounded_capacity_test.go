@@ -8,25 +8,25 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/browsertest"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// While an architect draft is in flight, the capacity view a running service
-// serializes in /v1/status shows the architect pool unbounded with its use,
-// and the web page rendering that response labels the architect
-// pool unbounded, keeps the header's slot totals numeric over the bounded
-// pools' limits alone, and still shows the architect's use.
 func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	t.Parallel()
-	f := newArchitectFixture(t, func(o *Options) { withListen(t, *o, "web = \"127.0.0.1:0\"\n") })
+	f := journey.NewArchitectFixture(t, func(o *journey.Options) { fixturekit.WithListen(t, o.Config.Root, "web = \"127.0.0.1:0\"\n") })
 	held, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int64
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
+	f.Script("draft-1-1", map[string]string{plan.SpecPath: fixturekit.ValidSpec, plan.PlanPath: fixturekit.ValidPlan}, func(ctx context.Context, _ agent.Request, _ *agent.Turn, _ *mcp.ClientSession) error {
 		if calls.Add(1) == 1 {
 			close(held)
 			select {
@@ -37,16 +37,18 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 		}
 		return nil
 	})
-	defer f.stop(t)
+	defer f.Stop(t)
 	defer close(release)
-	f.handIn(t, "held-draft", handedDesign)
+	f.HandIn(t, "held-draft", fixturekit.HandedDesign)
 	<-held
-	second := f.handIn(t, "independent-draft", handedDesign)
-	f.await(t, second, sketched)
-	f.await(t, second, func(_, _ string) bool { return InspectForTest(f.s).Pool().Slots(nil).Used[architectRole] == 1 })
+	second := f.HandIn(t, "independent-draft", fixturekit.HandedDesign)
+	f.Await(t, second, intakefixture.Sketched)
+	f.Await(t, second, func(_, _ string) bool {
+		return journey.InspectForTest(f.S).Pool().Slots(nil).Used[intake.ArchitectRole] == 1
+	})
 
 	var status json.RawMessage
-	must(t, f.c.Do(context.Background(), "GET", Prefix+"/status", nil, &status))
+	fixturekit.Must(t, f.C.Do(context.Background(), "GET", service.Prefix+"/status", nil, &status))
 	roles := fixturekit.CapacityWire(t, status)
 	var used, limit, architect float64
 	for _, r := range roles {
@@ -63,19 +65,18 @@ func TestBrowserShowsUnboundedPoolsFromTheServedStatus(t *testing.T) {
 	}
 
 	p := openBrowser(t)
-	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.s.WebAddr()+"/"))
+	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+f.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.AwaitText(`#capacity [data-role=architect] [data-field=slots]`, fmt.Sprintf("%d active (unbounded; 1 per workstream)", int(architect)))
-	p.Await("no librarian pool", `document.querySelector('#capacity [data-role=librarian]') === null`)
 	for _, role := range []string{"architect"} {
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "No factory-wide limit")
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "at most one turn per workstream")
 		p.AwaitText(`#capacity [data-role=`+role+`] [data-field=note]`, "no configuration setting")
 		p.Await(role+" meter is not full", `document.querySelector('[data-meter=`+role+`]').dataset.full === 'false'`)
 	}
-	p.Await("the architect meter title", `document.querySelector('[data-meter=architect]').title === `+quote(fmt.Sprintf("architect: %d active (unbounded; 1 per workstream)", int(architect))))
+	p.Await("the architect meter title", `document.querySelector('[data-meter=architect]').title === `+browsertest.Quote(fmt.Sprintf("architect: %d active (unbounded; 1 per workstream)", int(architect))))
 	p.AwaitText(`#meter-total`, fmt.Sprintf("%d/%d", int(used), int(limit)))
-	p.Await("the capacity button title", `document.getElementById('capacity-button').title === `+quote(fmt.Sprintf("%d of %d slots in use; %d architect sessions", int(used), int(limit), int(architect))))
+	p.Await("the capacity button title", `document.getElementById('capacity-button').title === `+browsertest.Quote(fmt.Sprintf("%d of %d slots in use; %d architect sessions", int(used), int(limit), int(architect))))
 	var text string
 	p.Eval(`document.getElementById('capacity').textContent + ' ' + document.getElementById('meter-total').textContent + ' ' + document.getElementById('capacity-button').title`, &text)
 	for _, bad := range []string{"NaN", "undefined", "/ 0 slots", "of 0 slots", "0/0", "null"} {

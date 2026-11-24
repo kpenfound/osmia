@@ -2,23 +2,6 @@
 
 package service
 
-// The Compose smoke run against a real Hearsay, driven by
-// scripts/hearsay-compose-smoke.sh (docs/hearsay-compose-smoke.md).
-//
-// Nothing here fakes Hearsay. The script runs Hearsay under Compose with the
-// configuration `osmia project memory` generates and then runs these tests in
-// a container on the Compose network:
-//
-//   - TestHearsaySmokeConfig writes the fragments the memory setup generates,
-//     for the fixture project, so Hearsay can be started with them.
-//   - TestHearsaySmokeRun drives the project through a sealed spec, an owner
-//     ruling on an escalated question and a chief logged assumption, lets the
-//     service's own publisher pass post them to Hearsay's connectors listener,
-//     and reads them back through Osmia's read path (the tools and the bundle
-//     provider the roles get) with each class agent acting for the owner.
-//
-// Both tests skip unless the script's environment is present.
-
 import (
 	"bytes"
 	"context"
@@ -42,7 +25,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// Names the memory setup generates by default; the script's tokens use them.
 const (
 	smokeWork      = "osmia-work"
 	smokeOwnerSrc  = "osmia-work-owner"
@@ -56,9 +38,6 @@ var smokeAgents = map[string]config.HearsayAgent{
 	"observer":     {ID: "osmia-observer", TokenEnv: "HEARSAY_OSMIA_OBSERVER_TOKEN"},
 }
 
-// smokeHearsay is the Hearsay configuration the run gives Osmia: the API at
-// api, the publisher at hooks, the owner as the principal the class agents act
-// for.
 func smokeHearsay(api, hooks string) config.Hearsay {
 	return config.Hearsay{URL: api, Principal: smokeOwner, TokenEnv: "HEARSAY_OWNER_TOKEN", Agents: smokeAgents,
 		Publish: &config.HearsayPublish{WorkSource: smokeWork, OwnerSource: smokeOwnerSrc, HooksURL: hooks, Agent: smokePublisher, TokenEnv: "HEARSAY_OSMIA_PUBLISHER_TOKEN"}}
@@ -71,35 +50,31 @@ func TestHearsaySmokeConfig(t *testing.T) {
 	}
 	f := newPublisherFixture(t, func(cfg *config.Config) { cfg.Hearsay = smokeHearsay("http://api:8080", "http://connectors:8081") })
 	setup, err := buildMemorySetup(f.cfg, f.repo)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for name, content := range setup.Files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
-		must(t, os.MkdirAll(filepath.Dir(path), 0o755))
-		must(t, os.WriteFile(path, append(content, '\n'), 0o644))
+		fixturekit.Must(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		fixturekit.Must(t, os.WriteFile(path, append(content, '\n'), 0o644))
 	}
 	summary, err := json.MarshalIndent(map[string]any{"project": f.repo.Project(), "work_source": setup.WorkSource, "owner_source": setup.OwnerSource, "publisher": setup.Publisher, "principal": setup.Principal, "hearsay_scope": setup.Scope}, "", "  ")
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(dir, "memory-setup-summary.json"), append(summary, '\n'), 0o644))
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "memory-setup-summary.json"), append(summary, '\n'), 0o644))
 	t.Logf("wrote %d fragments for project %s under %s", len(setup.Files), f.repo.Project(), dir)
 }
 
-// recorded is one request the run made, with credentials elided.
 type recorded struct {
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Status int    `json:"status"`
-	// Who the request was made as: the bearer's role in the run and, for a
-	// read, the agent and principal headers.
+	Method    string          `json:"method"`
+	Path      string          `json:"path"`
+	Status    int             `json:"status"`
 	Bearer    string          `json:"bearer,omitempty"`
 	Principal string          `json:"hearsay_principal,omitempty"`
 	Agent     string          `json:"hearsay_agent,omitempty"`
 	Body      json.RawMessage `json:"body,omitempty"`
 }
 
-// recorder wraps a transport and keeps what passed through it.
 type recorder struct {
 	mu     sync.Mutex
-	tokens map[string]string // token value -> label
+	tokens map[string]string
 	log    []recorded
 	next   http.RoundTripper
 }
@@ -155,7 +130,6 @@ func smokeEnv(t *testing.T, name string) string {
 	return v
 }
 
-// smokeBundle is the part of Hearsay's get_bundle answer the run reads.
 type smokeBundle struct {
 	Scope struct {
 		ID string `json:"id"`
@@ -191,7 +165,6 @@ func (b smokeBundle) decisions() map[string]smokeLogged {
 	return out
 }
 
-// smokeTraversed is the part of a traverse answer the run reads.
 type smokeTraversed struct {
 	Nodes []smokeNode `json:"nodes"`
 }
@@ -228,19 +201,17 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 	evidence := os.Getenv("OSMIA_SMOKE_EVIDENCE")
 	if evidence != "" {
-		must(t, os.MkdirAll(evidence, 0o755))
+		fixturekit.Must(t, os.MkdirAll(evidence, 0o755))
 	}
 	keep := func(name string, v any) {
 		t.Helper()
 		data, err := json.MarshalIndent(v, "", "  ")
-		must(t, err)
+		fixturekit.Must(t, err)
 		t.Logf("---- %s ----\n%s", name, data)
 		if evidence != "" {
-			must(t, os.WriteFile(filepath.Join(evidence, name+".json"), append(data, '\n'), 0o644))
+			fixturekit.Must(t, os.WriteFile(filepath.Join(evidence, name+".json"), append(data, '\n'), 0o644))
 		}
 	}
-	// A caller-visible label for each credential, so the run can show which
-	// token each request carried without printing one.
 	tokens := map[string]string{}
 	for label, env := range map[string]string{
 		"publisher token": "HEARSAY_OSMIA_PUBLISHER_TOKEN", "owner token": "HEARSAY_OWNER_TOKEN",
@@ -249,12 +220,10 @@ func TestHearsaySmokeRun(t *testing.T) {
 	} {
 		tokens[smokeEnv(t, env)] = label
 	}
-	direct := &http.Transport{} // no proxy: the services are on the Compose network
+	direct := &http.Transport{}
 	hookLog := &recorder{tokens: tokens, next: direct}
 	readLog := &recorder{tokens: tokens, next: direct}
 
-	// The publisher reaches the connectors through a recording relay, so the
-	// run can show exactly what was posted and that a second pass posted nothing.
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		req, err := http.NewRequestWithContext(r.Context(), r.Method, hooksURL+r.URL.Path, bytes.NewReader(body))
@@ -281,23 +250,19 @@ func TestHearsaySmokeRun(t *testing.T) {
 	streamEntity := entity + "#" + string(stream)
 	t.Logf("EVIDENCE: container evidence. Hearsay runs under Compose; this test runs in a container on its network; project %s, workstream %s", project, stream)
 
-	// ---- drive the project: a sealed spec, an owner ruling on an escalated
-	// question, a chief logged assumption ----
 	const specText = "# Upload limits\n\nCap uploads at 10 MiB. Reject anything larger with a clear error.\n"
 	fixturekit.RecordHanded(t, f.repo, stream, "stdin", fixturekit.DemoStart)
 	f.recordSeal(stream, 1, specText)
 	f.ask(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(1))
 	f.escalate(stream, "1", "Is the upload cap 10 MiB or unbounded?", hr(2))
 	f.ruling(stream, "1", 1, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB."}, hr(3), trace.Actor{Kind: "owner", ID: "local"})
-	// The chief's relay of the ruling to the askers is a later revision; it must not be posted as a ruling.
 	f.ruling(stream, "1", 2, trace.Ruling{Decision: trace.DecisionRuling, OwnerResponse: "Cap uploads at 10 MiB.", ReturnedAnswer: "RELAYED-TO-THE-ASKERS", Scope: trace.ScopeLocal}, hr(4), chiefActor)
 	const assumption = "Treat the 10 MiB cap as inclusive."
 	content := fmt.Sprintf(`{"version":1,"assumptions":[{"workstreams":[%q],"id":"1","text":%q,"actor":{"kind":"agent","id":"chief_of_staff"},"thread":"chief","turn":"t1","at":%q}]}`, string(stream), assumption, hr(5).Format(time.RFC3339))
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(5), chiefActor)
 
-	// ---- the publisher posts them ----
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	fixturekit.Must(t, err)
 	posts := hookLog.take()
 	keep("publisher-pass-1", map[string]any{"posts": res.Posts, "failures": res.Failures, "unreachable": res.Unreachable, "requests": posts})
 	if res.Posts == 0 || len(res.Failures) != 0 || res.Unreachable {
@@ -311,7 +276,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 	var sent []post
 	for _, p := range posts {
 		var raw map[string]any
-		must(t, json.Unmarshal(p.Body, &raw))
+		fixturekit.Must(t, json.Unmarshal(p.Body, &raw))
 		if p.Status != http.StatusAccepted {
 			t.Errorf("POST %s = %d %s", p.Path, p.Status, p.Body)
 		}
@@ -365,21 +330,18 @@ func TestHearsaySmokeRun(t *testing.T) {
 		assumptionID = assumptionPost.Decision
 	}
 
-	// ---- a second pass with nothing changed posts nothing ----
 	res2, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	fixturekit.Must(t, err)
 	again := hookLog.take()
 	keep("publisher-pass-2", map[string]any{"posts": res2.Posts, "failures": res2.Failures, "requests": again})
 	if res2.Posts != 0 || len(again) != 0 || len(res2.Failures) != 0 {
 		t.Errorf("a second pass with nothing changed posted %d records (%d requests)", res2.Posts, len(again))
 	}
 
-	// ---- read back through Osmia's read path ----
 	client := func(h config.Hearsay) hearsay.Client {
 		return hearsay.Client{Config: h, HTTP: &http.Client{Transport: readLog}}
 	}
 	cfg := f.s.current()
-	// The turn's own check, which the service backs with the active turn.
 	ready := func() error { return nil }
 	call := func(c hearsay.Client, role, tool string, args map[string]any) ([]byte, error) {
 		for _, tl := range c.Tools(role, entity, ready) {
@@ -399,8 +361,6 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 	owner := client(cfg.Hearsay)
 
-	// Hearsay places a post asynchronously (the distiller and the assertion
-	// worker), so the first read waits for the whole log to be served.
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		raw, err := call(owner, "mason", "get_bundle", map[string]any{"scope": streamEntity})
@@ -423,7 +383,6 @@ func TestHearsaySmokeRun(t *testing.T) {
 	roles := []struct{ role, class string }{{"mason", "worker"}, {"chief_of_staff", "orchestrator"}, {sessionRole, "observer"}}
 	for _, r := range roles {
 		name := r.class
-		// The tools the role is offered.
 		names := map[string]bool{}
 		for _, tl := range owner.Tools(r.role, entity, ready) {
 			names[tl.Name] = true
@@ -432,14 +391,13 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("%s (%s) tools: %v", r.role, name, names)
 		}
 
-		// get_bundle on the project's default entity, as a tool call with no scope.
 		raw, err := call(owner, r.role, "get_bundle", map[string]any{})
 		if err != nil {
 			t.Errorf("%s: get_bundle(%s): %v", name, entity, err)
 			continue
 		}
 		var project smokeBundle
-		must(t, json.Unmarshal(raw, &project))
+		fixturekit.Must(t, json.Unmarshal(raw, &project))
 		keep("get_bundle-project-"+name, json.RawMessage(raw))
 		if project.Scope.ID != entity {
 			t.Errorf("%s: the default read was %q, want %q", name, project.Scope.ID, entity)
@@ -448,14 +406,13 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("%s: the project's read serves no charter document: %+v", name, project.Anchors)
 		}
 
-		// get_bundle on the workstream entity.
 		raw, err = call(owner, r.role, "get_bundle", map[string]any{"scope": streamEntity})
 		if err != nil {
 			t.Errorf("%s: get_bundle(%s): %v", name, streamEntity, err)
 			continue
 		}
 		var b smokeBundle
-		must(t, json.Unmarshal(raw, &b))
+		fixturekit.Must(t, json.Unmarshal(raw, &b))
 		keep("get_bundle-workstream-"+name, json.RawMessage(raw))
 		got := b.decisions()
 		if g := got[string(stream)+"-ruling-1"]; g != (smokeLogged{"ratified", "owner", "current", "Cap uploads at 10 MiB."}) {
@@ -485,20 +442,19 @@ func TestHearsaySmokeRun(t *testing.T) {
 					System string `json:"system"`
 				} `json:"source"`
 			}
-			must(t, json.Unmarshal(raw, &doc))
+			fixturekit.Must(t, json.Unmarshal(raw, &doc))
 			keep("get_l1-spec-"+name, json.RawMessage(raw))
 			if !strings.Contains(doc.RawText, "Cap uploads at 10 MiB") || doc.ArtifactClass != "spec" || doc.Source.System != smokeOwnerSrc {
 				t.Errorf("%s: the sealed spec is served as class %q from %q: %q", name, doc.ArtifactClass, doc.Source.System, doc.RawText)
 			}
 		}
 
-		// traverse: the decision log, and the spec document, on the workstream entity.
 		raw, err = traverse(owner, r.role, streamEntity, "topics", "stances")
 		if err != nil {
 			t.Errorf("%s: traverse(topics, stances): %v", name, err)
 		} else {
 			var g smokeTraversed
-			must(t, json.Unmarshal(raw, &g))
+			fixturekit.Must(t, json.Unmarshal(raw, &g))
 			keep("traverse-workstream-decisions-"+name, json.RawMessage(raw))
 			d := g.decisions()
 			if d[string(stream)+"-ruling-1"].Tier != "ratified" || d[assumptionID].Tier != "inferred" {
@@ -510,7 +466,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 			t.Errorf("%s: traverse(documents): %v", name, err)
 		} else {
 			var g smokeTraversed
-			must(t, json.Unmarshal(raw, &g))
+			fixturekit.Must(t, json.Unmarshal(raw, &g))
 			keep("traverse-workstream-documents-"+name, json.RawMessage(raw))
 			if !slices.ContainsFunc(g.Nodes, func(n smokeNode) bool {
 				return n.Type == "document" && n.Class == "spec" && n.Line == "# Upload limits"
@@ -519,16 +475,14 @@ func TestHearsaySmokeRun(t *testing.T) {
 			}
 		}
 
-		// The bundle provider the turns use: the default entity of the project,
-		// and the workstream's own for a workstream-tied turn.
 		provider := hearsay.Provider{Local: bundle.Files{Repository: func(config.ProjectID) (*trace.Repository, error) { return f.repo, nil }},
 			Config: f.s.current, Health: &hearsay.Health{}, Client: client}
 		out, err := provider.Assemble(context.Background(), f.repo.Project(), bundle.Scope{Role: r.role, Workstream: stream})
-		must(t, err)
+		fixturekit.Must(t, err)
 		var scopes []string
 		for _, m := range out.Memory {
 			var s smokeBundle
-			must(t, json.Unmarshal(m, &s))
+			fixturekit.Must(t, json.Unmarshal(m, &s))
 			scopes = append(scopes, s.Scope.ID)
 		}
 		if out.Mode != hearsay.Mode || !slices.Equal(scopes, []string{entity, streamEntity}) {
@@ -536,7 +490,6 @@ func TestHearsaySmokeRun(t *testing.T) {
 		}
 	}
 
-	// ---- none of the reads used the publisher's token, an extra poster or a repo opt-in ----
 	reads := readLog.take()
 	keep("read-requests", reads)
 	for _, r := range reads {
@@ -550,7 +503,6 @@ func TestHearsaySmokeRun(t *testing.T) {
 		}
 	}
 
-	// ---- a principal that is neither the owner nor acting for the owner reads nothing ----
 	outsider := client(config.Hearsay{URL: apiURL, Principal: "smoke-outsider", TokenEnv: "HEARSAY_SMOKE_OUTSIDER_TOKEN", Agents: smokeAgents})
 	direct1 := func(scope string) (int, []byte) {
 		body, _ := json.Marshal(map[string]string{"scope": scope})
@@ -559,7 +511,7 @@ func TestHearsaySmokeRun(t *testing.T) {
 		req.Header.Set("Hearsay-Principal", "smoke-outsider")
 		req.Header.Set("Authorization", "Bearer "+smokeEnv(t, "HEARSAY_SMOKE_OUTSIDER_TOKEN"))
 		resp, err := (&http.Client{Transport: direct}).Do(req)
-		must(t, err)
+		fixturekit.Must(t, err)
 		defer resp.Body.Close()
 		raw, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, raw
@@ -589,8 +541,6 @@ func TestHearsaySmokeRun(t *testing.T) {
 	}
 	keep("outsider-reads", asOutsider)
 
-	// ---- the model stub never saw a decision's text ----
-	// (checked by the script from the stub's log)
 	if t.Failed() {
 		return
 	}

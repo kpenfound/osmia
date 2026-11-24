@@ -101,8 +101,6 @@ func (s *Controller) OwnerDocuments(w http.ResponseWriter, r *http.Request, h Do
 				h.Fail(w, Validation)
 				return true
 			}
-			// A directory that landed upstream since drafting is in the map the
-			// edit is validated against.
 			s.ReseedEntities(r.Context(), repo)
 			entities, loadErr := kb.Load(repo)
 			if loadErr != nil {

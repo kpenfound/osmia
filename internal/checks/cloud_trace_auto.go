@@ -38,7 +38,6 @@ type TraceFailureRecord struct {
 	Message string `json:"message"`
 }
 
-// traceFailureMessageLimit bounds the message a failure record keeps.
 const traceFailureMessageLimit = traceFailureExcerpt + 512
 
 // LookupFailure returns the recorded failure of the automatic fetch of

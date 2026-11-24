@@ -17,7 +17,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// journeyViewport is a size the journeys walk the page at.
 type journeyViewport struct {
 	name          string
 	width, height int64
@@ -36,11 +35,6 @@ func (v journeyViewport) emulate() chromedp.Action {
 	return chromedp.EmulateViewport(v.width, v.height)
 }
 
-// The owner finds a ratification waiting on home, opens its workstream, sees
-// the question first with the recommendation as the one primary button,
-// ratifies, and then reads the nest tube the plan gives the header: a cell
-// for each unit, each opening Activity on its unit, with the unit filter and
-// the tab kept in the address across a reload.
 func TestBrowserJourneyRatifiesFromTheNeedsYouListAndShowsTheNestTube(t *testing.T) {
 	t.Parallel()
 	for _, v := range journeyViewports {
@@ -80,7 +74,6 @@ func ratifyFromHome(t *testing.T, v journeyViewport) {
 	p.Run(v.emulate(), chromedp.Navigate("http://"+s.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 
-	// Home lists the ratification.
 	p.Await("the ratification on home", `(() => {
   const items = document.querySelectorAll('[data-view=project-pane] [data-field=needs-you] .needs-list > li');
   return items.length === 1 && items[0].dataset.needsWorkstream === `+quote(string(ws))+` && document.querySelector('[data-field=needs-count]').textContent === '1';
@@ -89,8 +82,6 @@ func ratifyFromHome(t *testing.T, v journeyViewport) {
 	p.Click(`[data-needs-workstream="` + string(ws) + `"] a`)
 	p.Await("the workstream", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(ws))+` && document.querySelector(`+quote(cardSelector)+`) !== null`)
 
-	// The card puts the question first, then the recommendation as the one
-	// primary button beside secondary ones, with its details closed.
 	p.AwaitText(card+`[data-decision-choice="ratify"]`, "Ratify")
 	var shown struct {
 		QuestionFirst, Closed bool
@@ -118,7 +109,6 @@ func ratifyFromHome(t *testing.T, v journeyViewport) {
 })()`)
 	audit("decision card")
 
-	// The recommendation answers it; the outcome and the milestones follow.
 	p.Click(card + `[data-decision-choice="ratify"]`)
 	p.AwaitOutcome("the owner ratified spec.md revision 1 and plan.json revision 1")
 	p.AwaitGone("the ratified packet", card)
@@ -126,7 +116,6 @@ func ratifyFromHome(t *testing.T, v journeyViewport) {
 	p.Await("a milestone for the ratified workstream", `[...document.querySelectorAll('[data-panel=conversation] [data-kind=milestone]')].some(n => ['ratified', 'building'].includes(n.dataset.milestone))`)
 	audit("conversation after ratifying")
 
-	// The plan's units are the cells of the nest tube.
 	p.Await("a cell for each unit", `document.querySelectorAll('#workstream-head [data-field=units] button.cell').length === 2`)
 	var cells []string
 	p.Eval(`[...document.querySelectorAll('#workstream-head [data-field=units] button.cell')].map(c => c.dataset.cell + '|' + c.getAttribute('aria-label').startsWith('Unit ' + c.dataset.cell + ': '))`, &cells)
@@ -149,9 +138,6 @@ func ratifyFromHome(t *testing.T, v journeyViewport) {
 	p.Await("Conversation again", `!document.querySelector('[data-panel=conversation]').hidden && location.hash === `+quote(hash))
 }
 
-// The owner opens a design session from the New menu, talks to the design
-// agent, and reads its brief beside the conversation on a wide screen and
-// below it on a phone.
 func TestBrowserJourneyOpensADesignSessionAndReadsItsBrief(t *testing.T) {
 	t.Parallel()
 	for _, v := range journeyViewports {

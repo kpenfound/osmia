@@ -8,7 +8,6 @@ import (
 )
 
 func TestServiceDaggerConfiguration(t *testing.T) {
-	// Config loading must work without a CLI or engine and never read the token.
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("OSMIA_CHECK_TOKEN", "private-cloud-token")
 	for _, tc := range []struct {
@@ -34,7 +33,7 @@ func TestServiceDaggerConfiguration(t *testing.T) {
 		{"both tokens", "[dagger]\nengine = 'cloud'\ncloud_compute_token_env = 'OSMIA_CHECK_TOKEN'\ncloud_api_token_env = 'OSMIA_CHECK_API_TOKEN'\n", ResolvedDagger{Mode: DaggerEngineCloud, CloudComputeTokenEnv: "OSMIA_CHECK_TOKEN", CloudAPITokenEnv: "OSMIA_CHECK_API_TOKEN"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(fixture(t, topConfig+tc.section, projectConfig))
+			cfg, err := load(fixture(t, topConfig+tc.section, projectConfig))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,14 +118,14 @@ func TestDaggerReplacedCloudTokenKey(t *testing.T) {
 }
 
 func TestDaggerOrganization(t *testing.T) {
-	cfg, err := Load(fixture(t, topConfig+"[dagger]\ncloud_compute_token_env = 'OSMIA_CHECK_TOKEN'\norganization = 'acme-corp'\n", projectConfig))
+	cfg, err := load(fixture(t, topConfig+"[dagger]\ncloud_compute_token_env = 'OSMIA_CHECK_TOKEN'\norganization = 'acme-corp'\n", projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Dagger.Organization != "acme-corp" {
 		t.Fatalf("organization %q", cfg.Dagger.Organization)
 	}
-	cfg, err = Load(fixture(t, topConfig, projectConfig))
+	cfg, err = load(fixture(t, topConfig, projectConfig))
 	if err != nil || cfg.Dagger.Organization != "" {
 		t.Fatalf("absent organization %q, %v", cfg.Dagger.Organization, err)
 	}

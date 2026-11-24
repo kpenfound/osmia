@@ -40,9 +40,6 @@ func TestBrowserRatifyButtonRecordsRatificationAndLeavesGate(t *testing.T) {
 	p.SelectWorkstream(ws)
 	p.AwaitText(card+`[data-decision-choice="ratify"]`, "Ratify")
 	p.Click(card + `[data-decision-choice="ratify"]`)
-	// The service's outcome joins the workstream's feed as an entry marked as
-	// the owner's command outcome, with the time it was accepted; the shared
-	// result line shows nothing.
 	const outcome = "the owner ratified spec.md revision 1 and plan.json revision 1"
 	feed := `#workstreams [data-field=feed] `
 	p.AwaitOutcome(outcome)
@@ -60,10 +57,6 @@ func TestBrowserRatifyButtonRecordsRatificationAndLeavesGate(t *testing.T) {
 		t.Fatalf("recorded ratification: %+v", record)
 	}
 	scenario.AwaitFeature(t, ws, intake.BuildingState)
-	// What the service adds to the feed after the ratification is accepted,
-	// such as the workstream's transitions as sealing and building proceed,
-	// follows the outcome entry; the outcome stays a single entry through the
-	// feed's re-reads.
 	p.Await("a feed entry the service added after the ratification rendered after the outcome entry", `(() => {
 		const items = [...document.querySelectorAll(`+quote(feed+"ol > li")+`)];
 		const at = items.findIndex(n => n.dataset.kind === 'outcome');

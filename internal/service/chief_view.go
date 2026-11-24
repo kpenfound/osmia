@@ -9,16 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// stageChiefDocuments stages current documents, excluding tool calls,
-// inspections and a resolved member's own spec and plan. Historical revisions
-// remain available through factory_context. Each staging replaces the last.
-func stageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
+func StageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, workspace string) ([]string, error) {
 	docs, err := trace.Read[trace.Document](r, stream)
 	if err != nil {
 		return nil, err
@@ -81,9 +80,6 @@ func stageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, worksp
 	return paths, nil
 }
 
-// activityTurns and activityTransitions bound what activity.json holds of
-// each role's turns and of the unit's transitions; activityText bounds each
-// report and final response.
 const activityTurns, activityTransitions, activityText = 3, 12, 4000
 
 func clip(text string) string {
@@ -93,8 +89,6 @@ func clip(text string) string {
 	return text[:activityText] + "…"
 }
 
-// unitActivity returns the activity of every unit of the workstream that has
-// a role thread, by unit.
 func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.Document) (map[string]UnitActivity, error) {
 	threads, err := r.Threads(stream)
 	if err != nil {
@@ -154,12 +148,12 @@ func unitActivity(r *trace.Repository, stream config.WorkstreamID, docs []trace.
 				if err != nil {
 					return nil, err
 				}
-				left, err := chiefRulingsLeft(r, stream, unit)
+				left, err := execution.ChiefRulingsLeft(r, stream, unit)
 				if err != nil {
 					return nil, err
 				}
-				a.Contest = &ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: contestOptions(contest, unit, mason), ChiefRulingsLeft: left}
-				_, decisions, err := chiefDecisions(r, stream, unit)
+				a.Contest = &api.ActivityContest{ID: contest.ID, Reason: contest.Reason, Rulings: ContestOptions(contest, unit, mason), ChiefRulingsLeft: left}
+				_, decisions, err := execution.ChiefDecisions(r, stream, unit)
 				if err != nil {
 					return nil, err
 				}

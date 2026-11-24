@@ -9,12 +9,12 @@ import (
 // have all merged.
 const AssembledState = "assembled"
 
-// maxFinalRounds is how many final reviews of one workstream may find
+// MaxFinalRounds is how many final reviews of one workstream may find
 // blocking problems before further revisions of its assembled plan are the
 // owner's decision rather than the chief of staff's.
 const MaxFinalRounds = 3
 
-// nextRevision returns the revision the next record of a workstream
+// NextRevision returns the revision the next record of a workstream
 // document takes.
 func NextRevision(repository *trace.Repository, stream config.WorkstreamID, id string) (int, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)

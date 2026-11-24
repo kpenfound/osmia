@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -21,14 +23,14 @@ func TestEventStreamResyncsWhenTheProjectChanges(t *testing.T) {
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
 	_, c := start(t, opts)
-	events, _ := eventStream(t, c)
-	nextEvent(t, events)
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
-	awaitEvents(t, events, Event{Kind: EventResync})
+	events, _ := fixturekit.EventStream(t, c)
+	fixturekit.NextEvent(t, events)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	fixturekit.Must(t, err)
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventResync})
 	_, err = c.RemoveProject(ctx, added.Project.ID)
-	must(t, err)
-	awaitEvents(t, events, Event{Kind: EventResync})
+	fixturekit.Must(t, err)
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventResync})
 }
 
 // A stream starts with a resync. After it, every runtime override announces a
@@ -38,8 +40,8 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	_, c := start(t, opts)
-	events, _ := eventStream(t, c)
-	if e := nextEvent(t, events); e != (Event{Kind: EventResync}) {
+	events, _ := fixturekit.EventStream(t, c)
+	if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventResync}) {
 		t.Fatalf("first event: %+v", e)
 	}
 	for _, m := range []struct {
@@ -48,39 +50,35 @@ func TestEventStreamAnnouncesRuntimeAndConfigurationChanges(t *testing.T) {
 	}{
 		{"PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft"}},
 		{"DELETE", "pause", ClearPauseRequest{Scope: "factory"}},
-		{"PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}}},
-		{"DELETE", "priority", ClearPriorityRequest{Project: project}},
+		{"PUT", "priority", PriorityRequest{Project: fixturekit.Project, Workstreams: []config.WorkstreamID{fixturekit.Stream}}},
+		{"DELETE", "priority", ClearPriorityRequest{Project: fixturekit.Project}},
 		{"PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"}},
 		{"DELETE", "profile", ClearProfileRequest{Role: "mason"}},
 	} {
-		mutation(t, c, m.method, m.kind, m.input)
-		if e := nextEvent(t, events); e != (Event{Kind: EventRuntime}) {
+		intakefixture.Mutation(t, c, m.method, m.kind, m.input)
+		if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventRuntime}) {
 			t.Fatalf("%s %s: %+v", m.method, m.kind, e)
 		}
 	}
 	if _, err := c.Reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	awaitEvents(t, events, Event{Kind: EventConfig}, Event{Kind: EventRuntime}, Event{Kind: EventSpend, Project: project})
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventConfig}, Event{Kind: EventRuntime}, Event{Kind: EventSpend, Project: fixturekit.Project})
 	path := filepath.Join(opts.Config.Root, "config.toml")
-	must(t, os.WriteFile(path, []byte("version = \n"), 0600))
+	fixturekit.Must(t, os.WriteFile(path, []byte("version = \n"), 0600))
 	if _, err := c.Reload(context.Background()); err == nil {
 		t.Fatal("invalid configuration reloaded")
 	}
-	if e := nextEvent(t, events); e != (Event{Kind: EventConfig}) {
+	if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventConfig}) {
 		t.Fatalf("failed reload: %+v", e)
 	}
 }
 
-// eventTraceFixture is a service whose trace holds stream and quiet, with
-// quiet's question escalated to the owner as inbox entry 1.
 func eventTraceFixture(t *testing.T) (*Service, *Client) {
 	t.Helper()
 	return start(t, eventTraceOptions(t))
 }
 
-// eventTraceOptions plants a workstream with one escalated question in the
-// trace and returns the options of a service that has not started.
 func eventTraceOptions(t *testing.T) Options {
 	t.Helper()
 	opts, cfg := conversationFixture(t, "evs-")
@@ -94,26 +92,26 @@ func TestEventStreamAnnouncesTraceChanges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, c := eventTraceFixture(t)
-	events, _ := eventStream(t, c)
-	nextEvent(t, events)
+	events, _ := fixturekit.EventStream(t, c)
+	fixturekit.NextEvent(t, events)
 
-	if _, err := c.Send(ctx, stream, "How is it going?"); err != nil {
+	if _, err := c.Send(ctx, fixturekit.Stream, "How is it going?"); err != nil {
 		t.Fatal(err)
 	}
-	awaitEvents(t, events, Event{Kind: EventConversation, Project: project, Workstream: stream}, Event{Kind: EventWorkstream, Project: project, Workstream: stream})
+	fixturekit.AwaitEvents(t, events, Event{Kind: api.EventConversation, Project: fixturekit.Project, Workstream: fixturekit.Stream}, Event{Kind: EventWorkstream, Project: fixturekit.Project, Workstream: fixturekit.Stream})
 
 	if _, err := c.Answer(ctx, 1, "In files.", ""); err != nil {
 		t.Fatal(err)
 	}
-	awaitEvents(t, events, Event{Kind: EventInbox, Project: project, Workstream: quiet}, Event{Kind: EventWorkstream, Project: project, Workstream: quiet})
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventInbox, Project: fixturekit.Project, Workstream: intakefixture.Quiet}, Event{Kind: EventWorkstream, Project: fixturekit.Project, Workstream: intakefixture.Quiet})
 
-	appendDayCost(t, s.sole().repository, stream, "cost", demoStart, 0.25, true)
-	awaitEvents(t, events, Event{Kind: EventSpend, Project: project}, Event{Kind: EventWorkstream, Project: project, Workstream: stream})
+	appendDayCost(t, s.sole().repository, fixturekit.Stream, "cost", fixturekit.DemoStart, 0.25, true)
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventSpend, Project: fixturekit.Project}, Event{Kind: EventWorkstream, Project: fixturekit.Project, Workstream: fixturekit.Stream})
 
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "feature_handed", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "owner"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "feature_handed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner"}
 	_, err := s.sole().repository.SetFeatureState(ctx, h, "handed", "Owner handed the feature in")
-	must(t, err)
-	awaitEvents(t, events, Event{Kind: EventWorkstream, Project: project, Workstream: stream}, Event{Kind: EventInbox, Project: project, Workstream: stream})
+	fixturekit.Must(t, err)
+	fixturekit.AwaitEvents(t, events, Event{Kind: EventWorkstream, Project: fixturekit.Project, Workstream: fixturekit.Stream}, Event{Kind: EventInbox, Project: fixturekit.Project, Workstream: fixturekit.Stream})
 }
 
 // A stream outlives the server's read and write timeouts while it is idle.
@@ -122,11 +120,11 @@ func TestEventStreamOutlivesTheRequestTimeouts(t *testing.T) {
 	opts := fixture(t)
 	opts.ReadTimeout, opts.WriteTimeout = 200*time.Millisecond, 200*time.Millisecond
 	_, c := start(t, opts)
-	events, done := eventStream(t, c)
-	nextEvent(t, events)
+	events, done := fixturekit.EventStream(t, c)
+	fixturekit.NextEvent(t, events)
 	time.Sleep(time.Second)
-	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
-	if e := nextEvent(t, events); e != (Event{Kind: EventRuntime}) {
+	intakefixture.Mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
+	if e := fixturekit.NextEvent(t, events); e != (Event{Kind: EventRuntime}) {
 		t.Fatalf("event after idling past the timeouts: %+v", e)
 	}
 	select {
@@ -156,10 +154,10 @@ func TestShutdownEndsEventStreams(t *testing.T) {
 			opts := fixture(t)
 			opts.ShutdownTimeout = 5 * time.Second
 			s, c := start(t, opts)
-			events, done := eventStream(t, c)
-			nextEvent(t, events)
+			events, done := fixturekit.EventStream(t, c)
+			fixturekit.NextEvent(t, events)
 			began := time.Now()
-			must(t, stop(s))
+			fixturekit.Must(t, stop(s))
 			if elapsed := time.Since(began); elapsed > 2*time.Second {
 				t.Fatalf("shutdown with an open stream took %s", elapsed)
 			}

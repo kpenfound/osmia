@@ -8,8 +8,6 @@ import (
 
 var nonSessionWorkstreams = intake.NonSessionWorkstreams
 
-// snapshotWorkstreamBase protects the aggregate base read from concurrent
-// session trace removal. It holds no guard during Git work or state writes.
 func snapshotWorkstreamBase(repo *trace.Repository, stream config.WorkstreamID) (trace.WorkstreamBase, error) {
 	var base trace.WorkstreamBase
 	err := repo.WithWorkstreamSnapshot(func() error {

@@ -17,8 +17,6 @@ const (
 	traceLoad = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
 )
 
-// cloudFailedStatus is the commit status Dagger Cloud posts for a failed
-// check: its own description naming the trace, and its own link.
 func cloudFailedStatus(f *watchFixture, id int64, name, traceID string, at time.Duration) pulls.CommitStatus {
 	s := pulls.CommitStatus{ID: id, Context: name, State: "failure", CreatedAt: f.at(at),
 		TargetURL: "https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=" + name}
@@ -30,17 +28,12 @@ func cloudFailedStatus(f *watchFixture, id int64, name, traceID string, at time.
 	return s
 }
 
-// settleFailedRun reads the statuses of a failed run, lets the once-only
-// rerun come back with the same failure, and returns the recorded result.
 func settleFailedRun(f *watchFixture, passed int, failing ...func(at time.Duration) pulls.CommitStatus) FinalCheckRun {
 	f.t.Helper()
 	driveFailedRun(f, passed, failing...)
 	return f.mustComplete()
 }
 
-// driveFailedRun reads the statuses of a failed run and lets the once-only
-// rerun come back with the same failure, up to the read that records the
-// result.
 func driveFailedRun(f *watchFixture, passed int, failing ...func(at time.Duration) pulls.CommitStatus) {
 	f.t.Helper()
 	post := func(id int64, at time.Duration) {
@@ -72,7 +65,6 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 		t.Fatalf("run %+v, reruns %q", run, f.rerunCalls())
 	}
 
-	// The durable record keeps each failed check's name and trace id.
 	recorded := f.runs()
 	last := recorded[len(recorded)-1]
 	traces := map[string]string{}
@@ -96,7 +88,6 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 		}
 	}
 
-	// The poll reads the same failure afresh.
 	got := f.call(ChecksToolOf(f.load(), f.repo, f.chief("poll")), `{"action":"poll","push":1}`)
 	if got["outcome"] != "failed" {
 		t.Fatalf("poll %v", got)
@@ -121,8 +112,6 @@ func TestFailedCloudRunGivesEverySurfaceEachFailedCheckWithItsTraceCommand(t *te
 	}
 }
 
-// noticeOf is the failed-check part of the chief's notice for the review the
-// fixture's watch recorded a result for.
 func (f *watchFixture) noticeOf() string {
 	f.t.Helper()
 	notice, err := f.reviewer.failedChecksNotice(stream, f.report)
@@ -197,9 +186,6 @@ func TestPassedAndIncompleteRunsGiveNoFailedChecks(t *testing.T) {
 	}
 }
 
-// TestFailedRunLinksCarryNoCredentialOnAnySurface drives a failed run whose
-// status links carry credentials through the watch, the reader's evidence,
-// the chief's notice and the poll tool.
 func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
@@ -254,7 +240,6 @@ func TestFailedRunLinksCarryNoCredentialOnAnySurface(t *testing.T) {
 		t.Errorf("chief notice:\n%s", surfaces["chief notice"])
 	}
 
-	// The durable record is unchanged by what is shown.
 	recorded := f.runs()
 	if last := recorded[len(recorded)-1]; last.StatusURL != runURL || len(last.FailedChecks) != 4 {
 		t.Errorf("recorded run %+v", last)

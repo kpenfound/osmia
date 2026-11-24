@@ -25,16 +25,10 @@ const (
 	release      = "dag+check://release/version-round-trip"
 )
 
-// fakeDagger stands in for the Dagger CLI, which is costly to invoke for
-// real (it builds and runs the project's checks) and may not be installed.
-// It lists links, refuses addresses with different filters or types and
-// records each dagger check. Executable-path tests also verify which checks
-// those commands select.
 type fakeDagger struct {
-	links    []string
-	exit     int
-	listExit int
-	// A nil topLevel simulates a runner unable to list top-level checks.
+	links     []string
+	exit      int
+	listExit  int
 	topLevel  []string
 	topExit   int
 	lists     [][]string
@@ -66,15 +60,7 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, 
 		return d.topExit, nil
 	}
 	if len(args) == 5 && slices.Equal(args[:4], []string{"list", "checks", "--all", "--format=link"}) {
-		members := d.scoped[args[4]]
-		if d.scoped == nil {
-			for _, root := range checkselect.Breadth(d.topLevel, d.links).Roots {
-				if root.Link == args[4] {
-					members = root.Links
-				}
-			}
-		}
-		for _, link := range members {
+		for _, link := range d.scoped[args[4]] {
 			fmt.Fprintln(stdout, link)
 		}
 		return d.scopeExit, nil
@@ -98,11 +84,6 @@ func (d *fakeDagger) run(_ context.Context, _ string, stdout, stderr io.Writer, 
 	return d.exit, nil
 }
 
-// fakeJev stands in for the Jev model service reached over the network,
-// which is both costly and nondeterministic to call for real. It answers
-// with probabilities by check link, or with err. It does not exercise
-// whether a real Jev endpoint accepts the request shape smartcheck sends or
-// returns well-formed answers for it.
 type fakeJev struct {
 	probabilities map[string]float64
 	err           error
@@ -184,8 +165,6 @@ func runHarness(t *testing.T, d *fakeDagger, j *fakeJev, env map[string]string, 
 
 var withKey = map[string]string{config.DefaultJevAPIKeyEnv: "test-key"}
 
-// newRepository returns a repository whose main branch has one commit, with
-// a feature branch checked out.
 func newRepository(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -217,8 +196,6 @@ func write(t *testing.T, dir, name, content string) {
 	}
 }
 
-// An uncommitted change against main runs only the checks Jev selects, and
-// without -v prints nothing of the selection.
 func TestRunsSelectionsWithDifferentFiltersSeparately(t *testing.T) {
 	t.Parallel()
 	for name, c := range map[string]struct {
@@ -304,7 +281,6 @@ func TestDryRunPrintsTheSelection(t *testing.T) {
 	}
 }
 
-// Every check runs whenever Jev does not select any, as in the factory.
 func TestFallsBackToEveryCheck(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -345,8 +321,6 @@ func TestNothingChangedRunsNothing(t *testing.T) {
 	}
 }
 
-// Without the default Jev API key env var set, smartcheck refuses before
-// touching the repository or Dagger.
 func TestRefusesWithoutAnAPIKey(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
@@ -357,8 +331,6 @@ func TestRefusesWithoutAnAPIKey(t *testing.T) {
 	}
 }
 
-// --api-key-env names the environment variable smartcheck reads instead of
-// the default, and --base is accepted as a revision other than main.
 func TestHonoursAPIKeyEnvAndBaseFlags(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
@@ -371,7 +343,6 @@ func TestHonoursAPIKeyEnvAndBaseFlags(t *testing.T) {
 	}
 }
 
-// An unknown --base revision surfaces git's own error and runs nothing.
 func TestUnknownBaseRevisionFails(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
@@ -382,7 +353,6 @@ func TestUnknownBaseRevisionFails(t *testing.T) {
 	}
 }
 
-// An out-of-range --threshold is rejected before anything runs.
 func TestInvalidThresholdIsRejected(t *testing.T) {
 	t.Parallel()
 	d, j := &fakeDagger{}, &fakeJev{}

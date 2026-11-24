@@ -16,7 +16,6 @@ import (
 
 func ratifyServer(t *testing.T, handler http.Handler) (string, string) {
 	t.Helper()
-	// Unix sockets have a short path limit, including the test name.
 	root, err := os.MkdirTemp("", "osmia-cli-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(root) })

@@ -140,8 +140,6 @@ func (g GitHub) CreateRepository(ctx context.Context, repository NewRepository) 
 	return created.repository(), nil
 }
 
-// classifyCreate decides what a failed create call proves. Only a 4xx answer
-// shows that nothing was created; anything else may have created it.
 func classifyCreate(err error) *CreateError {
 	var response *ResponseError
 	if !errors.As(err, &response) {
@@ -156,10 +154,6 @@ func classifyCreate(err error) *CreateError {
 	return &CreateError{Outcome: CreateUnknown, Status: response.Status, Err: err}
 }
 
-// nameExists reports whether a 422 is the name conflict. GitHub says so in its
-// per-field messages; a 422 that carries none is taken to be the conflict,
-// since the create call sends a valid name and the conflict is the refusal it
-// expects.
 func nameExists(response *ResponseError) bool {
 	if len(response.Details) == 0 {
 		return true

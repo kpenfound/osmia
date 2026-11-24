@@ -2,16 +2,16 @@ package intakejourney
 
 import (
 	context "context"
-	fmt "fmt"
 	reflect "reflect"
 	slices "slices"
 	strings "strings"
-	sync "sync"
 	testing "testing"
 	time "time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
 	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
 	questions "github.com/kpenfound/osmia/internal/questions"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
@@ -19,92 +19,23 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var toolNames = intakefixture.ToolNames
-
-// questionAsker is one agent of a question fixture with its first queued turn.
-type questionAsker struct {
-	stream                    config.WorkstreamID
-	agent, thread, role, turn string
-}
-
-// questionFixture is a project whose askers and chiefs of staff are fake
-// agents holding the real question tools over MCP. The clock stands still, so
-// the event window closes only when a test advances it. Fake turns lock mu
-// around results and problems.
-type questionFixture struct {
-	opts     Options
-	cfg      *config.Config
-	clock    *fixedClock
-	engine   *demoEngine
-	lives    chan *trace.Repository
-	ticks    chan time.Time
-	mu       sync.Mutex
-	results  map[string][]string
-	problems []string
-}
-
-// newQuestionFixture creates the trace with the charter, each asker's
-// workstream and thread, and one queued turn per asker. global is appended to
-// the root's config.toml.
-func newQuestionFixture(t *testing.T, prefix, global, charter string, askers []questionAsker) *questionFixture {
-	t.Helper()
-	f := &questionFixture{results: map[string][]string{}}
-	var inputs []intakefixture.QuestionAsker
-	for _, a := range askers {
-		inputs = append(inputs, intakefixture.QuestionAsker{Stream: a.stream, Agent: a.agent, Thread: a.thread, Role: a.role, Turn: a.turn})
-	}
-	data := intakefixture.NewQuestionSetup(t, prefix, global, charter, inputs, func(t *testing.T, home string) config.Options { f.opts = fixtureAt(t, home); return f.opts.Config })
-	f.cfg, f.clock, f.engine, f.lives, f.ticks = data.Config, data.Clock, data.Engine, data.Lives, data.Ticks
-	f.opts.Threads, f.opts.Reconciliation.Now, f.opts.Reconciliation.Ticks = data.Threads, data.Clock.Now, data.Ticks
-	return f
-}
-
-// settle sends several ticks. A tick is received only between passes, so
-// afterwards every pass an earlier one caused has finished.
-func (f *questionFixture) settle(t *testing.T, s *Service) {
-	t.Helper()
-	intakefixture.SettleTicks(t, f.ticks, f.clock.Now, s.Close)
-}
-
-// problem notes what a fake agent saw wrong; the test fails on them at its end.
-func (f *questionFixture) problem(format string, args ...any) {
-	f.problems = append(f.problems, fmt.Sprintf(format, args...))
-}
-
-// use calls a tool and keeps its result under step.
-func (f *questionFixture) use(ctx context.Context, tools *mcp.ClientSession, step, name string, args map[string]any) error {
-	out, err := callTool(ctx, tools, name, args)
-	if err != nil {
-		return err
-	}
-	f.results[step] = append(f.results[step], out)
-	return nil
-}
-
-var questionResult = intakefixture.QuestionResult
-
-// A fake mason and a fake reviewer ask, a fake chief of staff answers one
-// question with a citation and escalates the others as a batch, and the
-// service restarts with open, answered-but-undelivered and escalated
-// questions. Nothing is lost and nothing runs twice.
 func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	f := newQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []questionAsker{
-		{stream, demoAgent, demoThread, "mason", "build"}, {stream, "agent_mason2", "thread_mason2", "mason", "build2"}, {stream, "agent_reviewer", "thread_reviewer", "reviewer", "review"},
+	f := journey.NewQuestionFixture(t, "qa-", "[capacity]\nmasons = 1\n", "# Charter\n\n1. Keep state in files under the root.\n", []intakefixture.QuestionAsker{
+		{Stream: fixturekit.Stream, Agent: fixturekit.DemoAgent, Thread: fixturekit.DemoThread, Role: "mason", Turn: "build"}, {Stream: fixturekit.Stream, Agent: "agent_mason2", Thread: "thread_mason2", Role: "mason", Turn: "build2"}, {Stream: fixturekit.Stream, Agent: "agent_reviewer", Thread: "thread_reviewer", Role: "reviewer", Turn: "review"},
 	})
-	opts, clock, engine, lives, ticks := f.opts, f.clock, f.engine, f.lives, f.ticks
+	opts, clock, engine, lives, ticks := f.Opts, f.Clock, f.Engine, f.Lives, f.Ticks
 
-	// Keep worker operations in the pass so settle waits for the askers.
 	opts.Reconciliation.Concurrent = func(coreadapter.Operation) bool { return false }
-	settle := func(s *Service) { t.Helper(); f.settle(t, s) }
-	mu, results, problem, use, result := &f.mu, f.results, f.problem, f.use, questionResult
+	settle := func(s *journey.Service) { t.Helper(); f.Settle(t, s) }
+	mu, results, problem, use, result := &f.Mu, f.Results, f.Problem, f.Use, intakefixture.QuestionResult
 	var repo *trace.Repository
-	asker := func(session, question string, want ...string) demoTurn {
+	asker := func(session, question string, want ...string) fixturekit.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 			mu.Lock()
 			defer mu.Unlock()
-			names, err := toolNames(ctx, tools)
+			names, err := intakefixture.ToolNames(ctx, tools)
 			if err != nil {
 				return nil, err
 			}
@@ -137,7 +68,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	firstDeliveries := 0
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		mu.Lock()
-		names, err := toolNames(ctx, tools)
+		names, err := intakefixture.ToolNames(ctx, tools)
 		if err != nil {
 			mu.Unlock()
 			return nil, err
@@ -146,7 +77,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "log_assumption", "propose_charter", "relay_ruling", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {
 			if !strings.Contains(req.SystemPrompt, part) {
 				problem("event turn system prompt lacks %q:\n%s", part, req.SystemPrompt)
 			}
@@ -211,8 +142,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 
 	states := func(r *trace.Repository) map[string]string {
 		t.Helper()
-		list, err := r.Questions(stream)
-		must(t, err)
+		list, err := r.Questions(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		out := map[string]string{}
 		for _, q := range list {
 			out[q.Asked.ID] = q.State
@@ -221,8 +152,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	}
 	turnsOf := func(r *trace.Repository, agent string) []string {
 		t.Helper()
-		th, err := r.Thread(stream, agent)
-		must(t, err)
+		th, err := r.Thread(fixturekit.Stream, agent)
+		fixturekit.Must(t, err)
 		var out []string
 		for _, q := range th.Turns {
 			out = append(out, q.Request.TurnID)
@@ -231,14 +162,14 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	}
 	parked := func(r *trace.Repository, agent string) bool {
 		t.Helper()
-		th, err := r.Thread(stream, agent)
-		must(t, err)
+		th, err := r.Thread(fixturekit.Stream, agent)
+		fixturekit.Must(t, err)
 		return th.Parked()
 	}
 	questionEvents := func(r *trace.Repository) (total, unacknowledged int) {
 		t.Helper()
-		entries, err := r.Outbox(stream)
-		must(t, err)
+		entries, err := r.Outbox(fixturekit.Stream)
+		fixturekit.Must(t, err)
 		for _, e := range entries {
 			if strings.HasPrefix(e.Event.Body, "Question ") {
 				total++
@@ -262,8 +193,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		return out
 	}
 
-	s, err := Start(ctx, opts)
-	must(t, err)
+	s, err := journey.Start(ctx, opts)
+	fixturekit.Must(t, err)
 	defer func() {
 		if s != nil {
 			s.Close()
@@ -274,11 +205,11 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionOpen, "2": trace.QuestionOpen}) {
 		t.Fatalf("questions after asking: %v", got)
 	}
-	if !parked(repo, demoAgent) || !parked(repo, "agent_reviewer") || parked(repo, "agent_mason2") {
-		t.Fatalf("parked: mason %v, reviewer %v, second mason %v", parked(repo, demoAgent), parked(repo, "agent_reviewer"), parked(repo, "agent_mason2"))
+	if !parked(repo, fixturekit.DemoAgent) || !parked(repo, "agent_reviewer") || parked(repo, "agent_mason2") {
+		t.Fatalf("parked: mason %v, reviewer %v, second mason %v", parked(repo, fixturekit.DemoAgent), parked(repo, "agent_reviewer"), parked(repo, "agent_mason2"))
 	}
-	th, err := repo.Thread(stream, demoAgent)
-	must(t, err)
+	th, err := repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
 	if o := th.Turns[0].Response.Result.Outcome; o == nil || *o != (coreadapter.Outcome{Status: "waiting", Report: "Asked question 1"}) {
 		t.Fatalf("asking turn outcome: %+v", o)
 	}
@@ -288,18 +219,16 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if total, open := questionEvents(repo); total != 2 || open != 2 {
 		t.Fatalf("question events: %d, %d undelivered", total, open)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	s, err = Start(ctx, opts)
-	must(t, err)
+	s, err = journey.Start(ctx, opts)
+	fixturekit.Must(t, err)
 	repo = <-lives
 	settle(s)
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "build2": 1, "review": 1}) {
 		t.Fatalf("restart with open questions ran: %v", got)
 	}
-	// Hold delivery during this lifetime so the chief's durable answer stays
-	// undelivered until restart, even as scheduling passes continue.
-	InspectForTest(s).HoldAnswerDelivery()
+	journey.InspectForTest(s).HoldAnswerDelivery()
 	settle(s)
 	clock.Advance(time.Minute)
 
@@ -308,26 +237,26 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		case ticks <- clock.Now():
 		case <-answered:
 			waiting = false
-		case <-time.After(demoTimeout):
+		case <-time.After(fixturekit.DemoTimeout):
 			s.Close()
 			t.Fatal("chief of staff did not answer")
 		}
 	}
-	if got := turnsOf(repo, demoAgent); !slices.Equal(got, []string{"build"}) {
+	if got := turnsOf(repo, fixturekit.DemoAgent); !slices.Equal(got, []string{"build"}) {
 		t.Fatalf("answer delivered inside the chief-of-staff turn: %v", got)
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	s, err = Start(ctx, opts)
-	must(t, err)
+	s, err = journey.Start(ctx, opts)
+	fixturekit.Must(t, err)
 	repo = <-lives
 	settle(s)
-	if got := turnsOf(repo, demoAgent); !slices.Equal(got, []string{"build", "answer_1"}) {
+	if got := turnsOf(repo, fixturekit.DemoAgent); !slices.Equal(got, []string{"build", "answer_1"}) {
 		t.Fatalf("mason turns: %v", got)
 	}
-	th, err = repo.Thread(stream, demoAgent)
-	must(t, err)
-	if req := th.Turns[1].Request; req.Prompt != answerPrompt || req.ThreadID != demoThread || req.SystemPrompt != "You are the mason." || req.Profile.Name != "default" {
+	th, err = repo.Thread(fixturekit.Stream, fixturekit.DemoAgent)
+	fixturekit.Must(t, err)
+	if req := th.Turns[1].Request; req.Prompt != answerPrompt || req.ThreadID != fixturekit.DemoThread || req.SystemPrompt != "You are the mason." || req.Profile.Name != "default" {
 		t.Fatalf("answer turn: %+v", req)
 	}
 	mu.Lock()
@@ -336,8 +265,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if again != 2 {
 		t.Fatalf("events of the interrupted turn delivered %d times in all", again)
 	}
-	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionOpen, "3": trace.QuestionOpen}) || !parked(repo, demoAgent) {
-		t.Fatalf("questions after the answer: %v, mason parked %v", got, parked(repo, demoAgent))
+	if got := states(repo); !reflect.DeepEqual(got, map[string]string{"1": trace.QuestionAnswered, "2": trace.QuestionOpen, "3": trace.QuestionOpen}) || !parked(repo, fixturekit.DemoAgent) {
+		t.Fatalf("questions after the answer: %v, mason parked %v", got, parked(repo, fixturekit.DemoAgent))
 	}
 	clock.Advance(time.Minute)
 	settle(s)
@@ -346,9 +275,9 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	default:
 		t.Fatal("chief of staff did not escalate")
 	}
-	must(t, s.Close())
+	fixturekit.Must(t, s.Close())
 
-	s, c := start(t, opts)
+	s, c := journey.StartT(t, opts)
 	repo = <-lives
 	clock.Advance(24 * time.Hour)
 	settle(s)
@@ -358,7 +287,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if got := runs(); !reflect.DeepEqual(got, map[string]int{"build": 1, "build2": 1, "review": 1, "answer_1": 1, "events": 3}) {
 		t.Fatalf("runs: %v", got)
 	}
-	if !parked(repo, demoAgent) || !parked(repo, "agent_reviewer") {
+	if !parked(repo, fixturekit.DemoAgent) || !parked(repo, "agent_reviewer") {
 		t.Fatal("an asker with an escalated question is not parked")
 	}
 	if got := turnsOf(repo, "agent_reviewer"); !slices.Equal(got, []string{"review"}) {
@@ -367,8 +296,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if total, open := questionEvents(repo); total != 3 || open != 0 {
 		t.Fatalf("question events: %d, %d undelivered", total, open)
 	}
-	list, err := repo.Questions(stream)
-	must(t, err)
+	list, err := repo.Questions(fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if r := list[0].Ruling; r == nil || r.ReturnedAnswer != "In files under the root." || !slices.Equal(r.Citations, []string{"charter#1"}) || r.Actor != (trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}) {
 		t.Fatalf("ruling: %+v", r)
 	}
@@ -377,8 +306,8 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 			t.Fatalf("escalation of question %s: %+v", q.Asked.ID, e)
 		}
 	}
-	status, err := c.Status(ctx, stream)
-	must(t, err)
+	status, err := c.Status(ctx, fixturekit.Stream)
+	fixturekit.Must(t, err)
 	if status.OpenQuestions != 2 {
 		t.Fatalf("open questions in status: %d", status.OpenQuestions)
 	}
@@ -407,14 +336,7 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 	if !reflect.DeepEqual(results, want) {
 		t.Fatalf("tool results:\n%v\nwant:\n%v", results, want)
 	}
-	if len(f.problems) != 0 {
-		t.Fatalf("fake agents saw:\n%s", strings.Join(f.problems, "\n"))
+	if len(f.Problems) != 0 {
+		t.Fatalf("fake agents saw:\n%s", strings.Join(f.Problems, "\n"))
 	}
 }
-
-// An answer recorded in an abandoned workstream stays undelivered, while
-// another workstream's answer is queued with its asker's role profile.
-
-// An answer that arrives after its asker's unit merged stays undelivered: the
-// unit's workspace is gone, so the turn could not run. The answer to the same
-// question from a unit still in flight is queued on its asker's thread.

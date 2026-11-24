@@ -77,8 +77,6 @@ func Parse(diff string) []File {
 	return files
 }
 
-// path reads the path of a "diff --git a/<path> b/<path>" line, whose two
-// paths are equal without rename detection.
 func path(line string) string {
 	rest := strings.TrimPrefix(line, "diff --git ")
 	if strings.HasPrefix(rest, `"`) {

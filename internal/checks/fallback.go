@@ -45,7 +45,6 @@ func RememberedFrom(prior []*api.CheckAttribution) Remembered {
 	return r
 }
 
-// checkRecordPaths matches the documents of unit and final-review check runs.
 var checkRecordPaths = regexp.MustCompile(`^(units/[^/]+/checks-[0-9]+|final/checks-[0-9]+)\.json$`)
 
 // RememberedIn derives the remembered set of a workstream from the engine
@@ -168,7 +167,6 @@ func RunSelectionWithFallback(ctx context.Context, local, cloud ReviewChecks, bu
 	return o.result(), selection, &api.CheckAttribution{Runs: o.runs}, err
 }
 
-// group is the links one dagger check run selects, or every check.
 type group struct {
 	links      []string
 	every      bool
@@ -179,16 +177,13 @@ func (g group) run(engine, reason string, passedLocally int) api.CheckEngineRun 
 	return api.CheckEngineRun{Engine: engine, Links: g.links, EveryCheck: g.every, Reason: reason, PassedLocally: passedLocally}
 }
 
-// segment is the result of one call to a runner.
 type segment struct {
 	engine string
 	group  group
 	result CheckResult
-	// before is text that comes ahead of the segment's output.
 	before string
 }
 
-// fallbackRun is the state of one RunSelectionWithFallback.
 type fallbackRun struct {
 	ctx          context.Context
 	seen         func(url string)
@@ -213,7 +208,6 @@ func (o *fallbackRun) cancel() {
 	}
 }
 
-// engineContext is the budget of engine, which starts at its first use.
 func (o *fallbackRun) engineContext(engine string) context.Context {
 	slot := &o.localCtx
 	if engine == api.CheckEngineCloud {
@@ -227,8 +221,6 @@ func (o *fallbackRun) engineContext(engine string) context.Context {
 	return *slot
 }
 
-// plan splits links into the runs they need. With split, remembered links are
-// grouped apart from the others.
 func (o *fallbackRun) plan(links []string, split bool) []group {
 	if len(links) == 0 {
 		return []group{{every: true, remembered: split && o.remembered.EveryCheck}}
@@ -251,7 +243,6 @@ func (o *fallbackRun) plan(links []string, split bool) []group {
 	return groups
 }
 
-// The kinds of attempt result.
 const (
 	attemptPassed = iota
 	attemptFailed
@@ -260,9 +251,6 @@ const (
 	attemptUnfinished
 )
 
-// attempt runs g on engine and says how it ended. A stopped attempt, which
-// was cancelled or could not be prepared, returns its error. An unfinished
-// one returns the reason a cloud attempt would follow.
 func (o *fallbackRun) attempt(engine string, g group, skip []string) (kind int, reason string, skipped bool, err error) {
 	runner := o.local
 	if engine == api.CheckEngineCloud {
@@ -300,7 +288,6 @@ func (o *fallbackRun) attempt(engine string, g group, skip []string) (kind int, 
 	return attemptUnfinished, api.CloudAfterEngineFailure, skipped, nil
 }
 
-// escalation is a run that goes to the cloud engine.
 type escalation struct {
 	index  int
 	group  group
@@ -308,9 +295,6 @@ type escalation struct {
 	skip   []string
 }
 
-// execute runs groups, local work first and then cloud work, and returns the
-// refusal when Dagger refused the links of a run, which ends the execution.
-// A non-nil error ends it as incomplete.
 func (o *fallbackRun) execute(groups []group) (refusal string, err error) {
 	var jobs []escalation
 	trigger := ""
@@ -366,7 +350,6 @@ func (o *fallbackRun) execute(groups []group) (refusal string, err error) {
 	return "", nil
 }
 
-// cloudIncomplete is the error of a cloud attempt that did not finish.
 func (o *fallbackRun) cloudIncomplete(result CheckResult, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("the cloud attempt did not finish within checks_timeout %s", o.budget)
@@ -375,8 +358,6 @@ func (o *fallbackRun) cloudIncomplete(result CheckResult, err error) error {
 	return fmt.Errorf("the cloud attempt did not finish: %w", reason)
 }
 
-// result combines the segments into one result. Output holds every segment's
-// report, headed by its engine once the cloud engine ran any.
 func (o *fallbackRun) result() CheckResult {
 	var combined CheckResult
 	var output strings.Builder

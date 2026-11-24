@@ -1,7 +1,6 @@
 package delivery
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,7 +30,6 @@ const (
 	cloudToken     = "cloud-token-for-tests"
 )
 
-// watchClock is the fake clock of a watch fixture.
 type watchClock struct {
 	mu sync.Mutex
 	at time.Time
@@ -49,8 +47,6 @@ func (c *watchClock) Advance(d time.Duration) {
 	c.at = c.at.Add(d)
 }
 
-// fakeStatusAPI stands in for GitHub's combined status read of the pushed
-// commit.
 type fakeStatusAPI struct {
 	mu       sync.Mutex
 	clock    *watchClock
@@ -83,12 +79,10 @@ func (f *fakeStatusAPI) readCount() int {
 	return len(f.reads)
 }
 
-// setWithChecks is set with n more per-check statuses, all of them success.
 func (f *fakeStatusAPI) setWithChecks(n int, statuses ...pulls.CommitStatus) {
 	f.set(append(statuses, passing(n)...)...)
 }
 
-// passing is n per-check statuses that succeeded.
 func passing(n int) []pulls.CommitStatus {
 	var out []pulls.CommitStatus
 	for i := range n {
@@ -98,29 +92,23 @@ func passing(n int) []pulls.CommitStatus {
 }
 
 type watchFixture struct {
-	t        *testing.T
-	cfg      *config.Config
-	repo     *trace.Repository
-	clock    *watchClock
-	api      *fakeStatusAPI
-	reviewer *FinalReviewer
-	report   FinalReport
-	pushedAt time.Time
-	rerunLog string
-	program  string
-	scope    *coreadapter.Scope
-	// reader replaces api as the service's status reader when it is set.
-	reader pulls.StatusReader
-	// traces replaces the Dagger CLI at traceProgram as the service's trace
-	// fetch when it is set; with neither, the service has no trace fetch.
+	t            *testing.T
+	cfg          *config.Config
+	repo         *trace.Repository
+	clock        *watchClock
+	api          *fakeStatusAPI
+	reviewer     *FinalReviewer
+	report       FinalReport
+	pushedAt     time.Time
+	rerunLog     string
+	program      string
+	scope        *coreadapter.Scope
+	reader       pulls.StatusReader
 	traces       checkrun.TraceRunner
 	traceProgram string
-	// cliTimeout bounds the Dagger CLI at traceProgram; autoTimeout bounds each
-	// automatic fetch. Zero keeps the defaults.
-	cliTimeout  time.Duration
-	autoTimeout time.Duration
-	// step, when set, is called at each interruption step of the service.
-	step func(string) error
+	cliTimeout   time.Duration
+	autoTimeout  time.Duration
+	step         func(string) error
 }
 
 func newWatchFixture(t *testing.T) *watchFixture {
@@ -143,8 +131,6 @@ func newWatchFixture(t *testing.T) *watchFixture {
 	return f
 }
 
-// newReviewer is a reviewer over fresh service state, as a restarted service
-// has: nothing is remembered but the trace.
 func (f *watchFixture) newReviewer() *FinalReviewer {
 	var statuses pulls.StatusReader = f.api
 	if f.reader != nil {
@@ -177,7 +163,6 @@ func (f *watchFixture) newReviewer() *FinalReviewer {
 	return &FinalReviewer{S: controller, Repository: f.repo}
 }
 
-// restart forgets everything but the trace.
 func (f *watchFixture) restart() {
 	polled.Delete(pollKey{f.repo, stream, 1})
 	f.reviewer = f.newReviewer()
@@ -207,7 +192,6 @@ func (f *watchFixture) mustComplete() FinalCheckRun {
 	return run
 }
 
-// afterWait moves the clock to where the first status read is due.
 func (f *watchFixture) afterWait() { f.clock.At(f.pushedAt.Add(FinalChecksWait)) }
 
 func (c *watchClock) At(t time.Time) {
@@ -255,7 +239,6 @@ func (f *watchFixture) notices() int {
 
 func (f *watchFixture) at(d time.Duration) time.Time { return f.pushedAt.Add(d) }
 
-// loaded is the status of a loaded module.
 func (f *watchFixture) loaded() pulls.CommitStatus {
 	return pulls.CommitStatus{ID: 1, Context: "load", State: "success", CreatedAt: f.at(30 * time.Second)}
 }
@@ -264,7 +247,6 @@ func (f *watchFixture) pending(id int64, at time.Duration) pulls.CommitStatus {
 	return pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: "pending", CreatedAt: f.at(at)}
 }
 
-// done is a finished "Run Dagger Checks" posting.
 func (f *watchFixture) done(id int64, state string, at time.Duration) pulls.CommitStatus {
 	return pulls.CommitStatus{ID: id, Context: "Run Dagger Checks", State: state, CreatedAt: f.at(at), TargetURL: fmt.Sprintf("https://dagger.cloud/checks/%d", id)}
 }
@@ -287,7 +269,6 @@ func TestFinalChecksMakeNoRequestBeforeTheWaitAndThenFollowThePollInterval(t *te
 	if f.api.readCount() != 1 || f.api.commits[0] != "acme/widgets@"+pushedCommit {
 		t.Fatalf("reads %v", f.api.commits)
 	}
-	// Within the interval nothing is read; at its end the next read is made.
 	f.clock.Advance(10*time.Minute - time.Second)
 	f.mustWait()
 	if f.api.readCount() != 1 {
@@ -319,7 +300,6 @@ func TestFinalChecksRecordThePushedCommitOnceStatusesCompleteLate(t *testing.T) 
 	if recorded := f.runs(); len(recorded) != 1 || recorded[0].Status != "passed" {
 		t.Fatalf("recorded %+v", recorded)
 	}
-	// The recorded result is read back without another status read.
 	reads := f.api.readCount()
 	if again := f.mustComplete(); again.Run.ID != 3 || f.api.readCount() != reads {
 		t.Fatalf("again %+v, reads %d", again, f.api.readCount())
@@ -385,7 +365,6 @@ func TestFinalChecksRecordIncompleteRunsWithDoublingWaitsWhenPendingPastTheTimeo
 		if count != n || latest.Status != ChecksIncomplete {
 			t.Fatalf("run %d: count %d, latest %+v", n, count, latest)
 		}
-		// Before the doubling wait is over nothing is read or recorded.
 		reads := f.api.readCount()
 		f.clock.Advance(FinalCheckDelay(n) - time.Second)
 		if _, err := f.check(); err == nil || f.api.readCount() != reads {
@@ -408,9 +387,6 @@ func TestFinalChecksRecordIncompleteRunsWithDoublingWaitsWhenPendingPastTheTimeo
 	}
 }
 
-// settleIncomplete reads statuses that leave the run incomplete, past the
-// timeout of the push, and returns the record it wrote and the error that
-// makes the operation retry.
 func (f *watchFixture) settleIncomplete(statuses ...pulls.CommitStatus) (FinalCheckRun, error) {
 	f.t.Helper()
 	f.api.set(statuses...)
@@ -444,7 +420,6 @@ func TestFinalChecksNeverRecordAnUnaccountedCompletedRunAsPassed(t *testing.T) {
 			if recorded := f.runs(); len(recorded) != 1 || recorded[0].Status != ChecksIncomplete {
 				t.Fatalf("recorded %+v", recorded)
 			}
-			// It stays incomplete on the reads that follow, earlier incomplete records included.
 			for range 2 {
 				f.clock.Advance(FinalCheckDelay(1) * 4)
 				if run, _ := f.settleIncomplete(append([]pulls.CommitStatus{f.loaded(), f.done(3, "success", 5*time.Minute)}, tc.checks...)...); run.Status != ChecksIncomplete {
@@ -460,8 +435,6 @@ func TestFinalChecksNeverRecordAnUnaccountedCompletedRunAsPassed(t *testing.T) {
 	}
 }
 
-// stuckOnIncomplete records two incomplete runs for the push, as a workstream
-// that never could read a result has, and moves the clock to the next read.
 func (f *watchFixture) stuckOnIncomplete() {
 	f.t.Helper()
 	f.cfg.Project.ChecksTimeout = "30m"
@@ -523,7 +496,6 @@ func TestFinalChecksRecordAFailureFromStatusesAloneAfterIncompleteRecords(t *tes
 			f := newWatchFixture(t)
 			f.stuckOnIncomplete()
 			f.api.set(tc.statuses(f)...)
-			// The failure is rerun once, as ever, and the original keeps showing.
 			f.mustWait()
 			if calls := f.rerunCalls(); len(calls) != 1 || !strings.HasPrefix(calls[0], "cloud checks rerun --failed --pr 7") {
 				t.Fatalf("rerun calls %q", calls)
@@ -572,7 +544,6 @@ func TestFinalChecksStayIncompleteWhenOnlyZeroOrPendingChecksReportAfterIncomple
 	}
 }
 
-// failingRun makes the pushed commit show a completed failure of two checks.
 func (f *watchFixture) failingRun() (original pulls.CommitStatus, checks []pulls.CommitStatus) {
 	original = f.done(10, "failure", 100*time.Second)
 	checks = []pulls.CommitStatus{failedCheck(11, "test:a", "trace-a", 95*time.Second, f), failedCheck(12, "test:b", "trace-b", 95*time.Second, f)}
@@ -626,7 +597,6 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 		t.Fatalf("rerun record %+v", request)
 	}
 
-	// The original failure keeps showing for several polls: it settles nothing.
 	for range 3 {
 		f.clock.Advance(10 * time.Minute)
 		waiting := f.mustWait()
@@ -638,7 +608,6 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 		t.Fatalf("runs %+v, reruns %d", f.runs(), len(f.rerunCalls()))
 	}
 
-	// A different posting made before the request is not the rerun's either.
 	f.api.set(append([]pulls.CommitStatus{f.loaded(), f.done(9, "failure", 80*time.Second)}, checks...)...)
 	f.clock.Advance(10 * time.Minute)
 	f.mustWait()
@@ -646,7 +615,6 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 		t.Fatalf("runs %+v", f.runs())
 	}
 
-	// A pending posting is not a result either.
 	f.clock.Advance(10 * time.Minute)
 	f.api.set(append([]pulls.CommitStatus{f.loaded(), f.pending(13, 60*time.Minute)}, checks...)...)
 	f.mustWait()
@@ -654,7 +622,6 @@ func TestFinalChecksRerunFailedChecksOnceAndSettleOnlyOnAFreshCompletion(t *test
 		t.Fatalf("runs %+v", f.runs())
 	}
 
-	// The fresh completion passes, and the originally failed checks are flakes.
 	f.clock.Advance(10 * time.Minute)
 	fresh := f.done(14, "success", f.clock.Now().Sub(f.pushedAt))
 	f.api.set(f.loaded(), fresh, pulls.CommitStatus{ID: 15, Context: "test:a", State: "success", CreatedAt: f.clock.Now()})
@@ -679,7 +646,6 @@ func TestFinalChecksKeepACheckFailedThatFailsItsFreshRerun(t *testing.T) {
 	f.mustWait()
 	f.clock.Advance(10 * time.Minute)
 	now := f.clock.Now().Sub(f.pushedAt)
-	// test:a passes its rerun, test:b fails again with a new trace.
 	f.api.set(f.loaded(), f.done(20, "failure", now),
 		pulls.CommitStatus{ID: 21, Context: "test:a", State: "success", CreatedAt: f.clock.Now()},
 		failedCheck(22, "test:b", "trace-b2", now, f))
@@ -712,7 +678,6 @@ func TestFinalChecksRecordIncompleteAndNeverTheOriginalFailureWhenNoFreshResultA
 			t.Fatalf("the original failure was recorded: %+v", recorded)
 		}
 	}
-	// Watching goes on after the wait; still no fallback to the old failure.
 	f.clock.Advance(FinalCheckDelay(1))
 	if run, err := f.check(); err == nil || run.Status != ChecksIncomplete || len(f.rerunCalls()) != 1 {
 		t.Fatalf("run %+v: %v, reruns %d", run, err, len(f.rerunCalls()))
@@ -722,19 +687,16 @@ func TestFinalChecksRecordIncompleteAndNeverTheOriginalFailureWhenNoFreshResultA
 func TestFinalChecksResumeAfterARestartWithoutRepeatingARerunOrANotice(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
-	// During the wait.
 	f.clock.At(f.at(time.Minute))
 	f.restart()
 	if waiting := f.mustWait(); !waiting.Next.Equal(f.at(FinalChecksWait)) || f.api.readCount() != 0 {
 		t.Fatalf("waiting %v, reads %d", waiting, f.api.readCount())
 	}
-	// While pending.
 	f.afterWait()
 	f.api.set(f.loaded(), f.pending(2, 40*time.Second))
 	f.mustWait()
 	f.restart()
 	f.mustWait()
-	// After the rerun was requested, with the original failure still showing.
 	f.clock.Advance(10 * time.Minute)
 	original, checks := f.failingRun()
 	f.mustWait()
@@ -746,7 +708,6 @@ func TestFinalChecksResumeAfterARestartWithoutRepeatingARerunOrANotice(t *testin
 	if waiting := f.mustWait(); !strings.Contains(waiting.Reason, "posted before the rerun was requested") || len(f.rerunCalls()) != 1 || len(f.runs()) != 0 {
 		t.Fatalf("waiting %v, reruns %d, runs %+v", waiting, len(f.rerunCalls()), f.runs())
 	}
-	// After the fresh posting starts arriving.
 	f.clock.Advance(10 * time.Minute)
 	f.api.set(append([]pulls.CommitStatus{f.loaded(), f.pending(30, f.clock.Now().Sub(f.pushedAt))}, checks...)...)
 	f.mustWait()
@@ -773,9 +734,6 @@ func TestFinalChecksRecordARefusedRerunAsIncompleteAndRequestItAgainAfterTheWait
 	f.afterWait()
 	original, _ := f.failingRun()
 
-	// Dagger Cloud refuses the request: the run is incomplete at once, with
-	// the refusal and the token to check, and the original failure decides
-	// nothing.
 	run, err := f.check()
 	if err == nil || run.Status != ChecksIncomplete || !strings.Contains(run.Error, "Dagger Cloud refused the rerun") || !strings.Contains(run.Error, "dagger.cloud_api_token_env") || len(run.Reruns) != 1 || !strings.Contains(run.Reruns[0].Error, "invalid API token type") || len(run.Failed) != 0 {
 		t.Fatalf("run %+v: %v", run, err)
@@ -786,13 +744,11 @@ func TestFinalChecksRecordARefusedRerunAsIncompleteAndRequestItAgainAfterTheWait
 		t.Fatalf("rerun record %+v, calls %d", request, len(f.rerunCalls()))
 	}
 
-	// Nothing is requested again before the incomplete run's wait ends.
 	f.clock.Advance(FinalCheckDelay(1) - time.Minute)
 	if _, err := f.check(); err == nil || len(f.rerunCalls()) != 1 {
 		t.Fatalf("checks before the wait: %v, calls %d", err, len(f.rerunCalls()))
 	}
 
-	// After the wait, and after a restart, the request is made again.
 	f.clock.Advance(time.Minute)
 	f.restart()
 	if run, err := f.check(); err == nil || run.Status != ChecksIncomplete || len(f.rerunCalls()) != 2 {
@@ -802,8 +758,6 @@ func TestFinalChecksRecordARefusedRerunAsIncompleteAndRequestItAgainAfterTheWait
 		t.Fatalf("incomplete runs %d, %v", n, err)
 	}
 
-	// Once Dagger Cloud accepts it, the rerun is made and settles the push as
-	// a made rerun does.
 	fixturekit.Must(t, os.Remove(refuse))
 	f.clock.Advance(FinalCheckDelay(2))
 	if waiting := f.mustWait(); !strings.Contains(waiting.Reason, "the failed checks were rerun") {
@@ -827,7 +781,6 @@ func TestFinalChecksNeverRerunWhenTheRerunRecordExistsWithoutItsResult(t *testin
 	f := newWatchFixture(t)
 	f.afterWait()
 	original, _ := f.failingRun()
-	// A service that stopped between recording the request and running it.
 	w := &finalWatch{a: f.reviewer, cfg: f.cfg, stream: stream, report: f.report, push: Push{Number: 1, PullRequest: 7, Commit: pushedCommit}}
 	fixturekit.Must(t, w.writeRerun(context.Background(), FinalCheckRerunRecord{Review: 1, Push: 1, PullRequest: 7, PushedCommit: pushedCommit, Command: []string{"dagger"}, CheckRerun: rerunOf(original, f.clock.Now())}))
 	f.restart()
@@ -837,21 +790,19 @@ func TestFinalChecksNeverRerunWhenTheRerunRecordExistsWithoutItsResult(t *testin
 	}
 }
 
-func TestFinalChecksReadOlderLocalRecords(t *testing.T) {
+func TestAnExistingRecordOfTheReviewedCommitAndPushCompletesTheWatchWithoutAStatusRead(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t)
-	old := `{"review":1,"attempt":2,"operation":"review","commit":"` + reviewedCommit + `","status":"passed","command":["dagger","check"],"exit_code":0,"output":"ok","failed":["dag://?check=x"],"flaky":["dag://?check=y"],"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
-	content := []byte(old + "\n")
+	recorded := `{"review":1,"operation":"review","commit":"` + reviewedCommit + `","source":"pull_request","pull_request":7,"push":1,"pushed_commit":"` + pushedCommit + `","status":"passed","exit_code":0,"failed":["dag://?check=x"],"flaky":["dag://?check=y"],"started_at":"2026-01-02T03:04:05Z","finished_at":"2026-01-02T03:05:05Z"}`
+	content := []byte(recorded + "\n")
 	fixturekit.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: FinalChecksDocument(1), Revision: 1, Project: f.repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: checksActor, Cause: "review"}, Path: FinalChecksPath(1), Content: string(content)}}))
 	run := f.mustComplete()
-	if run.Source != "" || run.Status != "passed" || run.Attempt != 2 || f.api.readCount() != 0 {
+	if run.Source != api.CheckSourcePullRequest || run.Status != "passed" || f.api.readCount() != 0 {
 		t.Fatalf("run %+v", run)
 	}
-	if evidence := FinalCheckEvidence(run); !strings.Contains(evidence, "The run passed") || !strings.Contains(evidence, "dag://?check=y") {
+	if evidence := FinalCheckEvidence(run); !strings.Contains(evidence, "The result is passed") {
 		t.Fatalf("evidence:\n%s", evidence)
 	}
-	var decoded FinalCheckRun
-	fixturekit.Must(t, json.NewDecoder(bytes.NewReader(content)).Decode(&decoded))
 }
 
 func rerunOf(original pulls.CommitStatus, at time.Time) (r api.CheckRerun) {

@@ -1,19 +1,18 @@
 package service
 
 import (
-	context "context"
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	sync "sync"
-	testing "testing"
+	"context"
+	"sync"
+	"testing"
+
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// architectFixture is an active project with a ruled charter, a clone whose
-// tracked files seed the entity map, and the fake engine the architect's
-// turns run in.
 type architectFixture struct {
 	opts        Options
 	s           *Service
@@ -22,15 +21,15 @@ type architectFixture struct {
 	project     config.ProjectID
 	trace       string
 	clone       string
-	engine      *demoEngine
-	sessions    *demoSessions
-	clock       *demoClock
+	engine      *fixturekit.DemoEngine
+	sessions    *fixturekit.DemoSessions
+	clock       *fixturekit.DemoClock
 
 	scenarioOnce  sync.Once
 	scenarioState *intakefixture.ArchitectScenario
 }
 
-func newArchitectOptions(t *testing.T) (Options, string, *demoEngine, *demoSessions, *demoClock) {
+func newArchitectOptions(t *testing.T) (Options, string, *fixturekit.DemoEngine, *fixturekit.DemoSessions, *fixturekit.DemoClock) {
 	t.Helper()
 	opts, clone := projectFixture(t)
 	engine, sessions, clock, architect, issues := intakefixture.ArchitectExecution(t, opts.Config, clone)
@@ -46,7 +45,7 @@ func newArchitectFixture(t *testing.T, configure ...func(*Options)) *architectFi
 	}
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
-	f.project, f.trace = intakefixture.AddArchitectProject(t, f.c, clone, "1. Keep changes small.\n2. Every change has a test.\n", func(t *testing.T, p config.ProjectID, text string) { writeCharter(t, f.c, p, text) })
+	f.project, f.trace = intakefixture.AddArchitectProject(t, f.c, clone, intakefixture.ShedCharter, func(t *testing.T, p config.ProjectID, text string) { intakefixture.WriteCharter(t, f.c, p, text) })
 	return f
 }
 
@@ -71,20 +70,14 @@ func (f *architectFixture) handIn(t *testing.T, key, content string) config.Work
 
 func (f *architectFixture) repository() *trace.Repository { return f.s.sole().repository }
 
-// script installs the fake architect's behaviour for one turn: it delivers
-// the given files and returns a successful result.
 func (f *architectFixture) script(turn string, files map[string]string, check func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) error) {
 	f.scenario().Script(turn, files, check)
 }
 
-// await polls the workstream's feature and draft states until want accepts
-// them.
 func (f *architectFixture) await(t *testing.T, stream config.WorkstreamID, want func(feature, draft string) bool) {
 	t.Helper()
 	f.scenario().Await(t, stream, want)
 }
-
-var sketched = intakefixture.Sketched
 
 func (f *architectFixture) documents(t *testing.T, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()

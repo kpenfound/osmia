@@ -4,41 +4,39 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/browsertest"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-// The page shows no delivery card while the chief of staff's turn for the
-// final review notice has recorded no brief, and then shows the card with
-// the brief text, the screenshot as a thumbnail that opens the full image,
-// and the Before you ship items in their own labelled block.
 func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 	t.Parallel()
-	j := newBriefJourney(t, listenWeb)
-	stream := j.stream
-	project := j.repository.Project()
-	screenshot := j.capture(t, "uploads", j.report.Commit)
+	j := newBriefJourney(t, journey.ListenWeb)
+	stream := j.Stream
+	project := j.Repository.Project()
+	screenshot := j.capture(t, "uploads", j.Report.Commit)
 	items := []string{briefShipFirst, briefShipNext}
 	j.chief.plan(1, briefPlan{Text: briefText, Items: items, Screenshots: []string{screenshot}})
 	j.chief.hold()
 	j.run(t)
 	j.awaitStarts(t, 1)
 
-	p := openBrowser(t)
-	p.Run(chromedp.EmulateViewport(1280, 900), chromedp.Navigate("http://"+j.s.WebAddr()+"/"))
+	p := browsertest.OpenBrowser(t)
+	p.Run(chromedp.EmulateViewport(1280, 900), chromedp.Navigate("http://"+j.S.WebAddr()+"/"))
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.SelectWorkstream(stream)
-	card := intakefixture.DecisionCard(api.InboxEntry{Kind: InboxDelivery, Project: project, Workstream: stream})
+	card := intakefixture.DecisionCard(api.InboxEntry{Kind: api.InboxDelivery, Project: project, Workstream: stream})
 	cardSelector := strings.TrimSpace(card)
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the delivery entry is listed while the brief is pending: %+v", entries)
 	}
-	p.Await("no delivery card while the chief of staff writes the brief", `document.querySelector(`+quote(cardSelector)+`) === null`)
+	p.Await("no delivery card while the chief of staff writes the brief", `document.querySelector(`+browsertest.Quote(cardSelector)+`) === null`)
 
-	// The brief is recorded: the card appears with it.
 	j.chief.release()
-	p.Await("the delivery card", `document.querySelector(`+quote(cardSelector)+`) !== null`)
+	p.Await("the delivery card", `document.querySelector(`+browsertest.Quote(cardSelector)+`) !== null`)
 	brief := card + "[data-field=brief] "
 	p.AwaitText(brief+"[data-field=brief-text]", briefText)
 	p.AwaitText(brief+"[data-field=before-you-ship-label]", "Before you ship")
@@ -49,7 +47,7 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 		Links   []string `json:"links"`
 	}
 	p.Eval(`(() => {
-  const brief = document.querySelector(`+quote(strings.TrimSpace(brief))+`);
+  const brief = document.querySelector(`+browsertest.Quote(strings.TrimSpace(brief))+`);
   const block = brief.querySelector('[data-field=before-you-ship]');
   return {
     items: [...block.querySelectorAll('[data-field=before-you-ship-item]')].map(n => n.textContent),
@@ -65,7 +63,7 @@ func TestBrowserDeliveryCardIsHeldUntilTheBriefThenShowsIt(t *testing.T) {
 		t.Fatalf("the screenshot links %v, want %s", shown.Links, want)
 	}
 	p.Await("the screenshot thumbnail", `(() => {
-  const img = document.querySelector(`+quote(strings.TrimSpace(brief)+" a[data-field=image-link] img")+`);
+  const img = document.querySelector(`+browsertest.Quote(strings.TrimSpace(brief)+" a[data-field=image-link] img")+`);
   return !!img && img.complete && img.naturalWidth > 0;
 })()`)
 	p.AwaitText(card+"[data-field=pins]", "final review 1")

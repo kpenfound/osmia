@@ -71,8 +71,6 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 			if len(engine.Requests) != 2 {
 				t.Fatal("raw override reached construction")
 			}
-			// Only core's session can refuse these; every other widening is
-			// refused before a session is prepared.
 			prepared := 2
 			if coreRefuses[name] {
 				prepared = 3
@@ -84,7 +82,6 @@ func TestRawExecutionRequestCannotWidenBoundary(t *testing.T) {
 	}
 }
 
-// coreRefuses names the widening requests that reach core's session.
 var coreRefuses = map[string]bool{"VCS": true, "profile env": true, "shell": true}
 
 func boundaryTurn(t *testing.T, mode string) a.PreparedTurn {
@@ -169,8 +166,6 @@ func TestEverySandboxModeReachesRun(t *testing.T) {
 	}
 }
 
-// toolTurn is a read-only turn in mode with one granted tool on one service
-// MCP server.
 func toolTurn(t *testing.T, mode string) a.PreparedTurn {
 	t.Helper()
 	turn := boundaryTurn(t, mode)
@@ -239,7 +234,6 @@ func TestWritableViewPolicyIsAccepted(t *testing.T) {
 	if req := engine.Requests[0]; req.Workspace.Directory() != turn.Sandbox.Verified.Workspace.Directory || req.SystemPrompt != turn.SystemPrompt {
 		t.Fatalf("writable view: dir=%s prompt=%q", req.Workspace.Directory(), req.SystemPrompt)
 	}
-	// A writable view whose session reads it only is a mismatch too.
 	view := turn.Sandbox.Verified.Workspace.Directory
 	engine = &adaptertest.Engine{Policy: func(p *agent.Policy) { setAccess(p, view, agent.ReadOnly) }}
 	executor.Runner = engine
@@ -269,8 +263,6 @@ func TestCoreRefusalNeverStarts(t *testing.T) {
 			t.Fatalf("%v: err=%v launches=%d", refusal, err, len(engine.Requests))
 		}
 	}
-	// Any other failure, such as an unreadable path or an engine that has no
-	// enforcer, is not a refusal and keeps its own error.
 	failure := errors.New("fixture I/O failure")
 	for _, engine := range []*adaptertest.Engine{{PrepareErr: failure}, {EnforcerErr: failure}} {
 		_, err := (&a.TurnRunner{Executor: a.CoreExecutor{Required: turn.Sandbox.Verified, Runner: engine}}).Run(context.Background(), turn)
@@ -303,9 +295,6 @@ func TestNewEnforcer(t *testing.T) {
 	}
 }
 
-// Enforcers are told apart by the policy of a session they prepare: a host
-// kind under a confiner that allows everything and starts nothing, a
-// container with VCS granted, which Prepare does not look into the image for.
 func TestNewEnforcerKinds(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -342,10 +331,6 @@ func TestNewEnforcerKinds(t *testing.T) {
 	}
 }
 
-// allowAll stands in for a real agent.Confiner, which would actually confine
-// and launch a host process. It leaves unverified whether a real confiner
-// enforces its policy; this test only checks which enforcer kind Prepare
-// hands out for each sandbox mode.
 type allowAll struct{}
 
 func (allowAll) Check(agent.Confinement) error { return nil }

@@ -17,7 +17,7 @@ type SessionDestroy struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Kind       string              `json:"kind"`
 	// At is when the destroy was recorded, the end of the workstream's root
-	// span. Intents recorded before it was kept have none.
+	// span.
 	At time.Time `json:"at,omitempty"`
 }
 
@@ -56,7 +56,6 @@ func (r *Repository) BeginSessionDestroy(intent SessionDestroy) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	// Persist the new directory entries as well as the eventual intent file.
 	if err := syncDestroyDirectory(root.String()); err != nil {
 		return err
 	}

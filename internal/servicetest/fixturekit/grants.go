@@ -1,10 +1,11 @@
 package fixturekit
 
 import (
-	"github.com/kpenfound/agentcore/agent"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/kpenfound/agentcore/agent"
 )
 
 // CheckGrants reports a request whose grants or verified turn reach beyond a

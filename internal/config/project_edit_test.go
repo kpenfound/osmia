@@ -2,15 +2,11 @@ package config
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// A project file as an owner keeps it: reordered, commented, with a hand edit
-// and an ignored [preview] table.
 const ownerProjectFile = `# Settings of the shop project.
 version = 1
 checks_timeout = "30m" # raised by hand
@@ -19,7 +15,7 @@ fork = "owner/repo"
 # Where the clone lives.
 clone = "~/clone"
 
-[preview]
+[notes]
 call = ["serve"]
 port = 8080
 
@@ -40,7 +36,6 @@ func TestEditTOMLChangesOnlyTheEditedKeys(t *testing.T) {
 		{path: []string{"capacity", "git_operations"}, remove: true},
 		{path: []string{"hearsay_entities", "cart"}, value: "cart-scope"},
 		{path: []string{"hearsay_entities", "shop"}, remove: true},
-		{path: []string{"classifier"}, remove: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +48,7 @@ upstream = "upstream/repo"
 clone = "~/clone"
 landing = "squash"
 
-[preview]
+[notes]
 call = ["serve"]
 port = 8080
 
@@ -81,8 +76,8 @@ func TestEditTOMLPlacesNewKeysAndTables(t *testing.T) {
 			"version = 1\nname = \"x\"\nlanding = \"squash\"\n"},
 		{"file without keys", "# only a comment\n", []keyEdit{{path: []string{"name"}, value: "x"}},
 			"name = \"x\"\n# only a comment\n"},
-		{"dotted keys", "version = 1\ncapacity.git_operations = 2\n[preview]\nport = 1\n", []keyEdit{{path: []string{"capacity", "per_workstream"}, value: 4}, {path: []string{"capacity", "git_operations"}, remove: true}},
-			"version = 1\ncapacity.per_workstream = 4\n[preview]\nport = 1\n"},
+		{"dotted keys", "version = 1\ncapacity.git_operations = 2\n[notes]\nport = 1\n", []keyEdit{{path: []string{"capacity", "per_workstream"}, value: 4}, {path: []string{"capacity", "git_operations"}, remove: true}},
+			"version = 1\ncapacity.per_workstream = 4\n[notes]\nport = 1\n"},
 		{"quoted entity", "version = 1\n[hearsay_entities]\n", []keyEdit{{path: []string{"hearsay_entities", "web.shop"}, value: "scope"}},
 			"version = 1\n[hearsay_entities]\n\"web.shop\" = \"scope\"\n"},
 		{"existing quoted key", "version = 1\n\"name\" = 'old'\n", []keyEdit{{path: []string{"name"}, value: "new \"quoted\""}},
@@ -91,10 +86,9 @@ func TestEditTOMLPlacesNewKeysAndTables(t *testing.T) {
 			"version = 1\r\nname = \"x\"\r\nlanding = \"squash\"\r\n[capacity]\r\ngit_operations = 2\r\nper_workstream = 3\r\n"},
 		{"a multi-line value elsewhere", "version = 1\nnotes = \"\"\"\nname = \"fake\"\n[capacity]\n\"\"\"\nname = \"x\"\n", []keyEdit{{path: []string{"name"}, remove: true}},
 			"version = 1\nnotes = \"\"\"\nname = \"fake\"\n[capacity]\n\"\"\"\n"},
-		{"removing an absent key", "version = 1\n", []keyEdit{{path: []string{"classifier"}, remove: true}}, "version = 1\n"},
+		{"removing an absent key", "version = 1\n", []keyEdit{{path: []string{"landing"}, remove: true}}, "version = 1\n"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			// notes is not a project key, but the text edit is generic.
 			got, err := editTOML(c.text, c.edits)
 			if err != nil || got != c.want {
 				t.Fatalf("got %q, %v; want %q", got, err, c.want)
@@ -117,7 +111,7 @@ func TestEditTOMLRefusesLayoutsItCannotChangeSafely(t *testing.T) {
 func projectEditFixture(t *testing.T, project string) (*Config, Options) {
 	t.Helper()
 	opts := fixture(t, topConfig+"[profiles.other]\nagent = \"claude\"\nmodel = \"other\"\n", project)
-	c, err := Load(opts)
+	c, err := load(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +129,6 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 	}{
 		{"checks timeout out of range", str("checks_timeout", "25h"), "checks_timeout"},
 		{"checks timeout too small", str("checks_timeout", "30s"), "checks_timeout"},
-		{"removed classifier", str("classifier", "other"), "classifier"},
 		{"malformed upstream", str("upstream", "https://github.com/a/b.git"), "upstream"},
 		{"malformed fork", str("fork", "nope"), "fork"},
 		{"bad branch", str("base_branch", "a..b"), "base_branch"},
@@ -149,7 +142,7 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 		{"bad capacity", ProjectEdit{Ints: map[string]int{"capacity.per_workstream": 0}}, "capacity.per_workstream"},
 		{"bad git operations", ProjectEdit{Ints: map[string]int{"capacity.git_operations": -1}}, "capacity.git_operations"},
 		{"bad entity", ProjectEdit{Entities: map[string]string{"shop": "BAD"}}, "hearsay_entities"},
-		{"unknown setting", str("group_id", "x"), "group_id"},
+		{"unknown setting", str("colour", "x"), "colour"},
 		{"required upstream cleared", ProjectEdit{Clear: []string{"upstream"}}, "upstream"},
 		{"required clone cleared", ProjectEdit{Clear: []string{"clone"}}, "clone"},
 		{"set and cleared", ProjectEdit{Strings: map[string]string{"landing": "squash"}, Clear: []string{"landing"}}, "landing"},
@@ -175,9 +168,8 @@ func TestEditProjectValidatesTheResultLikeLoading(t *testing.T) {
 	if p := file.Project; p.ChecksTimeout != "30m" || p.Landing != "squash" || p.Capacity.PerWorkstream != 3 || !file.Set("landing") || file.Set("base_branch") || file.Set("capacity.git_operations") {
 		t.Fatalf("decoded: %+v", file)
 	}
-	// The edited bytes load to the same project from disk.
-	write(t, filepath.Join(c.Root.String(), "projects", pid, "config.toml"), string(edited))
-	fresh, err := Load(opts)
+	write(t, projectFile(opts), string(edited))
+	fresh, err := load(opts)
 	if err != nil || !reflect.DeepEqual(fresh.Project, file.Project) {
 		t.Fatalf("fresh load: %+v %v", fresh.Project, err)
 	}
@@ -207,27 +199,6 @@ func TestEditProjectClearsKeysToTheirDefaults(t *testing.T) {
 	}
 	if file.Set("checks_timeout") || file.Set("capacity.per_workstream") || !file.Set("hearsay_entities") {
 		t.Fatal("markers do not follow the file")
-	}
-}
-
-func TestReplaceFileFailureLeavesNoTemporaryFile(t *testing.T) {
-	path := editFixture(t, "version = 1\n")
-	failure := errors.New("injected")
-	err := writeAtomicallyBefore(path, []byte("version = 2\n"), 0600, func(tmp string) error {
-		if _, err := os.Stat(tmp); err != nil {
-			t.Errorf("the temporary file is missing before the rename: %v", err)
-		}
-		return failure
-	})
-	if !errors.Is(err, failure) || read(t, path) != "version = 1\n" {
-		t.Fatalf("failed write: %v, file %q", err, read(t, path))
-	}
-	entries, err := os.ReadDir(filepath.Dir(path))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("left behind: %v %v", entries, err)
-	}
-	if err := ReplaceFile(path, []byte("version = 3\n")); err != nil || read(t, path) != "version = 3\n" {
-		t.Fatalf("replace: %v %q", err, read(t, path))
 	}
 }
 

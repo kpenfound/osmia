@@ -112,7 +112,6 @@ func TestPauseHoldsWorkerTurnsWhileChiefOfStaffRuns(t *testing.T) {
 		defer mu.Unlock()
 		ran = append(ran, p.Scope.Role+"/"+p.Scope.Turn)
 		if p.Scope.Role == "mason" && p.Scope.Turn == "one" {
-			// The pause arrives while this turn is in flight.
 			pauses = []runtime.Pause{paused}
 		}
 		return result(p.Scope.Turn).Value, nil

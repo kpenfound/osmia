@@ -173,7 +173,6 @@ func transitionAnswers(in map[string]systemone.Answer) (TransitionAnswers, bool)
 	return out, true
 }
 
-// transitionQuestions returns the questions of a request, keyed by ID.
 func transitionQuestions(req TransitionRequest) (map[string]systemone.Question, []string, error) {
 	if len(req.Options) < 2 {
 		return nil, nil, errors.New("a transition request needs at least two legal targets")
@@ -299,7 +298,6 @@ func (j *Judge) DecideTransition(ctx context.Context, repo *trace.Repository, re
 	return TransitionResult{Answered: true, Answers: answers, Judgment: d.ID, Recorded: d.Recovered}
 }
 
-// transitionFailure is the latest failed transition request.
 type transitionFailure struct {
 	reason Reason
 	detail string
@@ -321,8 +319,6 @@ func (j *Judge) clearTransition() {
 	j.failure = nil
 }
 
-// transitionDegraded returns the latest transition request's failure since the
-// last answered one, if any.
 func (j *Judge) transitionDegraded() *transitionFailure {
 	j.failMu.Lock()
 	defer j.failMu.Unlock()

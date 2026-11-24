@@ -30,7 +30,7 @@ func (j *FakeJJ) Check(ctx context.Context) (string, error) {
 	return j.Version, j.Err
 }
 
-// lastBounded reports whether the latest check had a deadline no later than
+// LastBounded reports whether the latest check had a deadline no later than
 // jjCheckTimeout from when it ran.
 func (j *FakeJJ) LastBounded() bool {
 	j.Mu.Lock()

@@ -41,10 +41,8 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 	if selected.ID == shared.ID {
 		t.Fatal("second judgment in a turn was lost")
 	}
-	// A local log predating shared-chief adoption still belongs only to its
-	// member. Legacy entries have no affected-member field.
-	legacy := Assumption{ID: "1", Text: "Member-local convention."}
-	data, err := json.Marshal(assumptionsFile{Version: 1, Assumptions: []Assumption{legacy}})
+	memberLocal := Assumption{ID: "1", Text: "Member-local convention."}
+	data, err := json.Marshal(assumptionsFile{Version: 1, Assumptions: []Assumption{memberLocal}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +57,7 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 			stream config.WorkstreamID
 			texts  []string
 		}{
-			{a, crossMember1, []string{legacy.Text, shared.Text}},
+			{a, crossMember1, []string{memberLocal.Text, shared.Text}},
 			{b, crossMember2, []string{shared.Text, selected.Text}},
 		} {
 			got, err := Assumptions(test.repo, test.stream)
@@ -76,7 +74,6 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 		}
 	}
 	check(r1, r2)
-	// Explicit outsiders and duplicate targets cannot change the log.
 	for _, targets := range [][]config.WorkstreamID{
 		{"w_00000000000000000000000000000099"}, {crossMember1, crossMember1},
 	} {
@@ -93,8 +90,6 @@ func TestSharedAssumptionsSelectMembersAndRetainLocalHistory(t *testing.T) {
 	}
 	wg, r1, r2 = reopenCrossRepoWorkgroup(t, root, p1, p2, wg, r1, r2, g.ID)
 	check(r1, r2)
-	// A cold authority open needs neither a live chief turn nor another
-	// member's repository bound to the authority.
 	if err := wg.Close(); err != nil {
 		t.Fatal(err)
 	}

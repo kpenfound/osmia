@@ -53,8 +53,8 @@ type Dependencies struct {
 	// CloudStatuses reads the combined statuses of the pushed commit. When nil,
 	// PullRequests is used if it reads statuses.
 	CloudStatuses pulls.StatusReader
-	// PostPushWait replaces FinalChecksWait, the time after a push before the
-	// statuses of its commit are read. Nil keeps FinalChecksWait.
+	// PostPushWait is the time after a push before the statuses of its commit
+	// are read. Nil means FinalChecksWait.
 	PostPushWait *time.Duration
 	// CloudRerun requests the one rerun of a push's failed checks. It is nil
 	// when none can be requested.
@@ -100,8 +100,6 @@ type Controller struct{ Dependencies }
 
 func New(d Dependencies) *Controller { return &Controller{d} }
 
-// finalGate returns the workstream's latest final report and why it does not
-// authorise delivery now, or "".
 func (s *Controller) finalGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (FinalReport, string, error) {
 	if s.FinalGate != nil {
 		return s.FinalGate(ctx, repository, stream)
@@ -109,7 +107,6 @@ func (s *Controller) finalGate(ctx context.Context, repository *trace.Repository
 	return (&FinalReviewer{S: s, Repository: repository}).FinalGate(ctx, stream)
 }
 
-// postPushWait is how long after a push its statuses are not read.
 func (s *Controller) postPushWait() time.Duration {
 	if s.PostPushWait != nil {
 		return *s.PostPushWait
@@ -117,8 +114,6 @@ func (s *Controller) postPushWait() time.Duration {
 	return FinalChecksWait
 }
 
-// statusReader is the reader of commit statuses the controller uses, or nil
-// when it has none.
 func (s *Controller) statusReader() pulls.StatusReader {
 	if s.CloudStatuses != nil {
 		return s.CloudStatuses

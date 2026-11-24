@@ -205,17 +205,6 @@ func (st *State) setRecord(repository, fingerprint string, rec IssueRecord) {
 	rs.Issues[fingerprint] = &rec
 }
 
-// IntentsFor returns the unresolved intents recorded for repository.
-func (st *State) IntentsFor(repository string) []Intent {
-	var out []Intent
-	for _, in := range st.Intents {
-		if sameRepo(in.Repository, repository) {
-			out = append(out, in.clone())
-		}
-	}
-	return out
-}
-
 func (st *State) firstIntent(repository string) *Intent {
 	for i := range st.Intents {
 		if sameRepo(st.Intents[i].Repository, repository) {
@@ -242,17 +231,6 @@ func (st *State) removeIntent(in Intent) bool {
 		}
 	}
 	return false
-}
-
-// AwaitingFor returns the recurrences awaiting a state check in repository.
-func (st *State) AwaitingFor(repository string) []Awaiting {
-	var out []Awaiting
-	for _, aw := range st.Awaiting {
-		if sameRepo(aw.Repository, repository) {
-			out = append(out, aw)
-		}
-	}
-	return out
 }
 
 // NoteAttempt counts one more attempt of the intent's write or of reconciling
@@ -334,7 +312,6 @@ func (st *State) NoteCheckAttempt(repository, fingerprint string, at time.Time) 
 	}
 }
 
-// pruneAwaiting drops awaiting entries whose saved issue is gone or changed.
 func (st *State) pruneAwaiting() {
 	kept := st.Awaiting[:0]
 	for _, aw := range st.Awaiting {

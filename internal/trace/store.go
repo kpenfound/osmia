@@ -15,8 +15,6 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// The files of a trace directory: its database, the database's write-ahead
-// log and shared-memory index, and the process lock.
 const (
 	databaseFile = "trace.db"
 	lockFile     = "osmia.lock"
@@ -26,8 +24,6 @@ const (
 // trace refuses to open until it is repaired or restored.
 var ErrIntegrity = errors.New("trace database failed its integrity check")
 
-// schemaVersion is the database schema this build reads and writes, recorded
-// in PRAGMA user_version.
 const schemaVersion = 1
 
 const schema = `
@@ -65,13 +61,8 @@ CREATE TABLE workflow_threads (
 );
 `
 
-// storeFiles are the files a trace directory may hold besides a project's
-// configuration.
 var storeFiles = []string{databaseFile, databaseFile + "-wal", databaseFile + "-shm", lockFile}
 
-// checkStoreFiles refuses a trace directory whose database or lock is a
-// symlink, not a regular file, or has a second link: an alias would let two
-// traces share state. An absent file is accepted.
 func checkStoreFiles(directory string) error {
 	for _, name := range storeFiles {
 		info, err := os.Lstat(filepath.Join(directory, name))
@@ -94,16 +85,11 @@ func checkStoreFiles(directory string) error {
 	return nil
 }
 
-// databaseDSN is the driver's name for the database at path, opened with
-// pragmas, in order, and with any further query parameters.
 func databaseDSN(path string, params ...string) string {
 	escaped := strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(path)
 	return "file:" + escaped + "?" + strings.Join(params, "&")
 }
 
-// openDatabases opens the database at path: one write connection, whose
-// transactions begin immediately, and a pool of read-only connections that
-// read the last committed state without waiting on a write in progress.
 func openDatabases(path string) (*sql.DB, *sql.DB, error) {
 	write, err := sql.Open("sqlite", databaseDSN(path, "_pragma=busy_timeout(5000)", "_pragma=journal_mode(WAL)", "_pragma=synchronous(FULL)", "_pragma=foreign_keys(ON)", "_txlock=immediate"))
 	if err != nil {
@@ -127,14 +113,12 @@ func openDatabases(path string) (*sql.DB, *sql.DB, error) {
 	return write, read, nil
 }
 
-// schemaOf reads the database's schema version.
 func schemaOf(ctx context.Context, db *sql.DB) (int, error) {
 	var version int
 	err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version)
 	return version, err
 }
 
-// initialize creates the schema of a new, empty database.
 func initialize(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -150,7 +134,6 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
-// quickCheck runs SQLite's integrity check over the database at path.
 func quickCheck(ctx context.Context, db *sql.DB, path string) error {
 	rows, err := db.QueryContext(ctx, "PRAGMA quick_check")
 	if err != nil {
@@ -176,9 +159,6 @@ func quickCheck(ctx context.Context, db *sql.DB, path string) error {
 	return nil
 }
 
-// openDatabase checks the trace directory's files, takes the process lock and
-// opens the trace database, which it creates with an empty schema when create
-// is set and none exists. The lock is held until Close.
 func (r *Repository) openDatabase(create bool) error {
 	if err := checkStoreFiles(r.directory); err != nil {
 		return err
@@ -189,7 +169,6 @@ func (r *Repository) openDatabase(create bool) error {
 	return r.openLocked(create)
 }
 
-// openLocked is openDatabase once the process lock is held.
 func (r *Repository) openLocked(create bool) error {
 	path := filepath.Join(r.directory, databaseFile)
 	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) && !create {
@@ -229,7 +208,6 @@ func (r *Repository) openLocked(create bool) error {
 	return quickCheck(ctx, write, path)
 }
 
-// acquire takes the trace directory's exclusive process lock.
 func (r *Repository) acquire() error {
 	path := filepath.Join(r.directory, lockFile)
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0600)
@@ -248,7 +226,6 @@ func (r *Repository) acquire() error {
 	return nil
 }
 
-// closeDatabases closes the handle's database connections.
 func (r *Repository) closeDatabases() error {
 	var errs []error
 	if r.reads != nil {
@@ -274,7 +251,6 @@ func HasTraceDatabase(directory string) (bool, error) {
 	return err == nil, err
 }
 
-// sqliteCode is the primary result code of a database error, or 0.
 func sqliteCode(err error) int {
 	var e *sqlite.Error
 	if errors.As(err, &e) {
@@ -283,8 +259,6 @@ func sqliteCode(err error) int {
 	return 0
 }
 
-// damaged reports whether err is SQLite finding the database damaged or not
-// a database at all.
 func damaged(err error) bool {
 	code := sqliteCode(err)
 	return code == sqlite3.SQLITE_CORRUPT || code == sqlite3.SQLITE_NOTADB

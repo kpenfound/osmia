@@ -11,9 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// newRouter returns the service's transition router. It asks the service's
-// Jev, so a failed request marks the same Jev degraded in the status, and it
-// sends its route spans through the service's telemetry.
 func (s *Service) newRouter() *router.Router {
 	effects := &router.Effects{}
 	execution.RegisterUnitEffects(effects, s.execution)
@@ -60,9 +57,6 @@ func (s *Service) SubmitExit(x router.Exit, done func(router.Result, error)) boo
 	return s.routing.Submit(x, done)
 }
 
-// routerPort is the service's router as the unit controllers use it: an exit
-// that waits on a request is routed in place, and an exit a scheduling pass
-// raises goes to the worker.
 type routerPort struct{ s *Service }
 
 func (p routerPort) Route(ctx context.Context, x router.Exit) (router.Result, error) {
@@ -77,9 +71,6 @@ func (p routerPort) Submit(x router.Exit, done func(router.Result, error)) bool 
 	return p.s.SubmitExit(x, done)
 }
 
-// recoverRoutes finishes, for every workstream of the project, the transition
-// picks that were recorded but not applied when the service stopped. The picks
-// are applied with no request to Jev.
 func (s *Service) recoverRoutes(ctx context.Context, repository *trace.Repository) {
 	streams, err := repository.Workstreams()
 	if err != nil {

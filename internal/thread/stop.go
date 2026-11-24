@@ -29,7 +29,6 @@ func Stoppable(ctx context.Context) (context.Context, func(*Stop)) {
 	return context.WithValue(ctx, executionKey{}, execution), func(s *Stop) { cancel(s) }
 }
 
-// execution returns the context the turn's agent session runs under.
 func execution(ctx context.Context) context.Context {
 	if e, ok := ctx.Value(executionKey{}).(context.Context); ok {
 		return e
@@ -37,7 +36,6 @@ func execution(ctx context.Context) context.Context {
 	return ctx
 }
 
-// stopped returns the Stop the session context was cancelled with, or nil.
 func stopped(ctx context.Context) *Stop {
 	var s *Stop
 	if errors.As(context.Cause(ctx), &s) {

@@ -25,23 +25,16 @@ func init() {
 	gateRescan, gateScanGap = 200*time.Millisecond, 20*time.Millisecond
 }
 
-// gateJev is a fake Jev provider that answers every decision request with the
-// pick its script chooses from the request's options, at the given confidence,
-// and records the requests it received.
 type gateJev struct {
 	confidence float64
-	// pick chooses among the options by state; it defaults to the first.
-	pick func(state string, options []string) string
-	// wait runs before each answer and may block until the request ends.
-	wait func(ctx context.Context, state string) error
+	pick       func(state string, options []string) string
+	wait       func(ctx context.Context, state string) error
 
 	mu       sync.Mutex
 	requests []systemone.Request
 }
 
 func (g *gateJev) Evaluate(ctx context.Context, r systemone.Request) (systemone.Response, error) {
-	// A decide-transition request, which the router sends for the exits it
-	// routes, is answered "the default fits" and is not one of the gate requests.
 	if resp, ok := jevfixture.AnswerTransition(r, 1, nil); ok {
 		return resp, nil
 	}
@@ -82,8 +75,6 @@ func (g *gateJev) Requests() []systemone.Request {
 	return append([]systemone.Request(nil), g.requests...)
 }
 
-// gateJudge is a judge asking p under the default decision threshold, or an
-// unconfigured one when p is nil.
 func gateJudge(now func() time.Time, p *gateJev) *jev.Judge {
 	settings := config.Jev{URL: config.DefaultJevURL, Model: "jev-test", APIKeyEnv: "OSMIA_TEST_JEV_KEY", Timeout: "3s", CheckThreshold: config.DefaultJevCheckThreshold, DecisionThreshold: config.DefaultJevDecisionThreshold, OwnerThreshold: config.DefaultJevOwnerThreshold}
 	j := &jev.Judge{Config: func() config.Jev { return settings }, Getenv: func(string) string { return "" }, Now: now}
@@ -93,17 +84,12 @@ func gateJudge(now func() time.Time, p *gateJev) *jev.Judge {
 	return j
 }
 
-// fakeGate is an owner gate whose records the test controls: its decision, and
-// what applying a pick does.
 type fakeGate struct {
-	gate    intake.Gate
-	applied atomic.Int32
-	mu      sync.Mutex
-	state   intake.GateDecision
-	// refuse is what applying the pick answers instead of recording it.
-	refuse *intake.APIError
-	// ownerFirst, when set, is the decision the second read finds: the owner
-	// decided between Jev's judgment and its application.
+	gate       intake.Gate
+	applied    atomic.Int32
+	mu         sync.Mutex
+	state      intake.GateDecision
+	refuse     *intake.APIError
 	ownerFirst bool
 	reads      int
 }
@@ -137,13 +123,11 @@ func newGateFixture(t *testing.T, p *gateJev) *gateFixture {
 	return f
 }
 
-// restart is a new worker over the same records, with the judge replaced.
 func (f *gateFixture) restart(p *gateJev) {
 	f.s.jev = gateJudge(f.now, p)
 	f.w = newGateWorker(f.s, f.w.active)
 }
 
-// gate is a gate of the kind whose options are the named ones.
 func (f *gateFixture) gate(kind jev.DecisionKind, key string, options ...string) *fakeGate {
 	g := &fakeGate{}
 	var opts []jev.DecisionOption
@@ -169,7 +153,7 @@ func (f *gateFixture) gate(kind jev.DecisionKind, key string, options ...string)
 func (f *gateFixture) result(t *testing.T, g *fakeGate) jev.Result {
 	t.Helper()
 	res, err := f.s.jev.Lookup(f.repo, g.gate.Stream, g.gate.Kind, g.gate.Key)
-	must(t, err)
+	fixturekit.Must(t, err)
 	return res
 }
 
@@ -437,7 +421,6 @@ func TestGateWorkerOneHangingGateDoesNotHoldUpAnother(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the slow gate never gave up")
 	}
-	// The gate whose request timed out is a fallback: it went to the owner.
 	if res := f.result(t, slow); res.Status != jev.FallbackOnly || slow.applied.Load() != 0 {
 		t.Fatalf("slow gate: %+v, applied %d times", res, slow.applied.Load())
 	}
@@ -463,7 +446,6 @@ func TestSchedulingHookWakesTheGateWorkerWithoutWaiting(t *testing.T) {
 		t.Fatal("wakes did not coalesce")
 	default:
 	}
-	// A trace without a worker is not an error.
 	f.s.gateWorkers.Delete(f.repo)
 	f.s.kickGates(f.repo)
 }

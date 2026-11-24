@@ -13,15 +13,14 @@ import (
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// webTurnController is a lifecycle controller wired to recording fake
-// engines: one for the architect and one for the committee.
 func webTurnController(t *testing.T) (*lifecycle.Controller, *adaptertest.Engine, *adaptertest.RecordingHosts, *adaptertest.Engine, *adaptertest.RecordingHosts) {
 	t.Helper()
-	cfg, err := config.Load(fixturekit.ConfigAt(t, t.TempDir()))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, t.TempDir()))
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, os.MkdirAll(filepath.Join(cfg.Root.String(), "views"), 0700))
 	architect, architectHosts := &adaptertest.Engine{}, &adaptertest.RecordingHosts{}
@@ -41,10 +40,6 @@ func webTurnController(t *testing.T) (*lifecycle.Controller, *adaptertest.Engine
 	return c, architect, architectHosts, committee, committeeHosts
 }
 
-// runWebTurn runs one turn of role through turns on backend and reads what
-// reached the engine and the host the controller wired it to. The turns keep
-// their production grants, role ceiling, system prompt and engine; the view is
-// a stub, as selecting the real one needs a sealed plan.
 func runWebTurn(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engine, hosts *adaptertest.RecordingHosts, role string, tools []string, system, backend string) adaptertest.Turn {
 	t.Helper()
 	workspace := t.TempDir()
@@ -64,12 +59,6 @@ func runWebTurn(t *testing.T, turns *isolation.Turns, engine *adaptertest.Engine
 	return got
 }
 
-// The workgroup turn paths the architect and the committee run, built by
-// their real constructors and run through isolation.Turns into a fake engine,
-// hold the backend's web tools and are told about them on every backend: the
-// architect's project-spec draft, and the delta debate's deliver_delta,
-// answer_delta and review_delta. The service tool each turn kept is the only
-// one it serves, and its view is read-only with no write, shell or Network.
 func TestWorkgroupTurnPathsHoldWebTools(t *testing.T) {
 	t.Parallel()
 	c, architect, architectHosts, committee, committeeHosts := webTurnController(t)
@@ -77,13 +66,11 @@ func TestWorkgroupTurnPathsHoldWebTools(t *testing.T) {
 	const architectRole, committeeRole = intake.ArchitectRole, intake.CommitteeRole
 	type path struct {
 		role, prompt string
-		// tools are the service tools the turn serves; read is whether it
-		// also holds the file reading tool.
-		tools  []string
-		read   bool
-		turns  func() *isolation.Turns
-		engine *adaptertest.Engine
-		hosts  *adaptertest.RecordingHosts
+		tools        []string
+		read         bool
+		turns        func() *isolation.Turns
+		engine       *adaptertest.Engine
+		hosts        *adaptertest.RecordingHosts
 	}
 	delta := func(role, agent, tool string) func() *isolation.Turns {
 		return func() *isolation.Turns {
@@ -107,7 +94,6 @@ func TestWorkgroupTurnPathsHoldWebTools(t *testing.T) {
 				got := runWebTurn(t, turns, p.engine, p.hosts, p.role, p.tools, p.prompt, backend)
 				want := slices.Clone(p.tools)
 				if p.read {
-					// The file reading tool is served beside the turn's own.
 					want = append(want, "file_read")
 				}
 				adaptertest.CheckWebTurn(t, got, backend, want, p.prompt)

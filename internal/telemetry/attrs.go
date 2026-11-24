@@ -61,9 +61,9 @@ var (
 type kind int
 
 const (
-	kindID    kind = iota + 1 // identifier-shaped string; the zero kind is a key outside the allow-list
-	kindToken                 // lowercase word of an enumerated value
-	kindIDs                   // list of identifier-shaped strings
+	kindID kind = iota + 1
+	kindToken
+	kindIDs
 	kindInt
 	kindFloat
 	kindBool
@@ -92,9 +92,6 @@ func AttributeKeys() []string {
 	return keys
 }
 
-// identifier matches the shape of an ID, a role, a model or a profile name: a
-// single word of at most 128 characters with no whitespace. Text with spaces or
-// line breaks never matches. token is the narrower shape of an enumerated value.
 var (
 	identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127}$`)
 	token      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)

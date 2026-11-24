@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// The checks-choice card offers keep waiting and continue without check
-// results, and sends the answer with the push the entry pins.
 func TestBrowserChecksChoiceSendsTheChosenAnswerWithItsPush(t *testing.T) {
 	t.Parallel()
 	pin := `{"push":2,"pull_request":7,"pushed_commit":"abc123def456","operation":"review-2","offer":3}`

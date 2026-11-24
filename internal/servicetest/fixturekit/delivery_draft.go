@@ -11,9 +11,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// SetStatusGoal records goal as the workstream's chief-of-staff status, the
-// value workstreamTitle (and archiveTitle and status) read as the
-// workstream's title.
+// SetStatusGoal records goal as the workstream's chief-of-staff status, which
+// is the workstream's title.
 func SetStatusGoal(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, goal string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -32,7 +31,7 @@ func SetStatusGoal(t *testing.T, repository *trace.Repository, stream config.Wor
 }
 
 // RecordHanded records a handed document for stream with the given recorded
-// source, as hand-in would, so draftDelivery can read it.
+// source, as hand-in would, so delivery drafting can read it.
 func RecordHanded(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, source string, at time.Time) {
 	t.Helper()
 	Must(t, repository.Append(context.Background(), trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "handed", Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: OwnerActor, Cause: "fixture"},

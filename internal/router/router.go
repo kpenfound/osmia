@@ -100,7 +100,6 @@ func resultOf(rec Record, reused bool) Result {
 	return out
 }
 
-// lock serialises the asks of one occurrence.
 func (r *Router) lock(x Exit, key string) func() {
 	id := fmt.Sprintf("%p/%s/%s", x.Repo, x.Workstream, key)
 	m, _ := r.locks.LoadOrStore(id, &sync.Mutex{})
@@ -109,22 +108,14 @@ func (r *Router) lock(x Exit, key string) func() {
 	return mu.Unlock
 }
 
-// legality returns why the target is not legal for the exit now, or "". It is
-// the one definition of the hard prerequisites: the router uses it to filter
-// the targets Jev is offered and again, against current state, whenever it
-// applies a target. A non-nil error is a failure to read.
 func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error) {
 	a := x.Authority
 	switch {
 	case t.Approval:
-		// Approval comes only from a reviewer's verdict for the current
-		// candidate or from the owner.
 		if a == nil || a.Target != t.Name || a.Kind != AuthorityReviewer && a.Kind != AuthorityOwner {
 			return "approval comes only from a reviewer verdict or the owner", nil
 		}
 	case t.Gate:
-		// An owner gate is entered only on the owner's decision or one of Jev's
-		// existing gate decisions.
 		if a == nil || a.Target != t.Name || a.Kind != AuthorityOwner && a.Kind != AuthorityJevGate {
 			return "an owner gate opens only on an owner decision or a gate decision of Jev", nil
 		}
@@ -142,9 +133,6 @@ func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error)
 			return why, err
 		}
 	}
-	// The limits on work apply to a target by what it does, never by how it was
-	// reached: a pinned decision and a default entered with its trigger's own
-	// records meet them as a pick does.
 	if t.Works {
 		if why, err := r.paused(ctx, x, t); err != nil || why != "" {
 			return why, err
@@ -166,8 +154,6 @@ func (r *Router) legality(ctx context.Context, x Exit, t Target) (string, error)
 	return "", nil
 }
 
-// paused returns why the owner's pause holds the target, or "". Only a target
-// that starts work is held.
 func (r *Router) paused(ctx context.Context, x Exit, t Target) (string, error) {
 	if !t.Works || r.Paused == nil {
 		return "", nil
@@ -175,14 +161,10 @@ func (r *Router) paused(ctx context.Context, x Exit, t Target) (string, error) {
 	return r.Paused(ctx, x)
 }
 
-// deferred is the result of an exit the owner's pause holds: nothing is
-// committed or recorded, and the exit is offered again once the pause lifts.
 func deferred(x Exit, target, why string) Result {
 	return Result{Outcome: OutcomeHeld, State: x.From, Target: target, Hold: HoldPaused, Reason: why}
 }
 
-// legalTargets returns the targets of the exit that pass every hard
-// prerequisite, in the exit's order, and why each of the others does not.
 func (r *Router) legalTargets(ctx context.Context, x Exit) ([]Target, map[string]string, error) {
 	var legal []Target
 	why := map[string]string{}
@@ -200,7 +182,6 @@ func (r *Router) legalTargets(ctx context.Context, x Exit) ([]Target, map[string
 	return legal, why, nil
 }
 
-// decision is a target chosen for an exit and how it was chosen.
 type decision struct {
 	target    string
 	outcome   string
@@ -275,7 +256,6 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 			}
 			return *done, err
 		}
-		// The pick is recorded before it is applied, so a restart finishes it.
 		rec.State, rec.Table, rec.Rule, rec.Outcome, rec.Target, rec.DecidedBy, rec.Judgment, rec.Confidence, rec.Decided = StateDecided, TableVersion, d.rule, d.outcome, d.target, d.decidedBy, d.judgment, d.band, now
 		w := journalWrite{rec: *rec, rev: rev, from: journal, to: StateDecided, reason: fmt.Sprintf("Route of %s decided: %s (table %s rule %s)", key, d.target, TableVersion, d.rule)}
 		if err := r.writeJournal(ctx, x, name, w); err != nil {
@@ -286,9 +266,6 @@ func (r *Router) Route(ctx context.Context, x Exit) (Result, error) {
 	return r.apply(ctx, x, name, rec, rev, journal, d)
 }
 
-// decide asks the narrow questions of a non-pinned exit and returns the
-// decision. When the exit is finished without one (held, sent to the owner),
-// the result is returned instead.
 func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, rev int, journal trace.WorkflowState) (decision, *Result, error) {
 	strict := r.Judge.DecisionThreshold()
 	legal, why, err := r.legalTargets(ctx, x)
@@ -315,7 +292,6 @@ func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, r
 			}
 		}
 		if t, ok := x.target(x.Default); ok && (t.Gate || t.Approval) && (x.Authority == nil || x.Authority.Target != t.Name) {
-			// A proposal cannot make an owner gate: the move is the owner's.
 			rec.Rule, rec.Target = "0:owner_gate", t.Name
 			res, err := r.hold(ctx, x, name, rec, rev, journal, StateOwner, HoldGate, fmt.Sprintf("%s is an owner decision", t.Name), nil)
 			return decision{}, &res, err
@@ -324,15 +300,11 @@ func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, r
 		res, err := r.hold(ctx, x, name, rec, rev, journal, StateHeld, HoldDefaultIllegal, fmt.Sprintf("the default %s fails a hard prerequisite: %s", x.Default, why[x.Default]), nil)
 		return decision{}, &res, err
 	}
-	// A default that is the approval a reviewer's verdict authorises is decided
-	// by that verdict; any other default by code.
 	byCode := trace.DecidedByCode
 	if x.Authority != nil && x.Authority.Kind == AuthorityReviewer && x.Authority.Target == x.Default {
 		byCode = trace.DecidedByReviewer
 	}
 	if len(legal) == 1 {
-		// A choice needs two options: with one legal target the router keeps the
-		// default itself and Jev is not asked.
 		return decision{target: x.Default, outcome: OutcomeFollowed, decidedBy: byCode, rule: "0:only_target", band: ConfidenceNone}, nil, nil
 	}
 
@@ -365,8 +337,6 @@ func (r *Router) decide(ctx context.Context, x Exit, name string, rec *Record, r
 	}
 	rec.Judgment = res.Judgment
 	if !res.Answered {
-		// Degraded mode: the default commits if it still passes the hard
-		// prerequisites, which the apply step checks again.
 		rec.Fallback = string(res.Reason)
 		r.logger().Warn("Jev did not answer a transition request; the default is kept", "workstream", string(x.Workstream), "subject", x.Subject, "trigger", x.Trigger, "reason", string(res.Reason), "detail", res.Detail)
 		return decision{target: x.Default, outcome: OutcomeFallback, decidedBy: trace.DecidedByFallback, judgment: res.Judgment, rule: "fallback:" + string(res.Reason), band: ConfidenceNone}, nil, nil

@@ -3,8 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -37,8 +35,6 @@ func invokeInput(t *testing.T, root string, stdin string, args ...string) (int, 
 	return code, out.String(), diag.String()
 }
 
-// handInFixture starts a service with an active project whose charter has a
-// rule, and returns its root and project ID.
 func handInFixture(t *testing.T) (string, config.ProjectID, string) {
 	t.Helper()
 	opts, clone := emptyFixture(t)
@@ -66,28 +62,26 @@ func handedWorkstream(t *testing.T, root string, project config.ProjectID, strea
 	return doc, doc.Content
 }
 
-// handedCount counts the project's workstreams other than the librarian's.
 func handedCount(t *testing.T, root string, project config.ProjectID) int {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(root, "workstreams", string(project)))
-	must(t, err)
-	sum := sha256.Sum256([]byte("librarian:" + string(project)))
-	librarian := "w_" + hex.EncodeToString(sum[:16])
-	n := 0
-	for _, e := range entries {
-		if e.Name() != librarian {
-			n++
-		}
+	if os.IsNotExist(err) {
+		return 0
 	}
-	return n
+	must(t, err)
+	return len(entries)
 }
 
-func TestHandInCommand(t *testing.T) {
-	root, project, home := handInFixture(t)
+func designFile(t *testing.T, home string) string {
+	t.Helper()
 	design := filepath.Join(home, "design.md")
 	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
+	return design
+}
 
-	// A relative path resolves against the client's working directory.
+func TestHandInFileCopiesItIntoANewWorkstream(t *testing.T) {
+	root, project, home := handInFixture(t)
+	design := designFile(t, home)
 	wd, err := os.Getwd()
 	must(t, err)
 	relative, err := filepath.Rel(wd, design)
@@ -100,7 +94,10 @@ func TestHandInCommand(t *testing.T) {
 	if doc, handed := handedWorkstream(t, root, project, result.Workstream); doc.Source != "file:"+design || handed != "# Design\n" || doc.Path != "handed/design.md" {
 		t.Fatalf("file copy %+v %q", doc, handed)
 	}
+}
 
+func TestHandInIssueURLCopiesTheIssueText(t *testing.T) {
+	root, project, _ := handInFixture(t)
 	text := successful(t, root, "handin", string(project), "https://github.com/owner/repo/issues/3")
 	lines := strings.Split(text, "\n")
 	stream, ok := strings.CutPrefix(lines[0], "Workstream ")
@@ -112,26 +109,37 @@ func TestHandInCommand(t *testing.T) {
 	if doc, handed := handedWorkstream(t, root, project, id); doc.Source != "https://github.com/owner/repo/issues/3" || handed != "# Title\n\nBody\n" || doc.Path != "handed/issue-3.md" {
 		t.Fatalf("issue copy %+v %q", doc, handed)
 	}
+}
 
+func TestHandInStdinCopiesTheInputVerbatim(t *testing.T) {
+	root, project, _ := handInFixture(t)
 	stdin := "line one\r\n\ttabbed é\n"
 	code, out, diag := invokeInput(t, root, stdin, "handin", string(project), "-", "--json")
 	if code != 0 || diag != "" {
 		t.Fatalf("stdin hand-in: %d %s %s", code, out, diag)
 	}
+	var result wire.HandInResponse
 	must(t, json.Unmarshal([]byte(out), &result))
 	if doc, handed := handedWorkstream(t, root, project, result.Workstream); result.Source != "stdin" || doc.Source != "stdin" || handed != stdin || doc.Path != "handed/stdin" {
 		t.Fatalf("stdin copy %+v %+v %q", result, doc, handed)
 	}
+}
 
-	// Each command is its own hand-in.
+func TestEachHandInCreatesItsOwnWorkstream(t *testing.T) {
+	root, project, home := handInFixture(t)
+	design := designFile(t, home)
+	first := successful(t, root, "handin", string(project), design)
 	second := successful(t, root, "handin", string(project), design)
-	if strings.Contains(second, string(result.Workstream)) || strings.Split(second, "\n")[0] == lines[0] {
+	if strings.Split(first, "\n")[0] == strings.Split(second, "\n")[0] {
 		t.Fatalf("second hand-in reused a workstream:\n%s", second)
 	}
-	if n := handedCount(t, root, project); n != 4 {
+	if n := handedCount(t, root, project); n != 2 {
 		t.Fatalf("%d workstreams", n)
 	}
+}
 
+func TestRefusedHandInsCreateNoWorkstream(t *testing.T) {
+	root, project, home := handInFixture(t)
 	for _, c := range []struct {
 		stdin string
 		args  []string
@@ -150,7 +158,7 @@ func TestHandInCommand(t *testing.T) {
 			t.Errorf("%v: %d %q %q", c.args, code, out, diag)
 		}
 	}
-	if n := handedCount(t, root, project); n != 4 {
+	if n := handedCount(t, root, project); n != 0 {
 		t.Fatalf("refused hand-ins created workstreams: %d", n)
 	}
 }
@@ -169,52 +177,69 @@ func TestHandInKeys(t *testing.T) {
 	}
 }
 
-// TestHandInSkipDebate hands in with --skip-debate: the request carries the
-// skip, the output says so and the trace records the owner's skip of debate.
-func TestHandInSkipDebate(t *testing.T) {
+type skipDebateRoot struct {
+	root    string
+	project config.ProjectID
+	design  string
+}
+
+func newSkipDebateRoot(t *testing.T) skipDebateRoot {
+	t.Helper()
 	root, project, home := handInFixture(t)
 	design := filepath.Join(home, "design.md")
 	must(t, os.WriteFile(design, []byte("# Design\n"), 0600))
+	return skipDebateRoot{root: root, project: project, design: design}
+}
 
-	text := successful(t, root, "handin", string(project), design, "--skip-debate")
+func (r skipDebateRoot) skips(t *testing.T, stream string) []trace.Transition {
+	t.Helper()
+	var out []trace.Transition
+	for _, line := range traceBodies(t, workstreamDatabase(t, r.root, r.project, stream), "workstreams/"+stream+"/events.jsonl") {
+		var tr trace.Transition
+		must(t, json.Unmarshal([]byte(line), &tr))
+		if tr.ID == "shed-owner-skip" {
+			out = append(out, tr)
+		}
+	}
+	return out
+}
+
+func TestHandInSkipDebateReportsTheSkippedDebate(t *testing.T) {
+	r := newSkipDebateRoot(t)
+	text := successful(t, r.root, "handin", string(r.project), r.design, "--skip-debate")
 	lines := strings.Split(text, "\n")
-	stream, ok := strings.CutPrefix(lines[0], "Workstream ")
-	stream, ok2 := strings.CutSuffix(stream, " handed in to project "+string(project))
-	if !ok || !ok2 || len(lines) != 5 || lines[1] != "State: handed" || lines[2] != "Source: file:"+design ||
+	if !strings.HasPrefix(lines[0], "Workstream ") || !strings.HasSuffix(lines[0], " handed in to project "+string(r.project)) || len(lines) != 5 || lines[1] != "State: handed" || lines[2] != "Source: file:"+r.design ||
 		lines[3] != "Debate: skipped; ratify the spec and the plan once they are drafted" || lines[4] != "" {
 		t.Fatalf("hand-in output:\n%s", text)
 	}
-	skips := func(stream string) []trace.Transition {
-		t.Helper()
-		var out []trace.Transition
-		for _, line := range traceBodies(t, workstreamDatabase(t, root, project, stream), "workstreams/"+stream+"/events.jsonl") {
-			var tr trace.Transition
-			must(t, json.Unmarshal([]byte(line), &tr))
-			if tr.ID == "shed-owner-skip" {
-				out = append(out, tr)
-			}
-		}
-		return out
+}
+
+func TestHandInSkipDebateRecordsTheOwnersSkip(t *testing.T) {
+	r := newSkipDebateRoot(t)
+	var result wire.HandInResponse
+	must(t, json.Unmarshal([]byte(successful(t, r.root, "handin", string(r.project), r.design, "--skip-debate", "--json")), &result))
+	if !result.SkipDebate || result.State != "handed" {
+		t.Fatalf("JSON hand-in %+v", result)
 	}
-	if got := skips(stream); len(got) != 1 || got[0].Subject != "shed-owner" || got[0].To != "skipped" || got[0].Cause != "handin" ||
+	if got := r.skips(t, string(result.Workstream)); len(got) != 1 || got[0].Subject != "shed-owner" || got[0].To != "skipped" || got[0].Cause != "handin" ||
 		got[0].Reason != "the owner skipped debate at hand-in; the workstream still needs the owner's ratification of the spec and the plan" {
 		t.Fatalf("skip transitions %+v", got)
 	}
+}
 
-	var result wire.HandInResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--skip-debate", "--json")), &result))
-	if !result.SkipDebate || result.State != "handed" || len(skips(string(result.Workstream))) != 1 {
-		t.Fatalf("JSON hand-in %+v", result)
-	}
-	// Without the flag nothing is skipped and the output is unchanged.
+func TestHandInWithoutSkipDebateRecordsNoSkip(t *testing.T) {
+	r := newSkipDebateRoot(t)
 	var debated wire.HandInResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "handin", string(project), design, "--json")), &debated))
-	if debated.SkipDebate || debated.Workstream == result.Workstream || len(skips(string(debated.Workstream))) != 0 {
+	must(t, json.Unmarshal([]byte(successful(t, r.root, "handin", string(r.project), r.design, "--json")), &debated))
+	if debated.SkipDebate || len(r.skips(t, string(debated.Workstream))) != 0 {
 		t.Fatalf("hand-in without the flag %+v", debated)
 	}
+}
 
-	for _, args := range [][]string{{"handin", string(project), design, "--skip-debate=true"}, {"status", "--skip-debate"}, {"shed", "skip", "w_0123456789abcdef0123456789abcdef", "--skip-debate"}} {
-		code, out, diag := invokeInput(t, root, "", args...)
+func TestSkipDebateIsRefusedOutsideHandIn(t *testing.T) {
+	r := newSkipDebateRoot(t)
+	for _, args := range [][]string{{"handin", string(r.project), r.design, "--skip-debate=true"}, {"status", "--skip-debate"}, {"shed", "skip", "w_0123456789abcdef0123456789abcdef", "--skip-debate"}} {
+		code, out, diag := invokeInput(t, r.root, "", args...)
 		if code != 2 || out != "" || diag != "invalid arguments; use osmia --help\n" {
 			t.Errorf("%v: %d %q %q", args, code, out, diag)
 		}

@@ -22,7 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// inbox lists the open owner decisions of every active project, oldest
+// Inbox lists the open owner decisions of every active project, oldest
 // first, or none when no project or trace is active. Decisions of abandoned
 // workstreams are left out. A cross-repo workgroup's own consolidated
 // escalations, recorded only in its own trace, are listed exactly once,
@@ -38,13 +38,6 @@ func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 		if !cfg.Active(active.ID) {
 			continue
 		}
-		// projectInbox makes many separate repository and runtime-store
-		// reads per workstream (statuses, escalations, operations, outbox,
-		// the loop guard's pause, ...). readview.Consistent retries the whole
-		// project's inbox from scratch when a commit or runtime mutation
-		// lands partway through, so the response never mixes entries read
-		// from one trace or runtime generation with entries read from
-		// another.
 		entries, err := readview.Consistent(func() ([]InboxEntry, error) {
 			es, api := s.ProjectInbox(ctx, active)
 			if api != nil {
@@ -86,7 +79,7 @@ func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 	return out, nil
 }
 
-// crossRepoWorkgroupIDs returns, in encounter order, the distinct
+// CrossRepoWorkgroupIDs returns, in encounter order, the distinct
 // fully joined cross-repo workgroup IDs repository's workstreams point to.
 func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trace.Repository) ([]config.WorkgroupID, error) {
 	streams, err := NonSessionWorkstreams(repository)
@@ -134,7 +127,7 @@ func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trac
 	return ids, nil
 }
 
-// workgroupInbox lists the open consolidated escalations of the cross-repo
+// WorkgroupInbox lists the open consolidated escalations of the cross-repo
 // workgroup id, recorded only in its own trace, opened and closed for this
 // call alone through known, one of its real members' own already open
 // repository, used only to resolve the service root. Every entry is tagged
@@ -184,7 +177,7 @@ func (s *Controller) WorkgroupInbox(ctx context.Context, known *trace.Repository
 	return out, nil
 }
 
-// projectInbox lists the open owner decisions of one project.
+// ProjectInbox lists the open owner decisions of one project.
 func (s *Controller) ProjectInbox(ctx context.Context, active *Project) ([]InboxEntry, *APIError) {
 	out := InboxResponse{Entries: []InboxEntry{}}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the inbox of project %s; check the trace repository", active.ID)}
@@ -214,7 +207,7 @@ func (s *Controller) ProjectInbox(ctx context.Context, active *Project) ([]Inbox
 		}
 	}
 	for _, w := range statuses {
-		if gone[w.Workstream] || w.Workstream == LibrarianWorkstream(active.ID) {
+		if gone[w.Workstream] {
 			continue
 		}
 		entries, err := s.OpenDecisions(ctx, repository, w)
@@ -252,13 +245,13 @@ func InboxView(e trace.InboxEntry) InboxEntry {
 	return out
 }
 
-// decision starts an inbox entry of a kind other than an escalation.
+// Decision starts an inbox entry of a kind other than an escalation.
 func Decision(kind string, stream config.WorkstreamID, opened time.Time, path string, body map[string]any) InboxEntry {
 	return InboxEntry{Kind: kind, Workstream: stream, OpenedAt: opened, Options: []string{}, Asked: []InboxQuestion{},
 		Answer: InboxAnswer{Method: http.MethodPost, Path: Prefix + path, Body: body}}
 }
 
-// openDecisions lists a workstream's open decisions other than its
+// OpenDecisions lists a workstream's open decisions other than its
 // escalations: its ratification packet, contested units, presented
 // amendments, held drift rebase, delivery approval, failing publication,
 // final checks that do not complete, parked base, recovery moves that wait for
@@ -270,9 +263,6 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 			out = append(out, e)
 		}
 		return err
-	}
-	if err := add(s.LegacyProjectsEntry(repository, w.Workstream)); err != nil {
-		return nil, err
 	}
 	if err := add(s.ratificationCard(repository, w.Workstream, w.State)); err != nil {
 		return nil, err
@@ -349,8 +339,6 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 	return out, nil
 }
 
-// ratificationCard is the workstream's ratification card as the inbox lists
-// it: only while the workstream, in state, is sketched or in the shed.
 func (s *Controller) ratificationCard(repository *trace.Repository, stream config.WorkstreamID, state string) (InboxEntry, bool, error) {
 	if state != InShedState && state != SketchedState {
 		return InboxEntry{}, false, nil
@@ -358,7 +346,7 @@ func (s *Controller) ratificationCard(repository *trace.Repository, stream confi
 	return s.ratificationEntry(repository, stream)
 }
 
-// loopEntry is the loop guard's pause of the workstream while it holds,
+// LoopEntry is the loop guard's pause of the workstream while it holds,
 // opened when it was set. Resuming the workstream answers it.
 func (s *Controller) LoopEntry(repository *trace.Repository, stream config.WorkstreamID) (InboxEntry, bool) {
 	if s.Store == nil || s.Store() == nil {
@@ -443,11 +431,11 @@ func (s *Controller) HeldNoticesEntry(ctx context.Context, repository *trace.Rep
 	return e, true, nil
 }
 
-// publicationEscalation is how many consecutive failed attempts raise a
+// PublicationEscalation is how many consecutive failed attempts raise a
 // publication to the inbox.
 const PublicationEscalation = 3
 
-// ratificationEntry is the workstream's ratification packet while debate
+// RatificationEntry is the workstream's ratification packet while debate
 // rests at the decision it presents and the owner has not ratified it. The
 // chief of staff decides every committee objection that stands first, so the
 // entry is listed only once none waits for its decision. It offers ratify only
@@ -492,7 +480,7 @@ func RatificationEntry(repository *trace.Repository, stream config.WorkstreamID)
 	return e, true, nil
 }
 
-// amendmentEntry is a presented amendment at its latest packet revision, with
+// AmendmentEntry is a presented amendment at its latest packet revision, with
 // the decisions that revision takes.
 func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.WorkstreamID, id string) (InboxEntry, bool, error) {
 	c, found, err := ReadAmendment(repository, stream, id)
@@ -517,8 +505,6 @@ func (s *Controller) AmendmentEntry(repository *trace.Repository, stream config.
 		return InboxEntry{}, false, nil
 	}
 	entries := AmendmentDissent(records)
-	// A plan-only amendment is the chief of staff's to decide, unless Jev's
-	// binding pick on it was refused: it is then the owner's, with that pick.
 	refused, handed := s.RefusedPick(repository, stream, jev.KindPlanAmendment, jev.AmendmentKey(id))
 	if sealed && s.EngineeringRevision(repository, stream, c, current, entries, "Assess delegated authority") == nil && !handed {
 		return InboxEntry{}, false, nil
@@ -578,7 +564,7 @@ func EligibleQuickReply(recommendation string) bool {
 	return true
 }
 
-// answer records the owner's ruling on the inbox entry raw numbers. It returns
+// Answer records the owner's ruling on the inbox entry raw numbers. It returns
 // once the ruling and the chief of staff's notice of it are durable; relaying
 // the ruling to the askers is the chief of staff's next turn. For an entry
 // workgroupInbox tagged with a cross-repo workgroup's own synthetic project
@@ -616,7 +602,7 @@ func (s *Controller) Answer(ctx context.Context, raw string, req AnswerRequest) 
 	return s.RuleInbox(ctx, repository, number, req.Text, unknown)
 }
 
-// workgroupInboxRepository resolves req.Project as a cross-repo workgroup's
+// WorkgroupInboxRepository resolves req.Project as a cross-repo workgroup's
 // own synthetic project identity, when it is one. matched reports whether
 // req.Project matched that pattern and a workgroup's own trace was found at
 // it; the caller falls back to its own project resolution unchanged when
@@ -654,7 +640,7 @@ func (s *Controller) WorkgroupInboxRepository(ctx context.Context, project confi
 	return wt, func() { wt.Close() }, true, nil
 }
 
-// ruleInbox records the owner's ruling on repository's own inbox entry
+// RuleInbox records the owner's ruling on repository's own inbox entry
 // number.
 func (s *Controller) RuleInbox(ctx context.Context, repository *trace.Repository, number int, text string, unknown *APIError) (AnswerResponse, *APIError) {
 	return s.ruleInbox(ctx, repository, number, text, unknown, Deciding{})

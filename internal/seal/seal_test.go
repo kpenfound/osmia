@@ -31,7 +31,7 @@ func TestEncodeAndParseRoundTrip(t *testing.T) {
     "spec": 3,
     "plan": 1
   },
-  "spec_hash": "sha256:a5a24af8f9c9e3ba6bd1a0a6bd1f2b7d5a2c8e5b9c6d0a1f2e3d4c5b6a7f8e9d",
+  "spec_hash": "sha256:603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b",
   "base": {
     "remote": "upstream",
     "branch": "main",
@@ -57,8 +57,6 @@ func TestEncodeAndParseRoundTrip(t *testing.T) {
   ]
 }
 `
-	// The hash is of the content, not of the example.
-	want = strings.Replace(want, "sha256:a5a24af8f9c9e3ba6bd1a0a6bd1f2b7d5a2c8e5b9c6d0a1f2e3d4c5b6a7f8e9d", SpecHash("# Spec\n"), 1)
 	if string(data) != want {
 		t.Fatalf("encoded:\n%s\nwant:\n%s", data, want)
 	}
@@ -69,8 +67,15 @@ func TestEncodeAndParseRoundTrip(t *testing.T) {
 	if parsed.Seal != 1 || parsed.Round != 2 || parsed.Revision != (shed.Pin{Spec: 3, Plan: 1}) || parsed.Base.Commit != valid().Base.Commit || len(parsed.Footprints) != 2 || parsed.Footprints[1].Unit != "dedupe" || len(parsed.Footprints[1].Entities) != 0 {
 		t.Fatalf("parsed %+v", parsed)
 	}
-	if !strings.HasPrefix(SpecHash("x"), "sha256:") || len(SpecHash("x")) != 71 || SpecHash("x") == SpecHash("y") {
-		t.Fatalf("spec hash %q", SpecHash("x"))
+}
+
+func TestSpecHashIsTheSHA256OfTheContent(t *testing.T) {
+	t.Parallel()
+	if got, want := SpecHash("# Spec\n"), "sha256:603c828a03383f98b82bf9c6787deeb5c40c02871a1b8d6ba14b0d538020a02b"; got != want {
+		t.Fatalf("spec hash %q, want %q", got, want)
+	}
+	if SpecHash("x") == SpecHash("y") {
+		t.Fatal("different content hashed alike")
 	}
 }
 
@@ -96,7 +101,6 @@ func TestInvalidSealsAreRefused(t *testing.T) {
 		if _, err := Encode(s); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: encoding: %v, want %q", name, err, tc.want)
 		}
-		// What Encode refuses to write, Parse refuses to read.
 		data, err := json.Marshal(s)
 		if err != nil {
 			t.Fatal(err)

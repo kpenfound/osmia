@@ -150,9 +150,6 @@ func TestViewsListDirectories(t *testing.T) {
 	}
 }
 
-// A selected directory's symlinks are left out of the view at every depth,
-// whether they point inside the source, outside it or at a directory; the
-// view holds the rest. Selecting one of them explicitly still fails.
 func TestViewsSkipSymlinksInASelectedDirectory(t *testing.T) {
 	source, outside, views := t.TempDir(), t.TempDir(), Views{Directory: t.TempDir()}
 	put(t, source, "src/file", "data")

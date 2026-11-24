@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -41,10 +42,9 @@ func (b *BlockedFactoryOperation) Apply(ctx context.Context, op coreadapter.Oper
 }
 
 // RequestFactoryOperation durably records a RepositoryBoundary operation of
-// streamID, under an action the service does not reserve for sealing,
-// building, landing, rebasing, drift or publishing, so the reconcile
-// controller routes it to the test's own fake adapter (sealing.go,
-// repositoryAdapter.Apply) rather than to a real one.
+// streamID, under an action the service reserves for none of its own
+// operations, so the reconcile controller routes it to the test's fake
+// repository adapter.
 func RequestFactoryOperation(t *testing.T, repository *trace.Repository, streamID config.WorkstreamID, eventID string) {
 	t.Helper()
 	event := trace.Event{ID: eventID, Kind: "local-effect", Body: "simulated factory work"}
@@ -61,7 +61,7 @@ func BusyReadsConfig(t *testing.T) config.Options {
 	Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := ConfigAt(t, home)
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, DemoStart, ServiceActor)
 	Must(t, err)

@@ -19,7 +19,6 @@ const (
 	traceTwo = "https://dagger.cloud/example/traces/second22"
 )
 
-// recordedTraces collects what a TraceObserver hears.
 type recordedTraces struct {
 	mu   sync.Mutex
 	urls []string
@@ -120,10 +119,8 @@ func TestTraceScannerBoundsAnUnfinishedLine(t *testing.T) {
 	}
 }
 
-// tracedChecks is DaggerChecks with a token, which is what earns a trace link.
 func tracedChecks(token string) DaggerChecks { return DaggerChecks{CloudToken: token} }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksKeepTheLinkWhenTheRunDoesNotFinish(t *testing.T) {
 	for _, stream := range []string{"stdout", "stderr"} {
 		for _, end := range []string{"timeout", "cancellation"} {
@@ -132,7 +129,6 @@ func TestDaggerChecksKeepTheLinkWhenTheRunDoesNotFinish(t *testing.T) {
 				if stream == "stderr" {
 					redirect = " >&2"
 				}
-				// exec leaves the sleep as the process the context kills.
 				installLoggingDagger(t, "printf 'Full trace at "+traceOne+"\\n'"+redirect+"\nexec sleep 60\n")
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
@@ -165,7 +161,6 @@ func TestDaggerChecksKeepTheLinkWhenTheRunDoesNotFinish(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksReadTheLinkFromEitherStreamAndAcrossWrites(t *testing.T) {
 	for _, c := range []struct{ name, body string }{
 		{"stdout", "printf 'Full trace at " + traceOne + "\\n'\n"},
@@ -192,7 +187,6 @@ func TestDaggerChecksReadTheLinkFromEitherStreamAndAcrossWrites(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksIgnoreURLsThatAreNotTraceLinks(t *testing.T) {
 	for _, c := range []struct{ name, url string }{
 		{"other host", "https://example.com/example/traces/abc"},
@@ -227,7 +221,6 @@ func TestDaggerChecksIgnoreURLsThatAreNotTraceLinks(t *testing.T) {
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksRecordNoLinkWithoutACloudToken(t *testing.T) {
 	installLoggingDagger(t, "printf 'Full trace at "+traceOne+"\\nSetup tracing: https://dagger.cloud/traces/setup\\n' >&2\nprintf 'CHECKS  ✔ 1 passed\\n'\n")
 	for _, engine := range []string{"", "auto", "tcp://127.0.0.1:1234"} {
@@ -246,7 +239,6 @@ func TestDaggerChecksRecordNoLinkWithoutACloudToken(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksCaptureTheLinkInEveryEngineMode(t *testing.T) {
 	body := `case "$DAGGER_ENGINE" in
  cloud) kind=cloud ;;
@@ -273,10 +265,8 @@ printf 'CHECKS  ✔ 1 passed\n'
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksAnnounceTheLinkBeforeTheRunEnds(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "link-heard")
-	// The fake waits to be told the link was heard, and fails if it never is.
 	installLoggingDagger(t, fmt.Sprintf(`printf 'Full trace at %s\n'
 n=0
 until [ -e '%s' ]; do
@@ -297,7 +287,6 @@ printf 'CHECKS  ✔ 1 passed\n'
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksKeepTheLatestLinkAcrossAttempts(t *testing.T) {
 	const (
 		flags = "check --progress=report --fail-fast --parallel 4 "
@@ -352,7 +341,6 @@ passes() { printf 'CHECKS  ✔ 1 passed\n✔ %s 1s OK\n' "$1"; exit 0; }
 	})
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksKeepTheLinkOfAnEarlierInvocation(t *testing.T) {
 	const second = "dag+check://release/version"
 	for _, c := range []struct{ name, later, want string }{
@@ -371,7 +359,6 @@ func TestDaggerChecksKeepTheLinkOfAnEarlierInvocation(t *testing.T) {
 	}
 }
 
-// printedBy is a runner that, as Dagger does, makes its link known while it runs.
 func printedBy(url string, then func(ctx context.Context) (CheckResult, error)) func(context.Context, fakeCall) (CheckResult, error) {
 	return func(ctx context.Context, _ fakeCall) (CheckResult, error) {
 		if observe := traceObserverFrom(ctx); observe != nil && url != "" {
@@ -446,7 +433,6 @@ func TestFallbackHearsALinkARunnerReturnsWithoutStreaming(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestFallbackWithDaggerChecksFollowsTheCloudRunsLink(t *testing.T) {
 	for _, c := range []struct {
 		name, cloudLink, want string

@@ -2,9 +2,6 @@ package checkselect
 
 import "slices"
 
-// coverage holds the original listing's leaves. Links that cover each other
-// represent the same check; only strictly narrower links make a link a parent.
-// Opaque links stay options because their coverage cannot be determined.
 type coverage struct {
 	leaves []*address
 	roots  map[string][]*address
@@ -33,9 +30,6 @@ func listedCoverage(links []string) *coverage {
 	return c
 }
 
-// broad reports whether link has narrower listed checks and holds all the
-// leaves of its root (the same base and only the check-name filters). Roots
-// need not be listed, so narrowing cannot introduce a whole collection.
 func (c *coverage) broad(link string) bool {
 	a := parseAddress(link)
 	if a.opaque {

@@ -9,43 +9,80 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-func TestAbandonCommand(t *testing.T) {
-	root, project, _ := handInFixture(t)
-	id := handInStdin(t, root, project, "# Design\n")
-	db := workstreamDatabase(t, root, project, id)
+type abandonRoot struct {
+	root, id string
+	project  config.ProjectID
+}
 
-	text := successful(t, root, "abandon", id, "Superseded by the upload design.")
-	if want := "Workstream " + id + " abandoned\nReason: Superseded by the upload design.\n"; text != want {
+func newAbandonRoot(t *testing.T) abandonRoot {
+	t.Helper()
+	root, project, _ := handInFixture(t)
+	return abandonRoot{root: root, project: project, id: handInStdin(t, root, project, "# Design\n")}
+}
+
+func TestAbandonReportsTheReason(t *testing.T) {
+	a := newAbandonRoot(t)
+	text := successful(t, a.root, "abandon", a.id, "Superseded by the upload design.")
+	if want := "Workstream " + a.id + " abandoned\nReason: Superseded by the upload design.\n"; text != want {
 		t.Fatalf("output %q, want %q", text, want)
 	}
-	if status := successful(t, root, "status", id); !strings.Contains(status, "abandoned") {
+}
+
+func TestAbandonedWorkstreamShowsAsAbandonedInStatus(t *testing.T) {
+	a := newAbandonRoot(t)
+	successful(t, a.root, "abandon", a.id, "Superseded.")
+	if status := successful(t, a.root, "status", a.id); !strings.Contains(status, "abandoned") {
 		t.Fatalf("status:\n%s", status)
 	}
-	if handed := latestDocument(t, db, "workstreams/"+id+"/documents.jsonl", "handed/stdin"); handed.Content != "# Design\n" {
+}
+
+func TestAbandonKeepsTheHandedCopy(t *testing.T) {
+	a := newAbandonRoot(t)
+	successful(t, a.root, "abandon", a.id, "Superseded.")
+	db := workstreamDatabase(t, a.root, a.project, a.id)
+	if handed := latestDocument(t, db, "workstreams/"+a.id+"/documents.jsonl", "handed/stdin"); handed.Content != "# Design\n" {
 		t.Fatalf("handed copy %+v", handed)
 	}
-	if len(traceBodies(t, db, "workstreams/"+id+"/events.jsonl")) == 0 {
+}
+
+func TestAbandonRecordsTheTransition(t *testing.T) {
+	a := newAbandonRoot(t)
+	successful(t, a.root, "abandon", a.id, "Superseded.")
+	if len(traceBodies(t, workstreamDatabase(t, a.root, a.project, a.id), "workstreams/"+a.id+"/events.jsonl")) == 0 {
 		t.Fatal("the abandoned workstream records no transitions")
 	}
+}
 
-	code, out, diag := invoke(t, root, "abandon", id, "again")
-	if code != 5 || out != "" || diag != "conflict: workstream "+id+" is abandoned and cannot be abandoned\n" {
+func TestAbandonTwiceIsAConflict(t *testing.T) {
+	a := newAbandonRoot(t)
+	successful(t, a.root, "abandon", a.id, "Superseded.")
+	code, out, diag := invoke(t, a.root, "abandon", a.id, "again")
+	if code != 5 || out != "" || diag != "conflict: workstream "+a.id+" is abandoned and cannot be abandoned\n" {
 		t.Fatalf("abandoned again: %d %q %q", code, out, diag)
 	}
-	code, out, diag = invoke(t, root, "abandon", id, "")
+}
+
+func TestAbandonRefusesAnEmptyReason(t *testing.T) {
+	a := newAbandonRoot(t)
+	code, out, diag := invoke(t, a.root, "abandon", a.id, "")
 	if code != 4 || out != "" || diag != "validation: reason must not be empty\n" {
 		t.Fatalf("empty reason: %d %q %q", code, out, diag)
 	}
+}
 
-	other := handInStdin(t, root, project, "other")
+func TestAbandonReportsTheAbandonmentAsJSON(t *testing.T) {
+	a := newAbandonRoot(t)
 	var result wire.AbandonResponse
-	must(t, json.Unmarshal([]byte(successful(t, root, "abandon", other, "Not needed.", "--json")), &result))
-	if string(result.Workstream) != other || result.Project != project || result.State != "abandoned" || result.Reason != "Not needed." {
+	must(t, json.Unmarshal([]byte(successful(t, a.root, "abandon", a.id, "Not needed.", "--json")), &result))
+	if string(result.Workstream) != a.id || result.Project != a.project || result.State != "abandoned" || result.Reason != "Not needed." {
 		t.Fatalf("json %+v", result)
 	}
+}
 
-	for _, args := range [][]string{{"abandon", id}, {"abandon", "w_x", "reason"}, {"abandon", id, "a", "b"}} {
-		if code, _, _ := invoke(t, root, args...); code != 2 {
+func TestAbandonRefusesInvalidArguments(t *testing.T) {
+	a := newAbandonRoot(t)
+	for _, args := range [][]string{{"abandon", a.id}, {"abandon", "w_x", "reason"}, {"abandon", a.id, "a", "b"}} {
+		if code, _, _ := invoke(t, a.root, args...); code != 2 {
 			t.Fatalf("%v: exit %d", args, code)
 		}
 	}

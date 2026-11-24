@@ -67,7 +67,6 @@ func TestBreadthScopedRealDaggerShapes(t *testing.T) {
 	if !slices.Equal(distinct(attributed), expanded) || len(attributed) != len(expanded) {
 		t.Fatalf("attributed %q, expanded %q", attributed, expanded)
 	}
-	// A collection remains a collection when it has only one expanded item.
 	membership[realTestRoot] = membership[realTestRoot][:1]
 	p, _ = scopedFixture(t, membership)
 	for _, root := range p.Roots {
@@ -88,7 +87,6 @@ func TestBreadthScopedAmbiguousAndUnmatchedReachRanking(t *testing.T) {
 	)
 	expanded := []string{ambiguous, unmatched, standalone}
 	scoped := map[string][]string{a: {ambiguous, ambiguous}, b: {ambiguous}, standalone: {standalone}}
-	// Membership outside the unexpanded root listing cannot invent a root.
 	scoped["dag+check://?check=unlisted/root"] = []string{unmatched}
 	p, err := BreadthScoped([]string{b, a, standalone, a}, expanded, scoped)
 	if err != nil {
@@ -97,7 +95,6 @@ func TestBreadthScopedAmbiguousAndUnmatchedReachRanking(t *testing.T) {
 	if !slices.Equal(p.Uncovered, []string{ambiguous, unmatched}) || len(BreadthRequest(nil, p).Questions) != 3 {
 		t.Fatalf("attribution %+v", p)
 	}
-	// Dropping both roots that report the shared item must not drop that item.
 	breadth, ok := ApplyBreadth(breadthAnswers(p, map[string]float64{standalone: .9}), p, .5)
 	if !ok || !slices.Equal(breadth.KeptRoots, []string{standalone}) || len(breadth.Collections) != 0 {
 		t.Fatalf("breadth %+v, usable %t", breadth, ok)
@@ -114,9 +111,7 @@ func TestBreadthScopedPreservesCoverageOwners(t *testing.T) {
 	const parent = root + "&go-package=a"
 	leaves := []string{parent + "&go-test=One", root + "&go-package=b&go-test=Two"}
 	roots := []string{root, parent}
-	old := Breadth(roots, leaves)
-	// Membership agrees with the most-specific covering root. Membership is
-	// authoritative when multiple roots actually return the same link instead.
+	old := lexicalBreadth(roots, leaves)
 	p, err := BreadthScoped(roots, leaves, map[string][]string{root: {leaves[1]}, parent: {leaves[0]}})
 	if err != nil || !reflect.DeepEqual(p, old) {
 		t.Fatalf("scoped %+v, error %v; coverage %+v", p, err, old)

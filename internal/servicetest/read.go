@@ -29,12 +29,3 @@ func AwaitDesignConversation(t *testing.T, s *service.Service, c *service.Client
 		wait()
 	}
 }
-
-// ReadFeed reads the real feed endpoint.
-func ReadFeed(t *testing.T, c *service.Client, id config.WorkstreamID) api.FeedResponse {
-	t.Helper()
-	var out api.FeedResponse
-	err := c.Do(context.Background(), "GET", api.Prefix+"/feed/"+string(id), nil, &out)
-	fixturekit.Must(t, err)
-	return out
-}

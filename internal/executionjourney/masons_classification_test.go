@@ -9,7 +9,12 @@ import (
 	slices "slices"
 	strings "strings"
 	testing "testing"
-	time "time"
+
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
 
 	agent "github.com/kpenfound/agentcore/agent"
 	jevtest "github.com/kpenfound/agentcore/jev/jevtest"
@@ -29,82 +34,75 @@ func TestMasonContestedRuling(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f, fake := newMasonFixture(t, 1, validPlan)
-			defer f.stop(t)
-			fake.Response = map[string]string{masonTurnID("resume"): tc.response}
-			ownerTurn := masonAgent("resume") + "-owner-revise-"
-			f.engine.Mu.Lock()
+			f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+			defer f.Stop(t)
+			fake.Response = map[string]string{execution.MasonTurnID("resume"): tc.response}
+			ownerTurn := intake.MasonAgent("resume") + "-owner-revise-"
+			f.Engine.Mu.Lock()
 			if tc.name == "bound" {
-				for i := 1; i < f.s.cfg.Mason.MaxCleanTurns; i++ {
-					delete(fake.Play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
+				for i := 1; i < f.S.Cfg.Mason.MaxCleanTurns; i++ {
+					delete(fake.Play, fmt.Sprintf("%s-clarify-%d", intake.MasonAgent("resume"), i))
 				}
 			}
-			f.engine.Turns[ownerTurn+"1"] = fake.Turn
-			f.engine.Turns[ownerTurn+"2"] = fake.Turn
-			f.engine.Turns[ownerTurn+"3"] = fake.Turn
-			f.engine.Mu.Unlock()
-			stream := f.seedBuilding(t, tc.name+"-ruling", validPlan)
-			f.awaitUnit(t, stream, "resume", UnitContested)
-			status, err := f.c.Status(context.Background(), stream)
+			f.Engine.Turns[ownerTurn+"1"] = fake.Turn
+			f.Engine.Turns[ownerTurn+"2"] = fake.Turn
+			f.Engine.Turns[ownerTurn+"3"] = fake.Turn
+			f.Engine.Mu.Unlock()
+			stream := seedBuilding(f, t, tc.name+"-ruling", fixturekit.ValidPlan)
+			f.AwaitUnit(t, stream, "resume", intake.UnitContested)
+			status, err := f.C.Status(context.Background(), stream)
 			if err != nil || len(status.Gates) != 0 {
 				t.Fatalf("mason contest gate: %+v %v", status.Gates, err)
 			}
 			if len(status.Units) == 0 || !strings.Contains(status.Units[0].Reason, tc.reason) {
 				t.Fatalf("mason contest status: %+v", status.Units)
 			}
-			raiseFixtureContest(t, f.repository(), stream, "resume")
-			if entries := f.raisedContests(t, stream); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"revise"}) || !strings.Contains(entries[0].Question, tc.reason) {
+			journey.RaiseFixtureContest(t, f.Repository(), stream, "resume")
+			if entries := raisedContests(f, t, stream); len(entries) != 1 || !slices.Equal(entries[0].Options, []string{"revise"}) || !strings.Contains(entries[0].Question, tc.reason) {
 				t.Fatalf("inbox entries of the mason contest %+v", entries)
 			}
-			if _, err := f.c.RuleContested(context.Background(), stream, "resume", "review", "Try a reviewer"); err == nil || !strings.Contains(err.Error(), "no candidate under review; use revise") {
+			if _, err := f.C.RuleContested(context.Background(), stream, "resume", "review", "Try a reviewer"); err == nil || !strings.Contains(err.Error(), "no candidate under review; use revise") {
 				t.Fatalf("review refusal: %v", err)
 			}
-			th := f.thread(t, stream, masonAgent("resume"))
+			th := f.Thread(t, stream, intake.MasonAgent("resume"))
 			if tc.name == "bound" {
-				if len(th.Turns) != f.s.cfg.Mason.MaxCleanTurns {
+				if len(th.Turns) != f.S.Cfg.Mason.MaxCleanTurns {
 					t.Fatalf("bounded turns: %d", len(th.Turns))
 				}
-				f.awaitEventTurns(t, stream, "classified unclear")
-				f.awaitEventTurns(t, stream, "bound exhausted")
+				f.AwaitEventTurns(t, stream, "classified unclear")
+				f.AwaitEventTurns(t, stream, "bound exhausted")
 			} else {
-				f.awaitEventTurns(t, stream, "classified gave_up")
+				f.AwaitEventTurns(t, stream, "classified gave_up")
 			}
 			reset := th.Turns[len(th.Turns)-1].Sequence
 			turnID := fmt.Sprintf("%s%d", ownerTurn, reset)
 			if tc.name == "bound" {
-				continuation := fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), reset+1)
-				fake.Play[continuation] = reportDone("Owner revision")
-				f.engine.Mu.Lock()
-				f.engine.Turns[continuation] = fake.Turn
-				f.engine.Mu.Unlock()
+				continuation := fmt.Sprintf("%s-clarify-%d", intake.MasonAgent("resume"), reset+1)
+				fake.Play[continuation] = intakefixture.ReportDone("Owner revision")
+				f.Engine.Mu.Lock()
+				f.Engine.Turns[continuation] = fake.Turn
+				f.Engine.Mu.Unlock()
 			} else {
-				fake.Play[turnID] = reportDone("Owner revision")
+				fake.Play[turnID] = intakefixture.ReportDone("Owner revision")
 			}
-			ruling, err := f.c.RuleContested(context.Background(), stream, "resume", "revise", "Use the existing workspace")
+			ruling, err := f.C.RuleContested(context.Background(), stream, "resume", "revise", "Use the existing workspace")
 			if err != nil || ruling.Ruling.ResetTurn != reset || ruling.Ruling.Decision != "revise" {
 				t.Fatalf("mason ruling: %+v %v", ruling, err)
 			}
-			if _, err := f.c.RuleContested(context.Background(), stream, "resume", "revise", "Again"); err == nil {
+			if _, err := f.C.RuleContested(context.Background(), stream, "resume", "revise", "Again"); err == nil {
 				t.Fatal("accepted duplicate mason ruling")
 			}
-			f.stop(t)
-			f.start(t)
-			deadline := time.Now().Add(demoTimeout)
-			for {
-				th = f.thread(t, stream, masonAgent("resume"))
-				if len(th.Turns) > int(reset) && th.Turns[reset].Request.TurnID == turnID {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("owner turn not queued: %+v", th.Turns)
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
+			f.Stop(t)
+			f.Start(t)
+			intakefixture.Soon(t, "the owner turn to be queued", func() bool {
+				th = f.Thread(t, stream, intake.MasonAgent("resume"))
+				return len(th.Turns) > int(reset) && th.Turns[reset].Request.TurnID == turnID
+			})
 			if !strings.Contains(th.Turns[reset].Request.Prompt, "Use the existing workspace") || th.Turns[reset].Request.ThreadID != th.Identity.ThreadID {
 				t.Fatalf("owner turn: %+v", th.Turns[reset])
 			}
-			f.awaitUnit(t, stream, "resume", UnitReviewing)
-			th = f.thread(t, stream, masonAgent("resume"))
+			f.AwaitUnit(t, stream, "resume", intake.UnitReviewing)
+			th = f.Thread(t, stream, intake.MasonAgent("resume"))
 			wantTurns := int(reset) + 1
 			if tc.name == "bound" {
 				wantTurns++
@@ -112,7 +110,7 @@ func TestMasonContestedRuling(t *testing.T) {
 			if len(th.Turns) != wantTurns {
 				t.Fatalf("duplicate mason turn: %+v", th.Turns)
 			}
-			transitions, err := trace.Read[trace.Transition](f.repository(), stream)
+			transitions, err := trace.Read[trace.Transition](f.Repository(), stream)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,7 +118,7 @@ func TestMasonContestedRuling(t *testing.T) {
 			for _, transition := range transitions {
 				if transition.Cause == fmt.Sprintf("%s-mason-ruling-%d", trace.UnitSubject("resume"), reset) {
 					rulings++
-					if transition.From != UnitContested || transition.To != UnitImplementing {
+					if transition.From != intake.UnitContested || transition.To != intake.UnitImplementing {
 						t.Fatalf("ruling transition: %+v", transition)
 					}
 				}
@@ -143,45 +141,32 @@ func TestMasonCleanTurnPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			f, fake := newMasonFixture(t, 1, validPlan)
-			defer f.stop(t)
-			fake.Response = map[string]string{masonTurnID("resume"): tc.response}
-			fake.Play[masonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
-				_, err := callTool(ctx, tools, "file_read", map[string]any{"path": masonWrote})
+			f, fake := journey.NewMasonFixture(t, 1, fixturekit.ValidPlan)
+			defer f.Stop(t)
+			fake.Response = map[string]string{execution.MasonTurnID("resume"): tc.response}
+			fake.Play[execution.MasonTurnID("resume")] = func(ctx context.Context, _ agent.Request, tools *mcp.ClientSession) error {
+				_, err := fixturekit.CallTool(ctx, tools, "file_read", map[string]any{"path": fixturekit.MasonWrote})
 				return err
 			}
-			delete(fake.Play, masonAgent("resume")+"-clarify-1")
-			f.engine.Mu.Lock()
-			f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.Turn
-			f.engine.Mu.Unlock()
-			stream := f.seedBuilding(t, "classified", validPlan)
-			deadline := time.Now().Add(demoTimeout)
-			for {
-				th, err := f.repository().Thread(stream, masonAgent("resume"))
-				if err == nil && len(th.Turns) > 0 && th.Turns[0].Response != nil && th.Turns[0].Response.Classification != nil {
-					if got := th.Turns[0].Response.Classification.Class; got != tc.class {
-						t.Fatalf("class %s, want %s", got, tc.class)
-					}
-					if got := th.Turns[0].Response.Classification.ToolCounts["file_read"]; got != 1 {
-						t.Fatalf("tool count %d, want 1", got)
-					}
-					if len(th.Turns) > 1 && strings.Contains(th.Turns[1].Request.Prompt, "Call "+tc.tool) && th.Turns[1].Request.ThreadID == th.Identity.ThreadID {
-						break
-					}
+			delete(fake.Play, intake.MasonAgent("resume")+"-clarify-1")
+			f.Engine.Mu.Lock()
+			f.Engine.Turns[intake.MasonAgent("resume")+"-clarify-1"] = fake.Turn
+			f.Engine.Mu.Unlock()
+			stream := seedBuilding(f, t, "classified", fixturekit.ValidPlan)
+			intakefixture.Soon(t, "the classification policy to settle", func() bool {
+				th, err := f.Repository().Thread(stream, intake.MasonAgent("resume"))
+				if err != nil || len(th.Turns) == 0 || th.Turns[0].Response == nil || th.Turns[0].Response.Classification == nil {
+					return false
 				}
-				if time.Now().After(deadline) {
-					t.Fatalf("policy did not settle: %+v %v", th, err)
+				if got := th.Turns[0].Response.Classification.Class; got != tc.class {
+					t.Fatalf("class %s, want %s", got, tc.class)
 				}
-				time.Sleep(50 * time.Millisecond)
-			}
-			f.awaitEventTurns(t, stream, "classified "+tc.class)
-			f.engine.Mu.Lock()
-			for _, name := range f.engine.Runs {
-				if strings.Contains(name, "-classifier-") {
-					t.Errorf("classifier turn ran: %s", name)
+				if got := th.Turns[0].Response.Classification.ToolCounts["file_read"]; got != 1 {
+					t.Fatalf("tool count %d, want 1", got)
 				}
-			}
-			f.engine.Mu.Unlock()
+				return len(th.Turns) > 1 && strings.Contains(th.Turns[1].Request.Prompt, "Call "+tc.tool) && th.Turns[1].Request.ThreadID == th.Identity.ThreadID
+			})
+			f.AwaitEventTurns(t, stream, "classified "+tc.class)
 		})
 	}
 }
@@ -195,78 +180,63 @@ func TestMasonJevClassification(t *testing.T) {
 		"evidence-asked_in_prose": jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
 		"evidence-gave_up":        jevtest.Choice("none", 0.9, 0.9, "span-1", "span-2"),
 	}}}}}
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
+	f, fake := journey.NewMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", fixturekit.ValidPlan, func(opts *journey.Options) {
 		opts.JevProvider = p.Factory()
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-		must(t, err)
+		fixturekit.Must(t, err)
 		_, err = configFile.WriteString("\n[jev]\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
-		must(t, errors.Join(err, configFile.Close()))
+		fixturekit.Must(t, errors.Join(err, configFile.Close()))
 	})
-	defer f.stop(t)
-	fake.Response = map[string]string{masonTurnID("resume"): "Wrote the store. The unit is ready for review."}
-	delete(fake.Play, masonAgent("resume")+"-clarify-1")
-	f.engine.Mu.Lock()
-	f.engine.Turns[masonAgent("resume")+"-clarify-1"] = fake.Turn
-	f.engine.Mu.Unlock()
-	stream := f.seedBuilding(t, "jev-classified", validPlan)
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		th, err := f.repository().Thread(stream, masonAgent("resume"))
-		if err == nil && len(th.Turns) > 1 && th.Turns[0].Response != nil {
-			c := th.Turns[0].Response.Classification
-			if c == nil || c.Class != "claims_done" || c.By != trace.ClassifiedByJev || c.Evidence != "The unit is ready for review." || c.Judgment == "" {
-				t.Fatalf("classification %+v", c)
-			}
-			if !strings.Contains(th.Turns[1].Request.Prompt, "Call done") {
-				t.Fatalf("continuation prompt %q", th.Turns[1].Request.Prompt)
-			}
-			f.awaitEventTurns(t, stream, "Jev judgment "+c.Judgment)
-			break
+	defer f.Stop(t)
+	fake.Response = map[string]string{execution.MasonTurnID("resume"): "Wrote the store. The unit is ready for review."}
+	delete(fake.Play, intake.MasonAgent("resume")+"-clarify-1")
+	f.Engine.Mu.Lock()
+	f.Engine.Turns[intake.MasonAgent("resume")+"-clarify-1"] = fake.Turn
+	f.Engine.Mu.Unlock()
+	stream := seedBuilding(f, t, "jev-classified", fixturekit.ValidPlan)
+	intakefixture.Soon(t, "Jev's classification to settle", func() bool {
+		th, err := f.Repository().Thread(stream, intake.MasonAgent("resume"))
+		if err != nil || len(th.Turns) <= 1 || th.Turns[0].Response == nil {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("classification did not settle: %+v %v", th, err)
+		c := th.Turns[0].Response.Classification
+		if c == nil || c.Class != "claims_done" || c.By != trace.ClassifiedByJev || c.Evidence != "The unit is ready for review." || c.Judgment == "" {
+			t.Fatalf("classification %+v", c)
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		if !strings.Contains(th.Turns[1].Request.Prompt, "Call done") {
+			t.Fatalf("continuation prompt %q", th.Turns[1].Request.Prompt)
+		}
+		f.AwaitEventTurns(t, stream, "Jev judgment "+c.Judgment)
+		return true
+	})
 	if requests := p.Requests(); len(requests) == 0 || requests[0].State.(map[string]any)["message"] != "Wrote the store. The unit is ready for review." {
 		t.Fatalf("Jev requests %+v", requests)
 	}
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	for _, name := range f.engine.Runs {
-		if strings.Contains(name, "-classifier-") {
-			t.Errorf("classifier turn ran after Jev classified the turn: %s", name)
-		}
-	}
 }
 
-// Each ending the mason makes with no outcome tool is classified by the code
-// rules while Jev falls back. An unclear ending gets a clarify continuation,
-// and every classified turn counts toward mason.max_clean_turns, so the unit
-// is contested once the bound is reached.
 func TestMasonJevFallbackCountsTowardCleanTurnBound(t *testing.T) {
 	t.Setenv("OSMIA_TEST_JEV_KEY", "key")
 	outage := jevtest.Result{Err: &systemone.Error{Kind: systemone.KindTimeout, Message: "deadline"}}
 	p := &jevtest.Provider{Results: slices.Repeat([]jevtest.Result{outage}, 16)}
-	f, fake := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", validPlan, func(opts *Options) {
+	f, fake := journey.NewMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", fixturekit.ValidPlan, func(opts *journey.Options) {
 		opts.JevProvider = p.Factory()
 		configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
-		must(t, err)
-		_, err = configFile.WriteString("\n[jev]\nenabled = true\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
-		must(t, errors.Join(err, configFile.Close()))
+		fixturekit.Must(t, err)
+		_, err = configFile.WriteString("\n[jev]\nmodel = \"jev-test\"\napi_key_env = \"OSMIA_TEST_JEV_KEY\"\n")
+		fixturekit.Must(t, errors.Join(err, configFile.Close()))
 	})
-	defer f.stop(t)
-	bound := f.s.cfg.Mason.MaxCleanTurns
-	fake.Response = map[string]string{masonTurnID("resume"): "Work is ongoing."}
-	f.engine.Mu.Lock()
+	defer f.Stop(t)
+	bound := f.S.Cfg.Mason.MaxCleanTurns
+	fake.Response = map[string]string{execution.MasonTurnID("resume"): "Work is ongoing."}
+	f.Engine.Mu.Lock()
 	for i := 1; i < bound; i++ {
-		delete(fake.Play, fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i))
+		delete(fake.Play, fmt.Sprintf("%s-clarify-%d", intake.MasonAgent("resume"), i))
 	}
-	f.engine.Mu.Unlock()
-	stream := f.seedBuilding(t, "jev-fallback-bound", validPlan)
-	f.awaitUnit(t, stream, "resume", UnitContested)
-	f.awaitEventTurns(t, stream, "bound exhausted")
-	th := f.thread(t, stream, masonAgent("resume"))
+	f.Engine.Mu.Unlock()
+	stream := seedBuilding(f, t, "jev-fallback-bound", fixturekit.ValidPlan)
+	f.AwaitUnit(t, stream, "resume", intake.UnitContested)
+	f.AwaitEventTurns(t, stream, "bound exhausted")
+	th := f.Thread(t, stream, intake.MasonAgent("resume"))
 	if len(th.Turns) != bound {
 		t.Fatalf("%d mason turns, want the %d of mason.max_clean_turns", len(th.Turns), bound)
 	}
@@ -275,18 +245,11 @@ func TestMasonJevFallbackCountsTowardCleanTurnBound(t *testing.T) {
 		if c == nil || c.Class != "unclear" || c.By != trace.ClassifiedByRule || c.Judgment != "" {
 			t.Fatalf("turn %d classification %+v", i+1, c)
 		}
-		if i > 0 && (turn.Request.TurnID != fmt.Sprintf("%s-clarify-%d", masonAgent("resume"), i) || !strings.Contains(turn.Request.Prompt, "Call ask")) {
+		if i > 0 && (turn.Request.TurnID != fmt.Sprintf("%s-clarify-%d", intake.MasonAgent("resume"), i) || !strings.Contains(turn.Request.Prompt, "Call ask")) {
 			t.Fatalf("turn %d is not the clarify continuation of turn %d: %+v", i+1, i, turn.Request)
 		}
 	}
 	if len(p.Requests()) == 0 {
 		t.Fatal("Jev was never asked to classify an ending")
-	}
-	f.engine.Mu.Lock()
-	defer f.engine.Mu.Unlock()
-	for _, name := range f.engine.Runs {
-		if strings.Contains(name, "-classifier-") {
-			t.Errorf("classifier turn ran: %s", name)
-		}
 	}
 }

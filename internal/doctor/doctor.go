@@ -22,8 +22,6 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/engine"
-	"github.com/kpenfound/osmia/internal/plan"
-	"github.com/kpenfound/osmia/internal/projectmigration"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -89,16 +87,10 @@ type Options struct {
 	// https://api.github.com.
 	GitHubAPI string
 	HTTP      *http.Client
-	// Step, when set, is called after each durable step of the project
-	// migration with its name. A failure stops the migration there, as a crash
-	// would. Tests use it.
-	Step func(string) error
 }
 
-// commandTimeout bounds each tool, remote and API probe.
 const commandTimeout = 30 * time.Second
 
-// lockFile is the root ownership lock the service holds while it runs.
 const lockFile = ".service.lock"
 
 // Run runs every check and returns them in group order. Checks that need
@@ -138,8 +130,7 @@ func Run(ctx context.Context, o Options) []Check {
 	if lock != nil {
 		defer unlock(lock)
 	}
-	r.owned = lock != nil
-	cfg, projects := r.config(ctx)
+	cfg, projects := r.config()
 	r.toolchain(ctx, cfg)
 	if cfg != nil {
 		r.engine(ctx, cfg)
@@ -170,13 +161,8 @@ func groupOrder(g string) int {
 
 type run struct {
 	Options
-	checks []Check
-	// running is set when a service owns the root.
-	running bool
-	// owned is set when doctor holds the root's ownership lock, so no service
-	// can start or write while it migrates the root's projects.
-	owned bool
-	// rootReady is set when the root is an accessible directory.
+	checks    []Check
+	running   bool
 	rootReady bool
 }
 
@@ -187,8 +173,6 @@ func (r *run) add(group, name string, status Status, detail, remediation string)
 	r.checks = append(r.checks, Check{Group: group, Name: name, Status: status, Detail: detail, Remediation: remediation})
 }
 
-// root checks the root directory and its ownership lock, and returns the
-// lock when doctor acquired it.
 func (r *run) root() *os.File {
 	dir := r.Root.String()
 	info, err := os.Stat(dir)
@@ -236,7 +220,6 @@ func unlock(f *os.File) {
 	f.Close()
 }
 
-// serviceLog checks the log serve --detach appends to.
 func (r *run) serviceLog() {
 	path := filepath.Join(r.Root.String(), "service.log")
 	info, err := os.Lstat(path)
@@ -250,11 +233,7 @@ func (r *run) serviceLog() {
 	r.add(GroupRoot, "service log", Pass, path, "")
 }
 
-// config loads the top-level configuration and each active project's, and
-// returns the configuration with the projects that loaded. While no service
-// owns the root, it first completes the migration of the root's projects into
-// the store, as serve does on startup.
-func (r *run) config(ctx context.Context) (*config.Config, []config.Project) {
+func (r *run) config() (*config.Config, []config.Project) {
 	if !r.rootReady {
 		return nil, nil
 	}
@@ -269,89 +248,33 @@ func (r *run) config(ctx context.Context) (*config.Config, []config.Project) {
 		return nil, nil
 	}
 	r.add(GroupConfig, "config.toml", Pass, fmt.Sprintf("%s (%d profiles)", path, len(cfg.Profiles)), "")
-	return cfg, r.projects(ctx, cfg)
+	return cfg, r.projects(cfg)
 }
 
-// projects returns the root's active projects that load. Once the import is
-// complete they are the registry's, loaded from the store, and no project file
-// is read. Before it, doctor completes the import when it owns the root; a
-// root a service owns, or one with a project registration waiting for serve to
-// finish it, has its projects read from their files without any change.
-func (r *run) projects(ctx context.Context, cfg *config.Config) []config.Project {
+func (r *run) projects(cfg *config.Config) []config.Project {
 	store := projectstore.Open(cfg.Root)
-	imported, err := store.Imported()
+	ids, err := store.Projects()
 	if err != nil {
 		r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
 		return nil
 	}
-	if !imported && r.owned {
-		pending, _ := cfg.Root.PendingProject()
-		if _, err := os.Stat(pending); err == nil {
-			r.add(GroupConfig, "project import", Warn, "a project registration is waiting to finish, so the projects are not imported yet", "start the service; it finishes the registration and then imports the projects")
-		} else if err := projectmigration.New(cfg, r.Home, r.Step).Run(ctx); err != nil {
-			r.importFailed(cfg, err)
-			return nil
-		} else {
-			imported = true
-		}
-	}
 	var projects []config.Project
-	if imported {
-		ids, err := store.Projects()
+	for _, id := range ids {
+		file, _, err := store.Load(cfg, r.Home, id)
 		if err != nil {
-			r.add(GroupConfig, "project store", Fail, reason(err), "fix or move aside "+filepath.Join(cfg.Root.String(), "project-store")+"; it holds the project registry and every project's settings")
-			return nil
-		}
-		for _, id := range ids {
-			file, _, err := store.Load(cfg, r.Home, id)
-			if err != nil {
-				r.add(GroupConfig, "project "+string(id), Fail, storedReason(err), "correct the stored setting named with osmia project settings "+string(id)+" set NAME=VALUE while the service is stopped")
-				continue
-			}
-			projects = append(projects, r.projectLoaded(file.Project))
-		}
-		return projects
-	}
-	for _, s := range cfg.ActiveProjects {
-		id, _ := config.ParseProjectID(s)
-		loaded, err := cfg.WithProject(id, r.Home)
-		if err != nil {
-			r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again")
+			r.add(GroupConfig, "project "+string(id), Fail, storedReason(err), "correct the stored setting named with osmia project settings "+string(id)+" set NAME=VALUE while the service is stopped")
 			continue
 		}
-		projects = append(projects, r.projectLoaded(loaded.Project))
+		projects = append(projects, r.projectLoaded(file.Project))
 	}
 	return projects
 }
 
-// projectLoaded reports a project that loaded and returns it.
 func (r *run) projectLoaded(p config.Project) config.Project {
 	r.add(GroupConfig, "project "+string(p.ID), Pass, fmt.Sprintf("%s (%s)", p.Name, p.Upstream), "")
 	return p
 }
 
-// importFailed reports a migration that stopped. A listed project's file that
-// did not load is reported as that project, with the file and the field; the
-// import then changed nothing.
-func (r *run) importFailed(cfg *config.Config, err error) {
-	var field *config.FieldError
-	if errors.As(err, &field) {
-		for _, s := range cfg.ActiveProjects {
-			id, perr := config.ParseProjectID(s)
-			if perr != nil {
-				continue
-			}
-			if path, perr := cfg.Root.ProjectConfig(id); perr == nil && path == field.Path {
-				r.add(GroupConfig, "project "+s, Fail, configReason(err), "fix the field named in that project's file and run osmia doctor again; the import changed nothing")
-				return
-			}
-		}
-	}
-	r.add(GroupConfig, "project import", Fail, configReason(err), "run osmia doctor again, or start the service; the import resumes where it stopped")
-}
-
-// storedReason is the text of a stored project's settings that did not load:
-// the field and why, without the retired file the loader names.
 func storedReason(err error) string {
 	var field *config.FieldError
 	if !errors.As(err, &field) {
@@ -363,8 +286,6 @@ func storedReason(err error) string {
 	return field.Field + ": " + field.Reason
 }
 
-// configReason is a configuration error's text. A field error never carries
-// values read from the file; any other error is reported by kind alone.
 func configReason(err error) string {
 	var field *config.FieldError
 	if errors.As(err, &field) {
@@ -373,9 +294,6 @@ func configReason(err error) string {
 	return "cannot be loaded"
 }
 
-// toolchain checks the executables the service runs: git, jj for Jujutsu
-// workspaces, each configured agent, the container engine or Docker Sandboxes
-// a role's sandbox needs, and dagger for review checks.
 func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	r.tool(ctx, "git", Fail, "install git; every workspace, landing and delivery runs it", "--version")
 	r.jj(ctx, cfg)
@@ -405,8 +323,6 @@ func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	r.tool(ctx, "dagger", Warn, "install dagger; the service runs each candidate's checks with dagger check before review", "version")
 }
 
-// tool finds name on PATH and runs it with args, reporting the first line it
-// prints. A tool that is missing or fails is reported with status.
 func (r *run) tool(ctx context.Context, name string, status Status, remedy string, args ...string) {
 	path, err := r.LookPath(name)
 	if err != nil {
@@ -423,8 +339,6 @@ func (r *run) tool(ctx context.Context, name string, status Status, remedy strin
 	r.add(GroupToolchain, name, Pass, fmt.Sprintf("%s (%s)", path, firstLine(out)), "")
 }
 
-// jj checks the jj that Jujutsu workspaces need, by the configured workspaces
-// setting: required for jujutsu, preferred for auto and unused for git.
 func (r *run) jj(ctx context.Context, cfg *config.Config) {
 	setting := config.WorkspacesAuto
 	if cfg != nil {
@@ -449,12 +363,10 @@ func (r *run) jj(ctx context.Context, cfg *config.Config) {
 	r.add(GroupToolchain, "jj", Warn, reason(err)+"; new workstreams use Git worktrees", remedy+" for Jujutsu workspaces, or set workspaces = \"git\"")
 }
 
-// socket checks that the service can bind its Unix socket.
 func (r *run) socket(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	// Loading the configuration refused a socket path that is not a socket.
 	path := cfg.Listen.Socket
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		r.add(GroupRoot, "socket", Pass, path+" is free", "")
@@ -476,7 +388,6 @@ func (r *run) socket(cfg *config.Config) {
 	}
 }
 
-// web checks that listen.web can be bound. A running service holds it.
 func (r *run) web(cfg *config.Config) {
 	if cfg == nil || cfg.Listen.Web == "" || r.running {
 		return
@@ -490,9 +401,6 @@ func (r *run) web(cfg *config.Config) {
 	r.add(GroupConfig, "listen.web", Pass, cfg.Listen.Web+" can be bound", "")
 }
 
-// jev checks that Jev has its API key. The service starts without it, but
-// every judgment then falls back and every check runs, so a missing key fails
-// the check.
 func (r *run) jev(cfg *config.Config) {
 	if cfg == nil {
 		return
@@ -505,8 +413,6 @@ func (r *run) jev(cfg *config.Config) {
 	r.add(GroupConfig, "jev", Pass, "Jev is configured with "+name+" set for "+cfg.Jev.Model, "")
 }
 
-// project checks a project's clone and the remotes the service fetches from
-// and pushes to.
 func (r *run) project(ctx context.Context, p config.Project) {
 	name := p.Name
 	info, err := os.Stat(p.Clone)
@@ -530,8 +436,6 @@ func (r *run) project(ctx context.Context, p config.Project) {
 	}
 }
 
-// remote checks that the clone has a remote for repository and that it
-// answers, and when branch is set, that the branch exists there.
 func (r *run) remote(ctx context.Context, g *workspace.Git, id config.ProjectID, check, repository, branch, clone string) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -560,8 +464,6 @@ func (r *run) remote(ctx context.Context, g *workspace.Git, id config.ProjectID,
 	r.add(GroupProjects, check, Pass, detail, "")
 }
 
-// github checks the token the service fetches issues and opens pull requests
-// with, and that it reads each project's repositories.
 func (r *run) github(ctx context.Context, cfg *config.Config, projects []config.Project) {
 	creation := r.creationConfigured(cfg)
 	if r.Token == "" {
@@ -607,8 +509,6 @@ func (r *run) github(ctx context.Context, cfg *config.Config, projects []config.
 	}
 }
 
-// creationConfigured reports whether project creation is configured, and
-// records that finding: creation stays off until both [projects] keys are set.
 func (r *run) creationConfigured(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
@@ -621,12 +521,6 @@ func (r *run) creationConfigured(cfg *config.Config) bool {
 	return true
 }
 
-// creationToken checks what project creation needs of the token that
-// answered GET /user as login: that it is the account of repoOwner, which
-// POST /user/repos always creates under, and that it can create repositories.
-// A classic token lists its scopes in X-OAuth-Scopes; a fine-grained token
-// lists none, and its permissions cannot be read, so doctor says it cannot
-// confirm them rather than passing.
 func (r *run) creationToken(repoOwner, login string, header http.Header) {
 	if strings.EqualFold(login, repoOwner) {
 		r.add(GroupGitHub, "creation account", Pass, "the token's account is projects.repo_owner ("+login+")", "")
@@ -645,14 +539,11 @@ func (r *run) creationToken(repoOwner, login string, header http.Header) {
 	r.add(GroupGitHub, "creation permission", Warn, "the token's scopes ("+firstLine(scopes)+") do not include repo, so it cannot create repositories", "create a classic token with the repo scope, or a fine-grained token with Administration write, Pull requests and Metadata for all repositories")
 }
 
-// get reads one GitHub API resource into out.
 func (r *run) get(ctx context.Context, path string, out any) error {
 	_, err := r.getHeader(ctx, path, out)
 	return err
 }
 
-// getHeader reads one GitHub API resource into out and returns the response
-// headers.
 func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -673,13 +564,7 @@ func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header,
 	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
-// state opens each project's trace and the runtime state as serve does on
-// startup, first moving any Git trace to its database exactly as serve
-// would.
 func (r *run) state(cfg *config.Config, projects []config.Project) {
-	if err := trace.MigrateWorkgroups(context.Background(), cfg.Root, nil); err != nil {
-		r.add(GroupState, "workgroup traces", Fail, "trace migration is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the workgroup traces under "+filepath.Join(cfg.Root.String(), "workgroups"))
-	}
 	workstreams := map[config.ProjectID][]config.WorkstreamID{}
 	for _, p := range projects {
 		check := p.Name + " trace"
@@ -688,15 +573,11 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 			r.add(GroupState, check, Fail, reason(err), "")
 			continue
 		}
-		if exists, err := trace.HasTrace(directory); err != nil {
+		if exists, err := trace.HasTraceDatabase(directory); err != nil {
 			r.add(GroupState, check, Fail, reason(err), "")
 			continue
 		} else if !exists {
 			r.add(GroupState, check, Warn, "the project has no trace, so it runs idle", "add it again with osmia project add")
-			continue
-		}
-		if err := trace.Migrate(context.Background(), cfg.Root, p.ID, plan.DraftCheck(directory), nil); err != nil {
-			r.add(GroupState, check, Fail, "trace migration is incomplete: "+reason(err), "start the service so it can resume the migration, or repair the trace at "+directory)
 			continue
 		}
 		repository, err := trace.Open(cfg.Root, p)
@@ -735,8 +616,6 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 	r.add(GroupState, "runtime.json", Pass, path, "")
 }
 
-// command runs path and returns its standard output, or an error carrying
-// the first line it wrote to standard error.
 func command(ctx context.Context, path string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.Output()
@@ -749,7 +628,6 @@ func command(ctx context.Context, path string, args ...string) (string, error) {
 
 func reason(err error) string { return firstLine(err.Error()) }
 
-// firstLine is the first non-empty line of s, at most 120 bytes.
 func firstLine(s string) string {
 	for line := range strings.SplitSeq(s, "\n") {
 		if line = strings.TrimSpace(line); line != "" {

@@ -69,7 +69,7 @@ type FinalReviewInput struct {
 	// was asked for. It is "" for a workstream with no such edge, or
 	// whose edges have not merged yet. A review whose EdgeResolved differs
 	// from the current summary is stale: a workgroup dependency merged
-	// since, and a fresh review and owner approval are required (spec#13).
+	// since, and a fresh review and owner approval are required.
 	EdgeResolved string `json:"edge_resolved,omitempty"`
 	// EdgeWaived is workgroupMergeOrderWaived's summary of the incoming
 	// merge_order edges the workstream dropped, read when the review was asked
@@ -172,20 +172,16 @@ type FinalReviewer struct {
 
 var _ coreadapter.Reconciler = (*FinalReviewer)(nil)
 
-// Pass reconciles every workstream of the trace except the librarian's.
+// Pass reconciles every workstream of the trace.
 func (a *FinalReviewer) Pass(ctx context.Context) error {
 	streams, err := nonSessionWorkstreams(a.Repository)
 	if err != nil {
 		return err
 	}
-	librarian := librarianWorkstream(a.Repository.Project())
 	for _, stream := range streams {
 		if held, err := a.S.ChangeHeld(a.Repository, stream); err != nil {
 			return err
 		} else if held {
-			continue
-		}
-		if stream == librarian {
 			continue
 		}
 		if session, err := isSession(a.Repository, stream); err != nil {
@@ -219,7 +215,7 @@ func (a *FinalReviewer) Pass(ctx context.Context) error {
 	return nil
 }
 
-// assemble moves a building workstream to assembled once every unit of its
+// Assemble moves a building workstream to assembled once every unit of its
 // sealed plan has merged, and does nothing while any has not, while work
 // remains unresolved, or while a move to building holds it for a revision.
 func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID) error {
@@ -246,7 +242,6 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 		ids = append(ids, u.ID)
 		subjects[trace.UnitSubject(u.ID)] = true
 	}
-	// The last unit's move to merged caused the assembly.
 	cause := BuildingState
 	for _, t := range transitions {
 		if t.To == UnitMerged && subjects[t.Subject] {
@@ -259,8 +254,6 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 	if err != nil || feature.Value != BuildingState {
 		return err
 	}
-	// Assembling is the one way out of building once every unit has merged; the
-	// router keeps it as the exit's default.
 	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
 		Repo: a.Repository, Stream: stream, Subject: trace.FeatureSubject, State: feature,
 		Trigger: intake.TriggerUnitsMerged, Cause: id, ID: id, HeaderCause: cause, Reason: reason, Actor: foremanActor,
@@ -302,7 +295,7 @@ var AllMerged = execution.AllMerged
 // ErrNoFeatureBranch is a workstream whose feature branch the clone lacks.
 var ErrNoFeatureBranch = errors.New("the clone has no feature branch")
 
-// governing returns the inputs a final review of the workstream would read
+// Governing returns the inputs a final review of the workstream would read
 // now: the feature branch tip and the latest seal with its spec and plan
 // revisions and the latest charter revision.
 func (a *FinalReviewer) Governing(ctx context.Context, stream config.WorkstreamID) (FinalReviewInput, seal.Seal, error) {
@@ -353,7 +346,7 @@ func (a *FinalReviewer) Governing(ctx context.Context, stream config.WorkstreamI
 	return FinalReviewInput{BaseCheck: baseCheck, Maintenance: feature.Value == DeliveredState, EdgeResolved: edgeResolved, EdgeWaived: edgeWaived, Move: len(moves), Commit: tip, Seal: latest.Seal, Spec: latest.Revision.Spec, Plan: latest.Revision.Plan, Charter: charter.Revision}, latest, nil
 }
 
-// reads reports whether a review asked for with in, or recorded as report,
+// Reads reports whether a review asked for with in, or recorded as report,
 // reads the governing inputs now.
 func (in FinalReviewInput) Reads(now FinalReviewInput) bool {
 	in.Review, now.Review = 0, 0
@@ -364,8 +357,6 @@ func ReportInput(r FinalReport) FinalReviewInput {
 	return FinalReviewInput{Maintenance: r.Maintenance, BaseCheck: r.BaseCheck, EdgeResolved: r.EdgeResolved, EdgeWaived: r.EdgeWaived, Move: r.Move, Commit: r.Commit, Seal: r.Seal, Spec: r.Spec, Plan: r.Plan, Charter: r.Charter}
 }
 
-// holdsForWork reports whether a final review must wait: a unit of the sealed
-// plan or a follow-up unit has not merged, or work remains unresolved.
 func (a *FinalReviewer) holdsForWork(stream config.WorkstreamID) (bool, error) {
 	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
 	if err != nil || !found {
@@ -377,7 +368,7 @@ func (a *FinalReviewer) holdsForWork(stream config.WorkstreamID) (bool, error) {
 	return a.S.UnresolvedWork(a.Repository, stream)
 }
 
-// request asks for the next final review of an assembled workstream unless
+// Request asks for the next final review of an assembled workstream unless
 // one has no result yet, the workstream is paused, the service has no
 // committee runner, or a review was already asked for, or a report already
 // reads, the current branch, seal, spec, plan and charter. A review that
@@ -430,17 +421,9 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	if err := a.S.Step("final-review-governed"); err != nil {
 		return err
 	}
-	// The governing inputs name the merge-order edges observed merged. The work
-	// that follows such a merge is recorded after the observation, so the
-	// review waits for it here, after the inputs are read, rather than only
-	// before: an edge observed in between would otherwise be pinned by a review
-	// of a branch that does not yet hold the update.
 	if held, err := a.holdsForWork(stream); err != nil || held {
 		return err
 	}
-	// The feature can be delivered after the caller read it assembled; a
-	// delivered feature's review is maintenance, asked for only while
-	// maintenance is pending.
 	if now.Maintenance {
 		pending, err := a.S.UpstreamDeliveryPending(a.Repository, a.S.About(a.Repository), stream)
 		if err != nil || !pending {
@@ -486,8 +469,6 @@ func (a *FinalReviewer) Request(ctx context.Context, stream config.WorkstreamID)
 	tx := trace.Transaction{ExpectedVersion: subject.Version,
 		Transition: trace.Transition{Header: h, Subject: FinalReviewSubject, From: subject.Value, To: fmt.Sprintf("requested-%d", now.Review), Reason: reason},
 		Events:     []trace.Event{{ID: event, Kind: action, Body: fmt.Sprintf("Run final review %d", now.Review), Operation: &op}}}
-	// Asking for the review is the one way out of the previous round; the router
-	// keeps it as the exit's default.
 	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
 		Repo: a.Repository, Stream: stream, Subject: FinalReviewSubject, State: subject, Machine: FinalMachine,
 		Trigger: intake.TriggerFinalRequested, Cause: transition, ID: transition, HeaderCause: AssembledState, Reason: reason, Actor: FinalReviewActor,
@@ -515,7 +496,7 @@ func DecodeFinalReview(op coreadapter.Operation) (FinalReviewInput, error) {
 	return in, nil
 }
 
-// stream returns the workstream a final review operation belongs to: the one
+// Stream returns the workstream a final review operation belongs to: the one
 // whose run event derives the operation ID.
 func (a *FinalReviewer) Stream(op coreadapter.Operation, in FinalReviewInput) (config.WorkstreamID, error) {
 	streams, err := a.Repository.Workstreams()
@@ -531,7 +512,7 @@ func (a *FinalReviewer) Stream(op coreadapter.Operation, in FinalReviewInput) (c
 	return "", fmt.Errorf("final review operation %s belongs to no workstream", op.ID)
 }
 
-// outcome returns the recorded result of final review k: succeeded once its
+// Outcome returns the recorded result of final review k: succeeded once its
 // report is reviewed, failed once its failure is recorded, nil before either.
 func (a *FinalReviewer) Outcome(stream config.WorkstreamID, k int) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](a.Repository, stream)
@@ -743,7 +724,7 @@ func (a *FinalReviewer) Rebase(stream config.WorkstreamID, k int) (FinalRebase, 
 	return execution.ReadFeatureRebase(a.Repository, stream, k)
 }
 
-// read drives the first committee member's turn of the review to its end
+// Read drives the first committee member's turn of the review to its end
 // and records the report it left. It abandons a turn a previous service stop
 // interrupted and starts a new turn, carrying checks, while attempts remain.
 func (a *FinalReviewer) Read(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in FinalReviewInput, report FinalReport, checks FinalCheckRun) (coreadapter.OperationResult, error) {
@@ -763,8 +744,6 @@ func (a *FinalReviewer) Read(ctx context.Context, cfg *config.Config, stream con
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		// A turn a hard pause stopped is continued within its attempt, so
-		// only the attempts' own turns count.
 		var turns []trace.QueuedTurn
 		tries := 0
 		for _, q := range t.Turns {
@@ -869,7 +848,7 @@ func (a *FinalReviewer) Read(ctx context.Context, cfg *config.Config, stream con
 	}
 }
 
-// turnDirectory is the service-owned directory of one final review turn: its
+// TurnDirectory is the service-owned directory of one final review turn: its
 // staged view, its backend session and the report its tool kept.
 func (a *FinalReviewer) TurnDirectory(stream config.WorkstreamID, turn string) string {
 	return filepath.Join(a.S.Current().Root.String(), "final", string(a.Repository.Project()), string(stream), turn)
@@ -879,7 +858,7 @@ func (a *FinalReviewer) Output(stream config.WorkstreamID, turn string) string {
 	return filepath.Join(a.TurnDirectory(stream, turn), "output", "report.json")
 }
 
-// recorded returns the report the turn's tool kept, and whether it kept one.
+// Recorded returns the report the turn's tool kept, and whether it kept one.
 func (a *FinalReviewer) Recorded(stream config.WorkstreamID, turn string) (FinalReport, bool, error) {
 	data, err := os.ReadFile(a.Output(stream, turn))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -895,7 +874,7 @@ func (a *FinalReviewer) Recorded(stream config.WorkstreamID, turn string) (Final
 	return report, true, nil
 }
 
-// enqueue accepts one attempt of the reader's turn, fixing its profile and
+// Enqueue accepts one attempt of the reader's turn, fixing its profile and
 // prompts.
 func (a *FinalReviewer) Enqueue(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, in FinalReviewInput, report FinalReport, checks FinalCheckRun, member string, attempt int) error {
 	profile, err := a.S.AgentProfile(cfg, committeeRole, member)
@@ -931,7 +910,7 @@ func (a *FinalReviewer) Enqueue(ctx context.Context, cfg *config.Config, stream 
 	return err
 }
 
-// dispatch runs the turn through the thread dispatcher and runner, stopped by
+// Dispatch runs the turn through the thread dispatcher and runner, stopped by
 // a hard pause covering the workstream.
 func (a *FinalReviewer) Dispatch(ctx context.Context, stream config.WorkstreamID, in FinalReviewInput, report FinalReport, member, turn string) (coreadapter.OperationResult, error) {
 	ctx, release := a.S.Stoppable(ctx, a.Repository.Project(), stream)
@@ -947,7 +926,7 @@ func (a *FinalReviewer) Dispatch(ctx context.Context, stream config.WorkstreamID
 	return dispatcher.Apply(ctx, op)
 }
 
-// turns is the final reader's isolated turn path: a read-only private view
+// Turns is the final reader's isolated turn path: a read-only private view
 // of the reviewed branch, the sealed spec and plan, the charter and the
 // units' reports and landings, with reading, the branch's diff from upstream
 // and reporting. It has no native write, shell, check or VCS capability.
@@ -968,8 +947,6 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.Repository.Project()) || !strings.HasPrefix(scope.Turn, FinalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
 			}
-			// The turn that continues one a hard pause stopped replaces the
-			// report that turn recorded.
 			tool, err := a.Tool(stream, continuedTurn(scope.Turn), report)
 			if err != nil {
 				return nil, err
@@ -1000,7 +977,7 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 	return a.S.MemoryTurns(turns, a.S.About(a.Repository), a.Repository)
 }
 
-// sealedCriteria returns the criteria of the review's sealed spec revision,
+// SealedCriteria returns the criteria of the review's sealed spec revision,
 // cited as spec#<n>, with their text.
 func (a *FinalReviewer) SealedCriteria(stream config.WorkstreamID, report FinalReport) ([]FinalCriterion, error) {
 	spec, _, err := a.Documents(stream, report)
@@ -1017,7 +994,7 @@ func (a *FinalReviewer) SealedCriteria(stream config.WorkstreamID, report FinalR
 	return criteria, nil
 }
 
-// coverage returns every criterion of the review's sealed spec with the
+// Coverage returns every criterion of the review's sealed spec with the
 // merged units that serve it, or a gap when none does.
 func (a *FinalReviewer) Coverage(stream config.WorkstreamID, report FinalReport) ([]FinalCriterion, error) {
 	criteria, err := a.SealedCriteria(stream, report)
@@ -1046,7 +1023,7 @@ func (a *FinalReviewer) Coverage(stream config.WorkstreamID, report FinalReport)
 	return criteria, nil
 }
 
-// tool binds the report tool to the turn: a call whose findings each name a
+// Tool binds the report tool to the turn: a call whose findings each name a
 // severity, say what is wrong and cite only criteria of the sealed spec is
 // kept in the turn's output, replacing an earlier call's; any other is
 // refused with the reason.
@@ -1075,7 +1052,6 @@ func (a *FinalReviewer) Tool(stream config.WorkstreamID, turn string, report Fin
 		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
 			return nil, err
 		}
-		// A rename keeps the previous report whole if the write stops.
 		if err := errors.Join(os.WriteFile(file+".tmp", data, 0600), os.Rename(file+".tmp", file)); err != nil {
 			return nil, err
 		}
@@ -1106,7 +1082,7 @@ func CheckFindings(sealed []FinalCriterion, input []FinalFinding) ([]FinalFindin
 	return out, ""
 }
 
-// documents returns the review's sealed spec and plan revisions.
+// Documents returns the review's sealed spec and plan revisions.
 func (a *FinalReviewer) Documents(stream config.WorkstreamID, report FinalReport) (spec, graph trace.Document, err error) {
 	docs, err := trace.Read[trace.Document](a.Repository, stream)
 	if err != nil {
@@ -1126,7 +1102,7 @@ func (a *FinalReviewer) Documents(stream config.WorkstreamID, report FinalReport
 	return spec, graph, nil
 }
 
-// selectView stages the reader's view for the claimed turn and selects all of
+// SelectView stages the reader's view for the claimed turn and selects all of
 // it, read-only.
 func (a *FinalReviewer) SelectView(ctx context.Context, scope coreadapter.Scope, stream config.WorkstreamID, report FinalReport) (isolation.Selection, error) {
 	cfg := a.S.About(a.Repository)
@@ -1148,7 +1124,7 @@ func (a *FinalReviewer) SelectView(ctx context.Context, scope coreadapter.Scope,
 	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings}, nil
 }
 
-// stage builds the view: the reviewed commit's tracked files under branch/,
+// Stage builds the view: the reviewed commit's tracked files under branch/,
 // the sealed spec.md and plan.json, the charter revision the review reads as
 // charter.md, the review's recorded check result under final/ with the output
 // file it names, and each unit's latest report and landing under units/. It
@@ -1220,7 +1196,7 @@ func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream co
 	return paths, nil
 }
 
-// record commits the next revision of final/report.json with the review's
+// Record commits the next revision of final/report.json with the review's
 // move to reviewed or failed and a notice for the chief of staff, and
 // returns the review's result. A review already recorded returns its result
 // and records nothing more.
@@ -1239,9 +1215,6 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 	transition, _ := FinalReviewIDs(report.Review)
 	id := transition + "-" + report.Outcome
 	outcome := coreadapter.OperationResult{Outcome: "failed"}
-	// Only a pending workgroup post-merge update permits maintenance
-	// repairs on this branch. Historical edge resolutions do not grant
-	// that permission to later same-repo base maintenance.
 	edgePending := false
 	if report.Maintenance {
 		edgePending, err = a.S.WorkgroupEdgePending(a.Repository, stream)
@@ -1323,8 +1296,6 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 		Documents: documents, Followups: followups, Plain: plain, At: at}, outcome)
 }
 
-// failedChecksNotice reads the check result recorded for the review and
-// returns the notice lines of its failed checks, empty when it did not fail.
 func (a *FinalReviewer) failedChecksNotice(stream config.WorkstreamID, report FinalReport) (string, error) {
 	if report.Maintenance {
 		return "", nil
@@ -1400,7 +1371,7 @@ func BriefNotice(report FinalReport, revision int) string {
 	return b.String()
 }
 
-// followup returns the one unit that repairs the blocking problems of a
+// Followup returns the one unit that repairs the blocking problems of a
 // reviewed post-merge dependency update, scoped to the sealed footprints of
 // the units serving the criteria they concern, or of every unit when they
 // name none, and whether there are any.
@@ -1475,7 +1446,7 @@ func (a *FinalReviewer) Followup(stream config.WorkstreamID, report FinalReport,
 	return followup.Unit{Review: report.Review, Report: revision, Criterion: first, Gap: gap, Unit: plan.Unit{ID: id, Title: "Repair the post-merge dependency update", Task: "Resolve what final review " + strconv.Itoa(report.Review) + " found blocking after the dependency update: " + gap, Acceptance: acceptance, Criteria: criteria, DependsOn: []string{}, Footprint: footprint}}, true, nil
 }
 
-// finalMoveNote is what the reader of a final review asked for by the
+// FinalMoveNote is what the reader of a final review asked for by the
 // workstream's move n to building or assembled is told of it, or "" when the
 // review answers no move.
 func (a *FinalReviewer) FinalMoveNote(repository *trace.Repository, stream config.WorkstreamID, n int) (string, error) {
@@ -1599,7 +1570,7 @@ func FinalReportBaseStale(repository *trace.Repository, stream config.Workstream
 	return after != (seal.Base{}) && after != before, nil
 }
 
-// finalGate returns the workstream's latest final report and why it cannot
+// FinalGate returns the workstream's latest final report and why it cannot
 // be presented for approval or delivery: none is recorded, the latest
 // failed, it no longer reads the workstream's feature branch tip, latest seal
 // and its spec hash, latest spec and plan revisions and latest charter
@@ -1696,8 +1667,6 @@ func FinalSystemPrompt(p config.Project) string {
 	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and Dagger Cloud ran the project's checks on the exact commit you read, with the result the service read from the pull request in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + finalCheckReviewInstructions
 }
 
-// finalCheckReviewInstructions tells the final reader how to use the check
-// result in its prompt and view.
 const finalCheckReviewInstructions = " The check result of the commit you read is recorded by the service in the check result section of your prompt and in the final/checks file of your view; you cannot run checks. A recorded pass satisfies every criterion that needs tests or checks to pass: the pass is the evidence that the required tests ran and passed, so never raise a finding because you cannot run tests yourself or cannot see that a named test was selected. A recorded failure is evidence you may cite in a finding, with the failed checks it names. A result that says the final read continues without check results, or that no check results exist, is not a finding by itself; judge the feature from the branch."
 
 func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {

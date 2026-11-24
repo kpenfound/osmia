@@ -20,9 +20,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// confirmDestroy presses a destroy button, reads the in-page dialog it opens
-// and answers it. Cancelling hands focus back to the button; the native
-// confirmation is never called.
 func confirmDestroy(p *page, selector string, accept bool) {
 	p.T.Helper()
 	p.Eval(`window.nativeConfirms = 0; window.confirm = () => { window.nativeConfirms++; return true; }`, nil)
@@ -53,7 +50,7 @@ func confirmDestroy(p *page, selector string, accept bool) {
 
 func assertDestroyRequests(p *page, route string, id config.WorkstreamID, want int) {
 	p.T.Helper()
-	path := Prefix + "/" + route + "/" + string(id) + "/destroy"
+	path := service.Prefix + "/" + route + "/" + string(id) + "/destroy"
 	got := 0
 	for _, requested := range p.Paths() {
 		if requested == path {
@@ -65,9 +62,7 @@ func assertDestroyRequests(p *page, route string, id config.WorkstreamID, want i
 	}
 }
 
-// The reply can be visible before its operation is acknowledged. Wait for
-// that completion before dispatching destroy, rather than retrying a refusal.
-func awaitDestroyTurn(t *testing.T, s *Service, project config.ProjectID, id config.WorkstreamID) {
+func awaitDestroyTurn(t *testing.T, s *service.Service, project config.ProjectID, id config.WorkstreamID) {
 	t.Helper()
 	repository, err := service.InspectForTest(s).Repository(project)
 	must(t, err)
@@ -76,20 +71,10 @@ func awaitDestroyTurn(t *testing.T, s *Service, project config.ProjectID, id con
 		must(t, err)
 		return ops
 	})
-	deadline := time.Now().Add(browserTimeout)
-	for {
-		running := service.InspectForTest(s).SessionTurnRunning(id)
-		if !running {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("completed turn remains active")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	awaitCondition(t, "the completed turn ending", func() bool { return !service.InspectForTest(s).SessionTurnRunning(id) })
 }
 
-func assertBrowserDestroyed(p *page, s *Service, c *Client, project config.ProjectID, id config.WorkstreamID, route string) {
+func assertBrowserDestroyed(p *page, s *service.Service, c *service.Client, project config.ProjectID, id config.WorkstreamID, route string) {
 	p.T.Helper()
 	p.Await("destroy leaves the conversation and sidebar", fmt.Sprintf(`
       !document.querySelector('[data-view=project-pane]').hidden &&
@@ -171,7 +156,6 @@ func TestBrowserDestroyDesignConfirmsRefusesBusyAndRemovesHistory(t *testing.T) 
 	assertDestroyRequests(p, "design", id, 0)
 	_, err = c.Design(context.Background(), id)
 	must(t, err)
-	// Sending after cancellation proves that the retained session is usable.
 	p.TypeInto("#design-form textarea", "Keep thinking")
 	p.Await("the message typed", `document.querySelector('#design-form textarea').value === 'Keep thinking'`)
 	p.Click("#design-form [type=submit]")
@@ -210,7 +194,7 @@ func TestBrowserDestroySessionConfirmsRefusesBusyAndRemovesCommittedBranch(t *te
 		}
 		return &agent.Result{ClaudeID: "session", ResultText: "Exploration preserved."}, nil
 	}
-	opened, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default", Title: "Explore deletion"})
+	opened, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default", Title: "Explore deletion"})
 	must(t, err)
 	id := opened.Session.Workstream
 	p := openBrowser(t)

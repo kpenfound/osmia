@@ -85,7 +85,6 @@ func TestCandidatesNarrowLargeCollectionsToPackages(t *testing.T) {
 	}
 }
 
-// An empty query or repeated check-name filter represents the same root.
 func itemSeparator(root string) string {
 	if root == "dag+check://?check=test" {
 		return "&check=test"

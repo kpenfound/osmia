@@ -28,7 +28,6 @@ type Workgroup struct {
 	Conversation *ConversationOrigin   `json:"conversation,omitempty"`
 }
 
-// workgroupsFile is the recorded shape of workgroups.json.
 type workgroupsFile struct {
 	Version    int         `json:"version"`
 	Workgroups []Workgroup `json:"workgroups"`
@@ -113,10 +112,7 @@ func EnsureWorkgroups(ctx context.Context, r *Repository, missing []config.Works
 // CreateWorkgroup records one new workgroup holding exactly members, who
 // share its chief of staff from then on. It refuses, writing nothing, if
 // members is empty, lists a workstream twice or names one that already
-// belongs to a recorded workgroup. Until the architect's own graph exists,
-// this is how a multi-workstream workgroup is made: directly by a test
-// fixture or a service helper, as a fast-path or migrated one-workstream
-// workgroup is by EnsureWorkgroups.
+// belongs to a recorded workgroup.
 func CreateWorkgroup(ctx context.Context, r *Repository, members []config.WorkstreamID, at time.Time, actor Actor, cause string) (Workgroup, error) {
 	if len(members) == 0 {
 		return Workgroup{}, fmt.Errorf("a workgroup needs at least one member")
@@ -156,18 +152,14 @@ func CreateWorkgroup(ctx context.Context, r *Repository, members []config.Workst
 }
 
 // RetractWorkgroup removes stream's recorded one-workstream workgroup, if
-// hand-in's own EnsureWorkgroups call already recorded one before stream
-// joined a cross-repo workgroup. A new workstream gets that one-workstream
-// workgroup at once (handin.go's own EnsureWorkgroups call), before
-// anything can know it will later become a cross-repo workgroup's member;
-// once RecordCrossRepoWorkgroup durably points stream at its real, shared
-// workgroup in that workgroup's own trace, the earlier, solitary record on
-// stream's own repository would otherwise make workgroup membership
-// authoritative in two places (charter#2). It changes nothing when stream
-// carries no recorded workgroup, and it refuses, changing nothing, when the
-// recorded workgroup has more than stream as a member: retracting a real,
-// same-repo workgroup is not this function's job. r must be the project's
-// own repository, not an instance already scoped to one workstream.
+// one was recorded before stream joined a cross-repo workgroup. Once
+// RecordCrossRepoWorkgroup durably points stream at its shared workgroup in
+// that workgroup's own trace, the solitary record on stream's own repository
+// would make workgroup membership authoritative in two places. It changes
+// nothing when stream carries no recorded workgroup, and it refuses,
+// changing nothing, when the recorded workgroup has more than stream as a
+// member. r must be the project's own repository, not an instance already
+// scoped to one workstream.
 func (r *Repository) RetractWorkgroup(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor, cause string) error {
 	existing, revision, err := Workgroups(r)
 	if err != nil {
@@ -311,15 +303,11 @@ func ResolvedWorkgroups(r *Repository) ([]config.WorkgroupID, int, error) {
 // satisfies resolved (typically: has reached a resolved feature state,
 // delivered or abandoned). It returns the IDs newly recorded resolved by
 // this call. Calling it again, including after a crash mid-way, changes
-// nothing further and marks nothing twice: a workgroup is recorded
-// once per resolution period, and resolving one workgroup never affects
-// another's record.
-//
-// This is the distinct trigger other units retire workgroup-level documents
-// on, such as a project spec, once every workstream of a workgroup is
-// resolved; recording it neither resolves, deletes nor retires anything
-// itself, and nothing here fires when only some of a workgroup's members
-// are resolved.
+// nothing further and marks nothing twice: a workgroup is recorded once per
+// resolution period, and resolving one workgroup never affects another's
+// record. Recording a resolution neither resolves, deletes nor retires
+// anything itself, and nothing is recorded while only some of a workgroup's
+// members are resolved.
 func MarkWorkgroupsResolved(ctx context.Context, r *Repository, groups []Workgroup, resolved func(config.WorkstreamID) (bool, error), at time.Time, actor Actor, cause string) ([]config.WorkgroupID, error) {
 	existing, revision, err := ResolvedWorkgroups(r)
 	if err != nil {
@@ -371,9 +359,6 @@ func MarkWorkgroupsResolved(ctx context.Context, r *Repository, groups []Workgro
 	return newly, nil
 }
 
-// latestDocument returns the content and revision of the latest revision
-// of the project document at path, or no content and revision 0 when none
-// is recorded. Like Read, it fails on any damaged record.
 func latestDocument(r *Repository, path string) (string, int, error) {
 	target, err := r.questionRead("")
 	if err != nil {

@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 )
 
-// newSessionWorktree gives a fixture clone a worktree on a session-style
-// branch at the fixture's base commit, as a session's own open would.
 func newSessionWorktree(t *testing.T, f fixture) Worktree {
 	t.Helper()
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
@@ -45,9 +43,6 @@ func TestWorktreeDiffReadsUncommittedChangesIncludingUntracked(t *testing.T) {
 	if !strings.Contains(diff, "README") || !strings.Contains(diff, "widgets, changed") || !strings.Contains(diff, "new.txt") || !strings.Contains(diff, "brand new") {
 		t.Fatalf("worktree diff missing changes:\n%s", diff)
 	}
-	// Reading the diff leaves the worktree's own index untouched: it is
-	// still reported dirty by an ordinary status, and committing afterward
-	// still sees the same changes.
 	status := git(t, "-C", w.Path, "status", "--porcelain")
 	if status == "" {
 		t.Fatal("WorktreeDiff staged the worktree's real index")
@@ -87,8 +82,6 @@ func TestCommitChangesCommitsEveryChangeAndReportsNoChanges(t *testing.T) {
 	if changed2 != "M\tREADME\nA\tnew.txt" {
 		t.Fatalf("commit's changes:\n%s", changed2)
 	}
-	// Committing again with nothing new to add reports the same commit
-	// unchanged.
 	again, changed, err := f.provider.CommitChanges(ctx, w, "retried message", at)
 	if err != nil || changed || again != commit {
 		t.Fatalf("a repeated commit of an unchanged worktree: %s %v %v, want %s unchanged", again, changed, err, commit)

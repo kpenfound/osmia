@@ -108,9 +108,6 @@ func (p *Shared) reserved(project config.ProjectID) usage {
 	return out
 }
 
-// count excludes runner turns covered by workflow reservations, so publishing
-// a scheduler pass neither doubles their use nor loses an unclaimed slot.
-// Callers hold mu, which also fences reservation release against publication.
 func (p *Shared) count(l loaded, used usage) {
 	p.countWithout(l, used, "", "")
 }
@@ -142,7 +139,6 @@ func (p *Shared) countWithout(l loaded, used usage, agent string, owner config.W
 	}
 }
 
-// reservationKey identifies the runner thread covered by an operation's slot.
 type reservationKey struct {
 	project    config.ProjectID
 	workstream config.WorkstreamID

@@ -25,15 +25,11 @@ func document(id, path, content string) trace.Document {
 	return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: first, At: timestamp, Actor: owner, Cause: "test"}, Path: path, Content: content}
 }
 
-// sealed records the spec, the plan and a seal of both in the first
-// workstream.
 func sealed(t *testing.T) fixture {
 	t.Helper()
 	return sealedWith(t, masonPlan)
 }
 
-// sealedWith records the spec, the given plan and a seal of both in the
-// first workstream.
 func sealedWith(t *testing.T, planContent string) fixture {
 	t.Helper()
 	f := setup(t)
@@ -55,8 +51,6 @@ func sealedWith(t *testing.T, planContent string) fixture {
 	return f
 }
 
-// revise records content as the next revision of the first workstream's
-// document id at path.
 func (f fixture) revise(t *testing.T, id, path, content string) {
 	t.Helper()
 	documents, err := trace.Read[trace.Document](f.repo, first)

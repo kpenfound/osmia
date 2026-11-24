@@ -13,9 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// archiveRequest says who archives. The chief of staff archives only while
-// eligible holds, which is evaluated again on the snapshot that commits the
-// archive.
 type archiveRequest struct {
 	actor    string
 	eligible func(state string, evidence MemberEvidence) bool
@@ -143,7 +140,6 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 			if !req.eligible(snapshot.Feature.Value, evidence) {
 				return trace.ErrConflict
 			}
-			// An archive made since the selection stays as it was recorded.
 			if current, _ := s.Store().Snapshot(); ArchivedIn(current, stream) {
 				return nil
 			}
@@ -171,8 +167,6 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 			}
 		}
 		a.DeliveryLink = publicationLink
-		// An automatic archive links the pull request that merged, which its
-		// conversation entry names.
 		if mergeLink != "" && req.eligible == nil {
 			a.DeliveryLink = mergeLink
 		}
@@ -196,7 +190,6 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 		return ArchiveResponse{}, apiErr
 	}
 	if recorded, ok := s.ArchivedWorkstream(string(stream)); ok {
-		// Only the archive this call recorded ends the workstream's spans.
 		if s.WorkstreamEnded != nil && recorded.ArchivedAt.Equal(a.ArchivedAt) && recorded.Actor == a.Actor {
 			s.WorkstreamEnded(repository, stream, recorded.ArchivedAt)
 		}

@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -17,9 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// lossyPulls is the fake pull request host with a host that can lose the
-// response of marking a pull request ready, and that can refuse to answer or
-// to update a pull request.
 type lossyPulls struct {
 	*fixturekit.FakePulls
 	mu         sync.Mutex
@@ -54,8 +52,6 @@ func (p *lossyPulls) Update(ctx context.Context, repository string, number int, 
 	return p.FakePulls.Update(ctx, repository, number, change)
 }
 
-// Ready marks the pull request ready on the host and loses the response, as a
-// connection reset after the host acted does.
 func (p *lossyPulls) Ready(ctx context.Context, repository string, number int) (pulls.PullRequest, error) {
 	pr, err := p.FakePulls.Ready(ctx, repository, number)
 	p.mu.Lock()
@@ -67,31 +63,10 @@ func (p *lossyPulls) Ready(ctx context.Context, repository string, number int) (
 	return pr, err
 }
 
-// publicationClock is the controller's clock: a minute passes between passes.
-type publicationClock struct {
-	mu sync.Mutex
-	at time.Time
-}
-
-func (c *publicationClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
-func (c *publicationClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
-}
-
-// boundedPublication is an approved "Mark ready for review" asked for as a
-// publication operation, and a controller that reconciles it.
 type boundedPublication struct {
-	d          *draftFixture
-	pulls      *lossyPulls
-	clock      *publicationClock
-	controller *reconcile.Controller
+	d     *draftFixture
+	pulls *lossyPulls
+	retryPasses
 }
 
 func newBoundedPublication(t *testing.T) *boundedPublication {
@@ -103,36 +78,21 @@ func newBoundedPublication(t *testing.T) *boundedPublication {
 	}
 	d.recordBrief(t, "Restart the service")
 	lossy := &lossyPulls{FakePulls: d.pulls}
-	d.f.s.options.PullRequests = lossy
+	d.f.S.Options.PullRequests = lossy
 	if _, apiErr := d.decide(d.present(t)); apiErr != nil {
 		t.Fatal(apiErr)
 	}
-	must(t, (&publisher{s: d.f.s, repository: d.repository}).Pass(context.Background()))
-	clock := &publicationClock{at: time.Now().UTC()}
-	controller, err := reconcile.New(d.repository, reconcile.Options{
-		Worker: "publication-test", Now: clock.Now, RetryDelay: time.Minute, MaxRetryDelay: time.Minute, GiveUpWindow: 10 * time.Minute,
-		Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RepositoryBoundary: &delivery.Publisher{S: d.f.s.delivery(), Repository: d.repository}},
-		Hold:     func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action != PublishAction },
-	})
-	must(t, err)
-	return &boundedPublication{d, lossy, clock, controller}
-}
-
-// pass makes the given number of passes a minute apart.
-func (b *boundedPublication) pass(t *testing.T, passes int) {
-	t.Helper()
-	for range passes {
-		must(t, b.controller.Pass(context.Background()))
-		b.clock.advance(time.Minute)
-	}
+	fixturekit.Must(t, (&journey.Publisher{S: d.f.S, Repository: d.repository}).Pass(context.Background()))
+	passes := newRetryPasses(t, d.repository, "publication-test", delivery.PublishAction, &delivery.Publisher{S: d.f.S.Delivery(), Repository: d.repository})
+	return &boundedPublication{d, lossy, passes}
 }
 
 func (b *boundedPublication) operation(t *testing.T) trace.OperationRecord {
 	t.Helper()
 	ops, err := b.d.repository.Operations(b.d.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	for _, o := range ops {
-		if o.Operation.Action == PublishAction {
+		if o.Operation.Action == delivery.PublishAction {
 			return o
 		}
 	}
@@ -143,7 +103,7 @@ func (b *boundedPublication) operation(t *testing.T) trace.OperationRecord {
 func (b *boundedPublication) notices(t *testing.T, words string) []string {
 	t.Helper()
 	entries, err := b.d.repository.Outbox(b.d.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	var bodies []string
 	for _, e := range entries {
 		if e.Event.Kind == trace.NoticeKind && strings.Contains(e.Event.Body, words) {
@@ -153,10 +113,6 @@ func (b *boundedPublication) notices(t *testing.T, words string) []string {
 	return bodies
 }
 
-// The host marks the pull request ready and the response is lost; every later
-// attempt cannot read the host. Past the limit and the window the publication
-// is recorded as delivered-ready through its own success path: no second ready
-// call is made and nothing is refused.
 func TestPublicationWhoseReadyResponseWasLostIsRecordedWhenGivenUp(t *testing.T) {
 	t.Parallel()
 	b := newBoundedPublication(t)
@@ -170,8 +126,8 @@ func TestPublicationWhoseReadyResponseWasLostIsRecordedWhenGivenUp(t *testing.T)
 	if op := b.operation(t); op.Result != nil {
 		t.Fatalf("given up inside the window: %+v", op.Result)
 	}
-	// The window passes and the host answers again.
-	b.clock.advance(10 * time.Minute)
+
+	b.clock.Advance(10 * time.Minute)
 	b.pulls.set(func(p *lossyPulls) { p.unreadable = false })
 	b.pass(t, 1)
 
@@ -182,14 +138,14 @@ func TestPublicationWhoseReadyResponseWasLostIsRecordedWhenGivenUp(t *testing.T)
 	if b.d.pulls.Readies != 1 {
 		t.Fatalf("the pull request was marked ready %d times", b.d.pulls.Readies)
 	}
-	if refused, err := publicationRefused(b.d.repository, b.d.stream, 1); err != nil || refused {
+	if refused, err := delivery.PublicationRefused(b.d.repository, b.d.stream, 1); err != nil || refused {
 		t.Fatalf("the publication was refused: %v, %v", refused, err)
 	}
-	if got := b.d.feature(t); got != DeliveredState {
+	if got := b.d.feature(t); got != intake.DeliveredState {
 		t.Fatalf("the workstream is %s, want delivered", got)
 	}
 	ready, recorded, err := delivery.ReadyAt(b.d.repository, b.d.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !recorded || ready.Approval != 1 || ready.PullRequest != b.d.pulls.Prs[0].Number || ready.Draft {
 		t.Fatalf("the ready record %+v", ready)
 	}
@@ -198,10 +154,6 @@ func TestPublicationWhoseReadyResponseWasLostIsRecordedWhenGivenUp(t *testing.T)
 	}
 }
 
-// The remote cannot be read at the threshold: the publication is ended saying
-// its outcome could not be determined, never that the pull request was not
-// marked ready, the chief of staff is told once, and nothing is pushed,
-// marked ready or updated.
 func TestPublicationGivenUpOnAnUnreadableRemoteSaysItsOutcomeCouldNotBeDetermined(t *testing.T) {
 	t.Parallel()
 	b := newBoundedPublication(t)
@@ -211,7 +163,7 @@ func TestPublicationGivenUpOnAnUnreadableRemoteSaysItsOutcomeCouldNotBeDetermine
 	if op := b.operation(t); op.Result != nil {
 		t.Fatalf("given up inside the window: %+v", op.Result)
 	}
-	b.clock.advance(10 * time.Minute)
+	b.clock.Advance(10 * time.Minute)
 	b.pass(t, 1)
 
 	op := b.operation(t)
@@ -235,14 +187,11 @@ func TestPublicationGivenUpOnAnUnreadableRemoteSaysItsOutcomeCouldNotBeDetermine
 	if b.d.pushCount(t) != pushes || b.d.pulls.Readies != readies || b.d.pulls.Updates != updates || b.d.pulls.Creates != creates {
 		t.Fatalf("the give-up changed the remote: %d pushes (was %d), %d ready calls (was %d), %d updates (was %d), %d creates (was %d)", b.d.pushCount(t), pushes, b.d.pulls.Readies, readies, b.d.pulls.Updates, updates, b.d.pulls.Creates, creates)
 	}
-	if got := b.d.feature(t); got != AssembledState {
+	if got := b.d.feature(t); got != intake.AssembledState {
 		t.Fatalf("the workstream is %s, want assembled", got)
 	}
 }
 
-// A publication whose effect is confirmed absent is refused through the
-// publication's own refusal, with the last failure as its reason and one
-// notice to the chief of staff; the pull request is left as it was.
 func TestPublicationWhoseEffectIsConfirmedAbsentIsRefusedWhenGivenUp(t *testing.T) {
 	t.Parallel()
 	b := newBoundedPublication(t)
@@ -251,7 +200,7 @@ func TestPublicationWhoseEffectIsConfirmedAbsentIsRefusedWhenGivenUp(t *testing.
 	if op := b.operation(t); op.Result != nil || reconcile.ConsecutiveFailures(op) != reconcile.GiveUpFailures+1 {
 		t.Fatalf("inside the window: %+v", op)
 	}
-	b.clock.advance(10 * time.Minute)
+	b.clock.Advance(10 * time.Minute)
 	b.pass(t, 1)
 
 	op := b.operation(t)
@@ -263,10 +212,10 @@ func TestPublicationWhoseEffectIsConfirmedAbsentIsRefusedWhenGivenUp(t *testing.
 			t.Fatalf("the refusal lacks %q: %s", words, op.Result.Evidence)
 		}
 	}
-	if refused, err := publicationRefused(b.d.repository, b.d.stream, 1); err != nil || !refused {
+	if refused, err := delivery.PublicationRefused(b.d.repository, b.d.stream, 1); err != nil || !refused {
 		t.Fatalf("the publication was not refused: %v, %v", refused, err)
 	}
-	if b.d.pulls.Readies != 0 || !b.d.pulls.Prs[0].Draft || b.d.feature(t) != AssembledState {
+	if b.d.pulls.Readies != 0 || !b.d.pulls.Prs[0].Draft || b.d.feature(t) != intake.AssembledState {
 		t.Fatalf("the give-up changed the pull request: %d ready calls, %+v, %s", b.d.pulls.Readies, b.d.pulls.Prs[0], b.d.feature(t))
 	}
 	if got := b.notices(t, "not marked ready"); len(got) != 1 {

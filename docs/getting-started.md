@@ -195,7 +195,7 @@ Register another repo as its own project:
 osmia project add other --upstream owner/other --clone ~/src/other
 ```
 
-Give that project its own charter if it needs one. Projects have independent configuration and entity maps. Startup splits grouped registrations while retaining their IDs, copying the source charter's numbered rules and preserving in-flight workgroups. See [migration](configuration.md#project-and-workgroup-migration).
+Give that project its own charter if it needs one. Projects have independent configuration and entity maps.
 
 ## 5. Start a workgroup and decide
 

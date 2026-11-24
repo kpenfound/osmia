@@ -18,17 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// capacityStatus reports role slots from published scheduler counts and
-// workflow reservations in the shared pool,
-// with the queued turns their last passes found no free slot for, and, for
-// masons, the ready units of list whose latest mason controller decision is
-// to wait for a slot. It reads no trace. The role slots are shared by every
-// project in the pool, so their use counts the turns in flight on all of
-// them, and the waiting turns are listed in registry order.
-// PerWorkstream is the only active project's limit, or the configured default
-// otherwise. Work a pause now in force holds, and work of an abandoned
-// workstream, is not waiting. Check slots come directly from the service pool,
-// including every check run still waiting for capacity.
 func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 	cfg := s.current()
 	limits := cfg.Capacity
@@ -74,17 +63,10 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 	return out
 }
 
-// unboundedCapacity is the entry of a pool with no factory-wide limit: it
-// carries no numeric limit, so it cannot be read as zero slots.
 func unboundedCapacity(role string) RoleCapacity {
 	return RoleCapacity{Role: role, Unbounded: true, Scope: api.UnboundedScope, Note: api.UnboundedNote, Waiting: []SlotWait{}}
 }
 
-// providerUsage reports today's known spend by provider, the provider of the
-// turn attempt each cost records, next to each provider's usage limit in
-// state and the roles profiles says run a fallback, or are paused, because
-// of it. The providers are those of the configured profiles, of today's
-// costs and of the limits, by name.
 func (s *Service) providerUsage(state runtime.State, profiles map[string]EffectiveProfile) (*ProviderUsageStatus, *Diagnostic) {
 	cfg, projects := s.runtimes()
 	day := s.localDay()
@@ -131,7 +113,6 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 		}
 		for _, role := range slices.Sorted(maps.Keys(cfg.Roles)) {
 			configured := cfg.Roles[role].Profile
-			// The registry limit holds the sbx roles, whatever their backend.
 			registry := name == runtime.SandboxRegistryLimit && cfg.Roles[role].Sandbox == "sbx"
 			if (cfg.Profiles[configured].Agent != name && !registry) || usage.Limit == nil {
 				continue
@@ -155,9 +136,6 @@ func (s *Service) providerUsage(state runtime.State, profiles map[string]Effecti
 	return out, nil
 }
 
-// providerCosts returns the costs of every workstream's attempts that started
-// on day, by the provider of the turn attempt each one records. Jev's costs
-// are under jev.Role; other costs no recorded attempt matches are under "".
 func providerCosts(repository *trace.Repository, day calendarDay) (map[string][]trace.Cost, error) {
 	var result map[string][]trace.Cost
 	err := repository.WithWorkstreamDiscovery(func(streams []config.WorkstreamID) error {
@@ -208,7 +186,6 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 	return ProviderSpend{SpendUSD: spend.String(), UnknownCosts: spend.unknown, LowerBound: spend.unknown > 0}, nil
 }
 
-// capacity exposes the shared slot accounting without handing scheduling to a model.
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks) is its configured factory-wide limit: it comes from config.toml and applies on reload. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage

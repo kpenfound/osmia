@@ -21,7 +21,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// received is what a loopback collector stand-in was sent.
 type received struct {
 	header   http.Header
 	metadata metadata.MD
@@ -29,8 +28,6 @@ type received struct {
 	request  *coltrace.ExportTraceServiceRequest
 }
 
-// fakeCollector is an in-process OTLP receiver on a loopback port, speaking
-// OTLP/HTTP or OTLP/gRPC: a stand-in for the collector, never a real one.
 type fakeCollector struct {
 	addr   string
 	mu     sync.Mutex
@@ -61,7 +58,6 @@ func (c *fakeCollector) Export(ctx context.Context, req *coltrace.ExportTraceSer
 	return &coltrace.ExportTraceServiceResponse{}, nil
 }
 
-// countingListener counts accepted connections.
 type countingListener struct {
 	net.Listener
 	n *atomic.Int64
@@ -75,8 +71,6 @@ func (l countingListener) Accept() (net.Conn, error) {
 	return conn, err
 }
 
-// collector starts a loopback receiver that accepts connections and answers
-// both OTLP/HTTP posts and OTLP/gRPC exports.
 func collector(t *testing.T) *fakeCollector {
 	t.Helper()
 	c := &fakeCollector{status: http.StatusOK}
@@ -105,7 +99,6 @@ func collector(t *testing.T) *fakeCollector {
 	return c
 }
 
-// grpcCollector starts a loopback OTLP/gRPC receiver.
 func grpcCollector(t *testing.T) *fakeCollector {
 	t.Helper()
 	c := &fakeCollector{}
@@ -154,8 +147,6 @@ func sinkFor(t *testing.T, cfg config.Telemetry, opts Options) *Sink {
 	return sink
 }
 
-// The headers the headers_env variable holds reach the collector, over either
-// protocol, and the value appears in no log line or error.
 func TestHeadersFromTheEnvironmentVariableReachTheExporter(t *testing.T) {
 	const headers = "authorization=Bearer s3cret-token,x-team=osmia"
 	getenv := func(name string) string {
@@ -192,7 +183,6 @@ func TestHeadersFromTheEnvironmentVariableReachTheExporter(t *testing.T) {
 func TestHeaderValuesNeverAppearInLogsOrErrors(t *testing.T) {
 	const secret = "s3cret-token"
 	getenv := func(string) string { return "authorization=Bearer " + secret }
-	// A collector that refuses and repeats the credential back.
 	c := collector(t)
 	c.status, c.body = http.StatusUnauthorized, "bad credential Bearer "+secret
 	var logs bytes.Buffer
@@ -208,19 +198,15 @@ func TestHeaderValuesNeverAppearInLogsOrErrors(t *testing.T) {
 	if strings.Contains(logs.String(), secret) {
 		t.Fatalf("log exposed the header value:\n%s", logs.String())
 	}
-	// Anything the process logs afterward redacts it too.
 	if got := redact.Secrets("sent Bearer "+secret, redact.KnownSecrets()...); strings.Contains(got, secret) {
 		t.Fatalf("redact does not know the header value: %q", got)
 	}
-	// A malformed variable fails the build naming the variable only.
 	_, err := New(config.Telemetry{Endpoint: c.addr, Protocol: config.TelemetryProtocolHTTP, Insecure: true, HeadersEnv: "OSMIA_TEST_HEADERS"}, Options{Getenv: func(string) string { return "oops-" + secret }})
 	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "OSMIA_TEST_HEADERS") {
 		t.Fatalf("malformed headers: %v", err)
 	}
 }
 
-// OTEL_* variables change neither where spans go nor how, nor the resource:
-// only the [telemetry] table and the hand-built resource decide.
 func TestOTELEnvironmentChangesNeitherDestinationNorResource(t *testing.T) {
 	decoy := collector(t)
 	decoyGRPC := grpcCollector(t)
@@ -274,7 +260,6 @@ func TestOTELEnvironmentChangesNeitherDestinationNorResource(t *testing.T) {
 	}
 }
 
-// Building an exporter dials nothing: the first export does.
 func TestBuildingAnExporterMakesNoConnection(t *testing.T) {
 	for _, protocol := range []string{config.TelemetryProtocolGRPC, config.TelemetryProtocolHTTP} {
 		c := grpcCollector(t)

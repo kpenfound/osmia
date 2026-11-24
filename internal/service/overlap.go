@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kpenfound/osmia/internal/intake"
 	"slices"
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -19,24 +19,18 @@ import (
 // of staff that another workstream of the project builds in the same code.
 const OverlapKind = "overlap-advisory"
 
-// overlapPrefix opens the workflow subject overlap-<other-workstream> that
-// records, in each workstream of a pair, the seals of the latest warning about
-// the other: seals-<this seal>-<other seal>.
 const overlapPrefix = "overlap-"
 
 func overlapSubject(other config.WorkstreamID) string { return overlapPrefix + string(other) }
 
 func overlapValue(mine, theirs int) string { return fmt.Sprintf("seals-%d-%d", mine, theirs) }
 
-// footprintOverlap is what two sealed footprints share.
 type footprintOverlap struct {
 	Subsystems, Entities, Paths []string
 }
 
 func (o footprintOverlap) empty() bool { return len(o.Entities) == 0 && len(o.Paths) == 0 }
 
-// sealedFootprint returns the entities and path patterns of every unit of the
-// seal.
 func sealedFootprint(s seal.Seal) (entities, paths map[string]bool) {
 	entities, paths = map[string]bool{}, map[string]bool{}
 	for _, f := range s.Footprints {
@@ -50,12 +44,6 @@ func sealedFootprint(s seal.Seal) (entities, paths map[string]bool) {
 	return entities, paths
 }
 
-// overlapOf compares the footprints of two seals. An entity is shared when
-// both footprints name it or when its path patterns in the entity map overlap
-// the other footprint's sealed patterns; an entity that another shared entity
-// is part of is left out for the more specific one. The subsystems are the
-// shared entities' top-level part_of ancestors in the map, or the entities
-// themselves when the map has no parent for them.
 func overlapOf(a, b seal.Seal, m kb.Map) footprintOverlap {
 	ea, pa := sealedFootprint(a)
 	eb, pb := sealedFootprint(b)
@@ -144,8 +132,6 @@ func sortedKeys(set map[string]bool) []string {
 	return out
 }
 
-// overlapMessage is the advisory for workstream mine about the other, in
-// plain language.
 func overlapMessage(other config.WorkstreamID, mine, theirs int, o footprintOverlap) string {
 	where := "the same code: both sealed footprints cover the paths " + strings.Join(o.Paths, ", ")
 	if len(o.Entities) > 0 {
@@ -154,15 +140,12 @@ func overlapMessage(other config.WorkstreamID, mine, theirs int, o footprintOver
 	return fmt.Sprintf("Workstream %s of this project builds in %s (seal %d of this workstream, seal %d of that one). Its changes may conflict with this workstream's before both pull requests are open. This is an advisory and blocks neither workstream; the owner can pause or reprioritise either.", other, where, mine, theirs)
 }
 
-// sealedStream is a building or assembled workstream and its latest seal.
 type sealedStream struct {
 	stream   config.WorkstreamID
 	seal     seal.Seal
 	document trace.Document
 }
 
-// sealedBuild returns the workstream's latest seal while it is building or
-// assembled.
 func sealedBuild(repository *trace.Repository, stream config.WorkstreamID) (sealedStream, bool, error) {
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil || (feature.Value != BuildingState && feature.Value != AssembledState) {
@@ -175,30 +158,20 @@ func sealedBuild(repository *trace.Repository, stream config.WorkstreamID) (seal
 	return sealedStream{stream: stream, seal: latest, document: doc}, true, nil
 }
 
-// overlaps is the overlap controller. Its pass compares the sealed
-// footprints of every pair of the project's building or assembled
-// workstreams that no runtime pause covers, and warns the chief of staff of
-// each workstream of a pair that overlaps.
 type overlaps struct {
 	s          *Service
 	repository *trace.Repository
 }
 
-// Pass warns about each overlapping pair once for each pair of seals: in each
-// workstream, the transition overlap-<other>-<seal>-<other seal> moves the
-// subject overlap-<other> to seals-<seal>-<other seal> with an OverlapKind
-// event for its chief of staff. A pair whose subject already records its
-// seals is not warned again.
 func (o *overlaps) Pass(ctx context.Context) error {
 	streams, err := intake.NonSessionWorkstreams(o.repository)
 	if err != nil {
 		return err
 	}
 	state, _ := o.s.effective()
-	librarian := librarianWorkstream(o.repository.Project())
 	var active []sealedStream
 	for _, stream := range streams {
-		if stream == librarian || scheduler.Paused(state.Pauses, o.repository.Project(), stream) {
+		if scheduler.Paused(state.Pauses, o.repository.Project(), stream) {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -236,9 +209,6 @@ func (o *overlaps) Pass(ctx context.Context) error {
 	return nil
 }
 
-// warn records the advisory about other in mine unless its subject already
-// records these seals. A write another writer got to first is left to the
-// next pass.
 func (o *overlaps) warn(ctx context.Context, mine, other sealedStream, overlap footprintOverlap) error {
 	subject := overlapSubject(other.stream)
 	value := overlapValue(mine.seal.Seal, other.seal.Seal)
@@ -257,11 +227,6 @@ func (o *overlaps) warn(ctx context.Context, mine, other sealedStream, overlap f
 	return nil
 }
 
-// overlapAdvisories returns the advisories of the workstream that are still
-// active: the workstream and the other are building or assembled on the seals
-// the latest warning compared. Subjects are the workstream's workflow states.
-// A warning about a workstream whose trace is gone, such as an archived one,
-// is no longer active.
 func overlapAdvisories(repository *trace.Repository, stream config.WorkstreamID, subjects map[string]trace.WorkflowState) ([]OverlapAdvisory, error) {
 	out := []OverlapAdvisory{}
 	var mine sealedStream

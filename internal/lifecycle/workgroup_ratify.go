@@ -73,35 +73,23 @@ func (d ProjectSpecDraft) ProjectSpec(members []config.WorkstreamID, content fun
 	return trace.ProjectSpec{Behavior: d.Behavior, Contracts: d.Contracts, Graph: d.Graph, Slices: slices}, nil
 }
 
-// DraftWorkgroup creates a new cross-repo workgroup for the given member
+// DraftWorkgroup creates a cross-repo workgroup for the given member
 // workstreams, one per repo, each already handed into its own active
-// Project. It records, on each member's own trace, a locator pointing to
-// the new workgroup, and returns its ID. Drafting its project spec starts
-// once every member is sketched: this call only creates the workgroup and
-// its shared chief-of-staff thread, through unit workgroup-trace's
-// workgroup-level trace. It is the production entry point a brief that
-// names more than one repo is handed to; a one-repo hand-in keeps using the
-// existing single-workstream path unchanged.
+// project. It records on each member's own trace a locator pointing to the
+// workgroup, and returns its ID. This call only creates the workgroup and
+// its shared chief-of-staff thread; drafting its project spec starts once
+// every member is sketched.
 //
 // Readiness is checked for every member before anything is written: a
-// member may point at no cross-repo workgroup other than the one this very
-// call is resuming (below), and it may carry no chief-of-staff turn of its
-// own. JoinCrossRepoWorkgroup refuses once a thread has a real turn, and
-// a refusal partway through the per-member loop would leave the members
-// already processed durably joined while later ones are not. Checking
-// every member first, before the workgroup trace is even created or
-// reopened, keeps a refusal here leaving nothing recorded on any member.
+// member may point at no cross-repo workgroup other than the one this call
+// is resuming, and may carry no chief-of-staff turn of its own, so a
+// refusal leaves nothing recorded on any member.
 //
-// If an earlier call already created this join's workgroup trace and
-// joined some of its members before being interrupted (a crash or a
-// restart between members), a retry with the same members reopens that
-// same trace, rather than calling trace.CreateWorkgroupTrace again and
-// minting a second one, and finishes joining whichever members have not
-// yet recorded their own pointer to it: JoinCrossRepoWorkgroup and
-// RetractWorkgroup are documented to change
-// nothing once a member has already completed them, so resuming the loop
-// for every member, not only the ones still missing their pointer, is
-// always safe.
+// A retry after an interruption between members reopens the workgroup
+// trace the earlier call created instead of creating a second one, and
+// joins the members that have not yet recorded their pointer to it:
+// JoinCrossRepoWorkgroup and RetractWorkgroup change nothing once a member
+// has completed them, so resuming the loop for every member is safe.
 func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.WorkstreamID) (config.WorkgroupID, *APIError) {
 	lock, _ := WorkgroupJoinLocks.LoadOrStore(s.Current().Root.String(), &sync.Mutex{})
 	mu := lock.(*sync.Mutex)
@@ -232,9 +220,6 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 		if err := s.Step("workgroup-member-joining"); err != nil {
 			return "", &APIError{Code: Internal, Message: err.Error()}
 		}
-		// The locator and chief share a member trace; the solitary group is
-		// in the separate project trace. Publish the route before removing
-		// that group, so interruption leaves an authoritative shared route.
 		if err := m.Project.JoinCrossRepoWorkgroup(ctx, m.Workstream, g.ID, s.Now(), ownerActor, "draft-workgroup"); err != nil {
 			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot join workstream %s to the shared chief: %v", m.Workstream, err)}
 		}
@@ -265,9 +250,6 @@ func (s *Controller) DraftProjectSpecIfReady(ctx context.Context, known *trace.R
 	if len(g.Members) < 2 || g.Conversation != nil && len(g.Members) == 2 {
 		return nil
 	}
-	// Approved groups need no live member documents, including after
-	// retirement. The decision is read from the revision-keyed approval state,
-	// so an idle approved group is not decoded on each pass.
 	if status, err := known.GroupApprovalStatusOf(id); err != nil || status.Found {
 		return err
 	}
@@ -284,13 +266,6 @@ func (s *Controller) DraftProjectSpecIfReady(ctx context.Context, known *trace.R
 	}
 	members := make([]trace.CrossRepoMember, 0, len(real))
 	for _, m := range real {
-		// Checked immediately before each resolution, the same way
-		// crossRepoMemberRepos (workgroup_wiring.go) does: the service
-		// clears its own active-project list only after cancelling the
-		// context every background pass runs under, so a resolution
-		// failure met with ctx already done is the service stopping, not a
-		// real data problem, and is reported as ctx's own error rather
-		// than a hard failure of the pass.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -301,12 +276,7 @@ func (s *Controller) DraftProjectSpecIfReady(ctx context.Context, known *trace.R
 			}
 			return fmt.Errorf("workstream %s: %s", m, api.Message)
 		}
-		// Readiness is whether the member's own spec and plan are recorded,
-		// not its current feature state: a member that skips debate moves
-		// past SketchedState into InShedState the moment it is recorded, so
-		// gating on the transient state misses it.
 		if _, _, err := MemberSpecAndPlan(repo, m); err != nil {
-			// Not every member is sketched yet; try again once they are.
 			return nil
 		}
 		members = append(members, trace.CrossRepoMember{Workstream: m, Project: repo})
@@ -354,8 +324,6 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 	if state.Value == "drafting" {
 		turn := input.Turn
 		if revision == 0 {
-			// A drafting transition can have recorded output without input pins.
-			// Reconcile by turn identity without inventing those pins.
 			transitions, err := trace.Read[trace.Transition](wt, host)
 			if err != nil {
 				return ProjectSpecDraftInput{}, false, err
@@ -407,10 +375,6 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 		problems, note := "", ""
 		switch {
 		case state.Value == "failed":
-			// A refused first draft or guarded redraft is asked for again
-			// with its problems, up to ProjectSpecDraftAttempts in a row;
-			// after that the chief of staff is told, and the next draft
-			// waits for its request.
 			failures, last, err := ProjectSpecDraftFailures(wt, host)
 			if err != nil {
 				return ProjectSpecDraftInput{}, false, err
@@ -418,14 +382,10 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 			if failures >= ProjectSpecDraftAttempts {
 				return ProjectSpecDraftInput{}, false, s.ReportProjectSpecDraftFailure(ctx, members, last, failures, found)
 			}
-			// The note of a requested draft stays with the automatic retries
-			// of its run.
 			problems, note = last.Reason, input.Note
 		case !found && state.Value != "":
 			return ProjectSpecDraftInput{}, false, nil
 		}
-		// A guarded redraft retries on a later pass, retaining its request
-		// identity and member revisions.
 		if found && state.Value == "failed" && maps.Equal(input.Guarded, next.Guarded) {
 			next = input
 		}
@@ -461,8 +421,6 @@ func (s *Controller) ReportProjectSpecDraftRecorded(ctx context.Context, wt *tra
 	if err != nil {
 		return err
 	}
-	// The latest recorded draft, and the refusals between it and the draft
-	// recorded before it, whichever runs of attempts they belong to.
 	var drafted trace.Transition
 	var refused, pending []string
 	guarded := false
@@ -636,8 +594,6 @@ func (s *Controller) RequestProjectSpecDraftAgain(ctx context.Context, id config
 		return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the members' drafts of %s: %v", id, err)}
 	}
 	if found {
-		// A failed guarded redraft is asked for again only while a member's
-		// contract text still differs, and with its retained member revisions.
 		if len(next.Guarded) == 0 {
 			return "", recorded
 		}
@@ -735,12 +691,7 @@ func (s *Controller) DispatchProjectSpecDraft(ctx context.Context, wt *trace.Rep
 	if err != nil {
 		return err
 	}
-	// A queued turn's outcome is "idle" on an ordinary completed response,
-	// not "succeeded": trace.QueuedTurn.Status names it that way, and the
-	// same values other factory turns check against.
 	if result.Outcome != "idle" && result.Outcome != "failed" {
-		// Still running, captured and not completed, or interrupted; try
-		// again on a later pass.
 		return nil
 	}
 	if err := s.RecordProjectSpecDraft(ctx, wt, g, host, turn, result); err != nil {
@@ -871,8 +822,6 @@ func (s *Controller) ProjectSpecDraftTool(wt *trace.Repository, g trace.Workgrou
 		if err := os.WriteFile(filepath.Join(s.ProjectSpecTurnDirectoryFor(host), turn, "output", "project-spec.json"), data, 0600); err != nil {
 			return nil, err
 		}
-		// Validation reads no member content, so the slices are built
-		// without it.
 		full, err := draft.ProjectSpec(g.Members[1:], func(config.WorkstreamID) (string, string, error) {
 			return "", "", nil
 		})
@@ -1046,9 +995,6 @@ func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace
 		}
 		g, _, err := repository.CrossRepoWorkgroup(id)
 		if errors.Is(err, trace.ErrLocked) {
-			// Another member's own pass, or this workgroup's leader, holds
-			// the workgroup trace open right now (for example, while
-			// dispatching the architect's draft turn); try again next pass.
 			continue
 		}
 		if err != nil || len(g.Members) < 2 {
@@ -1062,7 +1008,6 @@ func (s *Controller) ProjectSpecDraftPass(ctx context.Context, repository *trace
 		}
 		err = s.DraftProjectSpecIfReady(ctx, repository, id)
 		if errors.Is(err, trace.ErrLocked) || errors.Is(err, errWorkgroupJoining) || errors.Is(err, trace.ErrMembershipChanged) || errors.Is(err, trace.ErrMemberRetired) {
-			// The workgroup or its member bindings are held; try again next pass.
 			continue
 		}
 		if err != nil {

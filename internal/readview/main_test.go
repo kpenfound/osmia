@@ -8,7 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// serial: sets process-wide test flags.
 func TestMain(m *testing.M) {
 	if !flag.Parsed() {
 		flag.Parse()

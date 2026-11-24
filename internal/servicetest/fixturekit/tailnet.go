@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
-	api "github.com/kpenfound/osmia/internal/api"
 	"math/big"
 	net "net"
 	os "os"
@@ -19,6 +18,8 @@ import (
 	atomic "sync/atomic"
 	testing "testing"
 	"time"
+
+	api "github.com/kpenfound/osmia/internal/api"
 )
 
 // TailnetNode stands in for the embedded Tailscale node with a loopback TCP

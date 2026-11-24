@@ -15,9 +15,6 @@ import (
 	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
-// Each deferral reason is decided from what the pass ends with, in order of
-// precedence, and carries the IDs that explain it and a plain-language
-// message.
 func TestDeferralReasons(t *testing.T) {
 	t.Parallel()
 	const (
@@ -54,8 +51,6 @@ func TestDeferralReasons(t *testing.T) {
 	}
 	busy := stream(first, 1, "resume")
 	behind := stream(second, 1, "upload")
-	// drained has a slot left but no unit it can start: resume is
-	// implementing and the rest are not ready.
 	drained := stream(second, 1, "resume")
 	for subject, state := range drained.states {
 		if state.Value == UnitReady {
@@ -94,7 +89,7 @@ func TestDeferralReasons(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := tc.pass.deferral(tc.b, tc.unit)
+			got, err := tc.pass.Deferral(tc.b, tc.unit)
 			must(t, err)
 			tc.want.Unit, tc.want.Version, tc.want.Decision = tc.unit, 1, DispatchDeferred
 			if !reflect.DeepEqual(got, tc.want) {
@@ -104,15 +99,13 @@ func TestDeferralReasons(t *testing.T) {
 	}
 }
 
-// A deferral shows in status only while the unit is ready in the state it
-// was decided on; a start is never shown as a deferral.
 func TestCurrentDeferralFollowsTheUnitState(t *testing.T) {
 	t.Parallel()
 	d := UnitDispatch{Unit: "resume", Version: 3, Decision: DispatchDeferred, Reason: DeferCapacity, Limit: 1, Message: "Waits for a mason slot: all 1 are in use."}
 	doc := func(d UnitDispatch) trace.Document {
 		data, err := json.Marshal(d)
 		must(t, err)
-		return trace.Document{Header: trace.Header{ID: dispatchDocument(d.Unit), Revision: 1, Unit: d.Unit}, Content: string(data)}
+		return trace.Document{Header: trace.Header{ID: DispatchDocument(d.Unit), Revision: 1, Unit: d.Unit}, Content: string(data)}
 	}
 	for _, tc := range []struct {
 		name  string
@@ -128,7 +121,7 @@ func TestCurrentDeferralFollowsTheUnitState(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := currentDeferral(tc.doc, tc.state)
+			got, err := CurrentDeferral(tc.doc, tc.state)
 			must(t, err)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("deferral %+v, want %+v", got, tc.want)

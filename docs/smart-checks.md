@@ -187,9 +187,8 @@ only when a Dagger Cloud compute token is configured; without one no record carr
 After a refusal, the finished record's selection and command describe the full
 run, its output holds the refused run above it, and the start evidence keeps
 the links Jev selected.
-Final review records written by older local runs, with their selection in
-`final/checks-<review>-attempt-<attempt>-started.json` and
-`final/checks-<review>.json`, remain readable.
+A final review's check run record, `final/checks-<review>.json`, carries its
+selection.
 
 The selection has this shape:
 
@@ -211,10 +210,10 @@ The selection has this shape:
 | --- | --- |
 | `mode` | `selected` when Jev's links ran, `full` when every check ran |
 | `links` | The links Jev selected, for a selected run; the command shows how they were grouped |
-| `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections, full runs and older records |
+| `fallback_picks` | Configured picks count on a selected run where no check reached the threshold; absent for ordinary selections and full runs |
 | `candidates` | How many links ranking was asked about, after breadth, depth, broad-link removal and narrowing |
-| `listed` | Total links the project listed, before removing broad links or narrowing; absent when listing was skipped or failed, and in older records |
-| `covered` | How many of the listed checks the run covered: the listed checks no other listed link is narrower than that a selected link covers, or all of them for a full run. Absent when listing was skipped or failed, on a run that fell back to every check after Dagger refused the selected links, and in older records. Check run spans carry it |
+| `listed` | Total links the project listed, before removing broad links or narrowing; absent when listing was skipped or failed |
+| `covered` | How many of the listed checks the run covered: the listed checks no other listed link is narrower than that a selected link covers, or all of them for a full run. Absent when listing was skipped or failed, on a run that fell back to every check after Dagger refused the selected links. Check run spans carry it |
 | `judgment` | The ranking judgment record, also set on a full run whose ranking judgment fell back |
 | `breadth_judgment` | Optional breadth judgment record, including when that judgment fell back |
 | `depth_judgment` | Optional depth judgment record; absent when no depth question was needed or breadth failed |
@@ -240,7 +239,7 @@ score, `cooling_down`, `timeout`,
 `rate_limited`, `unavailable`, `rejected`, `unusable`, `interrupted`,
 `unrecorded` or `cancelled`.
 
-The optional stage fields can be absent; older selection records remain readable.
+The optional stage fields can be absent.
 Each stage's judgment is recorded separately under the workstream as
 `judgments/<id>.json`, with its task, version, exact request identity, and
 any threshold or positive configured picks value it applied, the request (or
@@ -260,7 +259,7 @@ checks ran out of 37 candidate links in judgment judgment_4f1c...". The web
 feed says that no check reached the threshold and the highest-scored checks
 ran, retaining selected, judged and listed counts. That sentence appears in
 the unit's transition to reviewing and its notice, in the reviewer's prompt with the check evidence, and in the verdict a
-mason receives when checks fail. The feed's entries of older local final-review runs also describe the selection
+mason receives when checks fail. The feed's entries of final-review runs also describe the selection
 and its reason.
 
 When breadth succeeds, the summary adds the kept and total top-level counts
@@ -269,7 +268,7 @@ and the chosen levels, such as "within 2 of 5 top-level checks, by go-package".
 The selected and candidate counts describe the saving as "checking 2 of 37".
 When removing broad links or narrowing reduces the list, `listed` also explains
 that those 37 are narrowed from 214 listed links. An absent total stays
-unknown; no total is inferred for older runs.
+unknown; no total is inferred.
 
 The factory runs checks with `--progress=report --fail-fast --parallel 4`. It records the
 complete combined output beside the check record in `checks-<n>-output.txt`

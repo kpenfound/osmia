@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// The latest-revision lookups by path and identity run on every workflow read
-// of a workgroup member, so they must stay single index lookups however many
-// documents a scope holds.
 func TestLatestDocumentLookupsUseTheUniqueIdentityIndex(t *testing.T) {
 	r, _, _ := create(t)
 	s := mustScoped(t, r, streamID)

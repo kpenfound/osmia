@@ -31,8 +31,6 @@ func TestDecideIsAChiefOfStaffToolOnly(t *testing.T) {
 	}
 }
 
-// decideKit is a chief-of-staff turn with the decide tool and the question
-// tools, over a workstream where a worker of a role asked a question.
 type decideKit struct {
 	f      *gateFixture
 	p      *gateJev
@@ -48,20 +46,19 @@ func newDecideKit(t *testing.T, p *gateJev, role string) *decideKit {
 	chief := claimThread(t, f.repo, f.now(), "chief", trace.ChiefOfStaff, "chief1", "")
 	asker := claimThread(t, f.repo, f.now(), "asker", role, "build_asker", "unit1")
 	_, err := f.repo.Ask(context.Background(), "asker", asker, "Should uploads resume after a restart?", f.now())
-	must(t, err)
+	fixturekit.Must(t, err)
 	k := &decideKit{f: f, p: p, chief: chief}
 	k.turn(t, "chief", chief)
 	return k
 }
 
-// turn builds the chief's tools for the claimed turn, as a later turn does.
 func (k *decideKit) turn(t *testing.T, agent string, scope coreadapter.Scope) {
 	t.Helper()
 	controls := &runtimeControls{}
 	controls.service.Store(k.f.s)
 	k.decide = controls.decide(k.f.repo, scope)
 	list, err := questions.Tools(k.f.repo, agent, scope, k.f.now)
-	must(t, err)
+	fixturekit.Must(t, err)
 	k.tools = map[string]coreadapter.Tool{}
 	for _, tool := range list {
 		k.tools[tool.Name] = tool
@@ -71,7 +68,7 @@ func (k *decideKit) turn(t *testing.T, agent string, scope coreadapter.Scope) {
 func (k *decideKit) call(t *testing.T, tool coreadapter.Tool, input string) map[string]any {
 	t.Helper()
 	out := map[string]any{}
-	must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
+	fixturekit.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
 	return out
 }
 
@@ -87,10 +84,6 @@ const (
 	escalateUpload = `{"questions":["1"],"rephrasing":"Should uploads resume?","blocked":"The upload unit.","options":["Resume","Restart"],"recommendation":"Resume."}`
 )
 
-// A confident pick for a question's routing binds the chief's outcome tools:
-// they refuse the other outcomes naming Jev's pick, accept the picked one with
-// the chief's text, and the binding holds in a later turn without a new
-// request.
 func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "answer" }}
@@ -108,8 +101,6 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 	if got := k.call(t, k.tools["escalate"], escalateUpload); got["recorded"] != false || !strings.Contains(got["reason"].(string), "Jev decided answer") {
 		t.Fatalf("escalate against the pick: %v", got)
 	}
-	// A later turn of the chief of staff: the same decide returns the same
-	// result with no request, and the binding still holds.
 	later := claimThread(t, k.f.repo, k.f.now(), "chief2", trace.ChiefOfStaff, "chief2", "")
 	k.turn(t, "chief2", later)
 	if again := k.call(t, k.decide, decideQuestion); again["decision"] != "binding" || again["pick"] != "answer" {
@@ -125,7 +116,7 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 		t.Fatalf("%d requests", len(p.Requests()))
 	}
 	states, err := k.f.repo.Questions(fixturekit.Stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	judgment, _, _ := decisionJudgment(t, k.f.repo, fixturekit.Stream, jev.KindQuestionRouting, jev.QuestionKey("1"))
 	if r := states[0].Ruling; states[0].State != trace.QuestionAnswered || r == nil || r.Actor != trace.JevActor || r.DecidedBy != trace.DecidedByJev || r.Judgment != judgment || r.ReturnedAnswer != "Resume from the last chunk." {
 		t.Fatalf("question %+v", states[0])
@@ -133,7 +124,7 @@ func TestAConfidentRoutingPickBindsTheChiefsOutcomeToolsInLaterTurns(t *testing.
 }
 
 // A pick below the threshold, and an unconfigured Jev, leave the decision to
-// the chief of staff: decide says so and any outcome valid today is accepted.
+// the chief of staff: decide says so and any valid outcome is accepted.
 func TestADecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.6}, "unconfigured": nil} {
@@ -170,8 +161,6 @@ func TestAQuestionJevDoesNotRouteIsRefusedWithoutARequest(t *testing.T) {
 	}
 }
 
-// decide refuses a subject outside the three kinds it covers, an unknown
-// subject and a missing evidence summary as ordinary results.
 func TestDecideRefusalsAreOrdinaryResults(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
@@ -192,10 +181,6 @@ func TestDecideRefusalsAreOrdinaryResults(t *testing.T) {
 	}
 }
 
-// A contested unit's ruling goes through decide too. A confident pick binds
-// resolve_contested, and the ruling is Jev's with the chief's note. A pick the
-// contest's transition refuses puts the contest in the owner's inbox with Jev's
-// judgment, with no further request, including at the owner gate.
 func TestAContestRulingBindsAndAnUnexecutablePickGoesToTheOwner(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -214,13 +199,11 @@ func TestAContestRulingBindsAndAnUnexecutablePickGoesToTheOwner(t *testing.T) {
 	if out := intakefixture.Handle(t, c.tool, note); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "Jev decided revise") {
 		t.Fatalf("resolve against the pick: %s", out)
 	}
-	// The unit's candidate cannot be revised: its reviewer failed and left no
-	// findings, so only a review is valid. Jev's pick is handed to the owner.
 	out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"revise","note":"Fix it."}`)
 	if !strings.Contains(out, `"recorded":true`) || !strings.Contains(out, "owner's inbox") {
 		t.Fatalf("resolve with the pick: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitContested {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitContested {
 		t.Fatalf("the unit is %q", got)
 	}
 	gate, carried, err := c.f.s.contestedGate(c.repo, c.stream, "resume")
@@ -245,8 +228,6 @@ func TestAContestRulingBindsAndAnUnexecutablePickGoesToTheOwner(t *testing.T) {
 	}
 }
 
-// A confident review pick on a contest binds resolve_contested, and the ruling
-// is Jev's with the chief's note.
 func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "review" }}
@@ -260,8 +241,6 @@ func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"escalate","note":"Owner."}`); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "Jev decided review") {
 		t.Fatalf("escalate against the pick: %s", out)
 	}
-	// After a restart, with another answer waiting at the provider, decide
-	// returns the recorded pick with no request, and the binding holds.
 	later := &gateJev{confidence: 0.99, pick: func(_ string, options []string) string { return "escalate" }}
 	c.f.s.jev = gateJudge(c.f.clock.Now, later)
 	if out := intakefixture.Handle(t, decide, `{"kind":"contested-ruling","subject":"resume","evidence":"Changed evidence."}`); !strings.Contains(out, `"pick":"review"`) {
@@ -276,12 +255,12 @@ func TestAContestRulingByJevIsRecordedAsJevsWithTheChiefsNote(t *testing.T) {
 	if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {
 		t.Fatalf("review: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitReviewing {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 		t.Fatalf("the unit is %q", got)
 	}
 	judgment, _, _ := decisionJudgment(t, c.repo, c.stream, jev.KindContestedRuling, jev.ContestKey(contest.ID))
 	transitions, err := trace.Read[trace.Transition](c.repo, c.stream)
-	must(t, err)
+	fixturekit.Must(t, err)
 	found := false
 	for _, tr := range transitions {
 		if tr.Subject == trace.UnitSubject("resume") && tr.From == UnitContested && tr.To == UnitReviewing && tr.Actor == trace.JevActor && strings.Contains(tr.Reason, "Check the verdict file.") {
@@ -314,7 +293,7 @@ func TestAContestRulingThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 			if out := intakefixture.Handle(t, c.tool, `{"unit":"resume","decision":"review","note":"Check the verdict file."}`); !strings.Contains(out, `"recorded":true`) {
 				t.Fatalf("review: %s", out)
 			}
-			if got := c.state(t).Value; got != UnitReviewing {
+			if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitReviewing {
 				t.Fatalf("the unit is %q", got)
 			}
 		})
@@ -337,7 +316,7 @@ func TestAnotherContestsDecideResultDoesNotPermitARuling(t *testing.T) {
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 		t.Fatalf("resolve on another contest's result: %s", out)
 	}
-	if got := c.state(t).Value; got != UnitContested {
+	if got := intakefixture.UnitWorkflow(t, c.repo, c.stream, "resume").Value; got != UnitContested {
 		t.Fatalf("the unit is %q", got)
 	}
 }

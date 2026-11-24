@@ -19,8 +19,6 @@ import (
 const (
 	// ReplyTool is the tool the architect answers a round's objections with.
 	ReplyTool = "reply"
-	// replyName is the file name, without its extension, of the architect's
-	// reply to a round. No member may carry it.
 	replyName = "reply"
 )
 

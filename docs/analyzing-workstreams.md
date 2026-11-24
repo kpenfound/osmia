@@ -46,17 +46,11 @@ The records you will read most, by `schema`:
 
 | `schema` | What it answers |
 |---|---|
-| `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit`. A transition the router chose also has `decided_by` (`code`, `jev`, `fallback`, `owner`, `jev_gate` or `reviewer`), `default_to` (the state the default would have entered) and, when a Jev judgment is behind it, `judgment`; older transitions have none of the three |
+| `osmia.trace.transition` | Every transition: `subject`, `from`, `to`, `reason`, `actor`, `cause`, `at`, `unit`. A transition the router chose also has `decided_by` (`code`, `jev`, `fallback`, `owner`, `jev_gate` or `reviewer`), `default_to` (the state the default would have entered) and, when a Jev judgment is behind it, `judgment`; a transition made outside the router has none of the three |
 | `osmia.trace.cost` | One cost record per session: `$.entry.Scope` (`Role`, `Unit`, `Thread`, `Turn`), `$.entry.At`, `$.entry.Usage` (`CostUSD`, `Turns`) |
 | `osmia.trace.turn-request`, `osmia.trace.turn-response` | Each turn's request (`agent_id`, `actor`, `cause`, `prompt`, `profile`) and response (`result.FinalResponse`, `result.Outcome`) |
 | `osmia.trace.status` | The chief of staff's status revisions: `goal`, `note`, `agents` |
 | `osmia.trace.document` | Every document revision: `$.path` names the document and `$.content` holds it. The latest revision of a document is its row with the highest `seq`. `tools/<id>.json` is one audit record per tool call (`scope.Role`, `scope.Turn`, `name`); `units/<u>/` holds `report.json`, `review.json`, `rebase.json`, `landing.json` and `checks-<n>.json`; `drift/rebase.json` is the latest drift rebase record: outcome, conflicts, candidate, review count, verdict |
-
-An older project trace can hold a workstream named `w_` followed by the
-first 32 hex digits of `sha256("librarian:<project id>")`, with knowledge-base
-extraction and refresh operations. The service closes each of them still
-pending with the result `retired`, never adds to the workstream, and hides it
-from status and the page.
 
 Here `<p>` is the one-repo project's ID; its charter, entity map and settings are its
 own. For a cross-project workgroup also inspect
@@ -67,9 +61,7 @@ their own traces. A published `delivered` workflow state is not itself a merge;
 use a merged outcome matching the current publication's PR or an owner merge
 record. Closed without merge and outcomes for earlier PRs remain unresolved.
 Archive pins `resolution_evidence` as `merged`, `cancelled` or `unresolved`;
-only merged or cancelled evidence can resolve an archived member. An older
-`resolved` flag without evidence is re-derived from retained history or held
-unresolved. Archived-member identity and cleanup evidence distinguish
+only merged or cancelled evidence can resolve an archived member. Archived-member identity and cleanup evidence distinguish
 retirement from unexplained live absence; retirement alone proves no merge.
 
 Timestamps mix UTC and local offsets. Convert them before you sort or bucket

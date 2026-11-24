@@ -14,13 +14,8 @@ import (
 	"time"
 )
 
-// checkpointsName names the directory in the repository's .jj directory that
-// holds the checkpoints of operations in progress.
 const checkpointsName = "osmia-checkpoints"
 
-// checkpoint is the repository's state before one attempt of an operation:
-// the operation-log entry it starts from and what the provider recorded
-// about each workspace then, by name.
 type checkpoint struct {
 	Operation  string              `json:"operation"`
 	Entry      string              `json:"entry"`
@@ -119,8 +114,6 @@ func (j *Jujutsu) Recover(ctx context.Context) (recovered []string, err error) {
 		return nil, err
 	}
 	defer unlock()
-	// A restoration that fails leaves the clone marked as needing recovery,
-	// and one that succeeds clears the mark. A deadline alone clears nothing.
 	defer func() { cloneLockOf(cloneKey(j.Clone)).markRecovery(err != nil) }()
 	entries, err := os.ReadDir(j.checkpoints())
 	if errors.Is(err, os.ErrNotExist) {
@@ -162,7 +155,6 @@ func (j *Jujutsu) Recover(ctx context.Context) (recovered []string, err error) {
 	return operations, nil
 }
 
-// restore restores the repository to the checkpoint as Recover describes.
 func (j *Jujutsu) restore(ctx context.Context, c checkpoint) error {
 	live, err := j.live(ctx)
 	if err != nil {
@@ -200,10 +192,6 @@ func (j *Jujutsu) restore(ctx context.Context, c checkpoint) error {
 	return nil
 }
 
-// realign moves the workspace named name onto the commit its branch points
-// at when the branch moved from under it and the move loses nothing of the
-// workspace's: it holds nothing of its own, or exactly the files of that
-// commit. A workspace replaying, or with no branch, stays where it is.
 func (j *Jujutsu) realign(ctx context.Context, name string) error {
 	meta, err := readMetadata(j.path(name))
 	if errors.Is(err, os.ErrNotExist) || (err == nil && meta.Replay != nil) {
@@ -230,7 +218,6 @@ func (j *Jujutsu) realign(ctx context.Context, name string) error {
 	return j.checkout(ctx, w, head)
 }
 
-// sameTree reports whether two commits hold the same files.
 func (j *Jujutsu) sameTree(ctx context.Context, a, b string) (bool, error) {
 	g := j.git()
 	ta, err := g.run(ctx, "rev-parse", "--verify", "--end-of-options", a+"^{tree}")
@@ -241,8 +228,6 @@ func (j *Jujutsu) sameTree(ctx context.Context, a, b string) (bool, error) {
 	return ta == tb, err
 }
 
-// live returns the names of the repository's workspaces whose directories
-// are there.
 func (j *Jujutsu) live(ctx context.Context) ([]string, error) {
 	names, err := j.registered(ctx)
 	if err != nil {
@@ -259,11 +244,6 @@ func (j *Jujutsu) live(ctx context.Context) ([]string, error) {
 	return live, nil
 }
 
-// snapshotLive records the files of the workspace at path in its
-// working-copy commit. A workspace a jj command stopped updating after its
-// operation was recorded is stale: that command snapshotted its files first,
-// so they are in the operation log already, and it is left for the restore
-// to update.
 func (j *Jujutsu) snapshotLive(ctx context.Context, path string, settings []string) error {
 	_, err := j.run(ctx, path, settings, "util", "snapshot")
 	var jjErr *JJError
@@ -273,8 +253,6 @@ func (j *Jujutsu) snapshotLive(ctx context.Context, path string, settings []stri
 	return err
 }
 
-// writeDurably replaces the file at path with data in one rename, once data
-// is on disk.
 func writeDurably(path string, data []byte) error {
 	f, err := os.OpenFile(path+".new", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {

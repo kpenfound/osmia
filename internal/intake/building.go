@@ -26,7 +26,7 @@ const (
 	// BuildingState is the feature state of a workstream whose units are
 	// built.
 	BuildingState = "building"
-	// buildSubject is the workflow subject that tracks the requests to start
+	// BuildSubject is the workflow subject that tracks the requests to start
 	// building a workstream: requested-<k> once building on seal k is asked
 	// for. A build that succeeds is recorded by the feature state it moves.
 	BuildSubject = "build"
@@ -58,7 +58,7 @@ const (
 
 var BuildingActor = trace.Actor{Kind: "service", ID: "building"}
 
-// buildInput names the seal a build starts from.
+// BuildInput names the seal a build starts from.
 type BuildInput struct {
 	Seal int `json:"seal"`
 }
@@ -68,7 +68,7 @@ func BuildIDs(k int) (transition, event string) {
 	return transition, trace.EventID(transition, "run")
 }
 
-// builder is the building controller. Its pass asks to start building every
+// Builder is the building controller. Its pass asks to start building every
 // ratified workstream whose latest seal no build was asked for, and its
 // reconciler runs each build operation.
 type Builder struct {
@@ -78,17 +78,13 @@ type Builder struct {
 
 var _ coreadapter.Reconciler = (*Builder)(nil)
 
-// Pass reconciles every workstream of the trace except the librarian's.
+// Pass reconciles every workstream of the trace.
 func (b *Builder) Pass(ctx context.Context) error {
 	streams, err := NonSessionWorkstreams(b.Repository)
 	if err != nil {
 		return err
 	}
-	librarian := LibrarianWorkstream(b.Repository.Project())
 	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -99,7 +95,7 @@ func (b *Builder) Pass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile asks to start building a ratified workstream on its latest seal
+// Reconcile asks to start building a ratified workstream on its latest seal
 // when no build on that seal was asked for.
 func (b *Builder) Reconcile(ctx context.Context, stream config.WorkstreamID) error {
 	if held, err := b.S.ChangeHeld(b.Repository, stream); err != nil || held {
@@ -167,7 +163,7 @@ func DecodeBuild(op coreadapter.Operation) (BuildInput, error) {
 	return in, nil
 }
 
-// stream returns the workstream a build operation belongs to: the one whose
+// Stream returns the workstream a build operation belongs to: the one whose
 // run event derives the operation ID.
 func (b *Builder) Stream(op coreadapter.Operation, k int) (config.WorkstreamID, error) {
 	streams, err := b.Repository.Workstreams()
@@ -183,7 +179,7 @@ func (b *Builder) Stream(op coreadapter.Operation, k int) (config.WorkstreamID, 
 	return "", fmt.Errorf("build operation %s belongs to no workstream", op.ID)
 }
 
-// outcome returns the result of a build that moved the workstream to
+// Outcome returns the result of a build that moved the workstream to
 // building, nil before it did.
 func (b *Builder) Outcome(stream config.WorkstreamID, operation string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](b.Repository, stream)
@@ -276,8 +272,6 @@ func (b *Builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	var txs []trace.Transaction
 	var ready, planned []string
 	for _, u := range p.Units {
-		// No unit has merged before the build, so a unit is ready exactly
-		// when it depends on none.
 		subject := trace.UnitSubject(u.ID)
 		reason := fmt.Sprintf("unit %s is in the plan of seal %d", u.ID, in.Seal)
 		if len(u.DependsOn) > 0 {
@@ -303,9 +297,6 @@ func (b *Builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 		if err := b.S.Step("build-workflow-checked:" + string(stream)); err != nil {
 			return coreadapter.OperationResult{}, err
 		}
-		// Historical cross-repo seals may already have the individual
-		// ratified transition. Use the actual preparation state for the
-		// transaction; effective approval was checked above.
 		transitions, err := trace.Read[trace.Transition](b.Repository, stream)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -329,8 +320,6 @@ func (b *Builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if !errors.Is(err, trace.ErrConflict) {
 		return coreadapter.OperationResult{}, err
 	}
-	// The workflow moved since it was read: the owner moved the workstream,
-	// or a unit already has a state.
 	moved, err := b.Repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -338,7 +327,7 @@ func (b *Builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	return fail(fmt.Sprintf("the workflow changed while the build ran; the workstream is %s", FeatureState(moved.Value)))
 }
 
-// sealedPlan returns the given revision of the workstream's plan.
+// SealedPlan returns the given revision of the workstream's plan.
 func SealedPlan(repository *trace.Repository, stream config.WorkstreamID, revision int) (trace.Document, error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -351,7 +340,7 @@ func SealedPlan(repository *trace.Repository, stream config.WorkstreamID, revisi
 	return docs[i], nil
 }
 
-// list joins the entries of a message, or says none.
+// List joins the entries of a message, or says none.
 func List(entries []string) string {
 	if len(entries) == 0 {
 		return "none"

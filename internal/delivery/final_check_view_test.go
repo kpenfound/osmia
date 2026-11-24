@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// viewPath finds the paths of the reader's view a text mentions.
 var viewPath = regexp.MustCompile(`final/[A-Za-z0-9._/-]+`)
 
 func mentionedPaths(text string) []string {
@@ -33,10 +32,6 @@ func checkRecordHeader(repo *trace.Repository, id string, revision int) trace.He
 	return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: repo.Project(), Workstream: stream, At: fixturekit.DemoStart, Actor: checksActor, Cause: "review"}
 }
 
-// Every file the check evidence names is in the reader's view, for each kind
-// of record: a pull request's passed, failed, incomplete and continued
-// results, a local run that captured its output to a file, and a maintenance
-// review, whose evidence names no file at all.
 func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 	t.Parallel()
 	pullRequest := FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, Source: api.CheckSourcePullRequest, PullRequest: 7, Push: 1, PushedCommit: pushedCommit, StatusURL: "https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=3", Counts: &api.CheckCounts{Total: 3, Passed: 3}}
@@ -46,10 +41,9 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 		return run
 	}
 	cases := []struct {
-		name   string
-		run    FinalCheckRun
-		output string
-		files  []string
+		name  string
+		run   FinalCheckRun
+		files []string
 	}{
 		{name: "pull request passed", run: with(func(r *FinalCheckRun) { r.Status = "passed" }), files: []string{"final/checks-1.json"}},
 		{name: "pull request failed", run: with(func(r *FinalCheckRun) {
@@ -62,8 +56,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 			r.Status, r.Error = ChecksIncomplete, "the completed run is not a pass: the run reports no checks"
 		}), files: []string{"final/checks-1.json"}},
 		{name: "pull request continued", run: with(func(r *FinalCheckRun) { r.Status, r.Counts, r.StatusURL = ChecksContinued, nil, "" }), files: []string{"final/checks-1.json"}},
-		{name: "local run with an output file", run: FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, Status: "failed", ExitCode: 1, Output: "FAIL internal/trace", OutputPath: "final/checks-1-output.txt", OutputRevision: 1, Truncated: true}, output: "FAIL internal/trace\nthe whole captured output\n",
-			files: []string{"final/checks-1-output.txt", "final/checks-1.json"}},
 		{name: "maintenance review", run: FinalCheckRun{Review: 1, Operation: "review", Commit: reviewedCommit, ExitCode: -1, Error: "a review of a delivered workstream pushes nothing, so no pull request checks ran for it"}},
 	}
 	for _, c := range cases {
@@ -75,9 +67,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 				data, err := json.MarshalIndent(c.run, "", "  ")
 				fixturekit.Must(t, err)
 				docs = append(docs, trace.Document{Header: checkRecordHeader(repo, FinalChecksDocument(1), 1), Path: FinalChecksPath(1), Content: string(data) + "\n"})
-			}
-			if c.output != "" {
-				docs = append(docs, trace.Document{Header: checkRecordHeader(repo, FinalChecksDocument(1)+"-output", 1), Path: c.run.OutputPath, Content: c.output})
 			}
 			if len(docs) > 0 {
 				fixturekit.Must(t, repo.RecordDocuments(context.Background(), docs))
@@ -98,7 +87,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 					t.Errorf("the evidence names %s, which the view lacks %v:\n%s", path, view, evidence)
 				}
 			}
-			// What the prompt lists is what the view holds.
 			if listed := slices.Sorted(slices.Values(FinalCheckPaths(c.run))); !slices.Equal(listed, c.files) {
 				t.Errorf("the prompt lists %v, the view holds %v", listed, c.files)
 			}
@@ -115,7 +103,6 @@ func TestFinalCheckEvidenceNamesOnlyFilesTheReaderViewHolds(t *testing.T) {
 	}
 }
 
-// A record of another commit is not the result of the commit the reader reads.
 func TestFinalCheckFilesHoldOnlyTheLatestRecordOfTheReviewedCommit(t *testing.T) {
 	t.Parallel()
 	_, repo := deliveryTrace(t)
@@ -140,8 +127,6 @@ func TestFinalCheckFilesHoldOnlyTheLatestRecordOfTheReviewedCommit(t *testing.T)
 	}
 }
 
-// The reader's prompt carries the check result in a labelled section before
-// the criteria, never at its end, and its view list names the record.
 func TestFinalPromptCarriesTheCheckResultBeforeTheCriteria(t *testing.T) {
 	t.Parallel()
 	run := FinalCheckRun{Review: 2, Commit: reviewedCommit, Source: api.CheckSourcePullRequest, PullRequest: 7, Push: 1, PushedCommit: pushedCommit, Status: "passed", StatusURL: "https://dagger.cloud/acme/checks/github.com/acme/widgets@" + pushedCommit + "?check=3", Counts: &api.CheckCounts{Total: 3, Passed: 3},
@@ -162,10 +147,6 @@ func TestFinalPromptCarriesTheCheckResultBeforeTheCriteria(t *testing.T) {
 	}
 	if !strings.Contains(prompt, run.StatusURL) {
 		t.Fatalf("the prompt lacks the status link:\n%s", prompt)
-	}
-	local := FinalCheckRun{Review: 2, Commit: reviewedCommit, Status: "passed", OutputPath: "final/checks-2-output.txt", OutputRevision: 1}
-	if list := FinalPrompt(report, local, nil, coverage, FinalReport{}); !strings.Contains(list, "- final/checks-2-output.txt:") {
-		t.Fatalf("the output file is not listed:\n%s", list)
 	}
 	maintenance := FinalCheckRun{Review: 2, Commit: reviewedCommit, ExitCode: -1, Error: "a review of a delivered workstream pushes nothing, so no pull request checks ran for it"}
 	if list := FinalPrompt(report, maintenance, nil, coverage, FinalReport{}); strings.Contains(list, "final/checks") {

@@ -14,8 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// committedFixture commits README.md, core/llm.go, core/deep/x.go and a
-// symlink, then leaves an uncommitted edit to README.md.
 func committedFixture(t *testing.T) (clone, commit string) {
 	t.Helper()
 	clone = t.TempDir()
@@ -42,9 +40,6 @@ func committedFixture(t *testing.T) (clone, commit string) {
 	return clone, commit
 }
 
-// TestReadCommitPathReadsOneCommittedEntry covers reading committed source by
-// path: files and directories at the commit, never the working tree, with
-// symlinks hidden as they are from a staged commit.
 func TestReadCommitPathReadsOneCommittedEntry(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

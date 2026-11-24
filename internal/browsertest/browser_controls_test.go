@@ -16,10 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The page sends the owner's message to the workstream's chief of staff
-// through the conversation endpoint, refuses an empty one, and shows the
-// message and the chief of staff's answer as the event stream announces
-// them, without a reload.
 func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
@@ -34,7 +30,6 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.AwaitText(card+"[data-field=feed]", "Nothing here yet.")
 	p.Eval(`window.notReloaded = true`, nil)
 
-	// An empty message is refused on the page and never sent.
 	p.Click(send + "button[type=submit]")
 	p.AwaitText(send+".result", "Write a message first.")
 	list, err := f.c.Conversation(ctx, quiet)
@@ -47,11 +42,9 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.Click(send + "button[type=submit]")
 	p.AwaitText(send+".result", "Sent")
 	p.Await("an emptied message field", `document.querySelector(`+quote(send+"textarea")+`).value === ''`)
-	// The message is queued on the chief of staff's thread in the trace, as
-	// osmia send queues it.
 	list, err = f.c.Conversation(ctx, quiet)
 	must(t, err)
-	if len(list.Entries) != 1 || list.Entries[0].Kind != "message" || list.Entries[0].Text != "Pick the uploads back up on Friday." || list.Entries[0].State != TurnQueued {
+	if len(list.Entries) != 1 || list.Entries[0].Kind != "message" || list.Entries[0].Text != "Pick the uploads back up on Friday." || list.Entries[0].State != service.TurnQueued {
 		t.Fatalf("conversation after sending: %+v", list.Entries)
 	}
 	turn := list.Entries[0].Turn
@@ -60,8 +53,6 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.AwaitText(message+"[data-field=state]", "queued")
 	p.AwaitText(message+"[data-field=queued-reason]", "starting")
 
-	// The chief of staff takes the message and answers it; the page follows
-	// each step without a reload.
 	q, err := service.InspectForTest(f.s).SoleRepository().ClaimTurn(ctx, quiet, trace.ChiefOfStaff, "token_message", t.TempDir(), time.Now().UTC())
 	must(t, err)
 	if q.Request.TurnID != turn {
@@ -73,7 +64,6 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	p.AwaitText(message+"[data-field=state]", "done")
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// The other workstream's conversation stays its own.
 	p.SelectWorkstream(stream)
 	var other string
 	p.Eval(textOf(`[data-workstream="`+string(stream)+`"] [data-field=feed]`), &other)
@@ -82,21 +72,12 @@ func TestBrowserPageSendsMessagesAndFollowsTheConversation(t *testing.T) {
 	}
 }
 
-// pauseOf returns the effective pause of target, if any.
-
-// The page pauses the factory, the project and a workstream, soft or hard,
-// with a reason, and resumes each, through /v1/runtime/pause; it sets and
-// clears the priority order and a role's profile override, with the
-// provider's usage beside the profile. It refuses a pause without a scope or
-// a reason and a profile override without a profile, offers no resume for a
-// provider limit's role pause, shows the API's refusal, and keeps a message
-// and a profile being chosen through the reads events cause.
 func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
 	p := openBrowser(t)
 	ctx := context.Background()
-	runtimeView := func() RuntimeResponse {
+	runtimeView := func() service.RuntimeResponse {
 		t.Helper()
 		rt, err := f.c.Runtime(ctx)
 		must(t, err)
@@ -111,8 +92,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	row := `[data-profile-role="mason"] `
 	draft := `[data-workstream="` + string(quiet) + `"] [data-field=send] textarea`
 
-	// A profile being chosen and a message being written, still focused,
-	// survive the reads a runtime change causes.
 	p.OpenView("profiles")
 	p.AwaitText(row+"[data-field=source]", "configured")
 	var profile string
@@ -124,7 +103,7 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.Click("#settings-menu [data-close]")
 	p.SelectWorkstream(quiet)
 	p.TypeInto(draft, "Half a thought")
-	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
+	mutation(t, f.c, "PUT", "pause", service.PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Reason: "Lunch", Source: runtime.PauseOwner})
 	p.AwaitText(`[data-pause="factory:"] [data-field=reason]`, "Lunch")
 	var kept struct {
 		Draft, Profile string
@@ -134,11 +113,9 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	if kept.Draft != "Half a thought" || kept.Profile != "other" || !kept.Focused {
 		t.Fatalf("after a runtime change the page holds %+v", kept)
 	}
-	mutation(t, f.c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	mutation(t, f.c, "DELETE", "pause", service.ClearPauseRequest{Scope: "factory"})
 	p.Await("the factory resumed", `document.querySelector('[data-pause="factory:"]') === null`)
 
-	// A pause needs a scope and a reason; the page refuses one without and
-	// sends nothing.
 	p.OpenPauses()
 	p.Await("the workstream as a pause target", `[...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(stream))+`)`)
 	var chosen string
@@ -162,7 +139,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatal("a pause without a reason reached the service")
 	}
 
-	// Each scope pauses with its mode and reason, attributed to the owner.
 	for _, step := range []struct {
 		value, mode, reason string
 		target              runtime.Target
@@ -171,7 +147,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		{"factory", "soft", "Overnight", runtime.Target{Scope: "factory"}},
 		{"project:" + string(project), "hard", "Budget review", runtime.Target{Scope: "project", Project: project}},
 	} {
-		// The page names a pause by its scope and ID, as the form does.
 		shown := `[data-pause="` + step.value + `"] `
 		if step.value == "factory" {
 			shown = `[data-pause="factory:"] `
@@ -188,7 +163,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		if !ok || got.Mode != step.mode || got.Reason != step.reason || got.Source != runtime.PauseOwner || got.SetAt.IsZero() {
 			t.Fatalf("pause of %+v: %+v, %v", step.target, got, ok)
 		}
-		// Resuming clears exactly that pause.
 		p.Click(shown + "[data-field=resume]")
 		p.Await("the resumed "+step.value, `document.querySelector(`+quote(shown)+`) === null`)
 		p.AwaitText("#pause-result", "resumed")
@@ -200,8 +174,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatal("resuming the others cleared the quiet workstream's pause")
 	}
 
-	// The priority order: nothing chosen is refused; quiet then stream is set
-	// and cleared.
 	p.OpenView("priority")
 	p.Click("#priority-form button[type=submit]")
 	p.AwaitText("#priority-result", "Choose the workstreams that go first")
@@ -226,8 +198,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatalf("priority after clearing it: %+v", got)
 	}
 
-	// The mason's profile is overridden and cleared, with the usage of the
-	// profile's provider beside it; an override needs a profile.
 	p.OpenView("profiles")
 	p.AwaitText(row+"[data-field=usage]", "claude: USD")
 	p.Await("clear disabled without an override", `document.querySelector(`+quote(row+"[data-field=clear]")+`).disabled`)
@@ -255,15 +225,12 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 		t.Fatalf("mason's profile after clearing the override: %+v", got)
 	}
 
-	// A provider limit pauses the roles its provider serves without a
-	// fallback; that pause has no resume, an owner pause keeps its own.
 	must(t, service.InspectForTest(f.s).SetProviderLimit(runtime.ProviderLimit{Backend: "claude", Status: "blocked", SetAt: time.Now().UTC()}))
 	p.AwaitText(`[data-pause="role:mason"] [data-field=source]`, "a provider usage limit")
 	p.Await("no resume on the role pause", `document.querySelector('[data-pause="role:mason"] [data-field=resume]') === null`)
 	p.Await("resume on the owner's pause", `document.querySelector(`+quote(`[data-pause="workstream:`+string(quiet)+`"] [data-field=resume]`)+`) !== null`)
 	p.Await("the same document", `window.notReloaded === true`)
 
-	// A refusal of the API is shown as it came.
 	file := filepath.Join(service.InspectForTest(f.s).Config().Root.String(), "runtime.json")
 	data, err := os.ReadFile(file)
 	must(t, err)
@@ -276,10 +243,6 @@ func TestBrowserPageControlsPausesPriorityAndProfiles(t *testing.T) {
 	p.Await("an error outcome", `document.getElementById('pause-result').dataset.outcome === 'error'`)
 }
 
-// The reload button lights when the configuration on disk differs from the
-// loaded one and a reload has something to do. A reload that fails keeps it
-// lit and shows the error; one that applies clears it and shows the new
-// digest; a change only a restart applies is named and does not light it.
 func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
@@ -317,8 +280,6 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	original, err := os.ReadFile(path)
 	must(t, err)
 
-	// A file that does not parse lights reload; the reload fails, the loaded
-	// configuration stays and the error is shown until a reload succeeds.
 	must(t, os.WriteFile(path, append(slices.Clone(original), []byte("masons = \n")...), 0600))
 	lit(true)
 	p.Await("the settings button lit", `document.getElementById('settings-button').dataset.lit === 'true'`)
@@ -332,7 +293,6 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 		t.Fatalf("a failed reload changed the digest to %s", got)
 	}
 
-	// A valid change keeps it lit; the reload applies it and clears it.
 	changed := strings.Replace(string(original), "masons = 1", "masons = 2", 1)
 	must(t, os.WriteFile(path, []byte(changed), 0600))
 	p.AwaitText(`#drift-files [data-state=changed]`, "config.toml")
@@ -350,8 +310,6 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	p.Await("no last error", `document.getElementById('last-error').hidden`)
 	p.AwaitText(`#capacity [data-role=mason] [data-field=slots]`, "/ 2 slots")
 
-	// A change only a restart applies is named and does not light reload; a
-	// reload names it too.
 	must(t, os.WriteFile(path, []byte(strings.Replace(changed, `web = "127.0.0.1:0"`, `web = "127.0.0.1:9"`, 1)), 0600))
 	p.AwaitText(`#config-diagnostics [data-code=restart_required]`, "listen.web")
 	lit(false)
@@ -360,10 +318,6 @@ func TestBrowserPageReloadLightsOnDiskDriftAndClears(t *testing.T) {
 	p.Await("the same document", `window.notReloaded === true`)
 }
 
-// The workstream menu abandons and archives work in progress in one step,
-// and archives finished work. An archived workstream leaves the list of work
-// for the Archived group and the pause targets, the page shows the next
-// workstream in its place, and retains the archived title without history.
 func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	t.Parallel()
 	f := newPageFixture(t)
@@ -391,7 +345,6 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	menu("archive", false)
 	menu("abandon-archive", true)
 
-	// Work in progress is abandoned with a reason and archived.
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="abandon-archive"]`)
 	p.Await("the dialog names the abandonment and the archive, and the page stays on Conversation", `(() => {
@@ -400,7 +353,6 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 			document.getElementById('confirm-accept').textContent === 'Abandon and archive' &&
 			document.querySelector('[data-panel=documents]').hidden && document.querySelector('[data-tab=conversation]').getAttribute('aria-selected') === 'true';
 	})()`)
-	// A reason is required: the dialog stays open and says so.
 	p.Click("#confirm-accept")
 	p.AwaitText("#confirm-result", "Give a reason")
 	p.TypeInto("#confirm-reason", "Superseded by the upload design.")
@@ -410,7 +362,7 @@ func TestBrowserPagePermanentlyArchivesWorkstreams(t *testing.T) {
 	p.AwaitText("#archived-count", "1")
 	p.Await("quiet no longer a pause target", `![...document.querySelectorAll('#pause-form select[name=target] option')].some((o) => o.value === `+quote("workstream:"+string(quiet))+`)`)
 	archived(true)
-	if st, _ := f.c.Status(ctx, quiet); st.State == nil || *st.State != AbandonedState {
+	if st, _ := f.c.Status(ctx, quiet); st.State == nil || *st.State != service.AbandonedState {
 		t.Fatalf("quiet was not abandoned: %+v", st)
 	}
 

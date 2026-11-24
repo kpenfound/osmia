@@ -22,8 +22,6 @@ func recoveryEntry(unit string, version uint64) wire.InboxEntry {
 	}
 }
 
-// recoveryServer serves an inbox and the recovery endpoint, and keeps the
-// requests the endpoint received.
 func recoveryServer(t *testing.T, entries ...wire.InboxEntry) (root, socket string, requests func() []wire.RecoveryRequest) {
 	t.Helper()
 	root = t.TempDir()
@@ -58,8 +56,6 @@ func recoveryServer(t *testing.T, entries ...wire.InboxEntry) (root, socket stri
 	}
 }
 
-// `osmia recover` submits exactly the move the card pins, as the card's own
-// answer body carries it.
 func TestRecoverCommandApprovesTheMoveTheCardPins(t *testing.T) {
 	t.Parallel()
 	root, socket, requests := recoveryServer(t, recoveryEntry("a", 7))
@@ -74,8 +70,6 @@ func TestRecoverCommandApprovesTheMoveTheCardPins(t *testing.T) {
 	}
 }
 
-// With no card open, or several, the command approves nothing: it names the
-// cards so the owner picks the move they read.
 func TestRecoverCommandApprovesNothingWithoutExactlyOneCard(t *testing.T) {
 	t.Parallel()
 	root, socket, _ := recoveryServer(t)

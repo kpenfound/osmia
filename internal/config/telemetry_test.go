@@ -9,7 +9,7 @@ import (
 
 func TestTelemetryDefaultsToOff(t *testing.T) {
 	for _, section := range []string{"", "[telemetry]\n", "[telemetry]\nendpoint = ''\n"} {
-		cfg, err := Load(fixture(t, topConfig+section, projectConfig))
+		cfg, err := load(fixture(t, topConfig+section, projectConfig))
 		if err != nil {
 			t.Fatalf("%q: %v", section, err)
 		}
@@ -31,7 +31,7 @@ func TestTelemetryConfiguration(t *testing.T) {
 		{"settings without an endpoint", "protocol = 'http/protobuf'\nheaders_env = 'OSMIA_OTLP_HEADERS'\n", Telemetry{Protocol: "http/protobuf", HeadersEnv: "OSMIA_OTLP_HEADERS"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(fixture(t, topConfig+"[telemetry]\n"+tc.section, projectConfig))
+			cfg, err := load(fixture(t, topConfig+"[telemetry]\n"+tc.section, projectConfig))
 			if err != nil || cfg.Telemetry != tc.want {
 				t.Fatalf("telemetry %+v, %v; want %+v", cfg, err, tc.want)
 			}
@@ -76,7 +76,7 @@ func TestTelemetryValidationNamesTheField(t *testing.T) {
 // its value.
 func TestTelemetryConfigurationNeverReadsTheHeaders(t *testing.T) {
 	t.Setenv("OSMIA_OTLP_HEADERS", "authorization=private-token")
-	cfg, err := Load(fixture(t, topConfig+"[telemetry]\nendpoint = 'collector:4317'\nheaders_env = 'OSMIA_OTLP_HEADERS'\n", projectConfig))
+	cfg, err := load(fixture(t, topConfig+"[telemetry]\nendpoint = 'collector:4317'\nheaders_env = 'OSMIA_OTLP_HEADERS'\n", projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}

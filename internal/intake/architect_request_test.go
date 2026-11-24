@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -13,7 +14,7 @@ import (
 func TestArchitectDoesNotRequestDraftAfterConcurrentAbandon(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	cfg, err := config.Load(fixturekit.ConfigAt(t, t.TempDir()))
+	cfg, err := projectstore.LoadConfig(fixturekit.ConfigAt(t, t.TempDir()))
 	fixturekit.Must(t, err)
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
@@ -32,7 +33,6 @@ func TestArchitectDoesNotRequestDraftAfterConcurrentAbandon(t *testing.T) {
 		Now:                clock.Now,
 		DesignStartPending: func(*trace.Repository, config.WorkstreamID) (bool, error) { return false, nil },
 		Pausing: func(config.ProjectID, config.WorkstreamID) (runtime.Pause, bool) {
-			// Reconcile has read both states, but has not published its request.
 			h.ID, h.Cause = AbandonTransition, AbandonTransition
 			_, err := repo.SetFeatureState(ctx, h, AbandonedState, "Superseded")
 			fixturekit.Must(t, err)

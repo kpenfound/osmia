@@ -46,8 +46,6 @@ func traceFixture(t *testing.T, seed []byte) (*trace.Repository, config.Root, co
 	return r, root, p
 }
 
-// entityRevisions returns the entity map's revisions, leaving out other
-// project documents such as the charter.
 func entityRevisions(r *trace.Repository) ([]trace.Document, error) {
 	documents, err := trace.Read[trace.Document](r, "")
 	var out []trace.Document

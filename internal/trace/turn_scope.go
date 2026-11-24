@@ -7,8 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// turnScope requires r.mu. It returns the thread and turn a tool scope names;
-// active also requires this session's uncaptured claim on that turn.
 func (r *Repository) turnScope(agent string, scope coreadapter.Scope, active bool) (Thread, QueuedTurn, error) {
 	if scope.Project != string(r.project) || !key(agent) || !key(scope.Role) || !key(scope.Thread) || !key(scope.Turn) {
 		return Thread{}, QueuedTurn{}, fmt.Errorf("turn scope denied")

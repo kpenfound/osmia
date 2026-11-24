@@ -13,13 +13,7 @@ func TestSecretsRedactsCredentialURLsAndCallerSecrets(t *testing.T) {
 	}
 }
 
-// TestKnownSecretsIncludesRegisteredValues shows that a value Register
-// records joins EnvSecrets' fixed names in every later call to
-// KnownSecrets, so a caller-configured secret whose environment variable
-// name is not one of EnvSecrets' defaults is still redacted once something
-// has read it.
 func TestKnownSecretsIncludesRegisteredValues(t *testing.T) {
-	// serial: Register writes to the package's shared registry.
 	const secret = "registered-under-a-custom-name"
 	for _, known := range KnownSecrets() {
 		if known == secret {
@@ -42,7 +36,6 @@ func TestKnownSecretsIncludesRegisteredValues(t *testing.T) {
 }
 
 func TestRegisterIgnoresAnEmptySecret(t *testing.T) {
-	// serial: inspects the package's shared registry via KnownSecrets.
 	before := len(KnownSecrets())
 	Register("")
 	if got := len(KnownSecrets()); got != before {

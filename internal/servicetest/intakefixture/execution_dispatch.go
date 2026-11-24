@@ -3,9 +3,12 @@ package intakefixture
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -14,11 +17,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const ReliabilityPlan = `{"version": 1, "units": [
-  {"id": "upload", "title": "Send chunks", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestUpload"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "audit", "title": "Record acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "acknowledgements are recorded"}}], "depends_on": [], "footprint": ["internal.audit"]},
-  {"id": "dedupe", "title": "Skip acknowledged chunks", "addresses": [{"criterion": "spec#2", "proof": {"kind": "reviewer-judgement", "name": "no chunk is sent twice"}}], "depends_on": [], "footprint": ["internal.upload"]},
-  {"id": "resume", "title": "Resume from the last chunk", "addresses": [{"criterion": "spec#1", "proof": {"kind": "new-test", "name": "TestResume"}}], "depends_on": [], "footprint": ["internal.trace"]}
+const ReliabilityPlan = `{"version": 2, "units": [
+  {"id": "upload", "title": "Send chunks", "task": "Send chunks", "acceptance": ["spec#1 holds, shown by TestUpload (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "audit", "title": "Record acknowledged chunks", "task": "Record acknowledged chunks", "acceptance": ["spec#2 holds, shown by acknowledgements are recorded (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.audit"]},
+  {"id": "dedupe", "title": "Skip acknowledged chunks", "task": "Skip acknowledged chunks", "acceptance": ["spec#2 holds, shown by no chunk is sent twice (reviewer-judgement)"], "criteria": ["spec#2"], "depends_on": [], "footprint": ["internal.upload"]},
+  {"id": "resume", "title": "Resume from the last chunk", "task": "Resume from the last chunk", "acceptance": ["spec#1 holds, shown by TestResume (new-test)"], "criteria": ["spec#1"], "depends_on": [], "footprint": ["internal.trace"]}
 ]}
 `
 const TrackedFile = "internal/trace/git.go"
@@ -26,7 +29,7 @@ const TrackedFile = "internal/trace/git.go"
 func ReadUnitStatus(t *testing.T, client UnitStatusClient, stream config.WorkstreamID, unit string) api.UnitStatus {
 	t.Helper()
 	st, err := client.Status(context.Background(), stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	for _, u := range st.Units {
 		if u.Unit == unit {
 			return u
@@ -47,7 +50,7 @@ func DeferredUnit(t *testing.T, repository *trace.Repository, pauses []runtime.P
 		}
 	}
 	states, err := repository.WorkflowStates(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	d.Unit, d.Version, d.Decision = unit, states[trace.UnitSubject(unit)].Version, "deferred"
 	return api.UnitStatus{Unit: unit, State: "ready", Reason: d.Message, Deferral: &d}
 }
@@ -55,14 +58,14 @@ func DeferredUnit(t *testing.T, repository *trace.Repository, pauses []runtime.P
 func DispatchDecisions(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string) []string {
 	t.Helper()
 	documents, err := trace.Read[trace.Document](repository, stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []string
 	for _, doc := range documents {
 		if doc.ID != trace.UnitSubject(unit)+"-dispatch" {
 			continue
 		}
 		var d api.UnitDispatch
-		Must(t, json.Unmarshal([]byte(doc.Content), &d))
+		fixturekit.Must(t, json.Unmarshal([]byte(doc.Content), &d))
 		if doc.Revision != len(out)+1 || doc.Path != "units/"+unit+"/dispatch.json" || doc.Unit != unit || doc.Actor != intake.MasonActor || d.Unit != unit || d.Message == "" {
 			t.Fatalf("dispatch revision %+v", doc)
 		}
@@ -73,13 +76,11 @@ func DispatchDecisions(t *testing.T, repository *trace.Repository, stream config
 
 func AwaitDispatchDecisions(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, unit string, n int) {
 	t.Helper()
-	deadline := time.Now().Add(DemoTimeout)
-	for len(DispatchDecisions(t, repository, stream, unit)) < n {
-		if time.Now().After(deadline) {
-			t.Fatalf("decisions on unit %s of %s: %q, want %d", unit, stream, DispatchDecisions(t, repository, stream, unit), n)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	wake, release := fixturekit.Ticks(50 * time.Millisecond)
+	defer release()
+	fixturekit.Until(t, fmt.Sprintf("%d decisions on unit %s of %s", n, unit, stream), wake, func() bool {
+		return len(DispatchDecisions(t, repository, stream, unit)) >= n
+	})
 }
 
 func MasonStarts(transitions []trace.Transition) []string {
@@ -93,4 +94,13 @@ func MasonStarts(transitions []trace.Transition) []string {
 }
 func LowHigh(a, b config.WorkstreamID) (config.WorkstreamID, config.WorkstreamID) {
 	return min(a, b), max(a, b)
+}
+
+// MasonCapacity is the capacity settings of a root that runs masons at a time.
+func MasonCapacity(masons int) string { return fmt.Sprintf("masons = %d\n", masons) }
+
+// ParallelCapacity is the capacity settings of a root that runs masons at a
+// time and perWorkstream of them on one workstream.
+func ParallelCapacity(masons, perWorkstream int) string {
+	return fmt.Sprintf("masons = %d\nper_workstream = %d\n", masons, perWorkstream)
 }

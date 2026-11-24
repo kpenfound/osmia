@@ -20,11 +20,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// maxFlakeNotes bounds the chief of staff's notes in a flake-fix hand-in.
 const maxFlakeNotes = 8 << 10
 
-// flakeFixResult is what the flake_fix tool answers when it acts on, or finds
-// a decision of, an occurrence.
 type flakeFixResult struct {
 	Action     string              `json:"action"`
 	Occurrence string              `json:"occurrence"`
@@ -35,12 +32,6 @@ type flakeFixResult struct {
 	Next       string              `json:"next"`
 }
 
-// flakeFix returns the flake_fix tool of one claimed chief-of-staff turn. For
-// a recorded flake occurrence it opens a flake-fix workstream from the hand-in
-// the service writes from the occurrence's evidence plus the chief of
-// staff's notes, or declines with a reason. It hands in nothing else, and
-// repeating a call returns the occurrence's decision and acts no further.
-// Refusals are ordinary results, {"recorded":false,"reason":...}.
 func (c *runtimeControls) flakeFix(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: flakeFixToolName, Effect: coreadapter.ToolMemory,
 		Description: "Act on a flake occurrence a flake notice listed: open a flake-fix workstream that finds and fixes the cause of the flakiness, or decline it. " +
@@ -113,14 +104,11 @@ func (c *runtimeControls) flakeFix(repository *trace.Repository, scope coreadapt
 	return tool
 }
 
-// flakeFixLookup is the occurrence a flake-fix action names, with its group.
 type flakeFixLookup struct {
 	group      flakes.Group
 	occurrence flakes.Occurrence
 }
 
-// findFlakeOccurrence returns the occurrence with the ID in the project's flake
-// record.
 func findFlakeOccurrence(store *flakes.Store, id string) (flakeFixLookup, bool, error) {
 	groups, err := store.Groups()
 	if err != nil {
@@ -136,14 +124,10 @@ func findFlakeOccurrence(store *flakes.Store, id string) (flakeFixLookup, bool, 
 	return flakeFixLookup{}, false, nil
 }
 
-// flakeStore is the project's flake record, attributing the decisions it
-// records to the chief of staff.
 func (s *Service) flakeStore(repository *trace.Repository) *flakes.Store {
 	return &flakes.Store{Repository: repository, Actor: chiefActor, Now: s.now}
 }
 
-// actOnFlake opens or declines the occurrence for the originating workstream
-// stream of repository's project. A non-empty why is an ordinary refusal.
 func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, action, id, notes, reason string) (flakeFixResult, string, error) {
 	cfg := s.about(repository)
 	if !cfg.Project.FlakeFixes {
@@ -181,9 +165,6 @@ func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, 
 			return flakeFixResult{}, why, err
 		}
 	}
-	// The decision is committed. A destination of its announcement that
-	// fails stays owed and is reconciled by a later flake pass, so the tool
-	// still answers with the decision.
 	if err := s.announceFlakeDecision(ctx, repository, store, group, run); err != nil {
 		ghlog.Logger(ctx).Warn("the flake decision will be announced by the next flake pass", "occurrence", id, "error", err.Error())
 	}
@@ -209,13 +190,6 @@ func (s *Service) actOnFlake(ctx context.Context, repository *trace.Repository, 
 	return res, "", nil
 }
 
-// completeFlakeOpening finishes the hand-in the occurrence's reserved opening
-// stands for and records the occurrence as opened (or joined, when another
-// occurrence of the same reservation opened the workstream first). It uses the
-// key, the workstream and the notes reserved, never the group's current
-// generation, so a repeat after an interruption reaches the workstream the
-// first attempt made. The caller holds flakeFixMu. A non-empty why is an
-// ordinary refusal that leaves the reservation for a later attempt.
 func (s *Service) completeFlakeOpening(ctx context.Context, repository *trace.Repository, store *flakes.Store, group, run string) (flakes.Decision, string, error) {
 	g, found, err := store.Group(group)
 	if err != nil || !found {
@@ -264,14 +238,10 @@ func (s *Service) completeFlakeOpening(ctx context.Context, repository *trace.Re
 	return decided, "", err
 }
 
-// flakeHandInState is what a reserved opening's workstream already holds.
 type flakeHandInState struct {
 	handed bool
 }
 
-// flakeHandIn reads whether workstream's hand-in is recorded and the text of
-// its handed document if it holds one, so a hand-in interrupted partway is
-// finished with the text it copied.
 func flakeHandIn(repository *trace.Repository, workstream config.WorkstreamID) (flakeHandInState, string, error) {
 	streams, err := repository.Workstreams()
 	if err != nil {
@@ -297,28 +267,15 @@ func flakeHandIn(repository *trace.Repository, workstream config.WorkstreamID) (
 	return state, "", nil
 }
 
-// flakeHandInReason is what the flake-fix workstream's hand-in transition
-// records: who opened it, from which flake evidence of which workstream.
 func flakeHandInReason(o flakes.Occurrence, group string) string {
 	origin := flakeRun{stream: o.Source.Workstream, source: o.Source}
 	return fmt.Sprintf("the chief of staff opened this flake-fix workstream from flake occurrence %s of group %s, recorded by %s in %s", o.ID, group, origin.describe(), o.RunPath())
 }
 
-// flakeDecisionSubject is the workflow subject, in the originating
-// workstream's trace, of an occurrence's decision.
 func flakeDecisionSubject(occurrence string) string {
 	return "flake-decision-" + flakeDigest("decision", occurrence)
 }
 
-// announceFlakeDecision makes the occurrence's decision visible at each of its
-// destinations: a transition in the originating workstream's trace, which its
-// feed shows, naming the flake-fix workstream or the declining reason, and, for
-// an occurrence that joined an open workstream, the surfacing of the run's
-// links to that workstream's chief of staff. The destinations are tried
-// independently, each is written once and marked only after its write
-// succeeded, and a destination whose workstream was archived is closed as
-// moot, so repeating the call changes nothing. It returns the failures of the
-// destinations still owed. The caller holds flakeFixMu.
 func (s *Service) announceFlakeDecision(ctx context.Context, repository *trace.Repository, store *flakes.Store, group, run string) error {
 	g, found, err := store.Group(group)
 	if err != nil || !found {
@@ -334,8 +291,6 @@ func (s *Service) announceFlakeDecision(ctx context.Context, repository *trace.R
 	return errors.Join(s.announceToOrigin(ctx, repository, store, group, o), s.announceToTarget(ctx, repository, store, group, o))
 }
 
-// flakeDecisionText is the originating transition's destination state and
-// reason for the occurrence's decision.
 func flakeDecisionText(o flakes.Occurrence, group string) (to, reason string) {
 	switch o.Decision.State {
 	case flakes.Opened:
@@ -346,8 +301,6 @@ func flakeDecisionText(o flakes.Occurrence, group string) (to, reason string) {
 	return "declined", fmt.Sprintf("the chief of staff declined flake occurrence %s of group %s (%s): %s", o.ID, group, codeList(o.Links), o.Decision.Reason)
 }
 
-// closeFlakeDestination closes the occurrence's destination as moot because
-// its workstream was archived, noting in the flake record who archived it.
 func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store, group string, o flakes.Occurrence, destination string, workstream config.WorkstreamID, archive runtime.Archive) error {
 	by := archivedBy(archive)
 	who := "the owner"
@@ -358,10 +311,6 @@ func (s *Service) closeFlakeDestination(ctx context.Context, store *flakes.Store
 	return store.MarkMoot(ctx, group, o.Run, flakes.Moot{Destination: destination, Workstream: workstream, ArchivedBy: by, Note: note})
 }
 
-// announceToOrigin writes the occurrence's decision transition in the
-// originating workstream's trace unless it is already written or the
-// workstream was archived. A delivered or abandoned workstream still takes it:
-// the transition has a subject of its own, apart from the workstream's state.
 func (s *Service) announceToOrigin(ctx context.Context, repository *trace.Repository, store *flakes.Store, group string, o flakes.Occurrence) error {
 	if o.IsAnnounced(flakes.DestinationOrigin) || o.IsMoot(flakes.DestinationOrigin) {
 		return nil
@@ -401,9 +350,6 @@ func (s *Service) announceToOrigin(ctx context.Context, repository *trace.Reposi
 	return store.MarkAnnounced(ctx, group, o.Run, flakes.DestinationOrigin)
 }
 
-// announceToTarget surfaces a joined occurrence's links to the open flake-fix
-// workstream's chief of staff unless that is already done or the workstream was
-// archived.
 func (s *Service) announceToTarget(ctx context.Context, repository *trace.Repository, store *flakes.Store, group string, o flakes.Occurrence) error {
 	target := o.Decision.Workstream
 	if o.Decision.State != flakes.Joined || target == "" || o.FromFlakeFix || o.IsMoot(flakes.DestinationTarget) ||
@@ -421,11 +367,6 @@ func (s *Service) announceToTarget(ctx context.Context, repository *trace.Reposi
 	return recorder.surface(ctx, store, run, located{group: group, Occurrence: o})
 }
 
-// announce reconciles the announcement of every decided occurrence of the
-// project's flake record, the ones the recorder joined as well as those the
-// chief of staff decided. It does not depend on the run being processed now or
-// the chief repeating the tool call. A failure of one destination of one
-// occurrence leaves it owed for the next pass and does not stop the others.
 func (f *flakeRecorder) announce(ctx context.Context) error {
 	store := f.s.flakeStore(f.repository)
 	groups, err := store.Groups()
@@ -452,7 +393,6 @@ func (f *flakeRecorder) announce(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-// announced reports whether nothing of the occurrence's announcement is owed.
 func (f *flakeRecorder) announced(o flakes.Occurrence) bool {
 	if !o.IsAnnounced(flakes.DestinationOrigin) && !o.IsMoot(flakes.DestinationOrigin) {
 		return false
@@ -464,12 +404,6 @@ func (f *flakeRecorder) announced(o flakes.Occurrence) bool {
 	return slices.ContainsFunc(o.Surfaced, func(sf flakes.Surfacing) bool { return sf.Workstream == target })
 }
 
-// settle finishes what the flake record leaves partway and closes what is
-// over: every reserved opening is completed with its own key, the announcement
-// of every decided occurrence is reconciled per destination, and a group whose
-// flake-fix workstream was delivered or abandoned ends its association with
-// it, so the group's next occurrence opens the next generation. It returns the
-// failures it met, each retried by the next pass.
 func (f *flakeRecorder) settle(ctx context.Context) error {
 	store := f.s.flakeStore(f.repository)
 	groups, err := store.Groups()
@@ -523,8 +457,6 @@ func (f *flakeRecorder) settle(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-// flakeFixFinished reports whether the flake-fix workstream was delivered or
-// abandoned, or archived.
 func (s *Service) flakeFixFinished(repository *trace.Repository, workstream config.WorkstreamID) (bool, error) {
 	if _, archived := s.archivedWorkstream(string(workstream)); archived {
 		return true, nil
@@ -540,8 +472,6 @@ func (s *Service) flakeFixFinished(repository *trace.Repository, workstream conf
 	return state.Value == DeliveredState || state.Value == AbandonedState, nil
 }
 
-// closeFlakeFix ends the flake groups' association with a workstream that was
-// just abandoned. A failure is logged and left to the next flake pass.
 func (s *Service) closeFlakeFix(ctx context.Context, repository *trace.Repository, workstream config.WorkstreamID) {
 	if _, err := s.flakeStore(repository).CloseWorkstream(context.WithoutCancel(ctx), workstream); err != nil {
 		ghlog.Logger(ctx).Warn("flake groups will be closed by the next flake pass", "workstream", string(workstream), "error", err.Error())

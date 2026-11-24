@@ -73,10 +73,6 @@ func TestInvocationsGroupLinksThatShareOneFilteredView(t *testing.T) {
 	}
 }
 
-// Dagger ANDs an address's filters and ORs the values of one filter, so an
-// address selects a cross-product. Grouped addresses must select exactly the
-// checks the links select: a wider grouping runs checks nobody selected, and a
-// narrower one reports a pass without running a selected check.
 func TestInvocationsSelectExactlyWhatTheLinksSelect(t *testing.T) {
 	t.Parallel()
 	dimensions := []filter{
@@ -143,8 +139,6 @@ func TestInvocationsSelectExactlyWhatTheLinksSelect(t *testing.T) {
 	}
 }
 
-// One-link commands preserve the exact address; unfamiliar forms remain
-// independent rather than acquiring query semantics from their spelling.
 func TestInvocationsPreserveUnparsedLinks(t *testing.T) {
 	t.Parallel()
 	for _, link := range []string{

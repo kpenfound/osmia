@@ -8,9 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// A workstream's manifest records the workspace backend it was created on,
-// which survives reopening the trace; one that records none is on Git, and
-// an unknown backend is refused on creation and when read.
 func TestWorkstreamRecordsItsWorkspaceBackend(t *testing.T) {
 	ctx := context.Background()
 	r, root, p := create(t)

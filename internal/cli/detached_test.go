@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -26,17 +25,12 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-// testIssuesBaseURLEnv names the environment variable
-// TestDetachedServiceLogsGitHubActionsOnRealStandardError sets so the
-// detached child subprocess it launches fetches issues from a fake server
-// instead of api.github.com. Production never sets it.
 const testIssuesBaseURLEnv = "OSMIA_TEST_ISSUES_BASE_URL"
 
 func TestDetachedProcess(t *testing.T) {
 	if os.Getenv(readinessEnv) != "3" {
 		return
 	}
-	// TestMain installs fake execution boundaries. This process has no projects.
 	if base := os.Getenv(testIssuesBaseURLEnv); base != "" {
 		baseServiceOptions = func(root config.Root, logger *slog.Logger) service.Options {
 			return service.Options{Config: root.Options(""), Build: build(), Logger: logger,
@@ -47,57 +41,72 @@ func TestDetachedProcess(t *testing.T) {
 	os.Exit(Run(context.Background(), []string{"serve", "--root", root}, strings.NewReader(""), os.Stdout, os.Stderr))
 }
 
-func TestDetachedServeReadinessDuplicateOwnerAndStop(t *testing.T) {
+const minimalConfig = "version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"
+
+type detachedService struct {
+	root   string
+	client *service.Client
+	out    string
+}
+
+func startDetachedService(t *testing.T) detachedService {
+	t.Helper()
 	root, err := os.MkdirTemp("", "od-")
 	must(t, err)
-	defer os.RemoveAll(root)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	t.Cleanup(func() { os.RemoveAll(root) })
+	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte(minimalConfig), 0600))
 	original := detachedCommand
 	detachedCommand = func(root string) (*exec.Cmd, error) {
 		return exec.Command(os.Args[0], "-test.run=^TestDetachedProcess$", "--", root), nil
 	}
-	defer func() { detachedCommand = original }()
+	t.Cleanup(func() { detachedCommand = original })
 	c := service.NewClient(filepath.Join(root, "osmia.sock"))
-	defer c.Close()
-	defer c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil)
+	t.Cleanup(c.Close)
+	t.Cleanup(func() { c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil) })
 	code, out, diag := invoke(t, root, "serve", "--detach")
-	if code != 0 || diag != "" || !strings.Contains(out, "Osmia is ready") {
+	if code != 0 || diag != "" {
 		t.Fatalf("start %d %s %s", code, out, diag)
 	}
-	health, err := c.Health(context.Background())
+	return detachedService{root: root, client: c, out: out}
+}
+
+func TestDetachedServeReportsReadinessOnceTheServiceAnswers(t *testing.T) {
+	d := startDetachedService(t)
+	if !strings.Contains(d.out, "Osmia is ready") {
+		t.Fatalf("start output %q", d.out)
+	}
+	health, err := d.client.Health(context.Background())
 	must(t, err)
 	if !health.Ready {
 		t.Fatalf("not ready: %+v", health)
 	}
-	code, _, _ = invoke(t, root, "serve", "--detach")
-	if code != 6 {
+}
+
+func TestDetachedServeRefusesASecondServiceOnTheRoot(t *testing.T) {
+	d := startDetachedService(t)
+	if code, _, _ := invoke(t, d.root, "serve", "--detach"); code != 6 {
 		t.Fatalf("duplicate service started: %d", code)
 	}
-	info, err := os.Stat(filepath.Join(root, "service.log"))
+}
+
+func TestDetachedServiceLogIsReadableOnlyByTheOwner(t *testing.T) {
+	d := startDetachedService(t)
+	info, err := os.Stat(filepath.Join(d.root, "service.log"))
 	must(t, err)
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("log permissions %s", info.Mode())
 	}
-	var output, diagnostics bytes.Buffer
-	code = Run(context.Background(), []string{"stop", "--root", root}, strings.NewReader(""), &output, &diagnostics)
-	if code != 0 {
-		t.Fatalf("stop %d %s", code, diagnostics.String())
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		_, err = c.Health(context.Background())
-		if err != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("service did not stop")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
-// A detached default root starts its child without --root so the child reads
-// the same XDG config file; an explicit root is passed on.
+func TestStopShutsTheDetachedServiceDown(t *testing.T) {
+	d := startDetachedService(t)
+	var output, diagnostics bytes.Buffer
+	if code := Run(context.Background(), []string{"stop", "--root", d.root}, strings.NewReader(""), &output, &diagnostics); code != 0 {
+		t.Fatalf("stop %d %s", code, diagnostics.String())
+	}
+	awaitHealth(t, d.client, false, 10*time.Second, nil)
+}
+
 func TestDetachedRootFlag(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
@@ -114,9 +123,6 @@ func TestDetachedRootFlag(t *testing.T) {
 	}
 }
 
-// TestServeFailureNamesARuntimeFailure shows a service that stopped after it
-// started naming its failure, redacted and on one line, while a startup
-// failure still points at doctor without echoing its error.
 func TestServeFailureNamesARuntimeFailure(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
 	at := time.Date(2026, 10, 3, 19, 58, 13, 0, time.UTC)
@@ -130,30 +136,28 @@ func TestServeFailureNamesARuntimeFailure(t *testing.T) {
 	if out.String() != want {
 		t.Fatalf("runtime failure:\n got %q\nwant %q", out.String(), want)
 	}
-	out.Reset()
-	reportServeFailure(&out, errors.New("config.toml: token = \"ghp_secret\""), at)
+}
+
+func TestServeFailureAtStartupHidesTheFailureAndPointsToDoctor(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	var out strings.Builder
+	reportServeFailure(&out, errors.New("config.toml: token = \"ghp_secret\""), time.Date(2026, 10, 3, 19, 58, 13, 0, time.UTC))
 	if got := out.String(); strings.Contains(got, "ghp_secret") || strings.Contains(got, "config.toml") || !strings.Contains(got, "osmia doctor") {
 		t.Fatalf("startup failure: %q", got)
 	}
-	out.Reset()
-	reportServeFailure(&out, stoppedError{errors.New(strings.Repeat("é", maxFailureText))}, at)
+}
+
+func TestServeFailureTruncatesAnUnboundedFailure(t *testing.T) {
+	var out strings.Builder
+	reportServeFailure(&out, stoppedError{errors.New(strings.Repeat("é", maxFailureText))}, time.Date(2026, 10, 3, 19, 58, 13, 0, time.UTC))
 	if line, _, _ := strings.Cut(out.String(), "\n"); !strings.HasSuffix(line, "…") || !utf8.ValidString(line) || len(line) > maxFailureText+100 {
 		t.Fatalf("an unbounded failure: %d bytes", len(line))
 	}
 }
 
-// TestLogServeFailureRecordsAStructuredErrorRecord shows that the service
-// process itself, whether a foreground osmia serve or the detached child
-// whose stderr is service.log, reports its own failure as one error-level
-// structured record, at startup and after it started, with the same
-// redaction and guidance reportServeFailure gives the launcher.
-func TestLogServeFailureRecordsAStructuredErrorRecord(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "ghp_secret")
-	failure := errors.New("project p_1: workstream w_1: push https://x-access-token:hunter2@github.com/acme/widgets.git refused")
+func TestLogServeFailureRecordsARuntimeFailureAsAnErrorWithGuidance(t *testing.T) {
 	var buf bytes.Buffer
-	logger := newServiceLogger(&buf)
-	logServeFailure(logger, stoppedError{failure})
-
+	logServeFailure(newServiceLogger(&buf), stoppedError{errors.New("project p_1: workstream w_1: push refused")})
 	var record struct {
 		Level, Msg, Error, Guidance string
 	}
@@ -161,25 +165,32 @@ func TestLogServeFailureRecordsAStructuredErrorRecord(t *testing.T) {
 	if record.Level != "ERROR" {
 		t.Fatalf("level %q, want ERROR", record.Level)
 	}
-	if strings.Contains(record.Error, "hunter2") || strings.Contains(record.Error, "ghp_secret") {
-		t.Fatalf("record leaked a credential: %+v", record)
-	}
 	if record.Guidance != "fix the cause above, then start the service again" {
 		t.Fatalf("guidance %q", record.Guidance)
 	}
+}
 
-	buf.Reset()
-	logServeFailure(logger, errors.New("config.toml: token = \"ghp_secret\""))
+func TestLogServeFailureRedactsCredentials(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	var buf bytes.Buffer
+	logServeFailure(newServiceLogger(&buf), stoppedError{errors.New("project p_1: workstream w_1: push https://x-access-token:hunter2@github.com/acme/widgets.git refused with ghp_secret")})
+	var record struct{ Error string }
+	must(t, json.Unmarshal(bytes.TrimRight(buf.Bytes(), "\n"), &record))
+	if strings.Contains(record.Error, "hunter2") || strings.Contains(record.Error, "ghp_secret") {
+		t.Fatalf("record leaked a credential: %+v", record)
+	}
+}
+
+func TestLogServeFailureAtStartupHidesTheFailureAndPointsToDoctor(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	var buf bytes.Buffer
+	logServeFailure(newServiceLogger(&buf), errors.New("config.toml: token = \"ghp_secret\""))
 	text := buf.String()
 	if strings.Contains(text, "ghp_secret") || strings.Contains(text, "config.toml") || !strings.Contains(text, "osmia doctor") {
 		t.Fatalf("startup failure: %s", text)
 	}
 }
 
-// TestNewServiceLoggerRedactsKnownSecretsFromEveryWrite shows the writer
-// underneath the service's logger redacts known secrets even when a
-// record's own fields were not, a final guard besides each record's own
-// redaction.
 func TestNewServiceLoggerRedactsKnownSecretsFromEveryWrite(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
 	var buf bytes.Buffer
@@ -190,29 +201,9 @@ func TestNewServiceLoggerRedactsKnownSecretsFromEveryWrite(t *testing.T) {
 	}
 }
 
-// TestForegroundServeFailureIsAStructuredRecordOnStandardError shows a
-// foreground osmia serve reporting a startup failure, before the service
-// started, as one error-level structured record on its own standard error,
-// with the exit code unchanged.
 func TestForegroundServeFailureIsAStructuredRecordOnStandardError(t *testing.T) {
-	root, err := os.MkdirTemp("", "fg-")
-	must(t, err)
-	defer os.RemoveAll(root)
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
-	original := detachedCommand
-	detachedCommand = func(root string) (*exec.Cmd, error) {
-		return exec.Command(os.Args[0], "-test.run=^TestDetachedProcess$", "--", root), nil
-	}
-	defer func() { detachedCommand = original }()
-	c := service.NewClient(filepath.Join(root, "osmia.sock"))
-	defer c.Close()
-	defer c.Do(context.Background(), "POST", wire.Prefix+"/stop", nil, nil)
-	code, out, diag := invoke(t, root, "serve", "--detach")
-	if code != 0 || diag != "" || !strings.Contains(out, "Osmia is ready") {
-		t.Fatalf("start %d %s %s", code, out, diag)
-	}
-
-	code, _, diag = invoke(t, root, "serve")
+	d := startDetachedService(t)
+	code, _, diag := invoke(t, d.root, "serve")
 	if code != 6 {
 		t.Fatalf("duplicate foreground service started: %d", code)
 	}
@@ -223,92 +214,76 @@ func TestForegroundServeFailureIsAStructuredRecordOnStandardError(t *testing.T) 
 	}
 }
 
-// TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndRestoresGlobalsAfterward
-// shows that while runService's own process is the running service,
-// embedded code's standard log.Printf calls reach the same structured
-// logger as the service's own records, as a JSON record with a time,
-// level and message, and that the previous log and slog defaults come back
-// once the service stops.
-//
-// serial: installGlobalLog takes the process-wide standard log package
-// output and slog default for as long as the service it serves is
-// running; this test drives that through runService and checks both ends
-// of the handoff, so it cannot run alongside another test that also serves
-// in this process.
-func TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndRestoresGlobalsAfterward(t *testing.T) {
+type runningService struct {
+	root    config.Root
+	logger  *slog.Logger
+	logs    *bytes.Buffer
+	cancel  context.CancelFunc
+	done    chan error
+	stopped bool
+}
+
+func startRunService(t *testing.T) *runningService {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "rsg-")
 	must(t, err)
-	defer os.RemoveAll(dir)
-	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("version = 1\nactive_projects = []\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("version = 1\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	root, err := config.ResolveRoot(dir, "")
 	must(t, err)
-
-	previousDefault := slog.Default()
-	previousOutput := log.Writer()
-	previousFlags := log.Flags()
-
-	var buf bytes.Buffer
-	logger := newServiceLogger(&buf)
+	r := &runningService{root: root, logs: &bytes.Buffer{}, done: make(chan error, 1)}
+	r.logger = newServiceLogger(r.logs)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- runService(ctx, root, false, io.Discard, logger) }()
-
+	r.cancel = cancel
+	go func() { r.done <- runService(ctx, root, false, io.Discard, r.logger) }()
+	t.Cleanup(func() {
+		cancel()
+		if !r.stopped {
+			<-r.done
+		}
+	})
 	c := service.NewClient(filepath.Join(dir, "osmia.sock"))
-	defer c.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := c.Health(context.Background()); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("service did not start")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	t.Cleanup(c.Close)
+	awaitHealth(t, c, true, 5*time.Second, func() string { return "" })
+	return r
+}
 
-	log.Printf("embedded dependency output %d", 7)
-
-	// A second service on the same root, started while the first still
-	// holds globalLogMu, must not block waiting for it: installGlobalLog
-	// installs nothing for the second and the first service's own
-	// socket-ownership check refuses it promptly.
-	var secondBuf bytes.Buffer
-	secondDone := make(chan error, 1)
-	go func() {
-		secondDone <- runService(context.Background(), root, false, io.Discard, newServiceLogger(&secondBuf))
-	}()
+func (r *runningService) stop(t *testing.T) {
+	t.Helper()
+	r.cancel()
 	select {
-	case err := <-secondDone:
-		if err == nil || !strings.Contains(err.Error(), "already owned by another Osmia service") {
-			t.Fatalf("second runService on the same root: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("second runService on the same root did not return promptly")
-	}
-	if slog.Default() != logger {
-		t.Fatal("slog default changed while the first service still runs")
-	}
-
-	cancel()
-	select {
-	case err := <-done:
+	case err := <-r.done:
+		r.stopped = true
 		if err != nil {
 			t.Fatalf("runService: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("service did not stop")
 	}
+}
 
-	if slog.Default() != previousDefault {
-		t.Fatal("slog default was not restored after the service stopped")
+func (r *runningService) runSecond(t *testing.T) error {
+	t.Helper()
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- runService(context.Background(), r.root, false, io.Discard, newServiceLogger(&bytes.Buffer{}))
+	}()
+	select {
+	case err := <-secondDone:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("second runService on the same root did not return promptly")
+		return nil
 	}
-	if log.Writer() != previousOutput || log.Flags() != previousFlags {
-		t.Fatal("standard log package defaults were not restored after the service stopped")
-	}
+}
+
+func TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLogger(t *testing.T) {
+	r := startRunService(t)
+	log.Printf("embedded dependency output %d", 7)
+	r.stop(t)
 
 	var sawEmbedded bool
-	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimRight(r.logs.String(), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
@@ -324,20 +299,46 @@ func TestRunServiceRoutesTheStandardLogPackageThroughItsStructuredLoggerAndResto
 		}
 	}
 	if !sawEmbedded {
-		t.Fatalf("no structured record for the standard log package call:\n%s", buf.String())
+		t.Fatalf("no structured record for the standard log package call:\n%s", r.logs.String())
 	}
 }
 
-// TestDetachedServiceLogsGitHubActionsOnRealStandardError starts a detached
-// service as a real subprocess, whose own standard error is service.log, and
-// has it fetch a handed-in issue from a fake GitHub server. It then reads
-// service.log from disk and shows every line is a JSON object with a
-// timestamp, level and message, including one GitHub activity record for
-// the fetch. Parsing an Options.Logger buffer from within the test process,
-// as other tests here do, would miss a stray write straight to this real
-// child process's own standard error; reading the file this subprocess
-// actually wrote catches that.
-func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
+func TestRunServiceRefusesASecondServiceOnTheSameRoot(t *testing.T) {
+	r := startRunService(t)
+	if err := r.runSecond(t); err == nil || !strings.Contains(err.Error(), "already owned by another Osmia service") {
+		t.Fatalf("second runService on the same root: %v", err)
+	}
+}
+
+func TestRunServiceKeepsItsLoggerWhenASecondServiceIsRefused(t *testing.T) {
+	r := startRunService(t)
+	r.runSecond(t)
+	if slog.Default() != r.logger {
+		t.Fatal("slog default changed while the first service still runs")
+	}
+}
+
+func TestRunServiceRestoresTheLoggingGlobalsWhenItStops(t *testing.T) {
+	previousDefault := slog.Default()
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	r := startRunService(t)
+	r.stop(t)
+	if slog.Default() != previousDefault {
+		t.Fatal("slog default was not restored after the service stopped")
+	}
+	if log.Writer() != previousOutput || log.Flags() != previousFlags {
+		t.Fatal("standard log package defaults were not restored after the service stopped")
+	}
+}
+
+type detachedGitHubRun struct {
+	project config.ProjectID
+	log     []byte
+}
+
+func runDetachedIssueHandIn(t *testing.T) detachedGitHubRun {
+	t.Helper()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/issues/3" {
 			w.WriteHeader(http.StatusNotFound)
@@ -366,94 +367,98 @@ func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
 	var added wire.ProjectResponse
 	must(t, json.Unmarshal([]byte(successful(t, root, "project", "add", "dagger", "--upstream", "dagger/dagger", "--fork", "owner/dagger", "--clone", clone, "--json")), &added))
 	setCharter(t, root, added.Project.ID, "1. Keep changes small.\n")
-
-	text := successful(t, root, "handin", string(added.Project.ID), "https://github.com/owner/repo/issues/3")
-	if !strings.Contains(text, "handed in to project") {
-		t.Fatalf("handin: %s", text)
-	}
+	successful(t, root, "handin", string(added.Project.ID), "https://github.com/owner/repo/issues/3")
 
 	code = Run(context.Background(), []string{"stop", "--root", root}, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
 	if code != 0 {
 		t.Fatalf("stop %d", code)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := c.Health(context.Background()); err != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("service did not stop")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	awaitHealth(t, c, false, 10*time.Second, nil)
 
 	data, err := os.ReadFile(filepath.Join(root, "service.log"))
 	must(t, err)
-	var sawGitHub bool
+	return detachedGitHubRun{project: added.Project.ID, log: data}
+}
+
+func serviceLogRecords(t *testing.T, data []byte) []struct{ Time, Level, Msg, Activity, Access, Action, Project string } {
+	t.Helper()
+	var records []struct{ Time, Level, Msg, Activity, Access, Action, Project string }
 	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var record struct {
-			Time, Level, Msg, Activity, Access, Action, Project string
-		}
+		var record struct{ Time, Level, Msg, Activity, Access, Action, Project string }
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("line is not a JSON object: %s: %v", line, err)
 		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func TestDetachedServiceLogsEveryLineAsAStructuredRecord(t *testing.T) {
+	run := runDetachedIssueHandIn(t)
+	for _, record := range serviceLogRecords(t, run.log) {
 		if record.Time == "" || record.Level == "" || record.Msg == "" {
-			t.Fatalf("line is missing a timestamp, level or message: %s", line)
+			t.Fatalf("record is missing a timestamp, level or message: %+v", record)
 		}
+	}
+}
+
+func TestDetachedServiceLogsGitHubActionsOnRealStandardError(t *testing.T) {
+	run := runDetachedIssueHandIn(t)
+	var sawGitHub bool
+	for _, record := range serviceLogRecords(t, run.log) {
 		if record.Activity == "github" {
 			sawGitHub = true
-			if record.Access != "read" || record.Action != "issues.fetch" || record.Project != string(added.Project.ID) {
-				t.Fatalf("github record: %s", line)
+			if record.Access != "read" || record.Action != "issues.fetch" || record.Project != string(run.project) {
+				t.Fatalf("github record: %+v", record)
 			}
 		}
 	}
 	if !sawGitHub {
-		t.Fatalf("service.log has no GitHub activity record:\n%s", data)
+		t.Fatalf("service.log has no GitHub activity record:\n%s", run.log)
 	}
 }
 
-// Serial: replaces the detached child process boundary.
-func TestDetachedReadinessAllowsEngineCreation(t *testing.T) {
+func TestDetachedReadinessTimeoutCoversEngineCreation(t *testing.T) {
 	if detachedReadinessTimeout <= engine.ActionTimeout+time.Second {
 		t.Fatal("readiness cannot cover managed engine creation")
 	}
-	for _, ready := range []bool{true, false} {
-		t.Run(fmt.Sprintf("ready=%t", ready), func(t *testing.T) {
-			root, err := config.ResolveRoot(t.TempDir(), "")
-			must(t, err)
-			original := detachedCommand
-			defer func() { detachedCommand = original }()
-			var child *exec.Cmd
-			detachedCommand = func(string) (*exec.Cmd, error) {
-				script := "exec sleep 10"
-				if ready {
-					script = "sleep 0.2; printf 'ready\\n' >&3; exec sleep 10"
-				}
-				child = exec.Command("sh", "-c", script)
-				return child, nil
-			}
-			defer func() {
-				if child != nil && child.Process != nil {
-					_ = child.Process.Kill()
-				}
-			}()
-			timeout := 2 * time.Second
-			if !ready {
-				timeout = 100 * time.Millisecond
-			}
-			var out bytes.Buffer
-			err = detachWithin(t.Context(), root, &out, timeout)
-			if ready {
-				must(t, err)
-				if !strings.Contains(out.String(), "Osmia is ready") {
-					t.Fatal(out.String())
-				}
-			} else if err == nil || !strings.Contains(err.Error(), "readiness timed out") {
-				t.Fatalf("%v", err)
-			}
-		})
+}
+
+func detachWithChild(t *testing.T, script string, timeout time.Duration) (string, error) {
+	t.Helper()
+	root, err := config.ResolveRoot(t.TempDir(), "")
+	must(t, err)
+	original := detachedCommand
+	t.Cleanup(func() { detachedCommand = original })
+	var child *exec.Cmd
+	detachedCommand = func(string) (*exec.Cmd, error) {
+		child = exec.Command("sh", "-c", script)
+		return child, nil
+	}
+	t.Cleanup(func() {
+		if child != nil && child.Process != nil {
+			_ = child.Process.Kill()
+		}
+	})
+	var out bytes.Buffer
+	err = detachWithin(t.Context(), root, &out, timeout)
+	return out.String(), err
+}
+
+func TestDetachReportsReadyOnceTheChildSignalsReadiness(t *testing.T) {
+	out, err := detachWithChild(t, "sleep 0.2; printf 'ready\\n' >&3; exec sleep 10", 2*time.Second)
+	must(t, err)
+	if !strings.Contains(out, "Osmia is ready") {
+		t.Fatal(out)
+	}
+}
+
+func TestDetachFailsWhenTheChildNeverSignalsReadiness(t *testing.T) {
+	_, err := detachWithChild(t, "exec sleep 10", 100*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "readiness timed out") {
+		t.Fatalf("%v", err)
 	}
 }

@@ -9,16 +9,16 @@ import (
 
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/servicetest/daggerfixture"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func TestDaggerFixtureProcess(t *testing.T) { daggerfixture.Process() }
 
-// serial: h.run uses its real command path, with only Jev stubbed.
 func TestSmartcheckSelectedLinksReachDagger(t *testing.T) {
 	for _, picks := range []int{0, 3} {
 		for _, failed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("picks=%d/fail=%v", picks, failed), func(t *testing.T) {
-				links := []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}
+				links := []string{fixturekit.SmartPackageA, daggerfixture.TestB, daggerfixture.Version}
 				config := daggerfixture.Config{Links: links}
 				if failed {
 					config.Fail = daggerfixture.TestB
@@ -64,9 +64,8 @@ func TestSmartcheckSelectedLinksReachDagger(t *testing.T) {
 	}
 }
 
-// serial: smartcheck preserves Dagger's refusal and stops without service retries.
 func TestSmartcheckLateRefusalStops(t *testing.T) {
-	links := []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}
+	links := []string{fixturekit.SmartPackageA, daggerfixture.TestB, daggerfixture.Version}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links, RefuseOn: "go-package=b"})
 	dir := newRepository(t)
 	write(t, dir, "internal/trace/trace.go", "package trace\nconst Version = 2\n")
@@ -82,7 +81,6 @@ func TestSmartcheckLateRefusalStops(t *testing.T) {
 	}
 }
 
-// serial: command execution and dry-run selections use the same offered links.
 func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 	for _, picks := range []int{0, 4} {
 		for _, dry := range []bool{false, true} {
@@ -91,7 +89,7 @@ func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 				cli := daggerfixture.Install(t, listing)
 				dir := newRepository(t)
 				write(t, dir, "README.md", "changed\n")
-				selected := []string{daggerfixture.PackageA, daggerfixture.PackageB, daggerfixture.PathA, daggerfixture.Version}
+				selected := []string{fixturekit.SmartPackageA, fixturekit.SmartPackageB, daggerfixture.PathA, daggerfixture.Version}
 				j := &fakeJev{probabilities: map[string]float64{}}
 				for _, link := range listing.Links {
 					score := .01
@@ -136,7 +134,7 @@ func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 					if event.Kind != "start" {
 						continue
 					}
-					if slices.Contains(event.Args, daggerfixture.PackageA+"&go-package=b") {
+					if slices.Contains(event.Args, fixturekit.SmartPackageA+"&go-package=b") {
 						grouped = true
 					}
 					if slices.Contains(event.Args, daggerfixture.Version) {
@@ -151,11 +149,10 @@ func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 	}
 }
 
-// serial: the real command falls back without asking Jev when only a root fits.
 func TestSmartcheckCollectionTooManyChecksRunsFull(t *testing.T) {
 	var links []string
 	for i := range checkselect.MaxQuestions + 1 {
-		links = append(links, fmt.Sprintf("%s&go-test=T%d", daggerfixture.PackageA, i))
+		links = append(links, fmt.Sprintf("%s&go-test=T%d", fixturekit.SmartPackageA, i))
 	}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links})
 	dir := newRepository(t)

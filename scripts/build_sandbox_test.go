@@ -13,14 +13,9 @@ import (
 	"testing"
 )
 
-// buildScript is scripts/build-sandbox.sh itself. The Go check's container
-// carries only Go sources, testdata and embedded files, so the test embeds the
-// script and runs it from a temporary directory.
-//
 //go:embed build-sandbox.sh
 var buildScript []byte
 
-// scriptPath writes the embedded script to a temporary file and returns it.
 func scriptPath(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "build-sandbox.sh")
@@ -28,8 +23,6 @@ func scriptPath(t *testing.T) string {
 	return path
 }
 
-// guest is the directory the fake sbx presents as the build sandbox's
-// filesystem.
 type guest struct {
 	root       string
 	dockerHost string
@@ -41,7 +34,6 @@ type guest struct {
 
 func newGuest(t *testing.T) *guest {
 	t.Helper()
-	// Unix socket paths are short, so the guest lives directly under /tmp.
 	root, err := os.MkdirTemp("", "g")
 	if err != nil {
 		t.Fatal(err)
@@ -79,8 +71,6 @@ func must(err error) {
 	}
 }
 
-// serve answers HTTP on a unix socket inside the guest and returns its guest
-// path. A closed server leaves the socket file behind when stale is set.
 func (g *guest) serve(t *testing.T, rel string, handler http.Handler, stale bool) {
 	t.Helper()
 	path := filepath.Join(g.root, rel)
@@ -128,8 +118,6 @@ func (r result) count(prefix string) int {
 	return n
 }
 
-// run executes the real scripts/build-sandbox.sh with the fake sbx and a fake
-// host dagger first on PATH.
 func (g *guest) run(t *testing.T) result {
 	t.Helper()
 	for _, tool := range []string{"bash", "curl", "find"} {
@@ -171,8 +159,6 @@ func (g *guest) run(t *testing.T) result {
 	return result{output: string(out), err: runErr, calls: strings.Split(strings.TrimSpace(string(data)), "\n"), tmp: tmp}
 }
 
-// wantSaved asserts a clean build: exactly one template save, as the last
-// sbx call before the sandbox is removed.
 func (r result) wantSaved(t *testing.T) {
 	t.Helper()
 	if r.err != nil {
@@ -184,8 +170,6 @@ func (r result) wantSaved(t *testing.T) {
 	r.wantRemoved(t)
 }
 
-// wantRefused asserts the script failed naming want and never saved, and that
-// the temporary sandbox and its directory were removed.
 func (r result) wantRefused(t *testing.T, want ...string) {
 	t.Helper()
 	if r.err == nil {
@@ -229,8 +213,6 @@ func TestBuildSandboxSavesCleanGuest(t *testing.T) {
 	res := g.run(t)
 	res.wantSaved(t)
 
-	// Docker is removed first, the version checks and both users' probes come
-	// before the save, and the save is the last step before cleanup.
 	steps := []string{
 		"create --name",
 		"osmia-docker-removal",
@@ -365,7 +347,6 @@ func TestBuildSandboxRefusesWhenAProbeCannotAnswer(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { ln.Close() })
-			// Accepts connections but never answers.
 			go func() {
 				for {
 					c, err := ln.Accept()
@@ -389,9 +370,7 @@ func TestBuildSandboxRefusesWhenAProbeCannotAnswer(t *testing.T) {
 
 func TestBuildSandboxSavesWhenNoDaemonListens(t *testing.T) {
 	g := newGuest(t)
-	// A socket file nobody listens on is a clear absence.
 	g.serve(t, "var/run/docker.sock", pingOK, true)
-	// An unresolvable or unused DOCKER_HOST address is too.
 	g.dockerHost = "tcp://127.0.0.1:1"
 	g.run(t).wantSaved(t)
 }

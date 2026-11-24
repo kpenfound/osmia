@@ -12,6 +12,8 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -94,8 +96,6 @@ func (c *runtimeControls) pauseControl(repository *trace.Repository, scope corea
 	return tool
 }
 
-// setPause records the pause, then stops the running turns a hard pause in
-// force covers.
 func (s *Service) setPause(p runtime.Pause) error {
 	if err := s.store.SetPause(p); err != nil {
 		return err
@@ -106,7 +106,6 @@ func (s *Service) setPause(p runtime.Pause) error {
 	return nil
 }
 
-// clearPause clears the owner's pause on target and logs it.
 func (s *Service) clearPause(target runtime.Target) error {
 	if err := s.store.ClearPause(target, runtime.PauseOwner); err != nil {
 		return err
@@ -115,19 +114,12 @@ func (s *Service) clearPause(target runtime.Target) error {
 	return nil
 }
 
-// pauseStop is the cause with which the hard pause p stops a turn.
 func pauseStop(p runtime.Pause) *thread.Stop {
 	return &thread.Stop{TurnStop: trace.TurnStop{Cause: trace.TurnStopHardPause, Scope: p.Target.Scope, Source: p.Source, Reason: p.Reason}}
 }
 
-// pausedActions are the operations of the service's reconcilers that run
-// architect and committee turns or a unit's checks. A pause covering an
-// operation's workstream holds it; a hard pause also stops the turn it is
-// running.
 var pausedActions = map[string]bool{DraftAction: true, AmendmentDraftAction: true, RoundAction: true, ReplyAction: true, RedraftAction: true, AmendmentRoundAction: true, AmendmentReplyAction: true, FinalReviewAction: true, deliveryReviewAction: true, CheckAction: true}
 
-// pausing returns the pause in force that covers the workstream of the
-// project, and whether there is one.
 func (s *Service) pausing(project config.ProjectID, stream config.WorkstreamID) (runtime.Pause, bool) {
 	if s.store == nil {
 		return runtime.Pause{}, false
@@ -136,10 +128,6 @@ func (s *Service) pausing(project config.ProjectID, stream config.WorkstreamID) 
 	return scheduler.Pausing(st.Pauses, project, stream)
 }
 
-// held returns errPaused, with the pause, while a pause covers the workstream
-// of the repository's project, and nil otherwise. Reconcilers call it before
-// they queue or start a turn. An abandoned workstream is not held: its
-// operations end as abandonment has them end.
 func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID) error {
 	p, ok := s.pausing(repository.Project(), stream)
 	if !ok {
@@ -151,16 +139,6 @@ func (s *Service) held(repository *trace.Repository, stream config.WorkstreamID)
 	return fmt.Errorf("%w: %s pause set by %s: %s", errPaused, p.Target.Scope, p.Source, p.Reason)
 }
 
-// holding is the controller's Hold: it holds every reconciler operation that
-// runs architect or committee turns while held holds its workstream, and
-// every publication while the service has no credential to open its pull
-// request, so nothing is pushed or asked of GitHub. A drift rebase of an
-// abandoned workstream is never held: it ends as skipped without touching
-// the clone, so it cannot stay pending and defer the workstream's archive
-// cleanup behind a gate that abandonment leaves closed. A landing, rebase or
-// publication of an abandoned workstream is likewise released from its edge
-// wait: it reaches a result instead of waiting on an upstream that
-// abandonment no longer lets it merge behind. Its other holds stay.
 func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) bool {
 	cause := s.holdingCause(repository)
 	return func(stream config.WorkstreamID, op coreadapter.Operation) bool {
@@ -168,10 +146,6 @@ func (s *Service) holding(repository *trace.Repository) func(config.WorkstreamID
 	}
 }
 
-// holdingCause is holding with the cause of the hold: a pause, a hold that waits
-// on an owner's decision or a live dependency wait, or any other. The stall
-// watchdog explains a held operation only by a cause that is a legitimate
-// explanation of a quiet.
 func (s *Service) holdingCause(repository *trace.Repository) func(config.WorkstreamID, coreadapter.Operation) scheduler.HoldCause {
 	return func(stream config.WorkstreamID, op coreadapter.Operation) scheduler.HoldCause {
 		gone := false
@@ -185,7 +159,6 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 			return scheduler.NotHeld
 		}
 		if role := modelOperationRole(op); role != "" && !s.admitRole(role) {
-			// A role is only unavailable while a pause covers it.
 			return scheduler.HeldByPause
 		}
 		if gitOperation(op) {
@@ -196,9 +169,7 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 				}
 			}
 			if op.Action == landDeliveryAction {
-				// A landing waits for the operations of its workstream, as the router
-				// holds it while they run.
-				if why, err := landingBusy(repository, stream, op); err != nil || why != "" {
+				if why, err := delivery.LandingBusy(repository, stream, op); err != nil || why != "" {
 					return scheduler.HeldByOther
 				}
 			}
@@ -233,7 +204,7 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 			}
 			return scheduler.HeldByOther
 		}
-		if publicationAction(op) && !pulls.Credentialed(s.options.PullRequests) {
+		if delivery.PublicationAction(op) && !pulls.Credentialed(s.options.PullRequests) {
 			return scheduler.HeldByOther
 		}
 		if waiting, err := baseWaiting(repository, stream); op.Action != baseRefreshAction && (err != nil || waiting) {
@@ -252,14 +223,10 @@ func (s *Service) holdingCause(repository *trace.Repository) func(config.Workstr
 	}
 }
 
-// dependencyHold is the cause of a hold by a dependency wait: a dependency wait
-// whose upstreams are alive, or any other hold when the wait cannot be read or
-// its upstream has ended, which the dependency exit then decides.
 func dependencyHold(repository *trace.Repository, stream config.WorkstreamID, readErr error) scheduler.HoldCause {
 	if readErr != nil {
 		return scheduler.HeldByOther
 	}
-	// A workgroup the owner has not approved is waiting on the owner's card.
 	if approved, err := repository.GroupApproved(stream); err == nil && !approved {
 		return scheduler.HeldByCard
 	}
@@ -269,10 +236,6 @@ func dependencyHold(repository *trace.Repository, stream config.WorkstreamID, re
 	return scheduler.HeldByOther
 }
 
-// stoppable returns ctx for one reconciler turn of the workstream, held
-// until release is called, so that a hard pause covering the workstream stops
-// the turn's session the way it stops a scheduled turn. A hard pause already
-// in force stops the turn before its session starts.
 func (s *Service) stoppable(ctx context.Context, project config.ProjectID, stream config.WorkstreamID) (context.Context, func()) {
 	ctx, stop := thread.Stoppable(ctx)
 	release := s.turns.track(stream, runningTurn{project: project, stop: stop})
@@ -285,21 +248,16 @@ func (s *Service) stoppable(ctx context.Context, project config.ProjectID, strea
 	return ctx, release
 }
 
-// continueStopped queues the turn that continues the turn q a hard pause
-// stopped, on the same thread and with its agent's current profile, so it
-// resumes the stopped session, and returns its ID. The continuation belongs
-// to the attempt q belongs to: it is named after the turn q continues, and
-// spends no attempt.
 func (s *Service) continueStopped(ctx context.Context, repository *trace.Repository, cfg *config.Config, role string, q trace.QueuedTurn) (string, error) {
 	profile, err := s.agentProfile(cfg, role, q.Request.AgentID)
 	if err != nil {
 		return "", err
 	}
 	req := q.Request
-	turn := fmt.Sprintf("%s%s%d", continuedTurn(q.Request.TurnID), continueMark, q.Sequence)
+	turn := fmt.Sprintf("%s%s%d", intake.ContinuedTurn(q.Request.TurnID), intake.ContinueMark, q.Sequence)
 	req.ID, req.TurnID, req.Profile = "request_"+turn, turn, profile
 	req.At, req.Cause = s.now(), q.Response.ID
-	if !isContinuation(q.Request.TurnID) {
+	if !intake.IsContinuation(q.Request.TurnID) {
 		req.Prompt += "\n\nA hard pause stopped your last turn. Continue the same work from where it stopped: what you recorded before the pause is kept."
 	}
 	_, err = repository.EnqueueTurn(ctx, req)

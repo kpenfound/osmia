@@ -16,14 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A landing that ends because the base branch moved keeps the decision to land:
-// the route chosen, and who chose it. The existing rebase, the checks on the
-// new commit and a new final review follow, and once they have produced a new
-// push that every landing gate still admits, the landing is asked for again on
-// that push under the same decider, with no second approval and no delivery
-// card. A gate that no longer holds drops the route, and the delivery card
-// appears as for any delivery.
-
 const (
 	// LandingRoutePath and LandingRouteDocument are the workstream document that
 	// records the route a base-moved landing keeps, and its fate.
@@ -74,8 +66,6 @@ func ReadLandingRoute(repository *trace.Repository, stream config.WorkstreamID) 
 // landing attempt kept when the base branch moved, and whether one stands: the
 // route is pending and no later attempt has been asked for.
 func PendingLandingRoute(repository *trace.Repository, stream config.WorkstreamID) (LandingRoute, bool, error) {
-	// Only a landing that ended base-moved keeps a route: the subject says so
-	// without reading the workstream's documents.
 	if subject, err := repository.Workflow(stream, LandingSubject); err != nil || !strings.HasPrefix(subject.Value, LandOutcomeBaseMoved+"-") {
 		return LandingRoute{}, false, err
 	}
@@ -93,7 +83,6 @@ func PendingLandingRoute(repository *trace.Repository, stream config.WorkstreamI
 	return route, true, nil
 }
 
-// routeDocument is the next revision of the landing route.
 func (l *Lander) routeDocument(stream config.WorkstreamID, route LandingRoute, cause string) (trace.Document, error) {
 	content, err := jsonMarshal(route)
 	if err != nil {
@@ -107,8 +96,6 @@ func (l *Lander) routeDocument(stream config.WorkstreamID, route LandingRoute, c
 		Path: LandingRoutePath, Content: content}, nil
 }
 
-// dropRoute records that the pending route is dropped for reason: the delivery
-// goes to the owner as an ordinary delivery.
 func (l *Lander) dropRoute(ctx context.Context, stream config.WorkstreamID, route LandingRoute, reason string) error {
 	route.Status, route.Reason, route.At = LandingRouteDropped, reason, l.S.Now()
 	doc, err := l.routeDocument(stream, route, fmt.Sprintf("%s-route-dropped", mustTransition(route.Landing)))
@@ -121,23 +108,14 @@ func (l *Lander) dropRoute(ctx context.Context, stream config.WorkstreamID, rout
 	return nil
 }
 
-// retryVerdict is what a pending route's workstream allows.
 type retryVerdict int
 
 const (
-	// retryWait: the rebase, the checks or the final review are not done, so the
-	// route stands.
 	retryWait retryVerdict = iota
-	// retryLand: the workstream is assembled again with a current push, final
-	// review and passing checks, and every landing gate admits it.
 	retryLand
-	// retryDrop: a landing gate no longer holds.
 	retryDrop
 )
 
-// retryOf says what to do with the pending route of the workstream, and why a
-// route is dropped. It reads the same records the landing gates read, and
-// accepts none of the blocking findings of an earlier final review.
 func (s *Controller) retryOf(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, route LandingRoute) (retryVerdict, string, error) {
 	cfg := s.About(repository)
 	if !cfg.HasProject() || cfg.Project.ID != repository.Project() {
@@ -204,9 +182,8 @@ func (l *Lander) RetryPass(ctx context.Context) error {
 		return err
 	}
 	state, _ := l.S.Effective()
-	librarian := librarianWorkstream(l.Repository.Project())
 	for _, stream := range streams {
-		if stream == librarian || scheduler.Paused(state.Pauses, l.Repository.Project(), stream) {
+		if scheduler.Paused(state.Pauses, l.Repository.Project(), stream) {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -240,7 +217,6 @@ func (l *Lander) retry(ctx context.Context, stream config.WorkstreamID) error {
 			return err
 		}
 		if result.Outcome == LandingRefusedBeforePush {
-			// A gate stopped holding between the look and the landing.
 			return l.dropRoute(ctx, stream, route, result.Reason)
 		}
 	}

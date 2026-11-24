@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// landEntryJSON is the delivery inbox entry of a project that lands: it offers
-// "land" beside "approve", with the answer that approves and lands.
 func landEntryJSON(pins deliveryPins) string {
 	entry := deliveryEntryJSON(pins, false)
 	entry = strings.Replace(entry, `"options":["approve"]`, `"options":["approve","land"]`, 1)
@@ -17,9 +15,6 @@ func landEntryJSON(pins deliveryPins) string {
 
 const landButton = deliveryCard + "[data-field=land]"
 
-// On a project that lands, the delivery card shows Approve and land beside Mark
-// ready, and pressing it sends the pinned identity to the landing endpoint and
-// nothing to the one that marks the pull request ready.
 func TestBrowserDeliveryCardApproveAndLandSendsThePinnedIdentityToTheLandingEndpoint(t *testing.T) {
 	t.Parallel()
 	f := newDecisionButtonFixture(t, landEntryJSON(testPins), deliveryPresentationJSON(testPins, "one", "", `"can_land":true`))
@@ -50,8 +45,6 @@ func TestBrowserDeliveryCardApproveAndLandSendsThePinnedIdentityToTheLandingEndp
 	assertDecisionRequest(t, f, "/v1/delivery/w_000/land", map[string]any{"review": float64(1), "review_revision": float64(2), "commit": testPins.commit, "draft_hash": testPins.hash})
 }
 
-// Without the offer, the card has no Approve and land button, and says nothing
-// of landing: a project that delivers by pull request is as it was.
 func TestBrowserDeliveryCardOffersNoLandingOnAProjectThatDeliversByPullRequest(t *testing.T) {
 	t.Parallel()
 	f := newDeliveryFixture(t, false, deliveryPresentationJSON(testPins, "one", "", ""))
@@ -70,8 +63,6 @@ func TestBrowserDeliveryCardOffersNoLandingOnAProjectThatDeliversByPullRequest(t
 	}
 }
 
-// Jev's recommendation to land makes Approve and land the primary action; the
-// owner still decides with either button.
 func TestBrowserDeliveryCardMakesLandingPrimaryWhenJevRecommendsIt(t *testing.T) {
 	t.Parallel()
 	f := newDecisionButtonFixture(t, landEntryJSON(testPins), deliveryPresentationJSON(testPins, "one", "", `"can_land":true,"recommendation":"land"`))

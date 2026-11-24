@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -24,10 +26,10 @@ func (f *ArchitectScenario) AwaitFeature(t *testing.T, stream config.WorkstreamI
 	t.Helper()
 	wait, close := f.Changes(t)
 	defer close()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		state, err := f.Repository().Workflow(stream, trace.FeatureSubject)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if state.Value == want {
 			return
 		}
@@ -41,7 +43,7 @@ func (f *ArchitectScenario) AwaitFeature(t *testing.T, stream config.WorkstreamI
 func (f *ArchitectScenario) BuildOperations(t *testing.T, stream config.WorkstreamID) []trace.OperationRecord {
 	t.Helper()
 	ops, err := f.Repository().Operations(stream)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []trace.OperationRecord
 	for _, o := range ops {
 		if o.Operation.Action == intake.BuildAction {
@@ -57,7 +59,7 @@ func (f *ArchitectScenario) RatifiedBuild(t *testing.T, stream config.Workstream
 		t.Fatal(err)
 	}
 	f.AwaitFeature(t, stream, intake.BuildingState)
-	ops := AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.BuildOperations(t, stream) })
+	ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return f.BuildOperations(t, stream) })
 	if len(ops) != 1 || ops[0].Result == nil || ops[0].Result.Outcome != "succeeded" {
 		t.Fatalf("build operations %+v", ops)
 	}
@@ -83,9 +85,9 @@ func (f *ArchitectScenario) BuiltAs(t *testing.T, key string) (config.Workstream
 
 func (f *ArchitectScenario) HandInSkipping(t *testing.T, key string) config.WorkstreamID {
 	t.Helper()
-	content := HandedDesign
+	content := fixturekit.HandedDesign
 	out, err := f.Client().HandIn(context.Background(), api.HandInRequest{Project: f.Repository().Project(), Key: key, Stdin: &content, SkipDebate: true})
-	Must(t, err)
+	fixturekit.Must(t, err)
 	if !out.SkipDebate || out.State != intake.HandedState {
 		t.Fatalf("hand-in %+v", out)
 	}
@@ -96,7 +98,7 @@ func (f *ArchitectScenario) AwaitPacket(t *testing.T, stream config.WorkstreamID
 	t.Helper()
 	wait, close := f.Changes(t)
 	defer close()
-	deadline := time.Now().Add(DemoTimeout)
+	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		out, err := f.Client().Packet(context.Background(), stream)
 		if err != nil && !Failed(err, api.NotFound) {
@@ -118,7 +120,7 @@ func (f *ArchitectScenario) AwaitPacket(t *testing.T, stream config.WorkstreamID
 func (f *ArchitectScenario) InboxEntries(t *testing.T, stream config.WorkstreamID, kind string) []api.InboxEntry {
 	t.Helper()
 	inbox, err := f.Client().Inbox(context.Background())
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var out []api.InboxEntry
 	for _, e := range inbox.Entries {
 		if e.Kind == kind && e.Workstream == stream {
@@ -135,7 +137,7 @@ func (f *ArchitectScenario) Ratification(t *testing.T, stream config.WorkstreamI
 		t.Fatalf("ratification documents of round %d: %+v", round, docs)
 	}
 	record, err := shed.ParseRatification([]byte(docs[0].Content))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return record
 }
 
@@ -153,11 +155,11 @@ func (f *ArchitectScenario) Ratified(t *testing.T) (config.WorkstreamID, api.Rat
 	t.Helper()
 	p := &Faults{}
 	f.Member(1, 1, 1, Concedes(p))
-	stream := f.HandIn(t, f.Repository().Project(), "design", HandedDesign)
+	stream := f.HandIn(t, f.Repository().Project(), "design", fixturekit.HandedDesign)
 	f.AwaitShed(t, stream, "concluded-1")
 	p.Check(t)
 	f.AwaitPacket(t, stream, "ratify: no objection stands")
 	out, err := f.Client().Ratify(context.Background(), stream, 1, 1)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	return stream, out
 }

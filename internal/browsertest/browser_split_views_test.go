@@ -2,14 +2,12 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"testing"
 
 	"github.com/chromedp/chromedp"
 )
 
-// splitLayout reports where the conversation and the controls column sit.
-// side lists selectors whose boxes must lie in the column beside, or below,
-// the conversation.
 func splitLayout(p *page, feed string, side ...string) (wide, stacked bool) {
 	p.T.Helper()
 	sides := "["
@@ -33,13 +31,10 @@ func splitLayout(p *page, feed string, side ...string) (wide, stacked bool) {
 	return
 }
 
-// On a wide screen the session view puts the conversation on the left, with
-// the changes, commit, check and push in a column on the right. At phone
-// width they stack in that order, as they always did.
 func TestBrowserSessionViewIsTwoColumnsOnWideScreens(t *testing.T) {
 	t.Parallel()
 	s, c, project, _, _ := sessionWebFixture(t)
-	opened, err := c.OpenSession(context.Background(), SessionOpenRequest{Project: project, Profile: "default", Title: "Explore the layout"})
+	opened, err := c.OpenSession(context.Background(), service.SessionOpenRequest{Project: project, Profile: "default", Title: "Explore the layout"})
 	must(t, err)
 	p := openBrowser(t)
 	p.Run(chromedp.EmulateViewport(1280, 800), chromedp.Navigate("http://"+s.WebAddr()+"/"))
@@ -65,8 +60,6 @@ func TestBrowserSessionViewIsTwoColumnsOnWideScreens(t *testing.T) {
 	}
 }
 
-// The design view puts the conversation on the left of a column holding the
-// brief and Start on a wide screen, and stacks them on a phone.
 func TestBrowserDesignViewIsTwoColumnsOnWideScreens(t *testing.T) {
 	t.Parallel()
 	s, _, project, _ := newDesignEnforcementFixture(t, true)

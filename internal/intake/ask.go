@@ -7,7 +7,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// askChain maps every turn of one operation on the thread to the attempt it
+// AskChain maps every turn of one operation on the thread to the attempt it
 // continues: an attempt turn, named with prefix, to itself, and the turn that
 // delivers the answer to a question one of them asked, and the turn that
 // continues one of them after a hard pause stopped it, to that attempt.
@@ -18,8 +18,6 @@ func AskChain(t trace.Thread, prefix string, asked []trace.QuestionState) map[st
 			origins[q.Request.TurnID] = q.Request.TurnID
 		}
 	}
-	// Answers and continuations follow each other in any order, so both are
-	// followed until neither adds a turn.
 	for added := true; added; {
 		added = false
 		for _, q := range asked {
@@ -38,7 +36,7 @@ func AskChain(t trace.Thread, prefix string, asked []trace.QuestionState) map[st
 	return origins
 }
 
-// chainTurns returns the thread's turns the chain maps, in thread order.
+// ChainTurns returns the thread's turns the chain maps, in thread order.
 func ChainTurns(t trace.Thread, origins map[string]string) []trace.QueuedTurn {
 	var out []trace.QueuedTurn
 	for _, q := range t.Turns {
@@ -49,7 +47,7 @@ func ChainTurns(t trace.Thread, origins map[string]string) []trace.QueuedTurn {
 	return out
 }
 
-// attempts returns one turn per attempt of the chain, in order: the last
+// Attempts returns one turn per attempt of the chain, in order: the last
 // turn of the attempt, which says where the attempt got to, named after the
 // attempt, whose directory holds what the attempt delivered.
 func Attempts(chain []trace.QueuedTurn, origins map[string]string) []trace.QueuedTurn {
@@ -65,7 +63,7 @@ func Attempts(chain []trace.QueuedTurn, origins map[string]string) []trace.Queue
 	return out
 }
 
-// askedBy returns the ID of the question the thread's turn asked, or nothing.
+// AskedBy returns the ID of the question the thread's turn asked, or nothing.
 func AskedBy(asked []trace.QuestionState, thread, turn string) string {
 	for _, q := range asked {
 		if q.Asked.Thread == thread && q.Asked.Turn == turn {
@@ -75,7 +73,7 @@ func AskedBy(asked []trace.QuestionState, thread, turn string) string {
 	return ""
 }
 
-// received returns the answers delivered to the questions the chain's turns
+// Received returns the answers delivered to the questions the chain's turns
 // asked on the thread, as their answer turns put them, for the prompt of an
 // attempt that follows them.
 func Received(t trace.Thread, origins map[string]string, asked []trace.QuestionState) []string {
@@ -88,7 +86,7 @@ func Received(t trace.Thread, origins map[string]string, asked []trace.QuestionS
 	return out
 }
 
-// answered is the prompt block that repeats the answers an attempt's
+// Answered is the prompt block that repeats the answers an attempt's
 // predecessors received in the round, draft, reply or redraft named by what;
 // empty without answers.
 func Answered(what string, answers []string) string {

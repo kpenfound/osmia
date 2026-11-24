@@ -13,20 +13,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The options of a cancellation's impact summary: approve it and close the
-// open pull requests, approve it and leave them as drafts, or reject it. None
-// needs text.
 const (
 	cancelApproveClose = "approve-close"
 	cancelApproveDraft = "approve-draft"
 	cancelReject       = "reject"
 )
 
-// cancellationGates returns the gates of the cancellations whose impact
-// summary the workstream's conversation presents and nobody decided, which Jev
-// decides at the owner threshold. Only a change recorded in the project's own
-// trace is a gate; a cross-repo workgroup's changes live in its own trace and
-// stay the owner's.
 func (s *Service) cancellationGates(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) ([]intake.Gate, error) {
 	changes, err := readChanges(repository, stream)
 	if err != nil {
@@ -42,7 +34,6 @@ func (s *Service) cancellationGates(ctx context.Context, repository *trace.Repos
 	return out, nil
 }
 
-// changePresentedAt is when the change's latest revision was recorded.
 func changePresentedAt(repository *trace.Repository, stream config.WorkstreamID, c lifecycle.WorkgroupChange) time.Time {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -57,7 +48,6 @@ func changePresentedAt(repository *trace.Repository, stream config.WorkstreamID,
 	return at
 }
 
-// cancellationGate is the gate of one presented cancellation c.
 func (s *Service) cancellationGate(repository *trace.Repository, stream config.WorkstreamID, c lifecycle.WorkgroupChange, reached time.Time) intake.Gate {
 	project := repository.Project()
 	scope := "the whole workgroup"

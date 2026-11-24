@@ -7,6 +7,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/journey"
+
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -14,10 +20,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// escalationGate holds the first escalation before its durable effect until
-// shutdown cancels the session. Later calls use the ordinary scoped handler.
 type escalationGate struct {
-	base    *demoTransport
+	base    *fixturekit.DemoTransport
 	entered chan struct{}
 	calls   atomic.Int32
 }
@@ -40,17 +44,17 @@ func (g *escalationGate) Start(ctx context.Context, server *mcp.Server) (coreada
 
 func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 	t.Parallel()
-	p := &faults{}
+	p := &intakefixture.Faults{}
 	gate := &escalationGate{entered: make(chan struct{})}
-	f, chief := newAskingFixtureWith(t, 1, 1, p, func(opts *Options) {
-		gate.base = opts.Committee.Hosts.(*coreadapter.MCPHost).Transport.(*demoTransport)
-		opts.Threads = Enforce(*opts, Enforcement{Engine: opts.Committee.Engine, Hosts: &coreadapter.MCPHost{Transport: gate}}).Threads
+	f, chief := newAskingFixtureWith(t, 1, 1, p, func(opts *journey.Options) {
+		gate.base = opts.Committee.Hosts.(*coreadapter.MCPHost).Transport.(*fixturekit.DemoTransport)
+		opts.Threads = journey.Enforce(*opts, service.Enforcement{Engine: opts.Committee.Engine, Hosts: &coreadapter.MCPHost{Transport: gate}}).Threads
 	})
-	t.Cleanup(func() { f.stop(t) })
+	t.Cleanup(func() { f.Stop(t) })
 	cancelled := make(chan error, 1)
 	var deliveries atomic.Int32
-	f.engine.Mu.Lock()
-	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+	f.Engine.Mu.Lock()
+	f.Engine.Turns["*"] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		first := strings.Contains(req.Prompt, "Question 1 is open") && deliveries.Add(1) == 1
 		result, err := chief.Turn(ctx, req, turn, tools)
 		if first {
@@ -58,27 +62,25 @@ func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 		}
 		return result, err
 	}
-	f.engine.Mu.Unlock()
-	asking := f.member(1, 1, 1, asks(p, "1"))
-	stream := f.handIn(t, "cancelled-chief", handedDesign)
-	awaitStart(t, gate.entered)
-	soon(t, "the asking turn to complete", func() bool {
-		return !f.awaitTurn(t, stream, committeeAgent(1), asking).CompletedAt.IsZero()
+	f.Engine.Mu.Unlock()
+	asking := f.Member(1, 1, 1, intakefixture.Asks(p, "1"))
+	stream := f.HandIn(t, "cancelled-chief", fixturekit.HandedDesign)
+	intakefixture.AwaitStart(t, gate.entered)
+	intakefixture.Soon(t, "the asking turn to complete", func() bool {
+		return !f.AwaitTurn(t, stream, intake.CommitteeAgent(1), asking).CompletedAt.IsZero()
 	})
-	if q := f.question(t, stream, "1"); q.State != trace.QuestionOpen {
+	if q := f.Question(t, stream, "1"); q.State != trace.QuestionOpen {
 		t.Fatalf("question before cancelled escalation: %+v", q)
 	}
-	f.stop(t)
-	// A transport teardown error must not mask a fake session that falsely
-	// returns success after its tool call was cancelled.
+	f.Stop(t)
 	if err := <-cancelled; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled chief session returned %v, want context.Canceled", err)
 	}
-	f.start(t)
-	f.awaitQuestion(t, stream, "1", trace.QuestionEscalated)
-	soon(t, "the question event to be acknowledged", func() bool {
-		outbox, err := f.repository().Outbox(stream)
-		must(t, err)
+	f.Start(t)
+	f.AwaitQuestion(t, stream, "1", trace.QuestionEscalated)
+	intakefixture.Soon(t, "the question event to be acknowledged", func() bool {
+		outbox, err := f.Repository().Outbox(stream)
+		fixturekit.Must(t, err)
 		for _, entry := range outbox {
 			if strings.Contains(entry.Event.Body, "Question 1 is open") {
 				return entry.Acknowledged
@@ -86,8 +88,8 @@ func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 		}
 		return false
 	})
-	inbox, err := f.c.Inbox(context.Background())
-	must(t, err)
+	inbox, err := f.C.Inbox(context.Background())
+	fixturekit.Must(t, err)
 	entries := 0
 	for _, entry := range inbox.Entries {
 		for _, q := range entry.Asked {
@@ -100,7 +102,7 @@ func TestCancelledChiefEventRedeliversQuestionAfterRestart(t *testing.T) {
 		t.Fatalf("question deliveries %d, escalation calls %d, inbox entries %d: %+v", deliveries.Load(), gate.calls.Load(), entries, inbox.Entries)
 	}
 	escalations := 0
-	for _, move := range f.transitions(t, stream) {
+	for _, move := range f.Transitions(t, stream) {
 		if move.Subject == trace.QuestionSubject("1") && move.To == trace.QuestionEscalated {
 			escalations++
 		}

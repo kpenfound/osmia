@@ -59,7 +59,7 @@ token_env = "PUBLISHER_TOKEN"
 `
 
 func TestHearsayPublishLoadsWhenComplete(t *testing.T) {
-	c, err := Load(fixture(t, hearsayTop+publishTable, projectConfig))
+	c, err := load(fixture(t, hearsayTop+publishTable, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestHearsayPublishLoadsWhenComplete(t *testing.T) {
 }
 
 func TestHearsayPublishAbsentDoesNotEnablePublishing(t *testing.T) {
-	c, err := Load(fixture(t, hearsayTop, projectConfig))
+	c, err := load(fixture(t, hearsayTop, projectConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestHearsayPublishAbsentDoesNotEnablePublishing(t *testing.T) {
 	if c.HearsayScope() != "" || c.HearsayReads(nil, "w_x") != nil {
 		t.Fatal("reads enabled without a work source or an override")
 	}
-	if _, err := Load(fixture(t, topConfig, projectConfig)); err != nil {
+	if _, err := load(fixture(t, topConfig, projectConfig)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -120,9 +120,8 @@ func TestHearsayPublishFailsAtLoadNamingTheField(t *testing.T) {
 		{"wrong type", hearsayTop + replace(`"https://hooks.example"`, `7`), "hearsay.publish.hooks_url"},
 		{"without hearsay url", topConfig + publishTable, "hearsay.url"},
 	} {
-		_, err := Load(fixture(t, tc.top, projectConfig))
+		_, err := load(fixture(t, tc.top, projectConfig))
 		var field *FieldError
-		// The decoder names a mistyped key by its own spelling of the path.
 		if !errors.As(err, &field) || field.Field != tc.field && !(tc.name == "wrong type" && strings.HasSuffix(field.Field, "hooks_url")) {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
@@ -134,11 +133,11 @@ func TestHearsayPublishFailsAtLoadNamingTheField(t *testing.T) {
 }
 
 func TestHearsayRepoOptInDefaultsOffAndNamesItsField(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig+"hearsay_declare_repo = true\n"))
+	c, err := load(fixture(t, topConfig, projectConfig+"hearsay_declare_repo = true\n"))
 	if err != nil || !c.Project.HearsayDeclareRepo {
 		t.Fatalf("opt-in: %+v %v", c.Project, err)
 	}
-	_, err = Load(fixture(t, topConfig, projectConfig+"hearsay_declare_repo = \"yes\"\n"))
+	_, err = load(fixture(t, topConfig, projectConfig+"hearsay_declare_repo = \"yes\"\n"))
 	var field *FieldError
 	if !errors.As(err, &field) || field.Field != "hearsay_declare_repo" {
 		t.Fatalf("wrong type: %v", err)
@@ -146,24 +145,24 @@ func TestHearsayRepoOptInDefaultsOffAndNamesItsField(t *testing.T) {
 }
 
 func TestFlakeFixesDefaultsOffAndIsAKnownStrictKey(t *testing.T) {
-	c, err := Load(fixture(t, topConfig, projectConfig))
+	c, err := load(fixture(t, topConfig, projectConfig))
 	if err != nil || c.Project.FlakeFixes {
 		t.Fatalf("left out: %+v %v", c.Project, err)
 	}
-	c, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = true\n"))
+	c, err = load(fixture(t, topConfig, projectConfig+"flake_fixes = true\n"))
 	if err != nil || !c.Project.FlakeFixes {
 		t.Fatalf("opt-in: %+v %v", c.Project, err)
 	}
-	c, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = false\n"))
+	c, err = load(fixture(t, topConfig, projectConfig+"flake_fixes = false\n"))
 	if err != nil || c.Project.FlakeFixes {
 		t.Fatalf("explicit off: %+v %v", c.Project, err)
 	}
 	var field *FieldError
-	_, err = Load(fixture(t, topConfig, projectConfig+"flake_fixes = \"yes\"\n"))
+	_, err = load(fixture(t, topConfig, projectConfig+"flake_fixes = \"yes\"\n"))
 	if !errors.As(err, &field) || field.Field != "flake_fixes" {
 		t.Fatalf("wrong type: %v", err)
 	}
-	_, err = Load(fixture(t, topConfig, projectConfig+"flake_fix = true\n"))
+	_, err = load(fixture(t, topConfig, projectConfig+"flake_fix = true\n"))
 	if err == nil || !strings.Contains(err.Error(), "flake_fix") {
 		t.Fatalf("an unknown key was accepted: %v", err)
 	}
@@ -177,13 +176,13 @@ func TestHearsayScopeAndEntitiesMustBeEntityIDs(t *testing.T) {
 		{"empty body", projectConfig + "hearsay_scope = \"work:\"\n", "hearsay_scope"},
 		{"old entity scope name", projectConfig + "[hearsay_entities]\nstorage = \"osmia-ab12\"\n", "hearsay_entities"},
 	} {
-		_, err := Load(fixture(t, topConfig, tc.project))
+		_, err := load(fixture(t, topConfig, tc.project))
 		var field *FieldError
 		if !errors.As(err, &field) || field.Field != tc.field {
 			t.Errorf("%s: %v", tc.name, err)
 		}
 	}
-	c, err := Load(fixture(t, topConfig, projectConfig+"hearsay_scope = \"code:owner/repo\"\n[hearsay_entities]\nstorage = \"code:owner/repo:storage\"\n"))
+	c, err := load(fixture(t, topConfig, projectConfig+"hearsay_scope = \"code:owner/repo\"\n[hearsay_entities]\nstorage = \"code:owner/repo:storage\"\n"))
 	if err != nil || c.Project.HearsayScope != "code:owner/repo" {
 		t.Fatalf("entity ids: %v", err)
 	}

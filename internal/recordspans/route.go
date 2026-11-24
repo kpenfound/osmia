@@ -148,9 +148,6 @@ func (r Recorder) Route(route Route) bool {
 	return true
 }
 
-// routing returns the attributes that say how transition t was chosen: who
-// decided it, the state its default would have entered, and whether it
-// entered another. A transition no router chose has none.
 func routing(t trace.Transition) []telemetry.Attr {
 	var attrs []telemetry.Attr
 	if t.DecidedBy != "" {

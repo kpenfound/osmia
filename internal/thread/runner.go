@@ -31,16 +31,12 @@ type Runner struct {
 	// MaxRetries bounds the same-profile retries of an infrastructure failure.
 	MaxRetries int
 	// ResumableRoles reports whether a thread's role may look past an
-	// interrupted turn with no explicit Stop to an earlier source (so a
-	// session's restart recovery still finds its last recorded model
-	// session), and whether a CheckResume implementation that has no
-	// verification of its own may fall back to a role-blind heuristic
-	// instead of refusing resume outright (ResumeFallbackAllowed, this
-	// package). It never changes whether CheckResume is asked, or
-	// what a CheckResume implementation that already answers for itself
-	// says, for any role: that generic resume mechanism predates this field
-	// and stays identical for every role. Nil (every role but session,
-	// in production) means neither widening applies.
+	// interrupted turn with no explicit Stop to an earlier source, so a
+	// session's restart recovery finds its last recorded model session, and
+	// whether a CheckResume implementation with no verification of its own
+	// may fall back to a role-blind heuristic (ResumeFallbackAllowed). It
+	// never changes whether CheckResume is asked, or what a CheckResume that
+	// answers for itself says. Nil means neither applies to any role.
 	ResumableRoles func(string) bool
 	// Jev classifies clean mason responses first; a fallback, which is every
 	// judgment while Jev is unconfigured, leaves them to the code rules. It
@@ -80,7 +76,6 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	}
 	observeClaim(ctx, q)
 
-	// The claim serializes continuation selection against competing dispatchers.
 	t, err := r.Store.Thread(stream, agent)
 	if err != nil {
 		return q, err
@@ -89,7 +84,6 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	prepared.Scope = coreadapter.Scope{Project: string(r.Store.Project()), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
 	prepared.Profile, prepared.SystemPrompt, prepared.Prompt = req.Profile, req.SystemPrompt, req.Prompt
 	var advice string
-	// A stop cancels the advice with the session it would have informed.
 	if run := execution(ctx); r.Advise != nil && stopped(run) == nil {
 		if advice = r.Advise(run, req, prepared.Scope); stopped(run) != nil {
 			advice = ""
@@ -111,7 +105,6 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	case errors.As(runErr, &stop):
 		response.Stop = &stop.TurnStop
 	case len(q.Attempts) > 0:
-		// The final attempt is the turn's result.
 		last := q.Attempts[len(q.Attempts)-1]
 		response.Failure, response.FailureClass = last.Failure, last.FailureClass
 	case runErr != nil:
@@ -127,10 +120,8 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if persistErr != nil {
 		return q, errors.Join(runErr, persistErr)
 	}
-	// Cancellation stops execution, not durable recording of its partial
-	// result, which lands serialized with reconciliation.
 	cleanup := context.WithoutCancel(ctx)
-	err = trace.Relock(cleanup, func() error {
+	err = func() error {
 		if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
 			return err
 		}
@@ -140,6 +131,6 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		completed := r.Now()
 		q.CompletedAt = completed
 		return r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed)
-	})
+	}()
 	return q, errors.Join(runErr, err)
 }

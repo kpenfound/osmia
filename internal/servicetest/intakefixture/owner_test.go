@@ -40,10 +40,8 @@ func TestCheckUnitsWaitsForDetailAndCachedList(t *testing.T) {
 		waits++
 		switch waits {
 		case 1:
-			// Detail is current before the list includes the workstream.
 			client.detail.Units = want
 		case 2:
-			// A published list may still hold the previous unit state.
 			client.list.Workstreams = []api.WorkstreamStatus{{Workstream: stream, Units: []api.UnitStatus{{Unit: "resume", State: "ready"}}}}
 		case 3:
 			client.list.Workstreams[0].Units = want

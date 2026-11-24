@@ -133,17 +133,15 @@ func (iv Interval) SpanID() oteltrace.SpanID {
 	return telemetry.WorkstreamSpan(iv.Workstream, "slot", string(iv.Kind), iv.Source, iv.Pool, iv.Work, start)
 }
 
-// factoryRun names the factory-level trace of slot spans that belong to no workstream.
 const factoryRun = "slots"
 
 // Recorder tracks open intervals and sends their spans. A nil Recorder does
 // nothing.
 type Recorder struct {
-	sink   *telemetry.Sink
-	now    func() time.Time
-	logger *slog.Logger
-	path   string
-	// started is when this service run began.
+	sink    *telemetry.Sink
+	now     func() time.Time
+	logger  *slog.Logger
+	path    string
 	started time.Time
 
 	mu        sync.Mutex
@@ -189,14 +187,6 @@ func New(sink *telemetry.Sink, opts Options) *Recorder {
 	return r
 }
 
-// Started is when this run began.
-func (r *Recorder) Started() time.Time {
-	if r == nil {
-		return time.Time{}
-	}
-	return r.started
-}
-
 type ledgerFile struct {
 	Version   int        `json:"version"`
 	Intervals []Interval `json:"intervals"`
@@ -231,8 +221,6 @@ func (r *Recorder) warn(msg string, err error) {
 	}
 }
 
-// write is the ledger's writer: it saves the open intervals after they change,
-// off the path of whoever changed them.
 func (r *Recorder) write() {
 	defer close(r.exited)
 	for {
@@ -349,17 +337,6 @@ func (r *Recorder) Begin(iv Interval) (Interval, bool) {
 	return iv, true
 }
 
-// Open returns the open interval for the same work as iv.
-func (r *Recorder) Open(iv Interval) (Interval, bool) {
-	if r == nil {
-		return Interval{}, false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	have, ok := r.open[iv.Key()]
-	return have, ok
-}
-
 // Find returns the open intervals of kind and source for which match is true.
 // A nil match selects them all.
 func (r *Recorder) Find(kind Kind, source string, match func(Interval) bool) []Interval {
@@ -402,8 +379,6 @@ func (r *Recorder) End(iv Interval, end time.Time, outcome string) bool {
 	return true
 }
 
-// refusalTracked tells the waits whose owner asks again for as long as it waits:
-// a workflow reservation is refused each time its operation tries again.
 func refusalTracked(iv Interval) bool { return iv.Kind == Wait && iv.Source == SourceReservation }
 
 // EndRecovered closes the interval for the same work as iv like End, but only

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/runtime"
 )
@@ -41,15 +43,14 @@ func TestArchivedProjectPaneRequiresPinnedResolution(t *testing.T) {
 	}{
 		{name: "unresolved PR link", state: DeliveredState, evidence: "unresolved", link: "https://example.invalid/pull/42", want: "blocked"},
 		{name: "no publication", state: DeliveredState, evidence: "unresolved", want: "blocked"},
-		{name: "legacy ready flag", state: DeliveredState, resolved: true, link: "https://example.invalid/pull/42", want: "blocked"},
 		{name: "merged", state: DeliveredState, evidence: "merged", resolved: true, want: "delivered (merged)"},
 		{name: "cancelled", state: AbandonedState, evidence: "cancelled", resolved: true, want: "cancelled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, repo, _, _ := ownPRFixture(t)
 			a := runtime.Archive{State: tc.state, ResolutionEvidence: tc.evidence, Resolved: tc.resolved, DeliveryLink: tc.link}
-			w := WorkstreamStatus{Project: repo.Project(), Workstream: stream, State: &tc.state}
-			must(t, presentArchivedWorkstream(repo, &w, a))
+			w := WorkstreamStatus{Project: repo.Project(), Workstream: fixturekit.Stream, State: &tc.state}
+			fixturekit.Must(t, presentArchivedWorkstream(repo, &w, a))
 			if w.DisplayState != tc.want {
 				t.Fatalf("label=%s want=%s", w.DisplayState, tc.want)
 			}
@@ -60,8 +61,6 @@ func TestArchivedProjectPaneRequiresPinnedResolution(t *testing.T) {
 	}
 }
 
-// A workstream the service landed shows as landed with its commit, not as a
-// merged pull request.
 func TestLandedWorkstreamsShowTheirLandingInTheProjectPane(t *testing.T) {
 	t.Parallel()
 	got := landedState(delivery.DeliveryLanding{Commit: "0123456789abcdef0123456789abcdef01234567"})

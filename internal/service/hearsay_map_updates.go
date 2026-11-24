@@ -1,19 +1,15 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
-	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The structural changes of the subsystem map that are posted.
 const (
 	mapAdded   = "added"
 	mapRemoved = "removed"
@@ -21,46 +17,15 @@ const (
 	mapMoved   = "moved"
 )
 
-// mapChange is one structural change between two revisions of the subsystem
-// map: a subsystem added, removed, renamed, or moved under a different
-// parent. Notes, aliases, paths and owners are not structure.
 type mapChange struct {
-	kind string
-	// id is the subsystem's id after the change, or before it for a removal.
-	id string
-	// oldID differs from id for a rename that changed the id.
+	kind                 string
+	id                   string
 	oldID                string
 	name, oldName        string
 	parents, oldParents  []string
 	parentNames, oldWere []string
 }
 
-// librarianOperations reads the operations of a librarian workstream in the
-// trace, by ID. A revision of the entity map a librarian operation recorded
-// names that operation. A trace without a librarian workstream, or one that cannot be
-// read, leaves the map without such attributions.
-func librarianOperations(repo *trace.Repository) map[string]coreadapter.Operation {
-	stream := librarianWorkstream(repo.Project())
-	streams, err := repo.Workstreams()
-	if err != nil || !slices.Contains(streams, stream) {
-		return nil
-	}
-	records, err := repo.Operations(stream)
-	if err != nil {
-		return nil
-	}
-	out := make(map[string]coreadapter.Operation, len(records))
-	for _, r := range records {
-		out[r.Operation.ID] = r.Operation
-	}
-	return out
-}
-
-// mapUpdateRecords posts the structural changes between consecutive committed
-// revisions of kb/entities.json as dated updates on the project, on the work
-// source and without an author. Each names the re-seed and its commit, or for
-// a revision a librarian operation recorded the workstream or extraction that
-// caused it. Only the map's structure is posted: entity owners are not.
 func mapUpdateRecords(in *publishInputs) []hearsay.Record {
 	var revisions []trace.Document
 	for _, d := range in.documents {
@@ -78,13 +43,13 @@ func mapUpdateRecords(in *publishInputs) []hearsay.Record {
 			continue
 		}
 		if have {
-			cause := in.mapCause(d)
+			cause := mapCause(d)
 			for _, c := range diffMap(previous, current) {
 				id := mapUpdateID(d.Revision, c)
 				if !hearsay.ValidID(id) {
 					continue
 				}
-				w := hearsay.Wire{Kind: hearsay.KindUpdate, Project: string(in.project), Update: id, Text: c.text() + " " + cause,
+				w := hearsay.Wire{Kind: hearsay.KindUpdate, Project: string(in.project), Update: id, Text: c.text() + cause,
 					CreatedAt: hearsay.Time(d.At), UpdatedAt: hearsay.Time(d.At)}
 				out = append(out, hearsay.Record{Source: in.workSource, Key: "update/" + id, Tier: hearsay.TierRecord, After: []string{in.projectRef()}, Versions: []hearsay.Wire{w}})
 			}
@@ -94,51 +59,15 @@ func mapUpdateRecords(in *publishInputs) []hearsay.Record {
 	return out
 }
 
-// mapUpdateID is the id of the update that reports one change of one revision
-// of the map.
 func mapUpdateID(revision int, c mapChange) string {
 	return decisionID("map", fmt.Sprint(revision), c.kind, c.id)
 }
 
-// mapCause names what caused a revision of the map: the re-seed and the
-// commit it seeded from, the workstream a knowledge refresh folded in, or
-// else the extraction.
-func (in *publishInputs) mapCause(d trace.Document) string {
+func mapCause(d trace.Document) string {
 	if commit, ok := kb.ReseedCommit(d.Cause); ok {
-		return "Caused by the re-seed of the map from commit " + commit + "."
+		return " Caused by the re-seed of the map from commit " + commit + "."
 	}
-	op, ok := in.operations[d.Cause]
-	if !ok {
-		return "Caused by a knowledge-base extraction."
-	}
-	switch op.Action {
-	case retiredRefreshAction:
-		var input struct {
-			Workstream config.WorkstreamID `json:"workstream"`
-		}
-		if json.Unmarshal(op.Input, &input) == nil && input.Workstream != "" {
-			return "Caused by workstream " + in.workstreamLabel(input.Workstream) + "."
-		}
-	case retiredExtractAction:
-		var input struct {
-			Extraction int `json:"extraction"`
-		}
-		if json.Unmarshal(op.Input, &input) == nil && input.Extraction > 0 {
-			return fmt.Sprintf("Caused by knowledge-base extraction %d.", input.Extraction)
-		}
-	}
-	return "Caused by a knowledge-base extraction."
-}
-
-// workstreamLabel is a workstream's id with its title, when it is still
-// posted.
-func (in *publishInputs) workstreamLabel(id config.WorkstreamID) string {
-	for _, st := range in.streams {
-		if st.id() == id {
-			return fmt.Sprintf("%s (%s)", id, st.title())
-		}
-	}
-	return string(id)
+	return ""
 }
 
 func (c mapChange) text() string {
@@ -162,11 +91,6 @@ func (c mapChange) partOf(parents []string) string {
 	return " part of " + strings.Join(parents, ", ")
 }
 
-// diffMap lists the structural changes from one revision of the map to the
-// next, in a stable order. A subsystem whose id is gone and whose primary
-// path now belongs to a new id is a rename, as is one that kept its id and
-// changed its name. Parents are compared after following renames, so
-// renaming a parent does not move its children.
 func diffMap(before, after kb.Map) []mapChange {
 	old := map[string]kb.Entity{}
 	for _, e := range before.Entities {
@@ -221,7 +145,6 @@ func diffMap(before, after kb.Map) []mapChange {
 		slices.Sort(out)
 		return out
 	}
-	// mapped follows the renames of the old revision's parents.
 	mapped := func(ids []string) []string {
 		out := make([]string, len(ids))
 		for i, id := range ids {

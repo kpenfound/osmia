@@ -79,8 +79,6 @@ func resolvedPaths(m kb.Map, names []string) ([]string, bool) {
 	if len(names) == 0 {
 		return nil, true
 	}
-	// A malformed or changing map can contain colliding names. Resolution's
-	// first-match lookup alone must not certify either interpretation as safe.
 	for _, name := range names {
 		matches := map[string]bool{}
 		for _, e := range m.Entities {

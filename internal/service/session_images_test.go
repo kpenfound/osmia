@@ -5,30 +5,47 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-func TestActiveImageWorktreeBoundary(t *testing.T) {
+func imageWorktree(t *testing.T) (directory string, data []byte) {
+	t.Helper()
+	directory = t.TempDir()
+	data = attachmentPNG(t)
+	fixturekit.Must(t, os.WriteFile(filepath.Join(directory, "image.png"), data, 0600))
+	return directory, data
+}
+
+func TestActiveImageReadsAFileOfTheWorktree(t *testing.T) {
 	t.Parallel()
-	directory := t.TempDir()
-	data := attachmentPNG(t)
-	must(t, os.WriteFile(filepath.Join(directory, "image.png"), data, 0600))
+	directory, data := imageWorktree(t)
 	got, err := activeImage(directory, "image.png")
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !bytes.Equal(got, data) {
 		t.Fatal("bytes changed")
 	}
+}
+
+func TestActiveImageRefusesPathsOutsideTheWorktree(t *testing.T) {
+	t.Parallel()
+	directory, data := imageWorktree(t)
 	outside := filepath.Join(t.TempDir(), "outside.png")
-	must(t, os.WriteFile(outside, data, 0600))
-	must(t, os.Symlink(outside, filepath.Join(directory, "escape.png")))
+	fixturekit.Must(t, os.WriteFile(outside, data, 0600))
+	fixturekit.Must(t, os.Symlink(outside, filepath.Join(directory, "escape.png")))
 	for _, path := range []string{outside, "escape.png", "../outside.png"} {
 		if _, err := activeImage(directory, path); err == nil {
 			t.Fatalf("accepted outside: %s", path)
 		}
 	}
-	// An in-tree symlink is allowed after resolution and constrained opening.
-	must(t, os.Symlink("image.png", filepath.Join(directory, "inside.png")))
-	got, err = activeImage(directory, "inside.png")
-	must(t, err)
+}
+
+func TestActiveImageFollowsASymlinkThatStaysInTheWorktree(t *testing.T) {
+	t.Parallel()
+	directory, data := imageWorktree(t)
+	fixturekit.Must(t, os.Symlink("image.png", filepath.Join(directory, "inside.png")))
+	got, err := activeImage(directory, "inside.png")
+	fixturekit.Must(t, err)
 	if !bytes.Equal(got, data) {
 		t.Fatal("in-tree bytes changed")
 	}

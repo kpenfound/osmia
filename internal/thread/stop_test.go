@@ -14,13 +14,10 @@ import (
 
 var pauseStop = trace.TurnStop{Cause: trace.TurnStopHardPause, Scope: "workstream", Source: "owner", Reason: "Travelling"}
 
-// resumeAll accepts every session the runner asks to resume.
 func resumeAll(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
 	return nil
 }
 
-// runStopped runs the thread's next turn under a stoppable context, stopping
-// it before the session starts when early, or from inside the session.
 func runStopped(t *testing.T, repo *trace.Repository, early bool) (trace.QueuedTurn, int32) {
 	t.Helper()
 	ctx, stop := Stoppable(context.Background())
@@ -45,8 +42,6 @@ func runStopped(t *testing.T, repo *trace.Repository, early bool) (trace.QueuedT
 	return q, calls.Load()
 }
 
-// checkStopped checks that the turn completed interrupted with its stop and
-// no failure, and that the durable record says the same after a reopen.
 func checkStopped(t *testing.T, repo *trace.Repository, q trace.QueuedTurn) {
 	t.Helper()
 	r := q.Response
@@ -85,8 +80,6 @@ func TestStopDuringSessionInterruptsWithoutFailure(t *testing.T) {
 	defer repo.Close()
 	checkStopped(t, repo, q)
 
-	// The queued turn runs next on the same thread and resumes the stopped
-	// session.
 	var resumed *coreadapter.BackendSession
 	runner := Runner{Jev: unconfiguredJudge(), Store: repo, Now: func() time.Time { return timestamp.Add(2 * time.Second) }, ResumableRoles: func(string) bool { return true }, Turns: resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 		resumed = prepared.Resume
@@ -118,7 +111,6 @@ func TestStopBeforeSessionRunsNothing(t *testing.T) {
 	}
 	checkStopped(t, repo, q)
 
-	// The turn before the stopped one is the source of the next.
 	var resumed *coreadapter.BackendSession
 	runner.ResumableRoles = func(string) bool { return true }
 	runner.Turns = resumableTurns{check: resumeAll, run: func(_ context.Context, prepared coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {

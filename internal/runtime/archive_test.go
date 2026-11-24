@@ -11,9 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// An archived workstream persists with the time it was first archived;
-// archiving it again keeps that time, and clearing it returns it to the list
-// of work. Only a workstream of an active project can be archived.
 func TestArchivedWorkstreamsPersistAndClear(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)
@@ -48,8 +45,6 @@ func TestArchivedWorkstreamsPersistAndClear(t *testing.T) {
 	}
 }
 
-// A workstream that is no longer known stays recorded as archived, is
-// diagnosed and left out of the state in force, and can still be cleared.
 func TestStaleArchiveIsDiagnosedAndClearable(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)
@@ -70,7 +65,6 @@ func TestStaleArchiveIsDiagnosedAndClearable(t *testing.T) {
 	}
 }
 
-// A runtime file with a duplicate or untimed archive does not open.
 func TestInvalidArchivesRefused(t *testing.T) {
 	for _, body := range []string{
 		`{"version":1,"archived":[{"project":"` + string(pid) + `","workstream":"` + string(w1) + `","archived_at":"2026-09-29T12:00:00Z"},{"project":"` + string(pid) + `","workstream":"` + string(w1) + `","archived_at":"2026-09-29T12:00:00Z"}]}`,

@@ -10,7 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// creatingProjectState is the start's state while its new project is created.
 const creatingProjectState = "creating-project"
 
 // CheckDesignNewProject refuses, before anything is recorded or created, a
@@ -215,9 +214,6 @@ func (s *Controller) ProjectCreationEntries(projects []*Project) ([]InboxEntry, 
 	return append(refused, e), nil
 }
 
-// refusedCreationEntry is the inbox entry of a design start whose new
-// project's creation was refused before it began, while it has not begun.
-// Its retry is the full creation request under the start's identity.
 func (s *Controller) refusedCreationEntry(p *Project, stream config.WorkstreamID, intent DesignStartIntent) (InboxEntry, bool, error) {
 	refusal, found, err := DesignCreationRefusal(p.Repository, stream)
 	if err != nil || !found || s.ProjectCreation.State == nil {
@@ -246,9 +242,6 @@ func (s *Controller) refusedCreationEntry(p *Project, stream config.WorkstreamID
 	return e, true, nil
 }
 
-// creationAdvice says what a stuck creation needs. Ownership that could not
-// be established is the owner's to resolve on GitHub; a clone failure names the
-// host git credential, which the reason carries.
 func creationAdvice(stuck *api.ProjectCreationStuck) string {
 	if stuck.Kind == api.StuckOwnership || stuck.Kind == api.StuckMismatch {
 		return "The repo's ownership could not be established. Resolve the other repo on GitHub (rename or remove it) before retrying; Osmia never adopts or deletes a repository. " + stuck.Reason

@@ -9,7 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 )
 
-// ownerRecord is the owner's record of one round with that many objections.
 func ownerRecord(round int, pin shed.Pin, objections int) shed.Record {
 	r := shed.Record{Version: shed.Version, Round: round, Member: shed.OwnerMember, Revision: pin}
 	for k := 1; k <= objections; k++ {
@@ -22,8 +21,6 @@ func rulings(round int, pin shed.Pin, rs ...shed.Ruling) shed.Rulings {
 	return shed.Rulings{Version: shed.Version, Round: round, Revision: pin, Rulings: rs}
 }
 
-// The owner's objections are a record of the same shape as a member's, with
-// neither a part nor a citation, and they need the owner's kind.
 func TestOwnerRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 	t.Parallel()
 	r := ownerRecord(2, one, 2)
@@ -53,7 +50,6 @@ func TestOwnerRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 			t.Fatalf("%s was encoded", name)
 		}
 	}
-	// No committee member may carry a reserved name.
 	for _, name := range []string{shed.OwnerMember, "reply", "rulings", "more"} {
 		taken := record(1, name, one, 1)
 		taken.Objections[0].Kind = shed.Owner
@@ -68,7 +64,6 @@ func TestOwnerRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 			t.Fatalf("the owner's record: %v", err)
 		}
 	}
-	// A member's objection cannot carry the owner's kind.
 	member := record(1, alice, one, 1)
 	member.Objections[0].Kind = shed.Owner
 	if _, err := shed.Encode(member); err == nil {
@@ -76,7 +71,6 @@ func TestOwnerRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 	}
 }
 
-// The owner's objection blocks and no member's turn settles it.
 func TestOwnerObjectionBlocksAndOnlyTheOwnerSettlesIt(t *testing.T) {
 	t.Parallel()
 	entries := shed.DissentRecord([]shed.Record{ownerRecord(1, one, 1), record(2, alice, two, 0)}, nil, nil)
@@ -95,8 +89,6 @@ func TestOwnerObjectionBlocksAndOnlyTheOwnerSettlesIt(t *testing.T) {
 	}
 }
 
-// A ruling overrides what the kind means: a sustained fit objection blocks, a
-// dismissed charter veto does not, and the latest ruling wins.
 func TestRulingOverridesWhatTheKindMeans(t *testing.T) {
 	t.Parallel()
 	fit := record(1, alice, one, 1)
@@ -125,8 +117,6 @@ func TestRulingOverridesWhatTheKindMeans(t *testing.T) {
 	if got := shed.Standing(entries); len(got) != 1 || got[0].ID != sustained {
 		t.Fatalf("standing %+v", got)
 	}
-	// An unruled objection keeps what its kind means, and a ruling on an
-	// objection that no longer stands changes nothing.
 	plain := shed.DissentRecord(records, []shed.Rulings{rulings(1, one, shed.Ruling{Objection: "agent_committee_9-r1-1", Disposition: shed.Sustained})}, nil)
 	if len(plain) != 2 || plain[0].Blocking || plain[0].Disposition != "" || !plain[1].Blocking {
 		t.Fatalf("unruled dissent %+v", plain)
@@ -197,8 +187,6 @@ func TestRequestForFurtherRoundsRoundTripsAndBoundsTheLimit(t *testing.T) {
 	if _, err := shed.ParseMore([]byte(`{"version":1,"round":1,"rounds":1,"extra":1}`)); err == nil {
 		t.Fatal("an unknown field was parsed")
 	}
-	// A request replaces the cap: what the owner asked for is what runs,
-	// whether that is beyond the configured cap or short of it.
 	for name, tc := range map[string]struct {
 		configured int
 		requests   []shed.More
@@ -219,8 +207,6 @@ func TestRequestForFurtherRoundsRoundTripsAndBoundsTheLimit(t *testing.T) {
 	}
 }
 
-// The owner's files of a round are read back by round, and the members'
-// records never hold one of them.
 func TestOwnerFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -261,8 +247,6 @@ func TestOwnerFilesAreReadBackByRoundAndAreNotMemberRecords(t *testing.T) {
 	if err != nil || len(requests) != 1 || requests[0] != (shed.More{Version: shed.Version, Round: 1, Rounds: 2}) {
 		t.Fatalf("requests %+v %v", requests, err)
 	}
-	// A file whose content disagrees with its path is an error, never a
-	// silently misplaced record.
 	elsewhere, err := shed.EncodeRulings(rulings(2, one, shed.Ruling{Objection: "owner-r1-1", Disposition: shed.Sustained}))
 	if err != nil {
 		t.Fatal(err)

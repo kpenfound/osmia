@@ -12,7 +12,6 @@ const (
 
 var testNow = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 
-// quietFor returns a subject quiet for d.
 func quietFor(d time.Duration) Quiet { return Quiet{Since: testNow.Add(-d)} }
 
 func TestAssessRaisesAStallForAQuietSubjectWithNoExplanation(t *testing.T) {
@@ -36,7 +35,6 @@ func TestAssessIsOffWithAWindowOfZero(t *testing.T) {
 	}
 }
 
-// Each listed explanation suppresses the stall, and names itself.
 func TestAssessSuppressesAStallWhenSomethingExplainsTheQuiet(t *testing.T) {
 	t.Parallel()
 	inFlight := Operation{Action: "land", LastAttempt: testNow.Add(-time.Minute), Failures: 2}
@@ -66,8 +64,6 @@ func TestAssessSuppressesAStallWhenSomethingExplainsTheQuiet(t *testing.T) {
 	}
 }
 
-// An operation explains the quiet only while it can still reach a result: its
-// latest attempt is within the window and its failures are below the limit.
 func TestAssessDoesNotLetAnOperationThatCannotEndExplainTheQuiet(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -90,7 +86,6 @@ func TestAssessDoesNotLetAnOperationThatCannotEndExplainTheQuiet(t *testing.T) {
 			}
 		})
 	}
-	// Just inside the window and below the limit it still explains the quiet.
 	q := quietFor(2 * testAfter)
 	q.Operations = []Operation{{Action: "land", LastAttempt: testNow.Add(-testAfter + time.Second), Failures: testLimit - 1}}
 	if got := Assess(q, testNow, testAfter, testLimit); got.Stalled || got.Explanation != ExplainedByOperation {
@@ -98,8 +93,6 @@ func TestAssessDoesNotLetAnOperationThatCannotEndExplainTheQuiet(t *testing.T) {
 	}
 }
 
-// One operation that explains the quiet suppresses it, even beside one that
-// cannot end.
 func TestAssessSuppressesAStallWhileAnotherOperationIsInFlight(t *testing.T) {
 	t.Parallel()
 	q := quietFor(2 * testAfter)
@@ -112,8 +105,6 @@ func TestAssessSuppressesAStallWhileAnotherOperationIsInFlight(t *testing.T) {
 	}
 }
 
-// A quiet subject that has explanations only inside its window is stalled once
-// the clock passes it: the window is the subject's own, not the explanation's.
 func TestAssessCountsTheQuietFromTheLastProgress(t *testing.T) {
 	t.Parallel()
 	q := Quiet{Since: testNow.Add(-testAfter / 2)}
@@ -125,8 +116,6 @@ func TestAssessCountsTheQuietFromTheLastProgress(t *testing.T) {
 	}
 }
 
-// A running or queued turn explains the quiet only while it is younger than the
-// window: a turn stuck in its queue, or running past the window, is a stall.
 func TestAssessDoesNotLetATurnOlderThanTheWindowExplainTheQuiet(t *testing.T) {
 	t.Parallel()
 	q := quietFor(2 * testAfter)

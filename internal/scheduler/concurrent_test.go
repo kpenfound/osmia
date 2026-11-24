@@ -16,10 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/thread"
 )
 
-// Turns the reconciler runs beside its passes still stay within each role's
-// capacity: with two mason slots and one reviewer slot, two mason sessions
-// and one reviewer session are in flight at once and no more, and the others
-// run as those complete.
 func TestConcurrentTurnsStayWithinRoleCapacity(t *testing.T) {
 	f, repo := setup(t)
 	defer func() { repo.Close() }()
@@ -80,7 +76,6 @@ func TestConcurrentTurnsStayWithinRoleCapacity(t *testing.T) {
 	}
 	full := map[string]int{"mason": 2, "reviewer": 1}
 	await("every slot in flight", func() bool { return maps.Equal(running, full) })
-	// Two more passes while every slot is in flight start nothing more.
 	ticks <- time.Now()
 	ticks <- time.Now()
 	mu.Lock()

@@ -28,7 +28,7 @@ type Options struct{ Root, Home, File string }
 type Config struct {
 	Root           Root               `toml:"-" json:"-"`
 	Version        int                `toml:"version" json:"version"`
-	ActiveProjects []string           `toml:"active_projects" json:"active_projects"`
+	ActiveProjects []string           `toml:"-" json:"active_projects"`
 	Workspaces     string             `toml:"workspaces" json:"workspaces"`
 	Listen         Listen             `toml:"listen" json:"listen"`
 	Capacity       Capacity           `toml:"capacity" json:"capacity"`
@@ -57,9 +57,6 @@ type Config struct {
 	Project Project `toml:"-" json:"project"`
 	// Projects holds every active project, in registry order.
 	Projects []Project `toml:"-" json:"projects,omitempty"`
-	// Warnings describes settings that loaded but have no effect, one
-	// sentence each. A service logs them when it loads or reloads.
-	Warnings []string `toml:"-" json:"-"`
 }
 type Listen struct {
 	Socket string `toml:"socket" json:"socket"`
@@ -182,8 +179,6 @@ func (c *Config) EventWindow() time.Duration {
 	return d
 }
 
-// defaultProgressWindow is how long an event of routine progress waits when
-// events.progress_window is unset and events.window is shorter.
 const defaultProgressWindow = 15 * time.Minute
 
 // EventProgressWindow is how long an event of routine progress waits for
@@ -219,10 +214,6 @@ type Role struct {
 	Skills []string `toml:"skills" json:"skills,omitempty"`
 }
 
-// masonDagger is how a mason turn in sandbox runs Dagger on the service's
-// engine, [dagger]: on a host engine, the CLI release and engine address the
-// sandbox is given; on Dagger Cloud, the variable that holds the token its own
-// CLI runs with. A mason outside sbx gets neither.
 func (c *Config) masonDagger(sandbox string) (*agent.Dagger, string) {
 	if sandbox != "sbx" {
 		return nil, ""
@@ -249,9 +240,6 @@ func (c *Config) RoleExecution(role string) coreadapter.ExecutionSettings {
 	return execution
 }
 
-// validateMasonDagger checks that the service's engine is one a mason's sbx
-// sandbox can run Dagger on: Dagger Cloud, or a host engine at a known address
-// with the CLI release to install for it.
 func (c *Config) validateMasonDagger(path string) error {
 	engine := c.Dagger.Resolve()
 	switch engine.Mode {
@@ -357,37 +345,8 @@ func fieldError(path, field, reason string) error {
 	return &FieldError{Path: path, Field: field, Reason: reason}
 }
 
-// Load returns nil on every failure. The top-level file is required, and only
-// the projects its active_projects lists are read, each from its own file and
-// each of which must load and validate; archived directories are not
-// activated. It is the loader of a root whose project import into the project
-// store is not complete: a root that has completed it takes its projects from
-// the store.
-func Load(options Options) (*Config, error) {
-	c, err := LoadTopLevel(options)
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range c.ActiveProjects {
-		id, err := ParseProjectID(s)
-		if err != nil {
-			return nil, err
-		}
-		p, err := loadProject(c.Root, id, options.Home, c.Capacity.PerWorkstream)
-		if err != nil {
-			return nil, err
-		}
-		c.Projects = append(c.Projects, p)
-	}
-	if len(c.Projects) == 1 {
-		c.Project = c.Projects[0]
-	}
-	return c, nil
-}
-
-// LoadTopLevel loads and validates the top-level file alone, as Load does,
-// and returns nil on every failure. It reads no project file: Project and
-// Projects stay zero whatever active_projects lists.
+// LoadTopLevel loads and validates the top-level file. It returns nil on every
+// failure and reads no project settings: Project and Projects are zero.
 func LoadTopLevel(options Options) (*Config, error) {
 	root, err := options.Resolve()
 	if err != nil {
@@ -399,24 +358,17 @@ func LoadTopLevel(options Options) (*Config, error) {
 	}
 	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry(), ErrorReports: defaultErrorReports()}
 	c.Dagger.Engine = string(DaggerEngineAuto)
-	md, err := decode(path, c, false)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &FieldError{Path: path, Reason: "cannot be read", Err: err}
+	}
+	md, err := decodeBytes(path, data, c, false)
 	if err != nil {
 		return nil, err
 	}
 	c.Root = root
-	c.Warnings = legacyWarnings(path)
 	if c.Version != 1 {
 		return nil, fieldError(path, "version", "must be 1 (no migrations supported)")
-	}
-	ids := make([]ProjectID, len(c.ActiveProjects))
-	for i, s := range c.ActiveProjects {
-		ids[i], err = ParseProjectID(s)
-		if err != nil {
-			return nil, fieldError(path, fmt.Sprintf("active_projects[%d]", i), "expected p_ followed by 32 lowercase hex digits")
-		}
-	}
-	if err := CheckProjectIDs(ids...); err != nil {
-		return nil, fieldError(path, "active_projects", ErrCollision.Error())
 	}
 	if !md.IsDefined("listen", "socket") {
 		c.Listen.Socket, err = root.Socket()
@@ -523,8 +475,6 @@ func LoadTopLevel(options Options) (*Config, error) {
 	return c, nil
 }
 
-// validateCommittee checks the committee's perspectives and profiles against
-// the known perspectives, the named profiles and the committee's sandbox.
 func (c *Config) validateCommittee(path string) error {
 	if len(c.Committee.Perspectives) == 0 {
 		return fieldError(path, "committee.perspectives", "at least one perspective is required")
@@ -584,40 +534,6 @@ func (c *Config) For(id ProjectID) *Config {
 	return &out
 }
 
-// WithProject returns a copy of c whose only active project is id, loaded and
-// validated from its configuration file. The receiver is unchanged.
-func (c *Config) WithProject(id ProjectID, home string) (*Config, error) {
-	p, err := loadProject(c.Root, id, home, c.Capacity.PerWorkstream)
-	if err != nil {
-		return nil, err
-	}
-	out := *c
-	out.ActiveProjects = []string{string(id)}
-	out.Project = p
-	out.Projects = []Project{p}
-	return &out, nil
-}
-
-// AddProject loads one project's configuration while preserving the loaded
-// settings of every other project.
-func (c *Config) AddProject(id ProjectID, home string) (*Config, error) {
-	if c.Active(id) {
-		return c, nil
-	}
-	loaded, err := c.WithProject(id, home)
-	if err != nil {
-		return nil, err
-	}
-	out := *c
-	out.ActiveProjects = append(slices.Clone(c.ActiveProjects), string(id))
-	out.Projects = append(slices.Clone(c.Projects), loaded.Project)
-	out.Project = Project{}
-	if len(out.Projects) == 1 {
-		out.Project = out.Projects[0]
-	}
-	return &out, nil
-}
-
 // WithLoadedProjects returns a copy of c whose active projects are ps, already
 // loaded, in that order. It reads no file. The receiver is unchanged.
 func (c *Config) WithLoadedProjects(ps []Project) *Config {
@@ -629,15 +545,6 @@ func (c *Config) WithLoadedProjects(ps []Project) *Config {
 	if len(out.Projects) == 1 {
 		out.Project = out.Projects[0]
 	}
-	return &out
-}
-
-// WithoutProject returns a copy of c with no active project.
-func (c *Config) WithoutProject() *Config {
-	out := *c
-	out.ActiveProjects = []string{}
-	out.Project = Project{}
-	out.Projects = nil
 	return &out
 }
 
@@ -658,21 +565,6 @@ func (c *Config) WithoutProjectID(id ProjectID) *Config {
 	return &out
 }
 
-func loadProject(root Root, id ProjectID, home string, perWorkstream int) (Project, error) {
-	projectPath, err := root.ProjectConfig(id)
-	if err != nil {
-		return Project{}, err
-	}
-	data, err := os.ReadFile(projectPath)
-	if err != nil {
-		return Project{}, &FieldError{Path: projectPath, Reason: "cannot be read", Err: err}
-	}
-	p, _, err := loadProjectBytes(root, id, home, perWorkstream, data)
-	return p, err
-}
-
-// loadProjectBytes decodes and validates one project file's bytes. The
-// metadata says which keys the file sets.
 func loadProjectBytes(root Root, id ProjectID, home string, perWorkstream int, data []byte) (Project, toml.MetaData, error) {
 	projectPath, err := root.ProjectConfig(id)
 	if err != nil {
@@ -689,8 +581,6 @@ func loadProjectBytes(root Root, id ProjectID, home string, perWorkstream int, d
 	return p, md, nil
 }
 
-// validate completes a decoded project: resolves its identity and clone and
-// checks every setting.
 func (p *Project) validate(root Root, id ProjectID, home, projectPath string) error {
 	var err error
 	p.ID = id
@@ -766,14 +656,6 @@ func (r Root) Overlaps(path string) bool {
 	return beneath(path, r.directory) || beneath(r.directory, path)
 }
 
-func decode(path string, dest any, project bool) (toml.MetaData, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return toml.MetaData{}, &FieldError{Path: path, Reason: "cannot be read", Err: err}
-	}
-	return decodeBytes(path, data, dest, project)
-}
-
 func decodeBytes(path string, data []byte, dest any, project bool) (toml.MetaData, error) {
 	md, err := toml.Decode(string(data), dest)
 	if err != nil {
@@ -784,78 +666,14 @@ func decodeBytes(path string, data []byte, dest any, project bool) (toml.MetaDat
 			return md, fieldError(path, key.String(), unsupportedKey(key))
 		}
 	}
-	// An undecoded key normally means it decoded into nothing the caller's
-	// struct recognizes, so it is refused. knownKey still accepts a
-	// [beekeeper] section and its fields: a leftover section from the
-	// removed Beekeeper feature keeps loading, with no field for it to
-	// decode into and no effect.
 	for _, key := range md.Undecoded() {
-		if knownKey(key, project) {
-			continue
-		}
 		return md, fieldError(path, key.String(), unsupportedKey(key))
 	}
 	return md, nil
 }
 
-// JevEnabledIgnored warns that a top-level file sets the removed [jev] enabled
-// switch to false. Jev is required, so the value has no effect.
-const JevEnabledIgnored = "jev.enabled = false is ignored: Jev is always on, and without its API key it is unconfigured and every judgment falls back"
-
-// MasonDaggerIgnored warns that a top-level file has the removed
-// [roles.mason.dagger] section. The mason runs Dagger on the service's engine.
-const MasonDaggerIgnored = "roles.mason.dagger is ignored: the mason runs Dagger on the engine [dagger] selects, with its version"
-
-// LibrarianIgnored warns that a top-level file has the removed [roles.librarian]
-// table. The librarian role no longer exists.
-const LibrarianIgnored = "roles.librarian is ignored: the librarian role is removed"
-
-// ActiveProjectsIgnored warns that a top-level file still lists
-// active_projects after the project import is complete. The registry in
-// Osmia's own store decides which projects are active.
-const ActiveProjectsIgnored = "active_projects is ignored: the project registry in Osmia's own store decides which projects are active"
-
-// legacyWarnings reads the top-level file at path again for settings that are
-// accepted and ignored but deserve a warning. A file that cannot be read has
-// none: the load already read it.
-func legacyWarnings(path string) []string {
-	var raw struct {
-		Jev struct {
-			Switch *bool `toml:"enabled"`
-		} `toml:"jev"`
-		Roles struct {
-			Mason struct {
-				Dagger *struct{} `toml:"dagger"`
-			} `toml:"mason"`
-			Librarian *struct{} `toml:"librarian"`
-		} `toml:"roles"`
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return nil
-	}
-	var warnings []string
-	if raw.Jev.Switch != nil && !*raw.Jev.Switch {
-		warnings = append(warnings, JevEnabledIgnored)
-	}
-	if raw.Roles.Mason.Dagger != nil {
-		warnings = append(warnings, MasonDaggerIgnored)
-	}
-	if raw.Roles.Librarian != nil {
-		warnings = append(warnings, LibrarianIgnored)
-	}
-	return warnings
-}
-
-// typeMismatch matches the TOML decoder's message for a value of the wrong
-// type, which carries the key and line but no parse position.
 var typeMismatch = regexp.MustCompile(`^toml: (?:line ([0-9]+) )?\(last key ("(?:[^"\\]|\\.)*")\): incompatible types`)
 
-// decodeError names the key and line of a file the TOML decoder rejected,
-// leaving out the decoder's text, which may quote the file.
 func decodeError(path string, err error) error {
 	var parse toml.ParseError
 	if errors.As(err, &parse) {
@@ -875,25 +693,13 @@ func decodeError(path string, err error) error {
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {
-		if key[0] == "preview" {
-			return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"call", "port", "path", "timeout"}, key[1])
-		}
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "group_id", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "classifier", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
 	}
 	if key[0] == "dagger" {
 		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_compute_token_env", "cloud_api_token_env", "check_fallback", "organization"}, key[1])
-	}
-	// A leftover [beekeeper] section from the removed Beekeeper feature is
-	// accepted and ignored, never decoded into any field, so a top-level
-	// configuration that still has one keeps loading without effect.
-	if key[0] == "beekeeper" {
-		if len(key) == 1 {
-			return true
-		}
-		return len(key) == 2 && slices.Contains([]string{"name", "profile", "sandbox", "image"}, key[1])
 	}
 	if key[0] == "hearsay" {
 		if len(key) == 1 {
@@ -908,16 +714,11 @@ func knownKey(key toml.Key, project bool) bool {
 		return key[1] == "agents" && (len(key) == 3 || len(key) == 4 && (key[3] == "id" || key[3] == "token_env"))
 	}
 	if len(key) >= 2 && (key[0] == "profiles" || key[0] == "roles") {
+		if key[0] == "roles" && !slices.Contains(roleNames, key[1]) {
+			return false
+		}
 		if len(key) == 2 {
 			return true
-		}
-		// roles.mason.dagger is the removed mason engine override: accepted
-		// and ignored, with a warning.
-		if key[0] == "roles" && key[1] == "mason" && len(key) == 4 && key[2] == "dagger" {
-			return key[3] == "version" || key[3] == "engine"
-		}
-		if key[0] == "roles" && len(key) == 3 && key[2] == "dagger" {
-			return key[1] == "mason"
 		}
 		if len(key) != 3 {
 			return false
@@ -927,8 +728,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "skills"}, key[2])
 	}
-	// jev.enabled is the removed Jev switch: accepted and ignored.
-	return slices.Contains([]string{"version", "active_projects", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.enabled", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
+	return slices.Contains([]string{"version", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {
@@ -941,6 +741,19 @@ func unsupportedKey(key toml.Key) string {
 	}
 	return "unknown configuration key"
 }
+func (c *Config) validateFallbackCycles(path string, names []string) error {
+	for _, name := range names {
+		seen := map[string]bool{}
+		for next := name; next != ""; next = c.Profiles[next].Fallback {
+			if seen[next] {
+				return fieldError(path, "profiles."+next+".fallback", "fallback cycle from "+name)
+			}
+			seen[next] = true
+		}
+	}
+	return nil
+}
+
 func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 	if len(c.Profiles) == 0 {
 		return fieldError(path, "profiles", "at least one named profile is required")
@@ -985,36 +798,11 @@ func (c *Config) validateProfiles(path string, md toml.MetaData) error {
 		}
 		c.Profiles[name] = p
 	}
-	// TODO: Remove this named-profile fallback-cycle validation when agentcore
-	// resolves a caller's named profiles into its own agent.Profile.Fallback chain
-	// and validates that chain for cycles. Core's Profile.Fallback only links
-	// already-resolved profiles by pointer; core has no profile registry keyed by
-	// name, so it has nothing to walk or validate before a name is resolved.
-	for _, name := range names {
-		seen := map[string]bool{}
-		for next := name; next != ""; next = c.Profiles[next].Fallback {
-			if seen[next] {
-				return fieldError(path, "profiles."+next+".fallback", "fallback cycle from "+name)
-			}
-			seen[next] = true
-		}
+	if err := c.validateFallbackCycles(path, names); err != nil {
+		return err
 	}
 	if c.Roles == nil {
 		c.Roles = map[string]Role{}
-	}
-	// A leftover roles.classifier or roles.librarian from a removed role is
-	// accepted and ignored.
-	delete(c.Roles, "classifier")
-	delete(c.Roles, "librarian")
-	names = names[:0]
-	for name := range c.Roles {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, name := range names {
-		if !slices.Contains(roleNames, name) {
-			return fieldError(path, "roles."+name, "unknown role")
-		}
 	}
 	for _, name := range roleNames {
 		r := c.Roles[name]
@@ -1117,10 +905,12 @@ func (c *Config) Execution(role, profile string) (coreadapter.Profile, coreadapt
 	}
 	return coreadapter.Profile{}, coreadapter.ExecutionSettings{}, fmt.Errorf("profile %q is not in role %q's fallback chain", profile, role)
 }
+
+const maxSocketPath = 103
+
 func validateSocket(path string) error {
-	// 103 bytes fits Darwin's sockaddr_un and Linux's larger limit, with NUL.
-	if len(path) > 103 {
-		return fmt.Errorf("socket path exceeds the 103-byte Unix socket limit; choose a shorter root/path")
+	if len(path) > maxSocketPath {
+		return fmt.Errorf("socket path exceeds the %d-byte Unix socket limit; choose a shorter root/path", maxSocketPath)
 	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -1132,8 +922,6 @@ func validateSocket(path string) error {
 	return nil
 }
 
-// validateWeb accepts host:port where the host is localhost or a loopback
-// IP address and the port is a number from 0 to 65535; 0 binds a free port.
 func validateWeb(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -1151,8 +939,6 @@ func validateWeb(addr string) error {
 	return fmt.Errorf("host must be localhost or a loopback address; other interfaces are not supported")
 }
 
-// validateTailnet accepts a single DNS label: 1 to 63 lowercase letters,
-// digits and hyphens that neither starts nor ends with a hyphen.
 func validateTailnet(hostname string) error {
 	if len(hostname) > 63 {
 		return fmt.Errorf("hostname must be at most 63 characters")
@@ -1168,8 +954,6 @@ func validateTailnet(hostname string) error {
 	return nil
 }
 
-// validateWebhook accepts an absolute http or https URL with a host. The
-// reason never quotes the URL, which may carry a secret.
 func validateWebhook(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || !u.IsAbs() || u.Host == "" || u.Opaque != "" {

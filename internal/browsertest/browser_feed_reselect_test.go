@@ -30,9 +30,9 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone, bare)
 	demoGit(t, home, "-C", clone, "remote", "add", "upstream", bare)
 	brief := "An ordinary workstream to visit."
-	work, err := c.HandIn(ctx, HandInRequest{Project: project, Key: "feed-reselect", Stdin: &brief})
+	work, err := c.HandIn(ctx, service.HandInRequest{Project: project, Key: "feed-reselect", Stdin: &brief})
 	must(t, err)
-	session, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	session, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 
 	p := openBrowser(t)
@@ -67,8 +67,8 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	const otherMessage = "A separate design conversation."
 	_, err = c.DesignMessage(ctx, other.Design.Workstream, otherMessage)
 	must(t, err)
-	awaitDesignConversation(t, s, c, other.Design.Workstream, func(r ConversationResponse) bool {
-		return len(r.Entries) == 2 && r.Entries[1].State == TurnDone
+	awaitDesignConversation(t, s, c, other.Design.Workstream, func(r service.ConversationResponse) bool {
+		return len(r.Entries) == 2 && r.Entries[1].State == service.TurnDone
 	})
 
 	for _, target := range []string{"workstream", "session", "design", "project"} {
@@ -114,8 +114,8 @@ func TestBrowserDesignConversationSurvivesReselection(t *testing.T) {
 	const whileAway = "Include the entry recorded while I was away."
 	_, err = c.DesignMessage(ctx, id, whileAway)
 	must(t, err)
-	conversation := awaitDesignConversation(t, s, c, id, func(r ConversationResponse) bool {
-		return len(r.Entries) == 4 && r.Entries[3].State == TurnDone
+	conversation := awaitDesignConversation(t, s, c, id, func(r service.ConversationResponse) bool {
+		return len(r.Entries) == 4 && r.Entries[3].State == service.TurnDone
 	})
 	p.SelectDesign(id)
 	p.Await("the design view on return", `!document.querySelector('[data-view="design"]').hidden`)
@@ -133,12 +133,12 @@ func TestBrowserSessionConversationSurvivesReselection(t *testing.T) {
 	}
 	ctx := context.Background()
 	brief := "An ordinary workstream to visit."
-	work, err := c.HandIn(ctx, HandInRequest{Project: project, Key: "session-feed-reselect", Stdin: &brief})
+	work, err := c.HandIn(ctx, service.HandInRequest{Project: project, Key: "session-feed-reselect", Stdin: &brief})
 	must(t, err)
-	opened, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	opened, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	id := opened.Session.Workstream
-	other, err := c.OpenSession(ctx, SessionOpenRequest{Project: project, Profile: "default"})
+	other, err := c.OpenSession(ctx, service.SessionOpenRequest{Project: project, Profile: "default"})
 	must(t, err)
 	const otherMessage = "A separate exploratory conversation."
 

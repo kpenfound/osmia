@@ -22,7 +22,6 @@ var Containers = []string{"apps", "cmd", "crates", "internal", "libs", "packages
 // directory already takes it, the root entity is RootID + "-root".
 const RootID = "repo"
 
-// rule is one CODEOWNERS line translated to an entity path pattern.
 type rule struct {
 	pattern string
 	literal bool
@@ -31,8 +30,9 @@ type rule struct {
 
 // Seed builds the entity map of a clone from its CODEOWNERS file and its
 // directory structure, plus one root entity covering the whole repository, so
-// even a repository holding only a README has an entity a footprint can name. It only reads the clone, never follows a symlink out
-// of it, and returns the same map for the same files.
+// even a repository holding only a README has an entity a footprint can name.
+// It only reads the clone, never follows a symlink out of it, and returns the
+// same map for the same files.
 func Seed(clone string) (Map, error) {
 	root, err := os.OpenRoot(clone)
 	if err != nil {
@@ -82,7 +82,6 @@ func SeedFS(fsys fs.FS) (Map, error) {
 func build(set map[string]bool, rules []rule) Map {
 	var paths []string
 	for p := range set {
-		// A path whose ID cannot start with a letter or digit has no valid ID.
 		if idPattern.MatchString(ID(p)) {
 			paths = append(paths, p)
 		}
@@ -133,8 +132,6 @@ func build(set map[string]bool, rules []rule) Map {
 	return m
 }
 
-// directories lists the visible subdirectories of dir, excluding symlinks and
-// names that would read as glob patterns.
 func directories(fsys fs.FS, dir string) ([]string, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -168,9 +165,6 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// codeowners reads the first CODEOWNERS location that holds a regular file
-// inside the clone. Lines whose pattern cannot be expressed as an entity path
-// pattern are skipped.
 func codeowners(fsys fs.FS) ([]rule, error) {
 	for _, name := range CodeownersFiles {
 		info, err := fs.Stat(fsys, name)
@@ -207,10 +201,6 @@ func parseCodeowners(data []byte) []rule {
 	return rules
 }
 
-// translate turns a CODEOWNERS pattern into an entity path pattern. A pattern
-// with a leading or inner slash is anchored at the repository root; any other
-// pattern matches at any depth. A trailing slash or "/**" is dropped because an
-// entity pattern already covers everything below the paths it matches.
 func translate(p string) (pattern string, literal, ok bool) {
 	anchored := strings.Contains(strings.TrimSuffix(p, "/"), "/")
 	p = strings.TrimPrefix(p, "/")

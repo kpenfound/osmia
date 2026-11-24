@@ -10,9 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// memberQuestionHistory is routing evidence captured before owner retirement.
-// Original questions and rulings remain in their original scope; this document
-// preserves their exact revisions and links when those traces are unavailable.
 type memberQuestionHistory struct {
 	Workgroup  config.WorkgroupID  `json:"workgroup"`
 	Project    config.ProjectID    `json:"project"`
@@ -151,8 +148,6 @@ func (r *Repository) retiredQuestions(stream config.WorkstreamID) ([]QuestionSta
 	return history.Questions, nil
 }
 
-// questionHistory keeps the original authority across a live-to-retired read.
-// Only a verified terminal binding permits the preserved routing view.
 func (r *Repository) questionHistory(stream config.WorkstreamID) ([]QuestionState, bool, error) {
 	retired, err := r.MemberRetired(stream)
 	if err != nil {

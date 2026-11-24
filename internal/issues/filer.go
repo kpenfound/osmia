@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,7 +68,6 @@ type Filer struct {
 	PerPage int
 }
 
-// maxListPages bounds how many pages one list call reads.
 const maxListPages = 100
 
 // Error is a failed Filer call. It carries the HTTP status (0 when no response
@@ -80,8 +78,7 @@ type Error struct {
 	// Status is the HTTP status, 0 when no response arrived.
 	Status int
 	// Reason is a short, single-line description of the failure.
-	Reason string
-	// uncertain marks a call whose effect on GitHub is unknown.
+	Reason    string
 	uncertain bool
 }
 
@@ -103,18 +100,6 @@ func (e *Error) Uncertain() bool { return e.uncertain }
 // Rejected reports whether GitHub answered with a 4xx status: the request was
 // definitely not applied.
 func (e *Error) Rejected() bool { return e.Status >= 400 && e.Status < 500 }
-
-// IsUncertain reports whether err is a Filer error whose outcome is uncertain.
-func IsUncertain(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Uncertain()
-}
-
-// IsRejected reports whether err is a Filer error for a 4xx answer.
-func IsRejected(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Rejected()
-}
 
 // Create opens an issue in repository and returns it with its number and URL.
 func (f Filer) Create(ctx context.Context, repository string, issue NewIssue) (Issue, error) {
@@ -238,7 +223,6 @@ func (f Filer) ListComments(ctx context.Context, repository string, number int, 
 	return out, nil
 }
 
-// wireIssue is an issue as GitHub's REST API sends it.
 type wireIssue struct {
 	Number      int             `json:"number"`
 	HTMLURL     string          `json:"html_url"`
@@ -264,7 +248,6 @@ func (w wireIssue) issue() Issue {
 	return out
 }
 
-// wireComment is an issue comment as GitHub's REST API sends it.
 type wireComment struct {
 	ID        int64     `json:"id"`
 	HTMLURL   string    `json:"html_url"`
@@ -281,19 +264,13 @@ func (w wireComment) comment() Comment {
 	return out
 }
 
-// call describes one REST request for do: what to log and how to read the
-// answer.
 type call struct {
 	action, access, op, repository, method, path string
 	query                                        url.Values
 	want                                         int
-	// write marks a call whose effect on GitHub is unknown when it fails
-	// without a definite rejection.
-	write bool
+	write                                        bool
 }
 
-// do performs one request, records one activity entry for it, and decodes the
-// answer into out.
 func (f Filer) do(ctx context.Context, c call, in, out any) error {
 	data, err := f.send(ctx, c, in)
 	if err != nil {
@@ -305,9 +282,6 @@ func (f Filer) do(ctx context.Context, c call, in, out any) error {
 	return nil
 }
 
-// pages reads a list endpoint page by page, passing each page's JSON to add,
-// which returns the page's item count. It stops after a page shorter than the
-// page size that announces no next page.
 func (f Filer) pages(ctx context.Context, c call, query url.Values, add func(json.RawMessage) (int, error)) error {
 	per := f.PerPage
 	if per < 1 || per > 100 {
@@ -341,7 +315,6 @@ func (f Filer) pages(ctx context.Context, c call, query url.Values, add func(jso
 	}
 }
 
-// hasNext reports whether a Link header announces a next page.
 func hasNext(h http.Header) bool {
 	for _, link := range h.Values("Link") {
 		for _, part := range strings.Split(link, ",") {
@@ -353,15 +326,11 @@ func hasNext(h http.Header) bool {
 	return false
 }
 
-// send is exchange without the headers.
 func (f Filer) send(ctx context.Context, c call, in any) (json.RawMessage, error) {
 	data, _, err := f.exchange(ctx, c, in)
 	return data, err
 }
 
-// exchange performs one request and records its activity entry. The request is
-// marked as the reporter's own through ctx. Errors never include the token or
-// the request body.
 func (f Filer) exchange(ctx context.Context, c call, in any) (json.RawMessage, http.Header, error) {
 	ctx = ghlog.WithReporter(ctx)
 	start := time.Now()
@@ -417,11 +386,8 @@ func (f Filer) request(ctx context.Context, c call, in any) (json.RawMessage, ht
 	return data, resp.Header, resp.StatusCode, nil
 }
 
-// maxReason bounds the GitHub message an Error keeps.
 const maxReason = 200
 
-// statusError describes an unexpected answer with its status and GitHub's
-// short message. A write is uncertain unless the status is a 4xx rejection.
 func (f Filer) statusError(c call, resp *http.Response) *Error {
 	var body struct {
 		Message string `json:"message"`
@@ -442,8 +408,6 @@ func (f Filer) statusError(c call, resp *http.Response) *Error {
 	return &Error{Op: c.op, Status: resp.StatusCode, Reason: reason, uncertain: c.write && !rejected}
 }
 
-// reasonText is one value from GitHub's answer on one line, bounded, with the
-// token and every known secret removed.
 func (f Filer) reasonText(s string) string {
 	secrets := redact.KnownSecrets()
 	if f.Token != "" {
@@ -462,8 +426,6 @@ func (f Filer) reasonText(s string) string {
 	return s
 }
 
-// checkRepository rejects a repository that is not owner/name before any
-// request is made.
 func checkRepository(op, repository string) error {
 	owner, repo, ok := strings.Cut(repository, "/")
 	if !ok || !name.MatchString(owner) || !name.MatchString(repo) || owner == "." || owner == ".." || repo == "." || repo == ".." {
@@ -472,8 +434,6 @@ func checkRepository(op, repository string) error {
 	return nil
 }
 
-// checkIssue rejects a repository or issue number that is not usable before
-// any request is made.
 func checkIssue(op, repository string, number int) error {
 	if err := checkRepository(op, repository); err != nil {
 		return err

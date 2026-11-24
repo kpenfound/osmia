@@ -164,9 +164,6 @@ func questions(records []Record, v *workflowView, stream config.WorkstreamID) []
 	return result
 }
 
-// questionTurn requires r.mu. It checks that scope names this session's
-// active turn of agent and returns the turn with the workstream's workflow
-// and questions.
 func (r *Repository) questionTurn(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time) (QueuedTurn, workflowLog, *workflowView, []Record, error) {
 	if err := ctx.Err(); err != nil {
 		return QueuedTurn{}, workflowLog{}, nil, nil, err
@@ -312,8 +309,6 @@ func (r *Repository) AskCharterConflict(ctx context.Context, agent string, scope
 	return question, nil
 }
 
-// openQuestion returns the open question id, or why the chief of staff can
-// no longer choose for it.
 func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 	for _, q := range existing {
 		if q.Asked.ID != id {
@@ -337,7 +332,6 @@ func openQuestion(existing []QuestionState, id string) (QuestionState, error) {
 	return QuestionState{}, refused("there is no question %s in this workstream", id)
 }
 
-// chiefTurn requires r.mu. It is questionTurn for a chief-of-staff tool.
 func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadapter.Scope, at time.Time) (QueuedTurn, workflowLog, *workflowView, []Record, error) {
 	if scope.Role != ChiefOfStaff {
 		return QueuedTurn{}, workflowLog{}, nil, nil, fmt.Errorf("only a chief-of-staff turn may choose what happens to a question")
@@ -345,11 +339,6 @@ func (r *Repository) chiefTurn(ctx context.Context, agent string, scope coreadap
 	return r.questionTurn(ctx, agent, scope, at)
 }
 
-// chiefTurnOn requires that scope is the active chief-of-staff turn of its
-// own workstream, then returns a repository instance scoped and locked for
-// member, ready for the caller to read or write its questions. The caller
-// must unlock the returned repository's mu once done, whether or not this
-// returns an error. r must be the project's own repository.
 func (r *Repository) chiefTurnOn(ctx context.Context, agent string, scope coreadapter.Scope, member config.WorkstreamID, at time.Time) (*Repository, QueuedTurn, error) {
 	host := config.WorkstreamID(scope.Workstream)
 	hr, err := r.lockQuestionRead(host)
@@ -375,12 +364,6 @@ func (r *Repository) chiefTurnOn(ctx context.Context, agent string, scope coread
 	return tr, turn, nil
 }
 
-// chiefQuestionScope resolves id to the member workstream a chief-of-staff
-// tool names, with id's own local form, validates that scope is its active
-// turn, and returns a repository instance scoped and locked for that
-// member, ready for the caller to read or write its questions. The caller
-// must unlock target.mu once done, whether or not it returns an error.
-// r must be the project's own repository.
 func (r *Repository) chiefQuestionScope(ctx context.Context, agent string, scope coreadapter.Scope, id string, at time.Time) (target *Repository, localID string, turn QueuedTurn, err error) {
 	member, localID, err := r.ChiefQuestionTarget(config.WorkstreamID(scope.Workstream), id)
 	if err != nil {
@@ -462,8 +445,7 @@ func (r *Repository) AnswerQuestionJudged(ctx context.Context, agent string, sco
 // EscalationRequest is what the chief of staff sends the owner for one or
 // several open questions. Section cites the spec or plan passage in
 // tension and Conflict states the tension itself: a worker's escalated
-// question is structured with both, plus Options and a Recommendation
-// (spec#17).
+// question is structured with both, plus Options and a Recommendation.
 type EscalationRequest struct {
 	Questions      []string
 	Rephrasing     string
@@ -479,16 +461,13 @@ type EscalationRequest struct {
 // escalation, whose batch ID it returns, and the batch takes the project's
 // next inbox number, once, however many workstreams it spans. Every id
 // names a question of the turn's own workstream when unqualified, or
-// "<workstream>:<id>" one of any other member of the shared workgroup;
-// ChiefQuestionTarget already refuses a workstream outside it, so a batch
-// can span only members of one workgroup. Recording spans one commit per
-// distinct workstream the batch touches: every question is checked eligible,
+// "<workstream>:<id>" one of any other member of the shared workgroup. A
+// batch spans only members of one workgroup. Recording takes one commit per
+// distinct workstream the batch touches. Every question is checked eligible,
 // and the inbox number reserved, before any of them is written, so a
-// refused batch wastes no number and writes nothing; a crash after some of
-// those commits is not retried by this call, but its own questions keep
-// their escalation, and run() with the same idempotent action, as every
-// caller of this tool already does, must not call it a second time for
-// questions it already escalated. A turn of another role fails. Unless
+// refused batch wastes no number and writes nothing. After a crash between
+// those commits, the questions already written keep their escalation and the
+// caller must not escalate them again. A turn of another role fails. Unless
 // every question is open, none is escalated and the request is refused
 // with *QuestionRefused.
 func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope coreadapter.Scope, req EscalationRequest, at time.Time) (string, error) {
@@ -530,9 +509,6 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 			distinct = append(distinct, m)
 		}
 	}
-	// Every question of every workstream the batch touches is checked
-	// eligible before the inbox number is reserved, so a refused batch
-	// never wastes one.
 	for _, member := range distinct {
 		if err := func() error {
 			mr, _, err := project.chiefTurnOn(ctx, agent, scope, member, at)
@@ -562,10 +538,6 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 			return "", err
 		}
 	}
-	// The project's inbox number is reserved before any workstream's own
-	// commit, in the project's own trace: a crash between the
-	// two leaves the number unused, never reused, and the escalation is
-	// retried with a freshly reserved one.
 	inbox, err := project.reserveInboxNumber(ctx)
 	if err != nil {
 		return "", err
@@ -573,10 +545,6 @@ func (r *Repository) EscalateQuestions(ctx context.Context, agent string, scope 
 	batch := "escalation_" + locals[0]
 	escalation := &Escalation{Batch: batch, Inbox: inbox, Questions: slices.Clone(locals), Section: req.Section, Conflict: req.Conflict, Blocked: req.Blocked, Options: slices.Clone(req.Options), Recommendation: req.Recommendation}
 	if len(distinct) > 1 {
-		// Workstreams is recorded only for a batch that genuinely spans more
-		// than one of the workgroup's members, so a single-workstream
-		// escalation's record is byte-identical to one from before
-		// cross-workstream batches existed.
 		escalation.Workstreams = slices.Clone(members)
 	}
 	for _, member := range distinct {

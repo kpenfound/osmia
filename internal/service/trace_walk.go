@@ -10,7 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
@@ -19,9 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// errTraceNotFound reports a criterion, unit or commit the workstream's trace
-// does not know.
-var errTraceNotFound = errors.New("not in the workstream trace")
+var ErrTraceNotFound = errors.New("not in the workstream trace")
 
 // The states of a link a trace walk could not follow. LinkUnavailable is a
 // link the trace should hold by now, or one a record names, that it does not
@@ -34,26 +35,23 @@ const (
 	LinkNotCreated  = "not-created"
 )
 
-// The kinds of a TraceRuling.
 const (
-	rulingRatification = "ratification"
+	RulingRatification = "ratification"
 	rulingContested    = "contested"
 	rulingQuestion     = "question"
 )
 
-// The sources of a unit: the sealed plan or a final-review follow-up.
 const (
-	unitFromPlan     = "plan"
+	UnitFromPlan     = "plan"
 	unitFromFollowup = "followup"
 )
 
-// The roles a record gives a commit.
 const (
 	commitLanding      = "landing"
-	commitCandidate    = "candidate"
+	CommitCandidate    = "candidate"
 	commitBase         = "base"
 	commitRebase       = "unit-rebase"
-	commitChange       = "unit-change"
+	CommitChange       = "unit-change"
 	commitSealBase     = "seal-base"
 	commitFinalRebase  = "final-rebase"
 	commitFinalReview  = "final-review"
@@ -62,21 +60,15 @@ const (
 	commitPublishedRev = "publication-reviewed"
 )
 
-// traceWalk is one read of a workstream's trace. Every walk reads the
-// records once, so a walk sees one consistent revision of the trace, and
-// records nothing.
 type traceWalk struct {
 	project config.ProjectID
 	stream  config.WorkstreamID
 	records []trace.Record
 	docs    []trace.Document
-	// states holds the state of every workflow subject, and entered the
-	// transition that last moved it.
 	states  map[string]string
 	entered map[string]trace.Transition
 	feature string
 	roles   map[string]string
-	// seal is the latest seal, with the spec and plan revisions it pins.
 	seal    *TraceSeal
 	sealed  seal.Seal
 	spec    plan.Spec
@@ -86,8 +78,6 @@ type traceWalk struct {
 	gaps    []TraceGap
 }
 
-// walkUnit is a unit of the sealed plan or a follow-up, with the document
-// revision that defines it.
 type walkUnit struct {
 	unit   plan.Unit
 	source string
@@ -129,15 +119,10 @@ func loadTraceWalk(repository *trace.Repository, stream config.WorkstreamID) (*t
 	return w, nil
 }
 
-// terminal reports whether the workstream is delivered or abandoned, so
-// nothing more is produced for it.
 func (w *traceWalk) terminal() bool {
 	return w.feature == AbandonedState || w.feature == DeliveredState
 }
 
-// state returns the state of a link that is not there, from how far the
-// work that produces it has come: progress has reached done when the link
-// should exist, or producing when the work under way produces it.
 func (w *traceWalk) state(progress, producing, done int) string {
 	switch {
 	case progress >= done:
@@ -148,7 +133,6 @@ func (w *traceWalk) state(progress, producing, done int) string {
 	return LinkNotCreated
 }
 
-// featureProgress orders the feature states up to delivery.
 func featureProgress(state string) int {
 	switch state {
 	case RatifiedState:
@@ -163,8 +147,6 @@ func featureProgress(state string) int {
 	return 0
 }
 
-// loadSeal reads the latest seal, the spec and plan revisions it pins and
-// the follow-ups, and records a gap for each it cannot read.
 func (w *traceWalk) loadSeal() {
 	latest, ok := w.latest(seal.DocumentID)
 	if !ok {
@@ -194,7 +176,7 @@ func (w *traceWalk) loadSeal() {
 			w.gaps = append(w.gaps, unreadable(d, "", err))
 		}
 		for _, u := range p.Units {
-			w.units = append(w.units, walkUnit{unit: u, source: unitFromPlan, def: d})
+			w.units = append(w.units, walkUnit{unit: u, source: UnitFromPlan, def: d})
 		}
 	}
 	for _, d := range w.docs {
@@ -222,7 +204,6 @@ func orNone(s string) string {
 	return s
 }
 
-// latest returns the latest revision of the document with the given ID.
 func (w *traceWalk) latest(id string) (trace.Document, bool) {
 	var found trace.Document
 	for _, d := range w.docs {
@@ -233,7 +214,6 @@ func (w *traceWalk) latest(id string) (trace.Document, bool) {
 	return found, found.Revision > 0
 }
 
-// document returns the given revision of the document with the given ID.
 func (w *traceWalk) document(id string, revision int) (trace.Document, bool) {
 	i := slices.IndexFunc(w.docs, func(d trace.Document) bool { return d.ID == id && d.Revision == revision })
 	if i < 0 {
@@ -242,8 +222,6 @@ func (w *traceWalk) document(id string, revision int) (trace.Document, bool) {
 	return w.docs[i], true
 }
 
-// revisions returns every revision of the document with the given ID in
-// recorded order.
 func (w *traceWalk) revisions(id string) []trace.Document {
 	var out []trace.Document
 	for _, d := range w.docs {
@@ -254,8 +232,6 @@ func (w *traceWalk) revisions(id string) []trace.Document {
 	return out
 }
 
-// revisionOf reads a "<path> revision <n>" reference as reviews and
-// landings record it.
 func revisionOf(s string) (string, int, bool) {
 	path, n, ok := strings.Cut(s, " revision ")
 	revision, err := strconv.Atoi(n)
@@ -325,7 +301,6 @@ func recordHeader(r trace.Record) trace.Header {
 	return trace.Header{}
 }
 
-// findUnit returns the unit of the sealed plan or the follow-ups.
 func (w *traceWalk) findUnit(id string) (walkUnit, bool) {
 	i := slices.IndexFunc(w.units, func(u walkUnit) bool { return u.unit.ID == id })
 	if i < 0 {
@@ -334,7 +309,6 @@ func (w *traceWalk) findUnit(id string) (walkUnit, bool) {
 	return w.units[i], true
 }
 
-// criterionText returns the criterion's text in the given spec.
 func criterionText(spec plan.Spec, citation string) (string, bool) {
 	n, ok := plan.ParseCitation(citation)
 	if !ok {
@@ -344,9 +318,6 @@ func criterionText(spec plan.Spec, citation string) (string, bool) {
 	return c.Text, ok
 }
 
-// unitProgress orders a unit's states by how far the unit has come. A
-// waiting unit is as far as the state it waits in; a checking unit, whose
-// report awaits its verdict, is as far as a reviewing one.
 func (w *traceWalk) unitProgress(unit string) int {
 	subject := trace.UnitSubject(unit)
 	state := w.states[subject]
@@ -368,25 +339,20 @@ func (w *traceWalk) unitProgress(unit string) int {
 	return 0
 }
 
-// traceUnit walks one unit of the workstream.
-func traceUnit(repository *trace.Repository, stream config.WorkstreamID, unit string) (UnitTrace, error) {
+func TraceUnit(repository *trace.Repository, stream config.WorkstreamID, unit string) (UnitTrace, error) {
 	w, err := loadTraceWalk(repository, stream)
 	if err != nil {
 		return UnitTrace{}, err
 	}
 	u, ok := w.unit(unit, "")
 	if !ok {
-		return UnitTrace{}, fmt.Errorf("unit %s: %w", unit, errTraceNotFound)
+		return UnitTrace{}, fmt.Errorf("unit %s: %w", unit, ErrTraceNotFound)
 	}
-	// The seal and the revisions it pins define the unit.
 	u.Gaps = append(slices.Clone(w.gaps), u.Gaps...)
 	u.Complete = len(u.Gaps) == 0
 	return u, nil
 }
 
-// unit builds the unit's walk, its criteria restricted to one when
-// criterion is not empty. It reports false for a unit that neither the
-// sealed plan nor a follow-up defines and no record names.
 func (w *traceWalk) unit(id, criterion string) (UnitTrace, bool) {
 	t := UnitTrace{Project: w.project, Workstream: w.stream, Feature: w.feature, Unit: id, State: w.states[trace.UnitSubject(id)], Acceptance: []string{}, Criteria: []TraceCriterion{}, DependsOn: []string{}, Reports: []TraceReport{}, Reviews: []TraceReview{}, Rulings: []TraceRuling{}, Rebases: []TraceRebase{}, Landings: []TraceLanding{}, Turns: []TraceTurn{}, History: []TraceEvent{}, Gaps: []TraceGap{}}
 	defined, ok := w.findUnit(id)
@@ -465,8 +431,6 @@ func unreadable(d trace.Document, unit string, err error) TraceGap {
 	return TraceGap{Link: fmt.Sprintf("%s revision %d", d.Path, d.Revision), Unit: unit, State: LinkUnavailable, Reason: fmt.Sprintf("the recorded revision cannot be read: %v", err)}
 }
 
-// reviewOf reads a review.json revision. It reports false for a revision
-// that records only the candidate identity a review was asked for.
 func reviewOf(d trace.Document) (TraceReview, bool, error) {
 	var r UnitReviewResult
 	if err := json.Unmarshal([]byte(d.Content), &r); err != nil {
@@ -475,7 +439,7 @@ func reviewOf(d trace.Document) (TraceReview, bool, error) {
 	if r.Turn == "" {
 		return TraceReview{}, false, nil
 	}
-	review := TraceReview{Ref: refOf(d), Turn: r.Turn, Decision: r.Verdict.Decision, Report: r.Identity.Report, Seal: r.Identity.Seal, Candidate: r.Identity.Candidate, DiffSHA256: r.Identity.DiffSHA256, Bounces: r.Bounces, Summary: r.Verdict.Summary, Findings: []ReviewFinding{}}
+	review := TraceReview{Ref: refOf(d), Turn: r.Turn, Decision: r.Verdict.Decision, Report: r.Identity.Report, Seal: r.Identity.Seal, Candidate: r.Identity.Candidate, DiffSHA256: r.Identity.DiffSHA256, Bounces: r.Bounces, Summary: r.Verdict.Summary, Findings: []api.ReviewFinding{}}
 	review.Findings = append(review.Findings, r.Verdict.Findings...)
 	return review, true, nil
 }
@@ -488,9 +452,6 @@ func landingOf(d trace.Document) (TraceLanding, error) {
 	return TraceLanding{Ref: refOf(d), UnitLanding: l}, nil
 }
 
-// unitRulings returns the owner's rulings on the unit's contested
-// candidates and the answers to the questions asked about the unit, in
-// recorded order.
 func (w *traceWalk) unitRulings(unit string) []TraceRuling {
 	out := []TraceRuling{}
 	prefix := trace.UnitSubject(unit) + "-ruling-"
@@ -500,7 +461,7 @@ func (w *traceWalk) unitRulings(unit string) []TraceRuling {
 			if v.Unit != unit || !strings.HasPrefix(v.ID, prefix) {
 				continue
 			}
-			var c ContestedRuling
+			var c api.ContestedRuling
 			ruling := TraceRuling{Kind: rulingContested, Ref: refOf(v), Unit: unit}
 			if err := json.Unmarshal([]byte(v.Content), &c); err == nil {
 				ruling.Decision, ruling.Owner = c.Decision, c.Note
@@ -527,8 +488,6 @@ func (w *traceWalk) questionRuling(v trace.Ruling) TraceRuling {
 	return ruling
 }
 
-// unitTurns collects the turns requested for the unit, their responses
-// and the cost recorded for them.
 func (w *traceWalk) unitTurns(t *UnitTrace) {
 	index := map[string]int{}
 	for _, r := range w.records {
@@ -561,8 +520,6 @@ func (w *traceWalk) unitTurns(t *UnitTrace) {
 	}
 }
 
-// unitHistory lists every record of the unit in time order; records at the
-// same time keep their recorded order.
 func (w *traceWalk) unitHistory(t *UnitTrace) {
 	for _, r := range w.records {
 		h := recordHeader(r)
@@ -605,10 +562,6 @@ func (w *traceWalk) unitHistory(t *UnitTrace) {
 	sort.SliceStable(t.History, func(i, j int) bool { return t.History[i].At.Before(t.History[j].At) })
 }
 
-// unitGaps returns the links of the unit's chain that are missing: a
-// report, a verdict on the latest report, a landing of the latest approval,
-// and every revision a review or landing names that the trace does not
-// hold.
 func (w *traceWalk) unitGaps(t UnitTrace) []TraceGap {
 	var gaps []TraceGap
 	progress := w.unitProgress(t.Unit)
@@ -651,8 +604,6 @@ func approvalName(r TraceReview) string {
 	return fmt.Sprintf("%s revision %d", r.Ref.Path, r.Ref.Revision)
 }
 
-// latestApproval returns the latest satisfactory verdict when it is the
-// unit's latest verdict.
 func (w *traceWalk) latestApproval(reviews []TraceReview) *TraceReview {
 	if len(reviews) == 0 || reviews[len(reviews)-1].Decision != "satisfactory" {
 		return nil
@@ -660,7 +611,6 @@ func (w *traceWalk) latestApproval(reviews []TraceReview) *TraceReview {
 	return &reviews[len(reviews)-1]
 }
 
-// approval returns the satisfactory verdict a landing names.
 func (w *traceWalk) approval(unit, name string) (TraceReview, bool) {
 	path, revision, ok := revisionOf(name)
 	d, found := w.document(reviewDocument(unit), revision)
@@ -671,9 +621,7 @@ func (w *traceWalk) approval(unit, name string) (TraceReview, bool) {
 	return review, ok && err == nil && review.Decision == "satisfactory"
 }
 
-// traceCriterion walks one criterion of the workstream's sealed spec, cited
-// as spec#<n>.
-func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, criterion string) (CriterionTrace, error) {
+func WalkCriterion(repository *trace.Repository, stream config.WorkstreamID, criterion string) (CriterionTrace, error) {
 	if _, ok := plan.ParseCitation(criterion); !ok {
 		return CriterionTrace{}, fmt.Errorf("criterion %q is not cited as spec#<n>", criterion)
 	}
@@ -689,7 +637,7 @@ func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, cr
 	if w.specDoc != nil {
 		text, ok := criterionText(w.spec, criterion)
 		if !ok {
-			return CriterionTrace{}, fmt.Errorf("criterion %s of spec.md revision %d: %w", criterion, w.specDoc.Revision, errTraceNotFound)
+			return CriterionTrace{}, fmt.Errorf("criterion %s of spec.md revision %d: %w", criterion, w.specDoc.Revision, ErrTraceNotFound)
 		}
 		ref := refOf(*w.specDoc)
 		t.Text, t.Spec = text, &ref
@@ -721,7 +669,7 @@ func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, cr
 	delivery, report, gaps := w.delivery()
 	t.Delivery, t.Gaps = delivery, append(t.Gaps, gaps...)
 	if report != nil {
-		i := slices.IndexFunc(report.Criteria, func(c FinalCriterion) bool { return c.Criterion == criterion })
+		i := slices.IndexFunc(report.Criteria, func(c api.FinalCriterion) bool { return c.Criterion == criterion })
 		if i >= 0 {
 			t.Final = &report.Criteria[i]
 		} else if report.Outcome == finalReviewed {
@@ -736,8 +684,6 @@ func traceCriterion(repository *trace.Repository, stream config.WorkstreamID, cr
 	return t, nil
 }
 
-// ratification returns the owner's ratification of the revisions the seal
-// pins.
 func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 	path := shed.RatificationPath(w.sealed.Round)
 	for _, d := range slices.Backward(w.docs) {
@@ -748,25 +694,16 @@ func (w *traceWalk) ratification() (TraceRuling, *TraceGap) {
 		if err != nil || r.Revision != w.sealed.Revision {
 			break
 		}
-		return TraceRuling{Kind: rulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
+		return TraceRuling{Kind: RulingRatification, Ref: refOf(d), Decision: "ratified", DecidedBy: trace.Decider(r.DecidedBy, trace.DecidedByOwner), Judgment: r.Judgment, Owner: fmt.Sprintf("spec.md revision %d and plan.json revision %d", r.Revision.Spec, r.Revision.Plan)}, nil
 	}
 	return TraceRuling{}, &TraceGap{Link: path, State: LinkUnavailable, Reason: fmt.Sprintf("seal %d names round %d and the trace holds no ratification of spec.md revision %d and plan.json revision %d there", w.sealed.Seal, w.sealed.Round, w.sealed.Revision.Spec, w.sealed.Revision.Plan)}
 }
 
-// delivery follows the delivery chain back from the latest publication:
-// the approval revision it publishes and the final report revision that
-// approval names. Without a publication it starts from the latest approval,
-// and without one from the latest final report. A workstream the owner
-// merged into upstream needs neither a publication nor an approval. It
-// returns the final report the chain reaches.
 func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 	var gaps []TraceGap
 	pending := func(link, reason string) {
 		gaps = append(gaps, TraceGap{Link: link, State: w.state(featureProgress(w.feature), 3, 4), Reason: fmt.Sprintf("the workstream is %s and %s", orNone(w.feature), reason)})
 	}
-	// follow returns the document the chain names, or the latest revision
-	// when the chain names none. It reports false when the chain names a
-	// revision the trace does not hold, or holds unreadable content.
 	follow := func(id, path string, revision int, by string, v any) (trace.Document, bool, bool) {
 		var d trace.Document
 		var found bool
@@ -843,13 +780,7 @@ func (w *traceWalk) delivery() (*TraceDelivery, *FinalReport, []TraceGap) {
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-// traceCommit walks one commit back to the records that name it. message
-// is the commit's message, or empty when it is not known: its
-// Osmia-Operation trailer finds the landing or publication of a commit that
-// was rebased or squashed after it was recorded. change is the change ID the
-// commit carries on Jujutsu, or empty: it finds the unit whose change the
-// commit holds, whichever rebase or snapshot of the unit it is.
-func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message, change string) (CommitTrace, error) {
+func TraceCommit(repository *trace.Repository, stream config.WorkstreamID, commit, message, change string) (CommitTrace, error) {
 	if !commitPattern.MatchString(commit) {
 		return CommitTrace{}, fmt.Errorf("commit %q is not a full commit ID", commit)
 	}
@@ -857,7 +788,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 	if err != nil {
 		return CommitTrace{}, err
 	}
-	t := CommitTrace{Project: w.project, Workstream: stream, Feature: w.feature, Commit: commit, Operation: operationTrailer(message), Records: []CommitRecord{}, Landings: []CommitLanding{}, Gaps: []TraceGap{}}
+	t := CommitTrace{Project: w.project, Workstream: stream, Feature: w.feature, Commit: commit, Operation: OperationTrailer(message), Records: []CommitRecord{}, Landings: []CommitLanding{}, Gaps: []TraceGap{}}
 	record := func(role, unit string, d trace.Document) {
 		t.Records = append(t.Records, CommitRecord{Role: role, Unit: unit, Ref: refOf(d)})
 	}
@@ -869,8 +800,8 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			if s, err := seal.Parse([]byte(d.Content)); err == nil && s.Base.Commit == commit {
 				record(commitSealBase, "", d)
 			}
-		case finalRebaseDocument:
-			var r FinalRebase
+		case delivery.FinalRebaseDocument:
+			var r delivery.FinalRebase
 			if json.Unmarshal([]byte(d.Content), &r) == nil && r.Commit == commit {
 				record(commitFinalRebase, "", d)
 				delivered = true
@@ -907,7 +838,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			var r UnitReport
 			if json.Unmarshal([]byte(d.Content), &r) == nil {
 				if r.Candidate == commit {
-					record(commitCandidate, d.Unit, d)
+					record(CommitCandidate, d.Unit, d)
 				} else if r.Base == commit {
 					record(commitBase, d.Unit, d)
 				}
@@ -915,7 +846,7 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 		case reviewDocument(d.Unit):
 			if r, ok, _ := reviewOf(d); ok {
 				if r.Candidate.Revision == commit {
-					record(commitCandidate, d.Unit, d)
+					record(CommitCandidate, d.Unit, d)
 				} else if r.Candidate.BaseRevision == commit {
 					record(commitBase, d.Unit, d)
 				}
@@ -925,10 +856,10 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			if json.Unmarshal([]byte(d.Content), &r) == nil && (r.Commit == commit || t.Operation != "" && r.Operation == t.Operation) {
 				record(commitRebase, d.Unit, d)
 			}
-		case changeDocument(d.Unit):
-			var c UnitChange
+		case execution.ChangeDocument(d.Unit):
+			var c execution.UnitChange
 			if change != "" && json.Unmarshal([]byte(d.Content), &c) == nil && c.Change == change {
-				record(commitChange, d.Unit, d)
+				record(CommitChange, d.Unit, d)
 			}
 		case landingDocument(d.Unit):
 			l, err := landingOf(d)
@@ -941,22 +872,21 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 				t.Landings = append(t.Landings, w.commitLanding(l, &t.Gaps))
 				landed[d.Unit+"/"+strconv.Itoa(d.Revision)] = true
 			case l.Candidate == commit:
-				record(commitCandidate, d.Unit, d)
+				record(CommitCandidate, d.Unit, d)
 			case l.Base == commit:
 				record(commitBase, d.Unit, d)
 			}
 		}
 	}
 	if len(t.Records) == 0 {
-		return CommitTrace{}, fmt.Errorf("commit %s: %w", commit, errTraceNotFound)
+		return CommitTrace{}, fmt.Errorf("commit %s: %w", commit, ErrTraceNotFound)
 	}
-	// A candidate leads to the landing of that candidate, if it landed.
 	followed := map[string]bool{}
 	for _, l := range t.Landings {
 		followed[l.Unit] = true
 	}
 	for _, r := range t.Records {
-		if r.Role != commitCandidate || followed[r.Unit] {
+		if r.Role != CommitCandidate || followed[r.Unit] {
 			continue
 		}
 		followed[r.Unit] = true
@@ -973,7 +903,6 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 			t.Gaps = append(t.Gaps, TraceGap{Link: "landing of candidate " + commit, Unit: r.Unit, State: w.state(w.unitProgress(r.Unit), 4, 5), Reason: fmt.Sprintf("unit %s is %s and the candidate has not landed", r.Unit, orNone(w.states[trace.UnitSubject(r.Unit)]))})
 		}
 	}
-	// A delivery commit leads to the latest landing of every unit.
 	if delivered {
 		delivery, _, gaps := w.delivery()
 		t.Delivery = delivery
@@ -1003,19 +932,15 @@ func traceCommit(repository *trace.Repository, stream config.WorkstreamID, commi
 	return t, nil
 }
 
-// operationTrailer returns the Osmia-Operation trailer of a commit message.
-func operationTrailer(message string) string {
+func OperationTrailer(message string) string {
 	for line := range strings.SplitSeq(message, "\n") {
-		if value, ok := strings.CutPrefix(line, landingTrailer+": "); ok {
+		if value, ok := strings.CutPrefix(line, execution.LandingTrailer+": "); ok {
 			return strings.TrimSpace(value)
 		}
 	}
 	return ""
 }
 
-// commitLanding follows a landing back to its approval, the report the
-// approval reviewed and the revisions the landing records. It never
-// resolves a revision the landing does not name.
 func (w *traceWalk) commitLanding(l TraceLanding, gaps *[]TraceGap) CommitLanding {
 	c := CommitLanding{Unit: l.Unit, Landing: l, Criteria: []TraceCriterion{}, Rulings: w.unitRulings(l.Unit)}
 	gap := func(link, reason string) {
@@ -1071,7 +996,6 @@ func (w *traceWalk) commitLanding(l TraceLanding, gaps *[]TraceGap) CommitLandin
 	return c
 }
 
-// contestDecider returns who ruled on a contested unit from a ruling's By.
 func contestDecider(by string) string {
 	switch by {
 	case "", "owner":
@@ -1082,9 +1006,6 @@ func contestDecider(by string) string {
 	return by
 }
 
-// questionDecider returns who decided a question's ruling when the record
-// names no decider: the owner for an escalated question's ruling, the chief
-// of staff for its own answer.
 func questionDecider(v trace.Ruling) string {
 	if v.Decision == trace.DecisionRuling {
 		return trace.DecidedByOwner

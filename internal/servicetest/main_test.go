@@ -8,7 +8,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// serial: configures process-wide shuffle defaults before tests run.
 func TestMain(m *testing.M) {
 	if !flag.Parsed() {
 		flag.Parse()

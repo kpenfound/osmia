@@ -60,7 +60,7 @@ func TestReviewBundlePinsCandidateAndPersistsIdentity(t *testing.T) {
 	if identity.Matches(returned) {
 		t.Fatal("identity accepted another candidate")
 	}
-	cmd := exec.Command("git", "-C", f.cfg.Project.Clone, "update-ref", "refs/heads/"+unitBranch(stream, "resume"), identity.Candidate.BaseRevision)
+	cmd := exec.Command("git", "-C", f.cfg.Project.Clone, "update-ref", "refs/heads/"+UnitBranch(stream, "resume"), identity.Candidate.BaseRevision)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("move unit branch: %s: %v", out, err)
 	}
@@ -74,7 +74,7 @@ func TestReviewBundlePinsCandidateAndPersistsIdentity(t *testing.T) {
 	}
 	n := 0
 	for _, d := range docs {
-		if d.ID == reviewDocument("resume") {
+		if d.ID == ReviewDocument("resume") {
 			n++
 			var stored UnitReviewIdentity
 			if err := json.Unmarshal([]byte(d.Content), &stored); err != nil || stored != identity {
@@ -96,7 +96,7 @@ func TestReviewBundleMissingCandidateFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, d := range docs {
-		if d.ID != reportDocument("resume") {
+		if d.ID != ReportDocument("resume") {
 			continue
 		}
 		var report UnitReport
@@ -106,7 +106,7 @@ func TestReviewBundleMissingCandidateFailsClosed(t *testing.T) {
 		report.Candidate = ""
 		content, _ := json.Marshal(report)
 		d.Header.Revision++
-		d.Header.Cause = checkingTransitionID("resume", 1)
+		d.Header.Cause = CheckingTransitionID("resume", 1)
 		d.Content = string(content)
 		if err := repo.RecordDocuments(context.Background(), []trace.Document{d}); err != nil {
 			t.Fatal(err)
@@ -117,12 +117,12 @@ func TestReviewBundleMissingCandidateFailsClosed(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "lacks the unit, candidate") {
 		t.Fatalf("missing candidate: %v", err)
 	}
-	state, err := repo.Workflow(stream, reviewBlockedSubject("resume"))
+	state, err := repo.Workflow(stream, ReviewBlockedSubject("resume"))
 	if err != nil || state.Value == "" {
 		t.Fatalf("missing recorded error: %+v %v", state, err)
 	}
 	for _, d := range docs {
-		if d.ID == reviewDocument("resume") {
+		if d.ID == ReviewDocument("resume") {
 			t.Fatal("missing evidence recorded a review identity")
 		}
 	}

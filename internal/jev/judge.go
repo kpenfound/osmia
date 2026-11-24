@@ -1,8 +1,8 @@
 // Package jev asks Jev, TypeSafe's System One model, the bounded judgments of
 // Osmia's turns, and owns what Osmia does with them: judgment identity, trace
 // records, reuse after a restart, acceptance thresholds and ledger costs.
-// agentcore's jev sends the requests, with retries,
-// cool-down and status. Nothing here runs on the scheduling path.
+// agentcore's jev sends the requests, with retries, cool-down and status.
+// Nothing here runs on the scheduling path.
 package jev
 
 import (
@@ -25,13 +25,8 @@ import (
 // Role is the ledger role of Jev's costs.
 const Role = "jev"
 
-// maxAttempts bounds how many times one judgment is started. An attempt
-// interrupted before its result was recorded leaves only its start; the
-// judgment then starts again, until this many have been interrupted.
 const maxAttempts = 2
 
-// maxRecordedRequest bounds the request body kept in a judgment record; a
-// larger one is kept as its digest and size.
 const maxRecordedRequest = 64 << 10
 
 var taskName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
@@ -182,8 +177,6 @@ type Judge struct {
 	failure *transitionFailure
 }
 
-// core returns the agentcore Judge that sends j's requests, built from j's
-// fields on first use.
 func (j *Judge) core() *corejev.Judge {
 	j.once.Do(func() {
 		j.asker = &corejev.Judge{Config: func() corejev.Settings { return j.Config().Settings() }, Provider: j.Provider, Getenv: j.Getenv, Now: j.Now}
@@ -261,8 +254,6 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 	}
 	w := writer{repo: repo, judgment: judgment, id: id, revision: revision, now: j.now}
 	attempt := latest.Attempt + 1
-	// Writes outlive the turn's cancellation, so an answer that arrived is
-	// recorded with its cost.
 	record := context.WithoutCancel(ctx)
 	finish := func(r Record) Decision {
 		r.Attempt = attempt
@@ -282,9 +273,6 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 		r.State, r.Reason, r.Detail = StateFallback, ReasonRejected, fmt.Sprintf("request is %d bytes, above the limit of %d", len(body), judgment.MaxBytes)
 		return finish(r)
 	}
-	// A judgment the provider cannot be asked now falls back without a
-	// started revision. A cool-down that begins after this check is
-	// recorded as the attempt's result instead.
 	switch status := j.core().Status(); {
 	case status.Mode == ModeUnconfigured:
 		r := base
@@ -303,7 +291,6 @@ func (j *Judge) Evaluate(ctx context.Context, repo *trace.Repository, judgment J
 
 	asked := j.core().Evaluate(ctx, judgment.Request)
 	if asked.Reason == ReasonCancelled {
-		// The turn ended; the start stays as an interrupted attempt.
 		return Decision{ID: id, Outcome: Fallback, Reason: ReasonCancelled, Detail: "turn ended during the judgment"}
 	}
 	r := base
@@ -340,7 +327,6 @@ func (r Record) decision(id string, recovered bool) Decision {
 	return d
 }
 
-// load returns the latest revision of a judgment record, or revision 0.
 func load(repo *trace.Repository, stream config.WorkstreamID, id string) (Record, int, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -375,7 +361,6 @@ func (w *writer) header(schema, id string, revision int) trace.Header {
 	return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: revision, Project: config.ProjectID(s.Project), Workstream: config.WorkstreamID(s.Workstream), Unit: s.Unit, At: w.now(), Actor: trace.Actor{Kind: "service", ID: Role}, Cause: w.judgment.Cause, Depth: w.judgment.Depth + 1}
 }
 
-// write records the next revision of the judgment.
 func (w *writer) write(ctx context.Context, r Record) error {
 	data, err := json.Marshal(r)
 	if err != nil {
@@ -389,8 +374,6 @@ func (w *writer) write(ctx context.Context, r Record) error {
 	return nil
 }
 
-// cost appends an attempt's usage to the ledger. It is recorded before the
-// result, so every recorded answer has its cost.
 func (w *writer) cost(ctx context.Context, attempt int, u systemone.Usage) error {
 	scope := w.judgment.Scope
 	scope.Role = Role

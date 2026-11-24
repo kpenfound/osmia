@@ -81,7 +81,6 @@ func TestImageRecords(t *testing.T) {
 	if err != nil || len(images) != 3 {
 		t.Fatalf("images %d: %v", len(images), err)
 	}
-	// Returning a record never exposes the cached byte slice to mutation.
 	images[0].Data[0] = 0
 	saved, err := r.ImageByKey(streamID, "png")
 	if err != nil || !bytes.Equal(saved.Data, pngBytes) {

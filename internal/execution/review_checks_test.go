@@ -21,18 +21,18 @@ func TestUnitReviewReadsThePinnedCandidate(t *testing.T) {
 	th, err := repo.Thread(stream, reviewerAgent("resume"))
 	must(t, err)
 	scope := coreadapter.Scope{Project: string(repo.Project()), Workstream: string(stream), Unit: "resume", Thread: th.Identity.ThreadID, Turn: th.Turns[0].Request.TurnID, Role: reviewerRole}
-	pinned, err := unitReviewerIdentity(repo, scope)
+	pinned, err := UnitReviewerIdentity(repo, scope)
 	must(t, err)
 	if pinned != identity {
 		t.Fatalf("review turn identity %+v, want %+v", pinned, identity)
 	}
 
-	w, _, err := newUnitWorkspaces(f.cfg, repo).open(ctx, stream, "resume")
+	w, _, err := NewUnitWorkspaces(f.cfg, repo).open(ctx, stream, "resume")
 	must(t, err)
 	must(t, os.WriteFile(filepath.Join(w.Path, masonWrote), []byte("unreviewed\n"), 0600))
-	demoGit(t, f.cfg.Project.Clone, "-C", f.cfg.Project.Clone, "update-ref", "refs/heads/"+unitBranch(stream, "resume"), identity.Candidate.BaseRevision)
+	demoGit(t, f.cfg.Project.Clone, "-C", f.cfg.Project.Clone, "update-ref", "refs/heads/"+UnitBranch(stream, "resume"), identity.Candidate.BaseRevision)
 
-	selection, err := unitReviewerSelection(ctx, f.cfg, repo, scope, coreadapter.ExecutionSettings{})
+	selection, err := UnitReviewerSelection(ctx, f.cfg, repo, scope, coreadapter.ExecutionSettings{})
 	must(t, err)
 	selected, err := os.ReadFile(filepath.Join(selection.Workspace.SourceDirectory, masonWrote))
 	must(t, err)

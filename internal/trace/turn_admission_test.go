@@ -24,8 +24,6 @@ func TestTurnAdmissionOrdersWithRetirement(t *testing.T) {
 			tx := transaction("draft-amendment", 0, "", "drafting", 0)
 			tx.Transition.Subject = "amendment_1"
 			transact(t, r, tx)
-			// The operation supplies the admission condition when delivering
-			// a queued request, including when it replays after a restart.
 			enqueue(t, r, "one")
 			admitted := WithTurnAdmission(ctx, streamID, "amendment_1", "drafting")
 			var claimed QueuedTurn
@@ -43,8 +41,6 @@ func TestTurnAdmissionOrdersWithRetirement(t *testing.T) {
 				t.Fatal(err)
 			}
 			if claimFirst {
-				// Retirement does not revoke a claim that won the lock, nor
-				// prevent its captured result from completing durably.
 				again, err := r.ClaimTurn(admitted, streamID, "mason", "claim", "/session", at)
 				if err != nil || !reflect.DeepEqual(again, claimed) {
 					t.Fatalf("claim replay: %+v %v", again, err)

@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/service"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,13 +20,13 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	names := map[config.ProjectID]string{project: "Dagger", otherProject: "Osmia"}
 	for _, p := range f.cfg.Projects {
 		p.Name = names[p.ID]
-		fixturekit.WriteProjectFile(t, filepath.Join(f.opts.Config.Root, "projects", string(p.ID), "config.toml"), p)
+		fixturekit.SaveProjectSettings(t, f.opts.Config.Root, p)
 	}
 	withWeb(t, f.opts, "127.0.0.1:0")
 	clone := filepath.Join(t.TempDir(), "client")
 	demoGit(t, filepath.Dir(clone), "init", "-q", clone)
 	s, c := start(t, f.opts)
-	_, err := c.AddProject(context.Background(), ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: clone})
+	_, err := c.AddProject(context.Background(), service.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: clone})
 	must(t, err)
 	cfg, err := c.Configuration(context.Background())
 	must(t, err)
@@ -62,15 +63,12 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 					t.Fatalf("%s choices: %v, want %v", action.name, got, choices)
 				}
 			}
-			// A subsequent global action must clear a previous project choice too.
 			p.Choose(view+` select[name=project]`, string(project))
 		}
 		p.Await("the form fits at phone width", `document.querySelector(`+quote(view+` form`)+`).getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth`)
 	}
 	p.OpenView("project-add")
 	p.AwaitText("#project-add-title", "Create project")
-	// The New menu is the only place that offers the create actions: the
-	// sidebar has no create buttons, and its ids belong to the menu items.
 	p.Await("the New menu holds every create action and the only Create project", `(() => {
 		const items = [...document.querySelectorAll('#create-menu button')].map(b => [b.id, b.dataset.open]);
 		return JSON.stringify(items) === JSON.stringify([['sidebar-new', 'handin'], ['sidebar-new-design', 'design-add'], ['sidebar-new-session', 'session-add'], ['', 'project-add']]) &&
@@ -81,7 +79,6 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	p.Click("#project-home")
 	p.Click(`[data-project="` + string(project) + `"] [data-project-action="projects"]`)
 	p.Await("the card's management entry opens project management", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
-	// Global create actions also ignore the workstream currently being viewed.
 	p.SelectWorkstream(f.streams[project])
 	p.Click("#new-workstream")
 	p.Click(`#create-menu [data-open="handin"]`)
@@ -108,7 +105,7 @@ func TestBrowserExploratorySessionUsesProjectNameAcrossSurfaces(t *testing.T) {
 	must(t, os.MkdirAll(filepath.Dir(upstream), 0700))
 	demoGit(t, filepath.Dir(clone), "clone", "-q", "--bare", "--no-hardlinks", second, upstream)
 	demoGit(t, filepath.Dir(clone), "-C", second, "remote", "add", "upstream", upstream)
-	added, err := c.AddProject(ctx, ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
+	added, err := c.AddProject(ctx, service.ProjectAddRequest{Name: "client", Upstream: "owner/client", Clone: second})
 	must(t, err)
 	var repoID config.ProjectID
 	for _, repo := range added.Project.Repos {
@@ -142,7 +139,7 @@ func TestBrowserExploratorySessionUsesProjectNameAcrossSurfaces(t *testing.T) {
 	p.AwaitText("#session-meta [data-field=project]", label)
 	p.Click("#project-home")
 	p.AwaitText(card+` [data-sessions=session] [data-pane-workstream="`+string(id)+`"] [data-field=repo]`, label)
-	operation := s.StartActivity("repo-label", ActivityCheck, repoID, id, "checking the client")
+	operation := s.StartActivity("repo-label", service.ActivityCheck, repoID, id, "checking the client")
 	t.Cleanup(func() { operation.Finish(nil) })
 	p.Click("#activity-button")
 	p.AwaitText(`[data-activity="repo-label"] [data-field=where]`, label)

@@ -5,6 +5,7 @@ package daggerfixture
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"io"
 	"net/url"
 	"os"
@@ -17,16 +18,15 @@ import (
 )
 
 const (
-	PackageA = "dag+check://?check=test&go-module=.&go-package=a"
-	TestB    = "dag+check://?check=test&go-module=.&go-package=b&go-test=T1"
-	Version  = "dag+check://release/version"
-	Refusal  = "addresses with different filters require a union of workspace views; use shared filter flags"
+	TestB   = "dag+check://?check=test&go-module=.&go-package=b&go-test=T1"
+	Version = "dag+check://release/version"
+	Refusal = "addresses with different filters require a union of workspace views; use shared filter flags"
 )
 
 // Leaves contains two tests per package, including identical names in different
 // packages, so widening or a cross-product introduces observable extra checks.
 var Leaves = []string{
-	PackageA + "&go-test=T1", PackageA + "&go-test=T2",
+	fixturekit.SmartPackageA + "&go-test=T1", fixturekit.SmartPackageA + "&go-test=T2",
 	"dag+check://?check=test&go-module=.&go-package=b&go-test=T1",
 	"dag+check://?check=test&go-module=.&go-package=b&go-test=T2",
 	Version,
@@ -70,14 +70,14 @@ func Install(t *testing.T, config Config) CLI {
 	t.Helper()
 	dir := t.TempDir()
 	data, err := json.Marshal(config)
-	must(t, err)
+	fixturekit.Must(t, err)
 	path := filepath.Join(dir, "config.json")
-	must(t, os.WriteFile(path, data, 0600))
+	fixturekit.Must(t, os.WriteFile(path, data, 0600))
 	binary, err := os.Executable()
-	must(t, err)
+	fixturekit.Must(t, err)
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 	script := "#!/bin/sh\nexec " + quote(binary) + " -test.run=^TestDaggerFixtureProcess$ -- osmia-fake-dagger " + quote(path) + " \"$@\"\n"
-	must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(script), 0700))
+	fixturekit.Must(t, os.WriteFile(filepath.Join(dir, "dagger"), []byte(script), 0700))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	leaves := config.Leaves
 	if leaves == nil {
@@ -240,12 +240,6 @@ func run(c Config, log string, stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
-// Selected interprets an OR of addresses over Leaves, using URL query values
-// as OR within each dimension and AND between dimensions.
-func Selected(links []string) []string {
-	return selectedFrom(links, Leaves)
-}
-
 func selectedFrom(links, leaves []string) []string {
 	var selected []string
 	for _, leaf := range leaves {
@@ -280,7 +274,7 @@ func selectedFrom(links, leaves []string) []string {
 func (c CLI) Events(t *testing.T) []Event {
 	t.Helper()
 	f, err := os.Open(c.Log)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer f.Close()
 	var events []Event
 	decoder := json.NewDecoder(f)
@@ -290,7 +284,7 @@ func (c CLI) Events(t *testing.T) []Event {
 		if err == io.EOF {
 			return events
 		}
-		must(t, err)
+		fixturekit.Must(t, err)
 		events = append(events, e)
 	}
 }
@@ -322,12 +316,5 @@ func (c CLI) AssertRun(t *testing.T, links []string) {
 	slices.Sort(want)
 	if active != 0 || peak > 4 || !slices.Equal(ran, want) {
 		t.Fatalf("ran %q, want %q; active=%d peak=%d", ran, want, active, peak)
-	}
-}
-
-func must(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
 	}
 }

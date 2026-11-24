@@ -9,38 +9,19 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recoveryCard names where the owner decides a move that belongs to the owner
-// and has no card of its own.
 const recoveryCard = router.RecoveryCard
 
-// proposalHistory is how many earlier moves and rulings of a unit Jev reads
-// with a proposal.
 const proposalHistory = 10
 
-// proposalPolicy is how the chief of staff's policies set the default of a
-// proposal to move a unit, and the history Jev reads beside it.
 type proposalPolicy struct {
-	// Stay says the default leaves the unit where it is: the chief of staff
-	// raised the contest the unit sits in, or ruled on it already, so moving
-	// out of it is a departure from the default.
-	Stay bool
-	// Owner says the move is the owner's: the owner holds the contest the
-	// unit sits in, so the proposal waits on a pending owner decision.
-	Owner bool
-	// Why says, in a sentence, which policy applies.
+	Stay     bool
+	Owner    bool
 	Why      string
 	Facts    map[string]any
 	Records  []router.Entry
 	RaisedBy string
 }
 
-// unitProposalPolicy reads what bears on a proposal to move the unit to a
-// state: the unit's earlier moves and the chief of staff's earlier rulings,
-// which Jev reads as evidence, and the contest the unit sits in, if any. The
-// chief of staff rules a contest once and does not move a unit out of a contest
-// it raised itself; those set the default to leave the unit where it is. A
-// contest the owner raised by a move of its own is the owner's to move the unit
-// out of.
 func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, to string) (proposalPolicy, error) {
 	p := proposalPolicy{Facts: map[string]any{"state": state.Value, "target": to}}
 	docs, moves, err := recordedMoves(repo, stream, unit)
@@ -52,7 +33,7 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 		m := moves[i]
 		p.Records = append(p.Records, router.Entry{Kind: "earlier move", ID: docs[i].ID, Text: fmt.Sprintf("%s moved the unit from %s to %s: %s", m.By, m.From, m.To, m.Note)})
 	}
-	_, decisions, err := chiefDecisions(repo, stream, unit)
+	_, decisions, err := ChiefDecisions(repo, stream, unit)
 	if err != nil {
 		return p, err
 	}
@@ -64,15 +45,15 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 	if state.Value != UnitContested {
 		return p, nil
 	}
-	contest, contested, err := unitContest(repo, stream, unit)
+	contest, contested, err := UnitContest(repo, stream, unit)
 	if err != nil || !contested {
 		return p, err
 	}
 	switch {
-	case moveContest(contest, unit) && contest.Actor.Kind == ownerActor.Kind:
+	case MoveContest(contest, unit) && contest.Actor.Kind == ownerActor.Kind:
 		p.Owner, p.RaisedBy = true, "owner"
 		p.Why = fmt.Sprintf("the owner moved unit %s to contested and holds it", unit)
-	case moveContest(contest, unit):
+	case MoveContest(contest, unit):
 		p.Stay, p.RaisedBy = true, "chief of staff"
 		p.Why = fmt.Sprintf("the chief of staff raised the contest of unit %s itself, and by default does not move it out", unit)
 	case slices.ContainsFunc(decisions, func(d ChiefContestDecision) bool { return d.Contest == contest.ID }):
@@ -86,11 +67,9 @@ func unitProposalPolicy(repo *trace.Repository, stream config.WorkstreamID, unit
 	return p, nil
 }
 
-// unitDependenciesMerged reports whether every unit the unit depends on has
-// merged.
 func (s *Controller) unitDependenciesMerged(repo *trace.Repository, stream config.WorkstreamID, unit string) (bool, error) {
 	m := &masons{s: s, cfg: s.About(repo), repository: repo}
-	b, found, err := m.readSealed(stream)
+	b, found, err := m.ReadSealed(stream)
 	if err != nil || !found {
 		return false, err
 	}
@@ -102,14 +81,8 @@ func (s *Controller) unitDependenciesMerged(repo *trace.Repository, stream confi
 	return false, fmt.Errorf("the sealed plan has no unit %s", unit)
 }
 
-// unitStarted reports whether a unit in the state has started.
 func unitStarted(state string) bool { return state != UnitPlanned && state != UnitReady }
 
-// moveLegality returns why a unit in state from does not move to the target
-// now, or "". A unit that has not started moves to ready, once every unit it
-// depends on has merged, or back to planned while one has not, and its mason
-// starts it when it is ready; a started unit moves among the states of its work.
-// A target that leaves the unit where it is has no condition.
 func (s *Controller) moveLegality(repo *trace.Repository, stream config.WorkstreamID, unit, from, to string) (string, error) {
 	if to == TargetWait {
 		return "", nil
@@ -136,13 +109,6 @@ func (s *Controller) moveLegality(repo *trace.Repository, stream config.Workstre
 	return "", nil
 }
 
-// proposalInput returns the exit of the chief of staff's proposal to move the
-// unit to a state. The proposal is the default, except where a policy of the
-// chief of staff sets the default to leave the unit where it is: then the
-// proposed state is a departure that Jev may take at its bar. A proposal never
-// carries the authority to approve a candidate, and a contest the owner holds
-// is the owner's to move the unit out of; both leave the move as a pending
-// owner decision.
 func (s *Controller) proposalInput(repo *trace.Repository, stream config.WorkstreamID, unit string, state trace.WorkflowState, to, note, turn string, actor trace.Actor, cause string) (UnitExitInput, error) {
 	policy, err := unitProposalPolicy(repo, stream, unit, state, to)
 	if err != nil {

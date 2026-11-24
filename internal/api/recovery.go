@@ -15,7 +15,7 @@ const (
 	RecoveryIntent = "intent"
 )
 
-// The answer of a recovery card.
+// RecoveryApprove is the answer of a recovery card.
 const RecoveryApprove = "approve"
 
 // RecoveryMove is the exact move a recovery card pins: the subject the move

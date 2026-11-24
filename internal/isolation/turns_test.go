@@ -21,11 +21,6 @@ type leaseFunc func(context.Context) error
 
 func (f leaseFunc) Release(ctx context.Context) error { return f(ctx) }
 
-// provider stands in for a real workspace provider (git worktrees, a
-// Jujutsu workspace): it hands out one fixed directory instead of acquiring
-// and releasing a real VCS-backed workspace, so it leaves unverified that a
-// real provider's acquire/release boundary is exactly what internal/workspace
-// exercises against real git and jj.
 type provider struct {
 	directory          string
 	acquired, released int
@@ -36,15 +31,10 @@ func (p *provider) Acquire(_ context.Context, req a.WorkspaceRequest) (a.Workspa
 	return a.WorkspaceLease{Workspace: a.Workspace{Directory: p.directory, Access: req.Access}, Lease: leaseFunc(func(ctx context.Context) error { p.released++; return ctx.Err() })}, nil
 }
 
-// host stands in for the real MCP hosting server: it records each request
-// and returns a fixture token with no real network endpoint, so it leaves
-// unverified that the turn's backend actually reaches its server only over
-// the hosted endpoint and bearer token it was given.
 type host struct {
 	requests []a.HostRequest
 	released int
-	// url is the endpoint hosted turns reach; empty means a service name.
-	url string
+	url      string
 }
 
 func (h *host) Host(_ context.Context, req a.HostRequest) (a.HostedMCP, error) {
@@ -59,11 +49,6 @@ func (h *host) Host(_ context.Context, req a.HostRequest) (a.HostedMCP, error) {
 
 func fixture(t *testing.T, role, mode string) (*Turns, *provider, *host, *adaptertest.Engine, a.PreparedTurn) {
 	t.Helper()
-	// adaptertest.Engine stands in for the real model backend: it checks
-	// grants and requests with core's own enforcement code but launches no
-	// process, so it leaves unverified that a real sandboxed process (Claude,
-	// a container) actually honours the mounts, tools and environment Turns
-	// computed for it.
 	p, h, engine := &provider{directory: t.TempDir()}, &host{}, &adaptertest.Engine{}
 	put(t, p.directory, "src/file", "original")
 	put(t, p.directory, ".git", "gitdir: /service/vcs")
@@ -208,12 +193,9 @@ func TestTurnConfigurationCanOnlyNarrow(t *testing.T) {
 	if len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || engine.Requests[0].Grants.Mounts[0].Access == agent.ReadWrite {
 		t.Fatal("configuration widened grant")
 	}
-	// The host is told the turn's execution settings, which decide where the
-	// turn reaches its server from.
 	if want := (a.ExecutionSettings{Mode: "container", Image: "fixture-image"}); !reflect.DeepEqual(h.requests[0].Execution, want) {
 		t.Fatalf("host request execution %+v, want %+v", h.requests[0].Execution, want)
 	}
-	// Removing every requested tool also removes the MCP endpoint and token.
 	r.Select = func(ctx context.Context, scope a.Scope) (Selection, error) {
 		selected, err := selectBase(ctx, scope)
 		selected.Narrow = &a.Capabilities{}
@@ -293,8 +275,6 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 			if err == nil || !result.IsError {
 				t.Fatalf("failure lost: %+v %v", result, err)
 			}
-			// Capture retains output from any attempt that reached the runner,
-			// including boundary construction failures, but never from setup.
 			attempted := map[string]bool{"prepare": true, "policy": true, "pinned": true, "execute": true, "cancel": true, "capture": true}[mode]
 			if want := map[bool]int{true: 1}[attempted]; captures != want {
 				t.Fatalf("capture ran %d times after %s, want %d", captures, mode, want)
@@ -319,7 +299,6 @@ func TestServiceTurnFailureCleanup(t *testing.T) {
 	}
 }
 
-// tokenless hosts a turn's server without a bearer token.
 type tokenless struct{ *host }
 
 func (h tokenless) Host(ctx context.Context, req a.HostRequest) (a.HostedMCP, error) {
@@ -373,7 +352,6 @@ func TestScopedToolsFollowGrantForEachTurn(t *testing.T) {
 	if len(scopes) != 2 || scopes[0].Turn != "first" || scopes[1].Turn != "second" {
 		t.Fatalf("scoped tools not bound per turn: %+v", scopes)
 	}
-	// A read-only role keeps memory tools but loses workspace writes.
 	for i, req := range h.requests {
 		var names []string
 		for _, tool := range req.Tools {
@@ -393,8 +371,6 @@ func TestReviewerGrantIsReadOnly(t *testing.T) {
 	if grant.WriteFiles || grant.Execute || grant.Network {
 		t.Fatalf("reviewer capabilities %+v", grant)
 	}
-	// Effect filtering in Turns removes these tools even when a repository
-	// configuration grants their names.
 	r, _, h, _, input := fixture(t, "reviewer", "container")
 	r.Grants["reviewer"] = a.Capabilities{Tools: []string{"file_read", "file_write", "shell", "git"}, WriteFiles: true, Execute: true, Network: true}
 	if _, err := r.Run(context.Background(), input); err != nil {
@@ -417,24 +393,9 @@ func TestKnowledgeToolsFollowTheRole(t *testing.T) {
 	}
 }
 
-func TestRoleGrantRefusesTheRemovedLibrarianRole(t *testing.T) {
-	if _, err := roleGrant("librarian", a.Capabilities{Tools: []string{"file_read", "file_write"}}); err == nil {
-		t.Fatal("granted the removed librarian role")
-	}
-}
-
-func TestRoleGrantRefusesTheRemovedClassifierRole(t *testing.T) {
-	if _, err := roleGrant("classifier", a.Capabilities{}); err == nil {
-		t.Fatal("granted the removed classifier role")
-	}
-}
-
-// roleGrant's role switch no longer names a Beekeeper role: that service-wide
-// assistant is removed, and the role is unknown like any other it never
-// named.
-func TestRoleGrantRefusesTheRemovedBeekeeperRole(t *testing.T) {
-	if _, err := roleGrant("beekeeper", a.Capabilities{}); err == nil {
-		t.Fatal("roleGrant still recognizes the removed beekeeper role")
+func TestRoleGrantRefusesAnUnknownRole(t *testing.T) {
+	if _, err := roleGrant("unknown", a.Capabilities{}); err == nil {
+		t.Fatal("granted an unknown role")
 	}
 }
 
@@ -443,7 +404,6 @@ func TestChiefOfStaffToolsOnlyReachChiefOfStaff(t *testing.T) {
 		for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 			t.Run(name+"/"+role, func(t *testing.T) {
 				r, _, h, engine, input := fixture(t, role, "container")
-				// Every role is granted the tool by name; only one may hold it.
 				r.Grants[role] = a.Capabilities{Tools: []string{"file_read", name}}
 				handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
 				r.Scoped = func(_ context.Context, scope a.Scope) ([]a.Tool, error) {
@@ -476,8 +436,6 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, h, engine, input := fixture(t, role, "container")
-			// Every role is granted every question tool by name, and the
-			// service registers them all.
 			granted := append([]string{"ask", "amend"}, chief...)
 			r.Grants[role] = a.Capabilities{Tools: granted}
 			handle := func(context.Context, json.RawMessage) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
@@ -512,8 +470,6 @@ func TestQuestionToolsFollowTheRole(t *testing.T) {
 	}
 }
 
-// Every role is granted workstream_diff and the service registers it for all;
-// only reviewers and the committee, which reads the final review, hold it.
 func TestWorkstreamDiffOnlyReachesReviewers(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
@@ -533,9 +489,6 @@ func TestWorkstreamDiffOnlyReachesReviewers(t *testing.T) {
 	}
 }
 
-// Every role is granted the shed contribution tools by name and the service
-// registers them for all; only the committee holds them, and it holds no tool
-// that writes, runs or fetches.
 func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
@@ -573,8 +526,6 @@ func TestShedToolsOnlyReachTheCommittee(t *testing.T) {
 	}
 }
 
-// Every role is granted the reply tool by name and the service registers it
-// for all; only the architect holds it.
 func TestReplyToolOnlyReachesTheArchitect(t *testing.T) {
 	for _, role := range []string{"chief_of_staff", "committee", "reviewer", "architect", "foreman", "mason"} {
 		t.Run(role, func(t *testing.T) {
@@ -741,7 +692,6 @@ func TestNarrowIntersectsWeb(t *testing.T) {
 			t.Fatalf("%s: web=%v, want %v", name, got.Web, test.want)
 		}
 	}
-	// The request cannot add Web to a grant without it.
 	if got := narrow(a.Capabilities{Tools: []string{"file_read"}}, &a.Capabilities{Tools: []string{"file_read"}, Web: true}); got.Web {
 		t.Fatal("narrowing request added Web")
 	}
@@ -763,7 +713,6 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 			if req.Grants.Mounts[0].Access != agent.ReadOnly || req.Grants.VCS {
 				t.Fatalf("mounts %+v", req.Grants.Mounts)
 			}
-			// Web admits neither a service fetch tool nor write or shell tools.
 			if len(h.requests) != 1 || len(h.requests[0].Tools) != 1 || h.requests[0].Tools[0].Name != "file_read" || h.requests[0].Capabilities.Network {
 				t.Fatalf("service tools %+v", h.requests)
 			}
@@ -772,7 +721,6 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 			}
 		})
 	}
-	// An exploratory session keeps the write and execute grants it has.
 	r, _, _, engine, input := fixture(t, "session", "container")
 	r.Grants["session"] = a.Capabilities{Tools: []string{"file_read"}, WriteFiles: true, Execute: true, Web: true}
 	if _, err := r.Run(context.Background(), input); err != nil {
@@ -781,7 +729,6 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 	if want := []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "mcp__osmia_0"}; !reflect.DeepEqual(engine.Requests[0].Grants.Tools, want) {
 		t.Fatalf("session tools %v", engine.Requests[0].Grants.Tools)
 	}
-	// Roles without web access get no web tool even when the service grant sets it.
 	for _, role := range []string{"mason", "reviewer", "foreman"} {
 		t.Run(role, func(t *testing.T) {
 			r, _, _, engine, input := fixture(t, role, "container")
@@ -796,7 +743,6 @@ func TestWebTurnsStayReadOnly(t *testing.T) {
 			}
 		})
 	}
-	// A narrowing that leaves Web out drops it.
 	r, _, _, engine, input = fixture(t, "architect", "container")
 	r.Grants["architect"] = a.Capabilities{Tools: []string{"file_read"}, Web: true}
 	selectBase := r.Select

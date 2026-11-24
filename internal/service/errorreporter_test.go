@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 // With no [error_reports] section the reporter is off: the three kinds of
@@ -24,7 +25,7 @@ func TestErrorReporterIsOffWithoutASection(t *testing.T) {
 	if n := r.s.reporter.capture.queued(); n != 0 {
 		t.Fatalf("%d errors captured while the reporter is off", n)
 	}
-	time.Sleep(100 * time.Millisecond)
+	r.awaitPasses(2)
 	if got := r.gh.Requests(); len(got) != 0 {
 		t.Fatalf("requests with the reporter off: %+v", got)
 	}
@@ -33,14 +34,11 @@ func TestErrorReporterIsOffWithoutASection(t *testing.T) {
 	}
 }
 
-// Each source files one issue on the configured repository with the
-// configured labels and its own source, and a source switched off in sources
-// files nothing.
 func TestErrorReporterFilesEachSourceOnTheConfiguredRepository(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo, `labels = ["bug", "auto"]`), nil)
 	before, err := r.c.Statuses(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	r.apiError()
 	r.opFail("workspace.draft", "draft failed")
 	r.githubFail("GET", "/repos/acme/private-repo/pulls/12", 502, "bad gateway")
@@ -68,7 +66,7 @@ func TestErrorReporterFilesEachSourceOnTheConfiguredRepository(t *testing.T) {
 	r.quiet(reportRepo, 3)
 
 	after, err := r.c.Statuses(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(after.Workstreams) != len(before.Workstreams) {
 		t.Fatalf("filing issues changed the workstreams: %d then %d", len(before.Workstreams), len(after.Workstreams))
 	}
@@ -98,11 +96,10 @@ func TestErrorReporterIgnoresWhatItDoesNotReport(t *testing.T) {
 		t.Fatalf("%d requests for records that are not reported", n)
 	}
 
-	// The reporter's own calls fail, and write an Error activity record each.
 	r.reload(section(reportRepo))
 	r.gh.Inject(fixturekit.Fault{Kind: fixturekit.FaultCreate, Effect: fixturekit.StatusBeforeApply, Status: 500, Times: -1})
 	r.opFail("workspace.draft", "draft failed")
-	soon(t, "the failed creates", func() bool { return r.gh.Count("POST", "/repos/"+reportRepo+"/issues") >= 2 })
+	intakefixture.Soon(t, "the failed creates", func() bool { return r.gh.Count("POST", "/repos/"+reportRepo+"/issues") >= 2 })
 	r.awaitDiagnostic("retrying")
 	if !strings.Contains(r.log.String(), `"action":"issues.create"`) || !strings.Contains(r.log.String(), `"error_reporter":true`) {
 		t.Fatalf("the reporter's own calls are missing from the activity log:\n%s", r.log.String())
@@ -120,9 +117,6 @@ func TestErrorReporterIgnoresWhatItDoesNotReport(t *testing.T) {
 	}
 }
 
-// Repeats of one fingerprint produce one issue and one comment a day; after
-// GitHub reports the issue closed, the next occurrence opens a new issue that
-// links the old one, and nothing is ever reopened.
 func TestErrorReporterGroupsRepeatsAndOpensANewIssueAfterClosing(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo), nil)
@@ -168,9 +162,6 @@ func TestErrorReporterGroupsRepeatsAndOpensANewIssueAfterClosing(t *testing.T) {
 	r.quiet(reportRepo, 2)
 }
 
-// An issue closed after the day's comment was posted, or with the comment cap
-// spent, leads to a new linked issue for a single recurrence inside the
-// spacing of state reads, with nothing logged afterwards: only time passes.
 func TestErrorReporterOpensANewIssueForASingleRecurrenceAfterClosing(t *testing.T) {
 	t.Parallel()
 	t.Run("closed after the days comment", func(t *testing.T) {
@@ -223,8 +214,6 @@ func TestErrorReporterOpensANewIssueForASingleRecurrenceAfterClosing(t *testing.
 	})
 }
 
-// Caps stop new issues and comments, and the next filing reports what was
-// skipped.
 func TestErrorReporterCapsIssuesAndComments(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo, "max_issues_per_hour = 1", "max_issues_per_day = 2", "max_comments_per_day = 1"), nil)
@@ -278,7 +267,7 @@ func TestErrorReporterRetriesGivesUpAndRecovers(t *testing.T) {
 		}
 		return out
 	}
-	soon(t, "the reporter to give up", func() bool { return len(create()) >= reportAttempts })
+	intakefixture.Soon(t, "the reporter to give up", func() bool { return len(create()) >= reportAttempts })
 	r.awaitDiagnostic("gave up")
 	attempts := create()
 	for i := 1; i < len(attempts); i++ {
@@ -286,14 +275,12 @@ func TestErrorReporterRetriesGivesUpAndRecovers(t *testing.T) {
 			t.Fatalf("attempt %d came %v after the one before, want at least %v", i+1, gap, want)
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
+	r.awaitPasses(2)
 	if n := len(create()); n != reportAttempts {
 		t.Fatalf("%d create attempts, want %d and then nothing", n, reportAttempts)
 	}
 	r.awaitDiagnostic("gave up")
 
-	// GitHub recovers; a later error lets the given-up write be reconciled
-	// and written, and the diagnostic clears.
 	r.gh.Clear()
 	r.opFail("workspace.draft", "draft failed")
 	r.awaitIssues(reportRepo, 1)
@@ -325,7 +312,7 @@ func TestErrorReporterShowsAMissingToken(t *testing.T) {
 	r.reload(section(reportRepo))
 	r.awaitDiagnostic("GITHUB_TOKEN is not set")
 	r.opFail("workspace.draft", "draft failed")
-	time.Sleep(100 * time.Millisecond)
+	r.awaitPasses(2)
 	if n := len(r.gh.Requests()); n != 0 {
 		t.Fatalf("%d requests without a token", n)
 	}
@@ -350,12 +337,10 @@ func TestErrorReporterNeverFilesErrorsFromBeforeItWasEnabled(t *testing.T) {
 		t.Fatalf("filed %q", issues[0].Title)
 	}
 
-	// An error queued while the reporter waits for its token is dropped when
-	// the reporter is disabled.
 	r.tokenOn.Store(false)
 	r.reload(section(reportRepo))
 	r.opFail("queued.operation", "queued while enabled")
-	soon(t, "the error to be queued", func() bool { return r.s.reporter.capture.queued() == 1 })
+	intakefixture.Soon(t, "the error to be queued", func() bool { return r.s.reporter.capture.queued() == 1 })
 	r.reload("")
 	if n := r.s.reporter.capture.queued(); n != 0 {
 		t.Fatalf("%d errors still queued after disabling", n)
@@ -403,9 +388,6 @@ func TestErrorReporterDropsTheOldestErrorWhenTheQueueIsFull(t *testing.T) {
 	}
 }
 
-// After a restart on the same root, a recurring fingerprint comments on its
-// existing issue instead of opening another, and the state sits at the top of
-// the data directory beside the notification ledger.
 func TestErrorReporterKeepsItsIssuesAcrossARestart(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo), nil)
@@ -417,11 +399,11 @@ func TestErrorReporterKeepsItsIssuesAcrossARestart(t *testing.T) {
 	}
 	cfg := r.s.current()
 	state, err := cfg.Root.ErrorReports()
-	must(t, err)
+	fixturekit.Must(t, err)
 	ledger, err := cfg.Root.Notifications()
-	must(t, err)
+	fixturekit.Must(t, err)
 	if state != r.statePath() || filepath.Dir(state) != filepath.Dir(ledger) {
-		t.Fatalf("state %s is not beside the notification ledger %s", state, ledger)
+		t.Fatalf("state %s is not beside the Notification ledger %s", state, ledger)
 	}
 
 	r.restart()
@@ -431,8 +413,6 @@ func TestErrorReporterKeepsItsIssuesAcrossARestart(t *testing.T) {
 	r.quiet(reportRepo, 1)
 }
 
-// An accepted creation whose response is lost is adopted by the retry, and the
-// server ends with one issue, however the labels changed meanwhile.
 func TestErrorReporterAdoptsAnIssueWhoseResponseWasLost(t *testing.T) {
 	t.Parallel()
 	slow := func(o *ErrorReporterOptions) { o.Retry = 300 * time.Millisecond }
@@ -445,7 +425,6 @@ func TestErrorReporterAdoptsAnIssueWhoseResponseWasLost(t *testing.T) {
 		r.awaitIssues(reportRepo, 1)
 		r.awaitResolved()
 		r.quiet(reportRepo, 1)
-		// The adopted issue is the one the next occurrence groups with.
 		r.clock.Advance(2 * time.Minute)
 		r.opFail("workspace.draft", "draft failed")
 		r.awaitComments(reportRepo, 1, 1)
@@ -489,9 +468,9 @@ func TestErrorReporterAdoptsAnIssueWhoseResponseWasLost(t *testing.T) {
 		r.gh.Inject(lose)
 		r.opFail("workspace.draft", "draft failed")
 		r.awaitIssues(reportRepo, 1)
-		soon(t, "the lost response to be noticed", func() bool { return len(r.state().Intents) == 1 })
+		intakefixture.Soon(t, "the lost response to be noticed", func() bool { return len(r.state().Intents) == 1 })
 		r.stop()
-		r.files.write(t, r.files.topText+section(reportRepo, `labels = ["changed"]`), r.files.projectText)
+		r.files.Write(t, r.files.TopText+section(reportRepo, `labels = ["changed"]`))
 		r.launch()
 		r.awaitResolved()
 		r.clock.Advance(2 * time.Minute)
@@ -532,7 +511,7 @@ func TestErrorReporterAdoptsACommentWhoseResponseWasLost(t *testing.T) {
 		r.clock.Advance(2 * time.Minute)
 		r.opFail("workspace.draft", "draft failed")
 		r.awaitComments(reportRepo, 1, 1)
-		soon(t, "the comment to be adopted", func() bool { return len(r.state().Intents) == 0 })
+		intakefixture.Soon(t, "the comment to be adopted", func() bool { return len(r.state().Intents) == 0 })
 		r.clock.Advance(2 * time.Minute)
 		r.opFail("workspace.draft", "draft failed")
 		r.quiet(reportRepo, 1)
@@ -562,10 +541,6 @@ func TestErrorReporterAdoptsACommentWhoseResponseWasLost(t *testing.T) {
 	})
 }
 
-// Saved issues belong to the repository they were made in: after the
-// repository changes, a recurrence never touches the other repository's issue
-// with the same number, and the original grouping returns when the repository
-// does.
 func TestErrorReporterScopesIssuesToTheirRepository(t *testing.T) {
 	t.Parallel()
 	const a, b = "owner/alpha", "owner/beta"
@@ -617,7 +592,7 @@ func TestErrorReporterReconcilesAnOldRepositoryWhenItIsTheTargetAgain(t *testing
 	r.gh.Inject(fixturekit.Fault{Kind: fixturekit.FaultCreate, Effect: fixturekit.DropAfterApply})
 	r.opFail("workspace.draft", "draft failed")
 	r.awaitIssues(a, 1)
-	soon(t, "the lost response to be noticed", func() bool { return len(r.state().Intents) == 1 })
+	intakefixture.Soon(t, "the lost response to be noticed", func() bool { return len(r.state().Intents) == 1 })
 	fingerprint := r.state().Intents[0].Fingerprint
 
 	r.reload(section(b))
@@ -636,7 +611,6 @@ func TestErrorReporterReconcilesAnOldRepositoryWhenItIsTheTargetAgain(t *testing
 	r.quiet(a, 1)
 }
 
-// A rendered issue holds none of the private values in the error it reports.
 func TestErrorReporterFilesNoPrivateValues(t *testing.T) {
 	t.Parallel()
 	r := newReporterRig(t, section(reportRepo), nil)

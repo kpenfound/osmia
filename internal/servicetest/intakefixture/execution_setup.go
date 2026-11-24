@@ -20,12 +20,12 @@ import (
 func QueueFollowingTurn(t *testing.T, project config.ProjectID, now time.Time, repository *trace.Repository, stream config.WorkstreamID, agent, unit, turn string) {
 	t.Helper()
 	th, err := repository.Thread(stream, agent)
-	Must(t, err)
+	fixturekit.Must(t, err)
 	last := th.Turns[len(th.Turns)-1].Request
 	h := trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: project, Workstream: stream, Unit: unit,
 		At: now, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "move"}
 	_, err = repository.EnqueueTurn(context.Background(), trace.TurnRequest{Header: h, AgentID: agent, ThreadID: agent, TurnID: turn, Profile: last.Profile, SystemPrompt: last.SystemPrompt, Prompt: "Carry on."})
-	Must(t, err)
+	fixturekit.Must(t, err)
 }
 
 func BuiltPaused(t *testing.T, target runtime.Target, keys []string, shed func(*testing.T, string) config.WorkstreamID, pause func(), build func(*testing.T, config.WorkstreamID) trace.OperationRecord) []config.WorkstreamID {
@@ -57,9 +57,9 @@ func AwaitMerged(t *testing.T, turns *TurnScenario, stream config.WorkstreamID, 
 	deadline := time.Now().Add(fixturekit.DemoTimeout)
 	for {
 		got, err := turns.Repository().Workflow(stream, trace.UnitSubject(unit))
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if got.Value == intake.UnitMerged {
-			AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return landings(t) })
+			fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return landings(t) })
 			return
 		}
 		if time.Now().After(deadline) {
@@ -73,11 +73,11 @@ func AwaitMerged(t *testing.T, turns *TurnScenario, stream config.WorkstreamID, 
 func DriftResolutionDiff(t *testing.T, tool func() (coreadapter.Tool, error)) string {
 	t.Helper()
 	diff, err := tool()
-	Must(t, err)
+	fixturekit.Must(t, err)
 	out, err := diff.Handle(context.Background(), json.RawMessage(`{"change":"resolution"}`))
-	Must(t, err)
+	fixturekit.Must(t, err)
 	var got struct{ Diff string }
-	Must(t, json.Unmarshal(out, &got))
+	fixturekit.Must(t, json.Unmarshal(out, &got))
 	return got.Diff
 }
 
@@ -86,19 +86,19 @@ func PrepareRebase[B any](t *testing.T, d UnitSeedDriver[B], repository *trace.R
 	ctx := context.Background()
 	for _, unit := range []string{"resume", "dedupe"} {
 		b, found, err := d.Read(stream)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !found {
 			t.Fatal("fixture workstream is not building")
 		}
 		started, blocked, err := d.Start(ctx, b, unit)
-		Must(t, err)
+		fixturekit.Must(t, err)
 		if !started || blocked {
 			t.Fatalf("fixture unit %s did not start", unit)
 		}
 		if unit == "resume" {
 			w, _, err := d.Open(ctx, stream, unit)
-			Must(t, err)
-			Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n"), 0644))
+			fixturekit.Must(t, err)
+			fixturekit.Must(t, os.WriteFile(filepath.Join(w.Path, fixturekit.MasonWrote), []byte("package trace\n"), 0644))
 			capture(t, repository, stream, unit, nil)
 		}
 	}

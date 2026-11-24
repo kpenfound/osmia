@@ -14,14 +14,11 @@ import (
 
 type Webhook struct {
 	*httptest.Server
-	mu     sync.Mutex
-	bodies []string
-	// answers holds the status each post in bodies was answered with.
+	mu      sync.Mutex
+	bodies  []string
 	answers []int
 	status  int
-	// ledger, when set, is the notification ledger that must hold each
-	// posted body as pending before the post arrives.
-	ledger string
+	ledger  string
 }
 
 func NewWebhook(t *testing.T) *Webhook {
@@ -45,8 +42,6 @@ func NewWebhook(t *testing.T) *Webhook {
 	return w
 }
 
-// pendingIn reports whether the ledger at path holds body as a pending
-// notification.
 func pendingIn(path, body string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {

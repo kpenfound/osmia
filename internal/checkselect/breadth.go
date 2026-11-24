@@ -59,38 +59,6 @@ func BreadthScoped(topLevel, expanded []string, scoped map[string][]string) (Bre
 	return plan, nil
 }
 
-// Breadth maps each non-broad expanded link to its most specific covering
-// top-level check, using lexical order to break ties. Uncovered links bypass
-// breadth and always reach ranking. It never invents top-level checks.
-func Breadth(topLevel, expanded []string) BreadthPlan {
-	var plan BreadthPlan
-	for _, link := range distinct(topLevel) {
-		plan.Roots = append(plan.Roots, Root{Link: link})
-	}
-	links, _ := Candidates(expanded, len(expanded))
-	for _, link := range links {
-		a := parseAddress(link)
-		owner := -1
-		for i, root := range plan.Roots {
-			r := parseAddress(root.Link)
-			if !r.covers(a) {
-				continue
-			}
-			if owner < 0 || parseAddress(plan.Roots[owner].Link).covers(r) && !r.covers(parseAddress(plan.Roots[owner].Link)) {
-				owner = i
-			}
-		}
-		if owner < 0 {
-			plan.Uncovered = append(plan.Uncovered, link)
-			continue
-		}
-		root := &plan.Roots[owner]
-		root.Links = append(root.Links, link)
-		root.Collection = root.Collection || !a.covers(parseAddress(root.Link))
-	}
-	return plan
-}
-
 // BreadthQuestion is the question ID for Roots[i].
 func BreadthQuestion(i int) string { return fmt.Sprintf("breadth-%d", i) }
 

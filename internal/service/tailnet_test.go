@@ -1,38 +1,32 @@
 package service
 
 import (
-	bufio "bufio"
-	context "context"
-	errors "errors"
-	fmt "fmt"
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	io "io"
-	net "net"
-	http "net/http"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	sync "sync"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-// withTailnet sets opts to join a fake tailnet that reports names, and
-// returns a pointer to the node the service joins.
-func withTailnet(t *testing.T, opts *Options, names ...string) **fakeTailnet {
+func withTailnet(t *testing.T, opts *Options, names ...string) **fixturekit.TailnetNode {
 	t.Helper()
 	join, joined := fixturekit.TailnetJoiner(names...)
 	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) { return join(hostname, dir) }
 	return joined
-}
-
-// withListen appends a [listen] table with the given body to the fixture's
-// top-level file.
-func withListen(t *testing.T, opts Options, body string) {
-	t.Helper()
-	fixturekit.WithListen(t, opts.Config.Root, body)
 }
 
 // Without listen.tailnet the service never joins a tailnet and no response
@@ -49,14 +43,14 @@ func TestTailnetDisabledByDefault(t *testing.T) {
 		t.Fatalf("tailnet listener without listen.tailnet: %s", s.TailnetAddr())
 	}
 	cfg, err := c.Configuration(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Effective.Listen.Tailnet != "" {
 		t.Fatalf("effective listen: %+v", cfg.Effective.Listen)
 	}
 	h, err := c.Health(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	st, err := c.Statuses(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if h.Tailnet != nil || st.Tailnet != nil || cfg.Tailnet != nil {
 		t.Fatalf("tailnet reported without listen.tailnet: %+v %+v %+v", h.Tailnet, st.Tailnet, cfg.Tailnet)
 	}
@@ -71,7 +65,7 @@ func TestTailnetDisabledByDefault(t *testing.T) {
 func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, c := start(t, opts)
 	node := *joined
@@ -80,7 +74,7 @@ func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 		t.Fatalf("joined as %q with state in %q", node.Hostname, node.Directory)
 	}
 	info, err := os.Stat(wantDir)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !info.IsDir() || info.Mode().Perm() != 0700 {
 		t.Fatalf("tailnet state directory: %v %v", info.Mode(), info.IsDir())
 	}
@@ -88,7 +82,7 @@ func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 		t.Fatalf("tailnet address %q, listener %s", s.TailnetAddr(), node.Addr())
 	}
 	cfg, err := c.Configuration(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if cfg.Effective.Listen.Tailnet != "osmia" {
 		t.Fatalf("effective listen: %+v", cfg.Effective.Listen)
 	}
@@ -100,72 +94,70 @@ func TestTailnetJoinsAsTheConfiguredHostname(t *testing.T) {
 func TestTailnetListenerRefusesCrossSiteRequests(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	withTailnet(t, &opts, "osmia-1.tail0.ts.net.", "osmia-1")
 	s, c := start(t, opts)
-	remote, base := webHTTP(), "http://"+s.TailnetAddr()
+	remote, base := intakefixture.WebHTTP(), "http://"+s.TailnetAddr()
 
 	for _, host := range []string{"osmia", "OSMIA:80", "osmia.", "osmia-1", "osmia-1.tail0.ts.net", "Osmia-1.Tail0.ts.net.:80", "100.101.102.103", "[fd7a:115c:a1e0::1]:80"} {
-		if code, body := exchange(t, remote, "GET", base+Prefix+"/health", "", "", host); code != 200 {
+		if code, body := intakefixture.Exchange(t, remote, "GET", base+Prefix+"/health", "", "", host); code != 200 {
 			t.Fatalf("host %s: %d %s", host, code, body)
 		}
 	}
 	for _, host := range []string{"attacker.example", "osmia.attacker.example", "osmia-2", "localhost", "tail0.ts.net"} {
-		code, body := exchange(t, remote, "GET", base+Prefix+"/health", "", "", host)
-		if code != 403 || errorCode(t, body) != Forbidden {
+		code, body := intakefixture.Exchange(t, remote, "GET", base+Prefix+"/health", "", "", host)
+		if code != 403 || intakefixture.ErrorCode(t, body) != Forbidden {
 			t.Fatalf("host %s: %d %s", host, code, body)
 		}
 	}
 	pause := `{"target":{"scope":"factory"},"mode":"soft","reason":"travel","source":"owner"}`
 	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"} {
-		code, body := exchange(t, remote, "PUT", base+Prefix+"/runtime/pause", contentType, pause, "osmia")
-		if code != 403 || errorCode(t, body) != Forbidden {
+		code, body := intakefixture.Exchange(t, remote, "PUT", base+Prefix+"/runtime/pause", contentType, pause, "osmia")
+		if code != 403 || intakefixture.ErrorCode(t, body) != Forbidden {
 			t.Fatalf("content type %q: %d %s", contentType, code, body)
 		}
 	}
 	state, err := c.Runtime(context.Background())
-	must(t, err)
+	fixturekit.Must(t, err)
 	if len(state.Effective.Pauses) != 0 {
 		t.Fatalf("a refused tailnet request changed the runtime: %+v", state.Effective)
 	}
 }
 
-// A changed or removed listen.tailnet keeps the joined node and is named in
-// restart_required; an invalid one fails the reload by its field.
 func TestReloadKeepsTheTailnetListener(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
-	files := configFiles(t, opts)
+	files := fixturekit.ConfigFiles(t, opts.Config.Root)
 	s, c := start(t, opts)
 	node, addr := *joined, s.TailnetAddr()
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia-2\"", 1), files.projectText)
+	files.Write(t, strings.Replace(files.TopText, "\"osmia\"", "\"osmia-2\"", 1))
 	reloaded, err := c.Reload(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) {
 		t.Fatalf("restart required: %+v", reloaded)
 	}
 	now, err := c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if now.Effective.Listen.Tailnet != "osmia" || !hasCode(now.Diagnostics, "configuration", RestartRequired) || s.TailnetAddr() != addr || *joined != node || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("after reload: %+v, bound %s", now, s.TailnetAddr())
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", "osmia"); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+addr+Prefix+"/health", "", "", "osmia"); code != 200 {
 		t.Fatalf("tailnet after reload: %d %s", code, body)
 	}
 
-	files.write(t, strings.Replace(files.topText, "[listen]\ntailnet = \"osmia\"\n", "", 1), files.projectText)
+	files.Write(t, strings.Replace(files.TopText, "[listen]\ntailnet = \"osmia\"\n", "", 1))
 	reloaded, err = c.Reload(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet"}) || s.TailnetAddr() != addr || node.Closed.Load() || node.Left.Load() {
 		t.Fatalf("removed listen.tailnet: %+v, bound %s", reloaded, s.TailnetAddr())
 	}
 
-	files.write(t, strings.Replace(files.topText, "\"osmia\"", "\"osmia.example\"", 1), files.projectText)
-	reloadFails(t, c, files.top, "listen.tailnet")
+	files.Write(t, strings.Replace(files.TopText, "\"osmia\"", "\"osmia.example\"", 1))
+	intakefixture.ReloadFails(t, c.Reload, files.Top, "listen.tailnet")
 }
 
 // A tailnet that cannot be joined at startup leaves the service running with
@@ -176,10 +168,10 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 	ctx := context.Background()
 	opts := fixture(t)
 	opts.TailnetRetry = 10 * time.Millisecond
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	var unreachable atomic.Bool
 	unreachable.Store(true)
-	var joined atomic.Pointer[fakeTailnet]
+	var joined atomic.Pointer[fixturekit.TailnetNode]
 	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) {
 		if unreachable.Load() {
 			return nil, errors.New("control server unreachable")
@@ -188,7 +180,7 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		node := &fakeTailnet{Listener: l, Hostname: hostname, Directory: dir}
+		node := &fixturekit.TailnetNode{Listener: l, Hostname: hostname, Directory: dir}
 		joined.Store(node)
 		return node, nil
 	}
@@ -198,28 +190,28 @@ func TestTailnetJoinFailureDoesNotFailStartup(t *testing.T) {
 	}
 	want := TailnetStatus{State: TailnetDown, Reason: "control server unreachable", HTTPSState: "unavailable", HTTPSReason: "the tailnet node is unavailable: control server unreachable"}
 	h, err := c.Health(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !h.Ready || !reflect.DeepEqual(h.Tailnet, &want) {
 		t.Fatalf("health: %+v", h)
 	}
 	st, err := c.Statuses(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	cfg, err := c.Configuration(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !reflect.DeepEqual(st.Tailnet, &want) || !reflect.DeepEqual(cfg.Tailnet, &want) {
 		t.Fatalf("status %+v, config %+v", st.Tailnet, cfg.Tailnet)
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
 		t.Fatalf("web while the tailnet is down: %d %s", code, body)
 	}
 
 	unreachable.Store(false)
-	eventually(t, "tailnet never joined", func() bool { return joined.Load() != nil && s.TailnetAddr() != "" })
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
+	intakefixture.Soon(t, "tailnet never joined", func() bool { return joined.Load() != nil && s.TailnetAddr() != "" })
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
 		t.Fatalf("tailnet after joining: %d %s", code, body)
 	}
 	h, err = c.Health(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if h.Tailnet == nil || h.Tailnet.State != TailnetUp {
 		t.Fatalf("health after joining: %+v", h.Tailnet)
 	}
@@ -233,9 +225,9 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 	ctx := context.Background()
 	opts := fixture(t)
 	opts.TailnetRetry = 10 * time.Millisecond
-	withListen(t, opts, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "web = \"127.0.0.1:0\"\ntailnet = \"osmia\"\n")
 	var mu sync.Mutex
-	var nodes []*fakeTailnet
+	var nodes []*fixturekit.TailnetNode
 	var unreachable atomic.Bool
 	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) {
 		if unreachable.Load() {
@@ -245,7 +237,7 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		node := &fakeTailnet{Listener: l, Hostname: hostname, Directory: dir}
+		node := &fixturekit.TailnetNode{Listener: l, Hostname: hostname, Directory: dir}
 		mu.Lock()
 		nodes = append(nodes, node)
 		mu.Unlock()
@@ -254,49 +246,48 @@ func TestTailnetDropKeepsServingAndRejoins(t *testing.T) {
 	s, c := start(t, opts)
 	first := nodes[0]
 
-	// A request already accepted over the web listener survives the drop.
 	conn, err := net.Dial("tcp", s.WebAddr())
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer conn.Close()
 	body := `{"role":"mason","profile":"other"}`
 	_, err = fmt.Fprintf(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: %d\r\n\r\n", len(body))
-	must(t, err)
+	fixturekit.Must(t, err)
 	reader := bufio.NewReader(conn)
 	interim, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if interim.StatusCode != 100 {
 		t.Fatal(interim.StatusCode)
 	}
 
 	unreachable.Store(true)
 	first.Drop()
-	eventually(t, "tailnet never reported down", func() bool {
+	intakefixture.Soon(t, "tailnet never reported down", func() bool {
 		h, err := c.Health(ctx)
 		return err == nil && h.Tailnet != nil && h.Tailnet.State == TailnetDown
 	})
 	h, err := c.Health(ctx)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if !h.Ready || !strings.Contains(h.Tailnet.Reason, "no route to control") && !strings.Contains(h.Tailnet.Reason, "tailnet listener stopped") {
 		t.Fatalf("health during the outage: %+v", h)
 	}
 	if s.TailnetAddr() != "" {
 		t.Fatalf("tailnet address during the outage: %s", s.TailnetAddr())
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.WebAddr()+Prefix+"/health", "", "", ""); code != 200 {
 		t.Fatalf("web during the outage: %d %s", code, body)
 	}
 	_, err = io.WriteString(conn, body)
-	must(t, err)
+	fixturekit.Must(t, err)
 	resp, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("in-flight request during the outage: %d", resp.StatusCode)
 	}
 
 	unreachable.Store(false)
-	eventually(t, "tailnet never rejoined", func() bool { return s.TailnetAddr() != "" })
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
+	intakefixture.Soon(t, "tailnet never rejoined", func() bool { return s.TailnetAddr() != "" })
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", "osmia"); code != 200 {
 		t.Fatalf("tailnet after the outage: %d %s", code, body)
 	}
 	mu.Lock()
@@ -312,12 +303,12 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\ntailnet_https = false\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\ntailnet_https = false\n")
 	joined := withTailnet(t, &opts)
 	_, c := start(t, opts)
 	node := *joined
 	for _, want := range []TailnetStatus{
-		{State: TailnetConnecting},
+		{State: api.TailnetConnecting},
 		{State: TailnetNeedsLogin, LoginURL: "https://login.tailscale.com/a/abc"},
 		{State: TailnetNeedsLogin},
 		{State: TailnetUp},
@@ -325,11 +316,11 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 		node.SetState(want)
 		want.HTTPSState, want.HTTPSReason = "off", "disabled by listen.tailnet_https"
 		h, err := c.Health(ctx)
-		must(t, err)
+		fixturekit.Must(t, err)
 		st, err := c.Statuses(ctx)
-		must(t, err)
+		fixturekit.Must(t, err)
 		cfg, err := c.Configuration(ctx)
-		must(t, err)
+		fixturekit.Must(t, err)
 		for _, got := range []*TailnetStatus{h.Tailnet, st.Tailnet, cfg.Tailnet} {
 			if !reflect.DeepEqual(got, &want) {
 				t.Fatalf("reported %+v, want %+v", got, want)
@@ -343,32 +334,32 @@ func TestTailnetReportsTheNodeState(t *testing.T) {
 func TestShutdownDrainsTailnetRequestsBeforeLeaving(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	withListen(t, opts, "tailnet = \"osmia\"\n")
+	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	joined := withTailnet(t, &opts)
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	fixturekit.Must(t, err)
 	conn, err := net.Dial("tcp", s.TailnetAddr())
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer conn.Close()
 	body := `{"role":"mason","profile":"other"}`
 	_, err = fmt.Fprintf(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: osmia\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: %d\r\n\r\n", len(body))
-	must(t, err)
+	fixturekit.Must(t, err)
 	reader := bufio.NewReader(conn)
 	interim, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	fixturekit.Must(t, err)
 	if interim.StatusCode != 100 {
 		t.Fatal(interim.StatusCode)
 	}
 	s.cancel()
 	_, err = io.WriteString(conn, body)
-	must(t, err)
+	fixturekit.Must(t, err)
 	resp, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	fixturekit.Must(t, err)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatal(resp.StatusCode)
 	}
-	must(t, s.Wait())
+	fixturekit.Must(t, s.Wait())
 	if node := *joined; !node.Closed.Load() || !node.Left.Load() {
 		t.Fatalf("after shutdown: closed %v, left %v", node.Closed.Load(), node.Left.Load())
 	}

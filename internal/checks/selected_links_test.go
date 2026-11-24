@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -16,9 +17,8 @@ import (
 
 func TestDaggerFixtureProcess(t *testing.T) { daggerfixture.Process() }
 
-// serial: installs an executable fake Dagger on PATH.
 func TestSelectedLinksReachDaggerExactly(t *testing.T) {
-	const a = daggerfixture.PackageA
+	const a = fixturekit.SmartPackageA
 	const b = "dag+check://?check=test&go-module=.&go-package=b"
 	for name, links := range map[string][]string{
 		"packages": {a, b}, "tests": {a + "&go-test=T1", a + "&go-test=T2"},
@@ -41,12 +41,11 @@ func TestSelectedLinksReachDaggerExactly(t *testing.T) {
 	}
 }
 
-// serial: tests the refusal contract independently of the runner's grouping.
 func TestDaggerDoubleRefusesDifferentFiltersAndTypes(t *testing.T) {
 	cli := daggerfixture.Install(t, daggerfixture.Config{})
 	for _, links := range [][]string{
-		{daggerfixture.PackageA, daggerfixture.TestB},
-		{daggerfixture.PackageA, "dag+check://?check=test&go-module=.&go-package=b"},
+		{fixturekit.SmartPackageA, daggerfixture.TestB},
+		{fixturekit.SmartPackageA, "dag+check://?check=test&go-module=.&go-package=b"},
 		{"dag+check://release/version", "dag+lint://release/version"},
 	} {
 		cmd := exec.Command("dagger", checkArgs(links)...)
@@ -61,16 +60,15 @@ func TestDaggerDoubleRefusesDifferentFiltersAndTypes(t *testing.T) {
 	}
 }
 
-// serial: uses the real selection execution and classification boundaries.
 func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
-	links := []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}
+	links := []string{fixturekit.SmartPackageA, daggerfixture.TestB, daggerfixture.Version}
 	for name, c := range map[string]struct {
 		cfg         daggerfixture.Config
 		status      string
 		exit, parts int
 	}{
 		"passed":    {daggerfixture.Config{}, ChecksPassed, 0, 3},
-		"failed":    {daggerfixture.Config{Fail: daggerfixture.TestB}, ChecksFailed, 3, 3}, // includes the existing one-time rerun
+		"failed":    {daggerfixture.Config{Fail: daggerfixture.TestB}, ChecksFailed, 3, 3},
 		"no report": {daggerfixture.Config{ExitOn: "go-package=b"}, ChecksIncomplete, 7, 2},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -114,8 +112,6 @@ func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 	}
 }
 
-// serial: each completed command spends less than the timeout, but their sum
-// exceeds it; cancellation is also tested after a completed first part.
 func TestSelectedRunSharesDeadlineAndCancellation(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "cancelled"}[cancelled], func(t *testing.T) {
@@ -125,7 +121,7 @@ func TestSelectedRunSharesDeadlineAndCancellation(t *testing.T) {
 			if cancelled {
 				go func() { time.Sleep(1700 * time.Millisecond); cancel() }()
 			}
-			result, err := (DaggerChecks{}).Check(ctx, t.TempDir(), Identity{}, []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version})
+			result, err := (DaggerChecks{}).Check(ctx, t.TempDir(), Identity{}, []string{fixturekit.SmartPackageA, daggerfixture.TestB, daggerfixture.Version})
 			want := error(context.DeadlineExceeded)
 			if cancelled {
 				want = context.Canceled
@@ -146,15 +142,14 @@ func TestSelectedRunSharesDeadlineAndCancellation(t *testing.T) {
 	}
 }
 
-// serial: selected commands, reruns and fallback all use the real runner.
 func TestSelectedRunResolvesFlakesBeforeLaterCommands(t *testing.T) {
-	a1 := daggerfixture.PackageA + "&go-test=T1"
+	a1 := fixturekit.SmartPackageA + "&go-test=T1"
 	b1 := daggerfixture.TestB
-	links := []string{daggerfixture.PackageA, b1, daggerfixture.Version}
+	links := []string{fixturekit.SmartPackageA, b1, daggerfixture.Version}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Attempts: []daggerfixture.Attempt{
-		{Fail: a1}, {}, {}, // fail, rerun, finish a's cancelled T2
-		{Fail: b1}, {}, {}, // fail, rerun, resume with nothing left
-		{}, // later version check
+		{Fail: a1}, {}, {},
+		{Fail: b1}, {}, {},
+		{},
 	}})
 	selected := api.CheckSelection{Mode: SelectionSelected, Links: links, FallbackPicks: 3, Judgment: "stable"}
 	result, ran, err := RunSelection(t.Context(), DaggerChecks{}, t.TempDir(), Identity{}, selected)
@@ -165,7 +160,7 @@ func TestSelectedRunResolvesFlakesBeforeLaterCommands(t *testing.T) {
 	}
 	cli.AssertRun(t, links)
 	events := cli.Events(t)
-	if len(events) != 14 || !slices.Equal(events[4].Links, []string{daggerfixture.PackageA + "&go-test=T2"}) || len(events[10].Links) != 0 || !slices.Equal(events[12].Links, []string{daggerfixture.Version}) {
+	if len(events) != 14 || !slices.Equal(events[4].Links, []string{fixturekit.SmartPackageA + "&go-test=T2"}) || len(events[10].Links) != 0 || !slices.Equal(events[12].Links, []string{daggerfixture.Version}) {
 		t.Fatalf("cancelled work or later commands not completed: %+v", events)
 	}
 	if strings.Count(result.Output, "$ dagger check") != 7 || !strings.Contains(result.Output, "--skip "+a1) || !strings.Contains(result.Output, "--skip "+b1) {
@@ -173,10 +168,9 @@ func TestSelectedRunResolvesFlakesBeforeLaterCommands(t *testing.T) {
 	}
 }
 
-// serial: a late refusal is judged on that command even after earlier reports.
 func TestPicksLateRefusalRunsFullSelection(t *testing.T) {
-	a1 := daggerfixture.PackageA + "&go-test=T1"
-	selected := api.CheckSelection{Mode: SelectionSelected, Links: []string{daggerfixture.PackageA, daggerfixture.TestB}, FallbackPicks: 2, Candidates: 3, Judgment: "stable"}
+	a1 := fixturekit.SmartPackageA + "&go-test=T1"
+	selected := api.CheckSelection{Mode: SelectionSelected, Links: []string{fixturekit.SmartPackageA, daggerfixture.TestB}, FallbackPicks: 2, Candidates: 3, Judgment: "stable"}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Attempts: []daggerfixture.Attempt{
 		{Fail: a1}, {}, {}, {Refusal: daggerfixture.Refusal}, {},
 	}})
@@ -201,12 +195,10 @@ func TestPicksLateRefusalRunsFullSelection(t *testing.T) {
 	}
 }
 
-// serial: a fallback is bounded by the same context, and cannot turn a
-// refused full run or a lost session into a pass.
 func TestSelectedFallbackKeepsIncompleteAndDeadline(t *testing.T) {
 	for _, name := range []string{"full refused", "fallback refused", "fallback deadline", "late engine error"} {
 		t.Run(name, func(t *testing.T) {
-			selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{daggerfixture.PackageA, daggerfixture.TestB}, FallbackPicks: 2}
+			selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{fixturekit.SmartPackageA, daggerfixture.TestB}, FallbackPicks: 2}
 			attempts := []daggerfixture.Attempt{{}, {Refusal: daggerfixture.Refusal}, {Refusal: daggerfixture.Refusal}}
 			parts := 3
 			ctx := t.Context()
@@ -246,7 +238,6 @@ func TestSelectedFallbackKeepsIncompleteAndDeadline(t *testing.T) {
 	}
 }
 
-// serial: a rerun without a report cannot clear the reported failure.
 func TestSelectedFailedCheckStandsWhenRerunHasNoResult(t *testing.T) {
 	for name, rerun := range map[string]daggerfixture.Attempt{
 		"refused":     {Refusal: daggerfixture.Refusal},
@@ -257,7 +248,7 @@ func TestSelectedFailedCheckStandsWhenRerunHasNoResult(t *testing.T) {
 			cli := daggerfixture.Install(t, daggerfixture.Config{Attempts: []daggerfixture.Attempt{{}, {Fail: daggerfixture.TestB}, rerun}})
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}, FallbackPicks: 3}
+			selection := api.CheckSelection{Mode: SelectionSelected, Links: []string{fixturekit.SmartPackageA, daggerfixture.TestB, daggerfixture.Version}, FallbackPicks: 3}
 			result, ran, err := RunSelection(ctx, DaggerChecks{}, t.TempDir(), Identity{}, selection)
 			must(t, err)
 			status, failed, _ := ClassifyChecks(result, err)

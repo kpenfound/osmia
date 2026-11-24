@@ -1,15 +1,17 @@
 package service
 
 import (
-	context "context"
-	bundle "github.com/kpenfound/osmia/internal/bundle"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	intake "github.com/kpenfound/osmia/internal/intake"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"context"
+
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const AbandonedState = intake.AbandonedState
@@ -23,8 +25,6 @@ const cancelReason = intake.CancelReason
 var abandonActor = intake.AbandonActor
 
 var abandoned = intake.Abandoned
-
-const amendmentApplied = intake.AmendmentApplied
 
 const AmendmentRoundAction = intake.AmendmentRoundAction
 
@@ -40,35 +40,16 @@ const AmendmentRound = intake.AmendmentRound
 
 const AmendmentOverrule = intake.AmendmentOverrule
 
-const amendmentApproved = intake.AmendmentApproved
-
-const amendmentRejected = intake.AmendmentRejected
-
-const amendmentResealed = intake.AmendmentResealed
-
-const amendmentUnapplied = intake.AmendmentUnapplied
-
 const amendmentRuled = intake.AmendmentRuled
-
-func (s *Service) amendmentView(raw string, id string) (AmendmentResponse, *APIError) {
-	return s.intake().AmendmentView(raw, id)
-}
 
 func (s *Service) decideAmendment(ctx context.Context, raw string, id string, req AmendmentDecisionRequest) (AmendmentResponse, *APIError) {
 	return s.intake().DecideAmendment(ctx, raw, id, req)
-}
-
-func (s *Service) recordAmendmentDecision(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, id string, req AmendmentDecisionRequest, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
-	return s.intake().RecordAmendmentDecision(ctx, project, stream, repository, id, req, actor, cause)
 }
 
 const decideAmendmentTool = intake.DecideAmendmentTool
 
 const amendmentGuidance = intake.AmendmentGuidance
 
-// heldGates returns what a chief-of-staff status check reads, before the status
-// is stored, of the workstream's open owner gates that Jev's judgment holds
-// back from the owner.
 func (c *runtimeControls) heldGates(repository *trace.Repository, stream config.WorkstreamID) func() []trace.OwnerGate {
 	return func() []trace.OwnerGate {
 		s := c.service.Load()
@@ -97,8 +78,6 @@ const AmendmentDraftAction = intake.AmendmentDraftAction
 type amendmentDrafter = intake.AmendmentDrafter
 
 var amendmentSubject = intake.AmendmentSubject
-
-type amendmentAffected = intake.AmendmentAffected
 
 const DraftAction = intake.DraftAction
 
@@ -148,31 +127,13 @@ var errNoActiveProject = intake.ErrNoActiveProject
 
 var errNoTrace = intake.ErrNoTrace
 
-func (s *Service) charterProposals() (CharterProposalsResponse, *APIError) {
-	return s.intake().CharterProposals()
-}
-
-func (s *Service) charterProposal(raw string, question string) (CharterProposalView, *APIError) {
-	return s.intake().CharterProposal(raw, question)
-}
-
 func (s *Service) decideCharter(ctx context.Context, raw string, question string, req CharterDecisionRequest) (CharterProposalView, *APIError) {
 	return s.intake().DecideCharter(ctx, raw, question, req)
 }
 
-const decideCharterTool = intake.DecideCharterTool
-
-const charterGuidance = intake.CharterGuidance
-
 func (c *runtimeControls) decideCharter(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return c.intake().DecideCharter(repository, scope)
 }
-
-type charterer = intake.Charterer
-
-const chiefDocumentsGuidance = intake.ChiefDocumentsGuidance
-
-const followUpGuidance = intake.FollowUpGuidance
 
 func (s *Service) agentProfile(cfg *config.Config, role string, agent string) (coreadapter.Profile, error) {
 	return s.intake().AgentProfile(cfg, role, agent)
@@ -182,13 +143,7 @@ type apiErrAsError = intake.ApiErrAsError
 
 var chiefActor = intake.ChiefActor
 
-const contestGuidance = intake.ContestGuidance
-
-const driftHandbackGuidance = intake.DriftHandbackGuidance
-
 var ownerActor = intake.OwnerActor
-
-const ownerWritingGuidance = intake.OwnerWritingGuidance
 
 var conversation = intake.Conversation
 
@@ -200,40 +155,14 @@ const designReadRepoToolName = intake.DesignReadRepoToolName
 
 const designTitleToolName = intake.DesignTitleToolName
 
-var designLock = intake.DesignLock
-
 var isDesignWorkstream = intake.IsDesignWorkstream
 
-func (s *Service) openDesign(ctx context.Context, req DesignOpenRequest) (DesignView, *APIError) {
-	return s.intake().OpenDesign(ctx, req)
+func (s *Service) designRead(raw string) (api.DesignView, *APIError) {
+	return s.intake().DesignRead(raw)
 }
 
-func (s *Service) designList(rawProject string) (DesignsResponse, *APIError) {
-	return s.intake().DesignList(rawProject)
-}
-
-func (s *Service) designRead(raw string) (DesignView, *APIError) { return s.intake().DesignRead(raw) }
-
-func (s *Service) designMessage(ctx context.Context, raw string, req DesignMessageRequest) (ConversationEntry, *APIError) {
-	return s.intake().DesignMessage(ctx, raw, req)
-}
-
-var designReadRepoTool = intake.DesignReadRepoTool
-
-var designTitleTool = intake.DesignTitleTool
-
-func (s *Service) startDesignWorkgroup(ctx context.Context, raw string, req ...DesignStartRequest) (DesignStartResponse, *APIError) {
+func (s *Service) startDesignWorkgroup(ctx context.Context, raw string, req ...api.DesignStartRequest) (api.DesignStartResponse, *APIError) {
 	return s.intake().StartDesignWorkgroup(ctx, raw, req...)
-}
-
-const designStartSubject = intake.DesignStartSubject
-
-func (s *Service) designStartPending(r *trace.Repository, stream config.WorkstreamID) (bool, error) {
-	return s.intake().DesignStartPending(r, stream)
-}
-
-func (s *Service) designStartPass(ctx context.Context, r *trace.Repository) error {
-	return s.intake().DesignStartPass(ctx, r)
 }
 
 const driftMasonAgent = intake.DriftMasonAgent
@@ -242,31 +171,19 @@ const driftReviewerAgent = intake.DriftReviewerAgent
 
 const driftsDirectory = intake.DriftsDirectory
 
-const driftResolved = intake.DriftResolved
-
 var revisionWorkersIdle = intake.RevisionWorkersIdle
-
-var librarianWorkstream = intake.LibrarianWorkstream
 
 var progress = intake.Progress
 
 type stagedWorkspaces = intake.StagedWorkspaces
 
-type noLease = intake.NoLease
-
-var copyTracked = intake.CopyTracked
-
 const factoryContextTool = intake.FactoryContextTool
 
 const factoryPolicySubject = intake.FactoryPolicySubject
 
-const factoryPolicyVersion = intake.FactoryPolicyVersion
-
 var recordFactoryPolicy = intake.RecordFactoryPolicy
 
 const AssembledState = intake.AssembledState
-
-var groupApprovalResponse = intake.GroupApprovalResponse
 
 const MaxHandedBytes = intake.MaxHandedBytes
 
@@ -284,17 +201,13 @@ func (s *Service) crossRepoWorkgroupIDs(ctx context.Context, repository *trace.R
 	return s.intake().CrossRepoWorkgroupIDs(ctx, repository)
 }
 
-func (s *Service) workgroupInbox(ctx context.Context, known *trace.Repository, id config.WorkgroupID) ([]InboxEntry, *APIError) {
-	return s.intake().WorkgroupInbox(ctx, known, id)
-}
-
 var decision = intake.Decision
 
 func (s *Service) openDecisions(ctx context.Context, repository *trace.Repository, w trace.WorkstreamStatus) ([]InboxEntry, error) {
 	return s.intake().OpenDecisions(ctx, repository, w)
 }
 
-func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (AnswerResponse, *APIError) {
+func (s *Service) answer(ctx context.Context, raw string, req AnswerRequest) (api.AnswerResponse, *APIError) {
 	return s.intake().Answer(ctx, raw, req)
 }
 
@@ -304,55 +217,25 @@ var masonAgent = intake.MasonAgent
 
 const resolveObjectionTool = intake.ResolveObjectionTool
 
-const objectionGuidance = intake.ObjectionGuidance
-
-func (c *runtimeControls) resolveObjection(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return c.intake().ResolveObjection(repository, scope)
-}
-
 var errPaused = intake.ErrPaused
 
-const continueMark = intake.ContinueMark
-
-var continuedTurn = intake.ContinuedTurn
-
-var isContinuation = intake.IsContinuation
-
 var priorityRefusal = intake.PriorityRefusal
-
-var sliceMatchesPin = intake.SliceMatchesPin
 
 var registrationActor = intake.RegistrationActor
 
 var serviceActor = intake.ServiceActor
 
-func (s *Service) chiefEventsSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
-	return s.intake().ChiefEventsSkip(repository)
-}
-
-func (s *Service) chiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, error) {
-	return s.intake().ChiefEventsPrompt(project, repository)
-}
-
 func (s *Service) answers(cfg *config.Config, repository *trace.Repository) *questions.Deliverer {
 	return s.intake().Answers(cfg, repository)
 }
 
-func (s *Service) packet(raw string) (PacketResponse, *APIError) { return s.intake().Packet(raw) }
+func (s *Service) packet(raw string) (api.PacketResponse, *APIError) { return s.intake().Packet(raw) }
 
 func (s *Service) ratify(ctx context.Context, raw string, req RatifyRequest) (RatifyResponse, *APIError) {
 	return s.intake().Ratify(ctx, raw, req)
 }
 
-func (s *Service) ratifyMember(ctx context.Context, o *shedOwner, asked shed.Pin) (RatifyResponse, *APIError) {
-	return s.intake().RatifyMember(ctx, o, asked)
-}
-
-const projectSpecCatchingUp = intake.ProjectSpecCatchingUp
-
 var recoveryActor = intake.RecoveryActor
-
-var readCommitPath = intake.ReadCommitPath
 
 const readRemoteFileTool = intake.ReadRemoteFileTool
 
@@ -378,8 +261,6 @@ var latestRatification = intake.LatestRatification
 
 var decodeSeal = intake.DecodeSeal
 
-var isSession = intake.IsSession
-
 var unfinishedSessionTurn = intake.UnfinishedSessionTurn
 
 const RoundAction = intake.RoundAction
@@ -394,10 +275,6 @@ type Committee = intake.Committee
 
 var committeeAgent = intake.CommitteeAgent
 
-var roundTurnPrefix = intake.RoundTurnPrefix
-
-var roundTurnID = intake.RoundTurnID
-
 type debate = intake.Debate
 
 var Dissent = intake.Dissent
@@ -410,24 +287,8 @@ func (s *Service) shedAction(raw string, states ...string) (*shedOwner, *APIErro
 
 var featureState = intake.FeatureState
 
-func (s *Service) shedObject(ctx context.Context, raw string, req ShedObjectRequest) (ShedResponse, *APIError) {
-	return s.intake().ShedObject(ctx, raw, req)
-}
-
-func (s *Service) shedRule(ctx context.Context, raw string, req ShedRuleRequest) (ShedResponse, *APIError) {
-	return s.intake().ShedRule(ctx, raw, req)
-}
-
-func (s *Service) shedOverrule(ctx context.Context, raw string, req ShedOverruleRequest) (ShedResponse, *APIError) {
-	return s.intake().ShedOverrule(ctx, raw, req)
-}
-
 func (s *Service) shedRedraft(ctx context.Context, raw string, req ShedRedraftRequest) (ShedResponse, *APIError) {
 	return s.intake().ShedRedraft(ctx, raw, req)
-}
-
-func (s *Service) shedSkip(ctx context.Context, raw string) (ShedResponse, *APIError) {
-	return s.intake().ShedSkip(ctx, raw)
 }
 
 func (s *Service) shedMore(ctx context.Context, raw string, req ShedMoreRequest) (ShedResponse, *APIError) {
@@ -481,9 +342,9 @@ func (s *Service) intake() *intake.Controller {
 		DriftEntry:               driftEntry,
 		Effective:                s.effective,
 		FactoryContext:           factoryContext,
-		ChecksChoiceEntry:        checksChoiceEntry,
-		FinalChecksEntry:         finalChecksEntry,
-		FinalRoundsWithBlocking:  finalRoundsWithBlocking,
+		ChecksChoiceEntry:        delivery.ChecksChoiceEntry,
+		FinalChecksEntry:         delivery.FinalChecksEntry,
+		FinalRoundsWithBlocking:  delivery.FinalRoundsWithBlocking,
 		FirstLiveWorkgroupMember: s.firstLiveWorkgroupMember,
 		GroupApprovalLock:        s.groupApprovalLock,
 		Held:                     s.held,

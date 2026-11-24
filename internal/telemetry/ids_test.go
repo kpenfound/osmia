@@ -12,8 +12,6 @@ const (
 )
 
 func TestDerivedIDsAreStable(t *testing.T) {
-	// Each derivation runs through a function value so both sides are
-	// computed independently.
 	same := func(name string, derive func() any) {
 		t.Helper()
 		first, second := derive(), derive()
@@ -63,8 +61,6 @@ func TestDifferentRecordsHaveDifferentIDs(t *testing.T) {
 	}
 }
 
-// Parts are length-prefixed, so moving a character between two parts changes
-// the ID.
 func TestDerivationSeparatesParts(t *testing.T) {
 	if WorkstreamSpan(streamA, "ab", "c") == WorkstreamSpan(streamA, "a", "bc") {
 		t.Fatal("part boundaries are ambiguous")

@@ -10,14 +10,15 @@ import (
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
+func TestServiceFixtureOpensTheWebListenerAndRunsSchedulerPasses(t *testing.T) {
 	t.Parallel()
 	f := NewProject(t)
 	f.Stop(t)
-	WithWeb(t, f.Options, "127.0.0.1:0")
+	intakefixture.WithWeb(t, f.Options.Config.Root, "127.0.0.1:0")
 	passed := make(chan struct{}, 1)
 	f.Hooks.SchedulePassed = func() {
 		select {
@@ -34,7 +35,12 @@ func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
 	case <-time.After(fixturekit.DemoTimeout):
 		t.Fatal("scheduler never completed a pass")
 	}
-	graph := `{"version":1,"units":[{"id":"resume","title":"Resume uploads","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":[]}]}`
+}
+
+func TestServiceFixtureSeedsBuildsAcrossRestart(t *testing.T) {
+	t.Parallel()
+	f := NewProject(t)
+	graph := `{"version":2,"units":[{"id":"resume","title":"Resume uploads","task":"Resume uploads", "acceptance":["spec#1 holds, shown by TestResume (new-test)"], "criteria":["spec#1"],"depends_on":[],"footprint":[]}]}`
 	streams := f.SeedBuildingPaused(t, runtime.Target{Scope: "factory"}, graph, "live")
 	assertBuild := func(repo *trace.Repository, id config.WorkstreamID) {
 		t.Helper()

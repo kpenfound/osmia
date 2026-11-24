@@ -147,8 +147,6 @@ func (m Map) ResolvePaths(paths []string) Location {
 	return out
 }
 
-// match reports whether a pattern matches a path or one of its parent
-// directories, so a directory pattern covers everything below it.
 func match(pattern, name []string) bool {
 	if len(pattern) == 0 {
 		return true

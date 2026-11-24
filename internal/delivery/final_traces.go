@@ -15,17 +15,11 @@ import (
 // review when the service sets no timeout of its own.
 const AutoTraceTimeout = checks.TraceFetchTimeout
 
-// tracePair is one failed check of a recorded result with the trace its
-// status names: the identity of an automatic trace fetch.
 type tracePair struct {
 	TraceID string
 	Check   string
 }
 
-// failedTracePairs lists the failed (trace ID, check) pairs of a recorded
-// failed Dagger Cloud result, each once, in the order the record lists them.
-// A check without a trace ID, a trace ID the fetch would refuse, and any
-// result that is not a failed pull request result have none.
 func failedTracePairs(run FinalCheckRun) []tracePair {
 	if run.Source != api.CheckSourcePullRequest || run.Status != "failed" {
 		return nil
@@ -41,8 +35,6 @@ func failedTracePairs(run FinalCheckRun) []tracePair {
 	return pairs
 }
 
-// finalTraceView is the folder of the reader's view, under the check result's
-// own, that holds the recorded trace output of each failed check.
 func finalTraceView(k int) string { return fmt.Sprintf("final/checks-%d-traces", k) }
 
 // ReconcileFinalTraces makes sure each failed check of the recorded result run
@@ -82,10 +74,6 @@ func (a *FinalReviewer) ReconcileFinalTraces(ctx context.Context, stream config.
 	return nil
 }
 
-// finalTraceFiles returns the files of the reader's view that carry the
-// recorded trace output of each failed check of run, by their path in the
-// view: the output record of the (trace ID, check), or when it has none its
-// failure record. docs are the workstream's documents.
 func finalTraceFiles(docs []trace.Document, run FinalCheckRun) map[string]string {
 	latest := func(id, path string) (trace.Document, bool) {
 		var found *trace.Document
@@ -114,9 +102,6 @@ func finalTraceFiles(docs []trace.Document, run FinalCheckRun) map[string]string
 	return files
 }
 
-// finalTraceEvidence is the line of the reader's prompt that says where the
-// trace output of the failed checks is, or "" when the result has no failed
-// check that names a trace ID.
 func finalTraceEvidence(run FinalCheckRun) string {
 	if len(failedTracePairs(run)) == 0 {
 		return ""

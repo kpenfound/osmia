@@ -58,8 +58,6 @@ func scopedServer(req HostRequest) (server *mcp.Server, err error) {
 	if req.Scope.Role == "" {
 		return nil, errors.New("MCP host requires a role")
 	}
-	// The typed core registry panics for invalid schemas; request data errors are
-	// returned to the service before any transport starts.
 	defer func() {
 		if p := recover(); p != nil {
 			server = nil
@@ -86,9 +84,6 @@ func scopedServer(req HostRequest) (server *mcp.Server, err error) {
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil || schema == nil {
 			return nil, fmt.Errorf("MCP tool %q requires an object schema", tool.Name)
 		}
-		// The output is untyped so the SDK advertises no output schema and sets
-		// no structured content: clients show structured content in place of
-		// the text result, which carries the tool's JSON.
 		mcphost.AddTool(registry, &mcp.Tool{Name: tool.Name, Description: tool.Description, InputSchema: schema},
 			func(ctx context.Context, _ *mcp.CallToolRequest, input map[string]any) (*mcp.CallToolResult, any, error) {
 				raw, err := json.Marshal(input)
@@ -153,7 +148,6 @@ const ContainerHost = "host.docker.internal"
 // name. It never inspects a Docker bridge or opens a wildcard listener.
 func SbxTransport() CoreTransport { return CoreTransport{Via: ContainerHost} }
 
-// hostOS is the platform ContainerTransport listens for.
 var hostOS = runtime.GOOS
 
 // ContainerTransport is the CoreTransport of container turns: each server
@@ -174,9 +168,6 @@ func ContainerTransport(engine string) CoreTransport {
 	}}
 }
 
-// bridgeGateway asks engine for the gateway address of its bridge network.
-// TODO: core decides the same address for its own MCP server; remove this
-// once agentcore exports it.
 func bridgeGateway(ctx context.Context, engine string) (string, error) {
 	out, err := exec.CommandContext(ctx, engine, "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}").Output()
 	if err != nil {

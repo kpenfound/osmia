@@ -5,18 +5,15 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// TestConsistentReadRetriesAcrossARacingCommit shows the mechanism behind
-// the fix directly: a read that performs several separate Repository calls
-// is retried whole when a commit lands between them, so it never returns a
-// result assembled from two different generations of the trace.
 func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	t.Parallel()
 	opts := fixturekit.ConfigAt(t, t.TempDir())
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)
@@ -35,9 +32,6 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 		}
 		if !raced {
 			raced = true
-			// Committed from inside fn, between its two separate Repository
-			// calls, so an unprotected caller would see a different
-			// workstream count on each.
 			if err := repository.CreateWorkstream(context.Background(), racingStream, fixturekit.DemoStart, fixturekit.ServiceActor); err != nil {
 				return snapshot{}, err
 			}
@@ -60,12 +54,10 @@ func TestConsistentReadRetriesAcrossARacingCommit(t *testing.T) {
 	}
 }
 
-// TestConsistentReadReturnsWithoutARacingWrite shows the common case: with
-// nothing racing it, Consistent calls fn exactly once.
 func TestConsistentReadReturnsWithoutARacingWrite(t *testing.T) {
 	t.Parallel()
 	opts := fixturekit.ConfigAt(t, t.TempDir())
-	cfg, err := config.Load(opts)
+	cfg, err := projectstore.LoadConfig(opts)
 	fixturekit.Must(t, err)
 	repository, err := trace.Create(context.Background(), cfg.Root, cfg.Project, fixturekit.DemoStart, fixturekit.ServiceActor)
 	fixturekit.Must(t, err)

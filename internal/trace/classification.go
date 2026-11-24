@@ -22,12 +22,9 @@ type TurnClassification struct {
 }
 
 // What classified a clean mason response: the code rules or a Jev judgment.
-// ClassifiedByClassifier names a classifier profile turn and is accepted only
-// on responses already stored.
 const (
-	ClassifiedByRule       = "rule"
-	ClassifiedByClassifier = "classifier"
-	ClassifiedByJev        = "jev"
+	ClassifiedByRule = "rule"
+	ClassifiedByJev  = "jev"
 )
 
 var (
