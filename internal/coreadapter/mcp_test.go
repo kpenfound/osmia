@@ -159,9 +159,6 @@ func TestMCPRejectsEffectEscalationAndDuplicates(t *testing.T) {
 	}
 }
 
-// A role-scoped server hosted on core's loopback transport is reached through
-// the returned endpoint with its token, and only with it, until the lease is
-// released.
 func TestCoreTransportServesUntilReleased(t *testing.T) {
 	ctx := context.Background()
 	tool := Tool{Name: "notes_read", Effect: ToolRead, InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -221,7 +218,6 @@ func TestCoreTransportAdvertisesVia(t *testing.T) {
 	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "host.docker.internal" || parsed.Port() == "" || parsed.Path != mcphost.EndpointPath {
 		t.Fatalf("endpoint: %+v", endpoint)
 	}
-	// The server listens on the loopback port the URL names.
 	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", parsed.Port()))
 	if err != nil {
 		t.Fatal(err)
@@ -249,8 +245,6 @@ type closeTracker struct {
 
 func (c closeTracker) Close() error { *c.closed = true; return c.Lease.Close() }
 
-// A container turn is served by the container transport, every other turn by
-// the default one; without a container transport the default serves both.
 func TestMCPHostServesContainerTurnsWithContainerTransport(t *testing.T) {
 	ctx := context.Background()
 	request := func(mode string) HostRequest {
@@ -314,8 +308,6 @@ func TestSbxMCPUsesSandboxTransportAndLoopback(t *testing.T) {
 	}
 }
 
-// On macOS a container turn's server listens on the loopback and is named by
-// the container host alias; the engine is not asked.
 func TestContainerTransportOnMacOS(t *testing.T) {
 	defer func(os string) { hostOS = os }(hostOS)
 	hostOS = "darwin"
@@ -336,8 +328,6 @@ func TestContainerTransportOnMacOS(t *testing.T) {
 	conn.Close()
 }
 
-// On Linux a container turn's server listens on the gateway the engine
-// reports; a failing engine or a report that is no address fails the start.
 func TestContainerTransportOnLinux(t *testing.T) {
 	defer func(os string) { hostOS = os }(hostOS)
 	hostOS = "linux"
@@ -350,7 +340,6 @@ func TestContainerTransportOnLinux(t *testing.T) {
 		}
 		return p
 	}
-	// The loopback stands in for the bridge gateway, which a test cannot bind.
 	args := filepath.Join(t.TempDir(), "args")
 	endpoint, lease, err := ContainerTransport(engine(`printf '%s\n' "$@" > `+args+"\necho ' 127.0.0.1 '\n")).Start(ctx, server)
 	if err != nil {

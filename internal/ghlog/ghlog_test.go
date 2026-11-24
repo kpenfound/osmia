@@ -74,12 +74,6 @@ func TestLogRedactsKnownSecretsFromTheError(t *testing.T) {
 	}
 }
 
-func TestLoggerWithoutOneInContextDiscardsRatherThanWritingToAStreamNobodyConfigured(t *testing.T) {
-	// No WithLogger call: Logger must return a silent logger, not nil and
-	// not slog.Default(), so Log never writes to an unconfigured stream.
-	Log(context.Background(), time.Now(), Entry{Action: "a"})
-}
-
 func TestScopeOfIsEmptyWithoutWithScope(t *testing.T) {
 	if scope := ScopeOf(context.Background()); scope != (Scope{}) {
 		t.Fatalf("scope %+v", scope)

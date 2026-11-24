@@ -14,12 +14,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// eventQueue is how many events one subscriber may have waiting. The next
-// event beyond it replaces them all with a resync.
 const eventQueue = 64
 
-// eventHeartbeat is how long a stream may stay silent before the service
-// writes a comment, which finds readers that went away.
 const eventHeartbeat = 15 * time.Second
 
 // Hub fans change notifications out to the subscribers of the event stream.
@@ -90,9 +86,6 @@ func (h *Hub) Close() {
 	}
 }
 
-// push queues events, skipping any already waiting. A resync drops what is
-// waiting, which it supersedes, and so does an event that would overflow the
-// queue, which becomes a resync.
 func (s *Subscriber) push(events []api.Event) {
 	s.mu.Lock()
 	for _, e := range events {
@@ -124,9 +117,8 @@ func (s *Subscriber) Take() []api.Event {
 }
 
 // TraceEvents returns the observer of a project's trace, which announces the
-// views each commit changes. The librarian workstream an older trace can hold has no status,
-// conversation or inbox entry; its changes announce nothing.
-func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamID) func(trace.Commit) {
+// views each commit changes.
+func (h *Hub) TraceEvents(project config.ProjectID) func(trace.Commit) {
 	return func(c trace.Commit) {
 		var out []api.Event
 		add := func(kind api.EventKind, stream config.WorkstreamID) {
@@ -149,19 +141,11 @@ func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamI
 			if parts[2] == "ledger.jsonl" {
 				add(api.EventSpend, "")
 			}
-			if stream == librarian {
-				continue
-			}
 			add(api.EventWorkstream, stream)
 			switch {
 			case parts[2] == "images" || parts[2] == "image-references":
 				add(api.EventImage, stream)
 			case parts[2] == "questions" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl":
-				// Questions carry the inbox's escalations and rulings,
-				// transitions open and close the other decisions and abandon
-				// workstreams, whose entries the inbox leaves out, and
-				// documents carry packets, final reports and the owner's
-				// decisions.
 				add(api.EventInbox, stream)
 			case parts[2] == "agents" && len(parts) > 3 && parts[3] == trace.ChiefOfStaff:
 				add(api.EventConversation, stream)
@@ -170,8 +154,6 @@ func (h *Hub) TraceEvents(project config.ProjectID, librarian config.WorkstreamI
 					add(api.EventConversation, stream)
 				}
 				if c.Workflow.Deliveries {
-					// The chief of staff seeing a contest can raise it to
-					// the owner's inbox.
 					add(api.EventInbox, stream)
 				}
 			}
@@ -193,8 +175,6 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, writeTimeout time.Du
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	// Each write gets the write timeout of its own, so an idle stream
-	// outlives the server's timeouts and a stalled reader does not.
 	write := func(frame string) bool {
 		if control.SetWriteDeadline(time.Now().Add(writeTimeout)) != nil {
 			return false

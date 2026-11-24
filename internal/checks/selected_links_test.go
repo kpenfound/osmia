@@ -16,7 +16,6 @@ import (
 
 func TestDaggerFixtureProcess(t *testing.T) { daggerfixture.Process() }
 
-// serial: installs an executable fake Dagger on PATH.
 func TestSelectedLinksReachDaggerExactly(t *testing.T) {
 	const a = daggerfixture.PackageA
 	const b = "dag+check://?check=test&go-module=.&go-package=b"
@@ -41,7 +40,6 @@ func TestSelectedLinksReachDaggerExactly(t *testing.T) {
 	}
 }
 
-// serial: tests the refusal contract independently of the runner's grouping.
 func TestDaggerDoubleRefusesDifferentFiltersAndTypes(t *testing.T) {
 	cli := daggerfixture.Install(t, daggerfixture.Config{})
 	for _, links := range [][]string{
@@ -61,7 +59,6 @@ func TestDaggerDoubleRefusesDifferentFiltersAndTypes(t *testing.T) {
 	}
 }
 
-// serial: uses the real selection execution and classification boundaries.
 func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 	links := []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}
 	for name, c := range map[string]struct {
@@ -70,7 +67,7 @@ func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 		exit, parts int
 	}{
 		"passed":    {daggerfixture.Config{}, ChecksPassed, 0, 3},
-		"failed":    {daggerfixture.Config{Fail: daggerfixture.TestB}, ChecksFailed, 3, 3}, // includes the existing one-time rerun
+		"failed":    {daggerfixture.Config{Fail: daggerfixture.TestB}, ChecksFailed, 3, 3},
 		"no report": {daggerfixture.Config{ExitOn: "go-package=b"}, ChecksIncomplete, 7, 2},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -114,8 +111,6 @@ func TestSelectedRunStopsWithOneTruthfulResult(t *testing.T) {
 	}
 }
 
-// serial: each completed command spends less than the timeout, but their sum
-// exceeds it; cancellation is also tested after a completed first part.
 func TestSelectedRunSharesDeadlineAndCancellation(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "cancelled"}[cancelled], func(t *testing.T) {
@@ -146,15 +141,14 @@ func TestSelectedRunSharesDeadlineAndCancellation(t *testing.T) {
 	}
 }
 
-// serial: selected commands, reruns and fallback all use the real runner.
 func TestSelectedRunResolvesFlakesBeforeLaterCommands(t *testing.T) {
 	a1 := daggerfixture.PackageA + "&go-test=T1"
 	b1 := daggerfixture.TestB
 	links := []string{daggerfixture.PackageA, b1, daggerfixture.Version}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Attempts: []daggerfixture.Attempt{
-		{Fail: a1}, {}, {}, // fail, rerun, finish a's cancelled T2
-		{Fail: b1}, {}, {}, // fail, rerun, resume with nothing left
-		{}, // later version check
+		{Fail: a1}, {}, {},
+		{Fail: b1}, {}, {},
+		{},
 	}})
 	selected := api.CheckSelection{Mode: SelectionSelected, Links: links, FallbackPicks: 3, Judgment: "stable"}
 	result, ran, err := RunSelection(t.Context(), DaggerChecks{}, t.TempDir(), Identity{}, selected)
@@ -173,7 +167,6 @@ func TestSelectedRunResolvesFlakesBeforeLaterCommands(t *testing.T) {
 	}
 }
 
-// serial: a late refusal is judged on that command even after earlier reports.
 func TestPicksLateRefusalRunsFullSelection(t *testing.T) {
 	a1 := daggerfixture.PackageA + "&go-test=T1"
 	selected := api.CheckSelection{Mode: SelectionSelected, Links: []string{daggerfixture.PackageA, daggerfixture.TestB}, FallbackPicks: 2, Candidates: 3, Judgment: "stable"}
@@ -201,8 +194,6 @@ func TestPicksLateRefusalRunsFullSelection(t *testing.T) {
 	}
 }
 
-// serial: a fallback is bounded by the same context, and cannot turn a
-// refused full run or a lost session into a pass.
 func TestSelectedFallbackKeepsIncompleteAndDeadline(t *testing.T) {
 	for _, name := range []string{"full refused", "fallback refused", "fallback deadline", "late engine error"} {
 		t.Run(name, func(t *testing.T) {
@@ -246,7 +237,6 @@ func TestSelectedFallbackKeepsIncompleteAndDeadline(t *testing.T) {
 	}
 }
 
-// serial: a rerun without a report cannot clear the reported failure.
 func TestSelectedFailedCheckStandsWhenRerunHasNoResult(t *testing.T) {
 	for name, rerun := range map[string]daggerfixture.Attempt{
 		"refused":     {Refusal: daggerfixture.Refusal},

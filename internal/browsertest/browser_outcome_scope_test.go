@@ -19,9 +19,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// openOutcomePage holds only explicitly named responses, after the real
-// service has answered. Each URL has its own release, so simultaneous sends
-// can complete independently. The page's EventSource remains the refresh path.
 func openOutcomePage(t *testing.T, s *Service, scripts ...string) *page {
 	t.Helper()
 	p := openBrowser(t)
@@ -71,9 +68,6 @@ func assertOutcome(p *page, selector, state, text string) {
 	p.Await("the exact outcome in "+selector, `document.querySelector(`+quote(selector)+`).dataset.outcome === `+quote(state)+` && `+textOf(selector)+` === `+quote(text))
 }
 
-// assertFeedOutcomes waits until the feed inside scope shows exactly the
-// outcome entries of the owner's accepted commands in want, in order, each
-// with a time.
 func assertFeedOutcomes(p *page, scope string, want ...string) {
 	p.T.Helper()
 	if want == nil {
@@ -107,9 +101,6 @@ func selectOutcomeDesign(p *page, id config.WorkstreamID) {
 	p.Await("the selected design", `!document.querySelector('[data-view=design]').hidden && `+textOf("#design-title")+` === `+quote(string(id)))
 }
 
-// exerciseHeldSends checks both a completion while B is empty and a completion
-// while B has its own pending send. It also checks ordinary reselection after
-// completion, exact final text/state, and one dispatch per held action.
 func exerciseHeldSends(p *page, a, b config.WorkstreamID, kind, form, result, success string, selectInstance func(*page, config.WorkstreamID)) {
 	p.T.Helper()
 	urlA := "/v1/" + kind + "/" + string(a) + "/message"
@@ -134,8 +125,6 @@ func exerciseHeldSends(p *page, a, b config.WorkstreamID, kind, form, result, su
 			assertOutcome(p, result, "pending", "Sending…")
 		}
 		releaseOutcome(p, urlA)
-		// Fetch completion precedes act's final paint; two animation frames let
-		// the response continuation and the page's paint both finish.
 		p.Run(chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams { return p.WithAwaitPromise(true) }))
 		if round == 0 {
 			assertOutcome(p, result, "", "")
@@ -193,8 +182,6 @@ func TestBrowserDesignOutcomesBelongToTheirSession(t *testing.T) {
 	p.Await("start still navigates to its workstream", `!document.querySelector('[data-view=workstream]').hidden`)
 	selectOutcomeDesign(p, b.Design.Workstream)
 	assertOutcome(p, "#design-start-result", "", "")
-	// Open a design through the page after the start, rather than reusing a
-	// fixture-only session, to cover the fresh create/navigation path too.
 	p.OpenNewItem("#sidebar-new-design")
 	p.Choose("#design-add-form [name=project]", string(project))
 	p.Click("#design-add-form [type=submit]")
@@ -232,8 +219,6 @@ func TestBrowserSessionOutcomesBelongToTheirSession(t *testing.T) {
 	p.SelectSession(a.Session.Workstream)
 	assertOutcome(p, "#session-control-result", "ok", stopped)
 	p.Await("the stopped turn has released the session", `document.querySelector('#session-meta [data-field=state]').textContent === 'idle'`)
-	// Commit, check, push and end share the same selection contract, but keep
-	// their separate outcome areas and their actual service effects.
 	worktree := sessionWorktreePath(service.InspectForTest(s).Config().Root.String(), project, a.Session.Workstream)
 	must(t, os.WriteFile(filepath.Join(worktree, "outcome.txt"), []byte("owner change\n"), 0600))
 	p.TypeInto("#session-commit-form [name=message]", "record the owner change")
@@ -262,7 +247,6 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	f := newPageFixture(t)
 	p := openOutcomePage(t, f.s)
 	p.SelectWorkstream(stream)
-	// A real inbox answer uses the shared result moved between cards.
 	live := service.InspectForTest(f.s).SoleRepository()
 	at := service.InspectForTest(f.s).Now()
 	h := trace.Header{Schema: "osmia.trace.agent", Version: trace.Version, ID: "outcome-mason", Revision: 1, Project: project, Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"}
@@ -299,9 +283,6 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	p.SelectWorkstream(stream)
 	assertFeedOutcomes(p, "#workstreams", expected)
 	assertOutcome(p, "#inbox-result", "", "")
-	// Documents, dependency and action forms have independent outcome
-	// areas. Use the feed tab for reselection so no new document read is
-	// requested as part of selecting the next workstream.
 	p.Click("[data-tab=documents]")
 	p.AwaitText("#documents-form .result[data-outcome=ok]", "Documents loaded.")
 	p.AwaitText("#base-form .result[data-outcome=ok]", "loaded.")
@@ -327,7 +308,6 @@ func TestBrowserWorkstreamOutcomesBelongToTheirWorkstream(t *testing.T) {
 	for selector, out := range recorded {
 		assertOutcome(p, selector, out.State, out.Text)
 	}
-	// Trace reads retain their result on reselection too.
 	p.Click("[data-tab=trace]")
 	p.Click("#trace-form [type=submit]")
 	assertOutcome(p, "#trace-form .result", "ok", "Trace loaded.")
@@ -356,19 +336,13 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	p.Await("the archive dialog", `document.getElementById('confirm-dialog').open`)
 	p.Click("#confirm-accept")
 	p.Await("the real archive response held", `typeof releaseOutcome[`+quote(url)+`] === 'function' && outcomeResponses[`+quote(url)+`].archived`)
-	// Only the status event has moved the displayed workstream: the archive
-	// callback has not yet selected its successor or produced its final text.
 	p.Await("the event-driven fallback", `document.getElementById('workstream-head').dataset.workstream === `+quote(string(stream))+` && location.hash === `+quote("#workstream="+string(quiet)))
 	for _, selector := range []string{"#inbox-result", "#documents-form .result", "#base-form .result", "#workstream-action .result", "#trace-form .result"} {
 		assertOutcome(p, selector, "", "")
 	}
 	p.Await("the fallback has no archive busy state", `!document.querySelector('[data-workstream-action=archive]').disabled && !document.querySelector('[data-workstream-action=archive]').dataset.busy`)
-	// Actions taken on the fallback must use its identity too, both for the
-	// shared inbox result and for the workstream forms.
 	p.Click("#workstream-menu-button")
 	p.Click(`[data-workstream-action="rebase"]`)
-	// An accepted rebase goes into the feed of the workstream it was taken
-	// on; a refusal stays in the shared result line.
 	p.Await("the fallback menu action answered", `['error', 'unavailable'].includes(document.querySelector('#inbox-result').dataset.outcome) || document.querySelector('#workstreams `+OutcomeEntries+`') !== null`)
 	var menuText, menuState string
 	p.Eval(textOf("#inbox-result"), &menuText)
@@ -390,7 +364,6 @@ func TestBrowserWorkstreamOutcomesFollowArchiveFallback(t *testing.T) {
 	assertFallbackOutcomes := func() {
 		t.Helper()
 		assertOutcome(p, "#inbox-result", menuState, menuText)
-		// Archive adds no outcome entry to any feed; only the rebase did.
 		assertFeedOutcomes(p, "body", menuFeed...)
 		assertOutcome(p, "#documents-form .result", "ok", documentsText)
 		assertOutcome(p, "#base-form .result", "ok", baseText)

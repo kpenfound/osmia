@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// The values below stand for what must never reach a public repository.
 const (
 	privateRepo       = "acme/payroll-secrets"
 	privateRepoName   = "payroll-secrets"
@@ -22,8 +21,6 @@ const (
 	fixtureIssueTitle = "ISSUE-TITLE-SECRET"
 )
 
-// leaks lists the fragments of the private values that no rendered text may
-// hold.
 var leaks = []string{
 	privateRepo, privateRepoName, "/home/kyle", "main.go", privateBranch, "payroll-q3",
 	privateToken, "abcdefghijklmnop", privateEmail, "acme-corp", "dev@", privateHost, "tail1a2b3",

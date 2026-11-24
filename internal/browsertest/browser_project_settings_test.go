@@ -14,12 +14,8 @@ import (
 type ProjectConfigEdit = service.ProjectConfigEdit
 type ProjectConfigEditValues = service.ProjectConfigEditValues
 
-// ownerTables is what an owner keeps below a project's root keys: a commented
-// capacity.
 const ownerTables = "\n[capacity]\n# Keep this low.\ngit_operations = 3\n"
 
-// settingsFixture is a running service with one project whose stored settings
-// carry an owner's own text, and a page on its Project management view.
 type settingsFixture struct {
 	t       *testing.T
 	s       *Service
@@ -27,13 +23,9 @@ type settingsFixture struct {
 	p       *page
 	project config.ProjectID
 	root    config.Root
-	// before is the stored settings as the page first read them.
-	before string
+	before  string
 }
 
-// newSettingsFixture starts a real service on a temporary root and registers
-// a project. Its settings are commented and carry the owner's own root keys,
-// then ownerTables; the service adopts them before the page opens.
 func newSettingsFixture(t *testing.T, rootKeys string) *settingsFixture {
 	t.Helper()
 	opts, clone := projectFixture(t)
@@ -53,7 +45,6 @@ func newSettingsFixture(t *testing.T, rootKeys string) *settingsFixture {
 	text := "# Owner notes.\n" + string(base.Data) + rootKeys + ownerTables
 	owned, err := store.Replace(project, snapshot.Pin, []byte(text))
 	must(t, err)
-	// A save that changes nothing makes the service adopt the owner's text.
 	_, err = c.SaveProjectConfig(ctx, project, ProjectConfigEdit{Pin: owned.Pin})
 	must(t, err)
 	f := &settingsFixture{t: t, s: s, c: c, project: project, root: root}
@@ -61,8 +52,6 @@ func newSettingsFixture(t *testing.T, rootKeys string) *settingsFixture {
 	return f
 }
 
-// open shows the project's settings in Project management at the viewport's
-// width, with the page's own config events and writes observed.
 func (f *settingsFixture) open(width, height int64) {
 	f.t.Helper()
 	f.p = openBrowser(f.t)
@@ -89,7 +78,6 @@ func settingMarker(name, part string) string {
 
 func settingsResult() string { return "#project-config .result" }
 
-// disk is the text of the project's current stored revision.
 func (f *settingsFixture) disk() string {
 	f.t.Helper()
 	revision, err := projectstore.Open(f.root).Current(f.project)
@@ -97,8 +85,6 @@ func (f *settingsFixture) disk() string {
 	return string(revision.Data)
 }
 
-// hand records an edit of the stored settings the way another writer does,
-// without the service adopting it.
 func (f *settingsFixture) hand(from, to string) string {
 	f.t.Helper()
 	store := projectstore.Open(f.root)
@@ -126,9 +112,6 @@ func (f *settingsFixture) effective() config.Project {
 	return config.Project{}
 }
 
-// keepsOtherBytes checks that after holds every line of before in order,
-// except the lines dropped, so nothing the owner did not change was
-// rewritten, reordered or lost.
 func keepsOtherBytes(t *testing.T, before, after string, dropped ...string) {
 	t.Helper()
 	rest := strings.Split(after, "\n")
@@ -150,10 +133,6 @@ lines:
 	}
 }
 
-// Project management shows every setting of the project with its stored
-// values, marks the omitted ones as defaults, and saves a change as a new
-// revision of the stored settings: the other content stays as it was and the
-// service uses the new values without a reload.
 func TestBrowserProjectManagementSavesProjectSettingsToTheStore(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -201,7 +180,6 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheStore(t *testing.T) {
 			t.Fatalf("%q was lost from the stored settings:\n%s", kept, disk)
 		}
 	}
-	// No Reload was pressed: the service already runs the saved values.
 	p := f.effective()
 	if p.ChecksTimeout != "30m" || p.Capacity.GitOperations != 5 || p.HearsayScope != "work:main:shop" || p.HearsayEntities["cart"] != "code:shop:cart" {
 		t.Fatalf("in effect: %+v", p)
@@ -215,9 +193,6 @@ func TestBrowserProjectManagementSavesProjectSettingsToTheStore(t *testing.T) {
 	f.p.Await("the form holds the saved revision, without a pending value", `document.querySelector('#project-config').dataset.pin === `+quote(saved.Pin)+` && document.querySelector('#project-config .result').textContent.includes('Saved project settings as revision') && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent === '' && document.querySelector(`+quote(settingMarker("checks_timeout", "pending"))+`).textContent === ''`)
 }
 
-// A stored revision the service has not applied shows as the stored value
-// marked not yet applied beside the value in effect. A save of another
-// setting builds on it and puts it into effect, rather than reverting it.
 func TestBrowserProjectManagementShowsAnUnappliedRevisionAndKeepsItOnSave(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -245,9 +220,6 @@ func TestBrowserProjectManagementShowsAnUnappliedRevisionAndKeepsItOnSave(t *tes
 	f.p.Await("nothing pending after the save", `[...document.querySelectorAll('#config-fields [data-marker=pending]')].every(n => n.textContent === '')`)
 }
 
-// An invalid value is refused with the field error on the page, the draft
-// stays, and the stored settings and the loaded configuration stay as they
-// were. The kept draft saves once it is corrected.
 func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -284,10 +256,6 @@ func TestBrowserProjectManagementRefusesInvalidSettingsAndKeepsTheDraft(t *testi
 	}
 }
 
-// A save pinned to a revision that another writer replaced after the page read
-// it is refused as stale and writes nothing. The draft stays with a notice that
-// the configuration changed elsewhere, until the owner reads the latest stored
-// values, which show the other revision as not yet applied.
 func TestBrowserProjectManagementRefusesAStaleSaveAndLoadsTheLatestValues(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -315,9 +283,6 @@ func TestBrowserProjectManagementRefusesAStaleSaveAndLoadsTheLatestValues(t *tes
 	}
 }
 
-// Clearing a field on the page and saving removes its key from the stored
-// settings, and the default or inherited value then applies and shows as the
-// default.
 func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "checks_timeout = \"30m\" # the owner's choice\n")
@@ -346,9 +311,6 @@ func TestBrowserProjectManagementClearsASettingToItsDefault(t *testing.T) {
 	f.p.Await("the defaults shown as in effect", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === `+quote(config.DefaultChecksTimeout)+` && document.querySelector(`+quote(settingMarker("checks_timeout", "default"))+`).textContent !== '' && document.querySelector(`+quote(settingInput("fork"))+`).value === '' && document.querySelector(`+quote(settingMarker("fork", "default"))+`).textContent !== ''`)
 }
 
-// An untouched form follows another client's save live, and a later save from
-// it is pinned to the version it followed. A form holding a draft keeps the
-// draft and its pin, and says the configuration changed elsewhere.
 func TestBrowserProjectManagementFollowsOtherClientsSaves(t *testing.T) {
 	t.Parallel()
 	f := newSettingsFixture(t, "")
@@ -360,8 +322,6 @@ func TestBrowserProjectManagementFollowsOtherClientsSaves(t *testing.T) {
 	must(t, err)
 	other, err := f.c.SaveProjectConfig(ctx, f.project, ProjectConfigEdit{Pin: read.Pin, Set: ProjectConfigEditValues{ChecksTimeout: textPtr("45m")}})
 	must(t, err)
-	// A configuration save announces a config event for the whole service,
-	// without a project.
 	f.p.Await("the other client's save announced", `managementConfigEvents.some(e => e.kind === 'config')`)
 	f.p.Await("the untouched form follows the save and its pin", `document.querySelector(`+quote(settingInput("checks_timeout"))+`).value === '45m' && document.querySelector('#project-config').dataset.pin === `+quote(other.Pin)+` && document.querySelector('#config-changed').hidden`)
 

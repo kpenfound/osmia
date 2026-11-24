@@ -24,8 +24,6 @@ func TestBrowserHandInOffersAllProjectsAndPreservesSelectionOrder(t *testing.T) 
 	p.Click(`#create-menu [data-open="handin"]`)
 	p.Await("the hand-in view", `!document.querySelector('.view[data-view="handin"]').hidden`)
 	p.Await("every active project in a multi-select", `document.querySelector('#handin-form [name=project]').multiple && document.querySelector('#handin-form [name=project]').options.length === 2`)
-	// The last project in DOM order is chosen first. Later selection events
-	// retain that home project even when an earlier option is added.
 	p.Eval(`(() => {
   const select=document.querySelector('#handin-form [name=project]');
   for(const option of select.options) option.selected=false;

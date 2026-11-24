@@ -41,9 +41,8 @@ const (
 )
 
 // CloudCounts are the check counts of a Cloud run, taken from the per-check
-// statuses: every context but `load` and the run's own. Cancelled is zero in a
-// new result, since a commit status has no cancelled state; records written
-// earlier may carry a value.
+// statuses: every context but `load` and the run's own. Cancelled is always
+// zero, since a commit status has no cancelled state.
 type CloudCounts struct {
 	Total     int `json:"total"`
 	Passed    int `json:"passed"`
@@ -97,16 +96,6 @@ type CloudResult struct {
 // which a check failed, or a `load` that failed.
 func (r CloudResult) IsFailure() bool {
 	return r.Outcome == CloudFailed || r.Outcome == CloudLoadFailed
-}
-
-// Completed reports whether the run reached a final result: it passed,
-// failed, or finished with no checks or checks unaccounted for.
-func (r CloudResult) Completed() bool {
-	switch r.Outcome {
-	case CloudPassed, CloudIncomplete, CloudFailed:
-		return true
-	}
-	return false
 }
 
 // InterpretCloudStatuses turns one combined-status read into a result, from the
@@ -181,10 +170,8 @@ func InterpretCloudStatuses(read pulls.CommitStatuses) CloudResult {
 	return result
 }
 
-// runCompleted reports whether a "Run Dagger Checks" state is a final one.
 func runCompleted(state string) bool { return state == "success" || failing(state) }
 
-// cloudChecks lists the checks the statuses report, sorted by name.
 func cloudChecks(read pulls.CommitStatuses) []CloudCheck {
 	var checks []CloudCheck
 	for _, s := range read.Statuses {
@@ -203,8 +190,6 @@ func cloudChecks(read pulls.CommitStatuses) []CloudCheck {
 
 var durationDescription = regexp.MustCompile(`\bin ((?:[0-9]+(?:\.[0-9]+)?(?:ms|h|m|s))+)`)
 
-// statusDuration returns the duration a status description reports, as in
-// "Failed in 2m33s.", or zero when it reports none.
 func statusDuration(description string) time.Duration {
 	m := durationDescription.FindStringSubmatch(description)
 	if m == nil {
@@ -229,18 +214,10 @@ func failedCheck(s pulls.CommitStatus) CloudFailedCheck {
 	return check
 }
 
-// ReadCloudChecks reads the combined statuses of commit in repository and
-// interprets them. It reads nothing else: no status target URL is fetched. An
-// error means the statuses could not be read; the caller counts the run as
-// incomplete and never as passed.
-func ReadCloudChecks(ctx context.Context, reader pulls.StatusReader, repository, commit string) (CloudResult, error) {
-	result, _, err := ReadCloudStatuses(ctx, reader, repository, commit)
-	return result, err
-}
-
-// ReadCloudStatuses is ReadCloudChecks that also returns the statuses it
-// read, so a caller can look at the status of any one check in the same read.
-// The statuses are empty when the read itself failed.
+// ReadCloudStatuses reads the combined statuses of commit in repository and
+// interprets them. It also returns the statuses it read, so a caller can look
+// at the status of any one check in the same read. The statuses are empty when
+// the read itself failed.
 func ReadCloudStatuses(ctx context.Context, reader pulls.StatusReader, repository, commit string) (CloudResult, pulls.CommitStatuses, error) {
 	read, err := reader.CommitStatuses(ctx, repository, commit)
 	if err != nil {

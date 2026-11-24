@@ -190,13 +190,6 @@ func Decide(st *State, cfg Config, in Input, now time.Time) Decision {
 	return d
 }
 
-// Step decides and applies the decision in one call.
-func Step(st *State, cfg Config, in Input, now time.Time) Decision {
-	d := Decide(st, cfg, in, now)
-	st.Apply(d)
-	return d
-}
-
 // Apply records a decision made by Decide on the same state: counts, the
 // write intent, the cap windows and the awaiting check. The caller saves the
 // state before performing the write an intent describes.
@@ -250,7 +243,6 @@ func (st *State) Apply(d Decision) {
 	st.pruneAwaiting()
 }
 
-// occur counts an occurrence in the record.
 func (r *IssueRecord) occur(rep Report, event bool) {
 	if !event {
 		return
@@ -269,9 +261,6 @@ func (r *IssueRecord) occur(rep Report, event bool) {
 	r.Report = rep
 }
 
-// roll turns a record whose issue was found closed into the record of the next
-// issue, which links the closed one. The occurrences since the issue was last
-// known open belong to the next issue.
 func (r *IssueRecord) roll() {
 	r.Previous = r.Issue
 	r.Issue = 0
@@ -289,9 +278,6 @@ func checkAllowed(r IssueRecord, cfg Config, now time.Time) bool {
 	return cfg.CheckInterval <= 0 || r.CheckedAt.IsZero() || !now.Before(r.CheckedAt.Add(cfg.CheckInterval))
 }
 
-// pickAwaiting chooses the recurrence to resolve: the one a fresh check is
-// for, or else the oldest whose state read is allowed. Without one it returns
-// the time the earliest read becomes allowed.
 func (st *State) pickAwaiting(cfg Config, check *Check, now time.Time) (*Awaiting, time.Time) {
 	var wait time.Time
 	for i := range st.Awaiting {
@@ -316,7 +302,6 @@ func (st *State) pickAwaiting(cfg Config, check *Check, now time.Time) (*Awaitin
 	return nil, wait
 }
 
-// issueCap names the issue cap that is spent at now, or returns "".
 func (st *State) issueCap(cfg Config, now time.Time) string {
 	hour, day := 0, 0
 	for _, t := range st.IssueTimes {

@@ -41,8 +41,6 @@ esac
 				probe = strings.Replace(probe, "case \"$*\" in\n 'core version')", "echo 'engine does not answer' >&2; exit 1\ncase \"$*\" in\n 'core version')", 1)
 			}
 			must(t, os.WriteFile(dagger, []byte(probe), 0700))
-			// Run the public doctor flow against a root with no projects, fake tools,
-			// and the actual engine subprocess boundary.
 			root, err := config.ResolveRoot(filepath.Join(dir, "root"), "")
 			must(t, err)
 			must(t, os.MkdirAll(root.String(), 0700))
@@ -68,8 +66,6 @@ model = "opus"
 				}
 				return os.Getenv(name)
 			}}
-			// Leave EngineCommand on the real subprocess implementation, rather than
-			// the generic fake toolchain Command.
 			o.EngineCommand = func(ctx context.Context, path string, env []string, args ...string) (string, error) {
 				cmd := exec.CommandContext(ctx, path, args...)
 				cmd.Env = env

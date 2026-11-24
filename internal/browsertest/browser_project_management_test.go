@@ -12,8 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// observeManagementConfig records config events on the page's own live
-// connection, so periodic configuration reads cannot mask a missing event.
 func observeManagementConfig(p *page) {
 	p.T.Helper()
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
@@ -30,8 +28,6 @@ func observeManagementConfig(p *page) {
 	}))
 }
 
-// recordManagementWrites observes browser requests without replacing their
-// responses: every write still goes to the running service.
 func recordManagementWrites(p *page) {
 	p.T.Helper()
 	p.Eval(`window.managementWrites = [];
@@ -48,8 +44,6 @@ func managementOutcome(p *page, selector, outcome string) {
 	p.Await("management action completed with "+outcome, `document.querySelector(`+quote(selector)+`)?.dataset.outcome === `+quote(outcome))
 }
 
-// projectChoicesInclude checks all project/repo choosers, including those in
-// forms that are not currently open. Their choices must stay live too.
 func projectChoicesInclude(p *page, project, repo config.ProjectID, repoPresent bool, projects int) {
 	p.T.Helper()
 	p.Await("live project and repo choices", `(() => {
@@ -69,8 +63,6 @@ func TestBrowserProjectManagementWholePathAtPhoneWidth(t *testing.T) {
 	ctx := context.Background()
 	second := filepath.Join(filepath.Dir(clone), "client")
 	demoGit(t, filepath.Dir(clone), "clone", "-q", "--no-hardlinks", clone, second)
-	// The local remote names the configured owner/repo, as session opening
-	// resolves remotes by their URLs before fetching the base branch.
 	upstream := filepath.Join(filepath.Dir(clone), "remotes", "owner", "client.git")
 	must(t, os.MkdirAll(filepath.Dir(upstream), 0700))
 	demoGit(t, filepath.Dir(clone), "clone", "-q", "--bare", "--no-hardlinks", second, upstream)
@@ -187,8 +179,6 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	p.Await("external charter save announced on the event stream", `managementConfigEvents.some(e => e.project === `+quote(string(project))+`)`)
 	p.Await("untouched editor follows API save and its pin", `document.querySelector('#project-edit [name=content]').value === `+quote(external)+` && document.querySelector('#project-edit').dataset.revision === `+quote(strconv.Itoa(next.Revision)))
 	p.AwaitText("#charter-state", "1 rule, revision "+strconv.Itoa(next.Revision)+".")
-	// Make an actual change, so the service must accept the new pin before
-	// recording another revision rather than simply return unchanged text.
 	const local = "1. Follow the latest owner rule.\n2. Preserve decisions.\n"
 	p.SetValue("#project-edit [name=content]", local)
 	p.Click("#project-edit [type=submit]")
@@ -214,7 +204,6 @@ func TestBrowserProjectManagementCharterFollowsLiveRevisionsAndKeepsStaleDraft(t
 	if got.Content != remote || got.Revision != other.Revision {
 		t.Fatalf("stale draft overwrote the other client: %+v", got)
 	}
-	// A further live event must keep both the refusal and the draft.
 	latest, err := c.EditCharter(ctx, project, CharterEdit{Revision: other.Revision, Content: "1. The next external decision.\n"})
 	must(t, err)
 	p.AwaitText("#charter-state", "revision "+strconv.Itoa(latest.Revision))

@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-// prepareIdentity builds metadata separately so failure leaves the provider's
-// pinned export untouched. It never writes the export's files or source clone.
 func prepareIdentity(ctx context.Context, dir string, env []string, identity Identity) error {
 	if len(identity.Candidate) != 40 && len(identity.Candidate) != 64 {
 		return fmt.Errorf("candidate is not a full Git commit ID")
@@ -38,8 +36,6 @@ func prepareIdentity(ctx context.Context, dir string, env []string, identity Ide
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			// Arguments and Git diagnostics can contain source repository
-			// configuration. The operation alone is enough to explain fallback.
 			return "", fmt.Errorf("git identity preparation (%s): %w", operation, err)
 		}
 		return strings.TrimSpace(string(out)), nil
@@ -87,8 +83,6 @@ func prepareIdentity(ctx context.Context, dir string, env []string, identity Ide
 			return fmt.Errorf("candidate tag changed during export preparation")
 		}
 	}
-	// Index the existing export, including ignored files, to verify its entire
-	// tree. No checkout or reset can replace the pinned files on fallback.
 	worktree := func(args ...string) (string, error) {
 		return run(args[0], append([]string{"-C", dir, "--git-dir=" + filepath.Join(repo, ".git"), "--work-tree=" + dir}, args...)...)
 	}
@@ -103,7 +97,6 @@ func prepareIdentity(ctx context.Context, dir string, env []string, identity Ide
 	if err != nil || tree != expected {
 		return fmt.Errorf("exported tree does not match the candidate commit")
 	}
-	// Listing may already have initialized an anonymous repository here.
 	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
 		return fmt.Errorf("remove anonymous export metadata: %w", err)
 	}

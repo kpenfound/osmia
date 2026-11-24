@@ -34,7 +34,6 @@ type Store struct {
 	mu sync.Mutex
 }
 
-// maxAttempts bounds how often a change retries after losing a revision race.
 const maxAttempts = 8
 
 func (s *Store) now() time.Time {
@@ -114,9 +113,6 @@ func (s *Store) Occurrences() ([]Occurrence, error) {
 	return out, nil
 }
 
-// update applies change to the group's record, creating the record for seed
-// when the group has none, and commits the result as the next revision. A
-// change reporting no change commits nothing.
 func (s *Store) update(ctx context.Context, group, cause string, seed *Group, change func(*Group) (bool, error)) (Group, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -274,8 +270,6 @@ func (s *Store) CloseWorkstream(ctx context.Context, workstream config.Workstrea
 	return closed, nil
 }
 
-// holds reports whether workstream is the group's open workstream or the one
-// of an opening reserved in its current generation.
 func (g Group) holds(workstream config.WorkstreamID) bool {
 	if g.Open != nil {
 		return g.Open.Workstream == workstream

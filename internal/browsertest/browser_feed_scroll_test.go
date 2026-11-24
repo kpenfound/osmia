@@ -19,8 +19,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Requests still reach the service; only delivery of selected reads is held.
-// A resync exercises unchanged rereads through the page's event listener.
 func openFeedScrollPage(t *testing.T, s *service.Service, hash, held string) *page {
 	t.Helper()
 	p := openBrowser(t)
@@ -140,7 +138,6 @@ func TestBrowserWorkgroupFeedScroll(t *testing.T) {
 	rereadFeed(p)
 	feedScrollUnchanged(p)
 
-	// An actual conversation SSE entry snaps without changing the draft or focus.
 	p.TypeInto("#workgroup-content .composer textarea", "Unsent group draft")
 	p.Eval(`document.querySelector('#workgroup-content textarea').focus({preventScroll:true}); document.querySelector('#main').scrollTop = 0`, nil)
 	_, err = f.c.Send(ctx, quiet, "Newest shared entry")
@@ -155,7 +152,6 @@ func TestBrowserWorkgroupFeedScroll(t *testing.T) {
 	rereadFeed(p)
 	feedScrollUnchanged(p)
 
-	// Member links and project-pane drilldowns also reopen at the newest entry.
 	p.Click(`[data-open-member="` + string(quiet) + `"]`)
 	p.Click("#workstream-head [data-ask-chief]")
 	feedAtBottom(p, "#workgroup-content .feed")
@@ -265,7 +261,6 @@ func TestBrowserSessionFeedScroll(t *testing.T) {
 	feedScrollUnchanged(p)
 	rereadFeed(p)
 	feedScrollUnchanged(p)
-	// The agent's later response is another new entry, with a draft in progress.
 	p.TypeInto("#session-form textarea", "Unsent exploratory draft")
 	p.Eval(`document.querySelector('#session-form textarea').focus({preventScroll:true}); document.querySelector('#main').scrollTop = 0`, nil)
 	unblock()

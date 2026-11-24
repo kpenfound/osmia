@@ -21,7 +21,6 @@ func TraceCommand(traceID string) string {
 
 var traceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// secretQuery matches the names of query parameters that carry a credential.
 var secretQuery = regexp.MustCompile(`(?i)token|secret|password|passwd|credential|auth|signature|sig|key|session`)
 
 // SafeLink returns link when it can be given to an agent as it stands: an

@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// account is a fake GitHub API whose token authenticates as login. A nil
-// scopes sends no X-OAuth-Scopes header, as GitHub does for a fine-grained
-// token.
 func account(t *testing.T, login string, scopes *string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +85,6 @@ func TestCreationAccountMustBeRepoOwner(t *testing.T) {
 func TestCreationPermissionFromScopes(t *testing.T) {
 	expect(t, find(t, configured(t, "owner", scopes("gist, repo, workflow")), "creation permission"), Pass, "repo scope")
 	expect(t, find(t, configured(t, "owner", scopes("gist, read:org")), "creation permission"), Warn, "do not include repo")
-	// public_repo and repo:status are not the repo scope.
 	expect(t, find(t, configured(t, "owner", scopes("public_repo, repo:status")), "creation permission"), Warn, "do not include repo")
 	expect(t, find(t, configured(t, "owner", nil), "creation permission"), Warn, "cannot confirm")
 	expect(t, find(t, configured(t, "owner", scopes("")), "creation permission"), Warn, "cannot confirm")

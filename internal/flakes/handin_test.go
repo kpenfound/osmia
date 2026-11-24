@@ -75,7 +75,7 @@ func TestHandInOfAFinalReviewOnCloudStatesWhatCloudDidNotReport(t *testing.T) {
 			Engine: EngineCloud, Flaky: []string{"test/internal/a/TestOne"}, CoRun: []string{"lint", "test/internal/a/TestOne", "build"},
 			Diagnostics: []string{"Failed in 2m33s [passed on rerun]"},
 			Traces:      []Trace{{Check: "test/internal/a/TestOne", Role: "failed", Ref: "0a1b2c3d4e5f"}, {Check: "test/internal/a/TestOne", Role: "rerun", Ref: "ffff0000"}},
-			Unavailable: []string{ItemOutput, ItemParallelism},
+			Unavailable: []string{"output", "parallelism"},
 		},
 	}
 	g := recordWith(t, f, groupA, o)
@@ -99,7 +99,6 @@ func TestHandInOfAFinalReviewOnCloudStatesWhatCloudDidNotReport(t *testing.T) {
 	if strings.Contains(text, "Timings") {
 		t.Errorf("timings that were not recorded are shown:\n%s", text)
 	}
-	// An item the evidence leaves out is stated even when it was not marked.
 	o.Evidence.Unavailable, o.Evidence.Diagnostics, o.Evidence.CoRun = nil, nil, nil
 	o.Run = "final/checks-3.json"
 	g = recordWith(t, f, groupA, o)
@@ -225,7 +224,6 @@ func TestHandInNeverRequiresChangingTheTestOrAFileOrRepeatedPasses(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The evidence is quoted from the run; the instructions are the rest.
 		instructions := text[strings.Index(text, "## What this workstream is for"):strings.Index(text, NotesHeading)]
 		for name, re := range map[string]*regexp.Regexp{"a required change": requiresChange, "required repeats": requiresRepeats, "an instruction to change a file or test": instructsAFile} {
 			if m := re.FindString(instructions); m != "" {

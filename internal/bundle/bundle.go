@@ -96,8 +96,6 @@ type ProjectSpecView struct {
 	Slice   *trace.Slice `json:"slice,omitempty"`
 }
 
-// edgeWaiverDocument is the document of the dependencies a workstream
-// dropped, as the lifecycle records it in the dependent's own trace.
 const edgeWaiverDocument = "edge-waivers"
 
 type droppedDependency struct {
@@ -105,8 +103,6 @@ type droppedDependency struct {
 	Type     string              `json:"type"`
 }
 
-// droppedDependencies returns the dependencies stream dropped, from the latest
-// revision of its waiver document.
 func droppedDependencies(documents []trace.Document) ([]droppedDependency, error) {
 	for _, document := range slices.Backward(documents) {
 		if document.ID != edgeWaiverDocument {
@@ -307,8 +303,6 @@ func (f Files) Assemble(ctx context.Context, project config.ProjectID, scope Sco
 		return Bundle{}, fmt.Errorf("notices: %w", err)
 	}
 	for _, d := range all {
-		// One relay gives every ruling of its batch the same text at the same
-		// time; it is one notice, sourced from the first of them.
 		same := func(n Notice) bool {
 			return n.Workstream == d.Workstream && n.At.Equal(d.At) && n.OwnerResponse == d.OwnerResponse && n.ReturnedAnswer == d.ReturnedAnswer
 		}
@@ -370,10 +364,6 @@ func entity(e kb.Entity) Entity {
 	return Entity{ID: e.ID, Name: e.Name, Paths: append([]string{}, e.Paths...)}
 }
 
-// projectSpecView returns stream's own workgroup's project spec, with
-// stream's own slice named within it, as long as the spec is still active:
-// recorded, and the workgroup not yet resolved. repo must be the project's
-// own repository, not an instance scoped to one workstream.
 func projectSpecView(repo *trace.Repository, stream config.WorkstreamID) (*ProjectSpecView, error) {
 	spec, workgroup, found, err := repo.ProjectSpecOf(stream)
 	if err != nil || !found {
@@ -400,9 +390,6 @@ func projectSpecView(repo *trace.Repository, stream config.WorkstreamID) (*Proje
 	return &ProjectSpecView{Source: trace.ProjectSpecsPath, Record: trace.ProjectSpecsDocument, Workgroup: workgroup, Draft: !approved, Behavior: spec.Behavior, Contracts: spec.Contracts, Graph: spec.Graph, Slice: slicePtr}, nil
 }
 
-// decisions returns the latest revision of every ruling in the workstream, or
-// in every workstream of the project when none is given, ordered by
-// workstream, time and record ID.
 func decisions(repo *trace.Repository, stream config.WorkstreamID) ([]Decision, error) {
 	streams := []config.WorkstreamID{stream}
 	if stream == "" {
@@ -417,7 +404,6 @@ func decisions(repo *trace.Repository, stream config.WorkstreamID) ([]Decision, 
 		if err != nil {
 			return nil, err
 		}
-		// Revisions of one ruling are read in increasing order.
 		latest := map[string]trace.Ruling{}
 		for _, r := range rulings {
 			latest[r.ID] = r

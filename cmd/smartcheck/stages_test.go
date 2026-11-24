@@ -32,6 +32,12 @@ func stageFixture() (*fakeDagger, *fakeJev) {
 			lintRoot, lintRoot + "?path=a", lintRoot + "?path=b",
 			release, docsCheck, uncovered,
 		},
+		scoped: map[string][]string{
+			goRoot:    {packageA, packageB, packageA + "&go-test=TestA", packageA + "&go-test=TestB", packageB + "&go-test=TestA", packageB + "&go-test=TestB"},
+			lintRoot:  {lintRoot + "?path=a", lintRoot + "?path=b"},
+			release:   {release},
+			docsCheck: {docsCheck},
+		},
 	}
 	j := &fakeJev{
 		breadth:       map[string]float64{goRoot: .9, lintRoot: .05, release: .75, docsCheck: .1},
@@ -134,8 +140,6 @@ func TestSmartcheckStageRelativeFallbacks(t *testing.T) {
 			dir := newRepository(t)
 			write(t, dir, "README.md", "changed\n")
 			d, j := stageFixture()
-			// Keep all ranking scores high: this isolates the pre-filter's
-			// exclusions from ranking's threshold and fallback picks.
 			for link := range j.probabilities {
 				j.probabilities[link] = .9
 			}
@@ -252,7 +256,7 @@ func TestSmartcheckSkipsDepthWithoutAChoice(t *testing.T) {
 	t.Parallel()
 	dir := newRepository(t)
 	write(t, dir, "README.md", "changed\n")
-	d := &fakeDagger{topLevel: []string{lintRoot}, links: []string{lintRoot, lintRoot + "?path=a", lintRoot + "?path=b"}}
+	d := &fakeDagger{topLevel: []string{lintRoot}, links: []string{lintRoot, lintRoot + "?path=a", lintRoot + "?path=b"}, scoped: map[string][]string{lintRoot: {lintRoot + "?path=a", lintRoot + "?path=b"}}}
 	j := &fakeJev{breadth: map[string]float64{lintRoot: .8}, probabilities: map[string]float64{lintRoot + "?path=a": .9, lintRoot + "?path=b": .1}}
 	r := runHarness(t, d, j, withKey, "-C", dir, "--dry-run", "-v")
 	if r.code != 0 || r.stdout != lintRoot+"?path=a\n" || !strings.Contains(r.stderr, "chosen path (no judgment needed)") {

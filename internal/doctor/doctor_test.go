@@ -29,8 +29,6 @@ agent = "claude"
 model = "opus"
 `
 
-// host is a fake toolchain: every executable is on PATH and answers, except
-// those named missing.
 type host struct{ missing map[string]bool }
 
 func (h host) lookPath(name string) (string, error) {
@@ -47,8 +45,6 @@ func (host) command(_ context.Context, path string, args ...string) (string, err
 	return filepath.Base(path) + " 1.0.0\n", nil
 }
 
-// github is a fake GitHub API that accepts the token "good" and knows the
-// repositories listed.
 func github(t *testing.T, repositories ...string) string {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +77,6 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// fixture is a root with one active project whose clone has a local
-// upstream remote, and the options that check it against a fake host.
 func fixture(t *testing.T) (Options, string) {
 	t.Helper()
 	base := t.TempDir()
@@ -174,16 +168,12 @@ func TestHealthyRoot(t *testing.T) {
 	if Failed(checks) {
 		t.Fatal("a healthy root failed")
 	}
-	// Doctor releases the ownership lock it took.
 	lock, err := os.OpenFile(filepath.Join(dir, lockFile), os.O_RDWR, 0)
 	must(t, err)
 	defer lock.Close()
 	must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
 }
 
-// TestDamagedTraceDatabaseIsReported damages a project's closed trace
-// database past its first page, so its integrity check fails, and confirms
-// doctor reports the database by path.
 func TestDamagedTraceDatabaseIsReported(t *testing.T) {
 	o, dir := fixture(t)
 	root, err := config.ResolveRoot(dir, "")
@@ -368,7 +358,6 @@ func TestUnopenableState(t *testing.T) {
 	expect(t, find(t, checks, "widgets trace"), Fail, "trace.db")
 	expect(t, find(t, checks, "runtime.json"), Fail, "runtime.json")
 
-	// A project directory holding only its configuration has no trace.
 	must(t, os.Remove(filepath.Join(dir, "projects", projectID, "trace.db")))
 	must(t, os.RemoveAll(filepath.Join(dir, "projects", projectID, "osmia.lock")))
 	expect(t, find(t, Run(context.Background(), o), "widgets trace"), Warn, "no trace")

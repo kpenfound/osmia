@@ -2,16 +2,8 @@ package coreadapter
 
 import "github.com/kpenfound/agentcore/agent"
 
-// skillTool is Claude's tool that loads a skill from the turn's plugins.
 const skillTool = "Skill"
 
-// nativeTools maps service capabilities to each backend's tool vocabulary.
-// Delegation and arbitrary MCP discovery are absent. The Web permission adds
-// the backend's own web tools after all others (webTools); without it no web
-// tool is listed, whatever else is granted. Shell grants permit execution in
-// the disposable view under the selected sandbox's network policy; delivery
-// credentials and VCS remain withheld. A Claude turn given skills also holds
-// the Skill tool.
 func nativeTools(backend string, c Capabilities, skills bool) []string {
 	tools := []string{}
 	switch backend {
@@ -48,9 +40,6 @@ func nativeTools(backend string, c Capabilities, skills bool) []string {
 	return tools
 }
 
-// webTools are the web search and page fetch tools of a backend itself: the
-// tools the Web permission grants. The service runs no search or fetch of its
-// own.
 func webTools(backend string) []string {
 	switch backend {
 	case "", agent.AgentClaude:

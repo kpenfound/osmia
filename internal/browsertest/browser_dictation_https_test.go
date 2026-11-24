@@ -22,9 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// The origin stays the full MagicDNS name at the standard HTTP and HTTPS
-// ports. Chromium's resolver maps each port to the fake node's actual listener;
-// the SPKI allowlist trusts only that node's test certificate.
 func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	t.Parallel()
 	binary := os.Getenv("OSMIA_BROWSER")
@@ -49,28 +46,23 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	join, joined := fixturekit.TailnetJoiner(nodeName, "osmia")
 	opts.JoinTailnet = func(host, dir string) (service.TailnetListener, error) { return join(host, dir) }
 	s, c := servicetest.Start(t, opts)
-	deadline := time.Now().Add(BrowserTimeout)
-	for {
+	awaitCondition(t, "HTTPS coming up", func() bool {
 		h, err := c.Health(context.Background())
 		must(t, err)
-		if h.Tailnet != nil && h.Tailnet.HTTPSState == api.TailnetHTTPSUp {
-			if h.Tailnet.HTTPSAddress != secureAddress {
-				t.Fatalf("HTTPS address: %+v", h.Tailnet)
-			}
-			break
+		if h.Tailnet == nil || h.Tailnet.HTTPSState != api.TailnetHTTPSUp {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("HTTPS never came up: %+v", h.Tailnet)
+		if h.Tailnet.HTTPSAddress != secureAddress {
+			t.Fatalf("HTTPS address: %+v", h.Tailnet)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return true
+	})
 	node := *joined
 	spki := sha256.Sum256(node.HTTPSCertificate().RawSubjectPublicKeyInfo)
 	options := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(binary), chromedp.NoSandbox,
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("no-proxy-server", true),
-		// Keep Chromium's automatic HTTPS upgrade from bypassing the link.
 		chromedp.Flag("disable-features", "HttpsUpgrades,HttpsFirstBalancedModeAutoEnable"),
 		chromedp.Flag("host-resolver-rules", "MAP "+nodeName+":80 "+s.TailnetAddr()+", MAP "+nodeName+":443 "+node.HTTPSAddr()),
 		chromedp.Flag("ignore-certificate-errors-spki-list", base64.StdEncoding.EncodeToString(spki[:])),
@@ -119,7 +111,6 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 	 return link && !link.hidden && link.href === `+quote(secureAddress+pagePath)+` && mic.hidden && getComputedStyle(mic).display === 'none';
 	})()`)
 	p.AwaitText("#tailnet-https-status", secureAddress)
-	// This click leaves the document, including the usual click probe.
 	p.Run(chromedp.Click(link, chromedp.ByQuery))
 	p.Await("the same conversation on the node's TLS listener", `location.href === `+quote(secureAddress+pagePath)+` && isSecureContext && document.querySelector('[data-view=workstream]')?.hidden === false && document.querySelector(`+quote(form)+`) !== null`)
 	p.Await("the visible secure microphone", `(() => {
@@ -156,23 +147,17 @@ func TestBrowserTailnetHTTPSDictationJourney(t *testing.T) {
 		t.Fatalf("ordinary durable conversation message: %+v", after.Entries)
 	}
 
-	// Losing TLS leaves the same node's HTTP page usable, with the real
-	// failure reason and neither dictation control.
 	node.DropHTTPS()
 	var reason string
-	deadline = time.Now().Add(BrowserTimeout)
-	for {
+	awaitCondition(t, "the HTTPS failure reaching status", func() bool {
 		h, err := c.Health(context.Background())
 		must(t, err)
-		if h.Tailnet.HTTPSState == api.TailnetHTTPSUnavailable {
-			reason = h.Tailnet.HTTPSReason
-			break
+		if h.Tailnet.HTTPSState != api.TailnetHTTPSUnavailable {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("HTTPS failure never reached status")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		reason = h.Tailnet.HTTPSReason
+		return true
+	})
 	if reason == "" {
 		t.Fatal("HTTPS failure has no reason")
 	}

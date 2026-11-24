@@ -9,7 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// serial: the preview journey puts its fake engine CLIs on PATH.
 func TestBrowserChiefPreviewThroughMemberArchive(t *testing.T) {
 	f := servicetest.NewPreviewJourney(t)
 	p := openBrowser(t)

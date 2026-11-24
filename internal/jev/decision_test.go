@@ -15,7 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// judgmentRecords returns every revision of every judgment record.
 func (f *fixture) judgmentRecords(t *testing.T) []jev.Record {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](f.repo, streamID)
@@ -121,8 +120,6 @@ func TestDecisionKindsHaveDistinctTasksVersionsAndRecordTheThresholdAsAcceptance
 	}
 }
 
-// The owner's own decisions are binding at the owner threshold, independent of
-// the decision threshold, and the other kinds keep the decision threshold.
 func TestTheOwnersOwnDecisionsAreBindingAtTheOwnerThreshold(t *testing.T) {
 	owners := []jev.DecisionKind{jev.KindDeliveryApproval, jev.KindCharterProposal, jev.KindCharterConflict, jev.KindArchitectEscalation, jev.KindOwnerObjection, jev.KindCancellation}
 	for _, kind := range jev.Kinds() {
@@ -189,7 +186,6 @@ func TestABindingPickIsReturnedWithoutARequestWhateverChangedAndAfterARestart(t 
 	check(judge(&settings, later, "key").Decide(context.Background(), f.repo, changed))
 	f.reopen(t)
 	check(judge(&settings, later, "key").Decide(context.Background(), f.repo, changed))
-	// An unconfigured Jev still returns it.
 	check(judge(&settings, later, "").Decide(context.Background(), f.repo, changed))
 	if len(later.Requests()) != 0 {
 		t.Fatalf("requests = %d", len(later.Requests()))
@@ -387,8 +383,6 @@ func TestADecisionUsesTheDefaultThresholdWhenNoneIsConfigured(t *testing.T) {
 	}
 }
 
-// A delivery's occurrence key tells its workstream, final review round and
-// pushed commit apart, and its request offers land, pull-request and defer.
 func TestDeliveryRouteIsKeyedByWorkstreamReviewAndCommitAndOffersDefer(t *testing.T) {
 	keys := map[string]bool{}
 	for _, k := range []string{
@@ -422,8 +416,6 @@ func TestDeliveryRouteIsKeyedByWorkstreamReviewAndCommitAndOffersDefer(t *testin
 		t.Fatalf("Jev was offered %v", offered)
 	}
 
-	// The recorded result is reused after a restart, and a deferral is
-	// recorded as a nonbinding result.
 	f.reopen(t)
 	again := judge(&settings, &jevtest.Provider{}, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindDeliveryRoute, key, "other state", "land", "pull-request"))
 	if again.Status != jev.Binding || again.Pick != "land" || !again.Recorded || again.Judgment != first.Judgment {

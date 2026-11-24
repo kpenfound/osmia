@@ -35,7 +35,6 @@ type Pin struct {
 	Plan         int `json:"plan"`
 }
 
-// governs reports whether both pins name the same seal, spec and plan.
 func (p Pin) governs(q Pin) bool { return p.Seal == q.Seal && p.Spec == q.Spec && p.Plan == q.Plan }
 
 // Application records a numeric amendment under amendments/<n>/ or a group
@@ -145,7 +144,6 @@ func FromDocuments(docs []trace.Document) ([]Application, error) {
 	return out, nil
 }
 
-// idOf returns the amendment an application path names, or "".
 func idOf(path string) string {
 	if rest, ok := strings.CutPrefix(path, "tools/amendment-group-"); ok {
 		id, ok := strings.CutSuffix(rest, "-application.json")
@@ -183,8 +181,6 @@ func CarriesReport(applications []Application, unit string, reported, current in
 // since lead from one to the other, and none of them names the unit or
 // removes it. Pins are compared by seal, spec and plan only.
 func CarriesReview(applications []Application, unit string, reviewed, current Pin) bool {
-	// Every application moves the pin to later revisions, so the walk takes
-	// at most one step per application.
 	for range len(applications) {
 		if reviewed.governs(current) {
 			return true

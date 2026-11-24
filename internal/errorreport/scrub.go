@@ -49,8 +49,7 @@ type Scrubber struct {
 	repo   string
 	commit string
 	extra  []string
-	// hook runs on every scrub result, so tests can inject a failure.
-	hook func(string) (string, error)
+	hook   func(string) (string, error)
 }
 
 // NewScrubber returns a Scrubber for opts.
@@ -85,13 +84,10 @@ func (s *Scrubber) Scrub(text string) (out string, err error) {
 	return out, nil
 }
 
-// leak checks scrubbed text and returns the reason it must not be used, if any.
 func (s *Scrubber) leak(text string) string {
 	return leakReason(text, s.secrets()...)
 }
 
-// leakReason checks text for a value that must never remain in a report and
-// returns the reason when it finds one.
 func leakReason(text string, secrets ...string) string {
 	if strings.ContainsRune(text, 0) {
 		return "scrubber left an internal marker in the text"
@@ -111,8 +107,6 @@ func (s *Scrubber) secrets() []string {
 	return append(redact.KnownSecrets(), s.extra...)
 }
 
-// tokenShaped reports whether text still holds a value shaped like a
-// credential the secret rules target.
 func tokenShaped(text string) bool {
 	for _, rule := range redact.ShapedRules[:redact.TokenRules] {
 		if rule.Re.MatchString(text) {
@@ -150,8 +144,6 @@ var (
 	spaces  = regexp.MustCompile(`\s+`)
 )
 
-// refStopwords are words that follow "branch", "ref" and the like in prose
-// without naming a ref.
 var refStopwords = map[string]bool{
 	"a": true, "an": true, "the": true, "is": true, "was": true, "not": true, "name": true,
 	"names": true, "already": true, "does": true, "did": true, "has": true, "have": true,
@@ -164,8 +156,6 @@ var refStopwords = map[string]bool{
 	"at": true, "by": true, "no": true, "unknown": true, "invalid": true, "lookup": true,
 }
 
-// fileExtensions are final labels that mark a two-label name as a file, not
-// a host.
 var fileExtensions = map[string]bool{
 	"go": true, "json": true, "toml": true, "yaml": true, "yml": true, "md": true, "txt": true,
 	"sh": true, "log": true, "tmp": true, "lock": true, "sum": true, "mod": true, "html": true,
@@ -175,8 +165,6 @@ var fileExtensions = map[string]bool{
 	"ini": true, "env": true,
 }
 
-// actionPrefixes are the first labels of the dotted action names the
-// service records, such as pulls.find, which are not hosts.
 var actionPrefixes = map[string]bool{
 	"issues": true, "pulls": true, "workspace": true, "repos": true, "checks": true,
 	"git": true, "branches": true, "commits": true, "contents": true,
@@ -189,7 +177,6 @@ type scrubRun struct {
 	kept []string
 }
 
-// keep shields text already in its final form from later passes.
 func (r *scrubRun) keep(text string) string {
 	r.kept = append(r.kept, text)
 	return "\x00" + strconv.Itoa(len(r.kept)-1) + "\x00"
@@ -300,7 +287,6 @@ func (r *scrubRun) restPaths(text string) string {
 	})
 }
 
-// restVocabulary holds the literal segments of GitHub REST routes.
 var restVocabulary = map[string]bool{
 	"pulls": true, "issues": true, "comments": true, "reviews": true, "commits": true,
 	"branches": true, "git": true, "ref": true, "refs": true, "heads": true, "tags": true,
@@ -336,9 +322,6 @@ func isParam(seg string) bool {
 	return len(seg) > 2 && seg[0] == '{' && seg[len(seg)-1] == '}' && !strings.ContainsAny(seg[1:len(seg)-1], "{}/ ")
 }
 
-// restTemplate reduces a GitHub REST path to its route template, such as
-// /repos/{owner}/{repo}/pulls/{n}. It reports false when path is not a
-// GitHub REST path.
 func restTemplate(path string) (string, bool) {
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
@@ -474,9 +457,6 @@ func (r *scrubRun) repos(text string) string {
 	})
 }
 
-// repoReplacement returns the text that replaces an owner/name reference, and
-// false when the reference stays: it is the target repository or not a
-// repository at all.
 func (r *scrubRun) repoReplacement(owner, name string) (string, bool) {
 	suffix := ""
 	for name != "" && strings.ContainsRune(".-_", rune(name[len(name)-1])) {
@@ -493,7 +473,6 @@ func (r *scrubRun) repoReplacement(owner, name string) (string, bool) {
 	return PlaceholderRepo + suffix, true
 }
 
-// notRepos are common owner/name-shaped words that are not repositories.
 var notRepos = map[string]bool{
 	"i/o": true, "and/or": true, "read/write": true, "tcp/ip": true, "client/server": true,
 	"input/output": true, "application/json": true, "text/plain": true, "text/html": true,

@@ -12,8 +12,6 @@ import (
 	"unicode"
 )
 
-// The call command inherits these flags from the CLI root and module loader.
-// Names are folded because Dagger accepts camelCase and kebab-case spellings.
 var previewCLIFlags = strings.Fields(`help workdir verbose quiet silent debug progress interactive interactivecommand web noexit autoapply dotoutput dotfocusfield dotshowinternal cloud scaleout mod nomod allowllm eagerruntime output json engine workspace loadmodule shellonerror shellcommandonerror env xrelease profile profileebpf lock`)
 
 var previewClientVariables = strings.Fields(`PATH HOME TMPDIR NO_COLOR DOCKER_HOST _EXPERIMENTAL_DAGGER_RUNNER_HOST DAGGER_ENGINE DAGGER_X_RELEASE DAGGER_CLOUD_TOKEN`)
@@ -22,16 +20,12 @@ func previewName(s string) string {
 	return strings.ToLower(strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(s))
 }
 
-// previewElements mirrors Dagger's quote removal, CSV splitting and trimming
-// for typed slices. The original argv is never changed.
 func previewElements(arg string) []string {
 	values := func(value string) []string {
 		out := []string{value}
 		if strings.Contains(value, ",") {
 			out = append(out, strings.Split(value, ",")...)
 		}
-		// Address values may separate a local Git ref with # or remove a
-		// secret cache query with ?. Keep the literal reading as well.
 		for _, part := range out {
 			for _, separator := range []string{"#", "?"} {
 				if base, _, ok := strings.Cut(part, separator); ok {
@@ -54,8 +48,6 @@ func previewElements(arg string) []string {
 	if normalized != arg {
 		elements = append(elements, split(normalized)...)
 	}
-	// Scalar address values keep their spelling; slices remove quotes and
-	// whitespace. Check both readings, including filenames with surrounding spaces.
 	for _, element := range elements {
 		if trimmed := strings.TrimSpace(element); trimmed != element {
 			elements = append(elements, trimmed)
@@ -104,15 +96,12 @@ func ValidatePreviewCall(call []string) error {
 					return errors.New("preview call paths cannot contain parent-directory components")
 				}
 			}
-			// Secret addresses can remove a cacheKey query before reading
-			// the bare environment variable name.
 			variableName, _, _ := strings.Cut(element, "?")
 			for _, variable := range previewClientVariables {
 				if variableName == variable {
 					return errors.New("preview call cannot name a Dagger client environment variable")
 				}
 			}
-			// These core chain steps write to the host or start interactive sessions.
 			switch previewName(element) {
 			case "export", "terminal", "up", "apply", "tunnel", "findup", "host", "unixsocket":
 				return fmt.Errorf("preview call cannot use host-writing or interactive step %s", element)

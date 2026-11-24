@@ -23,11 +23,6 @@ import (
 	"github.com/kpenfound/osmia/internal/isolation"
 )
 
-// realCLIWorkspace writes a Dagger workspace of Go packages using the project's
-// pinned modules. broken always fails. TestLast fails when its test pattern
-// names TestNeighbour in another package, and passes when selected alone.
-// TestIdle is never selected beside TestLast, forcing that run to carry a
-// test-name pattern rather than selecting every test in the package.
 func realCLIWorkspace(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -60,9 +55,6 @@ func realCLIWorkspace(t *testing.T) string {
 	return dir
 }
 
-// installNestedDagger puts a dagger on PATH that reaches the session this test
-// runs in. The runner passes the CLI only its own environment, and a nested
-// CLI looks for its workspace from the container's root without -W.
 func installNestedDagger(t *testing.T) {
 	t.Helper()
 	cli, err := exec.LookPath("dagger")
@@ -79,7 +71,6 @@ func installNestedDagger(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// serial: installs a dagger executable through PATH.
 func TestRealDaggerCLI(t *testing.T) {
 	installNestedDagger(t)
 	const (
@@ -141,8 +132,6 @@ func TestRealDaggerCLI(t *testing.T) {
 		if !slices.Equal(roots, wantRoots) {
 			t.Fatalf("top-level listing %q, want %q", roots, wantRoots)
 		}
-		// Scoped listings preserve Dagger's membership across its full-path
-		// top-level names and short check names in expanded items.
 		var stale, tests []string
 		for _, pkg := range []string{"a", "b", "broken", "lone", "neighbour", "order"} {
 			stale = append(stale, "dag+check://?check=stale&go-module=.&go-package="+pkg)
@@ -375,11 +364,6 @@ func TestRealDaggerCLIServiceID(t *testing.T) {
 	}
 }
 
-// The trace fetch's command parses with the real CLI: help is answered after
-// the flags are read, so asking for it on the command the service builds shows
-// that the command, its --check=<name> element, which may begin with a dash,
-// and the trace ID in its positional slot are accepted, without reaching
-// Dagger Cloud.
 func TestRealDaggerCLITraceFetchCommandParses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
@@ -399,13 +383,6 @@ func TestRealDaggerCLITraceFetchCommandParses(t *testing.T) {
 	}
 }
 
-// viewCLI runs the real Dagger CLI from the root of the view at root, with the
-// arguments given and nothing that names a workspace, and returns its output
-// and exit status. A nested Dagger client takes its working directory from
-// the container it runs in, never from its process, so the CLI runs in a
-// container of its own whose working directory is the view root: the view is
-// that container's directory /view, repository included, and the CLI is this
-// test's own.
 func viewCLI(ctx context.Context, t *testing.T, root string, args ...string) (string, int) {
 	t.Helper()
 	cli, err := exec.LookPath("dagger")
@@ -447,8 +424,6 @@ func viewCLI(ctx context.Context, t *testing.T, root string, args ...string) (st
 	return output, exit
 }
 
-// enclosingRepository reports a directory above dir, or dir itself, that holds
-// Git metadata.
 func enclosingRepository(dir string) string {
 	for ; ; dir = filepath.Dir(dir) {
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
@@ -460,12 +435,6 @@ func enclosingRepository(dir string) string {
 	}
 }
 
-// A mason's view, built by Osmia's view code, is a Dagger workspace of its own
-// at the view root: plain dagger commands there find the project's modules with
-// no workspace flag, no copy and no repository the test made. The same project
-// in a view without the repository is not found, so the difference is the
-// view's repository and not an enclosing one.
-// serial: the nested session is the process's own.
 func TestRealDaggerCLIViewRepository(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
@@ -491,9 +460,7 @@ func TestRealDaggerCLIViewRepository(t *testing.T) {
 		t.Cleanup(func() { view.Release(context.WithoutCancel(ctx)) })
 		return view.Workspace().Directory
 	}
-	// What a mason's execution settings carry; only Dagger differs.
 	mason := coreadapter.ExecutionSettings{Mode: agent.SandboxSbx, Dagger: &agent.Dagger{Engine: "tcp://127.0.0.1:1234", Version: "v0.20.5"}}
-	// listsChecks reports the "MODULE CHECK" rows of a dagger check -l table.
 	listsChecks := func(output string) (rows []string) {
 		for _, line := range strings.Split(output, "\n") {
 			if fields := strings.Fields(line); len(fields) >= 2 && !strings.HasPrefix(line, "#") && fields[0] != "MODULE" {

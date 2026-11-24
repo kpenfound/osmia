@@ -8,10 +8,6 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// The new project form clears back to its default values once a
-// registration succeeds, so opening it again shows none of what was
-// submitted before; a failed registration leaves the owner's entry in place
-// and shows the refusal beside it.
 func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -42,8 +38,6 @@ func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t 
 	p.Await("the live connection", `document.body.dataset.connection === 'live'`)
 	p.OpenView("project-add")
 
-	// A successful registration clears the form; it shows its defaults, none
-	// of what the owner just submitted.
 	fill("Documents", "owner/docs", "owner/docs-fork")
 	p.Click("#project-add [type=submit]")
 	p.AwaitText("#project-add .result", "Registered Documents")
@@ -51,9 +45,6 @@ func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t 
 		t.Fatalf("the new project form after a successful registration: name %q, upstream %q, fork %q, clone %q, base %q", name, upstream, fork, cloneField, base)
 	}
 
-	// Registering a different project with the same clone fails, because the
-	// clone already belongs to the first registration; the owner's entry
-	// stands and the refusal shows.
 	fill("Notes", "owner/notes", "")
 	p.Click("#project-add [type=submit]")
 	p.AwaitText("#project-add .result", "already owns this registration or clone")
@@ -63,10 +54,6 @@ func TestBrowserPageResetsTheProjectAddFormAfterSuccessAndKeepsItAfterFailure(t 
 	}
 }
 
-// The debate-and-abandonment form, which also archives the work it abandons,
-// clears back to its default values once an action succeeds, so working on
-// it for the next workstream never shows what the owner submitted before; a
-// refused action leaves the owner's entry in place and shows the refusal.
 func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -85,8 +72,6 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 	p.Click("[data-tab=documents]")
 	p.Await("the documents tab", `!document.querySelector('[data-panel=documents]').hidden`)
 
-	// Abandoning and archiving quiet, with a reason, succeeds; the shared
-	// form clears back to its defaults once it does.
 	p.SetValue("#workstream-action [name=action]", "abandon")
 	p.Click("#workstream-action [name=archive]")
 	p.Await("the abandonment chosen", `document.querySelector('#workstream-action [name=action]').value === 'abandon' && document.querySelector('#workstream-action [name=archive]').checked`)
@@ -98,12 +83,9 @@ func TestBrowserPageResetsTheArchiveFormAfterSuccessAndKeepsItAfterFailure(t *te
 		t.Fatalf("the debate-and-abandonment form after a successful action: action %q, note %q, archive %v", action, note, archive)
 	}
 
-	// A stale form targeting archived work is refused and keeps its values.
 	p.SetValue("#workstream-action [name=action]", "abandon")
 	p.Eval(`document.querySelector('#workstream-action [name=archive]').checked = true`, nil)
 	p.TypeInto("#workstream-action [name=note]", "Trying again.")
-	// Set and submit the stale target together so a live refresh cannot
-	// replace it with the currently displayed workstream before submission.
 	p.Eval(`(() => {
       const form = document.getElementById('workstream-action');
       form.elements.workstream.value = `+quote(string(quiet))+`;

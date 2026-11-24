@@ -83,8 +83,6 @@ func DaggerCloudEnvironment(settings ExecutionSettings, getenv func(string) stri
 	return map[string]string{DaggerEngineEnvironment: "cloud", DaggerCloudTokenEnvironment: token}, nil
 }
 
-// turnSkills are the skills a turn on backend is given: the settings' skills
-// for Claude and Codex and none for any other backend.
 func turnSkills(settings ExecutionSettings, backend string) []string {
 	switch backend {
 	case "", agent.AgentClaude, agent.AgentCodex:
@@ -204,8 +202,6 @@ func (r *TurnRunner) Run(ctx context.Context, turn PreparedTurn) (result Session
 	return result, runErr
 }
 
-// invalidOutcome is the error subtype of a session that reported an outcome
-// its role may not report.
 const invalidOutcome = "invalid_outcome"
 
 func translateTurn(t PreparedTurn) (agent.Request, error) {
@@ -283,9 +279,6 @@ func AllowedTools(servers, tools []string) []string {
 	return allowed
 }
 
-// allowedTools is AllowedTools followed, for a Claude turn given skills, by
-// Claude's Skill tool, so a turn that runs without permission prompts may load
-// them. No other backend has that tool.
 func allowedTools(backend string, servers, tools []string, skills bool) []string {
 	allowed := AllowedTools(servers, tools)
 	if skills && (backend == "" || backend == agent.AgentClaude) {

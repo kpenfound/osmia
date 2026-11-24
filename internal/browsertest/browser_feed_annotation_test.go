@@ -11,9 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// sendAndAnswer sends message to ws's chief of staff through the page and
-// has the chief of staff answer with reply, so the feed gains a message
-// entry and a response entry, the way a real conversation does.
 func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamID, message, reply string) {
 	t.Helper()
 	send := `[data-workstream="` + string(ws) + `"] [data-field=send] `
@@ -29,12 +26,6 @@ func (f *pageFixture) sendAndAnswer(t *testing.T, p *page, ws config.WorkstreamI
 	f.answerChief(t, ws, turn, reply)
 }
 
-// On narrow viewports, every feed card's role, action and timestamp stay
-// readable: each one is fully visible inside the card and the page, none of
-// the three overlaps another, and neither the card nor the page scrolls
-// sideways. The fixture's status, session and unit-transition cards cover
-// those three kinds; sending a message and its answer on the quiet
-// workstream covers the message and response kinds.
 func TestBrowserEntryAnnotationFitsAtPhoneWidth(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -60,11 +51,6 @@ func TestBrowserEntryAnnotationFitsAtPhoneWidth(t *testing.T) {
 	assertFeedAnnotations(t, p, quietCard+"[data-field=feed] .entry", 2)
 }
 
-// At a laptop width, every feed card still shows its role, action and
-// timestamp, with the same checks as the phone-width test. This is also
-// where the fix is checked not to have changed the desktop layout: the
-// annotation still reads left to right on one line because there is room
-// for it, since the CSS only wraps the annotation when it does not fit.
 func TestBrowserEntryAnnotationShowsAtLaptopWidth(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)

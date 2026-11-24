@@ -45,11 +45,6 @@ const (
 	KindCancellation        DecisionKind = "cancellation"
 )
 
-// kindSpec is what a kind's judgments ask. Bump version whenever the
-// instructions, the meaning of the options or the acceptance rule changes;
-// decisions recorded under the old version stay as they were. An owner kind
-// is one of the owner's own decisions, binding at [jev] owner_threshold
-// rather than decision_threshold.
 type kindSpec struct {
 	version      int
 	instructions string
@@ -82,9 +77,6 @@ var kinds = map[DecisionKind]kindSpec{
 	KindCancellation:        {1, "The state is the impact summary of cancelling a workgroup or one of its member workstreams: what happens to each workstream and to its open pull requests. Choose the option the owner would choose.", true},
 }
 
-// alwaysDefers are the kinds whose requests offer Defer however many options
-// the caller gives: the decision is one Jev may decline to make even when both
-// of its options are the caller's.
 var alwaysDefers = map[DecisionKind]bool{KindDeliveryRoute: true}
 
 // Kinds returns the decision kinds in a fixed order.
@@ -121,15 +113,23 @@ type Occurrence struct {
 	Threshold float64 `json:"threshold,omitempty"`
 }
 
-// The occurrence keys of each subject, so every caller names an occurrence
-// the same way. A contest is keyed by its own ID, not the unit's, since a unit
-// can be contested again.
+// RatificationKey is the occurrence key of a ratification round of one spec and
+// plan revision pair.
 func RatificationKey(round, spec, plan int) string {
 	return fmt.Sprintf("ratification:round-%d:spec-%d:plan-%d", round, spec, plan)
 }
+
+// AmendmentKey is the occurrence key of an amendment.
 func AmendmentKey(id string) string { return "amendment:" + id }
-func QuestionKey(id string) string  { return "question:" + id }
-func ContestKey(id string) string   { return "contest:" + id }
+
+// QuestionKey is the occurrence key of a question.
+func QuestionKey(id string) string { return "question:" + id }
+
+// ContestKey is the occurrence key of a contest, keyed by the contest's own ID
+// because a unit can be contested again.
+func ContestKey(id string) string { return "contest:" + id }
+
+// ObjectionKey is the occurrence key of an objection.
 func ObjectionKey(id string) string { return "objection:" + id }
 func DiscoveryKey(id string) string { return "discovery:" + id }
 func FindingKey(review int, finding string) string {
@@ -155,7 +155,6 @@ func DeliveryRouteKey(stream config.WorkstreamID, review int, commit string) str
 	return fmt.Sprintf("delivery:%s:review-%d:%s", stream, review, commit)
 }
 
-// maxOccurrenceKey bounds an occurrence key.
 const maxOccurrenceKey = 256
 
 // MaxDecisionBytes bounds a decision request's body; a larger one falls back
@@ -167,7 +166,6 @@ const MaxDecisionBytes = 72 << 10
 // A pick of it is never binding.
 const Defer = "defer"
 
-// questionID is the ID of the one question a decision request asks.
 const questionID = "decision"
 
 // DecisionOption is one option Jev may pick. Description tells Jev what the
@@ -286,8 +284,6 @@ func (j *Judge) Threshold(kind DecisionKind) float64 {
 	return j.threshold()
 }
 
-// acceptance is the acceptance value a decision judgment of kind records: the
-// threshold in force.
 func acceptance(kind DecisionKind, threshold float64) string {
 	name := "decision_threshold="
 	if kind.Owner() {
@@ -296,15 +292,12 @@ func acceptance(kind DecisionKind, threshold float64) string {
 	return name + strconv.FormatFloat(threshold, 'g', -1, 64)
 }
 
-// recorded is one judgment record of an occurrence at its latest revision.
 type recorded struct {
 	id       string
 	revision int
 	record   Record
 }
 
-// occurrenceRecords returns the latest revision of every judgment record of
-// the occurrence, in the order they were first written.
 func occurrenceRecords(repo *trace.Repository, stream config.WorkstreamID, kind DecisionKind, key string) ([]recorded, error) {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -338,7 +331,6 @@ func occurrenceRecords(repo *trace.Repository, stream config.WorkstreamID, kind 
 	return out, nil
 }
 
-// pick returns the option a record's answer chose and its confidence.
 func (r Record) pick() (string, float64, bool) {
 	a, ok := r.Answers[questionID]
 	if !ok || a.Choice == "" {
@@ -347,8 +339,6 @@ func (r Record) pick() (string, float64, bool) {
 	return a.Choice, a.Confidence, true
 }
 
-// result reads an occurrence's result from its records. Binding and
-// nonbinding results never change once recorded, so the first one stands.
 func resultOf(records []recorded) Result {
 	var fallback *recorded
 	for i := range records {
@@ -431,10 +421,8 @@ func (j *Judge) Refuse(ctx context.Context, repo *trace.Repository, stream confi
 	return repo.RecordDocuments(context.WithoutCancel(ctx), []trace.Document{{Header: h, Path: Path(judgment), Content: string(data)}})
 }
 
-var occurrenceLocks sync.Map // string -> *sync.Mutex
+var occurrenceLocks sync.Map
 
-// lockOccurrence serializes the asks of one occurrence, so two callers never
-// both send its request. It returns the release.
 func lockOccurrence(repo *trace.Repository, stream config.WorkstreamID, kind DecisionKind, key string) func() {
 	id := fmt.Sprintf("%p/%s/%s/%s", repo, stream, kind, key)
 	m, _ := occurrenceLocks.LoadOrStore(id, &sync.Mutex{})
@@ -537,9 +525,6 @@ func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req Decision
 	return res
 }
 
-// decisionOptions returns the options of a request, adding Defer when the
-// caller offers fewer than two, since a choice needs two, or when the kind
-// always offers it.
 func decisionOptions(in []DecisionOption, withDefer bool) ([]systemone.Option, error) {
 	if len(in) == 0 {
 		return nil, errors.New("a decision needs an option")

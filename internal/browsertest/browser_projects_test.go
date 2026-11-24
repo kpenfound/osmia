@@ -67,8 +67,6 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 		p.Eval(`document.querySelector('#priority-project').dispatchEvent(new Event('change', {bubbles: true}))`, nil)
 		p.Await("only the selected project's workstream", `document.querySelectorAll('#priority-list li').length === 1 && document.querySelector('#priority-list li').dataset.priority === `+quote(string(f.streams[id])))
 	}
-	// An unsaved selection in one project must not become another project's
-	// order, including when both have no saved priority yet.
 	p.OpenView("priority")
 	selectProject(project)
 	p.Click("#priority-list input[type=checkbox]")
@@ -99,8 +97,6 @@ func TestBrowserControlsEachProjectAndKeepsPriorityOrdersSeparate(t *testing.T) 
 		t.Fatalf("clearing the other project's priority affected %+v", orders)
 	}
 
-	// Configuration events remove unavailable targets without reloading the
-	// page, and reset the editor to the remaining project's saved order.
 	_, err = c.Abandon(ctx, f.streams[otherProject], "Owner finished this work")
 	must(t, err)
 	_, err = c.RemoveProject(ctx, otherProject)

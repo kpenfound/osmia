@@ -136,8 +136,6 @@ func truncate(s string, max int) string {
 	return string(runes[:max]) + "…"
 }
 
-// scrubCode scrubs an error code. Codes are short identifiers; anything else
-// goes through full scrubbing and is shortened.
 func (s *Scrubber) scrubCode(code string) (string, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
@@ -157,9 +155,6 @@ func (s *Scrubber) scrubCode(code string) (string, error) {
 	return truncate(out, 64), nil
 }
 
-// scrubTemplate scrubs an action or an endpoint route template. Route
-// parameters in braces stay; a path segment that looks like instance data
-// becomes {id}, so a concrete path never reaches a report.
 func (s *Scrubber) scrubTemplate(template string) (string, error) {
 	fields := strings.Fields(cleanText(template))
 	if len(fields) == 0 {
@@ -185,8 +180,6 @@ func (s *Scrubber) scrubTemplate(template string) (string, error) {
 	return s.checked(s.secretPass(strings.Join(out, " ")))
 }
 
-// checked applies the scrubber's result hook and final checks to text that a
-// narrower pass produced.
 func (s *Scrubber) checked(text string) (out string, err error) {
 	defer func() {
 		if r := recover(); r != nil {

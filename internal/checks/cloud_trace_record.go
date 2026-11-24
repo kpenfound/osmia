@@ -155,7 +155,6 @@ func (f TraceFetcher) Fetch(ctx context.Context, caller TraceCaller, traceID, ch
 	id := TraceDocumentID(traceID, check)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.Repository.Project(), Workstream: caller.Workstream, At: fetched, Actor: caller.Actor, Cause: caller.Cause}, Path: TraceDocumentPath(traceID, check), Content: string(content) + "\n"}
 	if err := f.Repository.RecordDocuments(ctx, []trace.Document{doc}); err != nil {
-		// A concurrent fetch of the same identity recorded first: its record answers.
 		if errors.Is(err, trace.ErrConflict) {
 			if got, ok, lookup := f.Lookup(caller.Workstream, traceID, check); lookup == nil && ok {
 				return got, nil, nil

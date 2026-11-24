@@ -6,9 +6,6 @@ import (
 	"errors"
 )
 
-// previewServiceID verifies the CLI's scalar ServiceID: a base64 protobuf DAG
-// naming a Service, either by a recipe's root Call or an opaque engine result.
-// Object display strings, provider addresses and filesystem paths are not IDs.
 func previewServiceID(value string) bool {
 	data, err := base64.StdEncoding.Strict().DecodeString(value)
 	if err != nil {
@@ -21,7 +18,6 @@ func previewServiceID(value string) bool {
 	if len(dag) == 1 && len(dag[2]) == 1 {
 		return previewEngineServiceRef(dag[2][0])
 	}
-	// Recipe DAGs may be wrapped in the DAG value oneof.
 	if len(dag) == 1 && len(dag[1]) == 1 {
 		dag, err = previewProtoFields(dag[1][0])
 	}
@@ -57,7 +53,6 @@ func previewServiceType(data []byte) bool {
 	return err == nil && len(typ[1]) == 1 && string(typ[1][0]) == "Service" && len(typ[2]) == 0
 }
 
-// EngineResultRef contains a nonzero uint64 resultID followed by its rootType.
 func previewEngineServiceRef(data []byte) bool {
 	if len(data) == 0 || data[0] != 8 {
 		return false
@@ -77,9 +72,6 @@ func previewEngineServiceRef(data []byte) bool {
 	return previewServiceType(data[1+n:])
 }
 
-// previewProtoFields reads length-delimited fields and validates the remaining
-// protobuf wire data. Only the DAG root, Call type and digest are needed here;
-// the engine resolves the ID's full call graph.
 func previewProtoFields(data []byte) (map[uint64][][]byte, error) {
 	fields := map[uint64][][]byte{}
 	invalid := errors.New("invalid Service ID protobuf")

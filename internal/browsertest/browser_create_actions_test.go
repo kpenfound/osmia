@@ -62,15 +62,12 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 					t.Fatalf("%s choices: %v, want %v", action.name, got, choices)
 				}
 			}
-			// A subsequent global action must clear a previous project choice too.
 			p.Choose(view+` select[name=project]`, string(project))
 		}
 		p.Await("the form fits at phone width", `document.querySelector(`+quote(view+` form`)+`).getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth`)
 	}
 	p.OpenView("project-add")
 	p.AwaitText("#project-add-title", "Create project")
-	// The New menu is the only place that offers the create actions: the
-	// sidebar has no create buttons, and its ids belong to the menu items.
 	p.Await("the New menu holds every create action and the only Create project", `(() => {
 		const items = [...document.querySelectorAll('#create-menu button')].map(b => [b.id, b.dataset.open]);
 		return JSON.stringify(items) === JSON.stringify([['sidebar-new', 'handin'], ['sidebar-new-design', 'design-add'], ['sidebar-new-session', 'session-add'], ['', 'project-add']]) &&
@@ -81,7 +78,6 @@ func TestBrowserCreateActionsShareFormsAndProjectChoicesAtPhoneWidth(t *testing.
 	p.Click("#project-home")
 	p.Click(`[data-project="` + string(project) + `"] [data-project-action="projects"]`)
 	p.Await("the card's management entry opens project management", `!document.querySelector('[data-view=projects]').hidden && document.querySelector('#project-edit [name=project]').value === `+quote(string(project)))
-	// Global create actions also ignore the workstream currently being viewed.
 	p.SelectWorkstream(f.streams[project])
 	p.Click("#new-workstream")
 	p.Click(`#create-menu [data-open="handin"]`)

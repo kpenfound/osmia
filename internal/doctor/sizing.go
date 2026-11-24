@@ -17,19 +17,14 @@ const (
 	mebibyte = uint64(1) << 20
 	gibibyte = uint64(1) << 30
 
-	// sbx sizes a sandbox that sets no memory at half the host's memory,
-	// clamped to this range.
 	sbxMinimumMemory = 512 * mebibyte
 	sbxMaximumMemory = 32 * gibibyte
 )
 
-// sbxDefaultMemory is the memory sbx gives a sandbox created without --memory
-// on a host with total bytes of memory.
 func sbxDefaultMemory(total uint64) uint64 {
 	return min(max(total/2, sbxMinimumMemory), sbxMaximumMemory)
 }
 
-// parseMemory reads a validated sbx memory limit such as 512m or 4g.
 func parseMemory(s string) (uint64, bool) {
 	unit := mebibyte
 	switch {
@@ -45,13 +40,10 @@ func parseMemory(s string) (uint64, bool) {
 	return n * unit, true
 }
 
-// formatMemory is bytes in GiB with one decimal.
 func formatMemory(b uint64) string {
 	return fmt.Sprintf("%.1f GiB", float64(b)/float64(gibibyte))
 }
 
-// sizedRole is one sbx role in the estimate: how many sandboxes of it can be
-// alive at once and how much memory each may hold.
 type sizedRole struct {
 	name   string
 	slots  int
@@ -59,12 +51,6 @@ type sizedRole struct {
 	sized  bool
 }
 
-// sandboxMemory estimates the host memory the configured sbx sandboxes could
-// hold at once and warns when it exceeds the host's total memory. The
-// mason, reviewer and committee pools count at their capacity; the architect
-// has no factory-wide limit and runs one turn per workstream, so
-// it counts once, as do the chief of staff and foreman when they run in sbx.
-// A role without memory counts at sbx's default.
 func (r *run) sandboxMemory(cfg *config.Config) {
 	if cfg == nil {
 		return
@@ -120,8 +106,6 @@ func (r *run) sandboxMemory(cfg *config.Config) {
 	r.add(GroupConfig, name, Warn, fmt.Sprintf("%s, above the host's %s of memory", detail, formatMemory(total)), remedy)
 }
 
-// hostMemory is the host's total memory in bytes: /proc/meminfo on Linux and
-// sysctl hw.memsize on macOS.
 func hostMemory() (uint64, error) {
 	switch runtime.GOOS {
 	case "linux":

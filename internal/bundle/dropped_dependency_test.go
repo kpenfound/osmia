@@ -18,9 +18,6 @@ func recordDocument(t *testing.T, f fixture, stream config.WorkstreamID, id, pat
 	}
 }
 
-// A dependency the workstream dropped is still named by the shared project spec
-// and its edge observation. The bundle says it was dropped and never that the
-// upstream merged, for the dependent only.
 func TestBundleShowsADroppedDependencyAsDroppedNotMerged(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -63,7 +60,6 @@ func TestBundleShowsADroppedDependencyAsDroppedNotMerged(t *testing.T) {
 		t.Fatalf("the rendered context does not say the dependency was dropped:\n%s", text)
 	}
 
-	// The upstream's own bundle names no dropped edge: the waiver is the dependent's.
 	if b := f.assemble(t, bundle.Scope{Workstream: first}); len(b.ProjectSpec.Dropped) != 0 {
 		t.Fatalf("the upstream's context shows a dependent's waiver: %+v", b.ProjectSpec.Dropped)
 	}

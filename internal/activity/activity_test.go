@@ -10,86 +10,94 @@ import (
 
 	activitylib "github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
 func floatPtr(v float64) *float64 { return &v }
 
-// TestHealthReportsBackendAvailabilityFromTheActivityRecord covers spec#5:
-// health reports the API available and the backend ready with no blocking
-// work, not ready while a recovery is in progress, and degraded, naming the
-// cause, when an operation has failed or made no progress for
-// ActivityStallThreshold.
-func TestHealthReportsBackendAvailabilityFromTheActivityRecord(t *testing.T) {
-	t.Parallel()
+func startHealthFixture(t *testing.T) (*service.Service, *service.Client, *fixturekit.FixedClock) {
+	t.Helper()
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts := servicetest.Fixture(t)
 	opts.Reconciliation.Now = clock.Now
 	s, c := servicetest.Start(t, opts)
-	ctx := context.Background()
+	return s, c, clock
+}
 
+func TestHealthIsReadyWithNothingInFlight(t *testing.T) {
+	t.Parallel()
+	_, c, _ := startHealthFixture(t)
+	ctx := context.Background()
 	ready, err := c.Health(ctx)
 	fixturekit.Must(t, err)
 	if !ready.API || !ready.Ready || ready.Backend != api.BackendReady || ready.Cause != "" {
 		t.Fatalf("expected a ready backend with nothing in flight: %+v", ready)
 	}
-	// Start's own recovery steps report through the same record; by the
-	// time it returns, each has finished and left nothing behind.
 	activity, err := c.Activity(ctx)
 	fixturekit.Must(t, err)
 	if len(activity.Activity) != 0 {
 		t.Fatalf("startup recovery left activity behind: %+v", activity.Activity)
 	}
+}
 
+func TestHealthIsNotReadyWhileRecoveryRuns(t *testing.T) {
+	t.Parallel()
+	s, c, _ := startHealthFixture(t)
 	recovering := s.StartActivity("health-recovery", api.ActivityRecovery, fixturekit.Project, "", "recovering interrupted workspace operations")
-	notReady, err := c.Health(ctx)
+	notReady, err := c.Health(context.Background())
 	fixturekit.Must(t, err)
 	if !notReady.API || notReady.Ready || notReady.Backend != api.BackendNotReady || notReady.Cause == "" {
 		t.Fatalf("expected a not-ready backend while recovery is in progress: %+v", notReady)
 	}
 	recovering.Finish(nil)
-
-	failing := s.StartActivity("health-failure", api.ActivityGit, fixturekit.Project, fixturekit.Stream, "rebase")
-	failing.Finish(errors.New("the upstream branch moved"))
-	degradedByFailure, err := c.Health(ctx)
+	ready, err := c.Health(context.Background())
 	fixturekit.Must(t, err)
-	if !degradedByFailure.API || degradedByFailure.Ready || degradedByFailure.Backend != api.BackendDegraded ||
-		!strings.Contains(degradedByFailure.Cause, "the upstream branch moved") {
-		t.Fatalf("expected a degraded backend naming the failure: %+v", degradedByFailure)
-	}
-	failing.Finish(nil)
-
-	// The stall rule only catches an operation once its own reporting has
-	// demonstrably started and then stopped (activity.go, reported); a bare
-	// start with no progress report is covered by
-	// TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress below.
-	stalled := s.StartActivity("health-stall", api.ActivityGit, fixturekit.Project, fixturekit.Stream, "cloning")
-	stalled.Progress("cloning", nil)
-	clock.Advance(activitylib.ActivityStallThreshold)
-	degradedByStall, err := c.Health(ctx)
-	fixturekit.Must(t, err)
-	if !degradedByStall.API || degradedByStall.Ready || degradedByStall.Backend != api.BackendDegraded ||
-		!strings.Contains(degradedByStall.Cause, "cloning") {
-		t.Fatalf("expected a degraded backend naming the stalled operation: %+v", degradedByStall)
-	}
-	stalled.Finish(nil)
-
-	readyAgain, err := c.Health(ctx)
-	fixturekit.Must(t, err)
-	if !readyAgain.API || !readyAgain.Ready || readyAgain.Backend != api.BackendReady || readyAgain.Cause != "" {
-		t.Fatalf("expected a ready backend once every operation finished: %+v", readyAgain)
+	if !ready.Ready || ready.Backend != api.BackendReady {
+		t.Fatalf("expected a ready backend once recovery finished: %+v", ready)
 	}
 }
 
-// TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress covers
-// spec#5: activityReconciler.Apply reports a reconciled Git or workspace
-// operation (seal, build, land, rebase, drift, publish) with only a start
-// and a finish, nothing in between, so an ordinary one that simply takes
-// longer than ActivityStallThreshold must not read degraded. The stall rule
-// only applies once an entry's own reporting has demonstrably started and
-// then gone quiet (activity.go, ActivityEntry.reported): a bare start with
-// no progress report yet says nothing about whether the operation is stuck.
+func TestHealthIsDegradedByAFailedOperationUntilItIsStartedAgain(t *testing.T) {
+	t.Parallel()
+	s, c, _ := startHealthFixture(t)
+	failing := s.StartActivity("health-failure", api.ActivityGit, fixturekit.Project, fixturekit.Stream, "rebase")
+	failing.Finish(errors.New("the upstream branch moved"))
+	degraded, err := c.Health(context.Background())
+	fixturekit.Must(t, err)
+	if !degraded.API || degraded.Ready || degraded.Backend != api.BackendDegraded ||
+		!strings.Contains(degraded.Cause, "the upstream branch moved") {
+		t.Fatalf("expected a degraded backend naming the failure: %+v", degraded)
+	}
+	s.StartActivity("health-failure", api.ActivityGit, fixturekit.Project, fixturekit.Stream, "rebase").Finish(nil)
+	ready, err := c.Health(context.Background())
+	fixturekit.Must(t, err)
+	if !ready.Ready || ready.Backend != api.BackendReady || ready.Cause != "" {
+		t.Fatalf("expected a ready backend once the operation succeeded: %+v", ready)
+	}
+}
+
+func TestHealthIsDegradedByAnOperationThatStoppedReportingProgress(t *testing.T) {
+	t.Parallel()
+	s, c, clock := startHealthFixture(t)
+	stalled := s.StartActivity("health-stall", api.ActivityGit, fixturekit.Project, fixturekit.Stream, "cloning")
+	stalled.Progress("cloning", nil)
+	clock.Advance(activitylib.ActivityStallThreshold)
+	degraded, err := c.Health(context.Background())
+	fixturekit.Must(t, err)
+	if !degraded.API || degraded.Ready || degraded.Backend != api.BackendDegraded ||
+		!strings.Contains(degraded.Cause, "cloning") {
+		t.Fatalf("expected a degraded backend naming the stalled operation: %+v", degraded)
+	}
+	stalled.Finish(nil)
+	ready, err := c.Health(context.Background())
+	fixturekit.Must(t, err)
+	if !ready.Ready || ready.Backend != api.BackendReady || ready.Cause != "" {
+		t.Fatalf("expected a ready backend once the operation finished: %+v", ready)
+	}
+}
+
 func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.T) {
 	t.Parallel()
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
@@ -107,8 +115,6 @@ func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.
 		t.Fatalf("expected a ready backend while a Git operation that never reports progress is still running: %+v", stillReady)
 	}
 
-	// Once it does report progress and then goes quiet past the threshold,
-	// the same entry is caught.
 	running.Progress("pushing", nil)
 	clock.Advance(activitylib.ActivityStallThreshold)
 	degraded, err := c.Health(ctx)
@@ -119,13 +125,6 @@ func TestHealthDoesNotDegradeOnAGitOperationThatNeverReportsProgress(t *testing.
 	running.Finish(nil)
 }
 
-// TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks covers spec#5:
-// an agent turn or a check run is reported once at start and once at
-// finish, with nothing in between, and routinely runs well past
-// ActivityStallThreshold under this project's own checks_timeout and
-// profile timeout. Health must still report ready while one of those is in
-// flight: the no-progress stall rule applies to kinds whose own reporting
-// is expected to keep moving, not to a turn or a check that is merely busy.
 func TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks(t *testing.T) {
 	t.Parallel()
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
@@ -148,14 +147,6 @@ func TestHealthDoesNotDegradeOnOrdinaryLongRunningTurnsAndChecks(t *testing.T) {
 	check.Finish(nil)
 }
 
-// TestHealthStopsDegradingOnAFailureNothingRetries covers spec#5: many
-// operations are keyed by the trace event that requested them, not by a
-// retry-stable identity (activity.go, ActivityFailureExpiry), so an
-// abandoned workstream or a check run superseded by a new run number may
-// never issue a fresh start under the same key to supersede a failed entry.
-// A failure that nothing retries must still stop degrading health once
-// ActivityFailureExpiry passes, and must stop being listed too, while one a
-// caller is still retrying under a fresh key is unaffected.
 func TestHealthStopsDegradingOnAFailureNothingRetries(t *testing.T) {
 	t.Parallel()
 	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
@@ -193,17 +184,11 @@ func TestHealthStopsDegradingOnAFailureNothingRetries(t *testing.T) {
 	}
 }
 
-// TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream
-// covers spec#4 and spec#5's "event stream" half: a started operation's
-// phase, progress and last-progress time are readable through GET
-// /v1/activity as it reports them, each report announces an activity event
-// on the stream, a failure keeps the entry visible, and a successful finish
-// removes it.
 func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *testing.T) {
 	t.Parallel()
 	s, c := servicetest.Start(t, servicetest.Fixture(t))
 	events, _ := servicetest.EventStream(t, c)
-	servicetest.NextEvent(t, events) // the stream's first event is always a resync.
+	servicetest.NextEvent(t, events)
 
 	h := s.StartActivity("activity-test", api.ActivityCheck, fixturekit.Project, fixturekit.Stream, "selecting checks")
 	servicetest.AwaitEvents(t, events, api.Event{Kind: api.EventActivity})
@@ -240,15 +225,12 @@ func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *te
 		t.Fatalf("failure not reported: %+v", e)
 	}
 
-	// A fresh start under the same key supersedes the failed entry, and a
-	// nil Finish removes it once it succeeds.
 	fresh := s.StartActivity("activity-test", api.ActivityCheck, fixturekit.Project, fixturekit.Stream, "selecting checks")
 	out, err = c.Activity(context.Background())
 	fixturekit.Must(t, err)
 	if len(out.Activity) != 1 || out.Activity[0].Failure != "" {
 		t.Fatalf("a fresh start did not supersede the failed entry: %+v", out.Activity)
 	}
-	// The superseded handle can no longer report for the key.
 	h.Finish(errors.New("stale"))
 	out, err = c.Activity(context.Background())
 	fixturekit.Must(t, err)
@@ -264,13 +246,6 @@ func TestActivityReportsPhaseProgressAndFailureThroughTheAPIAndEventStream(t *te
 	}
 }
 
-// TestActivityStaysVisibleAndRespondsWhileAFactoryOperationIsBlocked covers
-// spec#4: a RepositoryBoundary operation the reconcile controller runs
-// inside trace.Repository.WithOperation, which holds the repository's
-// operationMu for the whole Apply call (busy_reads_test.go,
-// blockedFactoryOperation), stays visible in the activity record with its
-// kind and phase while that lock is held, and GET /v1/activity answers
-// within one second.
 func TestActivityStaysVisibleAndRespondsWhileAFactoryOperationIsBlocked(t *testing.T) {
 	t.Parallel()
 	blocking := fixturekit.NewBlockedFactoryOperation()

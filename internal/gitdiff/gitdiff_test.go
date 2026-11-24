@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// git runs a git command against a local repository with an isolated
-// identity and configuration, so the diff this test parses doesn't depend on
-// the host's git configuration (user name, global ignore rules, and so on).
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -28,13 +25,6 @@ func git(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// realDiff builds a local git repository in t.TempDir with two commits and
-// returns the unified diff `git diff --no-ext-diff --binary --no-renames`
-// writes between them: the same command and flags production code runs
-// (internal/workspace/git.go DiffSummary, cmd/smartcheck/main.go). Using a
-// real repository, rather than a hand-written diff fixture, protects the
-// parser against drift from git's actual output: path quoting for non-ASCII
-// names, hunk-header math, and the binary-patch marker.
 func realDiff(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -60,8 +50,6 @@ func realDiff(t *testing.T) string {
 	git(t, dir, "commit", "--quiet", "-m", "base")
 	base := strings.TrimSpace(git(t, dir, "rev-parse", "HEAD"))
 
-	// Insert a line near the top and change the last line, far enough apart
-	// that they land in two separate hunks.
 	var modified strings.Builder
 	modified.WriteString("line 1\nAdded near the top.\n")
 	for i := 2; i <= 19; i++ {
@@ -77,7 +65,6 @@ func realDiff(t *testing.T) string {
 	if err := os.Remove(filepath.Join(dir, "internal", "café.go")); err != nil {
 		t.Fatal(err)
 	}
-	// A NUL byte makes git's own heuristic treat the file as binary.
 	if err := os.WriteFile(filepath.Join(dir, "logo.png"), []byte{0x89, 'P', 'N', 'G', 0x00, 0x01, 0x02, 0x03}, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +88,6 @@ func TestParseSplitsFilesAndHunks(t *testing.T) {
 	for _, f := range files {
 		got = append(got, summary{f.Path, f.Added, f.Removed, f.Binary, len(f.Hunks)})
 	}
-	// Computed from the edits realDiff makes, not from running Parse: one
-	// inserted line near the top of docs/guide.md and one changed line at
-	// its end (two hunks, three lines apart from default unified context),
-	// a new file with a space in its name, a deleted file whose non-ASCII
-	// name git quotes, and a binary file git reports with no hunks.
 	want := []summary{
 		{"docs/guide.md", 2, 1, false, 2},
 		{"internal/a b.go", 2, 0, false, 1},
@@ -120,13 +102,9 @@ func TestParseSplitsFilesAndHunks(t *testing.T) {
 			t.Fatalf("file %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	// The inserted line has one line of context before it (file start) and
-	// three after: old range 1-4, new range 1-5.
 	if h := files[0].Hunks[0]; h.Start != 1 || h.End != 5 {
 		t.Fatalf("first hunk covers %d-%d, want 1-5", h.Start, h.End)
 	}
-	// The changed last line shifts by the earlier insertion: three lines of
-	// context before it in the new file, none after (end of file).
 	if h := files[0].Hunks[1]; h.Start != 18 || h.End != 21 {
 		t.Fatalf("second hunk covers %d-%d, want 18-21", h.Start, h.End)
 	}

@@ -63,8 +63,6 @@ func Find(repo *trace.Repository, stream config.WorkstreamID, id string) (Unit, 
 	return units[i], true, nil
 }
 
-// withTask returns the follow-up with a task, acceptance and criterion drawn
-// from its gap when its unit records none.
 func (u Unit) withTask() Unit {
 	if u.Unit.Task == "" {
 		u.Unit.Task = u.Gap

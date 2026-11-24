@@ -33,8 +33,6 @@ func (d DaggerChecks) Preview(ctx context.Context, dir string, in PreviewCapture
 	fail := func(err error) ([]byte, error) {
 		secrets := redact.KnownSecrets()
 		tail := output.String()
-		// The bounded buffer can begin halfway through a secret. Remove any
-		// matching suffix before redacting complete values and bounding the result.
 		if output.truncated {
 			for _, secret := range secrets {
 				for i := 1; i < len(secret); i++ {
@@ -88,7 +86,6 @@ func (d DaggerChecks) Preview(ctx context.Context, dir string, in PreviewCapture
   await page.screenshot({path: '/tmp/osmia-preview.png', fullPage: options.fullPage});
  } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });`
-	// Dagger's string-slice flag uses CSV, including quotes and embedded commas.
 	var execArgs strings.Builder
 	writer := csv.NewWriter(&execArgs)
 	_ = writer.Write([]string{"node", "-e", script})

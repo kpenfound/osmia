@@ -17,10 +17,8 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// serial: installs a fake CLI and plants host credentials and engine selectors.
 func TestDaggerClientEnvironment(t *testing.T) {
 	bin := t.TempDir()
-	// Remove shell-added variables before dumping the client environment.
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\nunset PWD SHLVL _\nexec env -0\n"), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for name, value := range map[string]string{
@@ -107,7 +105,6 @@ func TestDaggerClientEnvironment(t *testing.T) {
 							t.Fatal("check client environment contains CI")
 						}
 						if !reflect.DeepEqual(got, want) {
-							// Names and the redacted dump diagnose failures without logging a token.
 							t.Fatalf("environment mismatch: %s", redact.Secrets(output.String(), redact.KnownSecrets()...))
 						}
 						if operation == "check" && token != "" && (prep.CIIdentity == fallback || (prep.FallbackReason != "") != fallback) {
@@ -126,7 +123,6 @@ func TestDaggerClientEnvironment(t *testing.T) {
 	}
 }
 
-// serial: installs a fake CLI that prints the token and a trace URL.
 func TestDaggerClientRedactsOutputAndCapturesTrace(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -147,7 +143,6 @@ printf 'CHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 	if strings.Contains(result.Output+result.CIIdentityFallback+logs.String(), token) {
 		t.Fatal("token leaked")
 	}
-	// Listings have a separate error path and output budget.
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\nprintf '%s' \"$DAGGER_CLOUD_TOKEN\" >&2\nexit 1\n"), 0700))
 	_, err = (DaggerChecks{Engine: "cloud", CloudToken: token}).List(ctx, t.TempDir(), Identity{})
 	if err == nil || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "[redacted]") {
@@ -155,7 +150,6 @@ printf 'CHECKS  ✔ 1 passed\n✔ dag://go/test 1s OK\n'
 	}
 }
 
-// serial: installs a fake CLI that returns a Service ID and diagnostics.
 func TestDaggerClientSeparatesServiceIDFromDiagnostics(t *testing.T) {
 	installLoggingDagger(t, `printf 'service-id\n'
 printf 'service diagnostic\n' >&2
@@ -188,7 +182,6 @@ func TestCloudTraceURL(t *testing.T) {
 	}
 }
 
-// Serial: installs a fake CLI and sets the process Docker selectors.
 func TestDockerCheckHost(t *testing.T) {
 	fake := fixturekit.InstallEngineCLIs(t)
 	for _, host := range []string{"tcp://engine-host.example.ts.net:2375", "ssh://user@engine-host.example.ts.net", ""} {
@@ -243,7 +236,6 @@ func TestDockerCheckHost(t *testing.T) {
 	}
 }
 
-// Serial: supplies a host Docker Desktop socket and host CLI selectors.
 func TestAutoCheckDockerDesktopSelection(t *testing.T) {
 	bin := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\nprintf '%s\\n%s\\n' \"${DOCKER_HOST-}\" \"${_EXPERIMENTAL_DAGGER_RUNNER_HOST-}\"\n"), 0700))

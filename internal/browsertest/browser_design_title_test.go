@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/kpenfound/agentcore/agent"
@@ -24,14 +23,6 @@ const (
 	designTitleHandoff = "Resumable uploads across the server and the client"
 )
 
-// TestBrowserDesignTitlesFollowTheAgentAndTheHandoffTitlesTheStartedWork runs
-// the real service with fake agents. A design turn calls the title tool and
-// the page shows that title, in place of the workstream ID, in the sidebar
-// row, the project pane's design-session list and the design view; a second
-// call updates all three without a reload. The owner starts the work from the
-// page, the hand-off chief-of-staff turn sets the status goal with
-// set_status, and the page then shows that goal as the title of the started
-// workstream or workgroup.
 func TestBrowserDesignTitlesFollowTheAgentAndTheHandoffTitlesTheStartedWork(t *testing.T) {
 	t.Parallel()
 	for _, workgroup := range []bool{false, true} {
@@ -83,8 +74,6 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 			names = append(names, tool.Name)
 		}
 		if !slices.Contains(names, "set_title") {
-			// The hand-off turn of the chief of staff: it titles the started
-			// work through its status goal.
 			if !strings.Contains(req.Prompt, "Title the started work") {
 				return &agent.Result{ClaudeID: "chief", ResultText: "Nothing to do."}, nil
 			}
@@ -133,7 +122,6 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 	sidebar := `#workstream-list [data-select="` + string(id) + `"] [data-field=goal]`
 	pane := `#project-pane [data-pane-workstream="` + string(id) + `"] strong`
 
-	// shows checks the three places a design session is listed or shown.
 	shows := func(label, want string) {
 		t.Helper()
 		p.Await("the sidebar row labelled "+label, textOf(sidebar)+` === `+quote(want))
@@ -144,49 +132,39 @@ func browserDesignTitles(t *testing.T, workgroup bool) {
 		p.Click(`[data-drilldown="` + string(id) + `"]`)
 		p.Await("the design view again", `!document.querySelector('[data-view="design"]').hidden`)
 	}
-	// An untitled session keeps its ID.
 	shows("by its ID", string(id))
 
-	// The agent sets the title; the page follows without a reload.
 	p.Eval(`window.notReloaded = true`, nil)
 	p.TypeInto("#design-form [name=text]", "We need resumable uploads for the server and the client.")
 	p.Click("#design-form [type=submit]")
 	p.AwaitText("#design-feed", "Titled the session.")
 	shows("with the first title", designTitleFirst)
 
-	// A second title call replaces it, again without a reload.
 	p.TypeInto("#design-form [name=text]", "The client is in scope too, so widen the subject.")
 	p.Click("#design-form [type=submit]")
 	shows("with the second title", designTitleSecond)
 	p.Await("no reload", `window.notReloaded === true`)
 
-	// The owner starts the work from the page.
 	awaitBrowserDesignBrief(t, p, c, id)
 	p.Click("#design-start")
 	if workgroup {
-		// A started workgroup's design session leaves the sidebar, and the
-		// page follows it to the workgroup's view; the start's result line
-		// belongs to the design view it left.
 		p.Await("the started workgroup view", `!document.querySelector('[data-view="workgroup"]').hidden`)
 	} else {
 		p.Await("workgroup start", `document.getElementById('design-start-result').textContent.includes('Started a workgroup')`)
 		assertBrowserDesignSelection(t, p, c, id, true)
 	}
 
-	// The hand-off turn of the chief of staff sets the status goal, which the
-	// started work shows through its goal display.
 	if workgroup {
 		var group config.WorkgroupID
-		for end := time.Now().Add(browserTimeout); group == "" && time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		awaitCondition(t, "the started work reporting a workgroup", func() bool {
 			w, err := c.Status(ctx, id)
 			must(t, err)
-			if w.Workgroup != nil && len(w.Workgroup.Members) > 1 {
-				group = w.Workgroup.ID
+			if w.Workgroup == nil || len(w.Workgroup.Members) < 2 {
+				return false
 			}
-		}
-		if group == "" {
-			t.Fatal("the started work reports no workgroup")
-		}
+			group = w.Workgroup.ID
+			return true
+		})
 		p.Await("the workgroup titled by the hand-off status in the sidebar", textOf(`#workstream-list [data-sidebar-workgroup="`+string(group)+`"] .sidebar-workgroup-title .title`)+` === `+quote(designTitleHandoff))
 		p.Click(`[data-select-workgroup="` + string(group) + `"]`)
 		p.Await("the workgroup view titled by the hand-off status", textOf("#workgroup-goal")+` === `+quote(designTitleHandoff))

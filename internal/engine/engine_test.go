@@ -14,8 +14,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// The executables maintain local container/cache state and reject every command
-// outside the engine-control protocol. They have no access to a real engine.
 func fakeHost(t *testing.T) (Options, string) {
 	t.Helper()
 	dir := t.TempDir()

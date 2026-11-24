@@ -121,8 +121,6 @@ func AnswerTransition(r systemone.Request, call int, script func(Ask) Reply) (sy
 	return answerTransition(r, call, script), true
 }
 
-// answerTransition answers a transition request with the script's reply, or
-// DefaultFits.
 func answerTransition(r systemone.Request, call int, script func(Ask) Reply) systemone.Response {
 	ask := Ask{Call: call}
 	if raw, err := json.Marshal(r.State); err == nil {
@@ -167,9 +165,6 @@ func answerTransition(r systemone.Request, call int, script func(Ask) Reply) sys
 	return systemone.Response{Model: "jev-test", Answers: answers, Usage: systemone.Usage{InputTokens: 100, OutputTokens: 5, CostUSD: 0.000004, CostKnown: true}}
 }
 
-// choice answers a pick question with the option at the confidence. An option the
-// question does not offer is answered as given, so a test can script an
-// answer naming a target the router never offered.
 func choice(q systemone.Question, option string, confidence float64) systemone.Answer {
 	var others []string
 	for _, o := range q.Options {

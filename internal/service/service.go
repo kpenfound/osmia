@@ -1289,7 +1289,7 @@ func (s *Service) openReconciliation(cfg *config.Config) (*trace.Repository, *re
 		}
 		return nil, nil, nil, err
 	}
-	observe := s.hub.TraceEvents(cfg.Project.ID, librarianWorkstream(cfg.Project.ID))
+	observe := s.hub.TraceEvents(cfg.Project.ID)
 	repository.Observe(func(c trace.Commit) { observe(c); s.conversationSignal.wake() })
 	// With telemetry off the trace derives nothing for spans.
 	if s.telemetry.Enabled() {

@@ -20,14 +20,12 @@ const (
 	linkV = "dag+check://release/version"
 )
 
-// fakeCall is one call to a fakeRunner.
 type fakeCall struct {
 	links, skip []string
 	started     time.Time
 	deadline    time.Time
 }
 
-// fakeRunner is a ReviewChecks whose Check is script. It records its calls.
 type fakeRunner struct {
 	calls  []fakeCall
 	script func(ctx context.Context, call fakeCall) (CheckResult, error)
@@ -46,7 +44,6 @@ func (f *fakeRunner) CheckSkipping(ctx context.Context, _ string, _ Identity, li
 	return f.script(ctx, call)
 }
 
-// plainRunner is a ReviewChecks that cannot skip checks.
 type plainRunner struct{ r *fakeRunner }
 
 func (p plainRunner) List(ctx context.Context, dir string, identity Identity) ([]string, error) {
@@ -69,14 +66,12 @@ func failure(link string) CheckResult {
 	return CheckResult{ExitCode: 1, Output: "CHECKS  ✘ 1 failed\n✘ " + link + " 1s ERROR\n  wrong answer\n"}
 }
 
-// unfinished is the result of a run that reported passes and then ended.
 func unfinished(passed ...string) CheckResult {
 	result := passes(passed...)
 	result.ExitCode = -1
 	return result
 }
 
-// blocked waits for the engine's budget to end, as a run that cannot finish.
 func blocked(passed ...string) func(context.Context, fakeCall) (CheckResult, error) {
 	return func(ctx context.Context, _ fakeCall) (CheckResult, error) {
 		<-ctx.Done()
@@ -150,7 +145,6 @@ func TestWithoutCloudRunsSelectionUnderOneBudget(t *testing.T) {
 					t.Fatalf("attribution %+v", attribution)
 				}
 			}
-			// One budget spans every call.
 			for _, call := range wrapped.calls {
 				if !call.deadline.Equal(wrapped.calls[0].deadline) {
 					t.Fatalf("deadlines differ: %v", wrapped.calls)
@@ -160,7 +154,6 @@ func TestWithoutCloudRunsSelectionUnderOneBudget(t *testing.T) {
 	}
 }
 
-// statusOf is the status ClassifyChecks gives.
 func statusOf(result CheckResult, err error) string {
 	status, _, _ := ClassifyChecks(result, err)
 	return status
@@ -246,8 +239,6 @@ func TestLocalInvocationsShareOneBudget(t *testing.T) {
 
 func TestCloudWorkShareOneBudgetOfItsOwn(t *testing.T) {
 	t.Parallel()
-	// linkA is remembered, linkB times out locally, linkV passes locally with
-	// a flaky check. The local run spends its whole budget.
 	local := fake(func(ctx context.Context, call fakeCall) (CheckResult, error) {
 		if slices.Contains(call.links, linkV) {
 			result := passes(linkV)
@@ -540,7 +531,6 @@ func TestRememberedLinksGoStraightToCloud(t *testing.T) {
 	if !reflect.DeepEqual(attribution.Runs, want) {
 		t.Fatalf("attribution %+v", attribution.Runs)
 	}
-	// Only remembered links: the local runner is never called.
 	local = fake(always(CheckResult{}, errors.New("local runner called")))
 	_, _, _, err = runFallback(t, local, cloud, Remembered{Links: []string{linkA, linkV}}, linkA, linkV)
 	must(t, err)
@@ -663,7 +653,6 @@ func TestPassedChecksReadTheReport(t *testing.T) {
 	}
 }
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerChecksSkipPassedChecks(t *testing.T) {
 	const flags = "check --progress=report --fail-fast --parallel 4 "
 	t.Run("filtered links", func(t *testing.T) {

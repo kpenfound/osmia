@@ -30,8 +30,6 @@ func TestStateRoundTripsThroughAnAtomicSave(t *testing.T) {
 	cfgA.CheckInterval = time.Hour
 	fileIssue(t, st, cfgA, fp(1), t0, 7)
 	fileIssue(t, st, cfgB, fp(1), t0, 7)
-	// An awaiting check in A, an unresolved comment intent in B and a create
-	// intent in A, with counts, a cap window and queue drops.
 	at := t0.Add(5 * time.Minute)
 	if d := step(st, cfgA, testReport(fp(1), at), nil, at); d.Kind != AwaitCheck {
 		t.Fatalf("decision = %s", d.Kind)
@@ -65,7 +63,6 @@ func TestStateRoundTripsThroughAnAtomicSave(t *testing.T) {
 	if in.Kind != IntentCreate || in.Attempts != 1 || len(in.Labels) != 2 || in.Filing.Report.Fingerprint != fp(2) || in.RecordedAt.IsZero() {
 		t.Fatalf("intent = %+v", in)
 	}
-	// What was loaded decides like what was saved.
 	for _, cfg := range []Config{cfgA, cfgB} {
 		a, b := Decide(st, cfg, Input{}, at.Add(time.Minute)), Decide(loaded, cfg, Input{}, at.Add(time.Minute))
 		if a.Kind != b.Kind || a.Fingerprint != b.Fingerprint {
@@ -73,12 +70,10 @@ func TestStateRoundTripsThroughAnAtomicSave(t *testing.T) {
 		}
 	}
 
-	// No temporary file is left beside the state.
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 || entries[0].Name() != "error-reports.json" {
 		t.Fatalf("directory = %v, %v", entries, err)
 	}
-	// Saving again replaces the file.
 	loaded.NoteQueueDrops(1)
 	if err := loaded.Save(path); err != nil {
 		t.Fatal(err)
@@ -163,7 +158,6 @@ func TestMatchersRecogniseWritesRegardlessOfLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The labels change before the retry; the body is found just the same.
 	cfg.Labels = []string{"something", "else"}
 	if !MatchesIssue(issue.Body, d.Intent.Fingerprint) {
 		t.Fatal("the issue is not recognised")

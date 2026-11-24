@@ -38,7 +38,6 @@ func CheckWebTurn(t testing.TB, got Turn, backend string, wantMCP []string, role
 	if !slices.Equal(names, want) {
 		t.Errorf("MCP tools %v, want %v", names, want)
 	}
-	// The service registers no web search or fetch tool of its own.
 	for _, name := range got.MCP {
 		if lower := strings.ToLower(name); strings.Contains(lower, "web") || strings.Contains(lower, "search") || strings.Contains(lower, "fetch") {
 			t.Errorf("service tool %s looks like a web tool", name)

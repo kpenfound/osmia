@@ -89,10 +89,8 @@ type Options struct {
 	HTTP      *http.Client
 }
 
-// commandTimeout bounds each tool, remote and API probe.
 const commandTimeout = 30 * time.Second
 
-// lockFile is the root ownership lock the service holds while it runs.
 const lockFile = ".service.lock"
 
 // Run runs every check and returns them in group order. Checks that need
@@ -163,10 +161,8 @@ func groupOrder(g string) int {
 
 type run struct {
 	Options
-	checks []Check
-	// running is set when a service owns the root.
-	running bool
-	// rootReady is set when the root is an accessible directory.
+	checks    []Check
+	running   bool
 	rootReady bool
 }
 
@@ -177,8 +173,6 @@ func (r *run) add(group, name string, status Status, detail, remediation string)
 	r.checks = append(r.checks, Check{Group: group, Name: name, Status: status, Detail: detail, Remediation: remediation})
 }
 
-// root checks the root directory and its ownership lock, and returns the
-// lock when doctor acquired it.
 func (r *run) root() *os.File {
 	dir := r.Root.String()
 	info, err := os.Stat(dir)
@@ -226,7 +220,6 @@ func unlock(f *os.File) {
 	f.Close()
 }
 
-// serviceLog checks the log serve --detach appends to.
 func (r *run) serviceLog() {
 	path := filepath.Join(r.Root.String(), "service.log")
 	info, err := os.Lstat(path)
@@ -240,8 +233,6 @@ func (r *run) serviceLog() {
 	r.add(GroupRoot, "service log", Pass, path, "")
 }
 
-// config loads the top-level configuration and each active project's, and
-// returns the configuration with the projects that loaded.
 func (r *run) config() (*config.Config, []config.Project) {
 	if !r.rootReady {
 		return nil, nil
@@ -260,7 +251,6 @@ func (r *run) config() (*config.Config, []config.Project) {
 	return cfg, r.projects(cfg)
 }
 
-// projects returns the registry's projects that load from the project store.
 func (r *run) projects(cfg *config.Config) []config.Project {
 	store := projectstore.Open(cfg.Root)
 	ids, err := store.Projects()
@@ -280,14 +270,11 @@ func (r *run) projects(cfg *config.Config) []config.Project {
 	return projects
 }
 
-// projectLoaded reports a project that loaded and returns it.
 func (r *run) projectLoaded(p config.Project) config.Project {
 	r.add(GroupConfig, "project "+string(p.ID), Pass, fmt.Sprintf("%s (%s)", p.Name, p.Upstream), "")
 	return p
 }
 
-// storedReason is the text of a stored project's settings that did not load:
-// the field and why, without the retired file the loader names.
 func storedReason(err error) string {
 	var field *config.FieldError
 	if !errors.As(err, &field) {
@@ -299,8 +286,6 @@ func storedReason(err error) string {
 	return field.Field + ": " + field.Reason
 }
 
-// configReason is a configuration error's text. A field error never carries
-// values read from the file; any other error is reported by kind alone.
 func configReason(err error) string {
 	var field *config.FieldError
 	if errors.As(err, &field) {
@@ -309,9 +294,6 @@ func configReason(err error) string {
 	return "cannot be loaded"
 }
 
-// toolchain checks the executables the service runs: git, jj for Jujutsu
-// workspaces, each configured agent, the container engine or Docker Sandboxes
-// a role's sandbox needs, and dagger for review checks.
 func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	r.tool(ctx, "git", Fail, "install git; every workspace, landing and delivery runs it", "--version")
 	r.jj(ctx, cfg)
@@ -341,8 +323,6 @@ func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	r.tool(ctx, "dagger", Warn, "install dagger; the service runs each candidate's checks with dagger check before review", "version")
 }
 
-// tool finds name on PATH and runs it with args, reporting the first line it
-// prints. A tool that is missing or fails is reported with status.
 func (r *run) tool(ctx context.Context, name string, status Status, remedy string, args ...string) {
 	path, err := r.LookPath(name)
 	if err != nil {
@@ -359,8 +339,6 @@ func (r *run) tool(ctx context.Context, name string, status Status, remedy strin
 	r.add(GroupToolchain, name, Pass, fmt.Sprintf("%s (%s)", path, firstLine(out)), "")
 }
 
-// jj checks the jj that Jujutsu workspaces need, by the configured workspaces
-// setting: required for jujutsu, preferred for auto and unused for git.
 func (r *run) jj(ctx context.Context, cfg *config.Config) {
 	setting := config.WorkspacesAuto
 	if cfg != nil {
@@ -385,12 +363,10 @@ func (r *run) jj(ctx context.Context, cfg *config.Config) {
 	r.add(GroupToolchain, "jj", Warn, reason(err)+"; new workstreams use Git worktrees", remedy+" for Jujutsu workspaces, or set workspaces = \"git\"")
 }
 
-// socket checks that the service can bind its Unix socket.
 func (r *run) socket(cfg *config.Config) {
 	if cfg == nil {
 		return
 	}
-	// Loading the configuration refused a socket path that is not a socket.
 	path := cfg.Listen.Socket
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		r.add(GroupRoot, "socket", Pass, path+" is free", "")
@@ -412,7 +388,6 @@ func (r *run) socket(cfg *config.Config) {
 	}
 }
 
-// web checks that listen.web can be bound. A running service holds it.
 func (r *run) web(cfg *config.Config) {
 	if cfg == nil || cfg.Listen.Web == "" || r.running {
 		return
@@ -426,9 +401,6 @@ func (r *run) web(cfg *config.Config) {
 	r.add(GroupConfig, "listen.web", Pass, cfg.Listen.Web+" can be bound", "")
 }
 
-// jev checks that Jev has its API key. The service starts without it, but
-// every judgment then falls back and every check runs, so a missing key fails
-// the check.
 func (r *run) jev(cfg *config.Config) {
 	if cfg == nil {
 		return
@@ -441,8 +413,6 @@ func (r *run) jev(cfg *config.Config) {
 	r.add(GroupConfig, "jev", Pass, "Jev is configured with "+name+" set for "+cfg.Jev.Model, "")
 }
 
-// project checks a project's clone and the remotes the service fetches from
-// and pushes to.
 func (r *run) project(ctx context.Context, p config.Project) {
 	name := p.Name
 	info, err := os.Stat(p.Clone)
@@ -466,8 +436,6 @@ func (r *run) project(ctx context.Context, p config.Project) {
 	}
 }
 
-// remote checks that the clone has a remote for repository and that it
-// answers, and when branch is set, that the branch exists there.
 func (r *run) remote(ctx context.Context, g *workspace.Git, id config.ProjectID, check, repository, branch, clone string) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -496,8 +464,6 @@ func (r *run) remote(ctx context.Context, g *workspace.Git, id config.ProjectID,
 	r.add(GroupProjects, check, Pass, detail, "")
 }
 
-// github checks the token the service fetches issues and opens pull requests
-// with, and that it reads each project's repositories.
 func (r *run) github(ctx context.Context, cfg *config.Config, projects []config.Project) {
 	creation := r.creationConfigured(cfg)
 	if r.Token == "" {
@@ -543,8 +509,6 @@ func (r *run) github(ctx context.Context, cfg *config.Config, projects []config.
 	}
 }
 
-// creationConfigured reports whether project creation is configured, and
-// records that finding: creation stays off until both [projects] keys are set.
 func (r *run) creationConfigured(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
@@ -557,12 +521,6 @@ func (r *run) creationConfigured(cfg *config.Config) bool {
 	return true
 }
 
-// creationToken checks what project creation needs of the token that
-// answered GET /user as login: that it is the account of repoOwner, which
-// POST /user/repos always creates under, and that it can create repositories.
-// A classic token lists its scopes in X-OAuth-Scopes; a fine-grained token
-// lists none, and its permissions cannot be read, so doctor says it cannot
-// confirm them rather than passing.
 func (r *run) creationToken(repoOwner, login string, header http.Header) {
 	if strings.EqualFold(login, repoOwner) {
 		r.add(GroupGitHub, "creation account", Pass, "the token's account is projects.repo_owner ("+login+")", "")
@@ -581,14 +539,11 @@ func (r *run) creationToken(repoOwner, login string, header http.Header) {
 	r.add(GroupGitHub, "creation permission", Warn, "the token's scopes ("+firstLine(scopes)+") do not include repo, so it cannot create repositories", "create a classic token with the repo scope, or a fine-grained token with Administration write, Pull requests and Metadata for all repositories")
 }
 
-// get reads one GitHub API resource into out.
 func (r *run) get(ctx context.Context, path string, out any) error {
 	_, err := r.getHeader(ctx, path, out)
 	return err
 }
 
-// getHeader reads one GitHub API resource into out and returns the response
-// headers.
 func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
@@ -609,8 +564,6 @@ func (r *run) getHeader(ctx context.Context, path string, out any) (http.Header,
 	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
-// state opens each project's trace and the runtime state as serve does on
-// startup.
 func (r *run) state(cfg *config.Config, projects []config.Project) {
 	workstreams := map[config.ProjectID][]config.WorkstreamID{}
 	for _, p := range projects {
@@ -663,8 +616,6 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 	r.add(GroupState, "runtime.json", Pass, path, "")
 }
 
-// command runs path and returns its standard output, or an error carrying
-// the first line it wrote to standard error.
 func command(ctx context.Context, path string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.Output()
@@ -677,7 +628,6 @@ func command(ctx context.Context, path string, args ...string) (string, error) {
 
 func reason(err error) string { return firstLine(err.Error()) }
 
-// firstLine is the first non-empty line of s, at most 120 bytes.
 func firstLine(s string) string {
 	for line := range strings.SplitSeq(s, "\n") {
 		if line = strings.TrimSpace(line); line != "" {

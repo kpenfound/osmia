@@ -23,8 +23,6 @@ import (
 
 const filerToken = "ghp_sentinelreportertoken0123456789"
 
-// fakeGitHub is a GitHub REST server holding issues and comments for one
-// repository, paged by per_page and page.
 type fakeGitHub struct {
 	mu       sync.Mutex
 	requests []string
@@ -32,10 +30,8 @@ type fakeGitHub struct {
 	bodies   []string
 	issues   []map[string]any
 	comments map[int][]map[string]any
-	// status, when set, answers every request with it and a GitHub-style error.
-	status int
-	// message is the error message sent with status.
-	message string
+	status   int
+	message  string
 }
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +97,6 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// page answers one page of items and, like GitHub, a Link header when more follow.
 func (f *fakeGitHub) page(w http.ResponseWriter, r *http.Request, items []map[string]any) {
 	per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -257,7 +252,6 @@ func TestFilerStateReportsOpenOrClosed(t *testing.T) {
 
 func TestFilerListIssuesReadsEveryPageAndLeavesOutPullRequests(t *testing.T) {
 	f, fake, ctx, _ := newFiler(t)
-	// No issue carries the reporter's labels; one has other labels, one has none.
 	fake.seedIssue(1, "open", nil, false)
 	fake.seedIssue(2, "closed", []string{"bug"}, false)
 	fake.seedIssue(3, "open", []string{"x"}, true)
@@ -315,7 +309,6 @@ func TestFilerListIssuesFiltersByLabelsWhenGiven(t *testing.T) {
 }
 
 func TestFilerListIssuesStopsAfterAnExactlyFullLastPageWithoutALinkHeader(t *testing.T) {
-	// A server that sends no Link header still pages by per_page and page.
 	var pages []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, r.URL.Query().Get("page"))
@@ -380,9 +373,6 @@ func TestFilerRequiresAnExplicitRepositoryAndIssueNumber(t *testing.T) {
 	}
 }
 
-// TestFilerLogsOneActivityRecordPerCall shows each call, including failures,
-// no response and an unexpected status, logs one record with the action,
-// access, repository, method, path, status and the reporter marker.
 func TestFilerLogsOneActivityRecordPerCall(t *testing.T) {
 	f, fake, ctx, buf := newFiler(t)
 	fake.seedIssue(1, "open", nil, false)
@@ -396,8 +386,6 @@ func TestFilerLogsOneActivityRecordPerCall(t *testing.T) {
 	f.Comment(ctx, "o/r", 9, "c")
 
 	got := records(t, buf)
-	// ListIssues of two issues at two per page logs two requests: the full
-	// first page is followed by an empty one.
 	type want struct {
 		action, access, method, path string
 		status                       int
@@ -437,8 +425,14 @@ func TestFilerLogsFailuresNoResponseAndUnexpectedStatus(t *testing.T) {
 		{"comment 5xx", 500, false, func(f Filer, ctx context.Context) error { _, err := f.Comment(ctx, "o/r", 1, "x"); return err }, "issues.comment", ghlog.Write},
 		{"comment unexpected 200", 200, false, func(f Filer, ctx context.Context) error { _, err := f.Comment(ctx, "o/r", 1, "x"); return err }, "issues.comment", ghlog.Write},
 		{"state 403", 403, false, func(f Filer, ctx context.Context) error { _, err := f.State(ctx, "o/r", 1); return err }, "issues.state", ghlog.Read},
-		{"list 502", 502, false, func(f Filer, ctx context.Context) error { _, err := f.ListIssues(ctx, "o/r", time.Time{}, nil); return err }, "issues.list", ghlog.Read},
-		{"comments 404", 404, false, func(f Filer, ctx context.Context) error { _, err := f.ListComments(ctx, "o/r", 1, time.Time{}); return err }, "issues.list_comments", ghlog.Read},
+		{"list 502", 502, false, func(f Filer, ctx context.Context) error {
+			_, err := f.ListIssues(ctx, "o/r", time.Time{}, nil)
+			return err
+		}, "issues.list", ghlog.Read},
+		{"comments 404", 404, false, func(f Filer, ctx context.Context) error {
+			_, err := f.ListComments(ctx, "o/r", 1, time.Time{})
+			return err
+		}, "issues.list_comments", ghlog.Read},
 		{"create no response", 0, true, func(f Filer, ctx context.Context) error { _, err := f.Create(ctx, "o/r", NewIssue{}); return err }, "issues.create", ghlog.Write},
 		{"state no response", 0, true, func(f Filer, ctx context.Context) error { _, err := f.State(ctx, "o/r", 1); return err }, "issues.state", ghlog.Read},
 	}
@@ -485,7 +479,10 @@ func TestFilerLogsFailuresNoResponseAndUnexpectedStatus(t *testing.T) {
 
 func TestFilerWriteOutcomeIsUncertainExceptForA4xxRejection(t *testing.T) {
 	writes := map[string]func(Filer, context.Context) error{
-		"create":  func(f Filer, ctx context.Context) error { _, err := f.Create(ctx, "o/r", NewIssue{Title: "t"}); return err },
+		"create": func(f Filer, ctx context.Context) error {
+			_, err := f.Create(ctx, "o/r", NewIssue{Title: "t"})
+			return err
+		},
 		"comment": func(f Filer, ctx context.Context) error { _, err := f.Comment(ctx, "o/r", 1, "x"); return err },
 	}
 	for name, write := range writes {
@@ -528,7 +525,6 @@ func TestFilerWriteOutcomeIsUncertainExceptForA4xxRejection(t *testing.T) {
 }
 
 func TestFilerLostResponseAndTimeoutOnAWriteAreUncertain(t *testing.T) {
-	// The server applies the write, then drops the connection.
 	var applied int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applied++
@@ -546,7 +542,6 @@ func TestFilerLostResponseAndTimeoutOnAWriteAreUncertain(t *testing.T) {
 		t.Fatalf("lost comment response: %v", err)
 	}
 
-	// A timeout is no response either.
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
@@ -596,7 +591,6 @@ func TestFilerErrorsAndLogsNeverCarryTheTokenOrTheRequestBody(t *testing.T) {
 	const bodySentinel = "sentinel-request-body-text"
 	t.Setenv("GITHUB_TOKEN", filerToken)
 	f, fake, ctx, buf := newFiler(t)
-	// GitHub echoes the token and the body in its message.
 	fake.status, fake.message = 422, "bad token "+filerToken+" for "+bodySentinel+"\nsecond line"
 	var errs []error
 	_, err := f.Create(ctx, "o/r", NewIssue{Title: bodySentinel, Body: bodySentinel, Labels: []string{bodySentinel}})
@@ -615,8 +609,6 @@ func TestFilerErrorsAndLogsNeverCarryTheTokenOrTheRequestBody(t *testing.T) {
 			t.Fatalf("error leaks or spans lines: %q", text)
 		}
 	}
-	// The request body does not appear in any error or record; the one
-	// message that echoed it came from GitHub, not from the request.
 	if strings.Contains(buf.String(), filerToken) {
 		t.Fatalf("log leaked the token: %s", buf.String())
 	}
@@ -629,7 +621,6 @@ func TestFilerErrorsAndLogsNeverCarryTheTokenOrTheRequestBody(t *testing.T) {
 		t.Fatalf("error %v", errs[0])
 	}
 
-	// A token that GitHub echoes under a transport failure's text is absent too.
 	noServer := Filer{BaseURL: "http://127.0.0.1:1", Token: filerToken}
 	_, err = noServer.Create(ctx, "o/r", NewIssue{Title: bodySentinel})
 	if err == nil || strings.Contains(err.Error(), filerToken) || strings.Contains(err.Error(), bodySentinel) {
@@ -640,14 +631,12 @@ func TestFilerErrorsAndLogsNeverCarryTheTokenOrTheRequestBody(t *testing.T) {
 func TestFilerRecordsCarryTheReporterMarkerAndOtherRecordsDoNot(t *testing.T) {
 	f, fake, ctx, buf := newFiler(t)
 	fake.seedIssue(1, "open", nil, false)
-	// The caller's context is not marked; the filer's own calls are.
 	if ghlog.IsReporter(ctx) {
 		t.Fatal("test context must start unmarked")
 	}
 	if _, err := f.State(ctx, "o/r", 1); err != nil {
 		t.Fatal(err)
 	}
-	// An existing client's record carries no marker.
 	g := GitHub{BaseURL: f.BaseURL, HTTP: f.HTTP}
 	fake.issues[0]["title"] = "x"
 	if _, err := g.Fetch(ctx, Ref{"o", "r", 1}); err != nil {

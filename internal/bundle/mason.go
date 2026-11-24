@@ -191,7 +191,6 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	return m, nil
 }
 
-// latest returns the latest revision of a workstream document.
 func latest(repo *trace.Repository, stream config.WorkstreamID, id string) (trace.Document, error) {
 	documents, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -205,7 +204,6 @@ func latest(repo *trace.Repository, stream config.WorkstreamID, id string) (trac
 	return trace.Document{}, fmt.Errorf("workstream %s records no %s: %w", stream, id, fs.ErrNotExist)
 }
 
-// revision returns the given revision of a workstream document.
 func revision(repo *trace.Repository, stream config.WorkstreamID, id string, rev int) (trace.Document, error) {
 	documents, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {

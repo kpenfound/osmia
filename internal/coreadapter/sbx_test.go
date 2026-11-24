@@ -22,15 +22,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// sbxRunner uses a fake sbx CLI and the supplied agent binary in place of
-// the costly, externally mutating sandbox daemon and model session. It leaves
-// unverified whether a real sbx sandbox and backend behave this way; these
-// tests only check what core's enforcer and CoreExecutor do with the CLI's
-// output and policy.
 func sbxRunner(t *testing.T, bin string) agent.Runner {
 	t.Helper()
 	sbx := agenttest.Sbx(t, a.TokenEnvironment)
-	// The daemon refuses empty command elements before starting the agent.
 	data := readSbxFile(t, sbx)
 	data = strings.Replace(data, "set -e\n", `set -e
 if [ "$1" = exec ]; then
@@ -112,8 +106,6 @@ echo '{"type":"step_finish","sessionID":"fixture","part":{"type":"step-finish","
 				}
 				args := readSbxFile(t, filepath.Join(turn.SessionDirectory, "sbx-exec-args.txt"))
 				if image == "" {
-					// The writable scratch directory has a read-only parent;
-					// sbx needs a separate primary workspace for startup writes.
 					_, workspaces, ok := strings.Cut(created, backend+"\n")
 					if !ok {
 						t.Fatalf("missing backend in create arguments: %s", created)
@@ -161,8 +153,6 @@ func TestSbxRefusesUnavailableCLI(t *testing.T) {
 	}
 }
 
-// assertSbxHostPolicy checks that the sandbox was allowed to reach the host's
-// MCP port, and that the rule and the sandbox were removed afterwards.
 func assertSbxHostPolicy(t *testing.T, runner agent.Runner, port string) {
 	t.Helper()
 	dir := filepath.Dir(runner.SbxBin)
@@ -283,8 +273,6 @@ func TestSbxRequestCannotChangePreparedHostPort(t *testing.T) {
 	}
 }
 
-// A turn's sandbox size reaches the profile of its request, and a turn that
-// sets none leaves the profile's size unset.
 func TestSandboxSizeReachesTheProfile(t *testing.T) {
 	for name, c := range map[string]struct {
 		cpus   int
@@ -309,8 +297,6 @@ func TestSandboxSizeReachesTheProfile(t *testing.T) {
 	}
 }
 
-// A size that is not one a sandbox can be created with, or a size for a
-// sandbox that is not sbx, never reaches a session.
 func TestSandboxSizeIsRefusedWhereItCannotApply(t *testing.T) {
 	for name, mutate := range map[string]func(*a.PreparedTurn){
 		"negative cpus":       func(turn *a.PreparedTurn) { turn.Execution.CPUs = -1 },
@@ -333,8 +319,6 @@ func TestSandboxSizeIsRefusedWhereItCannotApply(t *testing.T) {
 	}
 }
 
-// A request whose size differs from the role's settings widens the service
-// boundary and is refused.
 func TestSandboxSizeCannotBeChangedAfterPreparation(t *testing.T) {
 	turn := toolTurn(t, "sbx")
 	turn.Execution.CPUs, turn.Execution.Memory = 2, "4g"
@@ -359,8 +343,6 @@ func TestSandboxSizeCannotBeChangedAfterPreparation(t *testing.T) {
 	}
 }
 
-// A turn's size becomes sbx create's --cpus and --memory among its options,
-// before the agent, and a turn without one has the command line it always had.
 func TestSbxCreateReceivesTheSandboxSize(t *testing.T) {
 	for name, c := range map[string]struct {
 		cpus   int
@@ -400,9 +382,6 @@ func TestSbxCreateReceivesTheSandboxSize(t *testing.T) {
 	}
 }
 
-// Docker Hub refusing a sandbox's kit for its pull rate limit is the machine's
-// account limit, not a failure of the turn: the result says so, so the
-// service stops creating sandboxes until the limit has had time to roll.
 func TestARateLimitedSandboxCreateIsARegistryLimit(t *testing.T) {
 	turn := toolTurn(t, "sbx")
 	turn.Profile.Timeout = time.Minute

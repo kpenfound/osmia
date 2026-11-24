@@ -59,7 +59,6 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-// reopen closes and reopens the trace, as a restart does.
 func (f *fixture) reopen(t *testing.T) {
 	t.Helper()
 	if err := f.repo.Close(); err != nil {
@@ -141,8 +140,6 @@ func judgment(state string) jev.Judgment {
 	}
 }
 
-// awaitRequest blocks until p has received a request or a bounded deadline
-// passes, so a provider that never receives one cannot hang the test.
 func awaitRequest(p *jevtest.Provider) {
 	deadline := time.Now().Add(5 * time.Second)
 	for len(p.Requests()) == 0 && time.Now().Before(deadline) {
@@ -384,8 +381,6 @@ func TestInvalidJudgmentsFallBackWithoutARequest(t *testing.T) {
 	}
 }
 
-// storedRecord is an accepted judgment record as the trace keeps it, with
-// its digest and request size to fill in.
 const storedRecord = `{"scope":{"Project":"p_00000000000000000000000000000001","Workstream":"w_00000000000000000000000000000001","Unit":"unit1","Thread":"mason1","Turn":"turn1","Role":"mason"},"task":"mason-classification","version":1,"model":"~typesafe/jev-latest","sources":[{"kind":"turn-response","id":"response_1","revision":1}],"digest":"%s","request_bytes":%d,"state":"accepted","attempt":1,"resolved_model":"jev-1.13.0","answers":{"class":{"type":"choice","choice":"claims_done","probabilities":{"claims_done":0.9,"gave_up":0.1},"confidence":0.85}},"usage":{"input_tokens":120,"output_tokens":10,"cost_usd":0.00004,"cost_known":true},"requests":1,"duration_ms":40}`
 
 func TestAStoredDecisionIsReusedAsRecorded(t *testing.T) {

@@ -68,8 +68,6 @@ func browserDesignBrief(t *testing.T, conflict bool) {
   document.querySelector('#design-brief strong')?.textContent === 'revision 1' &&
   !document.querySelector('#design-brief input, #design-brief select, #design-brief textarea, #design-brief [contenteditable]') &&
   !!(document.querySelector('#design-brief').compareDocumentPosition(document.querySelector('#design-start')) & Node.DOCUMENT_POSITION_FOLLOWING)`)
-	// Retain an actually displayed snapshot to exercise the race between
-	// an owner's read and the service's revision check, using real responses.
 	p.Eval(`window.notReloaded = true;
   window.briefFetch = window.fetch.bind(window);
   window.startPins = [];
@@ -87,7 +85,6 @@ func browserDesignBrief(t *testing.T, conflict bool) {
    }
    return window.briefFetch(url,init);
   };`, nil)
-	// Capture revision one through the installed wrapper before freezing.
 	p.Eval(`fetch('/v1/design/`+string(id)+`').then(() => { window.freezeBrief = `+fmt.Sprint(conflict)+`; window.snapshotReady = true; })`, nil)
 	p.Await("snapshot ready", `window.snapshotReady`)
 	_, err = c.DesignMessage(ctx, id, "Add Client and update the brief.")

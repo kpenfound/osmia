@@ -102,7 +102,6 @@ func (c Client) Call(ctx context.Context, role, name string, input any) (json.Ra
 	if c.HTTP != nil {
 		client = *c.HTTP
 	}
-	// A redirected call must never forward either credential to another endpoint.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)
 	if err != nil {

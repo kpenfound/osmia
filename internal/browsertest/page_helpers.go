@@ -12,21 +12,15 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// annotationBox is the measured position of one role, action or timestamp
-// element within a feed card.
 type annotationBox struct {
 	Ann                      string
 	Left, Right, Top, Bottom float64
 }
 
-// width and height report the box's size, after rounding away sub-pixel
-// noise that would otherwise make touching edges look like an overlap.
 func (b annotationBox) width() float64 { return b.Right - b.Left }
 
 func (b annotationBox) height() float64 { return b.Bottom - b.Top }
 
-// overlaps reports whether b and other's boxes share more than a sliver of
-// area, which would mean one annotation sits on top of the other.
 func (b annotationBox) overlaps(other annotationBox) bool {
 	const slack = 0.5
 	if b.Right <= other.Left+slack || other.Right <= b.Left+slack {
@@ -38,22 +32,19 @@ func (b annotationBox) overlaps(other annotationBox) bool {
 	return true
 }
 
-// annotationEntry is one feed card's own box and the role, action and
-// timestamp annotation boxes chromedp found inside it.
 type annotationEntry struct {
 	Kind                  string
 	EntryLeft, EntryRight float64
 	Anns                  []annotationBox
 }
 
-// annotationLayout is everything feedAnnotationLayout measures on the page.
 type annotationLayout struct {
 	ViewportWidth    float64
 	DocumentOverflow bool
 	Entries          []annotationEntry
 }
 
-// feedAnnotationLayout measures, for every feed card matching selector, the
+// FeedAnnotationLayout measures, for every feed card matching selector, the
 // card's own box and the box of each of its role, action and timestamp
 // annotation elements (marked with data-ann in app.js), plus whether the
 // document itself scrolls sideways at the current viewport width.
@@ -80,7 +71,7 @@ func (p *Page) FeedAnnotationLayout(selector string) annotationLayout {
 	return layout
 }
 
-// assertFeedAnnotations fails the test unless every feed card selector
+// AssertFeedAnnotations fails the test unless every feed card selector
 // matches shows a role, action and timestamp annotation that is each fully
 // visible inside the card and the viewport, and none of the three
 // intersects another, and neither the cards nor the page scroll sideways.
@@ -125,7 +116,7 @@ func AssertFeedAnnotations(t *testing.T, p *Page, selector string, minEntries in
 	}
 }
 
-// awaitCleared waits until the field selector names shows no value, either
+// AwaitCleared waits until the field selector names shows no value, either
 // because its card cleared it after a successful submission or because the
 // resolved entry it answered already took the card out of the inbox; it
 // fails with the page's text if neither happens.
@@ -134,7 +125,7 @@ func (p *Page) AwaitCleared(selector string) {
 	p.Await(selector+" cleared", `(function(){var e=document.querySelector(`+Quote(selector)+`);return e===null||e.value==='';})()`)
 }
 
-// requestGate fails the page's requests of one kind while it is closed, so
+// RequestGate fails the page's requests of one kind while it is closed, so
 // the page keeps what it last read of them until the gate opens again.
 type RequestGate struct {
 	mu     sync.Mutex
@@ -147,7 +138,7 @@ func (g *RequestGate) Set(closed bool) {
 	g.closed = closed
 }
 
-// gate intercepts the page's requests whose URL matches pattern. A page has
+// Gate intercepts the page's requests whose URL matches pattern. A page has
 // one gate at a time.
 func (p *Page) Gate(pattern string) *RequestGate {
 	p.T.Helper()
@@ -173,20 +164,20 @@ func (p *Page) Gate(pattern string) *RequestGate {
 	return g
 }
 
-// awaitGone waits until the page shows no card for the entry.
+// AwaitGone waits until the page shows no card for the entry.
 func (p *Page) AwaitGone(what, card string) {
 	p.T.Helper()
 	p.Await(what+" to leave the inbox", `document.querySelector(`+Quote(strings.TrimSpace(card))+`) === null`)
 }
 
-// setValue replaces the value of the first field selector matches.
+// SetValue replaces the value of the first field selector matches.
 func (p *Page) SetValue(selector, value string) {
 	p.T.Helper()
 	p.Eval(`document.querySelector(`+Quote(selector)+`).value = `+Quote(value), nil)
 }
 
-// selectSession picks the session with id from the sidebar the way
-// selectWorkstream does for an ordinary workstream, but waits for the
+// SelectSession picks the session with id from the sidebar the way
+// SelectWorkstream does for an ordinary workstream, but waits for the
 // session view's own content (there is no #workstream-head for a session).
 func (p *Page) SelectSession(id config.WorkstreamID) {
 	p.T.Helper()

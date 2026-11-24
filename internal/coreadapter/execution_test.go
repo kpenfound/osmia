@@ -8,13 +8,8 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	"github.com/kpenfound/agentcore/vcs"
 )
 
-// fakeExecutor stands in for a real Executor, which would launch a costly,
-// nondeterministic model session through core. It leaves unverified whether
-// a real backend actually runs the request; these tests only check what
-// TurnRunner builds and does with the executor's result.
 type fakeExecutor struct {
 	checkErr      error
 	checks, calls int
@@ -70,7 +65,6 @@ func TestTurnTranslationAndProvenance(t *testing.T) {
 	if req.Profile.MCP["osmia_0"].BearerTokenEnv != "MCP_TOKEN" || len(req.Profile.MCP) != 1 || !reflect.DeepEqual(fake.settings, turn.Execution) || req.Profile.SandboxImage != "prepared-image" {
 		t.Fatalf("settings: %+v", req.Profile)
 	}
-	// Claude matches MCP tools by server-qualified name; bare names pin nothing.
 	if !reflect.DeepEqual(req.Profile.AllowedTools, []string{"mcp__osmia_0__file_read", "mcp__osmia_0__file_write"}) {
 		t.Fatalf("allowed tools: %v", req.Profile.AllowedTools)
 	}
@@ -95,13 +89,6 @@ func TestTurnSessionLimitFromResultText(t *testing.T) {
 	}
 }
 
-// TestSessionCostCap shows that a turn with a positive Profile.CostLimitUSD
-// sends core a request whose CostCapUSD equals that limit, and that a fake
-// agent reporting core's CostCapped result (as a session the per-session
-// cap stopped, or one that ended at or over it, would) still ends with
-// IsError, keeps the cost core observed, carries no outcome and is
-// classified and retried as an infrastructure failure. A turn under the
-// cap, and a backend whose cost is unknown, are unaffected.
 func TestSessionCostCap(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -252,90 +239,6 @@ func TestCleanupAcrossAttemptPaths(t *testing.T) {
 	}
 }
 
-// fakeProvider stands in for a real vcs.Provider, which would acquire a
-// workspace from an externally mutating source such as a clone or worktree
-// pool. It leaves unverified whether a real provider acquires or releases
-// correctly; this test only checks that WorkspaceAdapter calls and cleans up
-// whatever provider Select names.
-type fakeProvider struct {
-	acquired, released int
-	req                vcs.Request
-	ws                 vcs.Workspace
-	err                error
-	cancel             context.CancelFunc
-}
-
-func (f *fakeProvider) Acquire(_ context.Context, r vcs.Request) (vcs.Workspace, error) {
-	f.acquired++
-	f.req = r
-	if f.cancel != nil {
-		f.cancel()
-	}
-	return f.ws, f.err
-}
-func (f *fakeProvider) Release(ctx context.Context, w vcs.Workspace) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if w != f.ws {
-		return errors.New("wrong workspace")
-	}
-	f.released++
-	return nil
-}
-func (f *fakeProvider) Prune(context.Context) error { panic("must not prune") }
-func TestWorkspaceAcquisitionAndRelease(t *testing.T) {
-	for _, mode := range []string{"success", "error", "cancel", "mismatch", "unsupported"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			dir := t.TempDir()
-			f := &fakeProvider{ws: vcs.Directory(dir)}
-			req := WorkspaceRequest{Directory: dir, SourceDirectory: "source", BaseRevision: "base", Access: ReadWrite}
-			if mode == "error" {
-				f.err = errors.New("acquire")
-			}
-			if mode == "cancel" {
-				f.cancel = cancel
-			}
-			if mode == "mismatch" {
-				req.Directory = "elsewhere"
-			}
-			adapter := WorkspaceAdapter{Select: func(_ context.Context, got WorkspaceRequest) (vcs.Provider, vcs.Request, error) {
-				if got != req {
-					t.Fatal("lost request")
-				}
-				if mode == "unsupported" {
-					return nil, vcs.Request{}, unsupported("workspace", "provider absent")
-				}
-				return f, vcs.Request{Name: "service-name", Ref: got.BaseRevision, Branch: "service-branch"}, nil
-			}}
-			lease, err := adapter.Acquire(ctx, req)
-			if mode == "success" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				if lease.Workspace.ID != "service-name" || f.req.Branch != "service-branch" {
-					t.Fatal("naming lost")
-				}
-				for range 2 {
-					if err := lease.Lease.Release(context.Background()); err != nil {
-						t.Fatal(err)
-					}
-				}
-			} else if err == nil {
-				t.Fatal("expected failure")
-			}
-			if mode == "unsupported" {
-				if f.acquired != 0 {
-					t.Fatal("unsupported acquired")
-				}
-			} else if f.released != 1 {
-				t.Fatalf("released %d", f.released)
-			}
-		})
-	}
-}
 func TestCleanupFailureRetriable(t *testing.T) {
 	calls := 0
 	l := &releaseLease{release: func(context.Context) error {
@@ -361,11 +264,6 @@ func TestCleanupFailureRetriable(t *testing.T) {
 	}
 }
 
-// TestTranslateTurnPassesTheTurnIdentifierThrough shows that Osmia no longer
-// shortens or hashes a turn's identifier to fit a sandbox name: core's own
-// sbx sandboxName bounds and hashes a long session name itself (see
-// TestSbxAcceptsTurnIdentifiersLongerThanTheSandboxNameLimit for the sbx
-// path), so the request carries the turn identifier unchanged, however long.
 func TestTranslateTurnPassesTheTurnIdentifierThrough(t *testing.T) {
 	turn := prepared(t)
 	long := "mason-startup-kinds-web-listener-and-tailnet-implement-with-a-very-long-unit-id"

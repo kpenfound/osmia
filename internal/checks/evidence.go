@@ -9,8 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 )
 
-// diagnosticLimit bounds the failure report kept for one check that passed on
-// its rerun.
 const diagnosticLimit = 4096
 
 // EngineOf names the engine an attribution says ran a check operation: local
@@ -154,8 +152,6 @@ func reportState(mark string) string {
 	return "cancelled"
 }
 
-// reportDuration reads the duration that follows a check's link in a report
-// line, as in "1.5s OK".
 func reportDuration(rest string) (time.Duration, bool) {
 	fields := strings.Fields(rest)
 	if len(fields) == 0 {

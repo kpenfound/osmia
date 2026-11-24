@@ -89,9 +89,6 @@ func TestInterpretCloudStatuses(t *testing.T) {
 			if got.IsFailure() != (tc.outcome == CloudFailed || tc.outcome == CloudLoadFailed) {
 				t.Fatalf("IsFailure %v for %q", got.IsFailure(), got.Outcome)
 			}
-			if got.Completed() != (tc.outcome == CloudPassed || tc.outcome == CloudIncomplete || tc.outcome == CloudFailed) {
-				t.Fatalf("Completed %v for %q", got.Completed(), got.Outcome)
-			}
 			if tc.outcome == CloudPassed && (got.Counts.Total != got.Counts.Passed || got.Counts.Failed != 0) {
 				t.Fatalf("passed counts %+v", got.Counts)
 			}
@@ -121,7 +118,7 @@ func TestStatusURLIsTheRunTargetAndIsNotFetched(t *testing.T) {
 		"pending": cloudRead(cloudStatus(1, "load", "success", "", ""), cloudStatus(5, CloudRunContext, "pending", "", runTarget)),
 		"load":    cloudRead(cloudStatus(1, "load", "failure", "", ""), cloudStatus(5, CloudRunContext, "pending", "", runTarget)),
 	} {
-		got, err := ReadCloudChecks(context.Background(), cloudFake{statuses: read}, "acme/widgets", "abc123")
+		got, _, err := ReadCloudStatuses(context.Background(), cloudFake{statuses: read}, "acme/widgets", "abc123")
 		if err != nil || got.StatusURL != runTarget {
 			t.Errorf("%s: status url %q: %v", name, got.StatusURL, err)
 		}
@@ -184,15 +181,12 @@ func TestResultsDistinguishPostingsOfTheRunStatus(t *testing.T) {
 	if a.Load == nil || a.Load.ID != 1 || a.StatusURL != runTarget {
 		t.Fatalf("result %+v", a)
 	}
-	// A pending posting is identified too.
 	p := InterpretCloudStatuses(cloudRead(load, cloudStatus(3, CloudRunContext, "pending", "", "")))
 	if p.Outcome != CloudPending || p.Run == nil || p.Run.ID != 3 {
 		t.Fatalf("pending %+v", p)
 	}
 }
 
-// cloudFake stands in for the GitHub status API, a remote system whose real
-// behaviour this fake does not reproduce.
 type cloudFake struct {
 	statuses pulls.CommitStatuses
 	err      error
@@ -202,7 +196,7 @@ func (f cloudFake) CommitStatuses(context.Context, string, string) (pulls.Commit
 	return f.statuses, f.err
 }
 
-func TestReadCloudChecksReadsOnlyTheStatuses(t *testing.T) {
+func TestReadCloudStatusesReadsOnlyTheStatuses(t *testing.T) {
 	t.Parallel()
 	reader := cloudFake{statuses: cloudRead(
 		cloudStatus(1, "load", "success", "", ""),
@@ -216,10 +210,10 @@ func TestReadCloudChecksReadsOnlyTheStatuses(t *testing.T) {
 	}
 }
 
-func TestReadCloudChecksPassesOnGitHubFailure(t *testing.T) {
+func TestReadCloudStatusesPassesOnGitHubFailure(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("github is down")
-	if _, err := ReadCloudChecks(context.Background(), cloudFake{err: boom}, "acme/widgets", "abc123"); !errors.Is(err, boom) {
+	if _, _, err := ReadCloudStatuses(context.Background(), cloudFake{err: boom}, "acme/widgets", "abc123"); !errors.Is(err, boom) {
 		t.Fatalf("error %v", err)
 	}
 }

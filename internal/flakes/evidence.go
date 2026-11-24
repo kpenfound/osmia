@@ -8,15 +8,6 @@ const (
 	EngineCloud = "cloud"
 )
 
-// Items of the evidence an engine may not expose. Evidence lists the ones its
-// engine did not report in Unavailable.
-const (
-	ItemOutput      = "output"
-	ItemDiagnostics = "diagnostics"
-	ItemCoRun       = "co_run"
-	ItemParallelism = "parallelism"
-)
-
 // Evidence is what one unit or final-review check run recorded about its
 // flaky checks. It is the neutral value the check-run records convert to and
 // the hand-in is written from; it holds the whole run, not one flake group.
@@ -42,7 +33,7 @@ type Evidence struct {
 	Traces []Trace `json:"traces,omitempty"`
 	// Timings are per-check durations, where the runner recorded them.
 	Timings []Timing `json:"timings,omitempty"`
-	// Unavailable names the items the engine did not expose.
+	// Unavailable names the items the engine did not expose, such as "output" or "parallelism".
 	Unavailable []string `json:"unavailable,omitempty"`
 }
 

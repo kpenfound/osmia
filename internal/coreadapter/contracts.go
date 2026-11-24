@@ -69,11 +69,6 @@ type Isolation struct {
 	DenyVCS, DenyInheritedEnvironment, DenyDeliveryCredentials bool
 }
 type CredentialRef struct{ EnvironmentName, Reference string }
-type SandboxRequest struct {
-	Scope    Scope
-	Mode     string
-	Required Isolation
-}
 
 // SandboxLease records the boundary actually verified by the implementation.
 // Verified must satisfy Required before any turn starts; a fake is no evidence
@@ -83,10 +78,6 @@ type SandboxLease struct {
 	Verified Isolation
 	Lease    Lease
 }
-type Sandboxes interface {
-	Prepare(context.Context, SandboxRequest) (SandboxLease, error)
-}
-
 type Tool struct {
 	Name, Description string
 	// Effect is declared by the service registry, never by MCP discovery.
@@ -271,12 +262,6 @@ type ReviewResult struct {
 	Partial             bool
 }
 
-// Reviews produces evidence tied to an exact candidate; approval and landing
-// remain service decisions. Partial artifacts may accompany an error.
-type Reviews interface {
-	Review(context.Context, ReviewRequest) (ReviewResult, error)
-}
-
 type FailureKind string
 
 const (
@@ -315,50 +300,6 @@ type LedgerEntry struct {
 	AttemptID string
 	At        time.Time
 	Usage     Usage
-}
-type SpendQuery struct {
-	Workstreams []string
-	Since       time.Time
-}
-type Spend struct {
-	CostUSD      float64
-	UnknownCosts int
-}
-
-// Ledger stores accounting only. The caller reconciles AttemptID before retrying
-// an append; this port makes no exactly-once or state-transaction guarantee.
-type Ledger interface {
-	Append(context.Context, LedgerEntry) error
-	Spend(context.Context, SpendQuery) (Spend, error)
-}
-type BudgetRequest struct {
-	Spend                   Spend
-	LimitUSD, ResumePercent float64
-	PreviouslyReached       bool
-}
-type BudgetResult struct {
-	Reached, Crossed, Released bool
-	UnknownCosts               int
-}
-
-// Budgets reports threshold signals; it does not pause or resume dispatch.
-type Budgets interface {
-	Evaluate(context.Context, BudgetRequest) (BudgetResult, error)
-}
-
-type ClaimRequest struct {
-	Scope Scope
-	Slots map[string]int
-}
-type Claim struct {
-	Acquired bool
-	Lease    Lease
-}
-
-// Capacity attempts an all-or-none, nonblocking claim. An unavailable claim is
-// Acquired=false with no error. The caller chooses ordering and all slot limits.
-type Capacity interface {
-	TryClaim(context.Context, ClaimRequest) (Claim, error)
 }
 
 // Wakeups is a per-controller, coalescing latency hint. Wait returns on a wake,

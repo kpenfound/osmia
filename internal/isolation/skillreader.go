@@ -13,8 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// errOutsideSkills refuses every absolute path that is not inside one of the
-// turn's own skill directories.
 var errOutsideSkills = errors.New("path is outside the turn's view and its skill directories")
 
 // SkillReader reads files inside the skill directories of one turn, at the
@@ -46,8 +44,6 @@ func NewSkillReader(engine coreadapter.Engine, refs []string) *SkillReader {
 	return &SkillReader{engine: source, refs: append([]string(nil), refs...)}
 }
 
-// prepared returns the plugin directories of the turn's references. The first
-// success is kept for the rest of the turn.
 func (s *SkillReader) prepared(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -65,13 +61,8 @@ func (s *SkillReader) prepared(ctx context.Context) ([]string, error) {
 	return plugins, nil
 }
 
-// skillMount is a skill directory as a path the model may use, and the target
-// directory it reads.
 type skillMount struct{ path, root string }
 
-// skillMounts lists where the prepared skills' directories are readable: each
-// plugin's skills directory, or each entry of it, under the path the plugin
-// holds it at and under the path it resolves to.
 func skillMounts(plugin string) []skillMount {
 	skills := filepath.Join(plugin, "skills")
 	info, err := os.Lstat(skills)
@@ -152,8 +143,6 @@ func insideAny(roots []string, dir string) bool {
 	return false
 }
 
-// listSkillEntries names the entries of a plugin's own skills directory whose
-// targets lie inside a mounted directory.
 func listSkillEntries(dir string, mounted []string) ([]byte, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -172,8 +161,6 @@ func listSkillEntries(dir string, mounted []string) ([]byte, error) {
 	return []byte(strings.Join(names, "\n")), nil
 }
 
-// readSkillFile reads rel under root. os.Root refuses a symlink that leaves
-// root.
 func readSkillFile(root, rel string) ([]byte, error) {
 	if rel != "." {
 		for _, part := range strings.Split(rel, "/") {

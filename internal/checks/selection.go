@@ -170,8 +170,6 @@ func Select(ctx context.Context, j *jev.Judge, repository *trace.Repository, sco
 	return selection
 }
 
-// coveredChecks counts the listed checks selection runs: those its links cover,
-// or every one of them for a run of every check.
 func coveredChecks(selection api.CheckSelection, listed []string) int {
 	if selection.Mode == SelectionSelected {
 		return checkselect.Covered(selection.Links, listed)
@@ -179,7 +177,6 @@ func coveredChecks(selection api.CheckSelection, listed []string) int {
 	return checkselect.Leaves(listed)
 }
 
-// prefilterChecks falls back at the failed stage, retaining every earlier answer.
 func prefilterChecks(ctx context.Context, j *jev.Judge, repository *trace.Repository, scope coreadapter.Scope, cause string, sources []jev.Source, dir string, identity Identity, checks ReviewChecks, links []string, state map[string]any, threshold float64) ([]string, api.CheckSelection) {
 	var evidence api.CheckSelection
 	top, ok := checks.(TopLevelChecks)

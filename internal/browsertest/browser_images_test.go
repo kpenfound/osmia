@@ -127,7 +127,6 @@ func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
 	rereadFeed(p)
 	feedScrollUnchanged(p)
 	openBrowserFullImage(p, feed, v)
-	// The same image stays in its member's own feed in a multi-member group.
 	p.Click(`[data-open-member="` + string(quiet) + `"]`)
 	assertBrowserThumbnail(p, "#workstreams .feed", v)
 	openWorkgroup(p, f.group.ID)
@@ -137,7 +136,6 @@ func TestBrowserWorkgroupImagesAndArchivedPlaceholder(t *testing.T) {
 	must(t, err)
 	p.AwaitText(entry+` [data-field=placeholder]`, "image removed when "+string(quiet)+" was archived")
 	p.Await("the placeholder has no image or link", `!document.querySelector(`+quote(entry)+`)?.querySelector('img, a') && imageDocument`)
-	// A fresh opening of the archived reference never requests deleted bytes.
 	fresh := openFeedScrollPage(t, f.s, "#workgroup="+string(f.group.ID), "")
 	fresh.AwaitText(entry+` [data-field=placeholder]`, "image removed when "+string(quiet)+" was archived")
 	rereadFeed(fresh)

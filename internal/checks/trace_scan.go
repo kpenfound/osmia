@@ -31,10 +31,6 @@ func traceObserverFrom(ctx context.Context) TraceObserver {
 	return observe
 }
 
-// distinctTraces wraps the observer in ctx so that it hears a link only when
-// it differs from the one it heard last, however many runs print it. It
-// returns the wrapped context and a function that offers a link a runner
-// returned without printing it through a stream this package reads.
 func distinctTraces(ctx context.Context) (context.Context, func(url string)) {
 	next := traceObserverFrom(ctx)
 	if next == nil {
@@ -54,12 +50,8 @@ func distinctTraces(ctx context.Context) (context.Context, func(url string)) {
 	return WithTraceObserver(ctx, see), see
 }
 
-// traceLineLimit bounds the unfinished line a traceScanner holds. A longer
-// line is scanned as it stands and only its tail is kept.
 const traceLineLimit = 64 << 10
 
-// traceScanner looks for the Cloud trace link in output as it is written,
-// accepting what cloudTraceURL accepts. It keeps the latest link found.
 type traceScanner struct {
 	mu      sync.Mutex
 	partial []byte
@@ -67,8 +59,6 @@ type traceScanner struct {
 	observe TraceObserver
 }
 
-// newTraceScanner returns a scanner that starts from the link already found,
-// so a link seen again is not new.
 func newTraceScanner(found string, observe TraceObserver) *traceScanner {
 	return &traceScanner{url: found, observe: observe}
 }
@@ -92,7 +82,6 @@ func (s *traceScanner) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// line scans a line that ends, with the unfinished text before it.
 func (s *traceScanner) line(tail []byte) {
 	if len(s.partial) == 0 {
 		s.scan(tail)
@@ -117,7 +106,6 @@ func (s *traceScanner) scan(line []byte) {
 	}
 }
 
-// Flush scans the unfinished last line, once the output has ended.
 func (s *traceScanner) Flush() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,16 +113,12 @@ func (s *traceScanner) Flush() {
 	s.partial = s.partial[:0]
 }
 
-// URL is the latest link found, or the one the scanner started from.
 func (s *traceScanner) URL() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.url
 }
 
-// scanned writes output to a buffer and to the scanner that reads it for the
-// trace link. It is a pointer so that standard output and standard error given
-// the same writer share one copy loop.
 type scanned struct {
 	output *bytes.Buffer
 	scan   *traceScanner

@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// The item filters of a Go test collection, coarsest first. A flaky test
-// groups with its package.
 const (
 	goModuleFilter  = "go-module"
 	goPackageFilter = "go-package"
@@ -31,10 +29,7 @@ type FlakeGroup struct {
 // checks: the listing of its checks, collections expanded. A flaky link and a
 // Dagger Cloud check name for the same check resolve to the same group.
 type FlakeResolver struct {
-	known []string
-	// full and suffix map a Cloud check name to the groups of the known checks
-	// it can stand for; the first is built from whole check names and the
-	// second from their trailing path segments.
+	known        []string
 	full, suffix map[string]map[string]bool
 }
 
@@ -90,12 +85,7 @@ func (r *FlakeResolver) CloudName(name string) FlakeGroup {
 	return FlakeGroup{Key: name, Unresolved: true}
 }
 
-// cut returns a cut to its group: the package or standalone check, and how
-// many of its item filters it keeps.
 func (r *FlakeResolver) cut(a *address) (*address, int, error) {
-	// The filters after the package's, and the test, are below the group.
-	// Go's own levels are dropped by name, so the order a link lists its
-	// filters in does not matter.
 	items := itemFilters(a)
 	pkg := slices.Index(items, goPackageFilter)
 	group := &address{base: a.base}
@@ -120,10 +110,7 @@ func (r *FlakeResolver) cut(a *address) (*address, int, error) {
 	return group, kept, nil
 }
 
-// broadGroup reports whether group is a collection root or module the known
-// checks list narrower checks under. A package or any collection item with nothing narrower is not.
 func (r *FlakeResolver) broadGroup(group *address) bool {
-	// A package, or an item of a collection that has no Go levels, is the group.
 	items := itemFilters(group)
 	if _, packaged := group.values(goPackageFilter); packaged || len(items) > 0 && !slices.Equal(items, []string{goModuleFilter}) {
 		return false
@@ -137,8 +124,6 @@ func (r *FlakeResolver) broadGroup(group *address) bool {
 	return false
 }
 
-// canonical writes the address with its filters in key order, so the same
-// check has one spelling whatever order its filters were listed in.
 func (a *address) canonical() string {
 	if len(a.filters) == 0 {
 		return a.base
@@ -154,7 +139,6 @@ func (a *address) canonical() string {
 	return a.base + "?" + strings.Join(pairs, "&")
 }
 
-// index records the names a known link can be reported under, if it has a group.
 func (r *FlakeResolver) index(link string) {
 	a := parseAddress(link)
 	if a.opaque {
@@ -187,10 +171,7 @@ func (r *FlakeResolver) index(link string) {
 		names []string
 	}{{r.full, full}, {r.suffix, suffix}} {
 		for _, name := range tier.names {
-			// The bare name is the check's when only one group is under it.
 			add(tier.index, name)
-			// A name that stops above the group's own item names a collection
-			// or module, which is no group's.
 			for from := range min(kept, len(values)) {
 				for to := kept; to <= len(values); to++ {
 					add(tier.index, name+"/"+strings.Join(values[from:to], "/"))
@@ -200,8 +181,6 @@ func (r *FlakeResolver) index(link string) {
 	}
 }
 
-// checkNames are the names a link's check goes by: its check filter values or
-// its path, and then each trailing run of their path segments.
 func checkNames(a *address) (full, suffix []string) {
 	names, ok := a.values("check")
 	if !ok {
@@ -218,7 +197,6 @@ func checkNames(a *address) (full, suffix []string) {
 	return full, suffix
 }
 
-// aliasName writes a check or Cloud name with one separator between segments.
 func aliasName(name string) string {
 	return strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), ":", "/"), "/")
 }

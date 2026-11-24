@@ -191,8 +191,6 @@ func indent(s string) string {
 	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "\n    ")
 }
 
-// guidance renders a charter's guidance between delimiters naming its source,
-// or says the charter is empty.
 func guidance(line func(string, ...any), source, text string) {
 	if text == "" {
 		line("The charter is empty.")

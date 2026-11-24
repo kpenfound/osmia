@@ -91,7 +91,6 @@ type Preparation struct {
 
 type CheckResult = api.CheckResult
 
-// listOutputLimit bounds the check links read from a listing.
 const listOutputLimit = 4 << 20
 
 func (d DaggerChecks) List(ctx context.Context, dir string, identity Identity) ([]string, error) {
@@ -158,7 +157,6 @@ func checkArgs(addresses []string) []string {
 	return append([]string{"check", "--progress=report", "--fail-fast", "--parallel", strconv.Itoa(CheckParallelism)}, addresses...)
 }
 
-// skipArgs are checkArgs that leave out the checks skip selects.
 func skipArgs(addresses, skip []string) []string {
 	args := checkArgs(nil)
 	for _, link := range skip {
@@ -169,7 +167,7 @@ func skipArgs(addresses, skip []string) []string {
 
 // Check runs links as the separate dagger check runs they need, in one export
 // and one after another so no more than four checks run at once. A run whose
-// report shows failed checks reruns them once (see checkRun.view). A check that
+// report shows failed checks reruns them once. A check that
 // passes its rerun counts as passed and is listed in Flaky. The first run that
 // does not pass stops the rest and supplies the exit code and any refusal.
 // Output holds every run's report, and TraceURL is the latest trace link Dagger
@@ -199,29 +197,15 @@ func (d DaggerChecks) CheckSkipping(ctx context.Context, dir string, identity Id
 	return run.result, nil
 }
 
-// checkRun accumulates the dagger check runs of one Check into its result.
 type checkRun struct {
-	checks DaggerChecks
-	dir    string
-	env    []string
-	result CheckResult
-	output strings.Builder
-	// labelled heads each report with its command, once there is more than one.
+	checks   DaggerChecks
+	dir      string
+	env      []string
+	result   CheckResult
+	output   strings.Builder
 	labelled bool
 }
 
-// view runs one set of addresses to a result, giving each failed check one
-// rerun by its own link.
-//
-// Dagger caches a failed result under the address that ran it, so the rerun is
-// a fresh attempt only when its link selects less than the run that failed; the
-// same address replays the failure, which then stands. That cache also means
-// the failed run cannot simply be repeated once the check passes. With
-// --fail-fast, that run may have cancelled checks its report does not mention,
-// so a passed rerun does not yet show the addresses pass: the addresses run
-// again skipping what passed, and any new failure gets its own rerun.
-//
-// Checks in skip are left out of every run, as if they had passed on a rerun.
 func (r *checkRun) view(ctx context.Context, addresses, skip []string) error {
 	flaky := slices.Clone(skip)
 	for {
@@ -251,10 +235,6 @@ func (r *checkRun) view(ctx context.Context, addresses, skip []string) error {
 	}
 }
 
-// rerun runs failed once more and returns those that passed, leaving the failed
-// run's exit code. A rerun that reports no result, including one that outlasts
-// the run's deadline, shows nothing against the failure, which stands. Only
-// cancellation returns an error.
 func (r *checkRun) rerun(ctx context.Context, failed []string) ([]string, error) {
 	r.labelled = true
 	allPassed := true
@@ -272,8 +252,6 @@ func (r *checkRun) rerun(ctx context.Context, failed []string) ([]string, error)
 	return slices.DeleteFunc(slices.Clone(failed), func(link string) bool { return slices.Contains(latest, link) }), nil
 }
 
-// attempt runs dagger check once, adding its report to the result's output, and
-// returns its exit status and its report alone.
 func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, error) {
 	if len(r.result.Command) > 0 {
 		r.result.Command = append(r.result.Command, "&&")
@@ -281,8 +259,6 @@ func (r *checkRun) attempt(ctx context.Context, args []string) (int, string, err
 	r.result.Command = append(append(r.result.Command, "dagger"), args...)
 	var output bytes.Buffer
 	var sink io.Writer = &output
-	// Only a configured token earns a link; without one Dagger's setup
-	// prompts are not trace links.
 	var scan *traceScanner
 	if r.checks.CloudToken != "" {
 		scan = newTraceScanner(r.result.TraceURL, traceObserverFrom(ctx))
@@ -312,8 +288,6 @@ func (r *checkRun) endLine() {
 	}
 }
 
-// dagger runs the Dagger CLI once in dir with args and returns its exit status,
-// -1 when it did not exit. A non-zero exit is not an error.
 func (d DaggerChecks) dagger(ctx context.Context, dir string, identity Identity, withIdentity bool, output io.Writer, args ...string) (int, Preparation, error) {
 	return d.daggerOutput(ctx, dir, identity, withIdentity, output, output, args...)
 }
@@ -328,8 +302,6 @@ func (d DaggerChecks) daggerOutput(ctx context.Context, dir string, identity Ide
 	return exit, preparation, redactError(err)
 }
 
-// redactError withholds known secrets from err's message, keeping cancellation
-// and other typed errors discoverable.
 func redactError(err error) error {
 	if err == nil {
 		return nil
@@ -341,8 +313,6 @@ func redactError(err error) error {
 	return err
 }
 
-// prepare readies dir for Dagger runs and returns the environment they share,
-// and a cleanup to call once they have finished.
 func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity, withIdentity bool) (env []string, preparation Preparation, cleanup func(), err error) {
 	redact.Register(d.CloudToken)
 	if err := engine.ValidateDockerSelectors(d.Engine, os.Getenv); err != nil {
@@ -356,8 +326,6 @@ func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity
 		return nil, Preparation{}, nil, err
 	}
 	cleanup = func() { os.RemoveAll(home) }
-	// Dagger's report colors its output even off a terminal; agents read it
-	// and FailedChecks parses it as plain text.
 	env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "TMPDIR=" + home, "NO_COLOR=1"}
 	if withIdentity {
 		if err := prepareIdentity(ctx, dir, env, identity); err != nil {
@@ -371,8 +339,6 @@ func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity
 			preparation.CIIdentity = true
 		}
 	}
-	// Dagger finds dagger.toml at the enclosing Git root. Anonymous exports
-	// need their own root; identity exports already have one.
 	if !preparation.CIIdentity {
 		initialise := exec.CommandContext(ctx, "git", "init", "--quiet", dir)
 		initialise.Env = env
@@ -384,8 +350,6 @@ func (d DaggerChecks) prepare(ctx context.Context, dir string, identity Identity
 	return env, preparation, cleanup, nil
 }
 
-// run executes the Dagger CLI in a prepared dir and returns its exit status,
-// -1 when it did not exit. A non-zero exit is not an error.
 func (d DaggerChecks) run(ctx context.Context, dir string, env []string, output io.Writer, args ...string) (int, error) {
 	return d.runOutput(ctx, dir, env, output, output, args...)
 }
@@ -394,8 +358,6 @@ func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, s
 	cmd := exec.CommandContext(ctx, "dagger", args...)
 	cmd.Dir = dir
 	cmd.Env = slices.Clone(env)
-	// Only the explicit allow-list reaches the CLI. Git preparation above
-	// never receives the Cloud token or engine settings.
 	if d.Engine == "" || d.Engine == "auto" {
 		for _, name := range []string{"DOCKER_HOST", "_EXPERIMENTAL_DAGGER_RUNNER_HOST", "DAGGER_X_RELEASE"} {
 			if value := os.Getenv(name); value != "" {
@@ -411,9 +373,6 @@ func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, s
 			}
 		}
 	} else {
-		// DAGGER_ENGINE takes precedence over the deprecated runner and Cloud
-		// variables. Docker container addresses also need the service Docker
-		// host; other Docker and SSH settings remain outside this allow-list.
 		cmd.Env = append(cmd.Env, "DAGGER_ENGINE="+d.Engine)
 		if strings.HasPrefix(d.Engine, "docker-container://") {
 			if host := os.Getenv("DOCKER_HOST"); host != "" {
@@ -448,8 +407,6 @@ func (d DaggerChecks) runOutput(ctx context.Context, dir string, env []string, s
 	return exit, err
 }
 
-// checkOutput keeps the last limit bytes written to it, starting at a whole
-// UTF-8 character, and whether anything before them was dropped.
 type checkOutput struct {
 	mu        sync.Mutex
 	limit     int
@@ -472,13 +429,11 @@ func (b *checkOutput) Write(p []byte) (int, error) {
 }
 func (b *checkOutput) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.text) }
 
-// lastLines returns the last n non-empty lines of text.
 func lastLines(text string, n int) string {
 	lines := slices.DeleteFunc(strings.Split(strings.TrimSpace(text), "\n"), func(l string) bool { return strings.TrimSpace(l) == "" })
 	return strings.Join(lines[max(len(lines)-n, 0):], "\n")
 }
 
-// redactedError keeps cancellation and other typed errors discoverable.
 type redactedError struct {
 	message string
 	cause   error

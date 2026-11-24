@@ -13,7 +13,6 @@ import (
 
 func TestDaggerFixtureProcess(t *testing.T) { daggerfixture.Process() }
 
-// serial: h.run uses its real command path, with only Jev stubbed.
 func TestSmartcheckSelectedLinksReachDagger(t *testing.T) {
 	for _, picks := range []int{0, 3} {
 		for _, failed := range []bool{false, true} {
@@ -64,7 +63,6 @@ func TestSmartcheckSelectedLinksReachDagger(t *testing.T) {
 	}
 }
 
-// serial: smartcheck preserves Dagger's refusal and stops without service retries.
 func TestSmartcheckLateRefusalStops(t *testing.T) {
 	links := []string{daggerfixture.PackageA, daggerfixture.TestB, daggerfixture.Version}
 	cli := daggerfixture.Install(t, daggerfixture.Config{Links: links, RefuseOn: "go-package=b"})
@@ -82,7 +80,6 @@ func TestSmartcheckLateRefusalStops(t *testing.T) {
 	}
 }
 
-// serial: command execution and dry-run selections use the same offered links.
 func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 	for _, picks := range []int{0, 4} {
 		for _, dry := range []bool{false, true} {
@@ -151,7 +148,6 @@ func TestSmartcheckCollectionOptionsReachDagger(t *testing.T) {
 	}
 }
 
-// serial: the real command falls back without asking Jev when only a root fits.
 func TestSmartcheckCollectionTooManyChecksRunsFull(t *testing.T) {
 	var links []string
 	for i := range checkselect.MaxQuestions + 1 {

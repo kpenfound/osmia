@@ -37,7 +37,6 @@ var writeCharter = servicetest.WriteCharter
 var withWeb = servicetest.WithWeb
 var newDesignEnforcementFixture = servicetest.NewDesignEnforcementFixture
 var sessionWebFixture = servicetest.SessionWebFixture
-var librarianWorkstream = service.LibrarianWorkstreamForTest
 var assertFeedAnnotations = func(t *testing.T, p *page, s string, n int) { AssertFeedAnnotations(t, p.Page, s, n) }
 
 const listenWeb = "[listen]\nweb = \"127.0.0.1:0\"\n"
@@ -133,7 +132,6 @@ var claimTurn = fixturekit.ClaimTurn
 const project = fixturekit.Project
 const stream = fixturekit.Stream
 
-// entriesOf returns the listed inbox entries of one kind.
 func entriesOf(t *testing.T, c *Client, kind string) []InboxEntry {
 	t.Helper()
 	inbox, err := c.Inbox(context.Background())
@@ -147,7 +145,6 @@ func entriesOf(t *testing.T, c *Client, kind string) []InboxEntry {
 	return out
 }
 
-// decisionCard is the selector of the page's card of an inbox entry.
 func decisionCard(e InboxEntry) string {
 	return fmt.Sprintf(`[data-decision="%s"] `, strings.Join([]string{e.Kind, string(e.Project), string(e.Workstream), strconv.Itoa(e.Number), e.Unit, e.Amendment}, ":"))
 }

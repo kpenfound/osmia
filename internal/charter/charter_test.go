@@ -88,8 +88,6 @@ func TestCommentLinesAndFencesEndRules(t *testing.T) {
 	}
 }
 
-// A ratified rule takes the next number and goes under the standing rulings
-// heading, which is added once; its source is a comment, not rule text.
 func TestAppendRule(t *testing.T) {
 	if n := Parse("").Next(); n != 1 {
 		t.Fatalf("empty charter next %d", n)
@@ -116,7 +114,6 @@ func TestAppendRule(t *testing.T) {
 	if !reflect.DeepEqual(c.Rules, want) || len(c.Diagnostics) != 0 {
 		t.Fatalf("%+v", c)
 	}
-	// A heading in a comment or a fence is not the charter's last heading.
 	for _, hidden := range []string{"<!--\n## Standing rulings\n-->\n", "```\n## Standing rulings\n```\n"} {
 		got := AppendRule("## Testing\n"+hidden, 1, "Rule.", "src")
 		if !strings.HasSuffix(got, hidden+"\n## Standing rulings\n\n1. Rule. <!-- src -->\n") {

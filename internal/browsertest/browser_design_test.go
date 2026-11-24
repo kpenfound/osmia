@@ -15,15 +15,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart
-// covers the web page's surface of spec#6 to spec#8: the owner opens a
-// design session from the project pane for an onboarded project, converses with
-// it, and is refused, with the refusal shown, when starting a workgroup
-// before the agent has drafted a brief. No agent runs in this test: the
-// readiness pass and the brief it produces are covered end to end by
-// internal/service's own TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools,
-// TestDraftBriefRefusesAnIncompleteBriefAndRecordsTheLatest and
-// TestStartDesignWorkgroupHandsOffBriefOnTheSameChiefOfStaffThread.
 func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *testing.T) {
 	t.Parallel()
 	p := openBrowser(t)
@@ -53,8 +44,6 @@ func TestBrowserPageOpensADesignSessionConversesAndRefusesAnUndraftedStart(t *te
 	stream := listed.Designs[0].Workstream
 	assertBrowserDesignSelection(t, p, c, stream, false)
 
-	// No brief has been drafted, since no agent turn ran: starting a
-	// workgroup is refused, and the refusal is shown next to the button.
 	awaitBrowserDesignBrief(t, p, c, stream)
 	p.Click("#design-start")
 	p.AwaitText("#design-start-result", "has not drafted a brief yet")
@@ -86,9 +75,6 @@ func TestBrowserDesignReadinessAssumptionsAndStartWorkgroup(t *testing.T) {
 		}
 		return &agent.Result{ClaudeID: "design-session", ResultText: readiness + brief}, nil
 	}
-	// Hold the successful open response while an older status snapshot
-	// lists the new workstream without its design marker. This makes the
-	// creation/selection race reproducible, independent of request timing.
 	p.Run(chromedp.ActionFunc(func(ctx context.Context) error {
 		_, err := cdppage.AddScriptToEvaluateOnNewDocument(`
           const fetchDesign = window.fetch.bind(window);

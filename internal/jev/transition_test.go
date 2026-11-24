@@ -35,8 +35,6 @@ func transitionAnswer(pickA, pickB string, fit float64) jevtest.Result {
 	}}}
 }
 
-// A transition request asks the narrow questions in one request, with the pick
-// asked in two orders, and the answers are recorded under the versioned task.
 func TestDecideTransitionAsksTheNarrowQuestionsInOneRequest(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()
@@ -64,8 +62,6 @@ func TestDecideTransitionAsksTheNarrowQuestionsInOneRequest(t *testing.T) {
 	}
 }
 
-// An answered occurrence is not asked again, after a restart either, and a
-// concurrent ask of it waits for the first.
 func TestDecideTransitionReusesARecordedAnswer(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()
@@ -83,8 +79,6 @@ func TestDecideTransitionReusesARecordedAnswer(t *testing.T) {
 	}
 }
 
-// A request that fails is a recorded fallback with no answers and marks Jev
-// degraded until a request is answered; the other kinds are not touched.
 func TestDecideTransitionFailureDegradesJevUntilAnAnswer(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()
@@ -106,8 +100,6 @@ func TestDecideTransitionFailureDegradesJevUntilAnAnswer(t *testing.T) {
 	}
 }
 
-// An answer that picks something that was not offered is not used, and a
-// request over the limit is not sent.
 func TestDecideTransitionRefusesWhatWasNotOfferedAndWhatIsTooLarge(t *testing.T) {
 	f := newFixture(t)
 	settings := testSettings()

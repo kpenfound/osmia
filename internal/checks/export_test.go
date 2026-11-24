@@ -16,7 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// serial: installs a fake dagger executable through PATH.
 func TestDaggerCandidateExport(t *testing.T) {
 	bin := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(bin, "dagger"), []byte(fixturekit.CheckExportDagger), 0700))
@@ -127,7 +126,6 @@ func TestDaggerCandidateExport(t *testing.T) {
 					if !bytes.Equal(before, after) {
 						t.Fatal("preparation changed the exported files")
 					}
-					// The public result must carry the preparation fallback too.
 					result, err := d.Check(ctx, dir, id, nil)
 					must(t, err)
 					if result.ExitCode != 0 || (result.CIIdentityFallback != "") != fallback {

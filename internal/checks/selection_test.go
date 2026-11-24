@@ -2,7 +2,6 @@ package checks
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,7 +22,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// scriptedChecks returns one scripted result for each Check and records its links.
 type scriptedChecks struct {
 	results []CheckResult
 	errs    []error
@@ -152,7 +150,6 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			// Keep the trace socket and clone paths short on every platform.
 			home, err := os.MkdirTemp("", "picks-")
 			must(t, err)
 			t.Cleanup(func() { os.RemoveAll(home) })
@@ -180,7 +177,6 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 			j := &jev.Judge{Config: func() config.Jev { return settings }, Provider: p.Factory(), Getenv: func(string) string { return key }, Now: func() time.Time { return fixturekit.DemoStart }}
 			checks := &fixturekit.FakeChecks{Links: []string{"dag+check://a", "dag+check://b"}, Outcomes: fixturekit.Passing()}
 			if tc.name == "unconfigured" {
-				// Listing would fail with another reason, so the reason shows it was skipped.
 				checks.ListErr = errors.New("listing must be skipped")
 			}
 			scope := coreadapter.Scope{Project: string(cfg.Project.ID), Workstream: string(stream), Thread: "checks", Turn: "check-1", Role: "checks"}
@@ -204,31 +200,36 @@ func TestFallbackPicksPreserveThresholdAndFullRunPaths(t *testing.T) {
 	}
 }
 
-func TestUnconfiguredSelectionDescribesNoOffMode(t *testing.T) {
+func TestUnconfiguredSelectionDescribesWhyEveryCheckRan(t *testing.T) {
 	t.Parallel()
 	got := DescribeSelection(FullSelection(string(jev.ReasonUnconfigured), "OPENROUTER_API_KEY is not set"))
 	want := "every check ran: Jev did not select them (unconfigured: OPENROUTER_API_KEY is not set)"
-	if got != want || strings.Contains(got, "boost") || strings.Contains(got, "off") {
+	if got != want {
 		t.Fatalf("description %q, want %q", got, want)
 	}
 }
 
-func TestSelectionDescriptionAndLegacyRecord(t *testing.T) {
+func TestSelectionDescriptionNamesTheJudgmentAndItsNarrowing(t *testing.T) {
 	t.Parallel()
-	var legacy api.CheckSelection
-	must(t, json.Unmarshal([]byte(`{"mode":"selected","links":["dag+check://standalone"],"candidates":4,"listed":8,"judgment":"judgment_old"}`), &legacy))
-	want := "Jev selected 1 of 4 check links for the changed files in judgment judgment_old"
-	if DescribeSelection(legacy) != want || legacy.BreadthJudgment != "" || legacy.DepthJudgment != "" || legacy.Roots != nil || legacy.KeptRoots != nil || legacy.Levels != nil {
-		t.Fatalf("legacy selection %+v: %s", legacy, DescribeSelection(legacy))
+	selection := api.CheckSelection{Mode: "selected", Links: []string{"dag+check://standalone"}, Candidates: 4, Judgment: "judgment_a"}
+	want := "Jev selected 1 of 4 check links for the changed files in judgment judgment_a"
+	if got := DescribeSelection(selection); got != want {
+		t.Fatalf("description %q, want %q", got, want)
 	}
 	roots := 5
-	legacy.Roots, legacy.KeptRoots = &roots, []string{"a", "b"}
-	legacy.Levels = map[string]string{"a": "go-package", "b": "go-package"}
-	if got := DescribeSelection(legacy); got != want+" within 2 of 5 top-level checks, by go-package" {
+	selection.Roots, selection.KeptRoots = &roots, []string{"a", "b"}
+	selection.Levels = map[string]string{"a": "go-package", "b": "go-package"}
+	if got := DescribeSelection(selection); got != want+" within 2 of 5 top-level checks, by go-package" {
 		t.Fatal(got)
 	}
-	legacy.FallbackPicks = 1
-	if got := DescribeSelection(legacy); !strings.HasSuffix(got, "within 2 of 5 top-level checks, by go-package") || !strings.Contains(got, "highest-scored") {
+}
+
+func TestSelectionDescriptionNamesFallbackPicks(t *testing.T) {
+	t.Parallel()
+	roots := 5
+	selection := api.CheckSelection{Mode: "selected", Links: []string{"dag+check://standalone"}, Candidates: 4, Judgment: "judgment_a", FallbackPicks: 1, Roots: &roots, KeptRoots: []string{"a", "b"}, Levels: map[string]string{"a": "go-package", "b": "go-package"}}
+	got := DescribeSelection(selection)
+	if !strings.HasSuffix(got, "within 2 of 5 top-level checks, by go-package") || !strings.Contains(got, "highest-scored") {
 		t.Fatal(got)
 	}
 }

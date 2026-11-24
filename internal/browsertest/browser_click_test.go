@@ -80,8 +80,6 @@ func TestBrowserClickReselectsReplacedNodeBeforeMouseDispatch(t *testing.T) {
 		if lookups != 1 {
 			return nil
 		}
-		// Replace the selected node after visibility succeeds but before
-		// MouseClickNode reads its geometry, as a status refresh can do.
 		if err := dom.RemoveNode(nodes[0].NodeID).Do(ctx); err != nil {
 			return err
 		}

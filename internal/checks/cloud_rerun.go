@@ -32,7 +32,6 @@ type CloudRerunner interface {
 // Dagger Cloud token is available.
 var ErrCloudRerunUnavailable = errors.New("a Dagger Cloud rerun needs a Dagger Cloud API token")
 
-// maxRerunOutput bounds the output of the rerun command kept in an error.
 const maxRerunOutput = 2048
 
 // RerunCommand is the Dagger CLI invocation that reruns the failed checks of

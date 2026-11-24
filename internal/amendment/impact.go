@@ -142,8 +142,6 @@ func ClassifyImpact(id string, before, after trace.ProjectSpec, members []Member
 	}
 	cascade := map[config.WorkstreamID]bool{}
 	if len(out.Contracts) > 0 {
-		// A changed contract without a changed slice still invalidates all
-		// criteria that the slices explicitly mark as that shared interface.
 		for _, sl := range before.Slices {
 			if len(sl.ContractCriteria) > 0 {
 				affected[sl.Workstream] = true
@@ -310,7 +308,6 @@ func RevisionPlan(id string, before, after plan.Plan, impact StreamImpact) plan.
 	}
 	for n := range out.Units {
 		u := &out.Units[n]
-		// Historical completed units retain their original assignments.
 		original := slices.ContainsFunc(impact.Units, func(i UnitImpact) bool { return i.Unit == u.ID && (i.Action == Leave || i.Action == Revise) })
 		if original {
 			u.DependsOn = slices.Clone(u.DependsOn)

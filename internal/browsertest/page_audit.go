@@ -22,7 +22,6 @@ func (p *Page) Screenshot(name string, position ...string) {
 	if dir == "" {
 		return
 	}
-	// Let the last transition settle, so the picture shows the resting page.
 	p.Await("the page at rest", `document.getAnimations().every(a => a.playState !== 'running' || a.effect.getTiming().iterations === Infinity)`)
 	var png []byte
 	actions := []chromedp.Action{}
@@ -38,9 +37,6 @@ func (p *Page) Screenshot(name string, position ...string) {
 	}
 }
 
-// auditScript reports what the shown page breaks of the design rules, one
-// finding to a string. It reads the page the way the owner sees it: the
-// visible text, the computed styles and the area a press reaches.
 const auditScript = `((phone) => {
   const findings = [];
   const visible = (e) => {

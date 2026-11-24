@@ -20,10 +20,6 @@ const (
 	reviewRef = "https://github.com/acme/skills#skills/review"
 )
 
-// skillCache lays out a skill cache the way the skill manager does: clones
-// under repos, and under plugins one generated plugin per reference whose
-// skills directory links into its clone. The review plugin is a real
-// directory of links, the tdd plugin is a link to a directory.
 type skillCache struct {
 	dir, outside string
 	tdd, review  string
@@ -59,8 +55,6 @@ func newSkillCache(t *testing.T) skillCache {
 	return skillCache{dir: dir, outside: outside, tdd: filepath.Join(dir, "plugins/skills-tdd"), review: filepath.Join(dir, "plugins/skills-review")}
 }
 
-// readInTurn runs a reviewer turn on a Claude backend, given refs, and reads
-// each path through the turn's own file_read while the turn runs.
 func readInTurn(t *testing.T, cache skillCache, refs []string, paths []string) map[string]string {
 	t.Helper()
 	r, _, h, engine, input := fixture(t, "reviewer", "none")
@@ -105,7 +99,6 @@ func TestFileReadReadsTheTurnsSkillDirectories(t *testing.T) {
 		filepath.Join(cache.tdd, "skills/inside.md"),
 		filepath.Join(cache.review, "skills/review/SKILL.md"),
 		filepath.Join(cache.review, "skills"),
-		// A skill's directory is also readable where its link resolves.
 		filepath.Join(cache.dir, "repos/skills/skills/tdd/SKILL.md"),
 		"src/file",
 	}

@@ -19,9 +19,6 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 )
 
-// daggerTurn is a mason turn in sbx that may execute commands and asks for
-// the Dagger CLI against an engine on the host's loopback. Its view holds the
-// empty repository the service creates for such a turn.
 func daggerTurn(t *testing.T) a.PreparedTurn {
 	t.Helper()
 	turn := toolTurn(t, "sbx")
@@ -87,9 +84,6 @@ func TestSbxMasonTurnGetsDaggerCLIAndEngine(t *testing.T) {
 	}
 }
 
-// cloudTurn is daggerTurn on Dagger Cloud: no host engine, the token's
-// variable named, and the variables the service adds for it in the turn's
-// environment.
 func cloudTurn(t *testing.T, token string) a.PreparedTurn {
 	t.Helper()
 	turn := daggerTurn(t)
@@ -100,9 +94,6 @@ func cloudTurn(t *testing.T, token string) a.PreparedTurn {
 	return turn
 }
 
-// A mason turn on Dagger Cloud reaches its sandbox with DAGGER_ENGINE=cloud
-// and the token, both by name, and an empty repository at its view's root.
-// agentcore gives it no Dagger: no CLI install, engine forward or host port.
 func TestSbxMasonTurnOnDaggerCloud(t *testing.T) {
 	const token = "mason-cloud-token"
 	turn := cloudTurn(t, token)
@@ -138,15 +129,12 @@ func TestSbxMasonTurnOnDaggerCloud(t *testing.T) {
 	}
 	policy, _ := os.ReadFile(filepath.Join(dir, "sbx-policy.txt"))
 	for _, line := range strings.Split(string(policy), "\n") {
-		// The turn's MCP server at 127.0.0.1:1 is the only host port.
 		if strings.Contains(line, "allow network") && !strings.HasSuffix(line, " localhost:1") {
 			t.Fatalf("a Dagger Cloud turn was allowed a host port: %s", line)
 		}
 	}
 }
 
-// A Dagger Cloud turn is granted its variables and the view's empty
-// repository, and asks agentcore for no Dagger engine.
 func TestDaggerCloudTurnGrants(t *testing.T) {
 	turn := cloudTurn(t, "mason-cloud-token")
 	engine := &adaptertest.Engine{}
@@ -164,9 +152,6 @@ func TestDaggerCloudTurnGrants(t *testing.T) {
 	}
 }
 
-// The Dagger Cloud variables reach only a Dagger Cloud turn, and a Dagger
-// Cloud turn only with them, in sbx, with execution, and without a host
-// engine besides.
 func TestDaggerCloudTurnBoundary(t *testing.T) {
 	ctx := context.Background()
 	for name, mutate := range map[string]func(*a.PreparedTurn){
@@ -201,8 +186,6 @@ func TestDaggerCloudTurnBoundary(t *testing.T) {
 	}
 }
 
-// DaggerCloudEnvironment reads the token from the variable a Dagger Cloud
-// turn names, refuses an unset one, and adds nothing to any other turn.
 func TestDaggerCloudEnvironment(t *testing.T) {
 	getenv := func(name string) string { return map[string]string{"SET": "token-value"}[name] }
 	env, err := a.DaggerCloudEnvironment(a.ExecutionSettings{DaggerCloudTokenEnv: "SET"}, getenv)
@@ -273,7 +256,6 @@ func TestDaggerEngineIsGrantedAndPolicyMustMatch(t *testing.T) {
 	}
 }
 
-// Serial: the pinned runner's Docker forward inherits the process environment.
 func TestMasonDockerEngineForwardUsesServiceHost(t *testing.T) {
 	for _, host := range []string{"tcp://engine.example.ts.net:2375", "ssh://user@engine.example.ts.net", ""} {
 		t.Run(host, func(t *testing.T) {
@@ -289,8 +271,6 @@ func TestMasonDockerEngineForwardUsesServiceHost(t *testing.T) {
 			turn.Sandbox.Verified.Environment[a.TokenEnvironment] = turn.SessionDirectory
 			finish := filepath.Join(t.TempDir(), "finish")
 			t.Cleanup(func() { _ = os.WriteFile(finish, nil, 0600) })
-			// agenttest.Session cannot wait for a file signal and then succeed;
-			// keep the agent alive until the Docker forward has been exercised.
 			runner := sbxRunner(t, agenttest.Script(t, "fake-agent", fmt.Sprintf(`case "$*" in
 *--version*) echo '2.1.200'; exit 0 ;;
 *--help*) echo '--tools --strict-mcp-config'; exit 0 ;;
@@ -332,8 +312,6 @@ echo '{"type":"result","subtype":"success","result":"built"}'
 				case <-time.After(10 * time.Millisecond):
 				}
 			}
-			// The fake records the sbx client's environment. Only --env grants
-			// enter a real sandbox; derive that environment from the runner's args.
 			clientEnv := map[string]string{}
 			for _, line := range strings.Split(env, "\n") {
 				if name, value, ok := strings.Cut(line, "="); ok {
@@ -393,9 +371,6 @@ echo '{"type":"result","subtype":"success","result":"built"}'
 	}
 }
 
-// A Dagger turn's view may hold a Git repository at its root, a directory of
-// regular files. Any other VCS metadata in it, and any repository in a view
-// for a turn without Dagger, is refused before a session is prepared.
 func TestBoundaryAdmitsOnlyADaggerViewsRootRepository(t *testing.T) {
 	ctx := context.Background()
 	for name, c := range map[string]struct {
@@ -463,7 +438,6 @@ func TestBoundaryAdmitsOnlyADaggerViewsRootRepository(t *testing.T) {
 	}
 }
 
-// emptyRepository leaves in view what `git init --quiet --template=` does.
 func emptyRepository(t *testing.T, view string) {
 	t.Helper()
 	mustWrite(t, filepath.Join(view, ".git", "HEAD"), "ref: refs/heads/main\n")
@@ -475,9 +449,6 @@ func emptyRepository(t *testing.T, view string) {
 	}
 }
 
-// A Dagger turn marks its view mount, and that mount alone, as holding only an
-// empty repository; core admits the writable mount without granting version
-// control. A turn without Dagger marks no mount.
 func TestDaggerTurnMarksOnlyItsViewMountAsAnEmptyRepository(t *testing.T) {
 	for name, dagger := range map[string]bool{"dagger": true, "no dagger": false} {
 		t.Run(name, func(t *testing.T) {

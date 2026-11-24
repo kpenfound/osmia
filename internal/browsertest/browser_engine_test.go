@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// Serial: the fake executable directory is installed on the process PATH.
 func engineWebFixture(t *testing.T, mode string) (*Service, fixturekit.EngineCLIs) {
 	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
@@ -74,7 +73,6 @@ func TestBrowserEngineControls(t *testing.T) {
 	}
 	p.Click("#engine-prune")
 	assertOutcome(p, "#engine-prune-result", "ok", "Engine cache pruned.")
-	// The Settings view remains within the phone viewport after status has expanded it.
 	p.Run(chromedp.EmulateViewport(390, 844, chromedp.EmulateMobile))
 	p.Await("the Settings view fits the phone", `(() => { const r = document.getElementById('settings-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; })()`)
 }
@@ -126,7 +124,6 @@ func TestBrowserEngineOutcomesBelongToSectionOpening(t *testing.T) {
 		p.Click("#engine-" + action)
 		p.Await("the new opening's response is held", `typeof releaseOutcome[`+quote(url)+`] === 'function'`)
 		p.Eval(`releaseOldEngineOutcome()`, nil)
-		// Complete another request after the release to cross the old callback.
 		p.Eval(`fetch('/v1/engine/status').then(() => window.engineOutcomeSettled = true)`, nil)
 		p.Await("the late action settled", `window.engineOutcomeSettled === true`)
 		assertOutcome(p, "#engine-"+action+"-result", "pending", "Sending…")
