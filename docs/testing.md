@@ -8,16 +8,28 @@ repositories. Tests never need a live model, remote push or real delivery.
 
 ## Run the checks
 
-From the repository root, with the Dagger engine available:
+Run focused checks for what you changed. The check service runs the full suite
+on every change, so you do not need the whole suite passing before you finish.
+Select tests with the Go check's flags, from the repository root, with the
+Dagger engine available:
 
 ```sh
-dagger check --progress=report
+dagger check --progress=report --go-test=TestA
+dagger check --progress=report --go-test=TestA --go-test=TestB
+dagger check --progress=report --go-package=internal/intakejourney
+dagger check --progress=report --go-package=internal/executionjourney --go-test=TestExactReviewDemonstration
 ```
 
-The Go check runs the complete suite with the official Dagger Go module, in the
-test container from the `osmia-dev` module. That container installs the pinned
-`jj` binary and Chromium, and sets `OSMIA_BROWSER`, so the browser tests run with
-the rest of the suite. Each package's tests run in their own container, in
+`--progress=report` prints each check's result and the output of failing tests.
+Use `--progress=plain` only when you need every container step, such as the
+exact `go test` command a check ran.
+
+The Go check runs the suite with the official Dagger Go module, in the test
+container from the `osmia-dev` module. That container provides the Go toolchain,
+`jj` and Chromium, and sets `OSMIA_BROWSER`, so the browser tests in
+`internal/browsertest`, `internal/intakejourney`, `internal/executionjourney`,
+`internal/lifecycle` and `internal/web` run with the rest of the suite; without
+`OSMIA_BROWSER` they skip. Each package's tests run in their own container, in
 parallel with the other packages. The release check builds and exercises the
 versioned archive. See [dagger.toml](../dagger.toml) for the registered
 checks.
@@ -26,35 +38,41 @@ Each Go package runs at most four tests concurrently, including race and flake
 runs. This bounds the number of service fixtures competing for CPU and filesystem
 operations within a check. Use `--parallel 4` to bound concurrent checks as well.
 
-Never run `go test` on the host. Tests can leave processes behind on the
-machine running them. For a focused package or test, use the Go check's
-selection flags described in [AGENTS.md](../AGENTS.md#validation), such as
-`dagger check --go-test=TestA`. Host `gofmt`, `go build` and `go vet ./...` are
-allowed; they do not execute tests.
+Never run `go test` on the host, in any role and for any purpose: iterating, a
+single test, a mutation check or reproducing a flake. Tests start processes that
+leak onto the machine they run on, so they run only inside Dagger. Host `gofmt`,
+`go build` and `go vet ./...` are allowed; `go vet ./...` type-checks test files
+without running them.
 
 ## Validate as a mason
 
-A mason with Dagger validates only through Dagger, from its view root. The
-view of a Dagger-enabled turn holds an empty Git repository at its root, which
-the Dagger CLI needs to find `dagger.toml`; the repository has no commits,
-remote or hooks and is never captured, and the turn still has no version
-control. Plain `dagger check`, its listing (`dagger check -l`), the Go check's
-`--go-package`, `--go-test` and `--env` flags and `dagger generate` all work
-from the view root, with no workspace flag, no copy of the tree and no `.git`
-of the mason's own:
+Run focused checks for what you changed; the check service runs the full suite.
+Select the tests that exercise the change, or the package that holds it, as in
+[Run the checks](#run-the-checks). Add `--env=race` to run the selected tests
+with the race detector when changing concurrent scheduling, recovery or shared
+state, or `--env=flake` to run each selected test five times when reproducing a
+flake.
+
+A mason validates only through Dagger, from its view root. The view holds an
+empty Git repository at its root, which the Dagger CLI needs to find
+`dagger.toml`; the repository has no commits, remote or hooks and is never
+captured, and the turn still has no version control. Plain `dagger check`, its
+listing (`dagger check -l`), the Go check's `--go-package`, `--go-test` and
+`--env` flags and `dagger generate` all work from the view root, with no
+workspace flag, no copy of the tree and no `.git` of the mason's own. The lint
+check runs staticcheck over the project:
 
 ```sh
-dagger check --progress=report
-dagger check --progress=report --go-package=internal/config --go-test=TestA
 dagger check --progress=report 'dag+check://?check=lint&staticcheck-project=.'
 ```
 
-The lint link runs staticcheck over the project. There is no other route:
-masons do not validate with Docker or Compose, a copy of the tree made into a
-Git root, or a toolchain installed in the guest. The Osmia sandbox template has
-no Docker Engine, and the guest reaches the engine only through the host's
-forward ([Dagger for masons](configuration.md#dagger-for-masons)). If a run
-cannot load the workspace, report that blocker instead of switching routes.
+There is no other route: masons do not validate with Docker or Compose, a copy
+of the tree made into a Git root, or a toolchain installed in the guest. The
+Osmia sandbox template has no Docker Engine, and the guest reaches the engine
+only through the host's forward
+([Dagger for masons](configuration.md#dagger-for-masons)). If a run cannot load
+the workspace, report that blocker instead of switching routes. Report the
+checks you ran and their results.
 
 ### Select checks
 
@@ -63,12 +81,23 @@ cannot load the workspace, report that blocker instead of switching routes.
   checks matched pattern`.
 - `--go-test` matches exact test names, not prefixes. A prefix such as
   `--go-test=TestDaggerClient` ends with `no checks selected` after a few
-  seconds.
+  seconds. Alone, it selects every test with that name in any package; add
+  `--go-package` to pick one.
+- `dagger list go-tests -a --go-package=internal/intakejourney` lists the tests
+  of a package, and `-f=cli` prints each one as the flags that select it.
+- `dagger check -l` lists the checks. `dagger list checks --all -f=link` lists
+  the link of every check, including checks outside the Go module such as
+  `release:version-round-trip`.
+- To rerun a failing check exactly, pass the link `--progress=report` names it
+  by back to `dagger check`, quoted:
+
+  ```sh
+  dagger check --progress=report 'dag://go/packages/tests/test?go-package=internal/config&go-test=TestA'
+  ```
+
 - A `dag+check://` link, such as the lint link, runs in a call of its own.
   Different links cannot share one call, and the Go check's flags do not
   combine with a link.
-- `dagger check -l` lists the checks and `dagger list go-tests -a` lists the
-  tests ([AGENTS.md](../AGENTS.md#validation)).
 
 ### Cached results
 
@@ -104,14 +133,14 @@ rejects:
 
 ### Size runs
 
-A complete `dagger check` takes well over ten minutes. Run it in the
-background and read its output file when it finishes, or select the package
-that holds the change. Selected tests take seconds. Do not wait with a
+The full suite takes well over ten minutes, which is why the check service runs
+it. Selected tests take seconds, and a whole package takes minutes. A
+whole-package `--env=race` run is much longer than a plain run, so select the
+tests that exercise the concurrent code by name. Do not wait with a
 `pgrep -f 'dagger check'` loop: it matches itself and never ends.
 
-A whole-package `--env=race` run is much longer than a plain run, so select the
-tests that exercise the concurrent code by name. After a change to the schema or
-an API type, run `dagger generate` so `docs/openapi.json` is current.
+After a change to the schema, a route or an API type, run `dagger generate` so
+`docs/openapi.json` is current; the generate check fails while it is stale.
 
 ### Known failures and flakes
 
@@ -148,7 +177,7 @@ composition root, with fake execution boundaries and local repositories.
 The [preview journey](../internal/servicetest/preview_test.go),
 `TestChiefPreviewImageIsServedAndSharedWithTheWorkgroup` and
 `TestArchivingAMemberRemovesItsPreviewImageFromEveryRecord`, sends an owner
-message to a production chief turn without saving preview settings. The chief
+message to a production chief turn. The chief
 inspects the member's committed Service code and names its call and port in the
 preview tool request. Offline Dagger and Chromium commands capture the built
 member's exact source; the journeys check both feeds, image bytes and headers,
@@ -158,14 +187,6 @@ presentations.
 [browsertest](../internal/browsertest/browser_preview_journey_test.go) uses the
 same running-service fixture to check a live thumbnail, its full-size link and
 the archived placeholder, including a fresh page that requests no deleted image.
-
-The config compatibility tests load and reload ignored `[preview]` tables
-(`call`, `port`, `path`, `timeout`), compare effective projects with a file
-without the table, and check unchanged file bytes and refusal of unknown keys.
-Service and CLI tests check unavailable settings routes and commands, the
-route inventory, effective configuration and usage. The browser checks Project
-management has no Preview form and sends no preview settings request; capacity
-checks still show waiting captures as `preview`.
 
 Preview argument tests cover the required non-empty `call` and `port` from 1
 to 65535, the `/` path default and the `5m` timeout default with a `1m` to `30m`
@@ -207,7 +228,14 @@ passing, failing and incomplete runs. No test reaches a Dagger engine.
 
 Running-service tests outside `internal/service` use
 [`servicetest`](../internal/servicetest) to start the real service and web
-listener, drive the API, and seed sealed builds. Its `Project` helpers provide
+listener, drive the API, and seed sealed builds. Its
+[`journey`](../internal/servicetest/journey) package is the one test harness of
+`executionjourney`, `intakejourney` and `lifecycle`: `Options`, `Start`,
+`Enforce`, the ready-access and active-project helpers, and the intake,
+execution and lifecycle controller builders. `internal/service` tests cannot
+import it, because `journey` imports `internal/service`; they bind the shared
+fixture bodies in `fixturekit` and `intakefixture` to the service's unexported
+state and keep no copy of the logic. Its `Project` helpers provide
 `SeedBuild`, `SeedBuilding`, `SeedBuildingPaused`, `BuiltAs` and `BuiltPaused`.
 Execution hooks and private fixture operations go through `service.TestHooks`,
 `StartForTest` and `InspectForTest`, separate from production options.
@@ -306,12 +334,14 @@ container's CPU and filesystem, so adding parallelism can increase contention.
 
 | Contract | Journey coverage | Focused coverage and fixture |
 | --- | --- | --- |
-| Intake and ratification | [intakejourney](../internal/intakejourney), `TestHandInToRatifiedPlan` | [intake](../internal/intake) and [intakejourney](../internal/intakejourney) architect, shed, ratification and build tests exercise their own transitions. Implementation tests start with sealed builds. |
+| Intake and ratification | [intakejourney](../internal/intakejourney), `TestHandInToRatifiedPlan` hands a design in through the API and follows the architect draft, sketch, committee rounds, objections, redraft, ratification packet and the owner's ratify to a seal; `TestSealingInterruptedAfterRatifyingOverAnOverruledObjectionResumesAfterRestart` follows the capped debate, overrule, interrupted seal and restart | [intake](../internal/intake) and [intakejourney](../internal/intakejourney) architect, shed, ratification and build tests exercise their own transitions, including `TestSkippedDebateRatifiesWithoutACommittee`, the committee question and cap tests and the committee round tests. Implementation tests start with sealed builds. |
 | Review and revision | [executionjourney](../internal/executionjourney), `TestExactReviewDemonstration` checks actionable findings, revised candidates, reviewer tool scope, questions and a restart | [execution](../internal/execution), [review](../internal/review) and [checks](../internal/checks) tests cover bundles, footprints, stale identity and interrupted results, starting with a completed candidate. |
 | Landing and rebase | [executionjourney](../internal/executionjourney) landing and parallel-work demonstrations and [lifecycle](../internal/lifecycle) drift demonstrations check controller wiring | [execution](../internal/execution) landing interruption cases start with an approved candidate and drive the production reconciler with a controlled clock. Git and Jujutsu rebase fixtures prepare unit reports and local workspace changes. |
-| Final review and delivery | [executionjourney](../internal/executionjourney), `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication; [lifecycle](../internal/lifecycle) `TestDraftFirstFlowFromTheLastMergeToDelivery` takes a workstream from its last merge to a ready pull request on a started service with a fake pull request host that shows Dagger Cloud statuses and a fake `dagger` | [delivery](../internal/delivery) tests cover report decisions. [executionjourney](../internal/executionjourney) delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
+| Final review and delivery | [executionjourney](../internal/executionjourney), `TestDeliveryDemonstration` follows a final-review gap through a follow-up unit to approved publication; [lifecycle](../internal/lifecycle) `TestDraftFirstFlowFromTheLastMergeToDelivery` takes a workstream from its last merge to a ready pull request on a started service with a fake pull request host that shows Dagger Cloud statuses | [delivery](../internal/delivery) tests cover report decisions. `TestFinalReviewReadsTheRebasedBranchAsAWhole` and the final-review staleness and exactly-once tests in [executionjourney](../internal/executionjourney) run the controller passes on a started service. The lifecycle cloud-check tests (`TestFailedCloudChecksAreRerunOnceAndTheFreshRunSettlesTheReview` runs a fake `dagger`, `TestFinalChecksWaitForTheLoadStatusAndTheCloudRunBeforeSettling`) and the triage and moved-branch tests start from the same last merge. [executionjourney](../internal/executionjourney) delivery and publication tests start with an assembled, reviewed feature and cover styles, approval invalidation and side-effect recovery. |
 | Amendments | [intakejourney](../internal/intakejourney), `TestAmendmentDemonstration` follows a mason request through approval and continuation across restarts | [intakejourney](../internal/intakejourney) draft, debate, decision and application tests cover the respective stage, including an architect question that parks the draft until its answer, rejection and stale owner decisions. |
-| Runtime controls | The [executionjourney](../internal/executionjourney) reliability demonstration combines pause, budget, profile changes, provider limits and recovery | Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
+| Runtime controls | The [executionjourney](../internal/executionjourney) `TestReliabilityDemonstration` takes one workstream, built through production intake, through the daily-budget pause, the owner's resume, a configuration reload, a provider usage-limit fallback, a crash at the landing boundary and a restart | The budget, hard pause, profile switch, slot wait, reload and usage-limit controls each have their own test in the same package (`TestDailyBudgetPausesDispatchUntilTheOwnerResumes`, `TestHardPauseStopsAMasonAndResumingContinuesItsSession` and the others beside it). Capacity, classification, turn failure and interrupted-mason tests start with sealed builds. |
+| Questions and the inbox | The [executionjourney](../internal/executionjourney) `TestChiefOfStaffQuestionsAndInbox`: workers ask, the chief answers one question and escalates another, the owner rules, and the ruling reaches the asking reviewer once across two restarts | The chief's reply and status, parked threads, the escalation across a restart and the ruling notice each have a test beside it. |
+| Workgroup archive and change | [lifecycle](../internal/lifecycle) `TestArchivedUpstreamMergeOrderRepairAndFreshApprovalAcrossRestart` and `TestChangePassAppliesPendingChangeAfterArchivedCrossRepoLeader` | The draft naming an unmerged upstream, the archive and cleanup hold, the project spec kept active, the archive and change races and the follow-up after merged work each have their own lifecycle test. |
 | Workspace backend compatibility | The [executionjourney](../internal/executionjourney) Jujutsu delivery demonstration compares the delivered branch from both backends | Workspace and Jujutsu recovery tests cover backend operations and interruption points. |
 | Interfaces | [browsertest](../internal/browsertest) browser scenarios and [executionjourney](../internal/executionjourney) browser, notification, session and trace demonstrations check their actual transport and presentation paths | API, inbox and trace tests use records appropriate to the requested view. |
 
@@ -342,7 +372,7 @@ cost of a lifecycle from contention with other tests. Compilation, image pulls
 and engine startup are separate from the durations printed by `go test`.
 
 Profile in the Go check's test container, which the `osmia-dev` module's
-`test-runtime` function returns. It has the pinned `jj` and Chromium installed
+`test-runtime` function returns. It has `jj` and Chromium installed
 and `/tmp` in memory. For example, this profiles a Git-backed execution journey
 and prints CPU and blocking summaries. The binary and profiles stay in the
 container:
@@ -357,17 +387,6 @@ dagger api call test-runtime \
 
 Cumulative CPU percentages overlap along call stacks; blocking profiles
 aggregate time across goroutines. Neither should be added up as wall-clock time.
-
-The trace decoding benchmark compares repeated decoding with reuse of verified
-file content, including copying mutable record fields. Run it inside Dagger:
-
-```sh
-dagger api call test-runtime \
-  with-directory --path /src --source . --exclude .git,.bees,.dagger \
-  with-workdir --path /src \
-  with-exec --args=go,test,'-run=^$',-bench=BenchmarkRecordDecoding,-benchmem,./internal/trace \
-  combined-output
-```
 
 A passing local run on four CPUs is a reproducible performance check, but is
 not a measurement of the CI engine's processor speed or competing workload.

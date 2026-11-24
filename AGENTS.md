@@ -1,20 +1,16 @@
 # Working on Osmia
 
-## Design and scope
+## Design
 
-- Read [docs/design.md](docs/design.md) before proposing, planning or implementing a feature. It is the source of truth; issues describe outcomes and do not override it.
-- Follow the feature dependencies in the design.
-- Keep behavior changes and the design consistent. Surface a conflict with the design instead of silently changing product scope.
-- Repository bootstrap, the Go module and initial Dagger checks are already initialized. Do not repeat them.
-- Hearsay is optional. File-based context must support the complete workflow without it.
+[docs/design.md](docs/design.md) is the source of truth, and issues describe outcomes without overriding it. Follow its feature dependencies. When a change conflicts with the design, raise the conflict instead of silently changing product scope.
 
 ## Architecture guardrails
 
-- Keep state transitions, scheduling, capacity and owner gates in Go. Models run inside turns, never on the scheduling path.
-- Osmia's service owns version control and delivery credentials. Its runtime agents receive scoped files and tools; they do not commit, rebase or push. This is a product requirement, not a restriction on the normal branch and pull-request workflow used to develop Osmia.
-- Keep target-project factory state under the Osmia root, outside the target repository. Osmia's own design and development configuration belong here.
-- Preserve the trace, durable threads and explicit owner decisions through restarts and retries. Reconcile side effects before retrying them.
-- Reuse `github.com/kpenfound/agentcore` through a pinned dependency. Do not require a sibling checkout or copy its internals into this repository.
+- Go owns state transitions, scheduling, capacity and owner gates. Models run inside turns, never on the scheduling path.
+- The service owns version control and delivery credentials. Runtime agents receive scoped files and tools and never commit, rebase or push. This is a product requirement, not a restriction on the branch and pull-request workflow used to develop Osmia.
+- Target-project factory state lives under the Osmia root, outside the target repository.
+- The trace, durable threads and explicit owner decisions survive restarts and retries. Reconcile side effects before retrying them.
+- `github.com/kpenfound/agentcore` is a pinned dependency, with no sibling checkout and no copy of its internals.
 
 ## Web page design skills
 
@@ -24,59 +20,18 @@ Masons and reviewers who change or review `internal/web` load these skills first
 - Review with [.agents/skills/web-design-guidelines/SKILL.md](.agents/skills/web-design-guidelines/SKILL.md): the interface checklist and its output format.
 - Build and review with [.agents/skills/osmia-design-language/SKILL.md](.agents/skills/osmia-design-language/SKILL.md): the page's tokens, type, components, nest tube, Conversation and Activity split, banned defaults and the quieter, distill and polish passes. It also records the chosen fonts and colours.
 
-## Missing agentcore functionality
+## Checks
 
-- When an Osmia feature needs functionality missing from agentcore, open an upstream feature request in `kpenfound/agentcore`.
-- If the needed logic can be implemented in Osmia while awaiting upstream support, a temporary local implementation is allowed. Leave a `TODO` comment beside that code describing the capability needed and stating that the extra code must be removed when agentcore provides it.
-- If the Osmia feature is blocked until upstream implements the capability, comment on the blocked Osmia issue explaining the dependency and linking the upstream feature request, so the upstream request can be prioritized.
+- Run focused checks for what you changed. The check service runs the full suite. [docs/testing.md](docs/testing.md#validate-as-a-mason) covers how to select and run checks.
+- Never run `go test` on the host, in any role and for any purpose. Tests start processes that leak onto the machine they run on, so they run only inside Dagger. `gofmt`, `go build` and `go vet` are fine on the host.
+- Fakes live only in tests, and tests use only fake agents, GitHub clients, providers and container engines. They never launch real model sessions, the live factory, remote pushes or pull requests. The one exception is `internal/checks/daggercli_test.go`, built with the `daggercli` tag and run by the `dagger-cli-contract` check.
+- List every API endpoint in `service.Routes`. After changing a route or a request or response type, run `dagger generate` and keep `docs/openapi.json` current.
+- Report the checks you ran and their results. If validation is blocked, state the exact blocker.
 
-## Validation
+## Comments
 
-- Run `dagger check` before declaring a change complete:
+Follow the no-comments and no-deltas skills. The one exception: accurate doc comments on exported identifiers and packages, including under `internal/`, are allowed.
 
-  ```sh
-  dagger check --progress=report
-  ```
+## Missing agentcore capability
 
-  `--progress=report` prints each check's result and the output of failing tests. Use `--progress=plain` only when you need every container step, such as the exact `go test` command a check ran.
-- Never run `go test` on the host, in any role and for any purpose: iterating, a single test, a mutation check and reproducing a flake included. Tests start processes that leak onto the machine they run on, so they run only inside Dagger. `gofmt`, `go build` and `go vet` are fine on the host; `go vet ./...` type-checks test files without running them.
-- While iterating, select tests with the Go check's flags. Each test runs in the same container as the full suite, with the pinned `jj` and Chromium:
-
-  ```sh
-  dagger check --progress=report --go-test=TestA
-  dagger check --progress=report --go-test=TestA --go-test=TestB
-  dagger check --progress=report --go-package=internal/intakejourney
-  dagger check --progress=report --go-package=internal/executionjourney --go-test=TestExactReviewDemonstration
-  ```
-
-  `--go-test` alone selects every test with that name, in any package; add `--go-package` to pick one. `dagger list go-tests -a --go-package=internal/intakejourney` lists the intake journeys, and `-f=cli` prints each one as the flags that select it.
-- `--go-test` matches exact test names, not prefixes, and check names such as `go:stale` do not select anything. Dagger replays cached results, cached failures included, so a run that finishes in a second or two proves nothing about a changed tree. [docs/testing.md](docs/testing.md#validate-as-a-mason) covers forcing a real run, what the test container holds, lint pitfalls, run sizing and known flakes.
-- `--progress=report` names each check by its link. To rerun a failing check exactly, pass that link back to `dagger check`, quoted:
-
-  ```sh
-  dagger check --progress=report 'dag://go/packages/tests/test?go-package=internal/config&go-test=TestA'
-  ```
-
-  `dagger list checks --all -f=link` lists the link of every check, including checks outside the Go module such as `release:version-round-trip`.
-- Add `--env=race` to run the selected tests with the race detector, or `--env=flake` to run each selected test five times when reproducing a flake.
-- Browser tests in `internal/browsertest`, `internal/intakejourney`, `internal/executionjourney` and `internal/lifecycle` run in the Go check, whose container installs Chromium and names it in `OSMIA_BROWSER`; without it they skip.
-- Add meaningful tests for changed behavior and regressions, especially state transitions, recovery, owner gates and execution boundaries. Use temporary directories and local repositories for filesystem and VCS tests.
-- Tests must use fake agents, GitHub clients, providers and container engines. Never launch real model sessions, the live factory, remote pushes or pull requests from tests. The one exception is `internal/checks/daggercli_test.go`, built only with the `daggercli` tag: the `dagger-cli-contract` check runs it against the real Dagger CLI inside its own container.
-- Report the checks actually run and their results. If validation is blocked, state the exact blocker; do not report success.
-- `dagger check` runs automatically on pull requests using Dagger Native CI
-
-## Housekeeping
-
-- Keep changes focused on the issue. Avoid unrelated refactors, generated churn and dependencies without a concrete need.
-- Format Go with `gofmt`; keep module and Dagger lockfiles consistent with dependency changes.
-- List every API endpoint in `service.Routes`. After changing a route or a request or response type, run `dagger generate` and commit the updated `docs/openapi.json`; `dagger check` fails while it is stale.
-- Keep local runtime state, credentials, logs and build artifacts out of version control. Reference secrets through environment variables.
-- Update documentation with user-visible behavior and configuration changes. Keep the README concise while the product is under construction.
-- Review the diff for accidental files and secrets. Describe the resulting behavior and validation clearly in pull requests.
-
-## Comments and documentation
-
-- Comments and documentation always represent the current state. Its never helpful to reference a change in behavior or how things used to work
-- Name code, tests, documentation and user-facing messages after product features and behavior, without development phase labels.
-- Comments and documentation should never reference github issues, pull requests, or commits
-- Comment blocks can describe a function API or specific behavior of nearby code, but never a whole feature. That belongs in actual documentation
+When a feature needs functionality agentcore lacks, report the gap in your report and add it to the list of agentcore gaps in [docs/architecture.md](docs/architecture.md#agentcore-gaps).

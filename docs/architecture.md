@@ -62,9 +62,7 @@ Merge-only dependency handling is a Go controller: contract edges resolve on
 the ratified contract, and hard-block and merge-order edges on the recorded
 upstream PR merge. Expected waits have no inbox or notification side effect.
 
-A trace still kept as a Git repository is migrated to its database
-automatically and resumably before its project is opened. Permanently
-archiving a workstream closes its database, moves its trace directory aside
+Permanently archiving a workstream closes its database, moves its trace directory aside
 and deletes it, together with its temporary workspaces, once any busy or
 pending work has cleared.
 See
@@ -95,6 +93,18 @@ See
 The service uses a pinned `agentcore` dependency for reusable execution,
 MCP, sandbox and VCS primitives. Osmia keeps its state machine, owner decisions
 and recovery policy in this repository.
+
+### Agentcore gaps
+
+Capabilities Osmia needs that the pinned agentcore does not provide, and the
+local code that stands in for each. When agentcore provides one, the stand-in is
+replaced by it and the entry removed.
+
+| Capability | Stand-in |
+| --- | --- |
+| The Docker bridge gateway address, for reaching host MCP servers from a container. agentcore computes it internally and does not export it | `bridgeGateway` in [internal/coreadapter/mcp.go](../internal/coreadapter/mcp.go) |
+| Git replay that survives a restart. The pinned `vcs/git` replayer keeps no record of the branch's pre-replay tip or the replay boundary, and drops its state when it finishes | `replayRecord` with `loadReplayRecord`, `saveReplayRecord`, `ensureAttached` and `replayFinishedButNotSettled` in [internal/workspace/git.go](../internal/workspace/git.go) |
+| Deterministic Jujutsu replay. The pinned `vcs/jj` replayer duplicates commits with random change IDs and wall-clock times, so replaying one range twice does not reproduce the same commit | `ReplayIn`, `ReplayInFrom`, `ContinueReplay` and `Replaying` on `Jujutsu` in [internal/workspace/jujutsu.go](../internal/workspace/jujutsu.go) |
 
 ## Decisions and side effects
 

@@ -38,7 +38,7 @@ type engineUnitCase struct{ name, mode, token, runner string }
 var (
 	managedAuthenticated = engineUnitCase{"managed authenticated", "managed", "OSMIA_ENGINE_TEST_TOKEN", "docker-container://osmia-dagger-engine"}
 	managedAnonymous     = engineUnitCase{"managed anonymous", "managed", "", "docker-container://osmia-dagger-engine"}
-	hostEngine           = engineUnitCase{"legacy auto", "", "", "tcp://host-engine:1234"}
+	hostEngine           = engineUnitCase{"automatic", "", "", "tcp://host-engine:1234"}
 	explicitContainer    = engineUnitCase{"explicit container", "docker-container://explicit", "", "docker-container://explicit"}
 	explicitAddress      = engineUnitCase{"explicit address", "tcp://configured-engine:1234", "OSMIA_ENGINE_TEST_TOKEN", "tcp://configured-engine:1234"}
 )
@@ -194,7 +194,7 @@ func assertEngineCheckOutput(t *testing.T, output, mode, token, runner, candidat
 		}
 	}
 	if (mode == "" || mode == "managed" || strings.HasPrefix(mode, "docker-container://")) && os.Getenv("DOCKER_HOST") != "" && !strings.Contains(output, "DOCKER_HOST="+os.Getenv("DOCKER_HOST")+"\n") {
-		t.Fatalf("legacy host environment: %s", output)
+		t.Fatalf("host environment: %s", output)
 	}
 	if strings.Contains(output, engineTestToken) {
 		t.Fatal("token in captured output")

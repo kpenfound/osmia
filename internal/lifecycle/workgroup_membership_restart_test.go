@@ -69,9 +69,9 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 	fixturekit.Must(t, err)
 	blockArchiveCleanup(t, repo, f.Project, retained, fixturekit.DemoStart, intake.RegistrationActor)
 	fixturekit.Must(t, repo.CreateSessionWorkstream(ctx, session, "default", f.Repos[0].Main, "osmia/session/"+string(session), "Explore uploads", fixturekit.DemoStart, intake.RegistrationActor))
-	legacyChiefs := map[config.WorkstreamID]trace.Thread{}
+	originalChiefs := map[config.WorkstreamID]trace.Thread{}
 	for _, stream := range []config.WorkstreamID{live, retained} {
-		legacyChiefs[stream], err = repo.ChiefOfStaffThread(stream)
+		originalChiefs[stream], err = repo.ChiefOfStaffThread(stream)
 		fixturekit.Must(t, err)
 	}
 	sessionPath := filepath.Join(f.Opts.Config.Root, "workstreams", string(f.Project), string(session))
@@ -171,11 +171,11 @@ func TestWorkgroupMembershipAcrossArchiveKindsAndRestart(t *testing.T) {
 		}
 		r, err := f.S.Repository(f.Project)
 		fixturekit.Must(t, err)
-		for stream, original := range legacyChiefs {
+		for stream, original := range originalChiefs {
 			current, err := r.ChiefOfStaffThread(stream)
 			fixturekit.Must(t, err)
 			if !reflect.DeepEqual(current.Identity, original.Identity) {
-				t.Fatalf("legacy chief changed for %s", stream)
+				t.Fatalf("original chief changed for %s", stream)
 			}
 		}
 		if fixturekit.TraceCommits(t, sessionPath) != sessionBefore {

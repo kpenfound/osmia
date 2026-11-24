@@ -56,9 +56,9 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	github := servicetest.NewFakeGitHub(t, "owner")
 	github.Remote = func(string) string { return remote }
 	opts.Repositories = github.Client()
-	legacy, err := os.ReadFile(top)
+	topLevel, err := os.ReadFile(top)
 	fixturekit.Must(t, err)
-	fixturekit.Must(t, os.WriteFile(top, append(legacy, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
+	fixturekit.Must(t, os.WriteFile(top, append(topLevel, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
 	fixturekit.Must(t, os.Chmod(top, 0400))
 	baseline := stateOf(t, top)
 	untouched := func(step string) {
