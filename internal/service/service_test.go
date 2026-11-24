@@ -1,49 +1,43 @@
 package service
 
 import (
-	bufio "bufio"
-	bytes "bytes"
-	context "context"
-	json "encoding/json"
-	errors "errors"
-	fmt "fmt"
-	config "github.com/kpenfound/osmia/internal/config"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	io "io"
-	net "net"
-	http "net/http"
-	os "os"
-	filepath "path/filepath"
-	reflect "reflect"
-	strings "strings"
-	sync "sync"
-	syscall "syscall"
-	testing "testing"
-	time "time"
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/trace"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
 )
 
-// writeCharter records content as the project's next charter revision
-// through the API, as the owner does, and returns that revision.
 func writeCharter(t *testing.T, c *Client, project config.ProjectID, content string) trace.Document {
 	t.Helper()
 	return intakefixture.WriteCharter(t, c, project, content)
 }
 
-var awaitAcknowledged = fixturekit.AwaitAcknowledged
-
 func fixture(t *testing.T) Options {
 	t.Helper()
 	home, err := os.MkdirTemp("", "os-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	return fixtureAt(t, home)
 }
 
-// fixtureAt writes a minimal root and project configuration under home. Its
-// workstreams are created on Git worktrees whether or not jj is installed.
 func fixtureAt(t *testing.T, home string) Options {
 	t.Helper()
 	return testOptions(fixturekit.ConfigAt(t, home))
@@ -52,7 +46,7 @@ func fixtureAt(t *testing.T, home string) Options {
 func start(t *testing.T, opts Options) (*Service, *Client) {
 	t.Helper()
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	c := NewClient(s.Socket())
 	t.Cleanup(func() {
 		c.Close()
@@ -68,72 +62,136 @@ func mutation(t *testing.T, c *Client, method, kind string, input any) {
 	intakefixture.Mutation(t, c, method, kind, input)
 }
 
-func TestRoundTrip(t *testing.T) {
+func TestHealthReportsReadyWithTheBuild(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	s, c := start(t, opts)
-	ctx := context.Background()
-	health, err := c.Health(ctx)
-	must(t, err)
+	_, c := start(t, opts)
+	health, err := c.Health(context.Background())
+	intakefixture.Must(t, err)
 	if !health.Ready || health.Build != opts.Build || health.APIVersion != 1 {
 		t.Fatal(health)
 	}
-	cfg, err := c.Configuration(ctx)
-	must(t, err)
-	if cfg.Effective.Project.ID != project || cfg.Root != s.cfg.Root.String() || len(cfg.Digest) != 64 || len(cfg.Diagnostics) != 0 || cfg.Project.CharterState != nil {
+}
+
+func TestConfigurationReportsTheProjectRootAndDigest(t *testing.T) {
+	t.Parallel()
+	s, c := start(t, fixture(t))
+	cfg, err := c.Configuration(context.Background())
+	intakefixture.Must(t, err)
+	if cfg.Effective.Project.ID != intakefixture.Project || cfg.Root != s.cfg.Root.String() || len(cfg.Digest) != 64 || len(cfg.Diagnostics) != 0 || cfg.Project.CharterState != nil {
 		t.Fatalf("%+v", cfg)
 	}
-	// Without a trace there is no charter to gate on.
+}
+
+func TestHandInWithoutATraceIsAnInternalError(t *testing.T) {
+	t.Parallel()
+	_, c := start(t, fixture(t))
 	var api *APIError
-	if _, err := c.HandIn(ctx, HandInRequest{Project: project}); !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "no trace repository") {
+	if _, err := c.HandIn(context.Background(), HandInRequest{Project: intakefixture.Project}); !errors.As(err, &api) || api.Code != Internal || !strings.Contains(api.Message, "no trace repository") {
 		t.Fatalf("hand-in without a trace: %v", err)
 	}
+}
+
+func TestTheSocketIsReadableByItsOwnerOnly(t *testing.T) {
+	t.Parallel()
+	s, _ := start(t, fixture(t))
 	info, err := os.Stat(s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if info.Mode().Perm() != 0600 {
 		t.Fatal(info.Mode())
 	}
+}
+
+func TestClosingTheServiceRemovesItsSocket(t *testing.T) {
+	t.Parallel()
+	s, _ := start(t, fixture(t))
+	intakefixture.Must(t, s.Close())
+	if _, err := os.Lstat(s.Socket()); !os.IsNotExist(err) {
+		t.Fatal("socket retained", err)
+	}
+}
+
+func setOwnerOverrides(t *testing.T, c *Client) {
+	t.Helper()
 	mutation(t, c, "PUT", "pause", PauseRequest{Target: runtime.Target{Scope: "factory"}, Mode: "hard", Source: "owner"})
-	mutation(t, c, "PUT", "priority", PriorityRequest{Project: project, Workstreams: []config.WorkstreamID{stream}})
+	mutation(t, c, "PUT", "priority", PriorityRequest{Project: intakefixture.Project, Workstreams: []config.WorkstreamID{intakefixture.Stream}})
 	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
-	before, err := c.Runtime(ctx)
-	must(t, err)
+}
+
+func TestOwnerOverridesAreReportedByRuntime(t *testing.T) {
+	t.Parallel()
+	s, c := start(t, fixture(t))
+	setOwnerOverrides(t, c)
+	before, err := c.Runtime(context.Background())
+	intakefixture.Must(t, err)
 	if len(before.Effective.Pauses) != 1 || len(before.Effective.Priorities) != 1 || before.Effective.Profiles["mason"] != "other" {
 		t.Fatal(before)
 	}
 	if len(before.Profiles) != len(s.cfg.Roles) || before.Profiles["mason"] != (EffectiveProfile{Name: "other", Source: "owner_override"}) || before.Profiles["reviewer"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("effective role profiles: %+v", before.Profiles)
 	}
-	status, err := c.Statuses(ctx)
-	must(t, err)
+}
+
+func TestStatusReportsTheEffectiveRoleProfiles(t *testing.T) {
+	t.Parallel()
+	_, c := start(t, fixture(t))
+	setOwnerOverrides(t, c)
+	before, err := c.Runtime(context.Background())
+	intakefixture.Must(t, err)
+	status, err := c.Statuses(context.Background())
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(status.Profiles, before.Profiles) {
 		t.Fatalf("status role profiles: %+v", status.Profiles)
 	}
-	must(t, s.Close())
-	if _, err := os.Lstat(s.Socket()); !os.IsNotExist(err) {
-		t.Fatal("socket retained", err)
-	}
-	s2, c2 := start(t, opts)
-	after, err := c2.Runtime(ctx)
-	must(t, err)
+}
+
+func TestOwnerOverridesSurviveARestart(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	s, c := start(t, opts)
+	setOwnerOverrides(t, c)
+	before, err := c.Runtime(context.Background())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, s.Close())
+	_, c2 := start(t, opts)
+	after, err := c2.Runtime(context.Background())
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal(before, after)
 	}
-	mutation(t, c2, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
-	mutation(t, c2, "DELETE", "priority", ClearPriorityRequest{Project: project})
-	mutation(t, c2, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
-	after, err = c2.Runtime(ctx)
-	must(t, err)
+}
+
+func TestClearingOwnerOverridesRestoresTheConfiguredDefaults(t *testing.T) {
+	t.Parallel()
+	_, c := start(t, fixture(t))
+	setOwnerOverrides(t, c)
+	mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: intakefixture.Project})
+	mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
+	after, err := c.Runtime(context.Background())
+	intakefixture.Must(t, err)
 	if len(after.Effective.Pauses) != 0 || len(after.Effective.Priorities) != 0 || after.Effective.Profiles["mason"] != "default" {
 		t.Fatal(after)
 	}
 	if after.Profiles["mason"] != (EffectiveProfile{Name: "default", Source: "configuration"}) {
 		t.Fatalf("cleared role profile: %+v", after.Profiles)
 	}
-	must(t, s2.Close())
-	_, c3 := start(t, opts)
-	cleared, err := c3.Runtime(ctx)
-	must(t, err)
+}
+
+func TestClearedOwnerOverridesStayClearedAfterARestart(t *testing.T) {
+	t.Parallel()
+	opts := fixture(t)
+	s, c := start(t, opts)
+	setOwnerOverrides(t, c)
+	mutation(t, c, "DELETE", "pause", ClearPauseRequest{Scope: "factory"})
+	mutation(t, c, "DELETE", "priority", ClearPriorityRequest{Project: intakefixture.Project})
+	mutation(t, c, "DELETE", "profile", ClearProfileRequest{Role: "mason"})
+	after, err := c.Runtime(context.Background())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, s.Close())
+	_, c2 := start(t, opts)
+	cleared, err := c2.Runtime(context.Background())
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(after, cleared) {
 		t.Fatal("cleared overrides returned after restart")
 	}
@@ -144,9 +202,9 @@ func TestRootContention(t *testing.T) {
 	opts := fixture(t)
 	s, c := start(t, opts)
 	before, err := os.Lstat(s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	alias := filepath.Join(filepath.Dir(opts.Config.Root), "alias")
-	must(t, os.Symlink(opts.Config.Root, alias))
+	intakefixture.Must(t, os.Symlink(opts.Config.Root, alias))
 	opts.Config.Root = alias
 	if second, err := Start(context.Background(), opts); err == nil {
 		second.Close()
@@ -155,12 +213,12 @@ func TestRootContention(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := os.Lstat(s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !os.SameFile(before, after) {
 		t.Fatal("socket replaced")
 	}
 	_, err = c.Health(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 }
 
@@ -168,16 +226,14 @@ func TestStaleSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "osmia.sock")
-	// Bind without listening: a closed listener stays reachable while a
-	// child forked by a parallel test still holds its descriptor.
 	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	must(t, err)
+	intakefixture.Must(t, err)
 	syscall.CloseOnExec(fd)
-	must(t, syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}))
-	must(t, syscall.Close(fd))
+	intakefixture.Must(t, syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}))
+	intakefixture.Must(t, syscall.Close(fd))
 	_, c := start(t, opts)
 	_, err = c.Health(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 }
 
 func TestForeignLiveSocket(t *testing.T) {
@@ -185,21 +241,21 @@ func TestForeignLiveSocket(t *testing.T) {
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "osmia.sock")
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer l.Close()
 	before, err := os.Lstat(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if s, err := Start(context.Background(), opts); err == nil {
 		s.Close()
 		t.Fatal("live socket replaced")
 	}
 	after, err := os.Lstat(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !os.SameFile(before, after) {
 		t.Fatal("live socket disturbed")
 	}
 	conn, err := net.Dial("unix", path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	conn.Close()
 }
 
@@ -213,18 +269,18 @@ func TestSocketAndLockArtifacts(t *testing.T) {
 				path = filepath.Join(opts.Config.Root, ".service.lock")
 			}
 			if kind == "file" {
-				must(t, os.WriteFile(path, []byte("keep"), 0600))
+				intakefixture.Must(t, os.WriteFile(path, []byte("keep"), 0600))
 			} else {
-				must(t, os.Symlink(filepath.Join(opts.Config.Root, "config.toml"), path))
+				intakefixture.Must(t, os.Symlink(filepath.Join(opts.Config.Root, "config.toml"), path))
 			}
 			before, err := os.Lstat(path)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if s, err := Start(context.Background(), opts); err == nil {
 				s.Close()
 				t.Fatal("unsafe artifact accepted")
 			}
 			after, err := os.Lstat(path)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !os.SameFile(before, after) {
 				t.Fatal("artifact changed")
 			}
@@ -239,15 +295,15 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 	ctx := context.Background()
 	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "other"})
 	before, err := c.Runtime(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	cfg, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	original, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, []byte("credential = 'secret-parser-text'\n[broken"), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, []byte("credential = 'secret-parser-text'\n[broken"), 0600))
 	now, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if now.Digest != cfg.Digest || !reflect.DeepEqual(now.Effective, cfg.Effective) || len(now.Diagnostics) != 1 {
 		t.Fatal(now)
 	}
@@ -255,34 +311,32 @@ func TestInvalidDiskRetainsView(t *testing.T) {
 	if bytes.Contains(encoded, []byte("secret-parser-text")) {
 		t.Fatal("parser text leaked")
 	}
-	must(t, os.WriteFile(path, append(original, []byte("\n[capacity]\nmasons = 7\n")...), 0600))
+	intakefixture.Must(t, os.WriteFile(path, append(original, []byte("\n[capacity]\nmasons = 7\n")...), 0600))
 	now, err = c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if now.Diagnostics[0].Code != ReloadRequired || now.Digest != cfg.Digest {
 		t.Fatal(now)
 	}
 	path = filepath.Join(opts.Config.Root, "runtime.json")
 	original, err = os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, []byte("{invalid secret-runtime-text"), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, []byte("{invalid secret-runtime-text"), 0600))
 	state, err := c.Runtime(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(state.Effective, before.Effective) || len(state.Diagnostics) != 1 {
 		t.Fatal(state)
 	}
 	err = c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "mason", Profile: "default"}, nil)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, Conflict)
 	disk, err := os.ReadFile(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if string(disk) != "{invalid secret-runtime-text" {
 		t.Fatal("disk overwritten")
 	}
-	must(t, os.WriteFile(path, original, 0600))
+	intakefixture.Must(t, os.WriteFile(path, original, 0600))
 	mutation(t, c, "PUT", "profile", ProfileRequest{Role: "mason", Profile: "default"})
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 }
-
-var assertCode = fixturekit.AssertCode
 
 func TestErrors(t *testing.T) {
 	t.Parallel()
@@ -291,24 +345,23 @@ func TestErrors(t *testing.T) {
 	ctx := context.Background()
 	for _, body := range []string{"null", "[]", "{} {}", `{"role":"mason","profile":"other","extra":1}`, `{"role":"mason","role":"reviewer","profile":"other"}`, `{"role":"mason","Role":"reviewer","profile":"other"}`, strings.Repeat(" ", 1<<20) + "{}"} {
 		req, err := http.NewRequest("PUT", "http://osmia/v1/runtime/profile", strings.NewReader(body))
-		must(t, err)
+		intakefixture.Must(t, err)
 		resp, err := c.http.Do(req)
-		must(t, err)
+		intakefixture.Must(t, err)
 		var v ErrorResponse
-		must(t, json.NewDecoder(resp.Body).Decode(&v))
+		intakefixture.Must(t, json.NewDecoder(resp.Body).Decode(&v))
 		resp.Body.Close()
 		if v.Error.Code != Malformed || resp.StatusCode != 400 {
 			t.Fatal(v, resp.StatusCode)
 		}
 	}
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "missing", Profile: "secret"}, nil), Validation)
-	assertCode(t, c.Do(ctx, "GET", Prefix+"/reload", nil, nil), Unsupported)
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/config/listen", nil, nil), RestartRequired)
-	// A non-regular runtime file is a storage failure, not a validation failure.
-	must(t, os.Mkdir(filepath.Join(opts.Config.Root, "runtime.json"), 0700))
-	assertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "mason", Profile: "other"}, nil), Internal)
-	must(t, s.Close())
-	assertCode(t, c.Do(ctx, "GET", Prefix+"/health", nil, nil), Unavailable)
+	fixturekit.AssertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "missing", Profile: "secret"}, nil), Validation)
+	fixturekit.AssertCode(t, c.Do(ctx, "GET", Prefix+"/reload", nil, nil), Unsupported)
+	fixturekit.AssertCode(t, c.Do(ctx, "PUT", Prefix+"/config/listen", nil, nil), RestartRequired)
+	intakefixture.Must(t, os.Mkdir(filepath.Join(opts.Config.Root, "runtime.json"), 0700))
+	fixturekit.AssertCode(t, c.Do(ctx, "PUT", Prefix+"/runtime/profile", ProfileRequest{Role: "mason", Profile: "other"}, nil), Internal)
+	intakefixture.Must(t, s.Close())
+	fixturekit.AssertCode(t, c.Do(ctx, "GET", Prefix+"/health", nil, nil), Unavailable)
 }
 
 func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
@@ -325,7 +378,7 @@ func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 		go func(id config.WorkstreamID) {
 			defer wg.Done()
 			var result MutationResponse
-			err := c.Do(context.Background(), "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: id}, Mode: "soft", Source: "owner"}, &result)
+			err := c.Do(context.Background(), "PUT", Prefix+"/runtime/pause", PauseRequest{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: id}, Mode: "soft", Source: "owner"}, &result)
 			if err != nil {
 				errs <- err
 				return
@@ -345,14 +398,14 @@ func TestConcurrentAcknowledgementsSurvive(t *testing.T) {
 		t.Error(err)
 	}
 	before, err := c.Runtime(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(before.Effective.Pauses) != 24 {
 		t.Fatal(before)
 	}
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	_, c2 := start(t, opts)
 	after, err := c2.Runtime(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("acknowledged changes lost")
 	}
@@ -363,23 +416,23 @@ func TestCancellationClosesInflightAndReleasesRoot(t *testing.T) {
 	opts := fixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer s.Close()
 	conn, err := net.Dial("unix", s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer conn.Close()
 	_, err = io.WriteString(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: osmia\r\nContent-Length: 10000\r\n\r\n{\"role\":")
-	must(t, err)
+	intakefixture.Must(t, err)
 	cancel()
 	done := make(chan error, 1)
 	go func() { done <- s.Wait() }()
 	select {
 	case err := <-done:
-		must(t, err)
+		intakefixture.Must(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("shutdown hung on unfinished request")
 	}
-	must(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
+	intakefixture.Must(t, conn.SetReadDeadline(time.Now().Add(time.Second)))
 	_, err = io.ReadAll(conn)
 	if e, ok := err.(net.Error); ok && e.Timeout() {
 		t.Fatal("connection remained open")
@@ -389,7 +442,7 @@ func TestCancellationClosesInflightAndReleasesRoot(t *testing.T) {
 	}
 	_, c := start(t, opts)
 	_, err = c.Health(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 }
 
 func TestShutdownDrainsAcceptedMutation(t *testing.T) {
@@ -397,30 +450,30 @@ func TestShutdownDrainsAcceptedMutation(t *testing.T) {
 	opts := fixture(t)
 	s, _ := start(t, opts)
 	conn, err := net.Dial("unix", s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer conn.Close()
 	body := `{"role":"mason","profile":"other"}`
 	_, err = fmt.Fprintf(conn, "PUT /v1/runtime/profile HTTP/1.1\r\nHost: osmia\r\nExpect: 100-continue\r\nContent-Length: %d\r\n\r\n", len(body))
-	must(t, err)
+	intakefixture.Must(t, err)
 	reader := bufio.NewReader(conn)
 	interim, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if interim.StatusCode != 100 {
 		t.Fatal(interim.StatusCode)
 	}
 	s.cancel()
 	_, err = io.WriteString(conn, body)
-	must(t, err)
+	intakefixture.Must(t, err)
 	resp, err := http.ReadResponse(reader, nil)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatal(resp.StatusCode)
 	}
-	must(t, s.Wait())
+	intakefixture.Must(t, s.Wait())
 	_, c := start(t, opts)
 	state, err := c.Runtime(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if state.Effective.Profiles["mason"] != "other" {
 		t.Fatal("drained mutation lost")
 	}
@@ -430,28 +483,27 @@ func TestFailedStartupAndConfiguredSocket(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "runtime.json")
-	must(t, os.WriteFile(path, []byte("not json"), 0600))
+	intakefixture.Must(t, os.WriteFile(path, []byte("not json"), 0600))
 	if s, err := Start(context.Background(), opts); err == nil {
 		s.Close()
 		t.Fatal("invalid startup accepted")
 	}
-	must(t, os.Remove(path))
+	intakefixture.Must(t, os.Remove(path))
 	cfgPath := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(cfgPath)
-	must(t, err)
-	must(t, os.WriteFile(cfgPath, append(data, []byte("\n[listen]\nsocket = 'custom.sock'\n")...), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(cfgPath, append(data, []byte("\n[listen]\nsocket = 'custom.sock'\n")...), 0600))
 	s, c := start(t, opts)
 	if filepath.Base(s.Socket()) != "custom.sock" {
 		t.Fatal(s.Socket())
 	}
 	_, err = c.Health(context.Background())
-	must(t, err)
-	// Cleanup must leave a replacement artifact alone.
-	must(t, os.Remove(s.Socket()))
-	must(t, os.WriteFile(s.Socket(), []byte("replacement"), 0600))
-	must(t, s.Close())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.Remove(s.Socket()))
+	intakefixture.Must(t, os.WriteFile(s.Socket(), []byte("replacement"), 0600))
+	intakefixture.Must(t, s.Close())
 	data, err = os.ReadFile(s.Socket())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if string(data) != "replacement" {
 		t.Fatal("removed foreign artifact")
 	}
@@ -460,15 +512,15 @@ func TestFailedStartupAndConfiguredSocket(t *testing.T) {
 func TestStaleDiagnosticsDoNotExposeDiskValues(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
-	must(t, os.WriteFile(filepath.Join(opts.Config.Root, "runtime.json"), []byte(`{"version":1,"profiles":{"secret-role":"secret-profile"}}`), 0600))
+	intakefixture.Must(t, os.WriteFile(filepath.Join(opts.Config.Root, "runtime.json"), []byte(`{"version":1,"profiles":{"secret-role":"secret-profile"}}`), 0600))
 	_, c := start(t, opts)
 	state, err := c.Runtime(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(state.Diagnostics) != 1 || state.Diagnostics[0].Field != "profiles" {
 		t.Fatal(state)
 	}
 	data, err := json.Marshal(state)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if bytes.Contains(data, []byte("secret-")) {
 		t.Fatal("stale disk values leaked")
 	}
@@ -478,12 +530,10 @@ func TestCloseReleasesTheRootWhileItsLockIsShared(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	s, err := Start(context.Background(), opts)
-	must(t, err)
-	// A duplicate descriptor shares the lock the way a child process forked
-	// but not yet executed does.
+	intakefixture.Must(t, err)
 	dup, err := syscall.Dup(int(s.lock.Fd()))
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer syscall.Close(dup)
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	start(t, opts)
 }

@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -25,7 +27,6 @@ const (
 	whisperKey  = "whisper-secret-key-9d41"
 )
 
-// whisperCall is one request the fake Whisper server received.
 type whisperCall struct {
 	path, auth, mediaType string
 	file                  []byte
@@ -34,8 +35,6 @@ type whisperCall struct {
 	fields                []string
 }
 
-// fakeWhisper is an OpenAI-compatible transcription server that records what
-// it receives. Its handler answers {"text": whisperText} unless set.
 type fakeWhisper struct {
 	*httptest.Server
 	mu      sync.Mutex
@@ -89,24 +88,21 @@ func (f *fakeWhisper) received() []whisperCall {
 
 func (f *fakeWhisper) url() string { return f.Server.URL + "/v1/audio/transcriptions" }
 
-// withTranscribe appends a [transcribe] table to the fixture's top-level file.
 func withTranscribe(t *testing.T, opts Options, body string) {
 	t.Helper()
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte("\n[transcribe]\n"+body)...), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, append(top, []byte("\n[transcribe]\n"+body)...), 0600))
 }
 
-// transcribeFixture starts a service whose [transcribe] table points at a
-// fake Whisper server and whose key comes from keys. It captures the log.
-func transcribeFixture(t *testing.T, keys map[string]string, tune func(*Options)) (*fakeWhisper, *Service, *Client, Options, *syncBuffer) {
+func transcribeFixture(t *testing.T, keys map[string]string, tune func(*Options)) (*fakeWhisper, *Service, *Client, Options, *fixturekit.SyncBuffer) {
 	t.Helper()
 	whisper := newFakeWhisper(t)
 	opts := fixture(t)
 	withTranscribe(t, opts, "url = \""+whisper.url()+"\"\n")
 	opts.getenv = func(name string) string { return keys[name] }
-	var log syncBuffer
+	var log fixturekit.SyncBuffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&log, nil))
 	if tune != nil {
 		tune(&opts)
@@ -145,7 +141,7 @@ func TestTranscribeForwardsTheClipAsMultipart(t *testing.T) {
 			t.Parallel()
 			whisper, _, c, _, _ := transcribeFixture(t, nil, nil)
 			out, err := c.Transcribe(context.Background(), clipRequest(tc.mimeType, []byte(clipBytes)))
-			must(t, err)
+			intakefixture.Must(t, err)
 			if out.Text != whisperText {
 				t.Fatalf("text %q", out.Text)
 			}
@@ -172,12 +168,11 @@ func TestTranscribeSendsTheBearerKeyOnlyWhenSet(t *testing.T) {
 	t.Parallel()
 	whisper, _, c, _, _ := transcribeFixture(t, map[string]string{"WHISPER_API_KEY": whisperKey}, nil)
 	_, err := c.Transcribe(context.Background(), clipRequest("audio/webm", []byte(clipBytes)))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || calls[0].auth != "Bearer "+whisperKey {
 		t.Fatalf("calls %+v", calls)
 	}
 
-	// The key comes from the variable api_key_env names.
 	whisper = newFakeWhisper(t)
 	opts := fixture(t)
 	withTranscribe(t, opts, "url = \""+whisper.url()+"\"\nmodel = \"whisper-1\"\napi_key_env = \"OTHER_KEY\"\n")
@@ -186,7 +181,7 @@ func TestTranscribeSendsTheBearerKeyOnlyWhenSet(t *testing.T) {
 	}
 	_, c = start(t, opts)
 	_, err = c.Transcribe(context.Background(), clipRequest("audio/webm", []byte(clipBytes)))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || calls[0].auth != "Bearer other-key" || calls[0].model != "whisper-1" {
 		t.Fatalf("calls %+v", calls)
 	}
@@ -215,34 +210,32 @@ func TestTranscribeFollowsAReload(t *testing.T) {
 	second.handler = func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"text":"from the second server"}`) }
 	files := configFiles(t, opts)
 
-	// A reload that fails leaves the loaded settings in force.
 	files.write(t, strings.Replace(files.topText, first.url(), "ftp://whisper.example/v1/audio/transcriptions", 1))
 	reloadFails(t, c, files.top, "transcribe.url")
 	out, err := c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if out.Text != whisperText || len(first.received()) != 1 {
 		t.Fatalf("after a failed reload: %q %d", out.Text, len(first.received()))
 	}
 
 	files.write(t, strings.Replace(files.topText, first.url(), second.url(), 1)+"model = \"whisper-1\"\n")
 	_, err = c.Reload(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	out, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
-	must(t, err)
+	intakefixture.Must(t, err)
 	calls := second.received()
 	if out.Text != "from the second server" || len(calls) != 1 || calls[0].model != "whisper-1" || len(first.received()) != 1 {
 		t.Fatalf("after a reload: %q %+v", out.Text, calls)
 	}
 	cfg, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if cfg.Effective.Transcribe.URL != second.url() || cfg.Effective.Transcribe.Model != "whisper-1" {
 		t.Fatalf("effective %+v", cfg.Effective.Transcribe)
 	}
 
-	// Emptying the url turns transcription off again.
 	files.write(t, strings.Replace(files.topText, first.url(), "", 1))
 	_, err = c.Reload(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	_, err = c.Transcribe(ctx, clipRequest("audio/webm", []byte(clipBytes)))
 	transcribeError(t, err, TranscriptionOff)
 	if len(second.received()) != 1 {
@@ -340,9 +333,8 @@ func TestTranscribeRefusesBadUploadsWithoutForwarding(t *testing.T) {
 			t.Fatalf("%s: the error echoes the upload: %s", tc.name, api.Message)
 		}
 	}
-	// The limit is on the clip, not on its encoding.
 	_, err := c.Transcribe(ctx, clipRequest("audio/webm", big[:1024]))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if calls := whisper.received(); len(calls) != 1 || len(calls[0].file) != 1024 {
 		t.Fatalf("the server received %d requests", len(calls))
 	}
@@ -358,12 +350,12 @@ func TestTranscribeDefaultLimitAndMalformedBodies(t *testing.T) {
 	whisper, s, _, _, log := transcribeFixture(t, nil, nil)
 	web := socketHTTP(s.Socket())
 	post := func(body string) (int, string) {
-		code, out := exchange(t, web, "POST", "http://osmia"+Prefix+"/transcribe", "application/json", body, "")
+		code, out := intakefixture.Exchange(t, web, "POST", "http://osmia"+Prefix+"/transcribe", "application/json", body, "")
 		return code, string(out)
 	}
 	huge := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, maxTranscribeClip+1))
 	code, body := post(`{"mime_type":"audio/webm","audio":"` + huge + `"}`)
-	if code != http.StatusRequestEntityTooLarge || errorCode(t, []byte(body)) != TooLarge {
+	if code != http.StatusRequestEntityTooLarge || intakefixture.ErrorCode(t, []byte(body)) != TooLarge {
 		t.Fatalf("a clip over 25 MiB: %d %.200s", code, body)
 	}
 	for _, malformed := range []string{
@@ -372,7 +364,7 @@ func TestTranscribeDefaultLimitAndMalformedBodies(t *testing.T) {
 		`{"mime_type":"audio/webm","audio":"QUJD"} {}`, `{"mime_type":"audio/webm","audio":"` + clipBytes + `"`,
 	} {
 		code, body = post(malformed)
-		if code != http.StatusBadRequest || errorCode(t, []byte(body)) != Malformed || strings.Contains(body, clipBytes) || strings.Contains(body, "QUJD") {
+		if code != http.StatusBadRequest || intakefixture.ErrorCode(t, []byte(body)) != Malformed || strings.Contains(body, clipBytes) || strings.Contains(body, "QUJD") {
 			t.Fatalf("body %.60q: %d %s", malformed, code, body)
 		}
 	}
@@ -394,9 +386,9 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 	withTranscribe(t, opts, "url = \""+whisper.url()+"\"\n")
 	withWeb(t, opts, "127.0.0.1:0")
 	s, _ := start(t, opts)
-	web, base := webHTTP(), "http://"+s.WebAddr()+Prefix+"/transcribe"
+	web, base := intakefixture.WebHTTP(), "http://"+s.WebAddr()+Prefix+"/transcribe"
 	valid, err := json.Marshal(clipRequest("audio/webm", []byte(clipBytes)))
-	must(t, err)
+	intakefixture.Must(t, err)
 
 	for _, tc := range []struct{ name, contentType, body, host string }{
 		{"foreign host", "application/json", string(valid), "osmia.example.com"},
@@ -408,8 +400,8 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 		{"form encoding", "application/x-www-form-urlencoded", "audio=" + clipBytes, ""},
 		{"no content type", "", string(valid), ""},
 	} {
-		code, body := exchange(t, web, "POST", base, tc.contentType, tc.body, tc.host)
-		if code != http.StatusForbidden || errorCode(t, body) != Forbidden {
+		code, body := intakefixture.Exchange(t, web, "POST", base, tc.contentType, tc.body, tc.host)
+		if code != http.StatusForbidden || intakefixture.ErrorCode(t, body) != Forbidden {
 			t.Fatalf("%s: %d %s", tc.name, code, body)
 		}
 	}
@@ -417,10 +409,9 @@ func TestTranscribeKeepsTheWebListenerProtections(t *testing.T) {
 		t.Fatalf("the server received %+v", calls)
 	}
 
-	// A JSON request from the loopback address is served.
-	code, body := exchange(t, web, "POST", base, "application/json; charset=utf-8", string(valid), "")
+	code, body := intakefixture.Exchange(t, web, "POST", base, "application/json; charset=utf-8", string(valid), "")
 	var out TranscribeResponse
-	must(t, json.Unmarshal(body, &out))
+	intakefixture.Must(t, json.Unmarshal(body, &out))
 	if code != 200 || out.Text != whisperText || len(whisper.received()) != 1 {
 		t.Fatalf("a JSON request over the web listener: %d %s", code, body)
 	}
@@ -436,7 +427,7 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString(clip)
 	for range 2 {
 		out, err := c.Transcribe(ctx, clipRequest("audio/webm;codecs=opus", clip))
-		must(t, err)
+		intakefixture.Must(t, err)
 		if out.Text != whisperText {
 			t.Fatalf("text %q", out.Text)
 		}
@@ -446,13 +437,13 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 	transcribeError(t, err, TranscriptionFailed)
 
 	cfg, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	config, err := json.Marshal(cfg)
-	must(t, err)
+	intakefixture.Must(t, err)
 	status, err := c.Statuses(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	statusJSON, err := json.Marshal(status)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if strings.Contains(string(config)+string(statusJSON), whisperKey) {
 		t.Fatal("the key is in the configuration or status response")
 	}
@@ -462,8 +453,8 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 			t.Fatalf("%q reached the log: %s", secret, log.String())
 		}
 	}
-	must(t, s.Close())
-	must(t, filepath.WalkDir(filepath.Dir(opts.Config.Root), func(path string, d fs.DirEntry, err error) error {
+	intakefixture.Must(t, s.Close())
+	intakefixture.Must(t, filepath.WalkDir(filepath.Dir(opts.Config.Root), func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
@@ -478,21 +469,4 @@ func TestTranscribeKeepsSecretsAndContentOutOfRecords(t *testing.T) {
 		}
 		return nil
 	}))
-}
-
-// The route is in Routes with a JSON request body.
-func TestTranscribeRouteIsListed(t *testing.T) {
-	t.Parallel()
-	for _, route := range Routes {
-		if route.Method == http.MethodPost && route.Path == Prefix+"/transcribe" {
-			if _, ok := route.Request.(TranscribeRequest); !ok {
-				t.Fatalf("request %T", route.Request)
-			}
-			if _, ok := route.Response.(TranscribeResponse); !ok {
-				t.Fatalf("response %T", route.Response)
-			}
-			return
-		}
-	}
-	t.Fatal("POST /v1/transcribe is not in Routes")
 }

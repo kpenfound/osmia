@@ -33,108 +33,147 @@ func engineConfig(mode, token string) string {
 	return fmt.Sprintf("\n[dagger]\nengine = %q\nversion = 'v0.20.5'\ncloud_compute_token_env = %q\n", mode, token)
 }
 
-// Serial: fake commands and planted host engine selectors are process-wide.
-func TestServiceEngineUnitChecks(t *testing.T) {
-	for _, tc := range []struct{ name, mode, token, runner string }{
-		{"managed authenticated", "managed", "OSMIA_ENGINE_TEST_TOKEN", "docker-container://osmia-dagger-engine"},
-		{"managed anonymous", "managed", "", "docker-container://osmia-dagger-engine"},
-		{"legacy auto", "", "", "tcp://host-engine:1234"},
-		{"explicit container", "docker-container://explicit", "", "docker-container://explicit"},
-		{"explicit address", "tcp://configured-engine:1234", "OSMIA_ENGINE_TEST_TOKEN", "tcp://configured-engine:1234"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			fake := fixturekit.InstallEngineCLIs(t)
-			t.Setenv("DOCKER_CONTEXT", "default")
-			if tc.mode == "managed" {
-				must(t, os.Remove(fake.Version))
-			}
-			var logs fixturekit.SyncBuffer
-			t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
-			t.Setenv("DOCKER_HOST", "tcp://host-docker:2375")
-			t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
-			f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(o *Options) {
-				appendEngineConfig(t, o, engineConfig(tc.mode, tc.token))
-				o.reviewChecks = nil
-				o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-			})
-			base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
-			w, repo := seedBuild(t, f, "engine-check", independentPlan, config.WorkspacesGit, base)
-			seedChecking(t, f, repo, w, "resume", resumeReport)
-			report := intakefixture.CurrentReport[UnitReport](t, repo, w, "resume", reportDocument)
-			must(t, repo.Close())
-			f.start(t)
-			t.Cleanup(func() { f.stop(t) })
-			var run UnitCheckRun
-			var captured string
-			deadline := time.Now().Add(20 * time.Second)
-			for {
-				r, err := f.s.repository(f.project)
-				must(t, err)
-				docs, err := trace.Read[trace.Document](r, w)
-				must(t, err)
-				for _, d := range docs {
-					if d.Path == "units/resume/checks-1.json" {
-						must(t, json.Unmarshal([]byte(d.Content), &run))
-					}
-					if strings.Contains(d.Content, "RUNNER=") {
-						captured = d.Content
-					}
-					if strings.Contains(d.Content, engineTestToken) {
-						t.Fatalf("token in trace %s", d.Path)
-					}
-				}
-				if run.Status != "" {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("unit check did not finish")
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			// Without a Cloud token no link is recorded, even though the fake
-			// CLI prints a dagger.cloud URL.
-			wantTrace := ""
-			if tc.token != "" {
-				wantTrace = engineTestTrace
-			}
-			if run.Status != ChecksPassed || run.Candidate != report.Candidate || run.TraceURL != wantTrace || run.CIIdentityFallback != "" {
-				t.Fatalf("unit run: %+v", run)
-			}
-			assertEngineCheckOutput(t, captured, tc.mode, tc.token, tc.runner, report.Candidate)
-			if tc.mode == "managed" {
-				env, err := os.ReadFile(fake.Environments)
-				must(t, err)
-				for _, want := range []string{"docker|container inspect osmia-dagger-engine||tcp://host-docker:2375", "registry.dagger.io/engine:v0.20.5||tcp://host-docker:2375", "dagger|check --progress=report --fail-fast --parallel 4|docker-container://osmia-dagger-engine|tcp://host-docker:2375"} {
-					if !strings.Contains(string(env), want) {
-						t.Fatalf("missing %q: %s", want, env)
-					}
-				}
-			}
-			feed := readFeed(t, f.c, w)
-			found, linked := false, false
-			for _, e := range feed.Entries {
-				if e.UnitChecks == nil {
-					continue
-				}
-				if e.UnitChecks.TraceURL == engineTestTrace {
-					found = true
-				}
-				if e.UnitChecks.TraceURL != "" {
-					linked = true
-				}
-			}
-			raw, _ := json.Marshal(feed)
-			if tc.token != "" && !found || tc.token == "" && linked || strings.Contains(string(raw), engineTestToken) {
-				t.Fatalf("feed: %s", raw)
-			}
-			if strings.Contains(logs.String(), engineTestToken) {
-				t.Fatal("Cloud token in service logs")
-			}
-			if tc.mode != "managed" && fake.Commands(t) != "" {
-				t.Fatalf("external engine touched: %s", fake.Commands(t))
-			}
-		})
+type engineUnitCase struct{ name, mode, token, runner string }
+
+var (
+	managedAuthenticated = engineUnitCase{"managed authenticated", "managed", "OSMIA_ENGINE_TEST_TOKEN", "docker-container://osmia-dagger-engine"}
+	managedAnonymous     = engineUnitCase{"managed anonymous", "managed", "", "docker-container://osmia-dagger-engine"}
+	hostEngine           = engineUnitCase{"legacy auto", "", "", "tcp://host-engine:1234"}
+	explicitContainer    = engineUnitCase{"explicit container", "docker-container://explicit", "", "docker-container://explicit"}
+	explicitAddress      = engineUnitCase{"explicit address", "tcp://configured-engine:1234", "OSMIA_ENGINE_TEST_TOKEN", "tcp://configured-engine:1234"}
+)
+
+type engineUnitRun struct {
+	fake      fixturekit.EngineCLIs
+	f         *shedFixture
+	stream    config.WorkstreamID
+	run       UnitCheckRun
+	captured  string
+	candidate string
+	logs      *fixturekit.SyncBuffer
+}
+
+// runEngineUnitCheck runs the checks of a unit on the engine tc configures and
+// returns the record of the run and the output the check captured. It fails
+// when a trace document carries the Cloud token.
+func runEngineUnitCheck(t *testing.T, tc engineUnitCase) engineUnitRun {
+	t.Helper()
+	fake := fixturekit.InstallEngineCLIs(t)
+	t.Setenv("DOCKER_CONTEXT", "default")
+	if tc.mode == "managed" {
+		intakefixture.Must(t, os.Remove(fake.Version))
 	}
+	logs := &fixturekit.SyncBuffer{}
+	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
+	t.Setenv("DOCKER_HOST", "tcp://host-docker:2375")
+	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
+	f, _ := newMasonFixtureWith(t, config.WorkspacesGit, "masons = 1\n", independentPlan, func(o *Options) {
+		appendEngineConfig(t, o, engineConfig(tc.mode, tc.token))
+		o.reviewChecks = nil
+		o.Logger = slog.New(slog.NewJSONHandler(logs, nil))
+	})
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	w, repo := seedBuild(t, f, "engine-check", independentPlan, config.WorkspacesGit, base)
+	seedChecking(t, f, repo, w, "resume", resumeReport)
+	report := intakefixture.CurrentReport[UnitReport](t, repo, w, "resume", reportDocument)
+	intakefixture.Must(t, repo.Close())
+	f.start(t)
+	t.Cleanup(func() { f.stop(t) })
+	out := engineUnitRun{fake: fake, f: f, stream: w, candidate: report.Candidate, logs: logs}
+	intakefixture.Soon(t, "the unit check to finish", func() bool {
+		r, err := f.s.repository(f.project)
+		intakefixture.Must(t, err)
+		docs, err := trace.Read[trace.Document](r, w)
+		intakefixture.Must(t, err)
+		for _, d := range docs {
+			if d.Path == "units/resume/checks-1.json" {
+				intakefixture.Must(t, json.Unmarshal([]byte(d.Content), &out.run))
+			}
+			if strings.Contains(d.Content, "RUNNER=") {
+				out.captured = d.Content
+			}
+			if strings.Contains(d.Content, engineTestToken) {
+				t.Fatalf("token in trace %s", d.Path)
+			}
+		}
+		return out.run.Status != ""
+	})
+	return out
+}
+
+func eachEngineUnitCase(t *testing.T, cases []engineUnitCase, check func(t *testing.T, tc engineUnitCase, r engineUnitRun)) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { check(t, tc, runEngineUnitCheck(t, tc)) })
+	}
+}
+
+// Serial: fake commands and planted host engine selectors are process-wide.
+func TestUnitChecksPassOnTheConfiguredEngineForTheReportedCandidate(t *testing.T) {
+	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous, hostEngine, explicitContainer, explicitAddress}, func(t *testing.T, tc engineUnitCase, r engineUnitRun) {
+		if r.run.Status != ChecksPassed || r.run.Candidate != r.candidate || r.run.CIIdentityFallback != "" {
+			t.Fatalf("unit run: %+v", r.run)
+		}
+		assertEngineCheckOutput(t, r.captured, tc.mode, tc.token, tc.runner, r.candidate)
+	})
+}
+
+// Serial: fake commands and planted host engine selectors are process-wide.
+func TestUnitCheckRunLinksItsCloudTraceOnlyWhenACloudTokenIsConfigured(t *testing.T) {
+	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous}, func(t *testing.T, tc engineUnitCase, r engineUnitRun) {
+		want := ""
+		if tc.token != "" {
+			want = engineTestTrace
+		}
+		if r.run.TraceURL != want {
+			t.Fatalf("trace URL %q, want %q", r.run.TraceURL, want)
+		}
+		found, linked := false, false
+		for _, e := range readFeed(t, r.f.c, r.stream).Entries {
+			if e.UnitChecks == nil {
+				continue
+			}
+			found = found || e.UnitChecks.TraceURL == engineTestTrace
+			linked = linked || e.UnitChecks.TraceURL != ""
+		}
+		if tc.token != "" && !found || tc.token == "" && linked {
+			t.Fatalf("feed links the trace: found %v, linked %v", found, linked)
+		}
+	})
+}
+
+// Serial: fake commands and planted host engine selectors are process-wide.
+func TestUnitChecksKeepTheCloudTokenOutOfTheFeedAndTheLogs(t *testing.T) {
+	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous, hostEngine, explicitContainer, explicitAddress}, func(t *testing.T, _ engineUnitCase, r engineUnitRun) {
+		raw, _ := json.Marshal(readFeed(t, r.f.c, r.stream))
+		if strings.Contains(string(raw), engineTestToken) {
+			t.Fatalf("feed: %s", raw)
+		}
+		if strings.Contains(r.logs.String(), engineTestToken) {
+			t.Fatal("Cloud token in service logs")
+		}
+	})
+}
+
+// Serial: fake commands and planted host engine selectors are process-wide.
+func TestManagedEngineUnitChecksRunInTheManagedContainer(t *testing.T) {
+	eachEngineUnitCase(t, []engineUnitCase{managedAuthenticated, managedAnonymous}, func(t *testing.T, _ engineUnitCase, r engineUnitRun) {
+		env, err := os.ReadFile(r.fake.Environments)
+		intakefixture.Must(t, err)
+		for _, want := range []string{"docker|container inspect osmia-dagger-engine||tcp://host-docker:2375", "registry.dagger.io/engine:v0.20.5||tcp://host-docker:2375", "dagger|check --progress=report --fail-fast --parallel 4|docker-container://osmia-dagger-engine|tcp://host-docker:2375"} {
+			if !strings.Contains(string(env), want) {
+				t.Fatalf("missing %q: %s", want, env)
+			}
+		}
+	})
+}
+
+// Serial: fake commands and planted host engine selectors are process-wide.
+func TestUnitChecksNeverTouchAnExternalEngine(t *testing.T) {
+	eachEngineUnitCase(t, []engineUnitCase{hostEngine, explicitContainer, explicitAddress}, func(t *testing.T, _ engineUnitCase, r engineUnitRun) {
+		if got := r.fake.Commands(t); got != "" {
+			t.Fatalf("external engine touched: %s", got)
+		}
+	})
 }
 
 func assertEngineCheckOutput(t *testing.T, output, mode, token, runner, candidate string) {
@@ -169,11 +208,25 @@ func appendEngineConfig(t *testing.T, o *Options, text string) {
 	t.Helper()
 	path := filepath.Join(o.Config.Root, "config.toml")
 	data, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(data, []byte(text)...), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, append(data, []byte(text)...), 0600))
 }
 
-func TestServiceEngineReloadAndControls(t *testing.T) {
+type engineReload struct {
+	fake  fixturekit.EngineCLIs
+	files reloadFiles
+	top   string
+	next  string
+	s     *Service
+	c     *Client
+	// releaseWork ends the unit check and the engine turn that keep the engine busy.
+	releaseWork func()
+}
+
+// startManagedEngine starts a service whose managed engine is created at
+// v0.20.5 with a sandboxed mason role.
+func startManagedEngine(t *testing.T) *engineReload {
+	t.Helper()
 	fake := fixturekit.InstallEngineCLIs(t)
 	t.Setenv("OSMIA_ENGINE_TEST_TOKEN", engineTestToken)
 	t.Setenv("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "tcp://host-engine:1234")
@@ -181,13 +234,40 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 	files := configFiles(t, o)
 	top := files.topText + engineConfig("managed", "") + "\n[roles.mason]\nsandbox = 'sbx'\nimage = 'fixture-image'\n"
 	files.write(t, top)
-	must(t, os.Remove(fake.Version))
+	intakefixture.Must(t, os.Remove(fake.Version))
 	s, c := start(t, o)
-	if !strings.Contains(fake.Commands(t), "registry.dagger.io/engine:v0.20.5") {
-		t.Fatalf("startup did not create managed engine: %s", fake.Commands(t))
+	return &engineReload{fake: fake, files: files, top: top, s: s, c: c}
+}
+
+// reloadedWhileBusy holds a unit check and an engine turn, then reloads a
+// configuration that expects v0.21.0.
+func (e *engineReload) reloadedWhileBusy(t *testing.T) {
+	t.Helper()
+	intakefixture.Must(t, os.WriteFile(e.fake.DockerCommands, nil, 0600))
+	held, err := e.s.checkSlots.acquire(t.Context(), CheckSlotRun{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "checking-unit"})
+	intakefixture.Must(t, err)
+	turn, err := e.s.checkSlots.startEngineTurn(t.Context(), EngineTurn{Project: intakefixture.Project, Workstream: intakefixture.Stream, Unit: "working-unit", Agent: "mason-working", Turn: "turn-1"})
+	intakefixture.Must(t, err)
+	e.releaseWork = func() { held(); turn() }
+	t.Cleanup(e.releaseWork)
+	e.next = strings.Replace(e.top, "version = 'v0.20.5'", "version = 'v0.21.0'", 1)
+	e.files.write(t, e.next)
+	_, err = e.c.Reload(t.Context())
+	intakefixture.Must(t, err)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestServiceStartCreatesTheManagedEngineAtTheConfiguredVersion(t *testing.T) {
+	e := startManagedEngine(t)
+	if !strings.Contains(e.fake.Commands(t), "registry.dagger.io/engine:v0.20.5") {
+		t.Fatalf("startup did not create managed engine: %s", e.fake.Commands(t))
 	}
-	must(t, os.WriteFile(fake.DockerCommands, nil, 0600))
-	settings := s.current().RoleExecution(masonRole)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestMasonsRunOnTheManagedEngineWithoutCredentials(t *testing.T) {
+	e := startManagedEngine(t)
+	settings := e.s.current().RoleExecution(masonRole)
 	if settings.Dagger == nil || settings.Dagger.Engine != "docker-container://osmia-dagger-engine" {
 		t.Fatalf("mason default: %+v", settings)
 	}
@@ -195,79 +275,105 @@ func TestServiceEngineReloadAndControls(t *testing.T) {
 	if strings.Contains(string(data), engineTestToken) || strings.Contains(string(data), "cloud") {
 		t.Fatalf("mason credential settings: %s", data)
 	}
-	held, err := s.checkSlots.acquire(t.Context(), CheckSlotRun{Project: project, Workstream: stream, Unit: "checking-unit"})
-	must(t, err)
-	turn, err := s.checkSlots.startEngineTurn(t.Context(), EngineTurn{Project: project, Workstream: stream, Unit: "working-unit", Agent: "mason-working", Turn: "turn-1"})
-	must(t, err)
-	defer held()
-	defer turn()
-	next := strings.Replace(top, "version = 'v0.20.5'", "version = 'v0.21.0'", 1)
-	files.write(t, next)
-	_, err = c.Reload(t.Context())
-	must(t, err)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestEngineRestartAndPruneAreRefusedWhileEngineWorkRuns(t *testing.T) {
+	e := startManagedEngine(t)
+	e.reloadedWhileBusy(t)
 	for _, action := range []string{"restart", "prune"} {
-		_, err := c.EngineAction(t.Context(), action)
+		_, err := e.c.EngineAction(t.Context(), action)
 		var api *APIError
 		if !errors.As(err, &api) || api.Code != Unavailable || !strings.Contains(api.Message, "checking-unit") || !strings.Contains(api.Message, "mason-working") {
 			t.Fatalf("busy %s: %v", action, err)
 		}
 	}
-	commands := fake.Commands(t)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestReloadLeavesARunningEngineAloneAndReportsTheVersionMismatch(t *testing.T) {
+	e := startManagedEngine(t)
+	e.reloadedWhileBusy(t)
+	commands := e.fake.Commands(t)
 	for _, line := range strings.Split(commands, "\n") {
 		if !strings.HasPrefix(line, "container inspect ") {
 			t.Fatalf("reload touched running engine: %s", commands)
 		}
 	}
-	status, err := c.EngineStatus(t.Context())
-	must(t, err)
+	status, err := e.c.EngineStatus(t.Context())
+	intakefixture.Must(t, err)
 	if status.Mode != config.DaggerEngineManaged || !status.Reachable || status.Version != "v0.20.5" || status.ExpectedVersion != "v0.21.0" || !status.ConfiguredVersionMismatch || status.CacheSizeBytes == nil || *status.CacheSizeBytes != 4096 {
 		t.Fatalf("reloaded status: %+v", status)
 	}
-	// Invalid reload leaves the engine selection and the check client bound to managed.
-	files.write(t, strings.Replace(next, "engine = \"managed\"", "engine = 'bad-mode'", 1))
-	if _, err = c.Reload(t.Context()); err == nil {
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestRejectedReloadLeavesChecksOnTheCurrentEngine(t *testing.T) {
+	e := startManagedEngine(t)
+	e.reloadedWhileBusy(t)
+	e.files.write(t, strings.Replace(e.next, "engine = \"managed\"", "engine = 'bad-mode'", 1))
+	if _, err := e.c.Reload(t.Context()); err == nil {
 		t.Fatal("invalid reload accepted")
 	}
-	result, err := s.configuredChecks(s.current()).Check(t.Context(), t.TempDir(), checks.Identity{}, nil)
-	must(t, err)
+	result, err := e.s.configuredChecks(e.s.current()).Check(t.Context(), t.TempDir(), checks.Identity{}, nil)
+	intakefixture.Must(t, err)
 	assertEngineCheckOutput(t, result.Output, "managed", "", "docker-container://osmia-dagger-engine", "")
-	held()
-	turn()
-	_, err = c.EngineAction(t.Context(), "restart")
-	must(t, err)
-	status, err = c.EngineStatus(t.Context())
-	must(t, err)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestEngineRestartOnceWorkEndsRecreatesTheEngineAtTheReloadedVersion(t *testing.T) {
+	e := startManagedEngine(t)
+	e.reloadedWhileBusy(t)
+	e.releaseWork()
+	_, err := e.c.EngineAction(t.Context(), "restart")
+	intakefixture.Must(t, err)
+	status, err := e.c.EngineStatus(t.Context())
+	intakefixture.Must(t, err)
 	if status.Version != "v0.21.0" || status.ConfiguredVersionMismatch || !status.VersionMismatch {
 		t.Fatalf("restarted status: %+v", status)
 	}
-	_, err = c.EngineAction(t.Context(), "prune")
-	must(t, err)
-	commands = fake.Commands(t)
+	commands := e.fake.Commands(t)
 	for _, want := range []string{"stop osmia-dagger-engine", "rm osmia-dagger-engine", "osmia-dagger-engine-cache:/var/lib/dagger registry.dagger.io/engine:v0.21.0"} {
 		if !strings.Contains(commands, want) {
 			t.Fatalf("restart missing %q: %s", want, commands)
 		}
 	}
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestEnginePruneSucceedsOnceWorkEnds(t *testing.T) {
+	e := startManagedEngine(t)
+	e.reloadedWhileBusy(t)
+	e.releaseWork()
+	_, err := e.c.EngineAction(t.Context(), "prune")
+	intakefixture.Must(t, err)
+}
+
+// Serial: startup, reload and commands share process Docker selectors.
+func TestEngineRestartAndPruneDoNotApplyToAnExternalEngine(t *testing.T) {
 	for _, mode := range []string{"auto", "tcp://external:1234", "cloud"} {
-		files.write(t, files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
-		_, err = c.Reload(t.Context())
-		must(t, err)
-		before := fake.Commands(t)
-		for _, action := range []string{"restart", "prune"} {
-			_, err = c.EngineAction(t.Context(), action)
-			var api *APIError
-			if !errors.As(err, &api) || api.Code != Conflict || !strings.Contains(api.Message, "not applicable") {
-				t.Fatalf("mode %s %s: %v", mode, action, err)
+		t.Run(mode, func(t *testing.T) {
+			e := startManagedEngine(t)
+			e.files.write(t, e.files.topText+engineConfig(mode, "OSMIA_ENGINE_TEST_TOKEN"))
+			_, err := e.c.Reload(t.Context())
+			intakefixture.Must(t, err)
+			before := e.fake.Commands(t)
+			for _, action := range []string{"restart", "prune"} {
+				_, err = e.c.EngineAction(t.Context(), action)
+				var api *APIError
+				if !errors.As(err, &api) || api.Code != Conflict || !strings.Contains(api.Message, "not applicable") {
+					t.Fatalf("mode %s %s: %v", mode, action, err)
+				}
 			}
-		}
-		status, err = c.EngineStatus(t.Context())
-		must(t, err)
-		if !status.Reachable || status.Version == "" || status.CacheSizeBytes == nil {
-			t.Fatalf("%s status: %+v", mode, status)
-		}
-		if fake.Commands(t) != before {
-			t.Fatalf("%s touched docker", mode)
-		}
+			status, err := e.c.EngineStatus(t.Context())
+			intakefixture.Must(t, err)
+			if !status.Reachable || status.Version == "" || status.CacheSizeBytes == nil {
+				t.Fatalf("%s status: %+v", mode, status)
+			}
+			if e.fake.Commands(t) != before {
+				t.Fatalf("%s touched docker", mode)
+			}
+		})
 	}
 }
 
@@ -305,15 +411,13 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			if s.current() != before {
 				t.Fatal("failed reload replaced loaded configuration")
 			}
-			// Install a valid selection, then model the conflicting process environment
-			// to exercise status and action routes independently of startup refusal.
 			t.Setenv("DOCKER_CONTEXT", "default")
 			_, err = c.Reload(t.Context())
-			must(t, err)
+			intakefixture.Must(t, err)
 			t.Setenv("DOCKER_CONTEXT", "named")
-			must(t, os.WriteFile(fake.Environments, nil, 0600))
+			intakefixture.Must(t, os.WriteFile(fake.Environments, nil, 0600))
 			status, err := c.EngineStatus(t.Context())
-			must(t, err)
+			intakefixture.Must(t, err)
 			if status.Reachable || status.DockerHost != "" || !strings.Contains(status.ReachabilityError, "DOCKER_HOST") || !strings.Contains(status.ReachabilityError, "DOCKER_CONTEXT") {
 				t.Fatalf("%+v", status)
 			}
@@ -324,7 +428,7 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 			_, err = s.configuredChecks(s.current()).Check(t.Context(), t.TempDir(), checks.Identity{}, nil)
 			assertConflict(err)
 			log, err := os.ReadFile(fake.Environments)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if len(log) != 0 {
 				t.Fatalf("conflict reached engine: %s", log)
 			}
@@ -332,9 +436,6 @@ func TestServiceDockerSelectorConflict(t *testing.T) {
 	}
 }
 
-// armedDeadline is a context that is done with context.DeadlineExceeded once
-// its delay has passed since the armed channel closed. It has a done channel of
-// its own, so contexts derived from it observe its error.
 type armedDeadline struct {
 	context.Context
 	done chan struct{}
@@ -360,9 +461,6 @@ func (c *armedDeadline) finish(err error) {
 	})
 }
 
-// deadlineAfter returns a context that is not done until the delay has passed
-// since armed closed, whichever the parent or the returned cancel function
-// ends it first.
 func deadlineAfter(parent context.Context, armed <-chan struct{}, delay time.Duration) (context.Context, context.CancelFunc) {
 	c := &armedDeadline{Context: parent, done: make(chan struct{})}
 	stop := make(chan struct{})
@@ -409,9 +507,7 @@ case "$1" in
  *) exit 92 ;;
 esac
 `, entered)
-	must(t, os.WriteFile(filepath.Join(fake.Directory, "docker"), []byte(script), 0700))
-	// The action bound runs from the moment creation is entered, so the time the
-	// fake engine spends on its earlier commands never counts against it.
+	intakefixture.Must(t, os.WriteFile(filepath.Join(fake.Directory, "docker"), []byte(script), 0700))
 	creating := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := deadlineAfter(r.Context(), creating, 500*time.Millisecond)
@@ -446,7 +542,7 @@ esac
 	started := time.Now()
 	close(creating)
 	next := queuedSlot(t.Context(), s.checkSlots, CheckSlotRun{Unit: "waiting-for-creation"})
-	must(t, awaitCheck(t, completed))
+	intakefixture.Must(t, awaitCheck(t, completed))
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("API did not deliver response at the action bound")
 	}

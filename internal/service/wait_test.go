@@ -1,12 +1,10 @@
 package service
 
 import (
-	testing "testing"
-	time "time"
+	"testing"
+	"time"
 )
 
-// serviceChanges subscribes before a waiter's first read. Notifications are
-// hints; the timer also wakes reads of state the event stream does not expose.
 func serviceChanges(t *testing.T, s *Service) (wait func(), close func()) {
 	t.Helper()
 	sub, ok := s.hub.Subscribe()
@@ -28,5 +26,3 @@ func serviceChanges(t *testing.T, s *Service) (wait func(), close func()) {
 			s.hub.Unsubscribe(sub)
 		}
 }
-
-// awaitDeferral waits for the unit's current dispatch reason.

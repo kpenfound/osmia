@@ -100,6 +100,7 @@ func (w *gateWorker) scan(ctx context.Context) {
 		}
 		return
 	}
+	var started sync.WaitGroup
 	for _, g := range gates {
 		id := g.ID()
 		w.mu.Lock()
@@ -110,8 +111,10 @@ func (w *gateWorker) scan(ctx context.Context) {
 		w.busy[id] = true
 		w.mu.Unlock()
 		w.wg.Add(1)
+		started.Add(1)
 		go func() {
 			defer w.wg.Done()
+			defer started.Done()
 			defer func() {
 				w.mu.Lock()
 				delete(w.busy, id)
@@ -124,6 +127,17 @@ func (w *gateWorker) scan(ctx context.Context) {
 				return
 			}
 			w.handle(ctx, g)
+		}()
+	}
+	if scanned := w.s.options.gateScanned; scanned != nil {
+		go func() {
+			started.Wait()
+			w.mu.Lock()
+			idle := len(w.busy) == 0
+			w.mu.Unlock()
+			if idle {
+				scanned()
+			}
 		}()
 	}
 }

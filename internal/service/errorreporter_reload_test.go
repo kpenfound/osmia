@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +15,6 @@ const (
 	reloadB = "owner/beta"
 )
 
-// reconcilingRig starts a reporter on reloadA whose first create is refused
-// with a 503 before GitHub applies it, so its intent is unresolved and the
-// retry reconciles it. The fake holds that reconciliation's issue list until
-// the test releases it. It returns once the list is outstanding.
 func reconcilingRig(t *testing.T) (*reporterRig, *fixturekit.Fault) {
 	t.Helper()
 	r := newReporterRig(t, section(reloadA), func(o *ErrorReporterOptions) { o.Retry = 20 * time.Millisecond })
@@ -32,23 +29,16 @@ func reconcilingRig(t *testing.T) (*reporterRig, *fixturekit.Fault) {
 	return r, hold
 }
 
-// afterRelease lets the held response go and waits for the reporter to act on
-// it.
-func afterRelease(hold *fixturekit.Fault) {
+func afterRelease(r *reporterRig, hold *fixturekit.Fault) {
 	close(hold.Release)
-	time.Sleep(150 * time.Millisecond)
+	r.awaitPasses(2)
 }
 
-// A reload to another repository while a reconciliation read is outstanding
-// stops the old pass from writing: the empty list that returns leads to no
-// create or comment in the old repository, its intent stays saved there, and an
-// error captured after the switch is filed in the new repository with the new
-// repository's environment.
 func TestErrorReporterReloadStopsAReconciliationInFlight(t *testing.T) {
 	t.Parallel()
 	r, hold := reconcilingRig(t)
 	r.reload(section(reloadB))
-	afterRelease(hold)
+	afterRelease(r, hold)
 
 	if got := r.gh.Count("POST", "/repos/"+reloadA); got != 1 {
 		t.Fatalf("%d writes reached %s, want only the refused create", got, reloadA)
@@ -63,8 +53,6 @@ func TestErrorReporterReloadStopsAReconciliationInFlight(t *testing.T) {
 	if st.Intents[0].Attempts != 1 {
 		t.Fatalf("the dropped write was counted: %d attempts", st.Intents[0].Attempts)
 	}
-	// Only the refused create's own diagnostic shows; the dropped write adds
-	// no attempt and no message.
 	cfg, status := r.diagnostics()
 	for _, m := range append(cfg, status...) {
 		if !strings.Contains(m, "attempt 1 of 5") {
@@ -93,8 +81,7 @@ func TestErrorReporterReloadThatDisablesStopsAReconciliationInFlight(t *testing.
 	r, hold := reconcilingRig(t)
 	r.reload("[error_reports]\nenabled = false\nrepository = \"" + reloadA + "\"\n")
 	before := len(r.gh.Requests())
-	afterRelease(hold)
-	time.Sleep(100 * time.Millisecond)
+	afterRelease(r, hold)
 
 	if after := r.gh.Requests(); len(after) != before {
 		t.Fatalf("requests reached GitHub after the reload turned the reporter off: %+v", after[before:])
@@ -113,9 +100,6 @@ func TestErrorReporterReloadThatDisablesStopsAReconciliationInFlight(t *testing.
 	}
 }
 
-// After the switch away from an interrupted reconciliation, switching back
-// reconciles the saved intent: it adopts the issue when the server has it and
-// files once when it does not, and the other repository is untouched.
 func TestErrorReporterReloadBackReconcilesTheInterruptedWrite(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -126,7 +110,7 @@ func TestErrorReporterReloadBackReconcilesTheInterruptedWrite(t *testing.T) {
 			t.Parallel()
 			r, hold := reconcilingRig(t)
 			r.reload(section(reloadB))
-			afterRelease(hold)
+			afterRelease(r, hold)
 			r.opFail("workspace.draft", "pull of "+reloadB+" failed")
 			r.awaitIssues(reloadB, 1)
 			r.quiet(reloadA, 0)
@@ -134,7 +118,7 @@ func TestErrorReporterReloadBackReconcilesTheInterruptedWrite(t *testing.T) {
 			intent := r.state().Intents[0]
 			if tc.exists {
 				rendered, err := errorreport.RenderIssue(intent.Filing)
-				must(t, err)
+				intakefixture.Must(t, err)
 				r.gh.Seed(reloadA, rendered.Title, rendered.Body, intent.Labels...)
 			}
 			r.reload(section(reloadA))

@@ -289,12 +289,12 @@ func (s *Service) publishRemoved(ctx context.Context) {
 		case <-timer.C:
 		}
 		delay = publishInterval
-		if !s.current().Hearsay.Publishing() {
-			continue
+		if s.current().Hearsay.Publishing() {
+			if retry := s.publishRemovedPass(ctx); retry {
+				delay = publishBackoff
+			}
 		}
-		if retry := s.publishRemovedPass(ctx); retry {
-			delay = publishBackoff
-		}
+		s.hearsayLoopPassed()
 	}
 }
 

@@ -1,15 +1,15 @@
 package service
 
 import (
-	context "context"
-	bundle "github.com/kpenfound/osmia/internal/bundle"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	intake "github.com/kpenfound/osmia/internal/intake"
-	questions "github.com/kpenfound/osmia/internal/questions"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"context"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const AbandonedState = intake.AbandonedState

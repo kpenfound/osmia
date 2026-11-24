@@ -1,7 +1,5 @@
 package service
 
-// Test-prefixed exports in this file are test-only seams for running-service fixtures.
-
 const TestBaseRefreshAction = baseRefreshAction
 
 var TestChiefActions = chiefActions

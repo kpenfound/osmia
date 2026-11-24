@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,17 +16,12 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// seededStream is a workstream created in the project at index project of the
-// registry, at demoStart plus age. A session is a design or
-// exploratory session workstream rather than a feature workstream.
 type seededStream struct {
 	project int
 	age     time.Duration
 	session bool
 }
 
-// orderRoot is a root of count active projects, registered in the store in
-// index order, each with its own trace holding the seeded streams.
 type orderRoot struct {
 	opts Options
 	cfg  *config.Config
@@ -36,31 +32,31 @@ func newOrderRoot(t *testing.T, count int, seeded []seededStream) orderRoot {
 	t.Helper()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "po-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	root := filepath.Join(home, "root")
 	var ids []config.ProjectID
-	must(t, os.MkdirAll(root, 0700))
-	must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nworkspaces = \"git\"\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
+	intakefixture.Must(t, os.MkdirAll(root, 0700))
+	intakefixture.Must(t, os.WriteFile(filepath.Join(root, "config.toml"), []byte("version = 1\nworkspaces = \"git\"\n[profiles.default]\nagent = \"claude\"\nmodel = \"test\"\n"), 0600))
 	for i := 0; i < count; i++ {
 		id := config.ProjectID(fmt.Sprintf("p_%032x", i+1))
 		ids = append(ids, id)
 		fixturekit.RegisterProject(t, root, id, fmt.Sprintf("version = 1\nupstream = \"upstream/repo%d\"\nfork = \"owner/repo%d\"\nclone = %q\n", i, i, filepath.Join(home, fmt.Sprintf("clone%d", i))))
 	}
 	cfg, err := projectstore.LoadConfig(config.Options{Root: root})
-	must(t, err)
+	intakefixture.Must(t, err)
 	repos := map[config.ProjectID]*trace.Repository{}
 	for _, p := range cfg.Projects {
-		must(t, os.MkdirAll(p.Clone, 0700))
-		repo, err := trace.Create(ctx, cfg.Root, p, demoStart, ownerActor)
-		must(t, err)
+		intakefixture.Must(t, os.MkdirAll(p.Clone, 0700))
+		repo, err := trace.Create(ctx, cfg.Root, p, fixturekit.DemoStart, ownerActor)
+		intakefixture.Must(t, err)
 		repos[p.ID] = repo
 	}
 	for _, w := range seeded {
 		createOrderStream(t, repos[ids[w.project]], w)
 	}
 	for _, repo := range repos {
-		must(t, repo.Close())
+		intakefixture.Must(t, repo.Close())
 	}
 	opts := testOptions(config.Options{Root: root})
 	opts.Workstreams = nil
@@ -70,25 +66,22 @@ func newOrderRoot(t *testing.T, count int, seeded []seededStream) orderRoot {
 func createOrderStream(t *testing.T, repo *trace.Repository, w seededStream) {
 	t.Helper()
 	existing, err := repo.Workstreams()
-	must(t, err)
+	intakefixture.Must(t, err)
 	id, err := config.NewWorkstreamID(existing...)
-	must(t, err)
-	at := demoStart.Add(w.age)
+	intakefixture.Must(t, err)
+	at := fixturekit.DemoStart.Add(w.age)
 	if w.session {
-		must(t, repo.CreateSessionWorkstream(context.Background(), id, "default", "base-commit", "session-branch", "A session", at, ownerActor))
+		intakefixture.Must(t, repo.CreateSessionWorkstream(context.Background(), id, "default", "base-commit", "session-branch", "A session", at, ownerActor))
 		return
 	}
-	must(t, repo.CreateWorkstream(context.Background(), id, at, ownerActor))
+	intakefixture.Must(t, repo.CreateWorkstream(context.Background(), id, at, ownerActor))
 }
 
-// listedProjects returns the configuration read's project IDs, after
-// checking that the runtime read lists the same projects in the same order
-// and that the effective configuration keeps the registry's order.
 func listedProjects(t *testing.T, c *Client, file []config.ProjectID) []config.ProjectID {
 	t.Helper()
 	ctx := context.Background()
 	got, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var ids []config.ProjectID
 	for _, p := range got.Projects {
 		ids = append(ids, p.ID)
@@ -101,7 +94,7 @@ func listedProjects(t *testing.T, c *Client, file []config.ProjectID) []config.P
 		t.Fatalf("effective.active_projects %v, want the registry order %v", effective, file)
 	}
 	runtime, err := c.Runtime(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var running []config.ProjectID
 	for _, p := range runtime.Projects {
 		running = append(running, p.Project)
@@ -131,7 +124,6 @@ func TestConfigListsProjectsByNewestWorkstream(t *testing.T) {
 		{project: 0, age: time.Hour},
 		{project: 1, age: 3 * time.Hour},
 		{project: 2, age: 2 * time.Hour},
-		// An older second workstream does not lower a project.
 		{project: 0, age: time.Minute},
 	})
 	_, c := start(t, f.opts)
@@ -180,11 +172,11 @@ func TestConfigCountsAWorkstreamCreatedAfterTheLastRead(t *testing.T) {
 	s, c := start(t, f.opts)
 	wantOrder(t, listedProjects(t, c, f.ids), f.ids, 1, 0, 2)
 	repo, err := s.repository(f.ids[2])
-	must(t, err)
+	intakefixture.Must(t, err)
 	createOrderStream(t, repo, seededStream{project: 2, age: 3 * time.Hour})
 	wantOrder(t, listedProjects(t, c, f.ids), f.ids, 2, 1, 0)
 	repo, err = s.repository(f.ids[0])
-	must(t, err)
+	intakefixture.Must(t, err)
 	createOrderStream(t, repo, seededStream{project: 0, age: 4 * time.Hour, session: true})
 	wantOrder(t, listedProjects(t, c, f.ids), f.ids, 0, 2, 1)
 }
@@ -200,7 +192,7 @@ func TestConfigPlacesAnUnreadableProjectAmongTheEmptyOnes(t *testing.T) {
 	_, c := start(t, f.opts)
 	wantOrder(t, listedProjects(t, c, f.ids), f.ids, 1, 0, 2)
 	traces, err := f.cfg.Root.WorkstreamTraces(f.ids[1])
-	must(t, err)
-	must(t, os.WriteFile(filepath.Join(traces, "not-a-workstream"), nil, 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(filepath.Join(traces, "not-a-workstream"), nil, 0600))
 	wantOrder(t, listedProjects(t, c, f.ids), f.ids, 0, 1, 2)
 }

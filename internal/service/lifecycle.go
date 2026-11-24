@@ -1,16 +1,16 @@
 package service
 
 import (
-	context "context"
-	time "time"
+	"context"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	lifecycle "github.com/kpenfound/osmia/internal/lifecycle"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
-	seal "github.com/kpenfound/osmia/internal/seal"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	workspace "github.com/kpenfound/osmia/internal/workspace"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 func (s *Service) lifecycle() *lifecycle.Controller {

@@ -1,27 +1,28 @@
 package service
 
 import (
-	context "context"
-	errors "errors"
-	fmt "fmt"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	atomic "sync/atomic"
-	testing "testing"
-	time "time"
+	"context"
+	"errors"
+	"fmt"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
 
-	agent "github.com/kpenfound/agentcore/agent"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	plan "github.com/kpenfound/osmia/internal/plan"
-	runtime "github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	shed "github.com/kpenfound/osmia/internal/shed"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/shed"
+	"github.com/kpenfound/osmia/internal/thread"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const pauseNote = "A hard pause stopped your last turn."
@@ -30,27 +31,24 @@ func ownerPause(scope string, p config.ProjectID, w config.WorkstreamID, mode, r
 	return runtime.Pause{Target: runtime.Target{Scope: scope, Project: p, Workstream: w}, Mode: mode, Reason: reason, Source: runtime.PauseOwner, SetAt: time.Now().UTC()}
 }
 
-// Every scope of a pause holds the reconciler operations of the workstreams it
-// covers, and no others: not those of a workstream outside it, not the turn
-// operations the scheduler gates, and not those of an abandoned workstream.
 func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	cfg, repo, clock := hardPauseRepository(t, 0)
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	must(t, repo.CreateWorkstream(ctx, sibling, clock.Now(), owner))
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, sibling, clock.Now(), owner))
 	s, _ := hardPauseService(t, cfg, repo, clock, nil)
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{stream, sibling}}})
-	must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: []config.WorkstreamID{intakefixture.Stream, sibling}}})
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s.store = store
 	hold := s.holding(repo)
 	actions := []string{DraftAction, AmendmentDraftAction, RoundAction, ReplyAction, RedraftAction, AmendmentRoundAction, AmendmentReplyAction, FinalReviewAction}
-	turn, err := thread.TurnOperation(project, "event", thread.TurnInput{Workstream: stream, Agent: "agent-0", Turn: "t-0"})
-	must(t, err)
+	turn, err := thread.TurnOperation(intakefixture.Project, "event", thread.TurnInput{Workstream: intakefixture.Stream, Agent: "agent-0", Turn: "t-0"})
+	intakefixture.Must(t, err)
 	check := func(what string, want map[config.WorkstreamID]bool) {
 		t.Helper()
-		for _, w := range []config.WorkstreamID{stream, sibling} {
+		for _, w := range []config.WorkstreamID{intakefixture.Stream, sibling} {
 			for _, action := range actions {
 				op := coreadapter.Operation{ID: "op", Boundary: coreadapter.RunnerBoundary, Action: action}
 				if got := hold(w, op); got != want[w] {
@@ -70,58 +68,44 @@ func TestPauseHoldsReconcilerOperationsInItsScope(t *testing.T) {
 	}
 	check("no pause", nil)
 	for _, p := range []runtime.Pause{
-		ownerPause("workstream", project, stream, "soft", "Soft workstream"),
-		ownerPause("workstream", project, stream, "hard", "Hard workstream"),
+		ownerPause("workstream", intakefixture.Project, intakefixture.Stream, "soft", "Soft workstream"),
+		ownerPause("workstream", intakefixture.Project, intakefixture.Stream, "hard", "Hard workstream"),
 	} {
-		must(t, s.setPause(p))
-		check(p.Reason, map[config.WorkstreamID]bool{stream: true})
-		must(t, store.ClearPause(p.Target, runtime.PauseOwner))
+		intakefixture.Must(t, s.setPause(p))
+		check(p.Reason, map[config.WorkstreamID]bool{intakefixture.Stream: true})
+		intakefixture.Must(t, store.ClearPause(p.Target, runtime.PauseOwner))
 	}
-	must(t, s.setPause(ownerPause("workstream", project, sibling, "soft", "Sibling")))
+	intakefixture.Must(t, s.setPause(ownerPause("workstream", intakefixture.Project, sibling, "soft", "Sibling")))
 	check("sibling", map[config.WorkstreamID]bool{sibling: true})
-	must(t, store.ClearPause(runtime.Target{Scope: "workstream", Project: project, Workstream: sibling}, runtime.PauseOwner))
-	for _, p := range []runtime.Pause{ownerPause("project", project, "", "soft", "Project"), ownerPause("factory", "", "", "hard", "Factory")} {
-		must(t, s.setPause(p))
-		check(p.Reason, map[config.WorkstreamID]bool{stream: true, sibling: true})
-		must(t, store.ClearPause(p.Target, runtime.PauseOwner))
+	intakefixture.Must(t, store.ClearPause(runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: sibling}, runtime.PauseOwner))
+	for _, p := range []runtime.Pause{ownerPause("project", intakefixture.Project, "", "soft", "Project"), ownerPause("factory", "", "", "hard", "Factory")} {
+		intakefixture.Must(t, s.setPause(p))
+		check(p.Reason, map[config.WorkstreamID]bool{intakefixture.Stream: true, sibling: true})
+		intakefixture.Must(t, store.ClearPause(p.Target, runtime.PauseOwner))
 	}
 	check("resumed", nil)
 
-	must(t, s.setPause(ownerPause("factory", "", "", "soft", "Factory")))
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: ownerActor, Cause: abandonTransition}
+	intakefixture.Must(t, s.setPause(ownerPause("factory", "", "", "soft", "Factory")))
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: ownerActor, Cause: abandonTransition}
 	_, err = repo.SetFeatureStateUnless(ctx, h, AbandonedState, "Superseded", AbandonedState, DeliveredState)
-	must(t, err)
+	intakefixture.Must(t, err)
 	check("abandoned", map[config.WorkstreamID]bool{sibling: true})
 }
 
-// operationRecord returns the workstream's one operation of the action.
-var operationRecord = fixturekit.OperationRecord
-
-var retries = intakefixture.Retries
-
-// checkHeld checks that the operation of a paused workstream is pending with
-// one retry naming the pause, and stays so over at least 3 further
-// reconciliation passes counted by passed, so the check runs against passes
-// that demonstrably ran under the pause rather than a fixed window.
 func checkHeld(t *testing.T, passed *atomic.Int64, fetch func() trace.OperationRecord) {
 	t.Helper()
 	op := fetch()
-	if op.Acknowledged || op.Result != nil || retries(op) != 1 || !slices.ContainsFunc(op.History, func(a trace.OperationAction) bool {
+	if op.Acknowledged || op.Result != nil || intakefixture.Retries(op) != 1 || !slices.ContainsFunc(op.History, func(a trace.OperationAction) bool {
 		return a.Kind == "retry" && strings.Contains(a.Failure, errPaused.Error())
 	}) {
 		t.Fatalf("the stopped operation is not held pending: %+v", op)
 	}
-	awaitPasses(t, passed, 3)
+	intakefixture.AwaitPasses(t, passed, 3)
 	if again := fetch(); again.Acknowledged || len(again.History) != len(op.History) {
 		t.Fatalf("the held operation was reconciled under the pause: %+v", again.History)
 	}
 }
 
-// newArchitectFixtureCounting is newArchitectFixture whose service calls
-// passed once per completed reconciliation pass, so a check that nothing
-// happened under a pause can wait for passes that demonstrably ran instead of
-// a fixed sleep. Kept as its own copy because newArchitectFixture takes no
-// prepare hook to install the counter before the service starts.
 func newArchitectFixtureCounting(t *testing.T) (*architectFixture, *atomic.Int64) {
 	t.Helper()
 	opts, clone, engine, sessions, clock := newArchitectOptions(t)
@@ -129,23 +113,19 @@ func newArchitectFixtureCounting(t *testing.T) (*architectFixture, *atomic.Int64
 	prepare(&opts)
 	f := &architectFixture{opts: opts, clone: clone, engine: engine, sessions: sessions, clock: clock}
 	f.start(t)
-	added, err := f.c.AddProject(context.Background(), request(clone))
-	must(t, err)
+	added, err := f.c.AddProject(context.Background(), fixturekit.Request(clone))
+	intakefixture.Must(t, err)
 	f.project, f.trace = added.Project.ID, added.Project.Trace
 	writeCharter(t, f.c, added.Project.ID, "1. Keep changes small.\n2. Every change has a test.\n")
 	return f, passed
 }
 
-// newShedFixtureCounting is newShedFixture whose service calls passed once
-// per completed reconciliation pass.
 func newShedFixtureCounting(t *testing.T, members int) (*shedFixture, *atomic.Int64) {
 	t.Helper()
 	passed, prepare := countingSchedule()
 	return newDebateFixtureWith(t, members, 1, "", prepare), passed
 }
 
-// blockTurn scripts the turn to run work, signal entered and run until its
-// session is stopped.
 func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp.ClientSession) error) chan struct{} {
 	entered := make(chan struct{})
 	f.engine.Mu.Lock()
@@ -161,8 +141,6 @@ func blockTurn(f *architectFixture, turn string, work func(context.Context, *mcp
 	return entered
 }
 
-// continueTurn scripts the continuation of the stopped turn: it checks the
-// prompt names the stop, runs work, and ends normally.
 func continueTurn(f *architectFixture, stopped trace.QueuedTurn, work func(context.Context, *mcp.ClientSession) error) string {
 	turn := fmt.Sprintf("%s-continue-%d", stopped.Request.TurnID, stopped.Sequence)
 	f.engine.Mu.Lock()
@@ -181,10 +159,6 @@ func continueTurn(f *architectFixture, stopped trace.QueuedTurn, work func(conte
 	return turn
 }
 
-var awaitTurn = intakefixture.AwaitTurn
-
-// checkContinued checks that the thread holds the stopped turn and its
-// continuation, completed normally, and no further attempt.
 func checkContinued(t *testing.T, th trace.Thread, prefix, stopped, continuation string) {
 	t.Helper()
 	var ids []string
@@ -202,10 +176,6 @@ func checkContinued(t *testing.T, th trace.Thread, prefix, stopped, continuation
 	}
 }
 
-// A hard pause on a workstream stops the architect's running draft without
-// failing it or spending an attempt, holds the draft while it is in force and
-// leaves another workstream's draft running. After resume, the draft's
-// continuation adds to what the stopped turn delivered.
 func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	t.Parallel()
 	f, passed := newArchitectFixtureCounting(t)
@@ -215,14 +185,14 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	f.engine.Mu.Lock()
 	f.engine.Turns["draft-1-1"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		if runs.Add(1) > 1 {
-			for path, content := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan} {
-				if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
+			for path, content := range map[string]string{plan.SpecPath: intakefixture.ValidSpec, plan.PlanPath: intakefixture.ValidPlan} {
+				if _, err := intakefixture.CallTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
 					return nil, err
 				}
 			}
 			return &agent.Result{ClaudeID: "session-other", ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
 		}
-		if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": plan.SpecPath, "content": validSpec}); err != nil {
+		if _, err := intakefixture.CallTool(ctx, tools, DraftTool, map[string]any{"path": plan.SpecPath, "content": intakefixture.ValidSpec}); err != nil {
 			return nil, err
 		}
 		close(entered)
@@ -230,22 +200,23 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 		return nil, ctx.Err()
 	}
 	f.engine.Mu.Unlock()
-	paused := f.handIn(t, "paused", handedDesign)
+	paused := f.handIn(t, "paused", intakefixture.HandedDesign)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("the draft did not start")
 	}
 	target := runtime.Target{Scope: "workstream", Project: f.project, Workstream: paused}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the architect", Source: "owner"})
-	stopped := awaitTurn(t, f.repository, paused, architectAgent, 0)
+	stopped := intakefixture.AwaitTurn(t, f.repository, paused, architectAgent, 0)
 	checkPauseStop(t, stopped, "workstream", "Stop the architect")
 
-	// Another workstream drafts through the pause.
-	other := f.handIn(t, "other", handedDesign)
-	f.await(t, other, sketched)
-	draft := func() trace.OperationRecord { return operationRecord(t, f.repository(), paused, DraftAction) }
-	eventually(t, "the stopped draft recorded no retry", func() bool { return retries(draft()) > 0 })
+	other := f.handIn(t, "other", intakefixture.HandedDesign)
+	f.await(t, other, intakefixture.Sketched)
+	draft := func() trace.OperationRecord {
+		return fixturekit.OperationRecord(t, f.repository(), paused, DraftAction)
+	}
+	intakefixture.Soon(t, "the stopped draft recorded no retry", func() bool { return intakefixture.Retries(draft()) > 0 })
 	checkHeld(t, passed, draft)
 	if state, err := f.repository().Workflow(paused, draftSubject); err != nil || state.Value != "drafting-1" {
 		t.Fatalf("the stopped draft is %+v: %v", state, err)
@@ -255,25 +226,25 @@ func TestHardPauseStopsAnArchitectDraftAndResumeContinuesIt(t *testing.T) {
 	}
 
 	continuation := continueTurn(f, stopped, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, DraftTool, map[string]any{"path": plan.PlanPath, "content": validPlan})
+		_, err := intakefixture.CallTool(ctx, tools, DraftTool, map[string]any{"path": plan.PlanPath, "content": intakefixture.ValidPlan})
 		return err
 	})
 	mutation(t, f.c, "DELETE", "pause", target)
-	f.await(t, paused, sketched)
+	f.await(t, paused, intakefixture.Sketched)
 	checkContinued(t, f.architectThread(t, paused), "draft-1-", "draft-1-1", continuation)
-	if spec := f.documents(t, paused, plan.SpecDocument); len(spec) != 1 || spec[0].Content != validSpec {
+	if spec := f.documents(t, paused, plan.SpecDocument); len(spec) != 1 || spec[0].Content != intakefixture.ValidSpec {
 		t.Fatalf("the spec the stopped turn delivered: %+v", spec)
 	}
 	wait, done := serviceChanges(t, f.s)
 	defer done()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for !draft().Acknowledged {
 		if time.Now().After(deadline) {
 			t.Fatal("the resumed draft operation was not acknowledged")
 		}
 		wait()
 	}
-	if op := draft(); !op.Acknowledged || op.Result == nil || op.Result.Outcome != "succeeded" || retries(op) != 1 {
+	if op := draft(); !op.Acknowledged || op.Result == nil || op.Result.Outcome != "succeeded" || intakefixture.Retries(op) != 1 {
 		t.Fatalf("draft operation %+v", op)
 	}
 }
@@ -293,27 +264,27 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 			close(entered)
 			<-release
 		})
-		for path, content := range map[string]string{plan.SpecPath: validSpec, plan.PlanPath: validPlan} {
-			if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
+		for path, content := range map[string]string{plan.SpecPath: intakefixture.ValidSpec, plan.PlanPath: intakefixture.ValidPlan} {
+			if _, err := intakefixture.CallTool(ctx, tools, DraftTool, map[string]any{"path": path, "content": content}); err != nil {
 				return nil, err
 			}
 		}
 		return &agent.Result{ClaudeID: "session-draft", ResultText: "Draft delivered", SessionDir: req.SessionDir, NumTurns: 1}, nil
 	}
 	f.engine.Mu.Unlock()
-	running := f.handIn(t, "running", handedDesign)
+	running := f.handIn(t, "running", intakefixture.HandedDesign)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("the draft did not start")
 	}
 	target := runtime.Target{Scope: "factory"}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "soft", Reason: "Hold new work", Source: "owner"})
 	close(release)
-	f.await(t, running, sketched)
+	f.await(t, running, intakefixture.Sketched)
 
-	waiting := f.handIn(t, "waiting", handedDesign)
-	awaitPasses(t, passed, 3)
+	waiting := f.handIn(t, "waiting", intakefixture.HandedDesign)
+	intakefixture.AwaitPasses(t, passed, 3)
 	settled(t, func() int { return len(f.draftOperations(t, waiting)) })
 	if ops := f.draftOperations(t, waiting); len(ops) != 0 {
 		t.Fatalf("a draft was asked for under a soft pause: %+v", ops)
@@ -322,36 +293,34 @@ func TestSoftPauseLetsARunningDraftFinishAndRequestsNoNewOne(t *testing.T) {
 		t.Fatalf("draft state %+v: %v", state, err)
 	}
 	mutation(t, f.c, "DELETE", "pause", target)
-	f.await(t, waiting, sketched)
+	f.await(t, waiting, intakefixture.Sketched)
 }
 
-// A hard pause on the project stops a committee member's running turn in
-// its round and holds the round; after resume, the member's continuation
-// completes its one attempt and the round records what the stopped turn
-// contributed.
 func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	t.Parallel()
 	f, passed := newShedFixtureCounting(t, 2)
 	defer f.stop(t)
 	member := committeeAgent(1)
 	entered := blockTurn(f.architectFixture, roundTurnID(1, member, 1), func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}})
+		_, err := intakefixture.CallTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "size", "part": "plan#resume", "argument": "Too wide.", "citations": []string{"kb/entities.json#internal.trace"}})
 		return err
 	})
 	f.member(1, 2, 1, func(context.Context, agent.Request, *agent.Turn, *mcp.ClientSession) error { return nil })
-	stream := f.handIn(t, "committee", handedDesign)
+	stream := f.handIn(t, "committee", intakefixture.HandedDesign)
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("the member's turn did not start")
 	}
-	awaitTurn(t, f.repository, stream, committeeAgent(2), 0)
+	intakefixture.AwaitTurn(t, f.repository, stream, committeeAgent(2), 0)
 	target := runtime.Target{Scope: "project", Project: f.project}
 	mutation(t, f.c, "PUT", "pause", PauseRequest{Target: target, Mode: "hard", Reason: "Stop the committee", Source: "owner"})
-	stopped := awaitTurn(t, f.repository, stream, member, 0)
+	stopped := intakefixture.AwaitTurn(t, f.repository, stream, member, 0)
 	checkPauseStop(t, stopped, "project", "Stop the committee")
-	round := func() trace.OperationRecord { return operationRecord(t, f.repository(), stream, RoundAction) }
-	eventually(t, "the stopped round recorded no retry", func() bool { return retries(round()) > 0 })
+	round := func() trace.OperationRecord {
+		return fixturekit.OperationRecord(t, f.repository(), stream, RoundAction)
+	}
+	intakefixture.Soon(t, "the stopped round recorded no retry", func() bool { return intakefixture.Retries(round()) > 0 })
 	checkHeld(t, passed, round)
 	if state, err := f.repository().Workflow(stream, shedSubject); err != nil || state.Value != "round-1" {
 		t.Fatalf("the stopped round is %+v: %v", state, err)
@@ -361,29 +330,25 @@ func TestHardPauseStopsACommitteeMemberAndResumeContinuesIt(t *testing.T) {
 	mutation(t, f.c, "DELETE", "pause", target)
 	f.awaitShed(t, stream, "heard-1")
 	th, err := f.repository().Thread(stream, member)
-	must(t, err)
+	intakefixture.Must(t, err)
 	checkContinued(t, th, roundTurnPrefix(1, member), stopped.Request.TurnID, continuation)
 	records, err := shed.Records(f.repository(), stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	i := slices.IndexFunc(records, func(r shed.Record) bool { return r.Round == 1 && r.Member == member })
 	if i < 0 || records[i].Failure != "" || records[i].Turn != stopped.Request.TurnID || len(records[i].Objections) != 1 {
 		t.Fatalf("records %+v", records)
 	}
 }
 
-// openPauseStore gives the stopped fixture's service a runtime store that
-// takes pauses, for reconcilers applied directly.
 func openPauseStore(t *testing.T, f *architectFixture, streams ...config.WorkstreamID) *runtime.Store {
 	t.Helper()
 	store, _, err := runtime.Open(runtime.Inputs{Config: f.s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{f.s.cfg.Project.ID: streams}})
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	f.s.store = store
 	return store
 }
 
-// stopWhileRunning applies op until the turn it runs has entered, sets the
-// hard pause and returns what the stopped application returned.
 func stopWhileRunning(t *testing.T, s *Service, r coreadapter.Reconciler, op coreadapter.Operation, entered chan struct{}, pause runtime.Pause) error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -395,23 +360,19 @@ func stopWhileRunning(t *testing.T, s *Service, r coreadapter.Reconciler, op cor
 	case <-entered:
 	case err := <-done:
 		t.Fatalf("the turn did not start: %v", err)
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("the turn did not start")
 	}
-	must(t, s.setPause(pause))
+	intakefixture.Must(t, s.setPause(pause))
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("the hard pause did not stop the turn")
 	}
 	return nil
 }
 
-// A soft pause asks for no final review; a hard pause stops the running
-// final review, which is not retried or failed while the pause holds. After
-// resume, its continuation completes the review with the report the stopped
-// turn recorded.
 func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 	t.Parallel()
 	f, stream, repository, a := newFinalFixture(t, "paused-final")
@@ -422,7 +383,7 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 		map[string]string{"internal/trace/dedupe.go": "package trace\n"})
 	turn := finalTurnID(1, committeeAgent(1), 1)
 	entered := blockTurn(f.architectFixture, turn, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "findings": []any{}})
+		_, err := intakefixture.CallTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Both hold.", "findings": []any{}})
 		return err
 	})
 	hard := ownerPause("workstream", f.project, stream, "hard", "Stop the review")
@@ -430,7 +391,7 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 		t.Fatalf("the stopped review returned %v", err)
 	}
 	th, err := repository.Thread(stream, committeeAgent(1))
-	must(t, err)
+	intakefixture.Must(t, err)
 	stopped := th.Turns[len(th.Turns)-1]
 	checkPauseStop(t, stopped, "workstream", "Stop the review")
 	if !f.s.holding(repository)(stream, op) {
@@ -442,55 +403,50 @@ func TestPauseHoldsAndStopsAFinalReview(t *testing.T) {
 	if again, err := repository.Thread(stream, committeeAgent(1)); err != nil || len(again.Turns) != len(th.Turns) {
 		t.Fatalf("turns queued under the hard pause: %+v %v", again.Turns, err)
 	}
-	if result, err := a.outcome(stream, 1); err != nil || result != nil {
+	if result, err := a.Outcome(stream, 1); err != nil || result != nil {
 		t.Fatalf("the stopped review has an outcome %+v: %v", result, err)
 	}
-	must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
+	intakefixture.Must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
 
 	continuation := continueTurn(f.architectFixture, stopped, nil)
 	result := settleOperation(t, f.s, repository, stream, op, a)
 	report, _, err := latestFinalReport(repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if result.Outcome != "succeeded" || report.Outcome != finalReviewed || report.Turn != continuation || report.Summary != "Both hold." {
 		t.Fatalf("result %+v, report %+v", result, report)
 	}
 	th, err = repository.Thread(stream, committeeAgent(1))
-	must(t, err)
-	checkContinued(t, th, finalTurnPrefix(1, committeeAgent(1)), turn, continuation)
+	intakefixture.Must(t, err)
+	checkContinued(t, th, delivery.FinalTurnPrefix(1, committeeAgent(1)), turn, continuation)
 
-	// A soft pause asks for no new review once the reviewed branch moves.
 	soft := ownerPause("factory", "", "", "soft", "Hold new work")
-	must(t, f.s.setPause(soft))
+	intakefixture.Must(t, f.s.setPause(soft))
 	moveFeature(t, f, stream, map[string]string{"LATER.md": "later\n"})
-	must(t, a.Pass(ctx))
-	must(t, a.Pass(ctx))
+	intakefixture.Must(t, a.Pass(ctx))
+	intakefixture.Must(t, a.Pass(ctx))
 	if ops := finalOperations(t, repository, stream); len(ops) != 1 {
 		t.Fatalf("a final review was asked for under a soft pause: %+v", ops)
 	}
-	must(t, store.ClearPause(soft.Target, runtime.PauseOwner))
-	must(t, a.Pass(ctx))
+	intakefixture.Must(t, store.ClearPause(soft.Target, runtime.PauseOwner))
+	intakefixture.Must(t, a.Pass(ctx))
 	if ops := finalOperations(t, repository, stream); len(ops) != 2 {
 		t.Fatalf("no final review was asked for after resume: %+v", ops)
 	}
 }
 
-// A hard pause stops the architect's amendment draft and its reply to the
-// amendment's round without spending attempts; a soft pause asks for no
-// reply. After resume, the continuations complete them with what the
-// stopped turns delivered.
 func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newSketchedDebateFixture(t, 1, 3)
 	object := func(ctx context.Context, _ agent.Request, _ *agent.Turn, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "fit", "part": "plan", "argument": "Checkpoint elsewhere.", "citations": []string{"spec#1"}})
+		_, err := intakefixture.CallTool(ctx, tools, shed.ObjectTool, map[string]any{"kind": "fit", "part": "plan", "argument": "Checkpoint elsewhere.", "citations": []string{"spec#1"}})
 		return err
 	}
 	f.script("amend-1-round-1-"+committeeAgent(1)+"-1", nil, object)
-	stream := f.handIn(t, "amend-paused", handedDesign)
+	stream := f.handIn(t, "amend-paused", intakefixture.HandedDesign)
 	f.stopAtSketch(t, stream)
 	repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer repo.Close()
 	f.s.setSole(&activeProject{repository: repo})
 	store := openPauseStore(t, f.architectFixture, stream)
@@ -498,78 +454,78 @@ func TestPauseHoldsAndStopsAmendmentTurns(t *testing.T) {
 
 	seedAmendment(t, f.architectFixture, repo, stream)
 	drafts := &amendmentDrafter{Drafter: &drafter{S: f.s.intake().DrafterDependencies(), Repository: repo}}
-	must(t, drafts.Pass(ctx))
-	draftOp := amendmentOp(t, repo, stream, AmendmentDraftAction)
-	amended := strings.Replace(validSpec, "last acknowledged chunk", "durable checkpoint", 1)
+	intakefixture.Must(t, drafts.Pass(ctx))
+	draftOp := intakefixture.AmendmentOp(t, repo, stream, AmendmentDraftAction)
+	amended := strings.Replace(intakefixture.ValidSpec, "last acknowledged chunk", "durable checkpoint", 1)
 	entered := blockTurn(f.architectFixture, "amend-1-1", func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, DraftTool, map[string]any{"path": plan.SpecPath, "content": amended})
+		_, err := intakefixture.CallTool(ctx, tools, DraftTool, map[string]any{"path": plan.SpecPath, "content": amended})
 		return err
 	})
 	if err := stopWhileRunning(t, f.s, drafts, draftOp, entered, hard); !errors.Is(err, errPaused) {
 		t.Fatalf("the stopped amendment draft returned %v", err)
 	}
 	th, err := repo.Thread(stream, architectAgent)
-	must(t, err)
+	intakefixture.Must(t, err)
 	stopped := th.Turns[len(th.Turns)-1]
 	checkPauseStop(t, stopped, "workstream", "Stop the amendment")
 	if _, err := drafts.Apply(ctx, draftOp); !errors.Is(err, errPaused) {
 		t.Fatalf("the amendment draft applied under the hard pause: %v", err)
 	}
-	must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
+	intakefixture.Must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
 	continuation := continueTurn(f.architectFixture, stopped, nil)
 	result, err := drafts.Apply(ctx, draftOp)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if state, err := repo.Workflow(stream, amendmentSubject("1")); err != nil || result.Outcome != "succeeded" || state.Value != "proposed" {
 		t.Fatalf("amendment draft %+v, state %+v: %v", result, state, err)
 	}
 	th, err = repo.Thread(stream, architectAgent)
-	must(t, err)
+	intakefixture.Must(t, err)
 	checkContinued(t, th, "amend-1-", "amend-1-1", continuation)
-	if docs := readDocs(t, repo, stream, "amendment_1_spec"); len(docs) != 1 || docs[0].Content != amended {
+	if docs := intakefixture.ReadDocs(t, repo, stream, "amendment_1_spec"); len(docs) != 1 || docs[0].Content != amended {
 		t.Fatalf("the amended spec the stopped turn delivered: %+v", docs)
 	}
 
 	debate := amendmentDebate{Debate: &debate{S: f.s.intake().DebateDependencies(), Repository: repo}}
-	must(t, debate.Pass(ctx))
-	_, err = debate.Apply(ctx, amendmentOp(t, repo, stream, AmendmentRoundAction))
-	must(t, err)
+	intakefixture.Must(t, debate.Pass(ctx))
+	_, err = debate.Apply(ctx, intakefixture.AmendmentOp(t, repo, stream, AmendmentRoundAction))
+	intakefixture.Must(t, err)
 	soft := ownerPause("project", f.project, "", "soft", "Hold new work")
-	must(t, f.s.setPause(soft))
-	must(t, debate.Pass(ctx))
+	intakefixture.Must(t, f.s.setPause(soft))
+	intakefixture.Must(t, debate.Pass(ctx))
 	if state, err := repo.Workflow(stream, amendmentSubject("1")); err != nil || state.Value != "heard" {
 		t.Fatalf("the reply was asked for under a soft pause: %+v %v", state, err)
 	}
-	must(t, store.ClearPause(soft.Target, runtime.PauseOwner))
-	must(t, debate.Pass(ctx))
-	replyOp := amendmentOp(t, repo, stream, AmendmentReplyAction)
+	intakefixture.Must(t, store.ClearPause(soft.Target, runtime.PauseOwner))
+	intakefixture.Must(t, debate.Pass(ctx))
+	replyOp := intakefixture.AmendmentOp(t, repo, stream, AmendmentReplyAction)
 	objection := shed.ObjectionID(1, committeeAgent(1), 1)
 	entered = blockTurn(f.architectFixture, "amend-1-reply-1", func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": objection, "answer": "The checkpoint stays in resume."})
+		_, err := intakefixture.CallTool(ctx, tools, shed.ReplyTool, map[string]any{"objection": objection, "answer": "The checkpoint stays in resume."})
 		return err
 	})
 	if err := stopWhileRunning(t, f.s, debate, replyOp, entered, hard); !errors.Is(err, errPaused) {
 		t.Fatalf("the stopped amendment reply returned %v", err)
 	}
 	th, err = repo.Thread(stream, architectAgent)
-	must(t, err)
+	intakefixture.Must(t, err)
 	stopped = th.Turns[len(th.Turns)-1]
 	checkPauseStop(t, stopped, "workstream", "Stop the amendment")
 	if _, err := debate.Apply(ctx, replyOp); !errors.Is(err, errPaused) {
 		t.Fatalf("the amendment reply applied under the hard pause: %v", err)
 	}
-	must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
+	intakefixture.Must(t, store.ClearPause(hard.Target, runtime.PauseOwner))
 	continuation = continueTurn(f.architectFixture, stopped, nil)
 	_, err = debate.Apply(ctx, replyOp)
-	must(t, err)
+	intakefixture.Must(t, err)
 	th, err = repo.Thread(stream, architectAgent)
-	must(t, err)
+	intakefixture.Must(t, err)
 	checkContinued(t, th, "amend-1-reply-", "amend-1-reply-1", continuation)
-	docs := readDocs(t, repo, stream, "amendment_1_round_1_reply")
+	docs := intakefixture.ReadDocs(t, repo, stream, "amendment_1_round_1_reply")
 	if len(docs) != 1 {
 		t.Fatalf("reply documents %+v", docs)
 	}
 	reply, err := shed.ParseReply([]byte(docs[0].Content))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if reply.Failure != "" || reply.Turn != continuation || len(reply.Answers) != 1 || reply.Answers[0].Objection != objection {
 		t.Fatalf("reply %+v", reply)
 	}

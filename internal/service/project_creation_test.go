@@ -6,20 +6,6 @@ import (
 	"testing"
 )
 
-func TestCreationRoutesAreListed(t *testing.T) {
-	want := map[string]string{
-		"POST " + Prefix + "/projects/create":          "",
-		"POST " + Prefix + "/projects/create/identity": "",
-		"GET " + Prefix + "/projects/create/{id}":      "",
-	}
-	for _, route := range Routes {
-		delete(want, route.Method+" "+route.Path)
-	}
-	if len(want) != 0 {
-		t.Fatalf("routes missing from Routes: %v", want)
-	}
-}
-
 func TestCreationGitEnvironmentDropsOnlyTheToken(t *testing.T) {
 	env := creationGitEnvironment([]string{"PATH=/bin", "GITHUB_TOKEN=secret", "HOME=/home/owner", "GITHUB_TOKEN_FILE=/keep", "SSH_AUTH_SOCK=/agent"})
 	want := []string{"PATH=/bin", "HOME=/home/owner", "GITHUB_TOKEN_FILE=/keep", "SSH_AUTH_SOCK=/agent", "GIT_TERMINAL_PROMPT=0"}

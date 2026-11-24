@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"strings"
 	"testing"
@@ -11,18 +12,15 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// publishThrough runs one publish pass over the service's own trace against a
-// fake hooks endpoint, and returns the requests it made.
 func publishThrough(t *testing.T, s *Service, repo *trace.Repository) []hooksPost {
 	t.Helper()
-	// serial: sets the publisher's token in the process environment.
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
 	hooks := newHooksFake(t)
 	cfg := *s.current()
 	cfg.Hearsay = config.Hearsay{URL: "https://memory.example", Principal: "owner", TokenEnv: "PUBLISH_TEST_OWNER",
 		Publish: &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}}
 	res, err := s.publishPass(context.Background(), repo, &cfg)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(res.Failures) != 0 || res.Unreachable {
 		t.Fatalf("pass: %+v", res)
 	}

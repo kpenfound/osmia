@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"strings"
 	"sync"
@@ -21,8 +22,6 @@ import (
 
 const resumeRun = "units/resume/checks-1.json"
 
-// announceFaults fails the writes of a flake decision's announcement that the
-// test selects, and counts the attempts made at each.
 type announceFaults struct {
 	mu   sync.Mutex
 	fail func(name string) bool
@@ -59,21 +58,18 @@ func (a *announceFaults) attempts(name string) int {
 	return a.hits[name]
 }
 
-// failing starts the service's announcement faults.
 func (l *flakeFixLive) failing(fail func(name string) bool) *announceFaults {
 	faults := &announceFaults{fail: fail}
 	l.s.setBoundary(faults.boundary)
 	return faults
 }
 
-// pass runs one pass of a fresh flake recorder, as after a restart.
 func (l *flakeFixLive) pass(t *testing.T) {
 	t.Helper()
 	repo := l.repository()
-	must(t, (&flakeRecorder{s: l.s, cfg: l.s.about(repo), repository: repo}).Pass(context.Background()))
+	intakefixture.Must(t, (&flakeRecorder{s: l.s, cfg: l.s.about(repo), repository: repo}).Pass(context.Background()))
 }
 
-// current is the occurrence as the flake record holds it now.
 func (l *flakeFixLive) current(t *testing.T, o flakes.Occurrence) flakes.Occurrence {
 	t.Helper()
 	for _, c := range flakeOccurrences(t, l.repository()) {
@@ -85,19 +81,15 @@ func (l *flakeFixLive) current(t *testing.T, o flakes.Occurrence) flakes.Occurre
 	return flakes.Occurrence{}
 }
 
-// entries are the decision transitions written for the occurrence in its
-// originating workstream.
 func (l *flakeFixLive) entries(t *testing.T, o flakes.Occurrence) []trace.Transition {
 	t.Helper()
 	posted, _ := flakePosts(t, l.repository(), o.Source.Workstream, flakeDecisionSubject(o.ID))
 	return posted
 }
 
-// awaitEntry waits for the occurrence's decision to show in its originating
-// workstream's trace and returns it.
 func (l *flakeFixLive) awaitEntry(t *testing.T, o flakes.Occurrence) trace.Transition {
 	t.Helper()
-	awaitFlake(t, "the decision of occurrence "+o.ID+" in its originating workstream", func() bool { return len(l.entries(t, o)) > 0 })
+	intakefixture.Soon(t, "the decision of occurrence "+o.ID+" in its originating workstream", func() bool { return len(l.entries(t, o)) > 0 })
 	return l.entries(t, o)[0]
 }
 
@@ -114,19 +106,16 @@ func declineInput(occurrence, reason string) string {
 	return fmt.Sprintf(`{"action":"decline","occurrence":%q,"reason":%q}`, occurrence, reason)
 }
 
-// awaitState waits until the occurrence's decision is in state.
 func (l *flakeFixLive) awaitState(t *testing.T, o flakes.Occurrence, state string) flakes.Occurrence {
 	t.Helper()
 	var got flakes.Occurrence
-	awaitFlake(t, "occurrence "+o.ID+" to be "+state, func() bool {
+	intakefixture.Soon(t, "occurrence "+o.ID+" to be "+state, func() bool {
 		got = l.current(t, o)
 		return got.Decision.State == state
 	})
 	return got
 }
 
-// footprint is everything the announcement writes for the occurrences: their
-// decision transitions, the originating notices and the surfacings.
 func (l *flakeFixLive) footprint(t *testing.T, target config.WorkstreamID, os ...flakes.Occurrence) string {
 	t.Helper()
 	var parts []string
@@ -139,8 +128,6 @@ func (l *flakeFixLive) footprint(t *testing.T, target config.WorkstreamID, os ..
 	return fmt.Sprintf("%v surfacings=%d", parts, len(flakeSurfacings(t, l.repository(), target)))
 }
 
-// settledFootprint restarts the service and passes the recorder repeatedly,
-// and fails if any of that changes the footprint.
 func (l *flakeFixLive) settledFootprint(t *testing.T, target config.WorkstreamID, os ...flakes.Occurrence) {
 	t.Helper()
 	before := l.footprint(t, target, os...)
@@ -160,10 +147,6 @@ func (l *flakeFixLive) settledFootprint(t *testing.T, target config.WorkstreamID
 	}
 }
 
-// A decision commits and the announcement's write is missed, by a failing write
-// or by a service that stops first. A later pass or the restarted service
-// writes the originating feed entry once, and the joined occurrence's
-// surfacing once, with no further tool call.
 func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 	t.Parallel()
 	for _, decision := range []string{"opened", "declined", "joined by the recorder", "joined by the chief"} {
@@ -216,7 +199,6 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 					decided, target, reasonPart = l.current(t, second), want, string(want)
 				}
 
-				// The decision is committed and nothing of it is announced.
 				if len(l.entries(t, decided)) != 0 {
 					t.Fatalf("an entry was written while the write failed: %+v", l.entries(t, decided))
 				}
@@ -227,7 +209,6 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 					t.Fatalf("the occurrence is marked announced before any write: %+v", o)
 				}
 
-				// A pass that still fails retries and keeps it owed.
 				l.pass(t)
 				if faults.attempts("flake-announce-origin "+decided.ID) == 0 {
 					t.Fatalf("the failing announcement was not tried: %+v", faults.hits)
@@ -242,9 +223,7 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 				if entry.To != strings.Fields(decision)[0] || !strings.Contains(entry.Reason, reasonPart) || entry.Actor != chiefActor || !strings.Contains(entry.Reason, decided.ID) {
 					t.Fatalf("the decision entry: %+v", entry)
 				}
-				// Each destination is marked after its write, so the marks
-				// follow the entry and the surfacing.
-				awaitFlake(t, "the announcement of "+decided.ID+" to be marked", func() bool {
+				intakefixture.Soon(t, "the announcement of "+decided.ID+" to be marked", func() bool {
 					o := l.current(t, decided)
 					return o.IsAnnounced(flakes.DestinationOrigin) && (target == "" || len(o.Surfaced) == 1)
 				})
@@ -285,10 +264,6 @@ func TestFlakeDecisionIsAnnouncedAfterAMissedWrite(t *testing.T) {
 	}
 }
 
-// One occurrence's originating write keeps failing beside a recoverable one:
-// the recoverable occurrence gets its single entry and the failing one stays
-// owed and retried. For a joined occurrence the surfacing is delivered though
-// the originating write fails.
 func TestFlakeAnnouncementOfOneOccurrenceFailingStopsNoOther(t *testing.T) {
 	t.Parallel()
 	l := startFlakeFixLive(t, "flake-announce-isolated", flakyOutcome(flakyTraceTest))
@@ -304,10 +279,8 @@ func TestFlakeAnnouncementOfOneOccurrenceFailingStopsNoOther(t *testing.T) {
 	declinedOcc := l.occurrence(t, l.stream, declinedRun)
 	l.awaitNoticeOf(t, l.stream, declinedOcc.ID)
 	l.awaitEntry(t, joined)
-	awaitFlake(t, "the first surfacing", func() bool { return len(flakeSurfacings(t, l.repository(), want)) == 1 })
+	intakefixture.Soon(t, "the first surfacing", func() bool { return len(flakeSurfacings(t, l.repository(), want)) == 1 })
 
-	// A second joined occurrence whose originating write keeps failing, and a
-	// declined one that can be announced.
 	thirdID := flakes.OccurrenceID(flakes.RunKey(l.stream, execution.CheckPath("third", 1)), l.group)
 	faults := l.failing(func(name string) bool { return name == "flake-announce-origin "+thirdID })
 	thirdRun := recordUnitFlakyRun(t, l.repository(), l.stream, "third", 1, flakyTraceOther)
@@ -320,7 +293,7 @@ func TestFlakeAnnouncementOfOneOccurrenceFailingStopsNoOther(t *testing.T) {
 	if entry.To != "declined" || !strings.Contains(entry.Reason, "Added by the unit.") {
 		t.Fatalf("the recoverable occurrence's entry: %+v", entry)
 	}
-	awaitFlake(t, "the failing occurrence's surfacing", func() bool { return len(l.current(t, third).Surfaced) == 1 })
+	intakefixture.Soon(t, "the failing occurrence's surfacing", func() bool { return len(l.current(t, third).Surfaced) == 1 })
 	if surfacings := flakeSurfacings(t, l.repository(), want); len(surfacings) != 2 {
 		t.Fatalf("surfacings %q, want one for each joined occurrence", surfacings)
 	}
@@ -342,7 +315,7 @@ func TestFlakeAnnouncementOfOneOccurrenceFailingStopsNoOther(t *testing.T) {
 
 	faults.set(nil)
 	l.awaitEntry(t, third)
-	awaitFlake(t, "the announcements to be marked", func() bool {
+	intakefixture.Soon(t, "the announcements to be marked", func() bool {
 		return l.current(t, third).IsAnnounced(flakes.DestinationOrigin) && l.current(t, declinedOcc).IsAnnounced(flakes.DestinationOrigin)
 	})
 	l.settledFootprint(t, want, first, joined, declinedOcc, third)
@@ -364,7 +337,7 @@ func TestFlakeAnnouncementReachesADeliveredOrAbandonedOriginatingWorkstream(t *t
 			l := startFlakeFixLive(t, "flake-announce-"+terminal, flakyOutcome(flakyTraceTest))
 			repo := l.repository()
 			other := config.WorkstreamID("w_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-			must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
+			intakefixture.Must(t, repo.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 			run := recordUnitFlakyRun(t, repo, other, "resume", 1, flakyWebTest)
 			occ := l.occurrence(t, other, run)
 			l.awaitNoticeOf(t, other, occ.ID)
@@ -416,10 +389,6 @@ func TestFlakeAnnouncementReachesADeliveredOrAbandonedOriginatingWorkstream(t *t
 	}
 }
 
-// archivedOrigin is a joined occurrence of a workstream that is archived and
-// cleaned up while the flake-fix workstream it joined stays open, with both of
-// its writes missed, and a declined occurrence of another workstream whose
-// write was missed too.
 type archivedOrigin struct {
 	l        *flakeFixLive
 	faults   *announceFaults
@@ -440,7 +409,6 @@ func newArchivedOrigin(t *testing.T, key string) *archivedOrigin {
 	l.awaitEntry(t, first)
 	faults := l.failing(failEveryAnnouncement)
 
-	// A second workstream the runtime knows, so it can be archived.
 	other := l.handIn(t, key+"-origin", "# An unrelated change\n\nThe workstream whose flake joins the open one.\n")
 	joined := l.awaitState(t, l.occurrence(t, other, recordUnitFlakyRun(t, l.repository(), other, "resume", 1, flakyTraceOther)), flakes.Joined)
 	declined := l.occurrence(t, l.stream, recordUnitFlakyRun(t, l.repository(), l.stream, "web", 1, flakyWebTest))
@@ -455,11 +423,10 @@ func newArchivedOrigin(t *testing.T, key string) *archivedOrigin {
 	return &archivedOrigin{l: l, faults: faults, want: want, other: other, opened: first, joined: joined, declined: declined}
 }
 
-// awaitCleaned waits until the archived workstream's trace is deleted.
 func (a *archivedOrigin) awaitCleaned(t *testing.T) runtime.Archive {
 	t.Helper()
 	var archive runtime.Archive
-	awaitFlake(t, "the archive cleanup of "+string(a.other), func() bool {
+	intakefixture.Soon(t, "the archive cleanup of "+string(a.other), func() bool {
 		var ok bool
 		archive, ok = archiveRecord(t, a.l.s.store, a.other)
 		if !ok || archive.CleanedAt.IsZero() {
@@ -471,18 +438,14 @@ func (a *archivedOrigin) awaitCleaned(t *testing.T) runtime.Archive {
 	return archive
 }
 
-// recovers clears the faults and checks what reconciliation owes now: the
-// open workstream's chief gets one surfacing, the archived origin is closed as
-// moot with its archiver noted, the declined occurrence gets its entry, and
-// later passes and restarts add nothing.
 func (a *archivedOrigin) recovers(t *testing.T, archivedBy, noteWho string) {
 	t.Helper()
 	l := a.l
 	a.faults.set(nil)
-	awaitFlake(t, "the surfacing to the open workstream", func() bool { return len(flakeSurfacings(t, l.repository(), a.want)) == 1 })
+	intakefixture.Soon(t, "the surfacing to the open workstream", func() bool { return len(flakeSurfacings(t, l.repository(), a.want)) == 1 })
 	l.awaitEntry(t, a.declined)
-	awaitFlake(t, "the originating destination to close as moot", func() bool { return l.current(t, a.joined).IsMoot(flakes.DestinationOrigin) })
-	awaitFlake(t, "the surfacing to be marked", func() bool { return len(l.current(t, a.joined).Surfaced) == 1 })
+	intakefixture.Soon(t, "the originating destination to close as moot", func() bool { return l.current(t, a.joined).IsMoot(flakes.DestinationOrigin) })
+	intakefixture.Soon(t, "the surfacing to be marked", func() bool { return len(l.current(t, a.joined).Surfaced) == 1 })
 
 	check := func() {
 		t.Helper()
@@ -515,9 +478,6 @@ func (a *archivedOrigin) recovers(t *testing.T, archivedBy, noteWho string) {
 	}
 }
 
-// A joined decision commits and both its writes are missed; then the
-// originating workstream is delivered, archived by the owner and cleaned up
-// while the joined flake-fix workstream stays open.
 func TestFlakeJoinedDecisionOfAnOwnerArchivedOriginStillSurfacesToTheOpenWorkstream(t *testing.T) {
 	t.Parallel()
 	a := newArchivedOrigin(t, "flake-announce-owner-archive")
@@ -532,10 +492,6 @@ func TestFlakeJoinedDecisionOfAnOwnerArchivedOriginStillSurfacesToTheOpenWorkstr
 	a.recovers(t, api.ArchivedByOwner, "the owner")
 }
 
-// A decision commits and its announcement fails; then the originating
-// workstream is delivered with its own pull request merged, and the chief of
-// staff's archive-on-merge and the archive cleanup run before reconciliation
-// does, which they do not wait for.
 func TestFlakeDecisionOfAWorkstreamTheChiefArchivedOnMergeClosesAsMoot(t *testing.T) {
 	t.Parallel()
 	a := newArchivedOrigin(t, "flake-announce-merge-archive")
@@ -557,7 +513,7 @@ func TestFlakeDecisionOfAWorkstreamTheChiefArchivedOnMergeClosesAsMoot(t *testin
 // are exactly those it has without flakes.
 func TestFlakeAnnouncementFailuresNeverChangeTheOriginatingFlow(t *testing.T) {
 	t.Parallel()
-	control, controlStream, controlRepository := newFlakeFixture(t, "flake-announce-control", checkOutcome{Result: api.CheckResult{Output: "CHECKS  ✔ 1 passed\n✔ " + flakyTraceTest + " 1.0s OK\n"}})
+	control, controlStream, controlRepository := newFlakeFixture(t, "flake-announce-control", fixturekit.CheckOutcome{Result: api.CheckResult{Output: "CHECKS  ✔ 1 passed\n✔ " + flakyTraceTest + " 1.0s OK\n"}})
 	control.s.cfg.Project.FlakeFixes = false
 	runChecks(t, control.s, controlRepository, controlStream)
 	want := unitHistory(t, controlRepository, controlStream)

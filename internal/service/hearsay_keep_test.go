@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,8 +20,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// restart stands in for a service restart: a new service over the same
-// configuration, with the project's trace opened afresh.
 func (f *publisherFixture) restart() {
 	f.t.Helper()
 	f.s = &Service{cfg: f.s.current(), memory: hearsay.Health{}}
@@ -28,25 +28,22 @@ func (f *publisherFixture) restart() {
 	}
 }
 
-// cleanup is archive cleanup of stream's trace: what it holds of pending
-// publication is kept, then the trace is moved aside and removed.
 func (f *publisherFixture) cleanup(stream config.WorkstreamID) {
 	f.t.Helper()
 	ctx := context.Background()
-	must(f.t, f.s.keepForCleanup(ctx, f.repo, stream))
+	intakefixture.Must(f.t, f.s.keepForCleanup(ctx, f.repo, stream))
 	moved, err := f.repo.MarkWorkstreamTraceForDeletion(stream)
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	if !moved {
 		f.t.Fatalf("the trace of %s was not moved aside", stream)
 	}
-	must(f.t, trace.FinishWorkstreamTraceDeletion(f.cfg.Root, f.repo.Project(), stream))
+	intakefixture.Must(f.t, trace.FinishWorkstreamTraceDeletion(f.cfg.Root, f.repo.Project(), stream))
 }
 
-// keptKeys are the artifacts the trace still has to post, sorted.
 func (f *publisherFixture) keptKeys() []string {
 	f.t.Helper()
 	kept, err := f.repo.HearsayKept()
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	var out []string
 	for _, k := range kept {
 		if !k.Released {
@@ -61,16 +58,14 @@ func (f *publisherFixture) recordMerge(stream config.WorkstreamID) {
 	f.t.Helper()
 	record := api.DeliveryPublication{Status: "opened", Upstream: "o/r", Base: "main", Branch: "feature", Commit: "tip", PullRequest: 7, URL: "https://github.com/o/r/pull/7", Title: "Title", Description: "PR-BODY-NEVER-SENT"}
 	data, err := json.Marshal(record)
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, "final-publication", 1, "final/publication.json", string(data), hr(10), ownerActor)
 	out, err := json.Marshal(map[string]any{"pull_request": 7, "outcome": "merged", "merge_commit": "m"})
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, "own-pull-request-outcome", 1, "own-pull-request-outcome.json", string(out), hr(11), ownerActor)
 	f.setFeature(stream, "delivered", "delivered", "delivered", hr(12))
 }
 
-// decideWork records a seal, an owner ruling on an escalated question and a
-// chief logged assumption for stream.
 func (f *publisherFixture) decideWork(stream config.WorkstreamID) {
 	f.t.Helper()
 	f.recordSeal(stream, 1, "# Upload limits\n\nCap uploads at 10 MiB.\n")
@@ -81,8 +76,6 @@ func (f *publisherFixture) decideWork(stream config.WorkstreamID) {
 	f.document(stream, trace.AssumptionsDocument, 1, trace.AssumptionsPath, content, hr(6), chiefActor)
 }
 
-// down closes the hooks fake, which refuses connections from then on, and
-// returns a function that brings it back at the same address.
 func (f *publisherFixture) down() (recover func()) {
 	f.t.Helper()
 	addr := f.hooks.Listener.Addr().String()
@@ -130,7 +123,6 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 			t.Fatalf("kept %v, want %v", kept, wantKept)
 		}
 	}
-	// Still down after the cleanup: nothing is sent, and nothing is lost.
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("posted while down: %v", kinds(posts))
 	}
@@ -171,7 +163,6 @@ func TestCleanupKeepsPendingPublicationThroughAnOutageAndARestart(t *testing.T) 
 	if left := f.keptKeys(); len(left) != 0 {
 		t.Fatalf("kept after they were posted: %v", left)
 	}
-	// Later passes, and later restarts, send nothing more.
 	for range 2 {
 		if again, _ := f.pass(); len(again) != 0 {
 			t.Fatalf("reposted: %v", kinds(again))
@@ -204,7 +195,6 @@ func TestKeptRecordsPostWhatTheLiveTraceWould(t *testing.T) {
 			p.Body["project"] = ""
 			delete(p.Body, "updated_at")
 			delete(p.Body, "created_at")
-			// The assumption's id and the project differ by fixture run.
 			raw, _ := json.Marshal(p.Body)
 			out = append(out, p.Source+" "+string(raw))
 		}
@@ -252,7 +242,6 @@ func TestCleanupKeepsOnlyWhatIsNotPostedAtItsCurrentDigest(t *testing.T) {
 	if posts, _ := f.pass(); len(posts) == 0 {
 		t.Fatal("nothing was posted")
 	}
-	// Everything is posted: cleanup keeps nothing.
 	f.cleanup(stream)
 	if kept := f.keptKeys(); len(kept) != 0 {
 		t.Fatalf("kept %v although everything was posted", kept)
@@ -261,7 +250,6 @@ func TestCleanupKeepsOnlyWhatIsNotPostedAtItsCurrentDigest(t *testing.T) {
 		t.Fatalf("posted after cleanup: %v", kinds(posts))
 	}
 
-	// A second seal the outage held back is the only revision kept.
 	g := newPublisherFixture(t)
 	fixturekit.RecordHanded(t, g.repo, stream, "stdin", fixturekit.DemoStart)
 	g.recordSeal(stream, 1, "# Upload limits\n\nCap uploads at 10 MiB.\n")
@@ -270,11 +258,11 @@ func TestCleanupKeepsOnlyWhatIsNotPostedAtItsCurrentDigest(t *testing.T) {
 	recoverHooks := g.down()
 	g.cleanup(stream)
 	kept, err := g.repo.HearsayKept()
-	must(t, err)
+	intakefixture.Must(t, err)
 	var doc hearsay.Record
 	for _, k := range kept {
 		if strings.HasSuffix(k.Key, "-spec") {
-			must(t, json.Unmarshal(k.Data, &doc))
+			intakefixture.Must(t, json.Unmarshal(k.Data, &doc))
 		}
 	}
 	if len(doc.Versions) != 1 || !strings.Contains(doc.Versions[0].Body, "20 MiB") {
@@ -302,7 +290,7 @@ func TestKeptRecordsHoldOnlyEligibleContent(t *testing.T) {
 	f.cleanup(stream)
 
 	docs, err := trace.Read[trace.Document](f.repo, "")
-	must(t, err)
+	intakefixture.Must(t, err)
 	n := 0
 	for _, d := range docs {
 		if !strings.HasPrefix(d.ID, "hearsay-kept-") {
@@ -342,11 +330,9 @@ func TestCleanupBeforePublishingWasConfiguredLeavesNothingToBackfill(t *testing.
 		t.Fatalf("cleanup wrote %d documents while publishing was off", after-before)
 	}
 
-	// Publishing is configured afterwards: the cleaned workstream is not
-	// reconstructed.
 	f.cfg.Hearsay.Publish = &config.HearsayPublish{WorkSource: "osmia-work", OwnerSource: "osmia-owner", HooksURL: f.hooks.URL, Agent: "osmia-publisher", TokenEnv: "PUBLISH_TEST_TOKEN"}
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	posts := f.hooks.take()
 	if len(res.Failures) != 0 || len(posts) == 0 {
 		t.Fatalf("backfill: %+v %v", res, kinds(posts))
@@ -361,7 +347,7 @@ func TestCleanupBeforePublishingWasConfiguredLeavesNothingToBackfill(t *testing.
 func documentCount(t *testing.T, repo *trace.Repository) int {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, "")
-	must(t, err)
+	intakefixture.Must(t, err)
 	return len(docs)
 }
 
@@ -376,10 +362,9 @@ func TestRemovalIsKeptAndPostedOnceAfterARestartWithTheProjectInactive(t *testin
 	if err := f.s.keepForRemoval(context.Background(), f.repo); err != nil {
 		t.Fatal(err)
 	}
-	must(t, f.repo.Close())
+	intakefixture.Must(t, f.repo.Close())
 	f.s.cfg = f.cfg.WithoutProjectID(project)
 	f.repo = nil
-	// The service runs on with the project gone and Hearsay down.
 	if !f.s.publishRemovedPass(context.Background()) {
 		t.Fatal("an unreachable Hearsay did not back the removed project off")
 	}
@@ -397,7 +382,6 @@ func TestRemovalIsKeptAndPostedOnceAfterARestartWithTheProjectInactive(t *testin
 	if len(removals) != 1 || removals[0].Source != "osmia-work" || removals[0].str("status") != "removed" || removals[0].str("state") != "abandoned" || removals[0].str("author") != "owner" || removals[0].Body["repos"] != nil {
 		t.Fatalf("removal: %v", removals)
 	}
-	// The project is posted before the records under it.
 	if posts[0].str("kind") != "project" {
 		t.Fatalf("order: %v", kinds(posts))
 	}
@@ -409,7 +393,6 @@ func TestRemovalIsKeptAndPostedOnceAfterARestartWithTheProjectInactive(t *testin
 	if len(postsAbout(posts, "decision", "project", string(project))) != 2 {
 		t.Fatalf("decisions: %v", kinds(posts))
 	}
-	// Later passes, in this lifetime and after another restart, send nothing.
 	for range 2 {
 		f.s.publishRemovedPass(context.Background())
 		if again := f.hooks.take(); len(again) != 0 {
@@ -425,8 +408,8 @@ func TestRemovalOfAPostedProjectPostsOnlyTheRemoval(t *testing.T) {
 	f.pass()
 	project := f.repo.Project()
 	recoverHooks := f.down()
-	must(t, f.s.keepForRemoval(context.Background(), f.repo))
-	must(t, f.repo.Close())
+	intakefixture.Must(t, f.s.keepForRemoval(context.Background(), f.repo))
+	intakefixture.Must(t, f.repo.Close())
 	f.s.cfg = f.cfg.WithoutProjectID(project)
 	f.repo = nil
 	f.restart()
@@ -446,23 +429,19 @@ func TestRemovalWritesNothingWithoutPublishing(t *testing.T) {
 	f := newPublisherFixture(t, func(c *config.Config) { c.Hearsay.Publish = nil })
 	fixturekit.RecordHanded(t, f.repo, fixturekit.Stream, "stdin", fixturekit.DemoStart)
 	before := documentCount(t, f.repo)
-	must(t, f.s.keepForRemoval(context.Background(), f.repo))
-	must(t, f.s.keepForCleanup(context.Background(), f.repo, fixturekit.Stream))
+	intakefixture.Must(t, f.s.keepForRemoval(context.Background(), f.repo))
+	intakefixture.Must(t, f.s.keepForCleanup(context.Background(), f.repo, fixturekit.Stream))
 	if after := documentCount(t, f.repo); after != before {
 		t.Fatalf("%d documents were written", after-before)
 	}
 	f.s.cfg = f.cfg.WithoutProjectID(f.repo.Project())
-	must(t, f.repo.Close())
+	intakefixture.Must(t, f.repo.Close())
 	if f.s.publishRemovedPass(context.Background()) || len(f.hooks.take()) != 0 {
 		t.Fatal("a removed project was published without publishing configured")
 	}
 }
 
-// A removed project's removal is posted by the service after a restart, with
-// the project no longer active, once Hearsay is back; the removal itself did
-// not wait for Hearsay while it was down.
 func TestRemovedProjectIsPostedByTheServiceAfterARestart(t *testing.T) {
-	// serial: sets the publisher's token in the process environment.
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
 	opts, clone := projectFixture(t)
 	hooks := newHooksFake(t)
@@ -470,7 +449,7 @@ func TestRemovedProjectIsPostedByTheServiceAfterARestart(t *testing.T) {
 	hooks.Close()
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	text, err := os.ReadFile(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	text = append(text, []byte(fmt.Sprintf(`
 [hearsay]
 url = "https://memory.example"
@@ -496,38 +475,37 @@ hooks_url = "http://%s"
 agent = "osmia-publisher"
 token_env = "PUBLISH_TEST_TOKEN"
 `, addr))...)
-	must(t, os.WriteFile(path, text, 0600))
+	intakefixture.Must(t, os.WriteFile(path, text, 0600))
 
 	ctx := context.Background()
+	var passes atomic.Int64
+	opts.hearsayPassed = func() { passes.Add(1) }
 	s, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	c := NewClient(s.Socket())
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	intakefixture.Must(t, err)
 	id := added.Project.ID
 	started := time.Now()
 	_, err = c.RemoveProject(ctx, id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if took := time.Since(started); took > 10*time.Second {
 		t.Fatalf("removal took %s with Hearsay down", took)
 	}
 	c.Close()
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 
 	hooks = newHooksFakeOn(t, addr)
+	passes.Store(0)
 	s, err = Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { s.Close() })
 	var posts []hooksPost
-	deadline := time.Now().Add(20 * time.Second)
-	for len(postsAbout(posts, "project", "status", "removed")) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("the removal was not posted: %v", kinds(posts))
-		}
-		time.Sleep(50 * time.Millisecond)
+	intakefixture.Soon(t, "the removal to be posted", func() bool {
 		posts = append(posts, hooks.take()...)
-	}
-	time.Sleep(300 * time.Millisecond)
+		return len(postsAbout(posts, "project", "status", "removed")) > 0
+	})
+	intakefixture.Soon(t, "the removal pass to finish", func() bool { return passes.Load() > 0 })
 	posts = append(posts, hooks.take()...)
 	if removals := postsAbout(posts, "project", "project", string(id)); len(removals) != 1 || removals[0].str("state") != "abandoned" {
 		t.Fatalf("removals: %v", kinds(posts))
@@ -535,12 +513,12 @@ token_env = "PUBLISH_TEST_TOKEN"
 	if charter := postsAbout(posts, "document", "document", "charter"); len(charter) == 0 {
 		t.Fatalf("the project's pending charter was not posted with it: %v", kinds(posts))
 	}
-	// Another restart sends nothing more.
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
+	passes.Store(0)
 	s, err = Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { s.Close() })
-	time.Sleep(500 * time.Millisecond)
+	intakefixture.Soon(t, "the removal pass to finish", func() bool { return passes.Load() > 0 })
 	if again := hooks.take(); len(again) != 0 {
 		t.Fatalf("reposted after another restart: %v", kinds(again))
 	}

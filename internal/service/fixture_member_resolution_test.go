@@ -11,7 +11,7 @@ import (
 
 func resolutionDocument(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id, path string, value any) {
 	t.Helper()
-	fixturekit.ResolutionDocument(t, repo, stream, id, path, value, demoStart, ownerActor)
+	fixturekit.ResolutionDocument(t, repo, stream, id, path, value, fixturekit.DemoStart, ownerActor)
 }
 
 func recordResolutionMerge(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) {

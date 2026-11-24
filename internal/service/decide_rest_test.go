@@ -16,11 +16,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// restDocuments returns the revisions recorded of a document in the stream.
 func restDocuments(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var out []trace.Document
 	for _, d := range docs {
 		if d.ID == id {
@@ -30,8 +29,6 @@ func restDocuments(t *testing.T, repo *trace.Repository, stream config.Workstrea
 	return out
 }
 
-// amendmentKit is a chief-of-staff turn with the decide and decide_amendment
-// tools over a workstream with amendment 1 presented, and Jev answering p.
 type amendmentKit struct {
 	f        *shedFixture
 	stream   config.WorkstreamID
@@ -47,7 +44,7 @@ func newAmendmentKit(t *testing.T, p *gateJev, spec, graph string) *amendmentKit
 	presentAmendment(t, f, stream, masonRole, spec, graph)
 	f.stop(t)
 	repo, err := trace.Open(f.s.current().Root, f.s.current().Project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { _ = repo.Close() })
 	f.s.setSole(&activeProject{repository: repo})
 	f.s.jev = gateJudge(f.clock.Now, p)
@@ -77,14 +74,10 @@ func (k *amendmentKit) decisions(t *testing.T) []trace.Document {
 	return restDocuments(t, k.repo, k.stream, intake.AmendmentDecisionID("1"))
 }
 
-// A confident pick for a plan-only amendment binds decide_amendment: it is
-// refused before decide, with another amendment's result and for the other
-// outcome, and records Jev's decision, with the chief of staff's note and the
-// judgment, for the picked one.
 func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
-	k := newAmendmentKit(t, p, validSpec, amendedPlan)
+	k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
 	if out := intakefixture.Handle(t, k.amend, approveAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 		t.Fatalf("decide_amendment before decide: %s", out)
 	}
@@ -123,7 +116,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 		t.Fatalf("decision records %+v", docs)
 	}
 	var recorded struct{ Decision, Actor, Judgment, Note string }
-	must(t, json.Unmarshal([]byte(docs[0].Content), &recorded))
+	intakefixture.Must(t, json.Unmarshal([]byte(docs[0].Content), &recorded))
 	if recorded.Decision != "approve" || recorded.Actor != trace.DecidedByJev || recorded.Judgment != judgment || judgment == "" || !strings.Contains(recorded.Note, "preserves the approved upload outcome") {
 		t.Fatalf("decision %+v (judgment %q)", recorded, judgment)
 	}
@@ -138,10 +131,7 @@ func TestAConfidentPlanAmendmentPickBindsDecideAmendment(t *testing.T) {
 func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95}
-	k := newAmendmentKit(t, p, amendedSpec, validPlan)
-	// The service that planted the amendment was still running when it was
-	// presented, and may have judged it already; only decide's own refusal is
-	// under test, so count what exists once the service has stopped.
+	k := newAmendmentKit(t, p, amendedSpec, intakefixture.ValidPlan)
 	_, before := judgments(t, k.repo, k.stream)
 	out := intakefixture.Handle(t, k.decide, decideAmendmentInput)
 	if !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "owner") {
@@ -161,13 +151,13 @@ func TestDecideRefusesAnAmendmentThatChangesIntent(t *testing.T) {
 
 // A pick below the threshold and an unconfigured Jev leave a plan-only
 // amendment to the chief of staff: decide says so and decide_amendment takes
-// either decision as it did.
+// either decision.
 func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			k := newAmendmentKit(t, p, validSpec, amendedPlan)
+			k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
 			if out := intakefixture.Handle(t, k.amend, rejectAmendment); !strings.Contains(out, `"recorded":false`) || !strings.Contains(out, "call decide") {
 				t.Fatalf("decide_amendment before decide: %s", out)
 			}
@@ -185,13 +175,10 @@ func TestAPlanAmendmentDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T
 	}
 }
 
-// A binding pick the service refused leaves the amendment with the owner,
-// carrying Jev's judgment: its card is listed with that judgment, the chief of
-// staff can no longer decide it, and Jev is not asked again.
 func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(string, []string) string { return "approve" }}
-	k := newAmendmentKit(t, p, validSpec, amendedPlan)
+	k := newAmendmentKit(t, p, intakefixture.ValidSpec, amendedPlan)
 	if _, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1"); err != nil || open {
 		t.Fatalf("the chief of staff's amendment is listed for the owner: %v %v", open, err)
 	}
@@ -199,7 +186,7 @@ func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 		t.Fatalf("decide: %s", out)
 	}
 	judgment, _, _ := decisionJudgment(t, k.repo, k.stream, jev.KindPlanAmendment, jev.AmendmentKey("1"))
-	must(t, k.f.s.jev.Refuse(context.Background(), k.repo, k.stream, judgment, "the sealed plan moved"))
+	intakefixture.Must(t, k.f.s.jev.Refuse(context.Background(), k.repo, k.stream, judgment, "the sealed plan moved"))
 	card, open, err := k.f.s.intake().AmendmentEntry(k.repo, k.stream, "1")
 	if err != nil || !open || card.Jev == nil || !card.Jev.Binding || card.Jev.Pick != "approve" || card.Jev.Judgment != judgment {
 		t.Fatalf("card %+v open %v: %v", card, open, err)
@@ -217,8 +204,6 @@ func TestAPlanAmendmentPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	}
 }
 
-// discoveryKit is a chief-of-staff turn with the decide and record_discovery
-// tools over a workstream with one open discovery.
 type discoveryKit struct {
 	c        *contestFixture
 	record   coreadapter.Tool
@@ -233,7 +218,7 @@ func newDiscoveryKit(t *testing.T, key string, p *gateJev) *discoveryKit {
 	c.f.s.jev = gateJudge(c.f.clock.Now, p)
 	k := &discoveryKit{c: c, record: recordDiscovery(c.repo, c.scope, c.f.s.now), decide: c.controls.decide(c.repo, c.scope), provider: p}
 	var created struct{ ID string }
-	must(t, json.Unmarshal([]byte(intakefixture.Handle(t, k.record, `{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`)), &created))
+	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, k.record, `{"key":"repair-fake","description":"Update the dependent fake for the new protocol","criterion":"spec#1"}`)), &created))
 	k.id = created.ID
 	return k
 }
@@ -257,16 +242,12 @@ func (k *discoveryKit) requests() int {
 func (k *discoveryKit) discovery(t *testing.T) workDiscovery {
 	t.Helper()
 	all, err := discoveries(k.c.repo, k.c.stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	return all[k.id]
 }
 
 const declineFields = `"disposition":"declined","reason":"The existing fake already covers this behavior."`
 
-// A confident pick binds the chief of staff's disposition of a discovery: it is
-// refused before decide, with another discovery's result and for the other
-// dispositions, and recorded as Jev's, with the chief of staff's reasoning, for
-// the picked one. Deciding a disposed discovery asks nothing more.
 func TestAConfidentDiscoveryPickBindsTheDisposition(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "decline" }}
@@ -334,10 +315,6 @@ func TestADiscoveryCannotNameItsDecider(t *testing.T) {
 	}
 }
 
-// A pick the service refuses to carry out, here an assignment to a unit that
-// does not exist, leaves the discovery open and puts it in the owner's inbox
-// with Jev's judgment. Jev is not asked again, and the chief of staff cannot
-// dispose of it.
 func TestADiscoveryPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 	t.Parallel()
 	p := &gateJev{confidence: 0.95, pick: func(_ string, options []string) string { return "assign" }}
@@ -375,8 +352,7 @@ func TestADiscoveryPickTheServiceRefusedReachesTheOwner(t *testing.T) {
 }
 
 // A pick below the threshold and an unconfigured Jev leave a discovery's
-// disposition to the chief of staff, who then records any disposition valid
-// today.
+// disposition to the chief of staff, who then records any valid disposition.
 func TestADiscoveryDecisionThatIsNotConfidentLeavesTheChiefFree(t *testing.T) {
 	t.Parallel()
 	for name, p := range map[string]*gateJev{"below the threshold": {confidence: 0.5}, "unconfigured": nil} {

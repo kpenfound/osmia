@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 	"time"
@@ -14,13 +15,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// probeExit is an exit of the unit resume that asks Jev between leaving the unit
-// where it is, the default, and starting more work on it. Neither target moves
-// the unit, so any number of probes of one state are told apart by their cause.
 func probeExit(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, cause string) router.Exit {
 	t.Helper()
 	state, err := repository.Workflow(stream, trace.UnitSubject("resume"))
-	must(t, err)
+	intakefixture.Must(t, err)
 	return router.Exit{
 		Repo: repository, Project: f.project, Workstream: stream, Unit: "resume", Machine: "probe",
 		Subject: trace.UnitSubject("resume"), From: state.Value, Version: state.Version,
@@ -33,8 +31,6 @@ func probeExit(t *testing.T, f *shedFixture, repository *trace.Repository, strea
 	}
 }
 
-// routeProbe routes a probe through the service's router, which asks a Jev that
-// answers as p does, a minute after the last thing the fixture did.
 func routeProbe(t *testing.T, f *shedFixture, repository *trace.Repository, stream config.WorkstreamID, p *jevfixture.Transitions, cause string) router.Result {
 	t.Helper()
 	f.s.router.Judge = jevfixture.TransitionJudge(f.clock.Now, p)
@@ -42,18 +38,16 @@ func routeProbe(t *testing.T, f *shedFixture, repository *trace.Repository, stre
 	f.clock.At = f.clock.At.Add(time.Minute)
 	f.clock.Mu.Unlock()
 	res, err := f.s.RouteExit(context.Background(), probeExit(t, f, repository, stream, cause))
-	must(t, err)
+	intakefixture.Must(t, err)
 	return res
 }
 
-// sessionsOf counts the agent sessions the loop guard has counted for the
-// workstream since its last progress.
 func sessionsOf(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) int {
 	t.Helper()
 	since, _, err := lastProgress(repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	costs, err := trace.Read[trace.Cost](repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	return sessionsSince(costs, stream, since)
 }
 
@@ -80,7 +74,7 @@ func TestJevRoutedMovesCountTowardTheLoopGuard(t *testing.T) {
 			t.Fatalf("exit %d: result %+v, %d sessions counted", i, res, sessionsOf(t, repository, stream)-base)
 		}
 	}
-	must(t, g.Pass(ctx))
+	intakefixture.Must(t, g.Pass(ctx))
 	if _, paused := loopPause(f, stream); paused {
 		t.Fatal("the loop guard paused the workstream below the limit")
 	}
@@ -88,22 +82,18 @@ func TestJevRoutedMovesCountTowardTheLoopGuard(t *testing.T) {
 	if n := sessionsOf(t, repository, stream) - base; n != 3 {
 		t.Fatalf("%d sessions counted for three routed exits", n)
 	}
-	must(t, g.Pass(ctx))
+	intakefixture.Must(t, g.Pass(ctx))
 	pause, paused := loopPause(f, stream)
 	if !paused || !strings.Contains(pause.Reason, fmt.Sprintf("reaching loop.max_sessions (%d)", base+3)) {
 		t.Fatalf("the loop guard's pause %+v %v", pause, paused)
 	}
 }
 
-// A held exit and a followed default move nothing, so they are no progress: the
-// sessions they cost keep counting toward the loop guard instead of starting its
-// count over.
 func TestRoutedExitsThatMoveNothingAreNoProgress(t *testing.T) {
 	t.Parallel()
 	f, stream, repository := newReviewFixture(t, "loop-guard-no-progress")
 	before, what, err := lastProgress(repository, stream)
-	must(t, err)
-	// Jev finds the default does not fit but its pick is below the bar: held.
+	intakefixture.Must(t, err)
 	held := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, "work", 0.55, 0.9) }}
 	if res := routeProbe(t, f, repository, stream, held, "probe-held"); res.Committed || res.Outcome != router.OutcomeHeld {
 		t.Fatalf("result %+v", res)
@@ -112,7 +102,7 @@ func TestRoutedExitsThatMoveNothingAreNoProgress(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 	after, now, err := lastProgress(repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !after.Equal(before) || now != what {
 		t.Fatalf("a routed exit that moved nothing counted as progress: %s %q, was %s %q", after, now, before, what)
 	}
@@ -141,7 +131,7 @@ func TestAnExhaustedBudgetStopsAJevPickedMove(t *testing.T) {
 		t.Parallel()
 		f, stream, repository := newReviewFixture(t, "budget-spent")
 		openRuntime(t, f, stream)
-		must(t, f.s.store.SetPause(runtime.Pause{Target: workstreamTarget(f, stream), Mode: "soft", Reason: "the daily budget is spent", Source: runtime.PauseDailyBudget, SetAt: f.clock.Now()}))
+		intakefixture.Must(t, f.s.store.SetPause(runtime.Pause{Target: workstreamTarget(f, stream), Mode: "soft", Reason: "the daily budget is spent", Source: runtime.PauseDailyBudget, SetAt: f.clock.Now()}))
 		p := departs()
 		res := routeProbe(t, f, repository, stream, p, "probe-spent")
 		if !res.Committed || res.Target != "keep" || res.Outcome != router.OutcomeFollowed || len(p.TransitionRequests()) != 0 {
@@ -163,7 +153,7 @@ func TestAnExhaustedBudgetStopsAJevPickedMove(t *testing.T) {
 		}
 		var notices []string
 		outbox, err := repository.Outbox(stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		for _, e := range outbox {
 			if strings.HasPrefix(e.TransitionID, "route-") && strings.HasSuffix(e.TransitionID, "-refused") {
 				notices = append(notices, e.Event.Body)
@@ -189,7 +179,6 @@ func TestTheLoopGuardsLimitStopsAJevPickedMoveBeforeItsPass(t *testing.T) {
 	if !res.Committed || res.Target != "keep" || res.Outcome != router.OutcomeFollowed || len(p.TransitionRequests()) != 0 {
 		t.Fatalf("result %+v, %d requests", res, len(p.TransitionRequests()))
 	}
-	// The same limit lifted: the pick is on offer again.
 	f.s.cfg.Loop.MaxSessions = 0
 	q := &jevfixture.Transitions{Script: func(a jevfixture.Ask) jevfixture.Reply { return jevfixture.Departs(a, "work", 0.95, 0.95) }}
 	if res := routeProbe(t, f, repository, stream, q, "probe-lifted"); res.Target != "work" || res.Outcome != router.OutcomeDeparted {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,19 +19,19 @@ import (
 
 func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testing.T) {
 	t.Parallel()
-	f, masons, _ := newParallelMasonFixtureCounting(t, 1, 4, reliabilityPlan)
+	f, masons, _ := newParallelMasonFixtureCounting(t, 1, 4, intakefixture.ReliabilityPlan)
 	defer f.stop(t)
 	f.stop(t)
 	path := filepath.Join(f.opts.Config.Root, "config.toml")
 	configText, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(configText, []byte("\n[budget]\nper_day = \"1.00\"\n")...), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, append(configText, []byte("\n[budget]\nper_day = \"1.00\"\n")...), 0600))
 	f.opts.Location = time.UTC
 	f.start(t)
 
 	release := make(chan struct{})
 	masons.Mu.Lock()
-	masons.Play[masonTurnID("upload")] = reportDone("Chunks are sent")
+	masons.Play[masonTurnID("upload")] = intakefixture.ReportDone("Chunks are sent")
 	masons.Mu.Unlock()
 	f.engine.Mu.Lock()
 	f.engine.Turns[masonTurnID("upload")] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
@@ -49,8 +50,6 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	stream, _ := f.builtAs(t, "budget-admission")
 	f.awaitUnit(t, stream, "upload", UnitImplementing)
 
-	// Let the turn complete after this pass's budget observation and before
-	// its mason step. Completing the turn must remain independent of the pass.
 	_, projects := f.s.runtimes()
 	active := projects[0]
 	next := *active.pipeline.current.Load()
@@ -64,7 +63,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 					return err
 				}
 				close(release)
-				timer := time.NewTimer(demoTimeout)
+				timer := time.NewTimer(intakefixture.DemoTimeout)
 				defer timer.Stop()
 				tick := time.NewTicker(time.Millisecond)
 				defer tick.Stop()
@@ -101,7 +100,7 @@ func TestDailyBudgetHoldsAdmissionAfterAMasonCompletesDuringScheduling(t *testin
 	f.repository().WakeWorkflow()
 	select {
 	case <-checked:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("mason admission did not complete")
 	}
 	want := f.deferred(t, stream, "audit", UnitDispatch{Reason: DeferPaused, Pause: &runtime.Pause{Target: factoryTarget}, Message: "Waits while a factory pause is in force, set by daily-budget."})

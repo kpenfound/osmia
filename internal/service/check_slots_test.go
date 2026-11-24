@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"sync"
 	"testing"
 
@@ -13,11 +14,9 @@ func TestCheckSlotsCancellationAndAdmissionRace(t *testing.T) {
 	for range 100 {
 		p := &checkSlotPool{limit: 1}
 		holder, err := p.acquire(context.Background(), CheckSlotRun{Unit: "holder"})
-		must(t, err)
+		intakefixture.Must(t, err)
 		ctx, cancel := context.WithCancel(context.Background())
 		next := queuedSlot(ctx, p, CheckSlotRun{Unit: "cancelled"})
-		// Cancellation may race with the return of capacity, including an
-		// already-granted slot whose caller has not observed ready yet.
 		var wg sync.WaitGroup
 		wg.Go(cancel)
 		wg.Go(holder)

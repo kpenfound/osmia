@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"reflect"
 	"slices"
 	"testing"
@@ -19,20 +20,18 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// roleCapacity returns the role's entry of the capacity view.
-func roleCapacity(t *testing.T, c *CapacityStatus, role string) RoleCapacity {
-	return fixturekit.RoleCapacityEntry(t, c, role)
+type capacityRig struct {
+	t     *testing.T
+	s     *Service
+	repo  *trace.Repository
+	clock *fixturekit.DemoClock
 }
 
-// Status reports the slots in use of each shared role kind and the queued
-// turns waiting for one as the project's scheduler pass published them, and
-// the deferred ready units waiting for one; work a pause holds waits for no
-// slot, while its turn in flight keeps its slot.
-func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
-	t.Parallel()
+func newCapacityRig(t *testing.T) *capacityRig {
+	t.Helper()
 	ctx := context.Background()
 	s, _, repo, clock := dailyBudgetService(t, 0, &adaptertest.Turns{})
-	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{stream, sibling}}}))
+	intakefixture.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{intakefixture.Stream, sibling}}}))
 	cfg := *s.cfg
 	cfg.Capacity = config.Capacity{Masons: 1, Reviewers: 1, Committee: 3, PerWorkstream: 5}
 	cfg.Project.Capacity.PerWorkstream = 2
@@ -40,94 +39,152 @@ func TestStatusReportsCapacityAndWhoWaits(t *testing.T) {
 	for _, turn := range []struct {
 		stream      config.WorkstreamID
 		agent, role string
-	}{{stream, "mason-1", masonRole}, {stream, "mason-2", masonRole}, {stream, "mason-3", masonRole}, {stream, "r1", reviewerRole}, {stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
-		queueRoleTurn(t, repo, turn.stream, turn.agent, turn.role, "u-"+turn.agent, clock.Now())
+	}{{intakefixture.Stream, "mason-1", masonRole}, {intakefixture.Stream, "mason-2", masonRole}, {intakefixture.Stream, "mason-3", masonRole}, {intakefixture.Stream, "r1", reviewerRole}, {intakefixture.Stream, "c1", committeeRole}, {sibling, "s1", masonRole}} {
+		fixturekit.QueueRoleTurn(t, repo, turn.stream, turn.agent, turn.role, "u-"+turn.agent, clock.Now())
 	}
-	_, err := repo.ClaimTurn(ctx, stream, "mason-1", "token", t.TempDir(), clock.Now())
-	must(t, err)
-
-	// Before the project's first pass, nothing is published.
+	_, err := repo.ClaimTurn(ctx, intakefixture.Stream, "mason-1", "token", t.TempDir(), clock.Now())
+	intakefixture.Must(t, err)
 	s.pool = &scheduler.Shared{}
-	if got := s.statusList(); got.Capacity == nil || roleCapacity(t, got.Capacity, masonRole).Used != 0 || len(roleCapacity(t, got.Capacity, masonRole).Waiting) != 0 {
+	return &capacityRig{t: t, s: s, repo: repo, clock: clock}
+}
+
+func (r *capacityRig) dispatch() {
+	r.t.Helper()
+	dispatch, err := r.s.dispatcher(r.s.cfg, r.repo)
+	intakefixture.Must(r.t, err)
+	intakefixture.Must(r.t, dispatch.Pass(context.Background()))
+}
+
+func (r *capacityRig) siblingWaiting() SlotWait {
+	return SlotWait{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity}
+}
+
+func deferredUnit(unit, reason string) UnitStatus {
+	return UnitStatus{Unit: unit, State: UnitReady, Deferral: &UnitDispatch{Unit: unit, Decision: DispatchDeferred, Reason: reason}}
+}
+
+func (r *capacityRig) deferredList() []WorkstreamStatus {
+	gone := AbandonedState
+	return []WorkstreamStatus{
+		{Project: intakefixture.Project, Workstream: sibling, Units: []UnitStatus{deferredUnit("a", DeferCapacity), deferredUnit("b", DeferEntangled), deferredUnit("c", DeferPriority), deferredUnit("d", DeferWorkstreamCap), deferredUnit("e", DeferPaused)}},
+		{Project: intakefixture.Project, Workstream: intakefixture.Stream, Units: []UnitStatus{deferredUnit("f", DeferCapacity)}},
+		{Project: intakefixture.Project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferredUnit("g", DeferCapacity)}},
+	}
+}
+
+func TestStatusCapacityReportsNothingUsedBeforeTheProjectsFirstPass(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	if got := r.s.statusList(); got.Capacity == nil || fixturekit.RoleCapacityEntry(t, got.Capacity, masonRole).Used != 0 || len(fixturekit.RoleCapacityEntry(t, got.Capacity, masonRole).Waiting) != 0 {
 		t.Fatalf("capacity before the project's pass: %+v", got.Capacity)
 	}
-	dispatch, err := s.dispatcher(s.cfg, repo)
-	must(t, err)
-	must(t, dispatch.Pass(ctx))
-	ops, err := repo.Operations(stream)
-	must(t, err)
+}
 
-	got := s.statusList()
-	// The reviewer takes the free reviewer slot and the workstream's second
-	// slot, so the workstream's masons wait for the workstream; the sibling's
-	// mason waits for mason-1's mason slot. The committee's turns run in shed
-	// rounds and never wait here.
+func TestStatusCapacityReportsTheSlotsInUseAndWhoWaitsForThem(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	got := r.s.statusList()
 	want := &CapacityStatus{PerWorkstream: 2, Roles: []RoleCapacity{
 		{Role: masonRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{
-			{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
-			{Workstream: stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
-			{Workstream: stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
+			r.siblingWaiting(),
+			{Workstream: intakefixture.Stream, Unit: "u-mason-2", Agent: "mason-2", Turn: "mason-2-turn", Reason: DeferWorkstreamCap},
+			{Workstream: intakefixture.Stream, Unit: "u-mason-3", Agent: "mason-3", Turn: "mason-3-turn", Reason: DeferWorkstreamCap}}},
 		{Role: reviewerRole, Used: 1, Limit: fixturekit.Limit(1), Waiting: []SlotWait{}},
 		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
-		{Role: checksRole, Limit: fixturekit.Limit(s.CheckSlots().Limit), Waiting: []SlotWait{}},
+		{Role: checksRole, Limit: fixturekit.Limit(r.s.CheckSlots().Limit), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
 	}
+}
 
-	// Pausing the workstream holds its queued turns, which no longer wait
-	// even before the next pass, and frees nothing: mason-1 is in flight and
-	// keeps its slot.
-	must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: clock.Now()}))
-	got = s.statusList()
-	mason := roleCapacity(t, got.Capacity, masonRole)
-	if mason.Used != 1 || !reflect.DeepEqual(mason.Waiting, []SlotWait{{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity}}) {
+func TestStatusCapacityDropsTheWaitersOfAPausedWorkstream(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
+	got := r.s.statusList()
+	mason := fixturekit.RoleCapacityEntry(t, got.Capacity, masonRole)
+	if mason.Used != 1 || !reflect.DeepEqual(mason.Waiting, []SlotWait{r.siblingWaiting()}) {
 		t.Fatalf("mason capacity with the workstream paused: %+v", mason)
 	}
-	if r := roleCapacity(t, got.Capacity, reviewerRole); len(r.Waiting) != 0 {
-		t.Fatalf("reviewer capacity with the workstream paused: %+v", r)
+	if rv := fixturekit.RoleCapacityEntry(t, got.Capacity, reviewerRole); len(rv.Waiting) != 0 {
+		t.Fatalf("reviewer capacity with the workstream paused: %+v", rv)
 	}
+}
 
-	// A ready unit the mason controller deferred for a slot waits too,
-	// unless a pause now covers its workstream or the workstream is
-	// abandoned; other deferrals do not wait for a slot.
-	deferred := func(unit, reason string) UnitStatus {
-		return UnitStatus{Unit: unit, State: UnitReady, Deferral: &UnitDispatch{Unit: unit, Decision: DispatchDeferred, Reason: reason}}
+func TestStatusCapacityListsDeferredUnitsOfActiveWorkstreamsThatWaitForASlot(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	capacity := r.s.capacityStatus(r.deferredList())
+	var got []SlotWait
+	for _, wait := range fixturekit.RoleCapacityEntry(t, capacity, masonRole).Waiting {
+		if wait.Agent == "" {
+			got = append(got, wait)
+		}
 	}
-	gone := AbandonedState
-	list := []WorkstreamStatus{
-		{Project: project, Workstream: sibling, Units: []UnitStatus{deferred("a", DeferCapacity), deferred("b", DeferEntangled), deferred("c", DeferPriority), deferred("d", DeferWorkstreamCap), deferred("e", DeferPaused)}},
-		{Project: project, Workstream: stream, Units: []UnitStatus{deferred("f", DeferCapacity)}},
-		// An abandoned workstream keeps its units' last deferral but never
-		// starts them.
-		{Project: project, Workstream: "w_00000000000000000000000000000abc", State: &gone, Units: []UnitStatus{deferred("g", DeferCapacity)}},
-	}
-	capacity := s.capacityStatus(list)
-	if got, want := roleCapacity(t, capacity, masonRole).Waiting, []SlotWait{
-		{Workstream: sibling, Unit: "u-s1", Agent: "s1", Turn: "s1-turn", Reason: DeferCapacity},
+	want := []SlotWait{
 		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
 		{Workstream: sibling, Unit: "c", Reason: DeferPriority},
 		{Workstream: sibling, Unit: "d", Reason: DeferWorkstreamCap},
-	}; !reflect.DeepEqual(got, want) {
+		{Workstream: intakefixture.Stream, Unit: "f", Reason: DeferCapacity},
+	}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mason waiting with deferred units\n%+v\nwant\n%+v", got, want)
 	}
+}
 
-	// A factory pause holds everything.
-	must(t, s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: clock.Now()}))
-	capacity = s.capacityStatus(list)
-	for _, r := range capacity.Roles {
-		if len(r.Waiting) != 0 {
-			t.Fatalf("%s waits under a factory pause: %+v", r.Role, r.Waiting)
+func TestStatusCapacityDropsTheDeferredUnitsOfAPausedWorkstream(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Hold", SetAt: r.clock.Now()}))
+	capacity := r.s.capacityStatus(r.deferredList())
+	var got []SlotWait
+	for _, wait := range fixturekit.RoleCapacityEntry(t, capacity, masonRole).Waiting {
+		if wait.Agent == "" {
+			got = append(got, wait)
 		}
 	}
-	if roleCapacity(t, capacity, masonRole).Used != 1 {
+	want := []SlotWait{
+		{Workstream: sibling, Unit: "a", Reason: DeferCapacity},
+		{Workstream: sibling, Unit: "c", Reason: DeferPriority},
+		{Workstream: sibling, Unit: "d", Reason: DeferWorkstreamCap},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deferred units waiting with the workstream paused\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestStatusCapacityShowsNoWaitersUnderAFactoryPauseButKeepsTheSlotInFlight(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "factory"}, Mode: "soft", Source: runtime.PauseOwner, Reason: "Travelling", SetAt: r.clock.Now()}))
+	capacity := r.s.capacityStatus(r.deferredList())
+	for _, role := range capacity.Roles {
+		if len(role.Waiting) != 0 {
+			t.Fatalf("%s waits under a factory pause: %+v", role.Role, role.Waiting)
+		}
+	}
+	if fixturekit.RoleCapacityEntry(t, capacity, masonRole).Used != 1 {
 		t.Fatalf("the turn in flight lost its slot: %+v", capacity)
 	}
+}
 
-	// Reading the capacity dispatched nothing.
-	after, err := repo.Operations(stream)
-	must(t, err)
+func TestReadingCapacityPublishesNoOperations(t *testing.T) {
+	t.Parallel()
+	r := newCapacityRig(t)
+	r.dispatch()
+	ops, err := r.repo.Operations(intakefixture.Stream)
+	intakefixture.Must(t, err)
+	r.s.statusList()
+	r.s.capacityStatus(r.deferredList())
+	after, err := r.repo.Operations(intakefixture.Stream)
+	intakefixture.Must(t, err)
 	if len(after) != len(ops) {
 		t.Fatalf("reading the capacity published %d operations", len(after)-len(ops))
 	}
@@ -152,13 +209,14 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 	}
 }
 
-// Provider usage sums today's known costs by the provider of the attempt each
-// records, flags a lower bound when a cost is unknown, keeps costs without a
-// recorded attempt apart, and names the limit in force and the roles it
-// moved to a fallback profile or paused; the sums agree with the daily
-// budget.
-func TestStatusReportsProviderUsage(t *testing.T) {
-	t.Parallel()
+type providerUsageRig struct {
+	s     *Service
+	clock *fixturekit.DemoClock
+	limit runtime.ProviderLimit
+}
+
+func newProviderUsageRig(t *testing.T) *providerUsageRig {
+	t.Helper()
 	ctx := context.Background()
 	usage := func(cost float64, known bool) adaptertest.Reply[coreadapter.SessionResult] {
 		return adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Done", Usage: coreadapter.Usage{CostUSD: cost, CostKnown: known, Turns: 1}}}
@@ -166,18 +224,15 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	backend := &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](usage(0.5, true), usage(0, false))}
 	s, a, repo, clock := dailyBudgetService(t, 2, backend)
 	for i, turn := range []string{"t-0", "t-1"} {
-		op, err := thread.TurnOperation(project, "event-"+turn, thread.TurnInput{Workstream: stream, Agent: "agent-" + string(rune('0'+i)), Turn: turn})
-		must(t, err)
+		op, err := thread.TurnOperation(intakefixture.Project, "event-"+turn, thread.TurnInput{Workstream: intakefixture.Stream, Agent: "agent-" + string(rune('0'+i)), Turn: turn})
+		intakefixture.Must(t, err)
 		_, err = a.Apply(ctx, op)
-		must(t, err)
+		intakefixture.Must(t, err)
 	}
 	appendDayCost(t, repo, sibling, "unmatched", clock.Now(), 0.25, true)
 	appendDayCost(t, repo, sibling, "yesterday", clock.Now().Add(-24*time.Hour), 9, true)
-	must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
-		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
-
-	// The mason falls back from claude to codex; the reviewer's profile has
-	// no fallback, so the reviewer is paused.
+	intakefixture.Must(t, repo.Append(ctx, trace.Cost{Header: trace.Header{Schema: "osmia.trace.cost", Version: trace.Version, ID: "judgment-cost", Revision: 1, Project: intakefixture.Project, Workstream: sibling, At: clock.Now(), Actor: trace.Actor{Kind: "service", ID: jev.Role}, Cause: "budget-fixture"},
+		Entry: coreadapter.LedgerEntry{Scope: coreadapter.Scope{Project: string(intakefixture.Project), Workstream: string(sibling), Thread: "thread", Turn: "judged", Role: jev.Role}, AttemptID: "judgment-attempt", At: clock.Now(), Usage: coreadapter.Usage{CostUSD: 0.125, CostKnown: true}}}))
 	cfg := *s.cfg
 	cfg.Profiles = map[string]config.Profile{
 		"default": {Agent: "claude", Model: "test", Fallback: "other"},
@@ -192,24 +247,45 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	cfg.Roles[reviewerRole] = config.Role{Profile: "solo"}
 	cfg.Roles[trace.ChiefOfStaff] = config.Role{Profile: "other"}
 	s.cfg = &cfg
-	must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{stream}}}))
+	intakefixture.Must(t, s.store.Resolve(runtime.Inputs{Config: s.cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{s.cfg.Project.ID: []config.WorkstreamID{intakefixture.Stream}}}))
 	limit := runtime.ProviderLimit{Backend: "claude", Status: "rejected", Kind: "five_hour", SetAt: clock.Now(), ResetsAt: clock.Now().Add(time.Hour)}
-	must(t, s.store.SetProviderLimit(limit))
-	must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
+	intakefixture.Must(t, s.store.SetProviderLimit(limit))
+	intakefixture.Must(t, dailyBudget{s: s, repository: repo}.Pass(ctx))
 
-	got := s.statusList()
-	u := got.ProviderUsage
-	if u == nil {
+	return &providerUsageRig{s: s, clock: clock, limit: limit}
+}
+
+func (r *providerUsageRig) status(t *testing.T) StatusResponse {
+	t.Helper()
+	got := r.s.statusList()
+	if got.ProviderUsage == nil {
 		t.Fatalf("no provider usage: %+v", got.Diagnostics)
 	}
+	return got
+}
+
+func TestStatusProviderUsageReportsTheDayAndEveryProvider(t *testing.T) {
+	t.Parallel()
+	u := newProviderUsageRig(t).status(t).ProviderUsage
 	if u.Day != "2026-09-16" || len(u.Providers) != 4 {
 		t.Fatalf("provider usage %+v", u)
 	}
-	claude, codex, fake, judged := u.Providers[0], u.Providers[1], u.Providers[2], u.Providers[3]
+}
+
+func TestStatusProviderUsageCountsJevJudgmentSpend(t *testing.T) {
+	t.Parallel()
+	judged := newProviderUsageRig(t).status(t).ProviderUsage.Providers[3]
 	if judged.Provider != jev.Role || judged.ProviderSpend != (ProviderSpend{SpendUSD: "0.125"}) {
 		t.Fatalf("jev %+v", judged)
 	}
-	if claude.Provider != "claude" || claude.ProviderSpend != (ProviderSpend{SpendUSD: "0"}) || claude.Limit == nil || !reflect.DeepEqual(*claude.Limit, limit) {
+}
+
+func TestStatusProviderUsageShowsALimitedProvidersFallbacksAndPausedRoles(t *testing.T) {
+	t.Parallel()
+	r := newProviderUsageRig(t)
+	got := r.status(t)
+	claude := got.ProviderUsage.Providers[0]
+	if claude.Provider != "claude" || claude.ProviderSpend != (ProviderSpend{SpendUSD: "0"}) || claude.Limit == nil || !reflect.DeepEqual(*claude.Limit, r.limit) {
 		t.Fatalf("claude %+v", claude)
 	}
 	if !slices.Contains(claude.Fallbacks, RoleFallback{Role: masonRole, Configured: "default", Profile: "other"}) || slices.ContainsFunc(claude.Fallbacks, func(f RoleFallback) bool { return f.Role == reviewerRole || f.Role == trace.ChiefOfStaff }) {
@@ -223,35 +299,61 @@ func TestStatusReportsProviderUsage(t *testing.T) {
 	if !slices.Equal(claude.PausedRoles, []string{reviewerRole}) {
 		t.Fatalf("claude paused roles %+v", claude.PausedRoles)
 	}
+}
+
+func TestStatusProviderUsageShowsAnUnlimitedProviderWithoutFallbacks(t *testing.T) {
+	t.Parallel()
+	codex := newProviderUsageRig(t).status(t).ProviderUsage.Providers[1]
 	if codex.Provider != "codex" || codex.Limit != nil || len(codex.Fallbacks) != 0 || len(codex.PausedRoles) != 0 || codex.SpendUSD != "0" {
 		t.Fatalf("codex %+v", codex)
 	}
+}
+
+func TestStatusProviderUsageSumsKnownSpendAndCountsUnknownCosts(t *testing.T) {
+	t.Parallel()
+	fake := newProviderUsageRig(t).status(t).ProviderUsage.Providers[2]
 	if fake.Provider != "fake" || fake.ProviderSpend != (ProviderSpend{SpendUSD: "0.5", UnknownCosts: 1, LowerBound: true}) || fake.Limit != nil {
 		t.Fatalf("fake %+v", fake)
 	}
+}
+
+func TestStatusProviderUsageReportsSpendNoProviderOwns(t *testing.T) {
+	t.Parallel()
+	u := newProviderUsageRig(t).status(t).ProviderUsage
 	if u.Unattributed == nil || *u.Unattributed != (ProviderSpend{SpendUSD: "0.25"}) {
 		t.Fatalf("unattributed %+v", u.Unattributed)
 	}
+}
+
+func TestStatusDailyBudgetAgreesWithProviderUsage(t *testing.T) {
+	t.Parallel()
+	got := newProviderUsageRig(t).status(t)
 	if b := got.DailyBudget; b == nil || b.SpendUSD != "0.875" || b.UnknownCosts != 1 {
 		t.Fatalf("daily budget %+v disagrees with provider usage", b)
 	}
+}
 
-	// Once the limit resets, nothing falls back and no limit is in force.
-	jump(clock, limit.ResetsAt)
-	got = s.statusList()
-	claude = got.ProviderUsage.Providers[0]
+func TestStatusProviderUsageDropsALimitAtItsReset(t *testing.T) {
+	t.Parallel()
+	r := newProviderUsageRig(t)
+	fixturekit.Jump(r.clock, r.limit.ResetsAt)
+	claude := r.status(t).ProviderUsage.Providers[0]
 	if claude.Limit != nil || len(claude.Fallbacks) != 0 || len(claude.PausedRoles) != 0 {
 		t.Fatalf("claude after the reset %+v", claude)
 	}
+}
 
-	s.setBoundary(func(name string) error {
+func TestStatusReportsUnreadableProviderUsageAsADiagnostic(t *testing.T) {
+	t.Parallel()
+	r := newProviderUsageRig(t)
+	r.s.setBoundary(func(name string) error {
 		if name == "status-provider-usage" {
 			return errors.New("injected")
 		}
 		return nil
 	})
-	got = s.statusList()
-	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(project) + "; check the trace repository"}) {
+	got := r.s.statusList()
+	if got.ProviderUsage != nil || !slices.Contains(got.Diagnostics, Diagnostic{Field: "provider_usage", Code: Internal, Message: "cannot read today's costs or turn attempts in project " + string(intakefixture.Project) + "; check the trace repository"}) {
 		t.Fatalf("unreadable provider usage: %+v %+v", got.ProviderUsage, got.Diagnostics)
 	}
 }

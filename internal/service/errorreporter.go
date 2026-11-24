@@ -57,7 +57,8 @@ type ErrorReporterOptions struct {
 	Queue int
 	// Now is the reporter's clock, for the days and windows that caps and
 	// comments count. It defaults to the service's clock.
-	Now func() time.Time
+	Now    func() time.Time
+	passed func()
 }
 
 // The kinds of reporter fault, so a success clears only the faults it can
@@ -179,6 +180,9 @@ func (r *errorReporter) run(ctx context.Context) {
 	defer timer.Stop()
 	for {
 		wait := r.pass(ctx)
+		if passed := r.opts().passed; passed != nil {
+			passed()
+		}
 		if wait <= 0 || wait > r.poll() {
 			wait = r.poll()
 		}

@@ -11,30 +11,19 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-const masonRoles = chiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+const masonRoles = intakefixture.ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
-type fakeMasons = intakefixture.FakeMasons
-
-func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *fakeMasons) {
+func newMasonFixture(t *testing.T, masons int, drafted string) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
-	return newCappedMasonFixture(t, fmt.Sprintf("masons = %d\n", masons), drafted)
+	return newMasonFixtureOn(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted)
 }
 
-func newCappedMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
-	return newConfiguredMasonFixture(t, capacity, drafted)
-}
-
-func newConfiguredMasonFixture(t *testing.T, capacity, drafted string) (*shedFixture, *fakeMasons) {
-	t.Helper()
-	return newMasonFixtureOn(t, config.WorkspacesGit, capacity, drafted)
-}
-
-func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFixture, *fakeMasons) {
+func newMasonFixtureOn(t *testing.T, backend, capacity, drafted string) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	return newMasonFixtureWith(t, backend, capacity, drafted, nil)
 }
 
-func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+func newMasonFixturePrepared(t *testing.T, masons int, drafted string, prepare func(*Options)) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	return newMasonFixtureWith(t, config.WorkspacesGit, fmt.Sprintf("masons = %d\n", masons), drafted, prepare)
 }
@@ -44,7 +33,7 @@ func countingSchedule() (*atomic.Int64, func(*Options)) {
 	return passed, func(opts *Options) { opts.schedulePassed = scheduled }
 }
 
-func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*shedFixture, *fakeMasons) {
+func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepare func(*Options)) (*shedFixture, *intakefixture.FakeMasons) {
 	t.Helper()
 	f := newDebateFixtureWith(t, 1, 1, masonRoles, func(opts *Options) {
 		opts.WriteTimeout = time.Minute
@@ -55,9 +44,7 @@ func newMasonFixtureWith(t *testing.T, backend, capacity, drafted string, prepar
 			prepare(opts)
 		}
 	})
-	f.script("draft-1-1", map[string]string{plan.SpecPath: validSpec, plan.PlanPath: drafted}, nil)
+	f.script("draft-1-1", map[string]string{plan.SpecPath: intakefixture.ValidSpec, plan.PlanPath: drafted}, nil)
 	f.upstream(t)
 	return f, intakefixture.ScriptMasons(f.engine, masonTurnID)
 }
-
-var awaitPasses = intakefixture.AwaitPasses

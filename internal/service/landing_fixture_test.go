@@ -1,15 +1,16 @@
 package service
 
 import (
-	json "encoding/json"
+	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/trace"
 
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
-	strings "strings"
-	testing "testing"
+	"strings"
+	"testing"
 )
 
 func landOperations(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []trace.OperationRecord {
@@ -28,7 +29,7 @@ func approveDirectly(t *testing.T, s *Service, repository *trace.Repository, str
 func newApprovedFixtureOn(t *testing.T, key, backend string) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
 	f, _ := newMasonFixtureOn(t, backend, "masons = 1\n", independentPlan)
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, backend, base)
 	intakefixture.SeedApprovedUnits(t, func(u, o string) { seedReview(t, f, repository, stream, u, o) }, func(u, c string) { approveDirectly(t, f.s, repository, stream, u, c) })
 	return f, stream, repository

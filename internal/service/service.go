@@ -183,6 +183,8 @@ type Options struct {
 	// use it to wait for a pass to demonstrably complete instead of a fixed
 	// number of ticks or a sleep.
 	schedulePassed func()
+	hearsayPassed  func()
+	gateScanned    func()
 	// getenv replaces os.Getenv for the transcription key and the telemetry
 	// headers, for tests.
 	getenv func(string) string

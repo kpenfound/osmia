@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 
@@ -11,26 +12,22 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The capacity view a running service serializes, in the chief's capacity
-// tool result and in /v1/status, shows the architect pool as
-// unbounded in words and with no numeric limit, and the other pools with
-// their configured limits, in the same order.
 func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 	t.Parallel()
 	f := newTwoProjectFixture(t)
 	f.opts.Threads = nil
 	s, c := start(t, f.opts)
 	ctx := context.Background()
-	repo, err := s.repository(project)
-	must(t, err)
-	_, err = repo.EnsureChiefOfStaff(ctx, stream, demoStart, ownerActor)
-	must(t, err)
-	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
+	repo, err := s.repository(intakefixture.Project)
+	intakefixture.Must(t, err)
+	_, err = repo.EnsureChiefOfStaff(ctx, intakefixture.Stream, fixturekit.DemoStart, ownerActor)
+	intakefixture.Must(t, err)
+	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_capacity", Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "owner-message"}, AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "capacity", Profile: coreadapter.Profile{Name: "default", Backend: "fake", Model: "fake"}, Prompt: "Read the capacity"}
 	_, err = repo.EnqueueTurn(ctx, req)
-	must(t, err)
-	_, err = repo.ClaimTurn(ctx, stream, trace.ChiefOfStaff, "claim", "/owned/capacity", demoStart)
-	must(t, err)
-	scope := coreadapter.Scope{Project: string(project), Workstream: string(stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
+	intakefixture.Must(t, err)
+	_, err = repo.ClaimTurn(ctx, intakefixture.Stream, trace.ChiefOfStaff, "claim", "/owned/capacity", fixturekit.DemoStart)
+	intakefixture.Must(t, err)
+	scope := coreadapter.Scope{Project: string(intakefixture.Project), Workstream: string(intakefixture.Stream), Thread: trace.ChiefOfStaff, Turn: "capacity", Role: trace.ChiefOfStaff}
 	controls := &runtimeControls{}
 	controls.service.Store(s)
 
@@ -41,11 +38,11 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 		}
 	}
 	out, err := tool.Handle(ctx, json.RawMessage(`{}`))
-	must(t, err)
+	intakefixture.Must(t, err)
 	fromTool := fixturekit.CapacityWire(t, out)
 
 	var status json.RawMessage
-	must(t, c.Do(ctx, "GET", Prefix+"/status", nil, &status))
+	intakefixture.Must(t, c.Do(ctx, "GET", Prefix+"/status", nil, &status))
 	fromStatus := fixturekit.CapacityWire(t, status)
 
 	cfg := s.current().Capacity
@@ -56,11 +53,10 @@ func TestCapacityToolAndStatusSerializeUnboundedPools(t *testing.T) {
 			}
 		}
 	}
-	// The tool and the status API carry the same entries.
 	toolJSON, err := json.Marshal(fromTool)
-	must(t, err)
+	intakefixture.Must(t, err)
 	statusJSON, err := json.Marshal(fromStatus)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if string(toolJSON) != string(statusJSON) {
 		t.Fatalf("tool and status capacity differ:\n%s\n%s", toolJSON, statusJSON)
 	}

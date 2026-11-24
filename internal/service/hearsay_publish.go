@@ -122,6 +122,7 @@ func (s *Service) publishHearsay(ctx context.Context, repo *trace.Repository) er
 		}
 		delay = publishInterval
 		if !cfg.Hearsay.Publishing() {
+			s.hearsayLoopPassed()
 			continue
 		}
 		res, err := s.publishPass(ctx, repo, cfg)
@@ -137,6 +138,13 @@ func (s *Service) publishHearsay(ctx context.Context, repo *trace.Repository) er
 		if err != nil || res.Unreachable || len(res.Failures) > 0 {
 			delay = publishBackoff
 		}
+		s.hearsayLoopPassed()
+	}
+}
+
+func (s *Service) hearsayLoopPassed() {
+	if passed := s.options.hearsayPassed; passed != nil {
+		passed()
 	}
 }
 

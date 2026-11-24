@@ -66,7 +66,7 @@ func TestWorkgroupFeedLabelsEachMembersBrief(t *testing.T) {
 	if api != nil {
 		t.Fatal(api)
 	}
-	fixturekit.FeedDocument(t, repo, fixturekit.Quiet, delivery.BriefDocument(1), delivery.BriefPath(1), 1, demoStart, delivery.Brief{Review: 1, ReviewRevision: 2, Commit: "abc", Text: "Quiet's brief", BeforeYouShip: []string{"Run migration"}})
+	fixturekit.FeedDocument(t, repo, fixturekit.Quiet, delivery.BriefDocument(1), delivery.BriefPath(1), 1, fixturekit.DemoStart, delivery.Brief{Review: 1, ReviewRevision: 2, Commit: "abc", Text: "Quiet's brief", BeforeYouShip: []string{"Run migration"}})
 	var feed WorkgroupFeedResponse
 	if code := feedHTTP(t, s, http.MethodGet, Prefix+"/workgroups/"+string(group.ID)+"/feed", "", &feed); code != 200 {
 		t.Fatalf("feed status %d", code)

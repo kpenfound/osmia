@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"testing"
 	"time"
 
@@ -17,10 +19,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// reservationRig is a service with the committee pool at one slot, a final
-// review operation waiting for it, and slot spans in an in-memory exporter. A
-// restart replaces the slot recorder and the pool, as a new run of the service
-// does, over the same ledger and trace.
 type reservationRig struct {
 	t        *testing.T
 	s        *Service
@@ -31,8 +29,7 @@ type reservationRig struct {
 	clock    *spanClock
 	ledger   string
 	op       coreadapter.Operation
-	// holder gives back the slot another reader holds.
-	holder func()
+	holder   func()
 }
 
 func newReservationRig(t *testing.T) *reservationRig {
@@ -44,10 +41,10 @@ func newReservationRig(t *testing.T) *reservationRig {
 	s.setSole(runtimeFor(repo))
 	exporter := tracetest.NewInMemoryExporter()
 	sink, err := telemetry.New(config.Telemetry{}, telemetry.Options{Exporter: exporter})
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { sink.Close() })
 	ledger, err := cfg.Root.SlotIntervals()
-	must(t, err)
+	intakefixture.Must(t, err)
 	r := &reservationRig{t: t, s: s, repo: repo, cfg: cfg, exporter: exporter, sink: sink, clock: &spanClock{now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}, ledger: ledger}
 	s.telemetry = sink
 	r.start()
@@ -61,35 +58,31 @@ func (r *reservationRig) start() {
 	r.s.pool = &scheduler.Shared{Spans: r.s.slots}
 }
 
-// restart stops the run and starts another over the same ledger.
 func (r *reservationRig) restart() {
 	r.t.Helper()
 	r.s.slots.Close()
 	r.start()
 }
 
-// seedOperation records a final review operation the workstream has not run.
 func (r *reservationRig) seedOperation(event string) coreadapter.Operation {
 	r.t.Helper()
-	op := coreadapter.Operation{ID: trace.OperationID(project, stream, event), Boundary: coreadapter.RunnerBoundary, Action: FinalReviewAction, Input: json.RawMessage(`{}`)}
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin-" + event, Revision: 1, Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "handin"}
+	op := coreadapter.Operation{ID: trace.OperationID(intakefixture.Project, intakefixture.Stream, event), Boundary: coreadapter.RunnerBoundary, Action: FinalReviewAction, Input: json.RawMessage(`{}`)}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin-" + event, Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "handin"}
 	_, err := r.repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: trace.FeatureSubject, To: HandedState, Reason: "Handed in"}, Events: []trace.Event{{ID: event, Kind: "turn", Body: "Review the feature", Operation: &op}}})
-	must(r.t, err)
+	intakefixture.Must(r.t, err)
 	return op
 }
 
-// hold takes the committee pool's only slot for another reader.
 func (r *reservationRig) hold() {
 	r.t.Helper()
-	release, admitted, err := r.s.pool.TryReserve(r.repo, stream, committeeRole, "holder", &r.cfg.Capacity)
-	must(r.t, err)
+	release, admitted, err := r.s.pool.TryReserve(r.repo, intakefixture.Stream, committeeRole, "holder", &r.cfg.Capacity)
+	intakefixture.Must(r.t, err)
 	if !admitted {
 		r.t.Fatal("the committee slot was refused")
 	}
 	r.holder = release
 }
 
-// reserve offers the operation its committee slot and reports whether it got it.
 func (r *reservationRig) reserve() (func(), bool) {
 	return r.s.reserveModelOperation(r.repo, r.op, committeeRole)
 }
@@ -102,14 +95,13 @@ func (r *reservationRig) refuse() {
 	}
 }
 
-// open is the operation's open reservation waits.
 func (r *reservationRig) open() []slotspans.Interval {
 	return r.s.slots.Find(slotspans.Wait, slotspans.SourceReservation, nil)
 }
 
 func (r *reservationRig) waits() []tracetest.SpanStub {
 	r.t.Helper()
-	must(r.t, r.sink.Flush(context.Background()))
+	intakefixture.Must(r.t, r.sink.Flush(context.Background()))
 	var out []tracetest.SpanStub
 	for _, sp := range r.exporter.GetSpans() {
 		if sp.Name == "osmia.slot.wait" {
@@ -119,14 +111,13 @@ func (r *reservationRig) waits() []tracetest.SpanStub {
 	return out
 }
 
-// acknowledge runs the operation to a recorded result.
 func (r *reservationRig) acknowledge() {
 	r.t.Helper()
 	c, err := reconcile.New(r.repo, reconcile.Options{Worker: "test", Now: r.clock.Now, Adapters: map[coreadapter.OperationBoundary]coreadapter.Reconciler{coreadapter.RunnerBoundary: reviewedAdapter{}}})
-	must(r.t, err)
-	must(r.t, c.Pass(context.Background()))
-	records, err := r.repo.Operations(stream)
-	must(r.t, err)
+	intakefixture.Must(r.t, err)
+	intakefixture.Must(r.t, c.Pass(context.Background()))
+	records, err := r.repo.Operations(intakefixture.Stream)
+	intakefixture.Must(r.t, err)
 	if len(records) != 1 || !records[0].Acknowledged {
 		r.t.Fatalf("the operation was not completed: %+v", records)
 	}
@@ -158,7 +149,6 @@ func TestReservationWaitSurvivesARestartAndIsGrantedOnce(t *testing.T) {
 	id := open[0].SpanID()
 	r.clock.Advance(time.Minute)
 
-	// The service restarts while the operation waits, and the pool is full again.
 	r.clock.Advance(time.Hour)
 	r.restart()
 	r.hold()
@@ -169,13 +159,11 @@ func TestReservationWaitSurvivesARestartAndIsGrantedOnce(t *testing.T) {
 		t.Fatalf("open waits after the restart: %+v", open)
 	}
 
-	// The operation is still pending, so the pass leaves its wait open.
 	r.s.reservationWaitPass(r.repo)
 	if got := r.waits(); len(got) != 0 || len(r.open()) != 1 {
 		t.Fatalf("the pass closed the wait of a pending operation: %d spans, %d open", len(got), len(r.open()))
 	}
 
-	// A refusal after the restart updates the recovered wait.
 	r.clock.Advance(time.Minute)
 	r.refuse()
 	open = r.open()
@@ -186,7 +174,6 @@ func TestReservationWaitSurvivesARestartAndIsGrantedOnce(t *testing.T) {
 		t.Fatalf("a refusal after the restart sent %d wait spans", len(got))
 	}
 
-	// Capacity frees and the operation is admitted.
 	r.holder()
 	r.clock.Advance(time.Minute)
 	grantedAt := r.clock.Now()
@@ -202,7 +189,7 @@ func TestReservationWaitSurvivesARestartAndIsGrantedOnce(t *testing.T) {
 		t.Fatalf("%d wait spans, want exactly one for the operation", len(waits))
 	}
 	sp := waits[0]
-	if !sp.StartTime.Equal(firstRefusal) || !sp.EndTime.Equal(grantedAt) || sp.SpanContext.SpanID() != id || sp.SpanContext.TraceID() != telemetry.WorkstreamTrace(stream) || sp.Parent.SpanID() != telemetry.WorkstreamRoot(stream) {
+	if !sp.StartTime.Equal(firstRefusal) || !sp.EndTime.Equal(grantedAt) || sp.SpanContext.SpanID() != id || sp.SpanContext.TraceID() != telemetry.WorkstreamTrace(intakefixture.Stream) || sp.Parent.SpanID() != telemetry.WorkstreamRoot(intakefixture.Stream) {
 		t.Fatalf("wait span %+v, want %s to %s with span %s", sp, firstRefusal, grantedAt, id)
 	}
 	if a := spanAttrs(sp); a["osmia.outcome"] != "granted" || a["osmia.wait_reason"] != "capacity" || a["osmia.role"] != "committee" {
@@ -224,14 +211,12 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 	for _, tc := range []struct {
 		name    string
 		outcome string
-		// refuse opens the wait before the restart and returns its start; change
-		// is what happens to the operation while the service is down.
-		refuse func(*reservationRig) time.Time
-		change func(*reservationRig)
+		refuse  func(*reservationRig) time.Time
+		change  func(*reservationRig)
 	}{
 		{"workstream removed", "removed", func(r *reservationRig) time.Time {
 			gone, err := config.NewWorkstreamID()
-			must(t, err)
+			intakefixture.Must(t, err)
 			start := r.clock.Now()
 			r.s.slots.Begin(reservationWaitOf(gone, start))
 			return start
@@ -239,12 +224,12 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 		{"operation completed elsewhere", "completed", refusedOperation, func(r *reservationRig) { r.acknowledge() }},
 		{"workstream canceled", "canceled", refusedOperation, func(r *reservationRig) {
 			r.acknowledge()
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede", Project: project, Workstream: stream, At: demoStart, Actor: ownerActor, Cause: "supersede"}
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, Revision: 1, ID: "supersede", Project: intakefixture.Project, Workstream: intakefixture.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "supersede"}
 			_, err := r.repo.SetFeatureState(ctx, h, AbandonedState, "Replaced by another workstream")
-			must(t, err)
+			intakefixture.Must(t, err)
 		}},
 		{"workstream paused", "blocked", refusedOperation, func(r *reservationRig) {
-			must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: project, Workstream: stream}, Mode: "soft", Reason: "Looking at it", Source: runtime.PauseOwner, SetAt: r.clock.Now()}))
+			intakefixture.Must(t, r.s.setPause(runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: intakefixture.Project, Workstream: intakefixture.Stream}, Mode: "soft", Reason: "Looking at it", Source: runtime.PauseOwner, SetAt: r.clock.Now()}))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -276,7 +261,6 @@ func TestRecoveredReservationWaitsOfOperationsNoLongerPendingAreClosedOnce(t *te
 	}
 }
 
-// refusedOperation fills the committee pool and has the rig's operation refused.
 func refusedOperation(r *reservationRig) time.Time {
 	r.hold()
 	start := r.clock.Now()
@@ -285,7 +269,7 @@ func refusedOperation(r *reservationRig) time.Time {
 }
 
 func reservationWaitOf(workstream config.WorkstreamID, start time.Time) slotspans.Interval {
-	iv := slotspans.Interval{Kind: slotspans.Wait, Source: slotspans.SourceReservation, Pool: committeeRole, Role: committeeRole, Project: project, Workstream: workstream, Agent: committeeAgent(1), Work: committeeAgent(1), Start: start, Reason: slotspans.ReasonCapacity}
+	iv := slotspans.Interval{Kind: slotspans.Wait, Source: slotspans.SourceReservation, Pool: committeeRole, Role: committeeRole, Project: intakefixture.Project, Workstream: workstream, Agent: committeeAgent(1), Work: committeeAgent(1), Start: start, Reason: slotspans.ReasonCapacity}
 	iv.Bound(1, true)
 	return iv
 }

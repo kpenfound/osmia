@@ -64,8 +64,6 @@ func TestConfiguredCloudRunnersUseTheirOwnTokens(t *testing.T) {
 		t.Fatalf("trace runner %#v, want %#v", got, want)
 	}
 
-	// Without an API token, reruns and trace reads have no token, even though
-	// the compute token is set.
 	cfg.Dagger.CloudAPITokenEnv = ""
 	if err := s.configuredRerun(cfg).CanRerun(); !errors.Is(err, checks.ErrCloudRerunUnavailable) {
 		t.Fatalf("rerun without an API token: %v", err)

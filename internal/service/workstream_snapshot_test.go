@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"log/slog"
 	"os"
 	"strings"
@@ -24,29 +25,29 @@ func TestWorkgroupResolutionPreservesTraceErrorLogging(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			t.Parallel()
 			cfg, err := projectstore.LoadConfig(fixture(t).Config)
-			must(t, err)
+			intakefixture.Must(t, err)
 			repo, err := trace.Create(context.Background(), cfg.Root, cfg.Project, time.Now(), serviceActor)
-			must(t, err)
+			intakefixture.Must(t, err)
 			t.Cleanup(func() { repo.Close() })
 			missing := config.WorkstreamID("w_00000000000000000000000000000902")
 			switch failure {
 			case "unknown-workstream":
 				_, err = trace.EnsureWorkgroups(context.Background(), repo, []config.WorkstreamID{missing}, time.Now(), serviceActor, "unknown-member")
-				must(t, err)
+				intakefixture.Must(t, err)
 			case "unknown-member-with-design":
 				design := config.WorkstreamID("w_00000000000000000000000000000903")
-				must(t, repo.CreateWorkstream(context.Background(), design, time.Now(), serviceActor))
+				intakefixture.Must(t, repo.CreateWorkstream(context.Background(), design, time.Now(), serviceActor))
 				h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "open-design", Revision: 1, Project: repo.Project(), Workstream: design, At: time.Now(), Actor: serviceActor, Cause: "fixture"}
 				_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: h, Subject: intake.DesignSessionSubject, To: intake.DesignOpenValue, Reason: "open design"}})
-				must(t, err)
+				intakefixture.Must(t, err)
 				_, err = trace.CreateWorkgroup(context.Background(), repo, []config.WorkstreamID{missing, design}, time.Now(), serviceActor, "unknown-member")
-				must(t, err)
+				intakefixture.Must(t, err)
 			case "damaged-trace":
 				path, err := cfg.Root.WorkstreamTrace(repo.Project(), missing)
-				must(t, err)
-				must(t, os.MkdirAll(path, 0700))
+				intakefixture.Must(t, err)
+				intakefixture.Must(t, os.MkdirAll(path, 0700))
 			case "missing-trace-after-discovery":
-				must(t, repo.CreateWorkstream(context.Background(), missing, time.Now(), serviceActor))
+				intakefixture.Must(t, repo.CreateWorkstream(context.Background(), missing, time.Now(), serviceActor))
 			}
 			controller := lifecycle.New(lifecycle.Dependencies{
 				Current: func() *config.Config { return cfg },

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"strings"
 	"testing"
@@ -18,12 +19,8 @@ import (
 
 const jevJudgment = "judgment_0123456789abcdef"
 
-// The deciders Hearsay's connector contract accepts.
 var contractDeciders = []string{"owner", "chief_of_staff", "committee"}
 
-// requireWorkDecision checks a decision is Jev's as posted: on the work source,
-// with no author, a decider the contract accepts that is not the owner, and text
-// that says Jev decided it and names the judgment.
 func requireWorkDecision(t *testing.T, p hooksPost, judgment string) {
 	t.Helper()
 	if p.Source != "osmia-work" || p.str("author") != "" || p.str("decider") == "owner" || !slices.Contains(contractDeciders, p.str("decider")) {
@@ -35,7 +32,6 @@ func requireWorkDecision(t *testing.T, p hooksPost, judgment string) {
 	}
 }
 
-// postsOf returns the posts of the kind whose field has the value.
 func postsOf(posts []hooksPost, kind, field, value string) []hooksPost {
 	var out []hooksPost
 	for _, p := range posts {
@@ -49,12 +45,10 @@ func postsOf(posts []hooksPost, kind, field, value string) []hooksPost {
 func (f *publisherFixture) jevAmendmentDecision(stream config.WorkstreamID, id string, revision int, verdict, note string, when time.Time) {
 	f.t.Helper()
 	data, err := json.Marshal(api.AmendmentDecision{Decision: verdict, Note: note, Round: 1, Packet: 1, Spec: 2, Plan: 2, SealRevision: 1, Actor: trace.DecidedByJev, Judgment: jevJudgment})
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, "amendment_"+id+"_decision", revision, "amendments/"+id+"/decision.json", string(data), when, trace.JevActor)
 }
 
-// ratify records the ratification of round 1 as decided by by: the owner when
-// it is empty, else Jev with its judgment.
 func (f *publisherFixture) ratify(stream config.WorkstreamID, byJev bool, when time.Time) {
 	f.t.Helper()
 	r := shed.Ratification{Version: shed.Version, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}}
@@ -63,22 +57,17 @@ func (f *publisherFixture) ratify(stream config.WorkstreamID, byJev bool, when t
 		r.DecidedBy, r.Judgment, actor = trace.DecidedByJev, jevJudgment, trace.JevActor
 	}
 	data, err := json.Marshal(r)
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, shed.RatificationDocumentID(1), 1, shed.RatificationPath(1), string(data), when, actor)
 }
 
-// applied records that amendment id produced seal n.
 func (f *publisherFixture) applied(stream config.WorkstreamID, id string, n int, when time.Time) {
 	f.t.Helper()
 	data, err := json.Marshal(amendment.Application{Amendment: id, To: amendment.Pin{Seal: n, SealRevision: n, Spec: n, Plan: 1}})
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, amendment.DocumentID(id), 1, amendment.Path(id), string(data), when, trace.Actor{Kind: "service", ID: "amendments"})
 }
 
-// A ruling Jev made on an escalated question is posted once on the work
-// source with no author, a decider the contract accepts that is not the owner,
-// and text that names Jev and the judgment. The chief of staff's relay of it is
-// never posted, and the owner's own ruling stays on the owner source.
 func TestPublishJevRulingIsAWorkDecisionAndTheOwnersStaysTheOwners(t *testing.T) {
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
@@ -178,7 +167,7 @@ func TestPublishJevDiscoveryDispositionSaysJevDecidedIt(t *testing.T) {
 	id := fmt.Sprintf("discovery-%064x", 7)
 	record := func(revision int, w workDiscovery, when time.Time, actor trace.Actor) {
 		data, err := json.Marshal(w)
-		must(t, err)
+		intakefixture.Must(t, err)
 		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, actor)
 	}
 	record(1, workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: "open"}, hr(1), chiefActor)
@@ -261,9 +250,6 @@ func TestPublishSealsFollowTheDeciderOfTheAmendmentThatProducedThem(t *testing.T
 	posts, _ := f.pass()
 	ownerSpec := postsOf(posts, "document", "document", string(stream)+"-spec")
 	jevSpec := postsOf(posts, "document", "document", string(stream)+"-jev-spec")
-	// The chief's plan-only seal keeps the spec text of the Jev seal before it,
-	// so it is the same revision of the Jev document and posts nothing new; had
-	// it been the owner's it would be a third revision on the owner source.
 	if len(ownerSpec) != 2 || len(jevSpec) != 1 {
 		t.Fatalf("owner spec revisions %d, Jev spec revisions %d: %v", len(ownerSpec), len(jevSpec), kinds(posts))
 	}

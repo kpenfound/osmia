@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"slices"
 	"testing"
 	"time"
@@ -19,29 +20,27 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 			f, _ := newParallelMasonFixture(t, 1, 3, disjointPlan)
 			defer f.stop(t)
 			built := f.builtPaused(t, factoryTarget, "first", "second")
-			lo, hi := lowHigh(built[0], built[1])
+			lo, hi := intakefixture.LowHigh(built[0], built[1])
 			mutation(t, f.c, "PUT", "priority", PriorityRequest{Project: f.project, Workstreams: []config.WorkstreamID{hi, lo}})
 			f.awaitDispatches(t, lo, "resume", 1)
 
-			// Run the admission pass directly so the next pass cannot hide
-			// a transient capacity decision or admit a second worker for it.
 			_, projects := f.s.runtimes()
 			active := projects[0]
 			active.controller.Drain()
 			select {
 			case err := <-active.done:
-				must(t, err)
-			case <-time.After(demoTimeout):
+				intakefixture.Must(t, err)
+			case <-time.After(intakefixture.DemoTimeout):
 				t.Fatal("controller did not drain")
 			}
-			must(t, f.s.store.ClearPause(factoryTarget, "owner"))
+			intakefixture.Must(t, f.s.store.ClearPause(factoryTarget, "owner"))
 			pause := runtime.Pause{Target: runtime.Target{Scope: "workstream", Project: f.project, Workstream: hi}, Mode: "soft", Source: "owner", Reason: "Hold the higher-priority workstream"}
 			if change == "unpause" {
-				must(t, f.s.store.SetPause(pause))
+				intakefixture.Must(t, f.s.store.SetPause(pause))
 			}
 			m := &masons{s: f.s, cfg: active.pipeline.current.Load().cfg, repository: f.repository()}
 			b, found, err := m.read(hi)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !found {
 				t.Fatal("building workstream missing")
 			}
@@ -68,7 +67,7 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 				return f.s.store.ClearPause(pause.Target, "owner")
 			})
 			defer func() { f.s.setBoundary(nil) }()
-			must(t, m.Pass(context.Background()))
+			intakefixture.Must(t, m.Pass(context.Background()))
 			if !changed {
 				t.Fatal("pause did not change during the mason scan")
 			}
@@ -77,7 +76,7 @@ func TestMasonAdmissionUsesOnePauseSnapshotForSlotsAndDecisions(t *testing.T) {
 				wantState, wantDecision = UnitReady, "deferred priority"
 			}
 			state, err := f.repository().Workflow(lo, trace.UnitSubject("resume"))
-			must(t, err)
+			intakefixture.Must(t, err)
 			if state.Value != wantState {
 				t.Fatalf("lower-priority unit is %s after %s, want %s", state.Value, change, wantState)
 			}

@@ -1,32 +1,29 @@
 package service
 
 import (
-	context "context"
-	json "encoding/json"
+	"context"
+	"encoding/json"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	http "net/http"
-	os "os"
-	filepath "path/filepath"
-	slices "slices"
-	strings "strings"
-	sync "sync"
-	testing "testing"
-	time "time"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	adaptertest "github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/projectstore"
-	reconcile "github.com/kpenfound/osmia/internal/reconcile"
-	router "github.com/kpenfound/osmia/internal/router"
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/router"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/thread"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
-var ptr = intakefixture.Ptr
-
-// abandonCall posts an abandon request to the service's handler.
 func abandonCall(t *testing.T, s *Service, id config.WorkstreamID, body string) (int, string) {
 	t.Helper()
 	return intakefixture.AbandonCall(t, s.handle, id, body)
@@ -36,42 +33,39 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 	t.Parallel()
 	f := newHandInFixture(t)
 	ctx := context.Background()
-	out := f.handIn(t, HandInRequest{Key: "k", Stdin: ptr("# Design\n")})
+	out := f.handIn(t, HandInRequest{Key: "k", Stdin: intakefixture.Ptr("# Design\n")})
 	stream := out.Workstream
 	r := f.repository()
 
 	got, err := f.c.Abandon(ctx, stream, "  Superseded.  ")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if got != (AbandonResponse{Project: f.project, Workstream: stream, State: AbandonedState, Reason: "Superseded."}) {
 		t.Fatalf("response %+v", got)
 	}
 	state, err := r.Workflow(stream, trace.FeatureSubject)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if state != (trace.WorkflowState{Version: 2, Value: AbandonedState}) {
 		t.Fatalf("state %+v", state)
 	}
 	transitions, err := trace.Read[trace.Transition](r, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	transitions = slices.DeleteFunc(transitions, func(tr trace.Transition) bool { return tr.Subject != trace.FeatureSubject })
 	last := transitions[len(transitions)-1]
 	if len(transitions) != 2 || last.From != HandedState || last.To != AbandonedState || last.Actor != ownerActor || last.Reason != "Superseded." || last.Subject != trace.FeatureSubject {
 		t.Fatalf("transitions %+v", transitions)
 	}
 	outbox, err := r.Outbox(stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !slices.ContainsFunc(outbox, func(e trace.OutboxEntry) bool {
 		return e.TransitionID == last.ID && strings.Contains(e.Event.Body, "from handed to abandoned: Superseded.")
 	}) {
 		t.Fatalf("no notice for the abandonment: %+v", outbox)
 	}
-	// Nothing is deleted.
-	if data, err := workstreamDocument(t, f.s.cfg.Root, f.project, stream, "handed/stdin"); err != nil || string(data) != "# Design\n" {
+	if data, err := fixturekit.WorkstreamDocument(t, f.s.cfg.Root, f.project, stream, "handed/stdin"); err != nil || string(data) != "# Design\n" {
 		t.Fatalf("handed copy: %q %v", data, err)
 	}
-	// The owner's abandonment is a pinned move, so the only other document is
-	// the router's record of it.
 	docs, err := trace.Read[trace.Document](r, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var handedCopies, routes []trace.Document
 	for _, d := range docs {
 		switch {
@@ -85,31 +79,29 @@ func TestAbandonHandedWorkstream(t *testing.T) {
 		t.Fatalf("documents %+v", docs)
 	}
 	var route router.Record
-	must(t, json.Unmarshal([]byte(routes[0].Content), &route))
+	intakefixture.Must(t, json.Unmarshal([]byte(routes[0].Content), &route))
 	if route.Rule != "pinned" || route.Authority != "owner" || route.DecidedBy != "owner" || route.Target != AbandonedState || route.Default != AbandonedState ||
 		route.JevRequested || route.Judgment != "" || route.State != router.StateCommitted {
 		t.Fatalf("route record %+v", route)
 	}
 	st, err := f.c.Status(ctx, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if st.State == nil || *st.State != AbandonedState {
 		t.Fatalf("status %+v", st)
 	}
 
-	// Successful abandonment records a project-level workgroup resolution
-	// asynchronously. Settle it before taking the refused request's baseline.
 	groups, _, err := trace.Workgroups(r)
-	must(t, err)
+	intakefixture.Must(t, err)
 	group, found := trace.WorkgroupOf(groups, stream)
 	if !found {
 		t.Fatal("handed workstream has no workgroup")
 	}
 	changes, closeChanges := serviceChanges(t, f.s)
 	defer closeChanges()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for {
 		resolved, _, err := trace.ResolvedWorkgroups(r)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if slices.Contains(resolved, group.ID) {
 			break
 		}
@@ -132,11 +124,11 @@ func TestAbandonRefusals(t *testing.T) {
 	t.Parallel()
 	f := newHandInFixture(t)
 	ctx := context.Background()
-	delivered := f.handIn(t, HandInRequest{Key: "d", Stdin: ptr("delivered")}).Workstream
-	handed := f.handIn(t, HandInRequest{Key: "h", Stdin: ptr("handed")}).Workstream
+	delivered := f.handIn(t, HandInRequest{Key: "d", Stdin: intakefixture.Ptr("delivered")}).Workstream
+	handed := f.handIn(t, HandInRequest{Key: "h", Stdin: intakefixture.Ptr("handed")}).Workstream
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "deliver", Revision: 1, Project: f.project, Workstream: delivered, At: time.Now().UTC(), Actor: ownerActor, Cause: "deliver"}
 	_, err := f.repository().SetFeatureState(ctx, h, DeliveredState, "pull request opened")
-	must(t, err)
+	intakefixture.Must(t, err)
 	head := f.head(t)
 	unknown := config.WorkstreamID("w_00000000000000000000000000000000")
 	for _, c := range []struct {
@@ -149,7 +141,6 @@ func TestAbandonRefusals(t *testing.T) {
 		{"delivered", delivered, `{"reason":"r"}`, http.StatusConflict, "is delivered and cannot be abandoned"},
 		{"empty reason", handed, `{"reason":" "}`, 422, "reason must not be empty"},
 		{"unknown", unknown, `{"reason":"r"}`, 422, "is not in an active project"},
-		{"librarian", librarianWorkstream(f.project), `{"reason":"r"}`, 422, "is not in an active project"},
 		{"malformed ID", "w_x", `{"reason":"r"}`, 422, "workstream must be a workstream ID"},
 		{"unknown field", handed, `{"reason":"r","force":true}`, http.StatusBadRequest, ""},
 	} {
@@ -166,44 +157,37 @@ func TestAbandonRefusals(t *testing.T) {
 	}
 }
 
-// TestAbandonCancelsTurnsAcrossRestart abandons a workstream while one of its
-// turns runs and another waits: the running turn stops with its result kept,
-// the waiting one never runs, and neither do turns queued later, before or
-// after a restart.
 func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ab-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
-	// The demo clock advances on every read, so a short event window would
-	// close after a timing-dependent number of passes and run a chief-of-staff
-	// turn for the hand-in notice. This test covers the owner's thread only.
 	global := filepath.Join(opts.Config.Root, "config.toml")
 	data, err := os.ReadFile(global)
-	must(t, err)
-	must(t, os.WriteFile(global, append(data, []byte("[events]\nwindow = \"1000h\"\n")...), 0600))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(global, append(data, []byte("[events]\nwindow = \"1000h\"\n")...), 0600))
 	cfg, err := projectstore.LoadConfig(opts.Config)
-	must(t, err)
+	intakefixture.Must(t, err)
 	root := cfg.Root.String()
 
-	clock := &demoClock{At: demoStart}
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin", Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "handin"}
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, clock.Now(), owner))
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "handin", Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: owner, Cause: "handin"}
 	_, err = repo.SetFeatureState(ctx, h, HandedState, "handed in")
-	must(t, err)
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
+	intakefixture.Must(t, err)
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.DemoAgent, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: intakefixture.DemoThread}
+	intakefixture.Must(t, repo.CreateThread(ctx, identity))
 	queueTurn(t, repo, "first", clock.Now())
 	queueTurn(t, repo, "second", clock.Now())
-	must(t, repo.Close())
+	intakefixture.Must(t, repo.Close())
 
 	reply := adaptertest.Reply[coreadapter.SessionResult]{Value: coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "session"}, FinalResponse: "Partial answer", Cancelled: true}}
-	turns := &blockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply)}, Hooks: map[string]func(context.Context){}}
+	turns := &fixturekit.BlockingTurns{Fake: &adaptertest.Turns{Script: *adaptertest.NewScript[coreadapter.PreparedTurn](reply, reply, reply)}, Hooks: map[string]func(context.Context){}}
 	var bound sync.Mutex
 	var live *trace.Repository
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
@@ -225,40 +209,36 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 		close(stopped)
 	}
 	s, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer s.Close()
 	select {
 	case <-entered:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("queued turn did not start")
 	}
 	bound.Lock()
 	repo = live
 	bound.Unlock()
 
-	code, body := abandonCall(t, s, stream, `{"reason":"Superseded."}`)
+	code, body := abandonCall(t, s, intakefixture.Stream, `{"reason":"Superseded."}`)
 	if code != http.StatusOK {
 		t.Fatalf("abandon: %d %s", code, body)
 	}
 	select {
 	case <-stopped:
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("abandoning did not cancel the running turn")
 	}
 	completed := func() trace.Thread {
 		t.Helper()
-		deadline := time.Now().Add(demoTimeout)
-		for {
-			th, err := repo.Thread(stream, demoAgent)
-			must(t, err)
-			if th.Active == "" && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() }) {
-				return th
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("turns did not complete: %+v", th)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		var th trace.Thread
+		intakefixture.Soon(t, "the abandoned turns to complete", func() bool {
+			var err error
+			th, err = repo.Thread(intakefixture.Stream, intakefixture.DemoAgent)
+			intakefixture.Must(t, err)
+			return th.Active == "" && !slices.ContainsFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.CompletedAt.IsZero() })
+		})
+		return th
 	}
 	th := completed()
 	first, second := th.Turns[0], th.Turns[1]
@@ -269,18 +249,16 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 		t.Fatalf("waiting turn: %+v", second.Response)
 	}
 
-	// A turn queued after abandonment is never dispatched.
 	queueTurn(t, repo, "third", clock.Now())
 	ticks <- clock.Now()
 	ticks <- clock.Now()
 	if _, ok := turnOperations(t, repo)["third"]; ok {
 		t.Fatal("a turn of an abandoned workstream was dispatched")
 	}
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 
-	// A restart completes the leftover turn as cancelled and runs nothing.
 	s, err = Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer s.Close()
 	ticks <- clock.Now()
 	ticks <- clock.Now()
@@ -298,7 +276,7 @@ func TestAbandonCancelsTurnsAcrossRestart(t *testing.T) {
 	if !slices.Equal(ran, []string{"first"}) {
 		t.Fatalf("backend runs %v", ran)
 	}
-	st, api := s.workstreamStatus(string(stream))
+	st, api := s.workstreamStatus(string(intakefixture.Stream))
 	if api != nil || st.State == nil || *st.State != AbandonedState {
 		t.Fatalf("status %+v %v", st, api)
 	}
@@ -310,22 +288,22 @@ func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	home, err := os.MkdirTemp("", "ao-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	cfg, err := projectstore.LoadConfig(fixtureAt(t, home).Config)
-	must(t, err)
-	clock := &demoClock{At: demoStart}
+	intakefixture.Must(t, err)
+	clock := &fixturekit.DemoClock{At: fixturekit.DemoStart}
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	repo, err := trace.Create(ctx, cfg.Root, cfg.Project, clock.Now(), owner)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer repo.Close()
-	must(t, repo.CreateWorkstream(ctx, stream, clock.Now(), owner))
-	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: demoAgent, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: demoRole, ThreadID: demoThread}
-	must(t, repo.CreateThread(ctx, identity))
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, intakefixture.Stream, clock.Now(), owner))
+	identity := trace.Agent{Header: trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: intakefixture.DemoAgent, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: owner, Cause: "workstream_created"}, Role: fixturekit.DemoRole, ThreadID: intakefixture.DemoThread}
+	intakefixture.Must(t, repo.CreateThread(ctx, identity))
 	queueTurn(t, repo, "first", clock.Now())
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: project, Workstream: stream, At: clock.Now(), Actor: owner, Cause: abandonTransition}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: abandonTransition, Revision: 1, Project: intakefixture.Project, Workstream: intakefixture.Stream, At: clock.Now(), Actor: owner, Cause: abandonTransition}
 	_, err = repo.SetFeatureState(ctx, h, AbandonedState, "gone")
-	must(t, err)
+	intakefixture.Must(t, err)
 
 	turns := &adaptertest.Turns{}
 	s := &Service{options: Options{Reconciliation: reconcile.Options{Now: clock.Now}}}
@@ -333,15 +311,15 @@ func TestAbandonedTurnOperationDoesNotRun(t *testing.T) {
 		Prepare: func(context.Context, thread.TurnInput) (coreadapter.PreparedTurn, error) {
 			return coreadapter.PreparedTurn{SessionDirectory: filepath.Join(home, "session")}, nil
 		}}, s: s, repository: repo}
-	op, err := thread.TurnOperation(project, "event", thread.TurnInput{Workstream: stream, Agent: demoAgent, Turn: "first"})
-	must(t, err)
+	op, err := thread.TurnOperation(intakefixture.Project, "event", thread.TurnInput{Workstream: intakefixture.Stream, Agent: intakefixture.DemoAgent, Turn: "first"})
+	intakefixture.Must(t, err)
 	result, err := a.Apply(ctx, op)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if result.Outcome != "interrupted" || len(turns.Calls()) != 0 {
 		t.Fatalf("result %+v, backend calls %d", result, len(turns.Calls()))
 	}
-	th, err := repo.Thread(stream, demoAgent)
-	must(t, err)
+	th, err := repo.Thread(intakefixture.Stream, intakefixture.DemoAgent)
+	intakefixture.Must(t, err)
 	if q := th.Turns[0]; q.Response == nil || !q.Response.Result.Cancelled || q.Response.Failure != cancelReason {
 		t.Fatalf("turn %+v", q)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"testing"
 	"time"
@@ -15,13 +16,11 @@ import (
 )
 
 type contestFixture struct {
-	f      *shedFixture
-	stream config.WorkstreamID
-	repo   *trace.Repository
-	r      *reviewers
-	tool   coreadapter.Tool
-	// scope is the chief of staff's claimed turn and controls the service's
-	// runtime controls, for tools a test builds beside tool.
+	f        *shedFixture
+	stream   config.WorkstreamID
+	repo     *trace.Repository
+	r        *reviewers
+	tool     coreadapter.Tool
 	scope    coreadapter.Scope
 	controls *runtimeControls
 }
@@ -30,7 +29,7 @@ func newContestFixture(t *testing.T, key string) *contestFixture {
 	t.Helper()
 	f, stream, repo := newReviewFixture(t, key)
 	f.s.setSole(&activeProject{repository: repo})
-	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return demoStart }, intakefixture.ChiefTurnInput{
+	scope := intakefixture.ClaimChiefTurn(t, repo, f.project, stream, func() time.Time { return fixturekit.DemoStart }, intakefixture.ChiefTurnInput{
 		Turn: "events_1", Prompt: "Unit resume is contested.", Actor: serviceActor, Cause: "fixture", Token: "token-events", Directory: "events",
 	})
 	controls := &runtimeControls{}
@@ -41,7 +40,7 @@ func newContestFixture(t *testing.T, key string) *contestFixture {
 func (c *contestFixture) state(t *testing.T) trace.WorkflowState {
 	t.Helper()
 	state, err := c.repo.Workflow(c.stream, trace.UnitSubject("resume"))
-	must(t, err)
+	intakefixture.Must(t, err)
 	return state
 }
 
@@ -58,18 +57,16 @@ func (c *contestFixture) resolve(t *testing.T, input string) string {
 	return intakefixture.Handle(t, c.tool, input)
 }
 
-// decided leaves the contest's decide result as a fallback, as the decide tool
-// does while Jev is unconfigured, unless a result is recorded.
 func (c *contestFixture) decided(t *testing.T) {
 	t.Helper()
 	contest, contested, err := unitContest(c.repo, c.stream, "resume")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !contested {
 		return
 	}
 	key := jev.ContestKey(contest.ID)
 	if res, err := jev.Recorded(c.repo, c.stream, jev.KindContestedRuling, key); err != nil || res.Status != jev.None {
-		must(t, err)
+		intakefixture.Must(t, err)
 		return
 	}
 	jevfixture.Fallback(c.repo, c.repo.Project(), c.stream, jev.KindContestedRuling, key)

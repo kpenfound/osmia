@@ -1,17 +1,17 @@
 package service
 
 import (
-	context "context"
-	time "time"
+	"context"
+	"time"
 
-	bundle "github.com/kpenfound/osmia/internal/bundle"
-	config "github.com/kpenfound/osmia/internal/config"
-	coreadapter "github.com/kpenfound/osmia/internal/coreadapter"
-	execution "github.com/kpenfound/osmia/internal/execution"
-	isolation "github.com/kpenfound/osmia/internal/isolation"
-	reconcile "github.com/kpenfound/osmia/internal/reconcile"
-	trace "github.com/kpenfound/osmia/internal/trace"
-	workspace "github.com/kpenfound/osmia/internal/workspace"
+	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/reconcile"
+	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/workspace"
 )
 
 var masonTurnID = execution.MasonTurnID

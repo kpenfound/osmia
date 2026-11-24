@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
@@ -11,7 +12,6 @@ func TestNetworkObserversShareGitCapacityWithoutWorkflowOrdering(t *testing.T) {
 	t.Parallel()
 	_, repo, _, refresh, _ := stopFixture(t)
 	s := refresh.s
-	// Saturate the same pool used by repository workflow operations.
 	var releases []func()
 	for i := 0; i < config.DefaultGitOperations; i++ {
 		release, admitted := s.tryGitOperation(repo)
@@ -37,7 +37,6 @@ func TestNetworkObserversShareGitCapacityWithoutWorkflowOrdering(t *testing.T) {
 	defer cancel()
 	done := make(chan struct{})
 	go func() { s.runNetworkPolls(ctx, repo, p); close(done) }()
-	// A full pool cannot admit the observer, but returning one permit can.
 	select {
 	case <-entered:
 		t.Fatal("poll exceeded Git capacity")
@@ -45,10 +44,10 @@ func TestNetworkObserversShareGitCapacityWithoutWorkflowOrdering(t *testing.T) {
 	}
 	releases[0]()
 	s.conversationSignal.wake()
-	awaitPollSignal(t, entered)
+	fixturekit.AwaitPollSignal(t, entered)
 	if _, admitted := s.tryGitOperation(repo); admitted {
 		t.Fatal("poll did not retain its Git permit")
 	}
 	cancel()
-	awaitPollSignal(t, done)
+	fixturekit.AwaitPollSignal(t, done)
 }

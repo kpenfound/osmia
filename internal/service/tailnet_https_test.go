@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"net"
 	"net/http"
 	"reflect"
@@ -25,7 +26,7 @@ const httpsNodeAddress = "https://" + httpsNodeName + "/"
 func awaitHTTPS(t *testing.T, c *Client, state string) *TailnetStatus {
 	t.Helper()
 	var status *TailnetStatus
-	eventually(t, "HTTPS never became "+state, func() bool {
+	intakefixture.Soon(t, "HTTPS never became "+state, func() bool {
 		h, err := c.Health(context.Background())
 		if err != nil || h.Tailnet == nil {
 			return false
@@ -36,9 +37,7 @@ func awaitHTTPS(t *testing.T, c *Client, state string) *TailnetStatus {
 	return status
 }
 
-// The URL uses the full MagicDNS name and default port; only dialing is
-// replaced by loopback. TLS verifies the fake node's certificate and name.
-func nodeHTTPSClient(t *testing.T, node *fakeTailnet) *http.Client {
+func nodeHTTPSClient(t *testing.T, node *fixturekit.TailnetNode) *http.Client {
 	t.Helper()
 	pool := x509.NewCertPool()
 	pool.AddCert(node.HTTPSCertificate())
@@ -52,7 +51,17 @@ func nodeHTTPSClient(t *testing.T, node *fakeTailnet) *http.Client {
 	return &http.Client{Timeout: 5 * time.Second, Transport: transport}
 }
 
-func TestTailnetHTTPSDefaultAndExplicitEnable(t *testing.T) {
+type tailnetHTTPS struct {
+	s      *Service
+	c      *Client
+	node   *fixturekit.TailnetNode
+	secure *http.Client
+	status *TailnetStatus
+}
+
+// eachTailnetHTTPSSetting starts a service that serves HTTPS on the tailnet
+// both by default and when tailnet_https is set, and checks each.
+func eachTailnetHTTPSSetting(t *testing.T, check func(t *testing.T, h *tailnetHTTPS)) {
 	for _, setting := range []string{"", "tailnet_https = true\n"} {
 		t.Run(setting, func(t *testing.T) {
 			t.Parallel()
@@ -61,53 +70,92 @@ func TestTailnetHTTPSDefaultAndExplicitEnable(t *testing.T) {
 			joined := withTailnet(t, &opts, httpsNodeName, "osmia-1")
 			s, c := start(t, opts)
 			status := awaitHTTPS(t, c, api.TailnetHTTPSUp)
-			if status.HTTPSAddress != httpsNodeAddress || status.HTTPSReason != "" {
-				t.Fatalf("HTTPS: %+v", status)
-			}
-			st, err := c.Statuses(context.Background())
-			must(t, err)
-			cfg, err := c.Configuration(context.Background())
-			must(t, err)
-			if !cfg.Effective.Listen.TailnetHTTPS || !reflect.DeepEqual(st.Tailnet, status) || !reflect.DeepEqual(cfg.Tailnet, status) {
-				t.Fatalf("status/config: %+v %+v", st.Tailnet, cfg)
-			}
 			node := *joined
-			secure := nodeHTTPSClient(t, node)
-			response, err := secure.Get(httpsNodeAddress + "v1/health")
-			must(t, err)
-			response.Body.Close()
-			if response.StatusCode != 200 || response.TLS == nil {
-				t.Fatalf("TLS health: %+v", response)
-			}
-			for _, endpoint := range []struct {
-				client *http.Client
-				base   string
-			}{{secure, strings.TrimSuffix(httpsNodeAddress, "/")}, {webHTTP(), "http://" + s.TailnetAddr()}} {
-				if code, body := exchange(t, endpoint.client, "GET", endpoint.base+Prefix+"/health", "", "", httpsNodeName); code != 200 {
-					t.Fatalf("health: %d %s", code, body)
-				}
-				if code, body := exchange(t, endpoint.client, "GET", endpoint.base+Prefix+"/health", "", "", "foreign.example"); code != 403 {
-					t.Fatalf("foreign Host: %d %s", code, body)
-				}
-				if code, body := exchange(t, endpoint.client, "PUT", endpoint.base+Prefix+"/runtime/profile", "text/plain", `{"role":"mason","profile":"other"}`, httpsNodeName); code != 403 {
-					t.Fatalf("non-JSON: %d %s", code, body)
-				}
-				if code, body := exchange(t, endpoint.client, "PUT", endpoint.base+Prefix+"/runtime/profile", "application/json", `{"role":"mason","profile":"other"}`, httpsNodeName); code != 200 {
-					t.Fatalf("JSON: %d %s", code, body)
-				}
-			}
-			must(t, s.Close())
-			if !node.HTTPSClosed() || !node.Left.Load() {
-				t.Fatal("shutdown did not close TLS and leave the node")
-			}
-			if status := s.tailnetStatus(context.Background()); status.HTTPSState == api.TailnetHTTPSUp || status.HTTPSAddress != "" {
-				t.Fatalf("status after shutdown: %+v", status)
-			}
-			if _, err := secure.Get(httpsNodeAddress + "v1/health"); err == nil {
-				t.Fatal("TLS still serves after shutdown")
-			}
+			check(t, &tailnetHTTPS{s: s, c: c, node: node, secure: nodeHTTPSClient(t, node), status: status})
 		})
 	}
+}
+
+func (h *tailnetHTTPS) endpoints() []struct {
+	client *http.Client
+	base   string
+} {
+	return []struct {
+		client *http.Client
+		base   string
+	}{{h.secure, strings.TrimSuffix(httpsNodeAddress, "/")}, {intakefixture.WebHTTP(), "http://" + h.s.TailnetAddr()}}
+}
+
+func TestTailnetServesHTTPSAtTheNodeAddressByDefaultAndWhenEnabled(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		if h.status.HTTPSAddress != httpsNodeAddress || h.status.HTTPSReason != "" {
+			t.Fatalf("HTTPS: %+v", h.status)
+		}
+	})
+}
+
+func TestTailnetHTTPSStateIsTheSameInHealthStatusesAndConfiguration(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		st, err := h.c.Statuses(context.Background())
+		intakefixture.Must(t, err)
+		cfg, err := h.c.Configuration(context.Background())
+		intakefixture.Must(t, err)
+		if !cfg.Effective.Listen.TailnetHTTPS || !reflect.DeepEqual(st.Tailnet, h.status) || !reflect.DeepEqual(cfg.Tailnet, h.status) {
+			t.Fatalf("status/config: %+v %+v", st.Tailnet, cfg)
+		}
+	})
+}
+
+func TestTailnetHealthIsServedOverTLS(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		response, err := h.secure.Get(httpsNodeAddress + "v1/health")
+		intakefixture.Must(t, err)
+		response.Body.Close()
+		if response.StatusCode != 200 || response.TLS == nil {
+			t.Fatalf("TLS health: %+v", response)
+		}
+	})
+}
+
+func TestTailnetEndpointsRefuseAForeignHostHeader(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		for _, endpoint := range h.endpoints() {
+			if code, body := intakefixture.Exchange(t, endpoint.client, "GET", endpoint.base+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+				t.Fatalf("health: %d %s", code, body)
+			}
+			if code, body := intakefixture.Exchange(t, endpoint.client, "GET", endpoint.base+Prefix+"/health", "", "", "foreign.example"); code != 403 {
+				t.Fatalf("foreign Host: %d %s", code, body)
+			}
+		}
+	})
+}
+
+func TestTailnetEndpointsAcceptWritesOnlyAsJSON(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		for _, endpoint := range h.endpoints() {
+			if code, body := intakefixture.Exchange(t, endpoint.client, "PUT", endpoint.base+Prefix+"/runtime/profile", "text/plain", `{"role":"mason","profile":"other"}`, httpsNodeName); code != 403 {
+				t.Fatalf("non-JSON: %d %s", code, body)
+			}
+			if code, body := intakefixture.Exchange(t, endpoint.client, "PUT", endpoint.base+Prefix+"/runtime/profile", "application/json", `{"role":"mason","profile":"other"}`, httpsNodeName); code != 200 {
+				t.Fatalf("JSON: %d %s", code, body)
+			}
+		}
+	})
+}
+
+func TestTailnetShutdownClosesTLSAndLeavesTheNode(t *testing.T) {
+	eachTailnetHTTPSSetting(t, func(t *testing.T, h *tailnetHTTPS) {
+		intakefixture.Must(t, h.s.Close())
+		if !h.node.HTTPSClosed() || !h.node.Left.Load() {
+			t.Fatal("shutdown did not close TLS and leave the node")
+		}
+		if status := h.s.tailnetStatus(context.Background()); status.HTTPSState == api.TailnetHTTPSUp || status.HTTPSAddress != "" {
+			t.Fatalf("status after shutdown: %+v", status)
+		}
+		if _, err := h.secure.Get(httpsNodeAddress + "v1/health"); err == nil {
+			t.Fatal("TLS still serves after shutdown")
+		}
+	})
 }
 
 func TestTailnetHTTPSOptOutAndRestartRequired(t *testing.T) {
@@ -124,16 +172,16 @@ func TestTailnetHTTPSOptOutAndRestartRequired(t *testing.T) {
 	}
 	files.write(t, strings.Replace(files.topText, "tailnet_https = false", "tailnet_https = true", 1))
 	reloaded, err := c.Reload(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(reloaded.RestartRequired, []string{"listen.tailnet_https"}) {
 		t.Fatalf("restart required: %+v", reloaded)
 	}
 	cfg, err := c.Configuration(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if cfg.Effective.Listen.TailnetHTTPS || !hasCode(cfg.Diagnostics, "configuration", RestartRequired) {
 		t.Fatalf("effective config: %+v", cfg)
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("HTTP: %d %s", code, body)
 	}
 	if node.HTTPSCalls.Load() != 0 {
@@ -156,20 +204,20 @@ func TestTailnetHTTPSUnavailableKeepsHTTP(t *testing.T) {
 			opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
 				node, err := join(host, dir)
 				if err == nil {
-					node.(*fakeTailnet).SetHTTPSFailure(errors.New(reason))
+					node.(*fixturekit.TailnetNode).SetHTTPSFailure(errors.New(reason))
 				}
 				return node, err
 			}
 			s, c := start(t, opts)
 			want := reason + "; retrying in 1h0m0s"
-			eventually(t, "HTTPS failure not reported", func() bool { return s.tailnetStatus(context.Background()).HTTPSReason == want })
+			intakefixture.Soon(t, "HTTPS failure not reported", func() bool { return s.tailnetStatus(context.Background()).HTTPSReason == want })
 			status := awaitHTTPS(t, c, api.TailnetHTTPSUnavailable)
 			st, err := c.Statuses(context.Background())
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !reflect.DeepEqual(st.Tailnet, status) || status.State != TailnetUp || status.HTTPSReason != want || status.HTTPSAddress != "" || (*joined).Left.Load() {
 				t.Fatalf("failure: %+v", status)
 			}
-			if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+			if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
 				t.Fatalf("HTTP: %d %s", code, body)
 			}
 			if got := s.notifier.link(context.Background(), s.current()); got != "http://"+httpsNodeName+"/" {
@@ -192,24 +240,24 @@ func TestTailnetHTTPSRetriesUntilTheCertificateIsIssued(t *testing.T) {
 	opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
 		node, err := join(host, dir)
 		if err == nil {
-			node.(*fakeTailnet).SetHTTPSFailure(errors.New(failure))
+			node.(*fixturekit.TailnetNode).SetHTTPSFailure(errors.New(failure))
 		}
 		return node, err
 	}
 	s, c := start(t, opts)
 	status := awaitHTTPS(t, c, api.TailnetHTTPSUnavailable)
-	eventually(t, "failed request not reported with its retry", func() bool {
+	intakefixture.Soon(t, "failed request not reported with its retry", func() bool {
 		status = s.tailnetStatus(context.Background())
 		return strings.HasPrefix(status.HTTPSReason, failure+"; retrying in ")
 	})
 	node := *joined
-	eventually(t, "certificate request not retried", func() bool { return node.HTTPSCalls.Load() >= 3 })
+	intakefixture.Soon(t, "certificate request not retried", func() bool { return node.HTTPSCalls.Load() >= 3 })
 	node.SetHTTPSFailure(nil)
 	status = awaitHTTPS(t, c, api.TailnetHTTPSUp)
 	if status.HTTPSAddress != httpsNodeAddress || status.HTTPSReason != "" || node.Left.Load() {
 		t.Fatalf("HTTPS after retry: %+v", status)
 	}
-	if code, body := exchange(t, nodeHTTPSClient(t, node), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, nodeHTTPSClient(t, node), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("TLS: %d %s", code, body)
 	}
 }
@@ -226,19 +274,19 @@ func TestTailnetHTTPSWaitsForASlowIssuance(t *testing.T) {
 	opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
 		node, err := join(host, dir)
 		if err == nil {
-			release = node.(*fakeTailnet).HoldHTTPS()
+			release = node.(*fixturekit.TailnetNode).HoldHTTPS()
 		}
 		return node, err
 	}
 	s, c := start(t, opts)
 	node := *joined
-	eventually(t, "certificate request not reported in progress", func() bool {
+	intakefixture.Soon(t, "certificate request not reported in progress", func() bool {
 		return node.HTTPSCalls.Load() == 1 && s.tailnetStatus(context.Background()).HTTPSReason == "requesting the HTTPS certificate"
 	})
 	if deadline := node.HTTPSDeadline(); !deadline.IsZero() && time.Until(deadline) < 5*time.Minute {
 		t.Fatalf("certificate request has only %s to finish", time.Until(deadline))
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+s.TailnetAddr()+Prefix+"/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("HTTP during issuance: %d %s", code, body)
 	}
 	release()
@@ -256,13 +304,12 @@ func TestTailnetHTTPSFailureFallsBackInWebhook(t *testing.T) {
 	joined := withTailnet(t, &opts, httpsNodeName)
 	s, c := startNotifying(t, opts, inbox)
 	awaitHTTPS(t, c, api.TailnetHTTPSUp)
-	// Wait for the notifier's first pass before adding the first new entry.
-	eventually(t, "webhook was not enabled", func() bool { return readLedger(t, opts).Enabled })
+	intakefixture.Soon(t, "webhook was not enabled", func() bool { return readLedger(t, opts).Enabled })
 	secure := nodeHTTPSClient(t, *joined)
-	if code, body := exchange(t, secure, "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, secure, "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("TLS: %d %s", code, body)
 	}
-	inbox.set(entryOf(InboxEscalation, 1))
+	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1))
 	if got := hook.await(t, 1)[0]; !strings.HasSuffix(got, "Open: "+httpsNodeAddress+"\n") {
 		t.Fatal(got)
 	}
@@ -272,10 +319,10 @@ func TestTailnetHTTPSFailureFallsBackInWebhook(t *testing.T) {
 	if status.State != TailnetUp || !strings.Contains(status.HTTPSReason, "HTTPS listener stopped") || status.HTTPSAddress != "" || node.Left.Load() || s.TailnetAddr() != httpAddr {
 		t.Fatalf("TLS failure: %+v", status)
 	}
-	if code, body := exchange(t, webHTTP(), "GET", "http://"+httpAddr+Prefix+"/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, intakefixture.WebHTTP(), "GET", "http://"+httpAddr+Prefix+"/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("HTTP after TLS failure: %d %s", code, body)
 	}
-	inbox.set(entryOf(InboxEscalation, 1), entryOf(InboxEscalation, 2))
+	inbox.set(fixturekit.NotificationEntry(InboxEscalation, 1), fixturekit.NotificationEntry(InboxEscalation, 2))
 	if got := hook.await(t, 2)[1]; !strings.HasSuffix(got, "Open: http://"+httpsNodeName+"/\n") {
 		t.Fatal(got)
 	}
@@ -286,7 +333,7 @@ func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	opts := fixture(t)
 	withListen(t, opts, "tailnet = \"osmia\"\n")
 	opts.TailnetRetry = time.Millisecond
-	var joined atomic.Pointer[fakeTailnet]
+	var joined atomic.Pointer[fixturekit.TailnetNode]
 	join, _ := fixturekit.TailnetJoiner(httpsNodeName)
 	opts.JoinTailnet = func(host, dir string) (TailnetListener, error) {
 		node, err := join(host, dir)
@@ -301,16 +348,15 @@ func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(first.HTTPSCertificate())
 	conn, err := tls.Dial("tcp", first.HTTPSAddr(), &tls.Config{RootCAs: pool, ServerName: httpsNodeName})
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer conn.Close()
 	_, err = fmt.Fprintf(conn, "GET /v1/health HTTP/1.1\r\nHost: %s\r\n\r\n", httpsNodeName)
-	must(t, err)
+	intakefixture.Must(t, err)
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
-	must(t, err)
+	intakefixture.Must(t, err)
 	resp.Body.Close()
-	// Fail HTTP acceptance without closing accepted TLS connections ourselves.
-	must(t, first.Close())
-	eventually(t, "node never replaced", func() bool { return joined.Load() != first && s.TailnetAddr() != "" })
+	intakefixture.Must(t, first.Close())
+	intakefixture.Soon(t, "node never replaced", func() bool { return joined.Load() != first && s.TailnetAddr() != "" })
 	awaitHTTPS(t, c, api.TailnetHTTPSUp)
 	if !first.HTTPSClosed() || !first.Left.Load() {
 		t.Fatal("superseded TLS listener not closed")
@@ -319,16 +365,15 @@ func TestTailnetHTTPSRejoinClosesSupersededListener(t *testing.T) {
 	if _, err := conn.Read(make([]byte, 1)); err == nil {
 		t.Fatal("superseded TLS connection remains open")
 	}
-	// A late update from the old generation cannot overwrite the new state.
 	s.tailnet.SetHTTPS(first, api.TailnetHTTPSUnavailable, "old failure", "")
 	if got := s.tailnetStatus(context.Background()); got.HTTPSAddress != httpsNodeAddress || got.HTTPSState != api.TailnetHTTPSUp {
 		t.Fatalf("new node status: %+v", got)
 	}
 	second := joined.Load()
-	if code, body := exchange(t, nodeHTTPSClient(t, second), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
+	if code, body := intakefixture.Exchange(t, nodeHTTPSClient(t, second), "GET", httpsNodeAddress+"v1/health", "", "", httpsNodeName); code != 200 {
 		t.Fatalf("replacement TLS: %d %s", code, body)
 	}
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	if !second.HTTPSClosed() || !second.Left.Load() {
 		t.Fatal("current TLS listener not closed on shutdown")
 	}

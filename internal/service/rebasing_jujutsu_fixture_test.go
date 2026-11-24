@@ -1,14 +1,12 @@
 package service
 
 import (
-	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/config"
 
-	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 
-	testing "testing"
+	"testing"
 )
-
-var requireJJ = intakefixture.RequireJJ
 
 func onWorkspaces(t *testing.T, opts Options, backend string) {
 	t.Helper()

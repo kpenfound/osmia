@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 	"time"
@@ -10,23 +11,17 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordRouted records a unit's move as the router commits it: with who decided
-// it and the state the default would have entered.
 func recordRouted(t *testing.T, repo *trace.Repository, id, from, to string, routing trace.Routing, at time.Time) {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, Unit: "resume", At: at, Actor: trace.Actor{Kind: "service", ID: "checks"}, Cause: "checks-1"}
 	subject := trace.UnitSubject("resume")
 	state, err := repo.Workflow(fixturekit.Stream, subject)
-	must(t, err)
+	intakefixture.Must(t, err)
 	tr := trace.Transition{Header: h, Subject: subject, From: from, To: to, Reason: "check run 1 failed on candidate abc", DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}
 	_, err = repo.Transact(context.Background(), trace.Transaction{ExpectedVersion: state.Version, Transition: tr})
-	must(t, err)
+	intakefixture.Must(t, err)
 }
 
-// Hearsay is told of a departure and of nothing else the router does: a default
-// the router followed, one it committed because Jev could not answer, and a move
-// the owner pinned are not decisions. The departure is Jev's decision on the work
-// source with no author.
 func TestOnlyADepartureIsPostedToHearsay(t *testing.T) {
 	f := newPublisherFixture(t)
 	fixturekit.RecordHanded(t, f.repo, fixturekit.Stream, "stdin", fixturekit.DemoStart)
@@ -63,7 +58,6 @@ func TestOnlyADepartureIsPostedToHearsay(t *testing.T) {
 		t.Fatalf("source %s", d.Source)
 	}
 
-	// A later pass, with the departure unchanged, posts nothing again.
 	posts, _ = f.pass()
 	for _, d := range decisions(posts) {
 		if strings.Contains(d.str("decision"), "-jev-route-") {

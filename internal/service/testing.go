@@ -390,7 +390,6 @@ func (a TestAccess) SetJudge(j *jev.Judge) {
 	defer a.s.mu.Unlock()
 	a.s.jev = j
 	a.s.router.Judge = j
-	// Final reviewers retain the dependencies composed for their stages.
 	for _, p := range a.s.projects {
 		if p.pipeline == nil {
 			continue

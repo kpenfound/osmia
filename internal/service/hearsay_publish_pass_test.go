@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"io"
 	"net"
 	"net/http"
@@ -23,7 +24,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// hooksPost is one request the fake hooks endpoint received.
 type hooksPost struct {
 	Source string
 	Auth   string
@@ -33,9 +33,6 @@ type hooksPost struct {
 
 func (p hooksPost) str(field string) string { s, _ := p.Body[field].(string); return s }
 
-// hooksFake stands in for the connectors listener of Hearsay's work source.
-// It checks nothing of Hearsay's own validation; it records the requests the
-// publisher makes, and answers with the status it is set to.
 type hooksFake struct {
 	*httptest.Server
 	mu     sync.Mutex
@@ -45,21 +42,17 @@ type hooksFake struct {
 
 func newHooksFake(t *testing.T) *hooksFake { return newHooksFakeOn(t, "127.0.0.1:0") }
 
-// newHooksFakeOn starts a hooks fake listening on addr, so a fake that was
-// closed can come back at the address the publisher is configured with.
 func newHooksFakeOn(t *testing.T, addr string) *hooksFake {
 	t.Helper()
 	f := &hooksFake{status: http.StatusAccepted}
 	listener, err := net.Listen("tcp", addr)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		post := hooksPost{Source: strings.TrimPrefix(r.URL.Path, "/hooks/"), Auth: r.Header.Get("Authorization"), Raw: string(raw)}
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/hooks/") || json.Unmarshal(raw, &post.Body) != nil {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		// Hearsay answers 400 to a decision whose decider is missing or is
-		// not one of these.
 		if post.Body["kind"] == "decision" && !slices.Contains([]string{"owner", "chief_of_staff", "committee"}, post.str("decider")) {
 			t.Errorf("a decision carries decider %q, which Hearsay's connector contract refuses: %s", post.str("decider"), raw)
 		}
@@ -83,7 +76,6 @@ func newHooksFakeOn(t *testing.T, addr string) *hooksFake {
 
 func (f *hooksFake) setStatus(status int) { f.mu.Lock(); f.status = status; f.mu.Unlock() }
 
-// take returns the requests received since the last take.
 func (f *hooksFake) take() []hooksPost {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -94,8 +86,6 @@ func (f *hooksFake) take() []hooksPost {
 
 const publishTestToken = "publisher-token-8a7b6c5d"
 
-// publisherFixture is a project with two workstreams and a charter, a trace
-// the test holds open, and a service configured to publish to hooks.
 type publisherFixture struct {
 	t     *testing.T
 	s     *Service
@@ -106,7 +96,6 @@ type publisherFixture struct {
 
 func newPublisherFixture(t *testing.T, mutate ...func(*config.Config)) *publisherFixture {
 	t.Helper()
-	// serial: sets the publisher's token in the process environment.
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
 	hooks := newHooksFake(t)
 	_, cfg := conversationFixture(t, "hearsay-publish-")
@@ -119,25 +108,23 @@ func newPublisherFixture(t *testing.T, mutate ...func(*config.Config)) *publishe
 	}
 	cfg.Projects[0] = cfg.Project
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
 	return &publisherFixture{t: t, s: &Service{cfg: cfg, memory: hearsay.Health{}}, cfg: cfg, repo: repo, hooks: hooks}
 }
 
-// pass runs one reconcile pass and returns the requests it made.
 func (f *publisherFixture) pass() ([]hooksPost, hearsay.Result) {
 	f.t.Helper()
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	return f.hooks.take(), res
 }
 
-// reopen closes and reopens the project's trace, as a service restart does.
 func (f *publisherFixture) reopen() {
 	f.t.Helper()
-	must(f.t, f.repo.Close())
+	intakefixture.Must(f.t, f.repo.Close())
 	repo, err := trace.Open(f.cfg.Root, f.cfg.Project)
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.repo = repo
 	f.t.Cleanup(func() { repo.Close() })
 }
@@ -147,18 +134,18 @@ func (f *publisherFixture) recordSeal(stream config.WorkstreamID, n int, specTex
 	ctx := context.Background()
 	at := fixturekit.DemoStart.Add(time.Duration(n) * time.Hour)
 	spec := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "spec", Revision: n, Project: f.repo.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"}, Path: "spec.md", Content: specText}
-	must(f.t, f.repo.RecordDocuments(ctx, []trace.Document{spec}))
+	intakefixture.Must(f.t, f.repo.RecordDocuments(ctx, []trace.Document{spec}))
 	data, err := seal.Encode(seal.Seal{Version: 1, Seal: n, Round: 1, Revision: shed.Pin{Spec: n, Plan: 1}, SpecHash: seal.SpecHash(specText), Base: seal.Base{Remote: "upstream", Branch: "main", Commit: "abc"}, Branch: "feature", Workspace: "/owned/feature"})
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	sealDoc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: seal.DocumentID, Revision: n, Project: f.repo.Project(), Workstream: stream, At: at.Add(time.Minute), Actor: ownerActor, Cause: "seal"}, Path: seal.Path, Content: string(data)}
-	must(f.t, f.repo.RecordDocuments(ctx, []trace.Document{sealDoc}))
+	intakefixture.Must(f.t, f.repo.RecordDocuments(ctx, []trace.Document{sealDoc}))
 }
 
 func (f *publisherFixture) setFeature(stream config.WorkstreamID, id, to, reason string, at time.Time) {
 	f.t.Helper()
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: id}
 	_, err := f.repo.SetFeatureState(context.Background(), h, to, reason)
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 }
 
 func find(posts []hooksPost, kind, field, value string) *hooksPost {
@@ -188,8 +175,6 @@ func TestPublishBackfillPostsEveryEligibleArtifactParentsFirst(t *testing.T) {
 	if res.Posts != len(posts) || len(res.Failures) != 0 {
 		t.Fatalf("pass: %+v", res)
 	}
-	// The project, both workstreams, two charter revisions and two seal
-	// revisions of the one spec document.
 	if len(posts) != 7 {
 		t.Fatalf("%d posts: %v", len(posts), kinds(posts))
 	}
@@ -239,7 +224,6 @@ func TestPublishBackfillPostsEveryEligibleArtifactParentsFirst(t *testing.T) {
 	if specs[0].str("created_at") != specs[1].str("created_at") || specs[0].str("updated_at") >= specs[1].str("updated_at") {
 		t.Fatalf("spec revision times: %s %s", specs[0].Raw, specs[1].Raw)
 	}
-	// Records posted in several revisions are recorded at the latest one.
 	if again, _ := f.pass(); len(again) != 0 {
 		t.Fatalf("the second pass after the backfill posted %v", kinds(again))
 	}
@@ -251,23 +235,19 @@ func TestPublishSecondPassSendsNothingAndAChangePostsOnce(t *testing.T) {
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("an unchanged trace posted %v", kinds(posts))
 	}
-	// A new charter revision.
 	fixturekit.RecordCharter(t, f.repo, trace.CharterTemplate+"\n## Rules\n\n1. Keep the upload API stable.\n2. Cache nothing.\n")
 	posts, _ := f.pass()
 	if len(posts) != 1 || posts[0].str("document") != "charter" || !strings.Contains(posts[0].str("body"), "Cache nothing") {
 		t.Fatalf("charter change posted %v", kinds(posts))
 	}
-	// A new seal.
 	f.recordSeal(fixturekit.Stream, 1, "# Upload limits\n\nCap uploads.\n")
 	posts, _ = f.pass()
 	if len(posts) != 2 || find(posts, "document", "workstream", string(fixturekit.Stream)) == nil || find(posts, "workstream", "workstream", string(fixturekit.Stream)) == nil {
-		// The seal retitles the workstream and adds its spec document.
 		t.Fatalf("seal posted %v", kinds(posts))
 	}
 	if posts, _ = f.pass(); len(posts) != 0 {
 		t.Fatalf("after the seal: %v", kinds(posts))
 	}
-	// A state change on one workstream.
 	f.setFeature(fixturekit.Quiet, "abandon", "abandoned", "no longer needed", fixturekit.DemoStart.Add(24*time.Hour))
 	posts, _ = f.pass()
 	if len(posts) != 1 || posts[0].str("workstream") != string(fixturekit.Quiet) || posts[0].str("state") != "abandoned" || posts[0].str("status") != "abandoned" || !strings.Contains(posts[0].str("description"), "no longer needed") {
@@ -282,14 +262,13 @@ func TestPublishOutageKeepsDigestsAndALaterPassPostsThePending(t *testing.T) {
 	f := newPublisherFixture(t)
 	f.hooks.setStatus(http.StatusInternalServerError)
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if res.Posts != 0 || len(res.Failures) == 0 || strings.Contains(fmt.Sprint(res.Failures), publishTestToken) {
 		t.Fatalf("pass during the outage: %+v", res)
 	}
 	if posted, err := f.repo.HearsayPosted(); err != nil || len(posted) != 0 {
 		t.Fatalf("digests recorded during the outage: %v %v", posted, err)
 	}
-	// Local work carries on while Hearsay is down.
 	f.setFeature(fixturekit.Stream, "abandon", "abandoned", "dropped", fixturekit.DemoStart.Add(time.Hour))
 
 	f.hooks.setStatus(http.StatusAccepted)
@@ -309,7 +288,7 @@ func TestPublishUnreachableEndpointRecordsNothing(t *testing.T) {
 	f := newPublisherFixture(t)
 	f.hooks.Close()
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !res.Unreachable || res.Posts != 0 {
 		t.Fatalf("pass: %+v", res)
 	}
@@ -320,8 +299,6 @@ func TestPublishUnreachableEndpointRecordsNothing(t *testing.T) {
 
 func TestPublishChildIsSkippedWhileItsParentIsRefused(t *testing.T) {
 	f := newPublisherFixture(t)
-	// Only the work source is refused: the project fails, so nothing that
-	// names it is attempted, and nothing on the owner source is posted.
 	refused := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/osmia-work") {
 			http.Error(w, "refused", http.StatusForbidden)
@@ -333,7 +310,7 @@ func TestPublishChildIsSkippedWhileItsParentIsRefused(t *testing.T) {
 	defer refused.Close()
 	f.cfg.Hearsay.Publish.HooksURL = refused.URL
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if res.Posts != 0 || len(res.Failures) < 4 {
 		t.Fatalf("pass: %+v", res)
 	}
@@ -347,15 +324,14 @@ func TestPublishRecordIDsAreStableAcrossRestartAndRepost(t *testing.T) {
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("a restart reposted %v", kinds(posts))
 	}
-	// Clearing every digest reposts the same artifacts under the same ids.
 	posted, err := f.repo.HearsayPosted()
-	must(t, err)
+	intakefixture.Must(t, err)
 	var cleared []trace.PostedRecord
 	for _, p := range posted {
 		p.Digest = ""
 		cleared = append(cleared, p)
 	}
-	must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, fixturekit.DemoStart))
+	intakefixture.Must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, fixturekit.DemoStart))
 	second, _ := f.pass()
 	if len(second) != len(first) {
 		t.Fatalf("a repost sent %v, first sent %v", kinds(second), kinds(first))
@@ -374,9 +350,6 @@ func TestPublishRecordIDsAreStableAcrossRestartAndRepost(t *testing.T) {
 	if !slices.Equal(ids(first), ids(second)) {
 		t.Fatalf("ids changed:\n%v\n%v", ids(first), ids(second))
 	}
-	// Identical content reposts byte for byte, so Hearsay writes nothing.
-	// A record with several revisions (the charter) is matched revision by
-	// revision: its revisions share an id and differ in updated_at.
 	revision := func(p hooksPost) string { return identify(p) + "|" + p.str("updated_at") }
 	byRevision := map[string]string{}
 	for _, p := range first {
@@ -416,9 +389,9 @@ func TestPublishCarriesPullRequestAndNeverItsBody(t *testing.T) {
 	const prBody = "PR-BODY-SECRET-DESCRIPTION"
 	record := api.DeliveryPublication{Status: "opened", Upstream: "o/r", Base: "main", Branch: "feature", Commit: "tip", PullRequest: 7, URL: "https://github.com/o/r/pull/7", Title: "Title", Description: prBody}
 	data, err := json.Marshal(record)
-	must(t, err)
+	intakefixture.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "final-publication", Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart.Add(time.Hour), Actor: ownerActor, Cause: "fixture"}
-	must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "final/publication.json", Content: string(data)}}))
+	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: "final/publication.json", Content: string(data)}}))
 	f.setFeature(fixturekit.Stream, "delivered", "delivered", "delivered", fixturekit.DemoStart.Add(2*time.Hour))
 
 	posts, _ := f.pass()
@@ -432,11 +405,10 @@ func TestPublishCarriesPullRequestAndNeverItsBody(t *testing.T) {
 		}
 	}
 
-	// A recorded merge changes the description and the post is made once.
 	out, err := json.Marshal(map[string]any{"pull_request": 7, "outcome": "merged", "merge_commit": "m"})
-	must(t, err)
+	intakefixture.Must(t, err)
 	oh := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: "own-pull-request-outcome", Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart.Add(3 * time.Hour), Actor: ownerActor, Cause: "fixture"}
-	must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: oh, Path: "own-pull-request-outcome.json", Content: string(out)}}))
+	intakefixture.Must(t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: oh, Path: "own-pull-request-outcome.json", Content: string(out)}}))
 	posts, _ = f.pass()
 	if len(posts) != 1 || !strings.Contains(posts[0].str("description"), "(merged)") || posts[0].str("state") != "completed" {
 		t.Fatalf("merge posted %v", posts)
@@ -463,18 +435,15 @@ func TestPublishBlockedAndStartedStatesFollowOsmiaStates(t *testing.T) {
 	}
 }
 
-func TestPublishSkipsLibrarianAndSessionWorkstreams(t *testing.T) {
+func TestPublishSkipsSessionWorkstreams(t *testing.T) {
 	f := newPublisherFixture(t)
 	ctx := context.Background()
-	librarian := librarianWorkstream(f.repo.Project())
-	must(t, f.repo.CreateWorkstream(ctx, librarian, fixturekit.DemoStart, ownerActor))
-	f.recordSeal(librarian, 1, "# Librarian\n")
 	session := config.WorkstreamID("w_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	must(t, f.repo.CreateSessionWorkstream(ctx, session, "profile", "base", "branch", "An exploratory session", fixturekit.DemoStart, ownerActor))
+	intakefixture.Must(t, f.repo.CreateSessionWorkstream(ctx, session, "profile", "base", "branch", "An exploratory session", fixturekit.DemoStart, ownerActor))
 	posts, _ := f.pass()
 	for _, p := range posts {
-		if p.str("workstream") == string(librarian) || p.str("workstream") == string(session) || strings.Contains(p.Raw, "exploratory") {
-			t.Fatalf("a post is about the librarian or a session: %s", p.Raw)
+		if p.str("workstream") == string(session) || strings.Contains(p.Raw, "exploratory") {
+			t.Fatalf("a post is about a session: %s", p.Raw)
 		}
 	}
 	if len(posts) != 5 {
@@ -486,7 +455,7 @@ func TestPublishWorkgroupMembersNameTheGroupAndItsProjectSpecIsPostedOnce(t *tes
 	f := newPublisherFixture(t)
 	ctx := context.Background()
 	group, err := trace.CreateWorkgroup(ctx, f.repo, []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet}, fixturekit.DemoStart, ownerActor, "test")
-	must(t, err)
+	intakefixture.Must(t, err)
 	posts, _ := f.pass()
 	for _, id := range []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet} {
 		other := fixturekit.Stream
@@ -498,14 +467,13 @@ func TestPublishWorkgroupMembersNameTheGroupAndItsProjectSpecIsPostedOnce(t *tes
 			t.Fatalf("a member does not name its workgroup and the other member: %+v", w)
 		}
 	}
-	// A draft project spec is not posted; the approved one is, once.
 	for _, p := range posts {
 		if strings.Contains(p.str("document"), "project-spec") {
 			t.Fatalf("a spec nobody approved was posted: %s", p.Raw)
 		}
 	}
 	spec := trace.ProjectSpec{Behavior: "The two repos agree on one upload contract.", Contracts: []trace.Contract{{Name: "upload-record", Text: "Records carry a size."}}, Graph: []trace.Edge{{From: fixturekit.Stream, To: fixturekit.Quiet, Type: trace.EdgeContract}}, Slices: []trace.Slice{{Workstream: fixturekit.Stream, Spec: "SLICE-SPEC", Plan: "SLICE-PLAN"}}}
-	must(t, trace.RecordWorkgroupRevision(ctx, f.repo, group, "approved", spec, fixturekit.DemoStart.Add(time.Hour), ownerActor))
+	intakefixture.Must(t, trace.RecordWorkgroupRevision(ctx, f.repo, group, "approved", spec, fixturekit.DemoStart.Add(time.Hour), ownerActor))
 	posts, _ = f.pass()
 	if len(posts) != 1 {
 		t.Fatalf("approved project spec posted %v", kinds(posts))
@@ -521,27 +489,25 @@ func TestPublishWorkgroupMembersNameTheGroupAndItsProjectSpecIsPostedOnce(t *tes
 }
 
 func TestPublishLoopSendsNothingWithoutPublishConfiguration(t *testing.T) {
-	// serial: sets the publisher's token in the process environment.
 	t.Setenv("PUBLISH_TEST_TOKEN", publishTestToken)
 	hooks := newHooksFake(t)
 	_, cfg := conversationFixture(t, "hearsay-unpublished-")
 	cfg.Hearsay = config.Hearsay{URL: hooks.URL, Principal: "owner", TokenEnv: "PUBLISH_TEST_OWNER", Agents: map[string]config.HearsayAgent{
 		"worker": {ID: "w", TokenEnv: "W"}, "orchestrator": {ID: "o", TokenEnv: "O"}, "observer": {ID: "b", TokenEnv: "B"}}}
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer repo.Close()
-	s := &Service{cfg: cfg, memory: hearsay.Health{}}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandon", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "abandon"}
+	_, err = repo.SetFeatureState(context.Background(), h, "abandoned", "done")
+	intakefixture.Must(t, err)
+	iterated := make(chan struct{})
+	s := &Service{cfg: cfg, memory: hearsay.Health{}, options: Options{hearsayPassed: func() { close(iterated) }}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- s.publishHearsay(ctx, repo) }()
-	time.Sleep(300 * time.Millisecond)
-	// Local work progresses meanwhile.
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "abandon", Revision: 1, Project: repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: ownerActor, Cause: "abandon"}
-	_, err = repo.SetFeatureState(context.Background(), h, "abandoned", "done")
-	must(t, err)
-	time.Sleep(100 * time.Millisecond)
+	intakefixture.Await(t, "the publishing loop's first iteration", iterated)
 	cancel()
-	must(t, <-done)
+	intakefixture.Must(t, <-done)
 	if posts := hooks.take(); len(posts) != 0 {
 		t.Fatalf("unconfigured publishing posted %v", kinds(posts))
 	}
@@ -552,25 +518,13 @@ func TestPublishLoopPostsWhilePublishingIsConfiguredAndStopsWithTheProject(t *te
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- f.s.publishHearsay(ctx, f.repo) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	intakefixture.Soon(t, "the loop to record its digests", func() bool {
 		posted, err := f.repo.HearsayPosted()
-		must(t, err)
-		// One digest per artifact: the project, two workstreams and the charter,
-		// whose revisions share a digest.
-		if len(posted) >= 4 {
-			break
-		}
-		if time.Now().After(deadline) {
-			cancel()
-			t.Fatalf("the loop recorded %d digests", len(posted))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		intakefixture.Must(t, err)
+		return len(posted) >= 4
+	})
 	cancel()
-	must(t, <-done)
-	// Every artifact reached the hooks endpoint; the charter's revisions are
-	// posted separately.
+	intakefixture.Must(t, <-done)
 	if posts := f.hooks.take(); len(posts) < 4 {
 		t.Fatalf("the loop posted %v", kinds(posts))
 	}

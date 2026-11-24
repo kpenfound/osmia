@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,47 +15,26 @@ import (
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// syncBuffer is a bytes.Buffer safe for the concurrent writes a running
-// service's background goroutines, such as the tailnet supervisor, make
-// through its logger.
-type syncBuffer = fixturekit.SyncBuffer
-
-var decodeStructuredLines = fixturekit.DecodeStructuredLines
-
-// TestServiceWritesOnlyStructuredRecordsToItsLogger shows that a service
-// started with a JSON-handler logger writes only JSON-line records through
-// it, with a timestamp, a level and a message, whether the service is
-// quiet or an embedded component such as the tailnet supervisor logs
-// through it.
 func TestServiceWritesOnlyStructuredRecordsToItsLogger(t *testing.T) {
 	t.Parallel()
 	opts := fixture(t)
 	withListen(t, opts, "tailnet = \"osmia\"\n")
-	var buf syncBuffer
+	var buf fixturekit.SyncBuffer
 	opts.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
 	opts.TailnetRetry = time.Hour
 	opts.JoinTailnet = func(hostname, dir string) (TailnetListener, error) { return nil, errors.New("no tailnet in this test") }
 	s, err := Start(context.Background(), opts)
-	must(t, err)
-	// The tailnet join failure logs through the service's own logger,
-	// synchronously before Start returns, giving at least one record to
-	// check besides the vacuous case of an otherwise quiet service.
+	intakefixture.Must(t, err)
 	text := buf.String()
-	decodeStructuredLines(t, text)
+	fixturekit.DecodeStructuredLines(t, text)
 	if !strings.Contains(text, `"component":"tailnet"`) {
 		t.Fatalf("tailnet join failure did not log through the service's logger: %s", text)
 	}
-	must(t, s.Close())
-	decodeStructuredLines(t, buf.String())
+	intakefixture.Must(t, s.Close())
+	fixturekit.DecodeStructuredLines(t, buf.String())
 }
 
-// TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction shows that the
-// Jev's API key is covered by redaction whichever environment
-// variable api_key_env names, not only the default OPENROUTER_API_KEY:
-// once the service reads the key through a real request, every later log
-// write that happens to contain the key's value is redacted.
 func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
-	// serial: sets process env OSMIA_TEST_JEV_KEY via t.Setenv
 	const envVar = "OSMIA_TEST_JEV_KEY"
 	const secret = "jev-secret-under-a-custom-name"
 	t.Setenv(envVar, secret)
@@ -62,8 +42,8 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 	opts := fixture(t)
 	path := filepath.Join(opts.Config.Root, "config.toml")
 	top, err := os.ReadFile(path)
-	must(t, err)
-	must(t, os.WriteFile(path, append(top, []byte(
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(path, append(top, []byte(
 		"\n[jev]\nmodel = \"jev-test\"\napi_key_env = \""+envVar+"\"\n")...), 0600))
 
 	for _, known := range redact.KnownSecrets() {
@@ -73,10 +53,8 @@ func TestJevKeyUnderANonDefaultEnvVarIsRegisteredForRedaction(t *testing.T) {
 	}
 
 	_, c := start(t, opts)
-	// GET /v1/runtime reports Jev's status, reading its key the
-	// same way a real judgment request does.
 	_, err = c.Runtime(context.Background())
-	must(t, err)
+	intakefixture.Must(t, err)
 
 	found := false
 	for _, known := range redact.KnownSecrets() {

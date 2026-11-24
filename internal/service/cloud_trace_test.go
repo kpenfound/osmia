@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,20 +20,18 @@ import (
 
 const cloudTraceToken = "dct_service_fixture_token_51c0e"
 
-// fakeTraceProgram writes a Dagger CLI that logs each call and then runs
-// body. It returns the program and the number of calls so far.
 func fakeTraceProgram(t *testing.T, body string) (program string, calls func() int) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	program = filepath.Join(dir, "dagger")
-	must(t, os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log+"'\n"+body), 0700))
+	intakefixture.Must(t, os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+log+"'\n"+body), 0700))
 	return program, func() int {
 		raw, err := os.ReadFile(log)
 		if os.IsNotExist(err) {
 			return 0
 		}
-		must(t, err)
+		intakefixture.Must(t, err)
 		return strings.Count(string(raw), "\n")
 	}
 }
@@ -55,79 +54,137 @@ type traceResult struct {
 func callTrace(t *testing.T, tool coreadapter.Tool, input string) traceResult {
 	t.Helper()
 	var out traceResult
-	must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
+	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, tool, input)), &out))
 	return out
 }
 
-func TestChiefFetchesAndRecordsTraceOutputByTraceAndNarrowing(t *testing.T) {
-	t.Parallel()
+type traceFetch struct {
+	c     *contestFixture
+	calls func() int
+	tool  func() coreadapter.Tool
+}
+
+func newTraceFetch(t *testing.T) *traceFetch {
+	t.Helper()
 	c := newContestFixture(t, "cloud-trace")
 	program, calls := fakeTraceProgram(t, "printf 'output of %s\\nauth %s\\n' \"$*\" \"$DAGGER_CLOUD_TOKEN\"\n")
 	c.f.s.options.CloudTrace = DaggerChecks{CloudToken: cloudTraceToken, Program: program}
-	now := func() time.Time { return demoStart }
-	tool := func() coreadapter.Tool { return c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, now) }
+	now := func() time.Time { return fixturekit.DemoStart }
+	return &traceFetch{c: c, calls: calls, tool: func() coreadapter.Tool { return c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, now) }}
+}
 
-	whole := callTrace(t, tool(), `{"trace_id":"t1"}`)
-	if !whole.Fetched || whole.Recorded || !whole.WholeTrace || whole.Check != "" || whole.Path != "traces/t1-all.json" || whole.Citation != "trace#t1-all" || whole.Truncated || calls() != 1 {
-		t.Fatalf("whole trace: %+v after %d calls", whole, calls())
+func (f *traceFetch) fetch(t *testing.T, input string) traceResult {
+	t.Helper()
+	return callTrace(t, f.tool(), input)
+}
+
+func TestChiefFetchesTheWholeOfATraceAndRecordsIt(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	whole := f.fetch(t, `{"trace_id":"t1"}`)
+	if !whole.Fetched || whole.Recorded || !whole.WholeTrace || whole.Check != "" || whole.Path != "traces/t1-all.json" || whole.Citation != "trace#t1-all" || whole.Truncated || f.calls() != 1 {
+		t.Fatalf("whole trace: %+v after %d calls", whole, f.calls())
 	}
+}
+
+func TestChiefTraceOutputHidesTheCloudToken(t *testing.T) {
+	t.Parallel()
+	whole := newTraceFetch(t).fetch(t, `{"trace_id":"t1"}`)
 	if !strings.Contains(whole.Output, "output of cloud traces view t1\n") || strings.Contains(whole.Output, cloudTraceToken) || !strings.Contains(whole.Output, "[redacted]") || whole.Size != len("output of cloud traces view t1\nauth "+cloudTraceToken+"\n") {
 		t.Fatalf("whole trace output %q, size %d", whole.Output, whole.Size)
 	}
-	// The same identity answers from the record, also from a tool built after a restart.
+}
+
+func TestChiefRefetchingARecordedTraceReadsTheRecordWithoutRunningTheCLI(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	whole := f.fetch(t, `{"trace_id":"t1"}`)
 	for range 2 {
-		again := callTrace(t, tool(), `{"trace_id":"t1"}`)
-		if !again.Fetched || !again.Recorded || again.Output != whole.Output || again.Path != whole.Path || again.Citation != whole.Citation || calls() != 1 {
-			t.Fatalf("repeat: %+v after %d calls", again, calls())
+		again := f.fetch(t, `{"trace_id":"t1"}`)
+		if !again.Fetched || !again.Recorded || again.Output != whole.Output || again.Path != whole.Path || again.Citation != whole.Citation || f.calls() != 1 {
+			t.Fatalf("repeat: %+v after %d calls", again, f.calls())
 		}
 	}
+}
 
-	// A record narrowed to check A never answers check B or the whole trace.
-	a := callTrace(t, tool(), `{"trace_id":"t2","check":"test:a"}`)
-	if !a.Fetched || a.Recorded || a.WholeTrace || a.Check != "test:a" || calls() != 2 || !strings.Contains(a.Output, "output of cloud traces view --check=test:a t2") || !strings.HasPrefix(a.Path, "traces/t2-check-") {
-		t.Fatalf("check A: %+v after %d calls", a, calls())
+func TestChiefFetchesEachCheckOfATraceAndItsWholeSeparately(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	a := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`)
+	if !a.Fetched || a.Recorded || a.WholeTrace || a.Check != "test:a" || f.calls() != 1 || !strings.Contains(a.Output, "output of cloud traces view --check=test:a t2") || !strings.HasPrefix(a.Path, "traces/t2-check-") {
+		t.Fatalf("check A: %+v after %d calls", a, f.calls())
 	}
-	b := callTrace(t, tool(), `{"trace_id":"t2","check":"test:b"}`)
-	if !b.Fetched || b.Recorded || calls() != 3 || b.Path == a.Path || !strings.Contains(b.Output, "--check=test:b t2") || strings.Contains(b.Output, "test:a") {
-		t.Fatalf("check B: %+v after %d calls", b, calls())
+	b := f.fetch(t, `{"trace_id":"t2","check":"test:b"}`)
+	if !b.Fetched || b.Recorded || f.calls() != 2 || b.Path == a.Path || !strings.Contains(b.Output, "--check=test:b t2") || strings.Contains(b.Output, "test:a") {
+		t.Fatalf("check B: %+v after %d calls", b, f.calls())
 	}
-	all := callTrace(t, tool(), `{"trace_id":"t2"}`)
-	if !all.Fetched || all.Recorded || calls() != 4 || all.Path == a.Path || all.Path == b.Path || strings.Contains(all.Output, "--check") {
-		t.Fatalf("whole trace of t2: %+v after %d calls", all, calls())
+	all := f.fetch(t, `{"trace_id":"t2"}`)
+	if !all.Fetched || all.Recorded || f.calls() != 3 || all.Path == a.Path || all.Path == b.Path || strings.Contains(all.Output, "--check") {
+		t.Fatalf("whole trace of t2: %+v after %d calls", all, f.calls())
 	}
-	if again := callTrace(t, tool(), `{"trace_id":"t2","check":"test:a"}`); !again.Recorded || again.Output != a.Output || calls() != 4 {
-		t.Fatalf("check A again: %+v after %d calls", again, calls())
+	if again := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`); !again.Recorded || again.Output != a.Output || f.calls() != 3 {
+		t.Fatalf("check A again: %+v after %d calls", again, f.calls())
 	}
-	// A check name that begins with a dash stays inside one element.
-	dash := callTrace(t, tool(), `{"trace_id":"t3","check":"--help"}`)
+}
+
+func TestChiefPassesACheckNamedLikeAFlagAsTheValueOfTheCheckOption(t *testing.T) {
+	t.Parallel()
+	dash := newTraceFetch(t).fetch(t, `{"trace_id":"t3","check":"--help"}`)
 	if !dash.Fetched || !strings.Contains(dash.Output, "output of cloud traces view --check=--help t3\n") {
 		t.Fatalf("dash check: %+v", dash)
 	}
+}
 
-	// Every fetch is a workstream document factory_context lists and reads.
-	read := factoryContext(c.repo, c.scope)
-	var listed map[string]int
-	must(t, json.Unmarshal([]byte(intakefixture.Handle(t, read, `{"path":"traces"}`)), &listed))
-	if len(listed) != 5 || listed[whole.Path] != 1 || listed[a.Path] != 1 || listed[b.Path] != 1 || listed[all.Path] != 1 || listed[dash.Path] != 1 {
-		t.Fatalf("listed %v", listed)
+func TestFactoryContextListsEachRecordedTraceOnce(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	paths := map[string]bool{}
+	for _, input := range []string{`{"trace_id":"t1"}`, `{"trace_id":"t2","check":"test:a"}`, `{"trace_id":"t2","check":"test:b"}`, `{"trace_id":"t2"}`, `{"trace_id":"t3","check":"--help"}`} {
+		paths[f.fetch(t, input).Path] = true
 	}
+	var listed map[string]int
+	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"traces"}`)), &listed))
+	if len(listed) != len(paths) || len(paths) != 5 {
+		t.Fatalf("listed %v for %v", listed, paths)
+	}
+	for path := range paths {
+		if listed[path] != 1 {
+			t.Fatalf("listed %v lacks %s", listed, path)
+		}
+	}
+}
+
+func TestRecordedTraceHoldsItsTraceCheckFetchTimeAndOutput(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	a := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`)
 	var doc struct {
 		Content string `json:"content"`
 	}
-	must(t, json.Unmarshal([]byte(intakefixture.Handle(t, read, `{"path":"`+a.Path+`"}`)), &doc))
+	intakefixture.Must(t, json.Unmarshal([]byte(intakefixture.Handle(t, factoryContext(f.c.repo, f.c.scope), `{"path":"`+a.Path+`"}`)), &doc))
 	var record checks.TraceRecord
-	must(t, json.Unmarshal([]byte(doc.Content), &record))
-	if record.TraceID != "t2" || record.Check != "test:a" || record.WholeTrace || record.Truncated || !record.FetchedAt.Equal(demoStart) || record.Output != a.Output || record.Size != a.Size {
+	intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &record))
+	if record.TraceID != "t2" || record.Check != "test:a" || record.WholeTrace || record.Truncated || !record.FetchedAt.Equal(fixturekit.DemoStart) || record.Output != a.Output || record.Size != a.Size {
 		t.Fatalf("record %+v", record)
 	}
-	must(t, questions.Resolve(context.Background(), c.repo, c.stream, a.Citation))
-	if err := questions.Resolve(context.Background(), c.repo, c.stream, "trace#t9-all"); err == nil {
+}
+
+func TestTraceCitationsResolveOnlyForRecordedTraces(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	a := f.fetch(t, `{"trace_id":"t2","check":"test:a"}`)
+	intakefixture.Must(t, questions.Resolve(context.Background(), f.c.repo, f.c.stream, a.Citation))
+	if err := questions.Resolve(context.Background(), f.c.repo, f.c.stream, "trace#t9-all"); err == nil {
 		t.Fatal("an unrecorded trace citation resolved")
 	}
+}
 
-	// The token is in no recorded document.
-	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	must(t, err)
+func TestRecordedTracesNeverHoldTheCloudToken(t *testing.T) {
+	t.Parallel()
+	f := newTraceFetch(t)
+	f.fetch(t, `{"trace_id":"t1"}`)
+	docs, err := trace.Read[trace.Document](f.c.repo, f.c.stream)
+	intakefixture.Must(t, err)
 	for _, d := range docs {
 		if strings.Contains(d.Content, cloudTraceToken) {
 			t.Fatalf("%s holds the token", d.Path)
@@ -140,7 +197,7 @@ func TestFetchCloudTraceRefusesBadValuesWithoutRunningTheCLI(t *testing.T) {
 	c := newContestFixture(t, "cloud-trace-refusals")
 	program, calls := fakeTraceProgram(t, "printf 'never\\n'\n")
 	c.f.s.options.CloudTrace = DaggerChecks{CloudToken: cloudTraceToken, Program: program}
-	tool := c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, func() time.Time { return demoStart })
+	tool := c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, func() time.Time { return fixturekit.DemoStart })
 	long, _ := json.Marshal(strings.Repeat("a", checks.MaxTraceIDLength+1))
 	for _, input := range []string{
 		`{}`, `{"trace_id":""}`, `{"trace_id":` + string(long) + `}`, `{"trace_id":"a b"}`, `{"trace_id":"a\tb"}`, `{"trace_id":"a/b"}`, `{"trace_id":"a;b"}`, `{"trace_id":"a=b"}`,
@@ -154,7 +211,7 @@ func TestFetchCloudTraceRefusesBadValuesWithoutRunningTheCLI(t *testing.T) {
 		t.Fatalf("the CLI ran %d times", calls())
 	}
 	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	for _, d := range docs {
 		if strings.HasPrefix(d.Path, "traces/") {
 			t.Fatalf("a refused request recorded %s", d.Path)
@@ -167,7 +224,6 @@ func TestFetchCloudTraceIsGrantedOnlyToItsRoles(t *testing.T) {
 	c := newContestFixture(t, "cloud-trace-roles")
 	program, calls := fakeTraceProgram(t, "printf 'trace\\n'\n")
 	fetcher := checks.TraceFetcher{Repository: c.repo, Runner: DaggerChecks{CloudToken: cloudTraceToken, Program: program}}
-	// A turn whose role is not named is refused, whatever its input.
 	refused := checks.TraceTool(fetcher, c.scope, chiefActor, "committee")
 	if out, err := refused.Handle(context.Background(), json.RawMessage(`{"trace_id":"t1"}`)); err == nil {
 		t.Fatalf("a turn of another role fetched: %s", out)
@@ -189,7 +245,7 @@ func TestFetchCloudTraceIsGrantedOnlyToItsRoles(t *testing.T) {
 
 func TestFetchCloudTraceFailuresAreResultsNotErrors(t *testing.T) {
 	t.Parallel()
-	now := func() time.Time { return demoStart }
+	now := func() time.Time { return fixturekit.DemoStart }
 	for _, tc := range []struct {
 		name   string
 		runner func(t *testing.T) DaggerChecks
@@ -222,18 +278,17 @@ func TestFetchCloudTraceFailuresAreResultsNotErrors(t *testing.T) {
 				t.Fatalf("the failure ended the turn: %v", err)
 			}
 			var got traceResult
-			must(t, json.Unmarshal(raw, &got))
+			intakefixture.Must(t, json.Unmarshal(raw, &got))
 			if got.Fetched || got.Reason != string(tc.reason) || got.Message == "" || got.Output != "" || strings.Contains(string(raw), cloudTraceToken) {
 				t.Fatalf("result %s", raw)
 			}
 			docs, err := trace.Read[trace.Document](c.repo, c.stream)
-			must(t, err)
+			intakefixture.Must(t, err)
 			for _, d := range docs {
 				if strings.HasPrefix(d.Path, "traces/") {
 					t.Fatalf("a failed fetch recorded %s", d.Path)
 				}
 			}
-			// The failed fetch is not remembered: a working runner fetches next.
 			p, _ := fakeTraceProgram(t, "printf 'now it works\\n'\n")
 			c.f.s.options.CloudTrace = DaggerChecks{CloudToken: cloudTraceToken, Program: p}
 			tool = c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, now)
@@ -249,14 +304,14 @@ func TestFetchCloudTraceBoundsAndRecordsLargeOutput(t *testing.T) {
 	c := newContestFixture(t, "cloud-trace-large")
 	program, _ := fakeTraceProgram(t, "i=0\nwhile [ $i -lt 5000 ]; do printf 'line %05d filler filler filler filler\\n' $i; i=$((i+1)); done\nprintf 'final failure\\n'\n")
 	c.f.s.options.CloudTrace = DaggerChecks{CloudToken: cloudTraceToken, Program: program}
-	tool := c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, func() time.Time { return demoStart })
+	tool := c.controls.cloudTrace(c.f.s.about(c.repo), c.repo, c.scope, func() time.Time { return fixturekit.DemoStart })
 	got := callTrace(t, tool, `{"trace_id":"big"}`)
 	full := 5000*len("line 00000 filler filler filler filler\n") + len("final failure\n")
 	if !got.Fetched || !got.Truncated || got.Size != full || len(got.Output) > checks.MaxTraceOutput || !strings.HasSuffix(got.Output, "line 04999 filler filler filler filler\nfinal failure\n") {
 		t.Fatalf("returned %d bytes, truncated %v, size %d (want %d)", len(got.Output), got.Truncated, got.Size, full)
 	}
 	docs, err := trace.Read[trace.Document](c.repo, c.stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var doc trace.Document
 	for _, d := range docs {
 		if d.Path == got.Path {
@@ -264,7 +319,7 @@ func TestFetchCloudTraceBoundsAndRecordsLargeOutput(t *testing.T) {
 		}
 	}
 	var record checks.TraceRecord
-	must(t, json.Unmarshal([]byte(doc.Content), &record))
+	intakefixture.Must(t, json.Unmarshal([]byte(doc.Content), &record))
 	if len(record.Output) > checks.MaxTraceOutput || !record.Truncated || record.Size != full || record.Output != got.Output {
 		t.Fatalf("the record holds %d bytes, truncated %v, size %d", len(record.Output), record.Truncated, record.Size)
 	}

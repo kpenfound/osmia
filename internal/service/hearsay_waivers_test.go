@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"strings"
 	"testing"
 	"time"
@@ -13,26 +14,19 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordWaiver records, as the router does when a dependency is dropped, the
-// waiver in the dependent's trace and the decision subject's move to waived.
 func recordWaiver(t *testing.T, f *publisherFixture, waiver lifecycle.EdgeWaiver, routing trace.Routing) {
 	t.Helper()
 	ctx := context.Background()
 	data, err := json.Marshal(lifecycle.EdgeWaivers{Waivers: []lifecycle.EdgeWaiver{waiver}})
-	must(t, err)
+	intakefixture.Must(t, err)
 	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: lifecycle.EdgeWaiverDocument, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: fixturekit.OwnerActor, Cause: "fixture"}, Path: lifecycle.EdgeWaiverPath, Content: string(data)}
 	subject := lifecycle.DependencySubject(waiver.Upstream, waiver.Type)
 	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: subject + "-1", Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: waiver.At, Actor: trace.Actor{Kind: "service", ID: "foreman"}, Cause: "upstream-abandoned"}
 	tx := trace.Transaction{ExpectedVersion: 0, Transition: trace.Transition{Header: h, Subject: subject, To: lifecycle.DependencyWaived, Reason: waiver.Reason, DecidedBy: routing.DecidedBy, Judgment: routing.Judgment, DefaultTo: routing.DefaultTo}}
 	_, err = f.repo.RecordDocumentsWith(ctx, []trace.Document{doc}, tx)
-	must(t, err)
+	intakefixture.Must(t, err)
 }
 
-// A dropped dependency is posted once, as the waiver it recorded: Jev's decision
-// on the work source with no author when Jev dropped it, and no second decision
-// for the transition that moved the decision subject. The decision says the
-// dependent goes on without the dependency, never that the upstream merged, and
-// a later pass posts nothing again.
 func TestAWaiverIsPostedToHearsayOnceAsJevsDecision(t *testing.T) {
 	f := newPublisherFixture(t)
 	fixturekit.RecordHanded(t, f.repo, fixturekit.Stream, "stdin", fixturekit.DemoStart)

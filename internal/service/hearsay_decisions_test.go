@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"net/http"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -21,38 +21,35 @@ import (
 
 func hr(hours int) time.Time { return fixturekit.DemoStart.Add(time.Duration(hours) * time.Hour) }
 
-// document records one revision of a workstream document.
 func (f *publisherFixture) document(stream config.WorkstreamID, id string, revision int, path, content string, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: f.repo.Project(), Workstream: stream, At: when, Actor: actor, Cause: "fixture"}
-	must(f.t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: content}}))
+	intakefixture.Must(f.t, f.repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: content}}))
 }
 
 func (f *publisherFixture) header(schema, id string, revision int, stream config.WorkstreamID, when time.Time, actor trace.Actor) trace.Header {
 	return trace.Header{Schema: schema, Version: trace.Version, ID: id, Revision: revision, Project: f.repo.Project(), Workstream: stream, At: when, Actor: actor, Cause: "fixture", Depth: 1}
 }
 
-// ask records question id as the mason asked it.
 func (f *publisherFixture) ask(stream config.WorkstreamID, id, text string, when time.Time) {
 	f.t.Helper()
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
-	must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 1, stream, when, mason), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text}))
+	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 1, stream, when, mason), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text}))
 }
 
-// escalate records the revision of question id the chief of staff sent the owner.
 func (f *publisherFixture) escalate(stream config.WorkstreamID, id, text string, when time.Time) {
 	f.t.Helper()
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
 	e := &trace.Escalation{Batch: "escalation_" + id, Inbox: 1, Questions: []string{id}, Section: "spec.md: Upload limits", Conflict: "The spec caps uploads at 10 MiB but the plan streams without a cap.",
 		Blocked: "The unit waits on the ruling.", Options: []string{"Cap at 10 MiB", "Stream without a cap"}, Recommendation: "Cap at 10 MiB"}
-	must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, chiefActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
+	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Question{Header: f.header("osmia.trace.question", id, 2, stream, when, chiefActor), AskedBy: mason, Thread: "thread", Turn: "turn-" + id, Question: text, SentToOwner: "Should uploads be capped?", Escalation: e}))
 }
 
 func (f *publisherFixture) ruling(stream config.WorkstreamID, id string, revision int, r trace.Ruling, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	r.Header = f.header("osmia.trace.ruling", id, revision, stream, when, actor)
 	r.QuestionID, r.QuestionRevision = id, 1
-	must(f.t, f.repo.Append(context.Background(), r))
+	intakefixture.Must(f.t, f.repo.Append(context.Background(), r))
 }
 
 func decisions(posts []hooksPost) []hooksPost {
@@ -105,15 +102,14 @@ func TestPublishOwnerRulingIsAnOwnerDecisionAndTheChiefsRelayIsNot(t *testing.T)
 
 	f.hooks.take()
 	f.reopen()
-	// Backfill after the digests are gone: exactly the owner's ruling.
 	posted, err := f.repo.HearsayPosted()
-	must(t, err)
+	intakefixture.Must(t, err)
 	var cleared []trace.PostedRecord
 	for _, p := range posted {
 		p.Digest = ""
 		cleared = append(cleared, p)
 	}
-	must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, hr(5)))
+	intakefixture.Must(t, f.repo.RecordHearsayPosted(context.Background(), cleared, hr(5)))
 	posts, _ = f.pass()
 	rulings := decisions(posts)
 	if len(rulings) != 1 {
@@ -204,7 +200,7 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 	proposal := func(question, rule, decision, note string, charter int) string {
 		p := trace.CharterProposal{Question: question, Ruling: "workstreams/x/questions/" + question + "/rulings.jsonl", RulingRevision: 1, OwnerResponse: "Every upload must resume.", Rule: rule, Number: 2, Decision: decision, Note: note, Charter: charter}
 		data, err := json.Marshal(p)
-		must(t, err)
+		intakefixture.Must(t, err)
 		return string(data)
 	}
 	f.document(stream, trace.CharterProposalID("1"), 1, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", "", "", 0), hr(1), chiefActor)
@@ -234,7 +230,6 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 	if !strings.HasPrefix(declined.str("outcome"), "Declined") || !strings.Contains(declined.str("outcome"), "Never cap uploads.") || !strings.Contains(declined.str("rationale"), "Too broad.") {
 		t.Fatalf("declined: %s", declined.Raw)
 	}
-	// Recording the ratified rule in the charter changes nothing posted.
 	f.document(stream, trace.CharterProposalID("1"), 3, trace.CharterProposalPath("1"), proposal("1", "Uploads resume after a restart.", trace.CharterRatify, "Yes, state it as a rule.", 4), hr(3), chiefActor)
 	if again, _ := f.pass(); len(again) != 0 {
 		t.Fatalf("chartering the rule reposted %v", kinds(again))
@@ -244,14 +239,14 @@ func TestPublishCharterProposalOutcomesAreOwnerDecisions(t *testing.T) {
 func (f *publisherFixture) amendment(stream config.WorkstreamID, id string, citations []string, change, reason, question string, when time.Time) {
 	f.t.Helper()
 	mason := trace.Actor{Kind: "agent", ID: "mason"}
-	must(f.t, f.repo.Append(context.Background(), trace.Amendment{Header: f.header("osmia.trace.amendment", id, 1, stream, when, mason), Requester: mason, Role: "mason", Thread: "thread", Turn: "turn-a" + id,
+	intakefixture.Must(f.t, f.repo.Append(context.Background(), trace.Amendment{Header: f.header("osmia.trace.amendment", id, 1, stream, when, mason), Requester: mason, Role: "mason", Thread: "thread", Turn: "turn-a" + id,
 		QuestionID: question, Citations: citations, Change: change, Reason: reason, Seal: 1, SealRevision: 1, SpecHash: "hash"}))
 }
 
 func (f *publisherFixture) amendmentDecision(stream config.WorkstreamID, id string, revision int, verdict, note string, when time.Time, actor trace.Actor) {
 	f.t.Helper()
 	data, err := json.Marshal(api.AmendmentDecision{Decision: verdict, Note: note, Round: 1, Packet: 1, Spec: 2, Plan: 2, SealRevision: 1, Actor: actor.ID})
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 	f.document(stream, "amendment_"+id+"_decision", revision, "amendments/"+id+"/decision.json", string(data), when, actor)
 }
 
@@ -291,7 +286,6 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 	if planOnly.Source != "osmia-work" || planOnly.str("author") != "" || planOnly.str("decider") != "chief_of_staff" || planOnly.str("supersedes") != "" {
 		t.Fatalf("plan-only amendment: %s on %s", planOnly.Raw, planOnly.Source)
 	}
-	// A later approved amendment about the same criterion revisits the earlier decision.
 	if revisited.str("supersedes") != ownerDecided.str("decision") || ownerDecided.str("supersedes") != "" {
 		t.Fatalf("supersedes: %s / %s", revisited.Raw, ownerDecided.Raw)
 	}
@@ -303,7 +297,6 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 			}
 		}
 	}
-	// The superseded decision is posted before the one that names it.
 	first := slices.IndexFunc(posts, func(p hooksPost) bool { return p.str("decision") == ownerDecided.str("decision") })
 	second := slices.IndexFunc(posts, func(p hooksPost) bool { return p.str("decision") == revisited.str("decision") })
 	if first < 0 || second < 0 || first > second {
@@ -311,38 +304,50 @@ func TestPublishAmendmentDecisionsRouteByWhoDecided(t *testing.T) {
 	}
 }
 
-func TestPublishScopeCallsAndAcceptedFindings(t *testing.T) {
+func scopeDiscovery(n int) string { return fmt.Sprintf("discovery-%064x", n) }
+
+type scopePublication struct {
+	f      *publisherFixture
+	stream config.WorkstreamID
+	posts  []hooksPost
+}
+
+// publishScopeCalls records discoveries the chief of staff declined and
+// deferred, a blocking finding the owner accepted and follow-ups of a final
+// review and of an amendment, and runs one publishing pass.
+func publishScopeCalls(t *testing.T) *scopePublication {
+	t.Helper()
 	f := newPublisherFixture(t)
 	stream := fixturekit.Stream
 	owner := trace.Actor{Kind: "owner", ID: "local"}
-	discovery := func(n int) string { return fmt.Sprintf("discovery-%064x", n) }
 	record := func(id string, revision int, disposition, reason, unit string, when time.Time) {
 		data, err := json.Marshal(workDiscovery{ID: id, Description: "Handle empty uploads", Criterion: "spec#1", Disposition: disposition, Unit: unit, Reason: reason})
-		must(t, err)
+		intakefixture.Must(t, err)
 		f.document(stream, id, revision, "discoveries/"+id+".json", string(data), when, chiefActor)
 	}
-	record(discovery(1), 1, "open", "", "", hr(1))
-	record(discovery(1), 2, "declined", "Outside the approved intent.", "", hr(2))
-	record(discovery(1), 3, "suggestion", "Worth doing after delivery.", "", hr(3))
-	record(discovery(2), 1, "open", "", "", hr(1))
-	record(discovery(2), 2, "assigned", "Needed for spec#1.", "upload", hr(2))
-	record(discovery(3), 1, "open", "", "", hr(1))
+	record(scopeDiscovery(1), 1, "open", "", "", hr(1))
+	record(scopeDiscovery(1), 2, "declined", "Outside the approved intent.", "", hr(2))
+	record(scopeDiscovery(1), 3, "suggestion", "Worth doing after delivery.", "", hr(3))
+	record(scopeDiscovery(2), 1, "open", "", "", hr(1))
+	record(scopeDiscovery(2), 2, "assigned", "Needed for spec#1.", "upload", hr(2))
+	record(scopeDiscovery(3), 1, "open", "", "", hr(1))
 
 	approval, err := json.Marshal(api.DeliveryApproval{Review: 2, Commit: "tip", At: hr(6), AcceptedBlocking: []string{"spec#2: the retry cap is not enforced"}})
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.document(stream, "final-delivery", 1, "final/delivery.json", string(approval), hr(6), owner)
 	followups := `[{"review":1,"report":1,"criterion":"spec#3","gap":"Resume is not tested after a restart","unit":{"id":"final-1"}},{"review":0,"criterion":"spec#1","gap":"Update dependency references","unit":{"id":"deps-1"}},{"review":1,"amendment":"2","criterion":"spec#1","gap":"AMENDMENT-FOLLOWUP","unit":{"id":"amend-1"}}]`
 	f.document(stream, "final-followups", 1, "final/followups.json", followups, hr(5), trace.Actor{Kind: "service", ID: "final-review"})
 
 	posts, _ := f.pass()
-	got := decisions(posts)
-	if len(got) != 4 {
-		t.Fatalf("%d decisions: %v", len(got), kinds(posts))
-	}
-	declined := decisionOf(t, posts, string(stream)+"-discovery-"+shortHash(discovery(1))+"-2")
-	deferred := decisionOf(t, posts, string(stream)+"-discovery-"+shortHash(discovery(1))+"-3")
+	return &scopePublication{f: f, stream: stream, posts: posts}
+}
+
+func TestPublishPostsADeclinedAndADeferredDiscoveryAsChiefOfStaffScopeCalls(t *testing.T) {
+	p := publishScopeCalls(t)
+	declined := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-2")
+	deferred := decisionOf(t, p.posts, string(p.stream)+"-discovery-"+shortHash(scopeDiscovery(1))+"-3")
 	for _, d := range []hooksPost{declined, deferred} {
-		if d.Source != "osmia-work" || d.str("author") != "" || d.str("decider") != "chief_of_staff" || d.str("workstream") != string(stream) {
+		if d.Source != "osmia-work" || d.str("author") != "" || d.str("decider") != "chief_of_staff" || d.str("workstream") != string(p.stream) {
 			t.Fatalf("scope call: %s on %s", d.Raw, d.Source)
 		}
 	}
@@ -352,26 +357,44 @@ func TestPublishScopeCallsAndAcceptedFindings(t *testing.T) {
 	if deferred.str("rationale") != "Worth doing after delivery." || !strings.Contains(deferred.str("outcome"), "Deferred") || deferred.str("supersedes") != declined.str("decision") {
 		t.Fatalf("deferred: %s", deferred.Raw)
 	}
-	accepted := decisions(posts)
-	var acceptedPost *hooksPost
-	for i := range accepted {
-		if accepted[i].Source == "osmia-owner" {
-			acceptedPost = &accepted[i]
+}
+
+func TestPublishPostsAnAcceptedBlockingFindingAsTheOwnersDecision(t *testing.T) {
+	p := publishScopeCalls(t)
+	var accepted *hooksPost
+	for _, d := range decisions(p.posts) {
+		if d.Source == "osmia-owner" {
+			accepted = &d
 		}
 	}
-	if acceptedPost == nil || acceptedPost.str("author") != "owner" || acceptedPost.str("decider") != "owner" || !strings.Contains(acceptedPost.str("outcome"), "the retry cap is not enforced") || len(rejectedOf(*acceptedPost)) == 0 {
-		t.Fatalf("accepted finding: %+v", acceptedPost)
+	if accepted == nil || accepted.str("author") != "owner" || accepted.str("decider") != "owner" || !strings.Contains(accepted.str("outcome"), "the retry cap is not enforced") || len(rejectedOf(*accepted)) == 0 {
+		t.Fatalf("accepted finding: %+v", accepted)
 	}
-	later := decisionOf(t, posts, string(stream)+"-followup-final-1")
+}
+
+func TestPublishPostsAFinalReviewFollowUpAsAChiefOfStaffDecision(t *testing.T) {
+	p := publishScopeCalls(t)
+	later := decisionOf(t, p.posts, string(p.stream)+"-followup-final-1")
 	if later.Source != "osmia-work" || later.str("author") != "" || later.str("decider") != "chief_of_staff" || !strings.Contains(later.str("context"), "Resume is not tested after a restart") || later.str("rationale") == "" {
 		t.Fatalf("follow-up: %s on %s", later.Raw, later.Source)
 	}
-	for _, p := range posts {
-		if strings.Contains(p.Raw, "AMENDMENT-FOLLOWUP") || strings.Contains(p.Raw, "Update dependency references") {
-			t.Fatalf("a follow-up outside the final review was posted: %s", p.Raw)
+}
+
+func TestPublishLeavesOutFollowUpsThatAreNotOfTheFinalReview(t *testing.T) {
+	p := publishScopeCalls(t)
+	for _, post := range p.posts {
+		if strings.Contains(post.Raw, "AMENDMENT-FOLLOWUP") || strings.Contains(post.Raw, "Update dependency references") {
+			t.Fatalf("a follow-up outside the final review was posted: %s", post.Raw)
 		}
 	}
-	if again, _ := f.pass(); len(again) != 0 {
+}
+
+func TestPublishPostsEachScopeCallAndFindingOnce(t *testing.T) {
+	p := publishScopeCalls(t)
+	if got := decisions(p.posts); len(got) != 4 {
+		t.Fatalf("%d decisions: %v", len(got), kinds(p.posts))
+	}
+	if again, _ := p.f.pass(); len(again) != 0 {
 		t.Fatalf("unchanged decisions were reposted: %v", kinds(again))
 	}
 }
@@ -386,7 +409,7 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 
 	f.hooks.setStatus(http.StatusServiceUnavailable)
 	res, err := f.s.publishPass(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	if res.Posts != 0 {
 		t.Fatalf("pass during the outage: %+v", res)
 	}
@@ -398,24 +421,9 @@ func TestPublishDecisionsWaitForAnOutageAndAreNotRepeated(t *testing.T) {
 	if again, _ := f.pass(); len(again) != 0 {
 		t.Fatalf("after recovery: %v", kinds(again))
 	}
-	// A restart reposts nothing and keeps the ids.
 	f.reopen()
 	if again, _ := f.pass(); len(again) != 0 {
 		t.Fatalf("after a restart: %v", kinds(again))
-	}
-}
-
-func TestPublishPostsNothingForDecisionsOfTheLibrarianOrSessions(t *testing.T) {
-	f := newPublisherFixture(t)
-	librarian := librarianWorkstream(f.repo.Project())
-	must(t, f.repo.CreateWorkstream(context.Background(), librarian, hr(1), registrationActor))
-	f.ask(librarian, "1", "Librarian question?", hr(2))
-	f.ruling(librarian, "1", 1, trace.Ruling{Decision: trace.DecisionAnswer, ReturnedAnswer: "LIBRARIAN-ANSWER", Citations: []string{"spec#1"}}, hr(3), chiefActor)
-	posts, _ := f.pass()
-	for _, p := range posts {
-		if strings.Contains(p.Raw, "LIBRARIAN-ANSWER") || p.str("workstream") == string(librarian) {
-			t.Fatalf("the librarian's workstream was posted: %s", p.Raw)
-		}
 	}
 }
 
@@ -444,7 +452,6 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 	base := testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**", "api"), entity("old", "Old", "internal/old/**"), entity("moveme", "Move me", "internal/m/**", "api"), entity("same", "Same", "internal/same/**"))
 	changed := testEntities(
 		entity("api", "API", "internal/api/**"),
-		// The store gains an alias, an owner, a path and a note-bearing edit: not structure.
 		kb.Entity{ID: "store", Name: "Store", Aliases: []string{"storage"}, Paths: []string{"internal/store/**", "internal/store2/**"}, Owners: []string{"@owner"}, PartOf: []string{"api"}},
 		entity("moveme", "Move me", "internal/m/**", "store"),
 		entity("same-renamed", "Same", "internal/same/**"),
@@ -465,7 +472,6 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 	if !strings.Contains(got["renamed:same-renamed"], "same") || !strings.Contains(got["moved:moveme"], "Store") {
 		t.Fatalf("texts: %v", got)
 	}
-	// A new name under the same id is a rename; unchanged maps change nothing.
 	renamed := testEntities(entity("api", "Public API", "internal/api/**"), base.Entities[1], base.Entities[2], base.Entities[3], base.Entities[4])
 	if got := diffMap(base, renamed); len(got) != 1 || got[0].kind != mapRenamed || got[0].id != "api" {
 		t.Fatalf("name change: %+v", got)
@@ -473,7 +479,6 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 	if got := diffMap(base, base); len(got) != 0 {
 		t.Fatalf("no change: %+v", got)
 	}
-	// Renaming a parent does not move its children.
 	parent := testEntities(entity("api-v2", "API", "internal/api/**"), entity("store", "Store", "internal/store/**", "api-v2"), base.Entities[2], base.Entities[3], base.Entities[4])
 	parent.Entities[3].PartOf = []string{"api-v2"}
 	got2 := diffMap(base, parent)
@@ -484,7 +489,7 @@ func TestDiffMapFindsOnlyStructuralChanges(t *testing.T) {
 
 func (f *publisherFixture) storeMap(m kb.Map, when time.Time, cause string) {
 	f.t.Helper()
-	must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: "agent_librarian"}, cause))
+	intakefixture.Must(f.t, kb.Store(context.Background(), f.repo, m, when, trace.Actor{Kind: "agent", ID: "agent_map"}, cause))
 }
 
 func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
@@ -492,10 +497,9 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**")), hr(1), "fixture")
 	f.pass()
 
-	// Notes, aliases, paths and the source ledger change nothing posted.
 	f.storeMap(testEntities(kb.Entity{ID: "api", Name: "API", Aliases: []string{"rest"}, Paths: []string{"internal/api/**", "cmd/api/**"}, Owners: []string{"@owner"}, PartOf: []string{}}), hr(2), "fixture")
-	f.document("", "subsystem-api", 1, "kb/api.md", "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
-	f.document("", "kb-sources", 1, "kb/sources.json", "[]\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_librarian"})
+	f.document("", "subsystem-api", 1, "kb/api.md", "A note about the API.\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_map"})
+	f.document("", "kb-sources", 1, "kb/sources.json", "[]\n", hr(2), trace.Actor{Kind: "agent", ID: "agent_map"})
 	if posts, _ := f.pass(); len(posts) != 0 {
 		t.Fatalf("a non-structural edit posted %v", kinds(posts))
 	}
@@ -524,7 +528,6 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 		t.Fatalf("unchanged updates were reposted: %v", kinds(again))
 	}
 
-	// One update per change: a removal and a rename in one revision.
 	f.storeMap(testEntities(entity("api-service", "API", "internal/api/**")), hr(4), "fixture")
 	posts, _ = f.pass()
 	if len(posts) != 2 {
@@ -534,63 +537,26 @@ func TestPublishSubsystemMapChangesAreDatedUpdatesOnTheProject(t *testing.T) {
 
 func hearsayTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
-func TestPublishSubsystemMapUpdatesFromLibrarianRevisionsKeepTheirText(t *testing.T) {
-	f := newPublisherFixture(t)
-	f.storeMap(testEntities(entity("api", "API", "internal/api/**")), hr(1), "fixture")
-	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**")), hr(2), "operation-refresh")
-
-	in, err := collectPublishInputs(context.Background(), f.repo, f.s.current())
-	must(t, err)
-	input, err := json.Marshal(map[string]any{"workstream": fixturekit.Stream, "commit": strings.Repeat("a", 40)})
-	must(t, err)
-	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: retiredRefreshAction, Input: input}}
-	storeUpdate := func() string {
-		for _, r := range mapUpdateRecords(in) {
-			if text := r.Versions[0].Text; strings.Contains(text, `"Store"`) {
-				return text
-			}
-		}
-		t.Fatal("no update for the added subsystem")
-		return ""
-	}
-	if text := storeUpdate(); !strings.Contains(text, "Caused by workstream "+string(fixturekit.Stream)) {
-		t.Fatalf("the update does not name the workstream: %s", text)
-	}
-	extract, err := json.Marshal(map[string]any{"extraction": 3})
-	must(t, err)
-	in.operations = map[string]coreadapter.Operation{"operation-refresh": {ID: "operation-refresh", Action: retiredExtractAction, Input: extract}}
-	if text := storeUpdate(); !strings.Contains(text, "knowledge-base extraction 3") {
-		t.Fatalf("extraction: %s", text)
-	}
-}
-
 func TestPublishSubsystemMapUpdatesNameTheReseedAndItsCommit(t *testing.T) {
 	f := newPublisherFixture(t)
 	commit := strings.Repeat("c", 40)
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**")), hr(1), "fixture")
 	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**")), hr(2), kb.ReseedCause(commit))
-	f.storeMap(testEntities(entity("api", "API", "internal/api/**"), entity("store", "Store", "internal/store/**"), entity("web", "Web", "internal/web/**")), hr(3), "operation-refresh")
 
 	in, err := collectPublishInputs(context.Background(), f.repo, f.s.current())
-	must(t, err)
+	intakefixture.Must(t, err)
 	texts := map[string]string{}
 	for _, r := range mapUpdateRecords(in) {
 		text := r.Versions[0].Text
-		for _, name := range []string{`"Store"`, `"Web"`} {
-			if strings.Contains(text, name) {
-				texts[name] = text
-			}
+		if strings.Contains(text, `"Store"`) {
+			texts[`"Store"`] = text
 		}
 	}
 	if text := texts[`"Store"`]; !strings.HasSuffix(text, "Caused by the re-seed of the map from commit "+commit+".") {
 		t.Fatalf("the re-seeded revision's update: %q", text)
 	}
-	if text := texts[`"Web"`]; !strings.HasSuffix(text, "Caused by a knowledge-base extraction.") {
-		t.Fatalf("an earlier kind of revision keeps its text: %q", text)
-	}
 }
 
-// groupInputs is the view one member project has of a workgroup's decisions.
 func groupInputs(project config.ProjectID, g trace.PublishedWorkgroup) *publishInputs {
 	return &publishInputs{owner: "owner", workSource: "osmia-work", ownerSource: "osmia-owner", project: project,
 		streams: []*publishStream{{status: trace.WorkstreamStatus{Workstream: "w_member"}, group: &g, approved: true, decisionsRead: true}}}
@@ -601,7 +567,7 @@ func TestPublishWorkgroupAmendmentRulingsArePostedOnEveryMemberProject(t *testin
 	change := func(id, state string, decision *lifecycle.ChangeDecision, request *trace.ProjectAmendment, text string) trace.Document {
 		c := lifecycle.WorkgroupChange{ID: id, Workgroup: "g_one", Origin: "w_member", Requester: request, Host: "w_host", Request: lifecycle.ChangeRequest{Key: id, Kind: "amend", Scope: "workgroup", Change: text}, State: state, Decision: decision}
 		data, err := json.Marshal(c)
-		must(t, err)
+		intakefixture.Must(t, err)
 		return trace.Document{Header: trace.Header{ID: lifecycle.WorkgroupChangeDocument(id), Revision: map[string]int{"presented": 1, "approved": 2}[state], At: fixturekit.DemoStart.Add(time.Hour * time.Duration(len(state)))}, Content: string(data)}
 	}
 	approve := &lifecycle.ChangeDecision{Revision: 1, Decision: "approve"}
@@ -630,7 +596,6 @@ func TestPublishWorkgroupAmendmentRulingsArePostedOnEveryMemberProject(t *testin
 		}
 		ids = append(ids, w.Decision)
 	}
-	// Both member projects derive the same id.
 	if ids[0] != ids[1] || ids[0] != "g_one-change-c1" {
 		t.Fatalf("ids: %v", ids)
 	}
@@ -641,7 +606,7 @@ func TestPublishWorkgroupAmendmentRevisitsAnEarlierRuling(t *testing.T) {
 	doc := func(id string, rev int, at time.Time, decision string) trace.Document {
 		c := lifecycle.WorkgroupChange{ID: id, Workgroup: "g_one", Origin: "w_member", Requester: requester, Request: lifecycle.ChangeRequest{Kind: "amend", Change: "change " + id}, State: "approved", Decision: &lifecycle.ChangeDecision{Revision: 1, Decision: decision}}
 		data, err := json.Marshal(c)
-		must(t, err)
+		intakefixture.Must(t, err)
 		return trace.Document{Header: trace.Header{ID: lifecycle.WorkgroupChangeDocument(id), Revision: rev, At: at}, Content: string(data)}
 	}
 	g := trace.PublishedWorkgroup{ID: "g_one", Members: []config.WorkstreamID{"w_member"}, Changes: []trace.Document{doc("later", 1, hr(5), "approve"), doc("earlier", 1, hr(2), "approve")}}
@@ -653,7 +618,6 @@ func TestPublishWorkgroupAmendmentRevisitsAnEarlierRuling(t *testing.T) {
 	if earlier.Versions[0].Decision != "g_one-change-earlier" || later.Versions[0].Supersedes != earlier.Versions[0].Decision || earlier.Versions[0].Supersedes != "" {
 		t.Fatalf("supersedes: %+v / %+v", earlier.Versions[0], later.Versions[0])
 	}
-	// The earlier decision must be held first.
 	if !slices.Contains(later.After, earlier.Ref()) {
 		t.Fatalf("after: %v", later.After)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"slices"
 	"strings"
 	"testing"
@@ -28,23 +29,20 @@ const (
 
 var errFlakeStop = errors.New("interrupted for the test")
 
-// flakyOutcome is a check run that passed with the links flaky.
-func flakyOutcome(links ...string) checkOutcome {
+func flakyOutcome(links ...string) fixturekit.CheckOutcome {
 	output := "CHECKS  ✔ " + fmt.Sprint(len(links)) + " passed\n"
 	for _, link := range links {
 		output += "✔ " + link + " 1.0s OK\n"
 	}
-	return checkOutcome{Result: api.CheckResult{Output: output, Flaky: links}}
+	return fixturekit.CheckOutcome{Result: api.CheckResult{Output: output, Flaky: links}}
 }
 
-// newFlakeFixture is a workstream whose resume unit is checking, with the
-// setting on and checks that return the outcomes.
-func newFlakeFixture(t *testing.T, key string, outcomes ...checkOutcome) (*shedFixture, config.WorkstreamID, *trace.Repository) {
+func newFlakeFixture(t *testing.T, key string, outcomes ...fixturekit.CheckOutcome) (*shedFixture, config.WorkstreamID, *trace.Repository) {
 	t.Helper()
-	checks := &fakeChecks{Outcomes: outcomes}
+	checks := &fixturekit.FakeChecks{Outcomes: outcomes}
 	f, _ := newMasonFixturePrepared(t, 1, independentPlan, func(opts *Options) { opts.reviewChecks = checks })
 	f.s.cfg.Project.FlakeFixes = true
-	base := strings.TrimSpace(demoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
+	base := strings.TrimSpace(fixturekit.DemoGit(t, f.clone, "-C", f.clone, "rev-parse", "HEAD"))
 	stream, repository := seedBuild(t, f, key, independentPlan, config.WorkspacesGit, base)
 	seedChecking(t, f, repository, stream, "resume", resumeReport)
 	return f, stream, repository
@@ -54,18 +52,15 @@ func flakeRecorderOf(f *shedFixture, repository *trace.Repository) *flakeRecorde
 	return &flakeRecorder{s: f.s, cfg: f.s.cfg, repository: repository}
 }
 
-// flakeStoreOf is the project's flake record.
 func flakeStoreOf(repository *trace.Repository) *flakes.Store {
 	return &flakes.Store{Repository: repository}
 }
 
 func createFlakeFix(t *testing.T, repository *trace.Repository) {
 	t.Helper()
-	must(t, repository.CreateWorkstream(context.Background(), flakeFixStream, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
+	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), flakeFixStream, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 }
 
-// openGroupOf makes workstream the open flake-fix workstream of the group of
-// link, through an earlier occurrence.
 func openGroupOf(t *testing.T, repository *trace.Repository, link string, workstream config.WorkstreamID) string {
 	t.Helper()
 	ctx := context.Background()
@@ -73,20 +68,18 @@ func openGroupOf(t *testing.T, repository *trace.Repository, link string, workst
 	store := flakeStoreOf(repository)
 	run := flakes.RunKey("w_cccccccccccccccccccccccccccccccc", "units/earlier/checks-1.json")
 	_, _, err := store.Record(ctx, flakes.OccurrenceInput{Group: group.Group, Run: run, Source: flakes.Source{Workstream: "w_cccccccccccccccccccccccccccccccc", Unit: "earlier"}, Links: []string{link}})
-	must(t, err)
+	intakefixture.Must(t, err)
 	_, err = store.Reserve(ctx, group.Group, run)
-	must(t, err)
+	intakefixture.Must(t, err)
 	_, err = store.Opened(ctx, group.Group, run, workstream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	return group.Group
 }
 
-// flakePosts are the transitions and outbox bodies of stream whose subject
-// starts with prefix.
 func flakePosts(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, prefix string) ([]trace.Transition, []string) {
 	t.Helper()
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var posted []trace.Transition
 	for _, tr := range transitions {
 		if strings.HasPrefix(tr.Subject, prefix) {
@@ -94,7 +87,7 @@ func flakePosts(t *testing.T, repository *trace.Repository, stream config.Workst
 		}
 	}
 	entries, err := repository.Outbox(stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var bodies []string
 	for _, e := range entries {
 		if strings.HasPrefix(e.TransitionID, prefix) {
@@ -109,18 +102,12 @@ func flakePosts(t *testing.T, repository *trace.Repository, stream config.Workst
 
 func flakeNoticeBodies(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []string {
 	t.Helper()
-	// A notice is one transaction, but the transitions and the outbox are two
-	// reads, so a notice committed between them shows in only one.
-	var posted []trace.Transition
 	var bodies []string
-	for range 100 {
+	intakefixture.Soon(t, "every notice transition to carry its notice event", func() bool {
+		var posted []trace.Transition
 		posted, bodies = flakePosts(t, repository, stream, "flake-notice-")
-		if len(posted) == len(bodies) {
-			return bodies
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("%d notice transitions but %d notice events", len(posted), len(bodies))
+		return len(posted) == len(bodies)
+	})
 	return bodies
 }
 
@@ -133,20 +120,19 @@ func flakeSurfacings(t *testing.T, repository *trace.Repository, stream config.W
 func flakeOccurrences(t *testing.T, repository *trace.Repository) []flakes.Occurrence {
 	t.Helper()
 	occurrences, err := flakeStoreOf(repository).Occurrences()
-	must(t, err)
+	intakefixture.Must(t, err)
 	return occurrences
 }
 
 func passFlakes(t *testing.T, f *shedFixture, repository *trace.Repository) {
 	t.Helper()
-	must(t, flakeRecorderOf(f, repository).Pass(context.Background()))
+	intakefixture.Must(t, flakeRecorderOf(f, repository).Pass(context.Background()))
 }
 
-// unitHistory is the unit's transitions without their reasons.
 func unitHistory(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) []string {
 	t.Helper()
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var out []string
 	for _, tr := range transitions {
 		if !strings.HasPrefix(tr.Subject, "flake-") {
@@ -178,7 +164,6 @@ func TestFlakeRecorderNoticesAUnitRunThatPassedWithAFlakyCheck(t *testing.T) {
 		t.Fatalf("notices %q", notices)
 	}
 
-	// Another recorder, as after a restart, and another pass add nothing.
 	passFlakes(t, f, repository)
 	passFlakes(t, f, repository)
 	if again := flakeOccurrences(t, repository); len(again) != 1 || len(flakeNoticeBodies(t, repository, stream)) != 1 {
@@ -190,7 +175,7 @@ func TestFlakeRecorderNoticesAUnitRunThatFailedWithAFailedAndAFlakyCheck(t *test
 	t.Parallel()
 	const flaky, failed = "dag://go/packages/tests/test?go-package=internal/trace&go-test=TestFlaky", "dag://go/lint"
 	output := "CHECKS  ✘ 2 failed\n✘ " + flaky + " 1s ERROR\n✘ " + failed + " 1s ERROR\nCHECKS  ✘ 1 failed  ✔ 1 passed\n✘ " + failed + " 1s ERROR\n✔ " + flaky + " 1s OK\n"
-	f, stream, repository := newFlakeFixture(t, "flake-fail", checkOutcome{Result: api.CheckResult{ExitCode: 1, Output: output, Flaky: []string{flaky}}})
+	f, stream, repository := newFlakeFixture(t, "flake-fail", fixturekit.CheckOutcome{Result: api.CheckResult{ExitCode: 1, Output: output, Flaky: []string{flaky}}})
 	runChecks(t, f.s, repository, stream)
 	if got := intakefixture.UnitState(t, repository, stream, "resume"); got != UnitImplementing {
 		t.Fatalf("unit is %s, want implementing", got)
@@ -243,7 +228,7 @@ func TestFlakeRecorderJoinsAGroupWithAnOpenWorkstream(t *testing.T) {
 	openGroup := openGroupOf(t, repository, flakyTraceTest, flakeFixStream)
 	runChecks(t, f.s, repository, stream)
 	transitions, err := trace.Read[trace.Transition](repository, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !slices.ContainsFunc(transitions, func(tr trace.Transition) bool {
 		return tr.To == UnitReviewing && strings.Contains(tr.Reason, "flake-fix workstream "+string(flakeFixStream)+" is open for flake group "+openGroup)
 	}) {
@@ -287,7 +272,7 @@ func TestFlakeRecorderOnlyInformsWhenEveryGroupHasAnOpenWorkstream(t *testing.T)
 	f, stream, repository := newFlakeFixture(t, "flake-all-open", flakyOutcome(flakyTraceTest, flakyWebTest))
 	createFlakeFix(t, repository)
 	other := config.WorkstreamID("w_dddddddddddddddddddddddddddddddd")
-	must(t, repository.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
+	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 	openGroupOf(t, repository, flakyTraceTest, flakeFixStream)
 	openGroupOf(t, repository, flakyWebTest, other)
 	runChecks(t, f.s, repository, stream)
@@ -308,9 +293,7 @@ func TestFlakeRecorderRecordsAFlakeFixRunWithoutNoticingOrSurfacing(t *testing.T
 	t.Parallel()
 	f, stream, repository := newFlakeFixture(t, "flake-own-run", flakyOutcome(flakyTraceTest, flakyWebTest))
 	other := config.WorkstreamID("w_dddddddddddddddddddddddddddddddd")
-	must(t, repository.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
-	// The checking workstream is the open flake-fix workstream of one group,
-	// and another workstream is that of the other.
+	intakefixture.Must(t, repository.CreateWorkstream(context.Background(), other, time.Now(), trace.Actor{Kind: "service", ID: "fixture"}))
 	openGroupOf(t, repository, flakyTraceTest, stream)
 	openGroupOf(t, repository, flakyWebTest, other)
 	runChecks(t, f.s, repository, stream)
@@ -360,9 +343,9 @@ func TestFlakeRecorderIgnoresSessionCheckRuns(t *testing.T) {
 	f, _, repository := newFlakeFixture(t, "flake-session", flakyOutcome(flakyTraceTest))
 	ctx := context.Background()
 	session := config.WorkstreamID("w_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	must(t, repository.CreateSessionWorkstream(ctx, session, "default", "abc123", "session-branch", "try", time.Now(), trace.Actor{Kind: "owner", ID: "owner"}))
+	intakefixture.Must(t, repository.CreateSessionWorkstream(ctx, session, "default", "abc123", "session-branch", "try", time.Now(), trace.Actor{Kind: "owner", ID: "owner"}))
 	now := time.Now()
-	must(t, recordSessionCheckRun(ctx, repository, repository.Project(), session, SessionCheckRun{Run: 1, Commit: "abc123", Status: ChecksPassed, Flaky: []string{flakyTraceTest}, StartedAt: now, FinishedAt: now}, ""))
+	intakefixture.Must(t, recordSessionCheckRun(ctx, repository, repository.Project(), session, SessionCheckRun{Run: 1, Commit: "abc123", Status: ChecksPassed, Flaky: []string{flakyTraceTest}, StartedAt: now, FinishedAt: now}, ""))
 	passFlakes(t, f, repository)
 	if occurrences := flakeOccurrences(t, repository); len(occurrences) != 0 {
 		t.Fatalf("a session check run recorded %+v", occurrences)
@@ -372,8 +355,6 @@ func TestFlakeRecorderIgnoresSessionCheckRuns(t *testing.T) {
 	}
 }
 
-// cloudFinalRun records the final-review check run a Dagger Cloud result
-// with two flaky checks leaves.
 func cloudFinalRun(t *testing.T, repository *trace.Repository, stream config.WorkstreamID, review int) FinalCheckRun {
 	t.Helper()
 	at := time.Now()
@@ -391,9 +372,9 @@ func cloudFinalRun(t *testing.T, repository *trace.Repository, stream config.Wor
 				{Item: api.CheckItemParallelism, Engine: api.CheckEngineCloud, Where: "dagger trace trace-a"},
 			}}}
 	data, err := json.MarshalIndent(run, "", "  ")
-	must(t, err)
+	intakefixture.Must(t, err)
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalChecksDocument(review), Revision: 1, Project: repository.Project(), Workstream: stream, At: at, Actor: trace.Actor{Kind: "service", ID: "final-review"}, Cause: "final-review-op"}
-	must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalChecksPath(review), Content: string(data) + "\n"}}))
+	intakefixture.Must(t, repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalChecksPath(review), Content: string(data) + "\n"}}))
 	return run
 }
 
@@ -410,7 +391,7 @@ func TestFlakeRecorderNoticesAFinalReviewCloudRunAndKeepsItsEvidence(t *testing.
 	}
 	store := flakeStoreOf(repository)
 	group, found, err := store.Group("test:a")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found {
 		t.Fatalf("no record for the group of test:a: %+v", flakeOccurrences(t, repository))
 	}
@@ -419,7 +400,7 @@ func TestFlakeRecorderNoticesAFinalReviewCloudRunAndKeepsItsEvidence(t *testing.
 		t.Fatalf("occurrence %+v of group %+v", o, group)
 	}
 	text, err := flakes.RenderHandIn(group, o.Run, "")
-	must(t, err)
+	intakefixture.Must(t, err)
 	for _, want := range []string{
 		"`cloud`", "the final review of workstream `" + string(stream) + "`", "`final/checks-1.json`",
 		"- `lint`", "- `test:a`", "- `test:b`",
@@ -442,7 +423,6 @@ func TestFlakeRecorderResumesAfterEveryInterruption(t *testing.T) {
 			f, stream, repository := newFlakeFixture(t, "flake-interrupted-"+step, flakyOutcome(flakyTraceTest, flakyWebTest))
 			createFlakeFix(t, repository)
 			openGroupOf(t, repository, flakyTraceTest, flakeFixStream)
-			// The source unit has advanced before the recorder sees its run.
 			runChecks(t, f.s, repository, stream)
 			if got := intakefixture.UnitState(t, repository, stream, "resume"); got != UnitReviewing {
 				t.Fatalf("unit is %s, want reviewing", got)
@@ -455,13 +435,12 @@ func TestFlakeRecorderResumesAfterEveryInterruption(t *testing.T) {
 				}
 				return nil
 			})
-			must(t, flakeRecorderOf(f, repository).Pass(context.Background()))
+			intakefixture.Must(t, flakeRecorderOf(f, repository).Pass(context.Background()))
 			if stopped == 0 {
 				t.Fatalf("the recorder never reached %s", step)
 			}
 			f.s.setBoundary(nil)
 
-			// A new recorder, as after a restart, finishes the run.
 			passFlakes(t, f, repository)
 			passFlakes(t, f, repository)
 			occurrences := flakeOccurrences(t, repository)
@@ -515,7 +494,7 @@ func TestFlakeRecorderResumesAFinalReviewRunAfterInterruptions(t *testing.T) {
 
 func TestFlakeFailuresNeverChangeTheOriginatingFlow(t *testing.T) {
 	t.Parallel()
-	control, controlStream, controlRepository := newFlakeFixture(t, "flake-control", checkOutcome{Result: api.CheckResult{Output: "CHECKS  ✔ 1 passed\n✔ " + flakyTraceTest + " 1.0s OK\n"}})
+	control, controlStream, controlRepository := newFlakeFixture(t, "flake-control", fixturekit.CheckOutcome{Result: api.CheckResult{Output: "CHECKS  ✔ 1 passed\n✔ " + flakyTraceTest + " 1.0s OK\n"}})
 	control.s.cfg.Project.FlakeFixes = false
 	runChecks(t, control.s, controlRepository, controlStream)
 	want := unitHistory(t, controlRepository, controlStream)
@@ -560,7 +539,7 @@ func TestFlakeRecordingIsAScheduleStepThatNeverFailsTheSchedule(t *testing.T) {
 	f, stream, repository := newFlakeFixture(t, "flake-schedule", flakyOutcome(flakyTraceTest))
 	runChecks(t, f.s, repository, stream)
 	stages, err := f.s.stages(f.s.cfg, repository)
-	must(t, err)
+	intakefixture.Must(t, err)
 	i := slices.IndexFunc(stages.hooks, func(h scheduleHook) bool { return h.name == "flakes" })
 	if i < 0 {
 		t.Fatalf("the schedule has no flakes step: %+v", stages.hooks)
@@ -578,7 +557,7 @@ func TestFlakeRecordingIsAScheduleStepThatNeverFailsTheSchedule(t *testing.T) {
 		t.Fatalf("notices %q", notices)
 	}
 	f.s.setBoundary(nil)
-	must(t, stages.hooks[i].pass(context.Background()))
+	intakefixture.Must(t, stages.hooks[i].pass(context.Background()))
 	if notices := flakeNoticeBodies(t, repository, stream); len(notices) != 1 {
 		t.Fatalf("notices %q", notices)
 	}

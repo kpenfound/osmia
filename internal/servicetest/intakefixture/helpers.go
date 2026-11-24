@@ -1408,10 +1408,10 @@ func Snapshot(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// soon polls ok until it holds, failing with what after 20 seconds.
+// Soon polls ok until it holds, failing with what after DemoTimeout.
 func Soon(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(DemoTimeout)
 	for !ok() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
