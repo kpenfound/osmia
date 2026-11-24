@@ -12,12 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/projectstore"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// observeJoinPasses instruments the running controllers, without driving a pass.
 func observeJoinPasses(s *Service) func(*testing.T) {
 	var phase atomic.Int32
 	completed := make(chan string, 32)
@@ -54,7 +58,7 @@ func observeJoinPasses(s *Service) func(*testing.T) {
 		for _, key := range observedKeys {
 			needed[fmt.Sprintf("%d:%s", current, key)] = true
 		}
-		deadline := time.NewTimer(demoTimeout)
+		deadline := time.NewTimer(intakefixture.DemoTimeout)
 		defer deadline.Stop()
 		for len(needed) != 0 {
 			select {
@@ -70,15 +74,15 @@ func observeJoinPasses(s *Service) func(*testing.T) {
 }
 func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) {
 	t.Parallel()
-	joining := &changeRaceGate{Step: "workgroup-member-joining", Reached: make(chan struct{}), Released: make(chan struct{})}
-	transferred := &changeRaceGate{Step: "workgroup-member-transferred", Reached: make(chan struct{}), Released: make(chan struct{})}
+	joining := &intakefixture.ChangeRaceGate{Step: "workgroup-member-joining", Reached: make(chan struct{}), Released: make(chan struct{})}
+	transferred := &intakefixture.ChangeRaceGate{Step: "workgroup-member-transferred", Reached: make(chan struct{}), Released: make(chan struct{})}
 	defer joining.Release()
 	defer transferred.Release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) {
-		opts.Reconciliation.Now = (&fixedClock{At: demoStart}).Now
+		opts.Reconciliation.Now = (&fixturekit.FixedClock{At: fixturekit.DemoStart}).Now
 		cfg, err := projectstore.LoadConfig(opts.Config)
-		must(t, err)
-		runChief(opts, cfg, &chiefTurns{})
+		intakefixture.Must(t, err)
+		runChief(opts, cfg, &fixturekit.ChiefTurns{})
 		opts.boundary = func(ctx context.Context, name string) error {
 			if err := joining.Checkpoint(ctx, name); err != nil {
 				return err
@@ -90,18 +94,18 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	observe := observeJoinPasses(f.s)
 	joining.Armed.Store(true)
 	transferred.Armed.Store(true)
-	done := make(chan *APIError, 1)
+	done := make(chan *api.APIError, 1)
 	var id config.WorkgroupID
 	go func() {
-		var api *APIError
-		id, api = f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-		done <- api
+		var apiFault *api.APIError
+		id, apiFault = f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+		done <- apiFault
 	}()
 	joining.Await(t)
 	repo, err := f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	groups, _, err := trace.Workgroups(repo)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if _, ok := trace.WorkgroupOf(groups, f.stream1); !ok {
 		t.Fatal("old route missing before transfer")
 	}
@@ -112,21 +116,20 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	joining.Release()
 	transferred.Await(t)
 	pointer, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	groups, _, err = trace.Workgroups(repo)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if _, ok := trace.WorkgroupOf(groups, f.stream1); ok || pointer == "" {
 		t.Fatalf("transfer has no unique shared route: pointer=%s groups=%+v", pointer, groups)
 	}
 	if _, err := repo.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("local chief remains: %v", err)
 	}
-	// A ready event forces the real event pass through the incomplete join.
-	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "join-notice", Revision: 1, Project: f.project, Workstream: f.stream1, At: demoStart.Add(-time.Hour), Actor: ownerActor, Cause: "owner"}, Subject: "join-notice", To: "recorded", Reason: "Observe member transfer"}, Events: []trace.Event{{ID: "join-notice", Kind: "notice", Body: "Member transfer remains pending."}}})
-	must(t, err)
+	_, err = repo.Transact(context.Background(), trace.Transaction{Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "join-notice", Revision: 1, Project: f.project, Workstream: f.stream1, At: fixturekit.DemoStart.Add(-time.Hour), Actor: intake.OwnerActor, Cause: "owner"}, Subject: "join-notice", To: "recorded", Reason: "Observe member transfer"}, Events: []trace.Event{{ID: "join-notice", Kind: "notice", Body: "Member transfer remains pending."}}})
+	intakefixture.Must(t, err)
 	notice := func() trace.OutboxEntry {
 		out, err := repo.Outbox(f.stream1)
-		must(t, err)
+		intakefixture.Must(t, err)
 		for _, e := range out {
 			if e.Event.ID == "join-notice" {
 				return e
@@ -143,19 +146,19 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 	}
 	transferred.Release()
 	select {
-	case api := <-done:
-		if api != nil {
-			t.Fatal(api)
+	case apiFault := <-done:
+		if apiFault != nil {
+			t.Fatal(apiFault)
 		}
-	case <-time.After(demoTimeout):
+	case <-time.After(intakefixture.DemoTimeout):
 		t.Fatal("join did not complete")
 	}
 	f.awaitProjectSpec(t)
 	authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	shared, err := authority.ChiefOfStaffThread(f.stream1)
-	must(t, err)
-	must(t, authority.Close())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, authority.Close())
 	f.stop(t)
 	f.start(t)
 	observeJoinPasses(f.s)(t)
@@ -164,50 +167,49 @@ func TestDraftWorkgroupTransferKeepsControllerRoutesAcrossRestart(t *testing.T) 
 		stream  config.WorkstreamID
 	}{{f.project, f.stream1}, {f.project2, f.stream2}} {
 		r, err := f.s.repository(member.project)
-		must(t, err)
+		intakefixture.Must(t, err)
 		got, err := r.CrossRepoWorkgroupOf(member.stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if got != id {
 			t.Fatalf("restart replaced group: %s", got)
 		}
 		groups, _, err := trace.Workgroups(r)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if _, ok := trace.WorkgroupOf(groups, member.stream); ok {
 			t.Fatal("startup added replacement local group")
 		}
 		target, _, _, close, err := f.s.chiefRepository(context.Background(), r, member.stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		chief, err := target.ChiefOfStaffThread(member.stream)
 		close()
-		must(t, err)
+		intakefixture.Must(t, err)
 		if chief.Identity != shared.Identity {
 			t.Fatal("shared chief identity changed")
 		}
 	}
 	entries, err := os.ReadDir(filepath.Join(f.s.current().Root.String(), "workgroups"))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(entries) != 1 {
 		t.Fatalf("duplicate workgroups: %v", entries)
 	}
 }
 func TestChangeContextFollowsTransferredMemberRoute(t *testing.T) {
 	t.Parallel()
-	gate := &changeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
+	gate := &intakefixture.ChangeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
 	defer gate.Release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.Checkpoint })
 	gate.Step = "change-context-routed:" + string(f.stream1)
 	defer f.stop(t)
-	// Start the controller's read on its old local route, then finish the join.
 	gate.Armed.Store(true)
 	gate.Await(t)
-	id, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatal(api)
+	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	gate.Release()
 	f.awaitProjectSpec(t)
 	repo, g, _, close, err := f.s.changeContext(context.Background(), string(f.stream1))
-	must(t, err)
+	intakefixture.Must(t, err)
 	close()
 	if g.ID != id || repo.Project() == f.project {
 		t.Fatal("stale local route survived transfer")
@@ -215,7 +217,7 @@ func TestChangeContextFollowsTransferredMemberRoute(t *testing.T) {
 }
 func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testing.T) {
 	t.Parallel()
-	gate := &changeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
+	gate := &intakefixture.ChangeRaceGate{Reached: make(chan struct{}), Released: make(chan struct{})}
 	defer gate.Release()
 	f := newCrossRepoRatifyFixture(t, func(opts *Options) { opts.boundary = gate.Checkpoint })
 	gate.Step = "change-context-routed:" + string(f.stream1)
@@ -223,23 +225,22 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	awaitJoinDrafts(t, f)
 	ctx := context.Background()
 	repo1, err := f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	repo2, err := f.s.repository(f.project2)
-	must(t, err)
-	authority, g, err := trace.CreateWorkgroupTrace(ctx, f.s.current().Root, []trace.CrossRepoMember{{Workstream: f.stream1, Project: repo1}, {Workstream: f.stream2, Project: repo2}}, f.clock.Now(), ownerActor, "draft-workgroup")
-	must(t, err)
+	intakefixture.Must(t, err)
+	authority, g, err := trace.CreateWorkgroupTrace(ctx, f.s.current().Root, []trace.CrossRepoMember{{Workstream: f.stream1, Project: repo1}, {Workstream: f.stream2, Project: repo2}}, f.clock.Now(), intake.OwnerActor, "draft-workgroup")
+	intakefixture.Must(t, err)
 	original, err := authority.ChiefOfStaffThread(g.Members[0])
-	must(t, err)
-	must(t, authority.Close())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, authority.Close())
 	observe := observeJoinPasses(f.s)
 	gate.Armed.Store(true)
 	gate.Await(t)
-	// This is a durable interruption of the owner join before its locator.
-	must(t, repo1.RetractChiefOfStaff(ctx, f.stream1))
-	must(t, repo1.RetractWorkgroup(ctx, f.stream1, f.clock.Now(), ownerActor, "draft-workgroup"))
+	intakefixture.Must(t, repo1.RetractChiefOfStaff(ctx, f.stream1))
+	intakefixture.Must(t, repo1.RetractWorkgroup(ctx, f.stream1, f.clock.Now(), intake.OwnerActor, "draft-workgroup"))
 	gate.Release()
 	observe(t)
-	if _, _, _, close, err := f.s.changeContext(ctx, string(f.stream1)); !errors.Is(err, errWorkgroupJoining) {
+	if _, _, _, close, err := f.s.changeContext(ctx, string(f.stream1)); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		close()
 		t.Fatalf("unauthenticated missing-group result: %v", err)
 	} else {
@@ -248,29 +249,28 @@ func TestDraftWorkgroupResumesAuthenticatedRetractedMemberAcrossRestart(t *testi
 	f.stop(t)
 	f.start(t)
 	repo1, err = f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	groups, _, err := trace.Workgroups(repo1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if _, ok := trace.WorkgroupOf(groups, f.stream1); ok {
 		t.Fatal("startup replaced the pending join with a solitary group")
 	}
-	id, api := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil || id != g.ID {
-		t.Fatalf("retry replaced join: %s %v", id, api)
+	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil || id != g.ID {
+		t.Fatalf("retry replaced join: %s %v", id, apiFault)
 	}
 	target, _, _, close, err := f.s.chiefRepository(ctx, repo1, f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	chief, err := target.ChiefOfStaffThread(f.stream1)
 	close()
-	must(t, err)
+	intakefixture.Must(t, err)
 	if chief.Identity != original.Identity {
 		t.Fatal("retry replaced original shared chief")
 	}
 	f.awaitProjectSpec(t)
-	// No retraction or authoritative membership authenticates this bare stream.
 	bare := config.WorkstreamID("w_00000000000000000000000000000129")
-	must(t, repo1.CreateWorkstream(ctx, bare, f.clock.Now(), ownerActor))
-	if _, _, _, close, err := f.s.changeContext(ctx, string(bare)); err == nil || errors.Is(err, errWorkgroupJoining) {
+	intakefixture.Must(t, repo1.CreateWorkstream(ctx, bare, f.clock.Now(), intake.OwnerActor))
+	if _, _, _, close, err := f.s.changeContext(ctx, string(bare)); err == nil || errors.Is(err, intake.ErrWorkgroupJoining) {
 		close()
 		t.Fatalf("unexplained missing group was hidden: %v", err)
 	} else {
@@ -292,28 +292,28 @@ func TestDraftWorkgroupInterruptsAfterLastLocatorBeforeLocalRemoval(t *testing.T
 	defer f.stop(t)
 	awaitJoinDrafts(t, f)
 	armed.Store(true)
-	if _, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2}); api == nil {
+	if _, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2}); apiFault == nil {
 		t.Fatal("join did not interrupt before last local removal")
 	}
 	repo, err := f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	_, g, _, err := repo.CrossRepoProjectSpec(id)
-	must(t, err)
-	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, errWorkgroupJoining) {
+	intakefixture.Must(t, err)
+	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		t.Fatalf("all locators admitted an unfinished transfer: %v", err)
 	}
 	f.stop(t)
 	f.start(t)
 	_, err = f.s.repository(f.project)
-	must(t, err)
-	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, errWorkgroupJoining) {
+	intakefixture.Must(t, err)
+	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); !errors.Is(err, intake.ErrWorkgroupJoining) {
 		t.Fatalf("startup admitted unfinished local removal: %v", err)
 	}
-	got, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil || got != id {
-		t.Fatalf("retry replaced join: %s %v", got, api)
+	got, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil || got != id {
+		t.Fatalf("retry replaced join: %s %v", got, apiFault)
 	}
 	if _, err := f.s.crossRepoMemberRepos(context.Background(), g); err != nil {
 		t.Fatalf("completed transfer remained held: %v", err)
@@ -321,13 +321,11 @@ func TestDraftWorkgroupInterruptsAfterLastLocatorBeforeLocalRemoval(t *testing.T
 	f.awaitProjectSpec(t)
 }
 
-// awaitJoinDrafts keeps a join-recovery restart from interrupting unrelated
-// member drafting. The join checkpoints still run against the real controller.
 func awaitJoinDrafts(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	wait, release := serviceChanges(t, f.s)
 	defer release()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for {
 		ready := true
 		for _, member := range []struct {
@@ -335,16 +333,16 @@ func awaitJoinDrafts(t *testing.T, f *crossRepoRatifyFixture) {
 			stream  config.WorkstreamID
 		}{{f.project, f.stream1}, {f.project2, f.stream2}} {
 			repo, err := f.s.repository(member.project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			ops, err := repo.Operations(member.stream)
-			must(t, err)
+			intakefixture.Must(t, err)
 			settled := false
 			for _, op := range ops {
-				if op.Operation.Action == DraftAction && op.Result != nil && op.Result.Outcome == "succeeded" {
+				if op.Operation.Action == intake.DraftAction && op.Result != nil && op.Result.Outcome == "succeeded" {
 					settled = true
 				}
 			}
-			_, _, err = memberSpecAndPlan(repo, member.stream)
+			_, _, err = lifecycle.MemberSpecAndPlan(repo, member.stream)
 			ready = ready && settled && err == nil
 		}
 		if ready {

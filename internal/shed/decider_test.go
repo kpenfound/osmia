@@ -9,8 +9,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// A decision Jev made is the ordinary gate record with its decider and its
-// judgment link; the owner's and the chief of staff's records keep none.
 func TestGateRecordsDecidedByJevRoundTripWithTheirJudgment(t *testing.T) {
 	t.Parallel()
 	ratification := shed.Ratify(3, one, []shed.Entry{entry("a-r1-1", shed.Fit, "")})

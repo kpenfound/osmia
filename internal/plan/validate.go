@@ -141,7 +141,6 @@ func Validate(spec Spec, p Plan, entities kb.Map) []Problem {
 	return out
 }
 
-// numbered returns the criteria numbered n.
 func (s Spec) numbered(n int) []Criterion {
 	var out []Criterion
 	for _, c := range s.Criteria {
@@ -152,7 +151,6 @@ func (s Spec) numbered(n int) []Criterion {
 	return out
 }
 
-// numbers returns the distinct criterion numbers in ascending order.
 func (s Spec) numbers() []int {
 	var out []int
 	for _, c := range s.Criteria {
@@ -164,8 +162,6 @@ func (s Spec) numbers() []int {
 	return out
 }
 
-// cycles returns the dependency cycles a depth-first walk finds, at least one
-// in every cyclic group, each starting at its smallest unit ID.
 func cycles(p Plan) [][]string {
 	edges := map[string][]string{}
 	var order []string

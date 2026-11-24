@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -15,10 +18,10 @@ func TestAvailabilityPassesPreserveTraceErrors(t *testing.T) {
 			f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 			id, path := "workstream-base", "base.json"
 			if subject == "edge" {
-				id, path = edgeObservationDocument, edgeObservationPath
+				id, path = lifecycle.EdgeObservationDocument, lifecycle.EdgeObservationPath
 			}
-			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: f.downstream, At: f.s.now(), Actor: ownerActor, Cause: "fixture"}
-			must(t, f.repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: "{"}}))
+			h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: f.project, Workstream: f.downstream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "fixture"}
+			intakefixture.Must(t, f.repository.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: path, Content: "{"}}))
 			var err error
 			if subject == "base" {
 				err = f.s.baseWaitPass(context.Background(), f.repository)

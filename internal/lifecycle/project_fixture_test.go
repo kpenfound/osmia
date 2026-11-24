@@ -1,16 +1,18 @@
 package lifecycle_test
 
 import (
+	testing "testing"
+
 	api "github.com/kpenfound/osmia/internal/api"
 	config "github.com/kpenfound/osmia/internal/config"
 	delivery "github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	runtime "github.com/kpenfound/osmia/internal/runtime"
 	service "github.com/kpenfound/osmia/internal/service"
 	servicetest "github.com/kpenfound/osmia/internal/servicetest"
 	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	intakefixture "github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	trace "github.com/kpenfound/osmia/internal/trace"
-	testing "testing"
 )
 
 func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
@@ -19,17 +21,15 @@ func factoryPause(t *testing.T, s *Service) (runtime.Pause, bool) {
 	return fixturekit.PauseOf(api.RuntimeResponse{Effective: st}, factoryTarget)
 }
 
-// documentRevisions returns the active project's revisions of one document.
 func documentRevisions(t *testing.T, s *Service, id string) []trace.Document {
 	t.Helper()
 	return intakefixture.DocumentRevisions(t, s.sole().repository, id)
 }
 
-func draftDelivery(cfg *config.Config, r *trace.Repository, w config.WorkstreamID, report FinalReport) (string, string, error) {
-	return delivery.New(delivery.Dependencies{PendingMergeOrderReferences: pendingMergeOrderReferences}).DraftDelivery(cfg, r, w, report)
+func draftDelivery(cfg *config.Config, r *trace.Repository, w config.WorkstreamID, report api.FinalReport) (string, string, error) {
+	return delivery.New(delivery.Dependencies{PendingMergeOrderReferences: lifecycle.PendingMergeOrderReferences}).DraftDelivery(cfg, r, w, report)
 }
 
-// traces returns the open traces of the active projects.
 func (s *Service) traces() []*trace.Repository {
 	_, projects := s.runtimes()
 	out := make([]*trace.Repository, len(projects))
@@ -43,11 +43,11 @@ func mutation(t *testing.T, c *Client, method, kind string, input any) {
 	servicetest.Mutation(t, c.Client, method, kind, input)
 }
 
-func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
+func (s *Service) capacityStatus(list []api.WorkstreamStatus) *api.CapacityStatus {
 	return service.InspectForTest(s.core()).Capacity(list)
 }
 
-func budgetStatus(t *testing.T, s *Service) DailyBudgetStatus {
+func budgetStatus(t *testing.T, s *Service) api.DailyBudgetStatus {
 	t.Helper()
 	got := s.dailyBudgetStatus()
 	if got == nil {

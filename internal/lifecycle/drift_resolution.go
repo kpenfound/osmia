@@ -374,22 +374,18 @@ func (d Drifter) Advance(ctx context.Context, stream config.WorkstreamID, next D
 // error that wraps errDriftAwaits, and the feature branch and the seal stay
 // where they are.
 //
-// The replay runs in the workstream's resolution workspace, created from the
-// branch's old tip on its own branch. At each commit that conflicts it stops
-// with the conflict markers in the workspace, the stop is recorded, and the
+// The replay runs in the workstream's resolution workspace. At each commit
+// that conflicts it stops with the conflict markers in the workspace and the
 // Drift mason gets one turn that names the conflicted paths and carries the
-// sealed spec. Once the mason's turn ends with no marker left in those
-// paths, the service stages the workspace and goes on with the replay. The
-// replayed branch is the candidate a reviewer reads against the sealed
-// spec: approval replays the feature branch to it, and material findings
-// return it to the mason, whose work the service snapshots as the next
-// candidate. Once review has sent the resolution back shed.max_bounces
-// times, or the mason has left markers after mason.max_clean_turns
-// reminders, resolve returns a driftHeldError instead of asking the mason
-// again.
-// The resolution workspace is removed once the feature branch moves. Every step reads the workspace and the threads first, so a
-// Retry or a restart goes on from where the last one stopped and queues no
-// turn twice.
+// sealed spec. Once that turn ends with no marker left, the service stages
+// the workspace and goes on with the replay. The replayed branch is the
+// candidate a reviewer reads against the sealed spec: approval replays the
+// feature branch to it, and material findings return it to the mason. Once
+// review has sent the resolution back shed.max_bounces times, or the mason
+// has left markers after mason.max_clean_turns reminders, Resolve returns a
+// driftHeldError instead of asking the mason again. The resolution workspace
+// is removed once the feature branch moves. A retry or a restart goes on
+// from where the last step stopped and queues no turn twice.
 func (d Drifter) Resolve(ctx context.Context, stream config.WorkstreamID, rebase DriftRebase) (DriftRebase, error) {
 	w, err := d.Resolution(ctx, stream, rebase)
 	if err != nil {
@@ -422,8 +418,6 @@ func (d Drifter) Resolve(ctx context.Context, stream config.WorkstreamID, rebase
 			}
 			continue
 		case replaying && len(unmerged) == 0:
-			// A replay stopped for a resolution the service already staged,
-			// or stopped by the service itself: it goes on.
 			if _, _, err := g.ContinueReplay(ctx, w, requested); err != nil {
 				return rebase, err
 			}

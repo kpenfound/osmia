@@ -16,8 +16,6 @@ import (
 const otherStream = config.WorkstreamID("w_fedcba9876543210fedcba9876543210")
 const thirdStream = config.WorkstreamID("w_00000000000000000000000000000003")
 
-// controlledOperations can hold either boundary call independently. Channels
-// expose entry without relying on goroutine scheduling or elapsed time.
 type controlledOperations struct {
 	entered     map[string]chan struct{}
 	inspect     map[string]<-chan struct{}
@@ -267,7 +265,6 @@ func TestKindLimitLeavesPassAndOtherKindsFree(t *testing.T) {
 			t.Fatalf("pending workflow overtaken or claimed: %+v", r)
 		}
 	}
-	// No tick: releasing the permit wakes Run to finish the pending workflows.
 	c.options.Ticks = make(chan time.Time)
 	scheduled := make(chan struct{}, 1)
 	c.options.Schedule = func(context.Context) error {

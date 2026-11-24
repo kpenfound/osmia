@@ -15,10 +15,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// turnAction mirrors thread.TurnAction, the runner-boundary action that
-// delivers one queued turn. The controller logs those separately, with the
-// role and profile only the service's turn adapter knows, so it leaves them
-// out of its own generic operation records to keep the log readable.
 const turnAction = "thread-turn"
 
 type Options struct {
@@ -109,13 +105,9 @@ type Controller struct {
 	options    Options
 	boundary   func(string) error
 
-	mu sync.Mutex
-	// running holds the concurrent operations in flight, by workstream and
-	// event; group joins them.
-	running map[string]bool
-	group   sync.WaitGroup
-	// failure is the first terminal operation store error. abort cancels
-	// the context Run passes to operations beside the pass.
+	mu        sync.Mutex
+	running   map[string]bool
+	group     sync.WaitGroup
 	failure   error
 	abort     context.CancelCauseFunc
 	drain     chan struct{}
@@ -190,7 +182,6 @@ func (c *Controller) Run(ctx context.Context) error {
 		}
 		c.mu.Unlock()
 	}
-	// Fence admission before joining, including passes racing Run's exit.
 	c.Drain()
 	if err != nil {
 		cancel(err)
@@ -217,7 +208,6 @@ func (c *Controller) loop(ctx context.Context, ticks <-chan time.Time) error {
 			}
 			ghlog.Logger(ctx).Error("reconciliation schedule failed; will retry", "project", string(c.repository.Project()), "error", err.Error())
 		}
-		// A drain wakes a controller even when no workflow event or tick arrives.
 		waitCtx, stop := context.WithCancel(ctx)
 		finished := make(chan struct{})
 		go func() {
@@ -258,9 +248,6 @@ func (c *Controller) inFlight(stream config.WorkstreamID, event string) bool {
 	return c.running[string(stream)+"/"+event]
 }
 
-// start reserves admission and durably claims in pass order. It never waits
-// for workflow ownership or limit capacity. Only short bookkeeping precedes
-// launching the reconciler; Inspect and Apply both run outside all trace locks.
 func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, record trace.OperationRecord, beside bool) (bool, error) {
 	key := string(stream) + "/" + record.EventID
 	c.mu.Lock()
@@ -315,7 +302,6 @@ func (c *Controller) start(ctx context.Context, stream config.WorkstreamID, reco
 		err := run()
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		// Cancellation leaves the durable claim for restart reconciliation.
 		if err != nil && ctx.Err() == nil && c.failure == nil {
 			c.failure = err
 			if c.abort != nil {
@@ -336,8 +322,6 @@ func (c *Controller) class(op coreadapter.Operation, beside bool) trace.Operatio
 	return trace.WorkflowOperation
 }
 
-// retryDelay is the wait before the next attempt of an operation that
-// failed failures times before this failure.
 func (c *Controller) retryDelay(failures int) time.Duration {
 	delay := c.options.RetryDelay
 	for i := 0; i < failures && delay < c.options.MaxRetryDelay; i++ {
@@ -382,8 +366,6 @@ func (c *Controller) Pass(ctx context.Context) error {
 	}
 	var due []pending
 
-	// Trace removal cannot invalidate the operation snapshot midway. The
-	// snapshot guard excludes neither operation claims nor result writes.
 	err := c.repository.WithWorkstreamSnapshot(func() error {
 		workstreams := c.options.Workstreams
 		if workstreams == nil {
@@ -439,8 +421,6 @@ func (c *Controller) Pass(ctx context.Context) error {
 	return nil
 }
 
-// attemptContext bounds one call of a bounded operation's adapter by the
-// attempt deadline; the call of an unbounded operation runs under ctx itself.
 func (c *Controller) attemptContext(ctx context.Context, bounded Bounded) (context.Context, context.CancelFunc) {
 	if bounded == nil {
 		return ctx, func() {}
@@ -448,7 +428,6 @@ func (c *Controller) attemptContext(ctx context.Context, bounded Bounded) (conte
 	return context.WithTimeout(ctx, c.attemptDeadline())
 }
 
-// giveUp asks the adapter to end the operation under the reconcile deadline.
 func (c *Controller) giveUp(ctx context.Context, bounded Bounded, op coreadapter.Operation, why GiveUpReason) (coreadapter.OperationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.reconcileDeadline())
 	defer cancel()
@@ -459,8 +438,6 @@ func (c *Controller) giveUp(ctx context.Context, bounded Bounded, op coreadapter
 	return result, err
 }
 
-// reconcile inspects and completes one admitted operation under its class's
-// ordering, without holding a trace lock across an adapter call.
 func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, attempt *trace.OperationAttempt, record trace.OperationRecord) error {
 	started := time.Now()
 	defer func() {
@@ -481,8 +458,6 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 	}
 	retry := func(reason string) error {
 		if bounded != nil {
-			// The adapter hears of the failure before it is recorded, so a crash
-			// between the two repeats a notice it records only once.
 			if err := bounded.Failing(ctx, record.Operation, ConsecutiveFailures(record)+1, reason); err != nil {
 				return err
 			}
@@ -515,8 +490,6 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 		if err != nil {
 			observed = coreadapter.Observation{State: coreadapter.EffectUnknown, Evidence: fmt.Sprintf("Inspection failed: %v; evidence: %s", err, observed.Evidence)}
 		}
-		// Inspection found no durable outcome. An operation that has failed past
-		// its limit is then ended instead of attempted again.
 		if bounded != nil && observed.State != coreadapter.EffectCompleted {
 			if status, limit := StatusOf(record), c.GiveUpLimit(); limit.Reached(status, c.options.Now()) {
 				ended, err := c.giveUp(ctx, bounded, record.Operation, GiveUpReason{Status: status, Limit: limit})
@@ -548,9 +521,6 @@ func (c *Controller) reconcile(ctx context.Context, stream config.WorkstreamID, 
 			if err := c.step(ctx, "before-effect"); err != nil {
 				return err
 			}
-			// Agent turns are logged separately, with the role and profile
-			// only the service's turn adapter knows; every other operation
-			// is logged here, the one place they all pass through.
 			logger, routine := ghlog.Logger(ctx), record.Operation.Action == turnAction
 			logAttrs := []any{"project", string(c.repository.Project()), "workstream", string(stream), "action", record.Operation.Action, "boundary", string(record.Operation.Boundary)}
 			if !routine {

@@ -50,8 +50,6 @@ func (s *Controller) chiefRepository(ctx context.Context, repository *trace.Repo
 	}
 	var g trace.Workgroup
 	var wt *trace.Repository
-	// A member can join between reading the membership and binding it;
-	// the membership is then read again.
 	for attempt := 0; ; attempt++ {
 		g, _, err = repository.CrossRepoWorkgroup(id)
 		if err != nil {

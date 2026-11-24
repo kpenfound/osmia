@@ -70,7 +70,6 @@ func (g *Git) remote(ctx context.Context, repository string) (string, error) {
 	return "", fmt.Errorf("the clone has no remote whose URL names %s", repository)
 }
 
-// names reports whether a remote URL names owner/repository.
 func names(url, repository string) bool {
 	url = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
 	return strings.HasSuffix(strings.ToLower(url), strings.ToLower("/"+repository)) || strings.HasSuffix(strings.ToLower(url), strings.ToLower(":"+repository))
@@ -119,8 +118,6 @@ func (g *Git) fetch(ctx context.Context, remote, branch string) (string, error) 
 	return commit, nil
 }
 
-// fetchRefCollision recognises both a compare-and-swap race and a ref lock
-// temporarily held by another fetch. Other fetch failures are not retried.
 func fetchRefCollision(err error) bool {
 	text := err.Error()
 	return strings.Contains(text, "cannot lock ref") &&
@@ -188,7 +185,6 @@ func (g *Git) push(ctx context.Context, remote, commit, branch, expected string)
 	return err
 }
 
-// nonEmpty returns a one-element slice holding s, or nil for an empty s.
 func nonEmpty(s string) []string {
 	if s == "" {
 		return nil
@@ -217,15 +213,8 @@ func (g *Git) Ancestor(ctx context.Context, commit, tip string) (bool, error) {
 
 // Known reports whether commit's object already exists in the clone, such
 // as a remote branch tip the clone has fetched before through one of its
-// own branches. Ancestor cannot answer about a commit the clone has never
-// fetched; it fails outright instead.
-//
-// rev-parse --verify --quiet resolves the name first and exits 1 with no
-// output when it doesn't resolve to a commit (git-rev-parse(1)), whether
-// because the object is absent or exists but isn't a commit. cat-file -e
-// exits 1 the same way for a missing object, but exits 128 when the name
-// fails to resolve at all (as "<commit>^{commit}" does for an absent
-// object), so it cannot tell "unknown" apart from a real error here.
+// own branches. Ancestor fails outright for a commit the clone has never
+// fetched; Known answers false.
 func (g *Git) Known(ctx context.Context, commit string) (bool, error) {
 	_, err := g.run(ctx, "rev-parse", "--verify", "--quiet", commit+"^{commit}")
 	if exitCode(err, 1) {
@@ -300,7 +289,6 @@ func (g *Git) ChangedPaths(ctx context.Context, base, candidate string) ([]strin
 	return strings.Split(strings.TrimSuffix(out, "\x00"), "\x00"), nil
 }
 
-// identity is the author and committer of the commits the service makes.
 var identity = []string{"GIT_AUTHOR_NAME=Osmia", "GIT_AUTHOR_EMAIL=osmia@localhost", "GIT_COMMITTER_NAME=Osmia", "GIT_COMMITTER_EMAIL=osmia@localhost"}
 
 // Snapshot commits the worktree's full tree, untracked files included and
@@ -525,7 +513,6 @@ func (g *Git) Markers(ctx context.Context, commit string, paths []string) ([]str
 	return marked, nil
 }
 
-// conflicted reports whether a file holds a conflict marker line.
 func conflicted(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		for _, marker := range []string{"<<<<<<<", ">>>>>>>"} {
@@ -555,28 +542,8 @@ func (g *Git) Advance(ctx context.Context, w Worktree, from, to string) error {
 	return err
 }
 
-// replayer is the core replayer that performs every Git replay below: it
-// cherry-picks one commit at a time, keeping each original's message,
-// author and committer, so the same replay of the same commits onto the
-// same revision gives the same commit ids; a commit that becomes empty is
-// kept. Its state is kept in the worktree's core-replay.json.
 func (g *Git) replayer() gitvcs.Replayer { return gitvcs.Replayer{} }
 
-// replayRecord is Osmia's own small durable record of a persistent Git
-// replay through core's Replayer: the worktree's Branch, the branch's tip
-// Head held before the replay started, the explicit dependency boundary
-// Base the caller gave, if any, and the new revision Onto the replay
-// targets. It lives in the worktree's git directory, written before Osmia
-// ever calls core's Replay and cleared once the replay is settled or
-// aborted, so a restart anywhere around that call is recoverable: before
-// core's own state is ever saved, and after core has finished every commit
-// and removed its state but before Osmia reattached the branch to it,
-// neither of which core's own state covers.
-//
-// TODO: Remove this record when agentcore's vcs.Replayer itself records
-// a replay's pre-replay branch and tip, for a worktree that starts
-// attached, so a caller needs no separate bookkeeping to recover across a
-// restart or to abort back to it.
 type replayRecord struct {
 	Branch string `json:"branch"`
 	Head   string `json:"head"`
@@ -584,18 +551,12 @@ type replayRecord struct {
 	Onto   string `json:"onto"`
 }
 
-// replayRecordFile is the name Osmia's own replayRecord is kept under, in
-// the worktree's git directory alongside core's own StateFile.
 const replayRecordFile = "osmia-replay.json"
 
-// replayRecordPath returns the absolute path of the worktree at dir's own
-// replayRecord file, in its git directory rather than its working tree.
 func (g *Git) replayRecordPath(ctx context.Context, dir string) (string, error) {
 	return g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", replayRecordFile)
 }
 
-// loadReplayRecord reads the worktree's own replayRecord, or nil when it
-// holds none.
 func (g *Git) loadReplayRecord(ctx context.Context, w Worktree) (*replayRecord, error) {
 	path, err := g.replayRecordPath(ctx, w.Path)
 	if err != nil {
@@ -615,9 +576,6 @@ func (g *Git) loadReplayRecord(ctx context.Context, w Worktree) (*replayRecord, 
 	return rec, nil
 }
 
-// saveReplayRecord writes the worktree's own replayRecord through a
-// temporary file, so a process that stops part way leaves the previous
-// record or the new one, matching how core's own StateFile is saved.
 func (g *Git) saveReplayRecord(ctx context.Context, w Worktree, rec replayRecord) error {
 	path, err := g.replayRecordPath(ctx, w.Path)
 	if err != nil {
@@ -634,8 +592,6 @@ func (g *Git) saveReplayRecord(ctx context.Context, w Worktree, rec replayRecord
 	return os.Rename(tmp, path)
 }
 
-// clearReplayRecord removes the worktree's own replayRecord, once its
-// replay is settled or aborted.
 func (g *Git) clearReplayRecord(ctx context.Context, w Worktree) error {
 	path, err := g.replayRecordPath(ctx, w.Path)
 	if err != nil {
@@ -647,8 +603,6 @@ func (g *Git) clearReplayRecord(ctx context.Context, w Worktree) error {
 	return nil
 }
 
-// attachedTo reports whether the worktree at dir's HEAD is attached to
-// branch.
 func (g *Git) attachedTo(ctx context.Context, dir, branch string) (bool, error) {
 	ref, err := g.runIn(ctx, dir, nil, "symbolic-ref", "-q", "HEAD")
 	if err != nil {
@@ -660,12 +614,6 @@ func (g *Git) attachedTo(ctx context.Context, dir, branch string) (bool, error) 
 	return ref == "refs/heads/"+branch, nil
 }
 
-// ensureAttached reattaches the worktree to rec's branch, from rec's
-// pre-replay head, when a core replay has left it detached: a stop that
-// happened before this call's caller, or an earlier one, ever reattached
-// it. A worktree already attached to the branch is left as it is, since
-// every commit the replay has gone on to make there has already moved the
-// branch with it.
 func (g *Git) ensureAttached(ctx context.Context, w Worktree, rec replayRecord) error {
 	attached, err := g.attachedTo(ctx, w.Path, rec.Branch)
 	if err != nil || attached {
@@ -674,11 +622,6 @@ func (g *Git) ensureAttached(ctx context.Context, w Worktree, rec replayRecord) 
 	return g.reattach(ctx, w, rec.Head)
 }
 
-// replayFinishedButNotSettled reports whether core already finished every
-// commit of the replay rec describes and removed its own state, leaving
-// the worktree's HEAD, attached or not, at the final candidate, before
-// Osmia reattached the branch to it and cleared rec. It is only safe to
-// call when core's own state does not exist.
 func (g *Git) replayFinishedButNotSettled(ctx context.Context, w Worktree, rec replayRecord) (bool, string, error) {
 	attached, err := g.attachedTo(ctx, w.Path, rec.Branch)
 	if err != nil {
@@ -694,10 +637,6 @@ func (g *Git) replayFinishedButNotSettled(ctx context.Context, w Worktree, rec r
 	return head != rec.Onto, head, nil
 }
 
-// settleReplay reattaches the worktree's branch to the replay's progress,
-// through ensureAttached, when there is a stop or a result to track, and
-// reports the replay's conflicts; once it holds no more, it clears rec and
-// reports the candidate.
 func (g *Git) settleReplay(ctx context.Context, w Worktree, rec replayRecord, r vcs.Replay) (string, []string, error) {
 	if err := g.ensureAttached(ctx, w, rec); err != nil {
 		return "", nil, err
@@ -708,14 +647,6 @@ func (g *Git) settleReplay(ctx context.Context, w Worktree, rec replayRecord, r 
 	return r.Candidate, nil, g.clearReplayRecord(ctx, w)
 }
 
-// advanceReplay resumes or starts the Git replay rec describes through
-// core's Replayer, from wherever core's own state, or, when that does not
-// exist, the worktree's current HEAD shows it stopped, and settles the
-// result as settleReplay does. Calling core's Replay afresh when nothing
-// has happened yet, or redoing it when core already finished and removed
-// its state, both make the same deterministic commits core's own replay
-// always does, so either is safe; replayFinishedButNotSettled avoids the
-// redoing by using the result already there.
 func (g *Git) advanceReplay(ctx context.Context, w Worktree, rec replayRecord) (string, []string, error) {
 	status, err := g.replayer().ReplayStatus(ctx, w)
 	if err != nil {
@@ -820,45 +751,6 @@ func randomReplayID() []byte {
 	return id
 }
 
-// unmerged returns the paths the index of the worktree at dir holds
-// unmerged, sorted.
-func (g *Git) unmerged(ctx context.Context, dir string) ([]string, error) {
-	out, err := g.runInRaw(ctx, dir, nil, "diff", "--name-only", "--diff-filter=U", "-z")
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for _, path := range strings.Split(out, "\x00") {
-		if path != "" && !slices.Contains(paths, path) {
-			paths = append(paths, path)
-		}
-	}
-	slices.Sort(paths)
-	return paths, nil
-}
-
-// nativeRebaseDir returns the absolute path of the worktree's native Git
-// rebase state directory, and whether it holds one: a replay in Git's own
-// native rebase state, rather than core's replayer's core-replay.json, so
-// it can still be finished or aborted through that same native rebase.
-func (g *Git) nativeRebaseDir(ctx context.Context, dir string) (string, bool, error) {
-	path, err := g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge")
-	if err != nil {
-		return "", false, err
-	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return path, false, nil
-	} else if err != nil {
-		return path, false, err
-	}
-	return path, true, nil
-}
-
-// reattach returns the worktree, left detached by a fresh replay, to its
-// branch, moving the branch from its pre-replay tip head to wherever the
-// replay left HEAD. From here on every commit the replay makes, on an
-// attached HEAD, moves the branch with it, so the branch tracks the
-// replay's progress without further action.
 func (g *Git) reattach(ctx context.Context, w Worktree, head string) error {
 	current, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD")
 	if err != nil {
@@ -916,11 +808,6 @@ func (g *Git) ReplayInFrom(ctx context.Context, w Worktree, base, onto string, _
 // commit it returns. A worktree a core replay left detached, however the
 // service last stopped, is reattached first.
 func (g *Git) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
-	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
-		return "", nil, err
-	} else if native {
-		return g.continueNativeRebase(ctx, w, at)
-	}
 	rec, err := g.loadReplayRecord(ctx, w)
 	if err != nil {
 		return "", nil, err
@@ -936,12 +823,6 @@ func (g *Git) ContinueReplay(ctx context.Context, w Worktree, at time.Time) (str
 // persistent ReplayIn or ReplayInFrom that started it. A worktree with no
 // replay in progress returns vcs.ErrNoReplay.
 func (g *Git) AbortReplay(ctx context.Context, w Worktree) error {
-	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
-		return err
-	} else if native {
-		_, err := g.runIn(ctx, w.Path, nil, "rebase", "--abort")
-		return err
-	}
 	rec, err := g.loadReplayRecord(ctx, w)
 	if err != nil {
 		return err
@@ -952,11 +833,6 @@ func (g *Git) AbortReplay(ctx context.Context, w Worktree) error {
 	if rec == nil {
 		return nil
 	}
-	// Core's Abort checks out the ref it recorded as the worktree's
-	// pre-replay HEAD, which, once Osmia reattached the branch to track a
-	// conflict stop, is this same branch, now moved to the partly replayed
-	// commit. Move it, and the worktree's index and files, back to the
-	// branch's own pre-replay tip, which only Osmia's record still holds.
 	head, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return err
@@ -981,11 +857,6 @@ func (g *Git) AbortReplay(ctx context.Context, w Worktree) error {
 // all yet, recorded but not even started by core, is left as it is and
 // reported in progress.
 func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
-	if _, native, err := g.nativeRebaseDir(ctx, w.Path); err != nil {
-		return "", nil, false, err
-	} else if native {
-		return g.nativeRebaseReplaying(ctx, w)
-	}
 	rec, err := g.loadReplayRecord(ctx, w)
 	if err != nil || rec == nil {
 		return "", nil, false, err
@@ -1020,53 +891,6 @@ func (g *Git) Replaying(ctx context.Context, w Worktree) (string, []string, bool
 	return stop, status.Conflicts, true, nil
 }
 
-// nativeRebaseEnvironment is the environment continueNativeRebase finishes
-// a native Git rebase in: commits are committed by Osmia at the given
-// time, no editor opens and the owner's rebase settings that would change
-// what is replayed are off.
-func nativeRebaseEnvironment(at time.Time) []string {
-	date := fmt.Sprintf("@%d +0000", at.Unix())
-	env := append(slices.Clone(identity), "GIT_COMMITTER_DATE="+date, "GIT_EDITOR=true", "GIT_SEQUENCE_EDITOR=true")
-	settings := []string{"rebase.autoStash=false", "rebase.autoSquash=false", "rebase.updateRefs=false", "rebase.rebaseMerges=false", "commit.gpgSign=false"}
-	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(settings)))
-	for i, setting := range settings {
-		key, value, _ := strings.Cut(setting, "=")
-		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, value))
-	}
-	return env
-}
-
-// continueNativeRebase is ContinueReplay for a replay in Git's own native
-// rebase state, detached at the point it stopped, with its state under the
-// worktree's rebase-merge directory rather than core-replay.json. It
-// finishes that native rebase directly, rather than migrating its state
-// into core's replayer.
-func (g *Git) continueNativeRebase(ctx context.Context, w Worktree, at time.Time) (string, []string, error) {
-	if _, err := g.runIn(ctx, w.Path, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.excludesFile", "GIT_CONFIG_VALUE_0=" + os.DevNull}, "add", "--all"); err != nil {
-		return "", nil, err
-	}
-	if _, err := g.runIn(ctx, w.Path, nativeRebaseEnvironment(at), "rebase", "--continue"); err != nil {
-		conflicts, unmergedErr := g.unmerged(ctx, w.Path)
-		if unmergedErr != nil || len(conflicts) == 0 {
-			return "", nil, errors.Join(err, unmergedErr)
-		}
-		return "", conflicts, nil
-	}
-	commit, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "HEAD^{commit}")
-	return commit, nil, err
-}
-
-// nativeRebaseReplaying is Replaying for a replay in Git's own native rebase
-// state; see continueNativeRebase.
-func (g *Git) nativeRebaseReplaying(ctx context.Context, w Worktree) (string, []string, bool, error) {
-	stop, err := g.runIn(ctx, w.Path, nil, "rev-parse", "--verify", "--quiet", "REBASE_HEAD^{commit}")
-	if err != nil && !exitCode(err, 1) {
-		return "", nil, false, err
-	}
-	conflicts, err := g.unmerged(ctx, w.Path)
-	return stop, conflicts, true, err
-}
-
 // MarkedFiles returns the paths, of those given, whose file in the worktree
 // holds a conflict marker line, as Markers finds them in a commit. A path
 // the worktree does not hold as a regular file has none.
@@ -1074,8 +898,6 @@ func (g *Git) MarkedFiles(w Worktree, paths []string) ([]string, error) {
 	return markedFiles(w.Path, paths)
 }
 
-// markedFiles returns the paths, of those given, whose regular file in the
-// directory dir holds a conflict marker line.
 func markedFiles(dir string, paths []string) ([]string, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -1102,8 +924,6 @@ func markedFiles(dir string, paths []string) ([]string, error) {
 	return marked, nil
 }
 
-// dropReplay removes Replay's temporary worktree at dir, and what a stop left
-// of it.
 func (g *Git) dropReplay(ctx context.Context, dir string) error {
 	ctx, unlock, err := lockClone(ctx, g.Clone)
 	if err != nil {
@@ -1153,8 +973,6 @@ func (g *Git) ExportValidated(ctx context.Context, commit, dir string, validate 
 	}
 	checkout := []string{"checkout-index", "--all", "--force"}
 	if validate != nil {
-		// Validation must see recorded links even when the owner's Git config
-		// would check them out as regular files.
 		checkout = append([]string{"-c", "core.symlinks=true"}, checkout...)
 	}
 	if _, err := g.runEnv(ctx, append(env, "GIT_WORK_TREE="+dir), checkout...); err != nil {
@@ -1191,13 +1009,11 @@ func (g *Git) Commit(ctx context.Context, revision string) (Commit, error) {
 	return Commit{Tree: tree, Parents: strings.Fields(parents), Message: strings.TrimRight(message, "\n")}, nil
 }
 
-// listed is one entry of the clone's worktree list.
 type listed struct {
 	path, branch string
 	prunable     bool
 }
 
-// list reads the clone's worktrees.
 func (g *Git) list(ctx context.Context) ([]listed, error) {
 	out, err := g.run(ctx, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -1223,8 +1039,6 @@ func (g *Git) list(ctx context.Context) ([]listed, error) {
 	return entries, nil
 }
 
-// own reports whether a listed worktree is the one named name: Git lists the
-// directory it resolved when the worktree was added.
 func (g *Git) own(entry listed, name string) bool {
 	path := g.path(name)
 	resolved, err := filepath.EvalSymlinks(path)
@@ -1249,8 +1063,6 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 			continue
 		}
 		if entry.prunable {
-			// Re-read after taking ownership: an Acquire may have recreated this
-			// workspace since the unlocked list, and must not be pruned away.
 			if !holdsClone(ctx, cloneKey(g.Clone)) {
 				local, unlock, err := lockClone(ctx, g.Clone)
 				if err != nil {
@@ -1283,16 +1095,7 @@ func (g *Git) Workspace(ctx context.Context, name string) (Worktree, bool, error
 	return Worktree{}, false, nil
 }
 
-// detachedBranch returns the branch a worktree a replay has left detached
-// returns to: from Git's own native rebase state, for a replay migrated
-// from the replaced native rebase, or, for a core replay, from Osmia's own
-// replayRecord, which covers both a core replay a service stop left
-// detached before core's own state was ever saved and one core finished
-// and removed its own state for before Osmia reattached the branch to it.
 func (g *Git) detachedBranch(ctx context.Context, dir string) (string, error) {
-	if branch, err := g.replayedBranch(ctx, dir); err != nil || branch != "" {
-		return branch, err
-	}
 	rec, err := g.loadReplayRecord(ctx, Worktree{Path: dir})
 	if err != nil || rec == nil {
 		return "", err
@@ -1300,33 +1103,6 @@ func (g *Git) detachedBranch(ctx context.Context, dir string) (string, error) {
 	return rec.Branch, nil
 }
 
-// replayedBranch returns the branch the replay in progress in the worktree
-// at dir returns to, or "" when no replay of a branch is in progress there.
-func (g *Git) replayedBranch(ctx context.Context, dir string) (string, error) {
-	path, err := g.runIn(ctx, dir, nil, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge/head-name")
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	branch, _ := strings.CutPrefix(strings.TrimSpace(string(data)), "refs/heads/")
-	if branch == "detached HEAD" {
-		return "", nil
-	}
-	return branch, nil
-}
-
-// forget removes one worktree's metadata from the clone. Git lists a worktree
-// as prunable once its .git file is gone, yet refuses to remove it while its
-// directory still exists. That is the state of a directory whose deletion is in
-// progress or was interrupted, so what remains of it is deleted first, and
-// Git then removes the registration of a missing directory. A directory that
-// still has its .git file is left to Git.
 func (g *Git) forget(ctx context.Context, entry listed) error {
 	ctx, unlock, err := lockClone(ctx, g.Clone)
 	if err != nil {
@@ -1342,10 +1118,6 @@ func (g *Git) forget(ctx context.Context, entry listed) error {
 	return err
 }
 
-// unfinishedWorktree reports whether the worktree at dir was stopped while it
-// was being added. Git gives a worktree a HEAD that names no commit until it
-// has put the worktree on its branch, and checks the files out only after
-// that, so such a worktree never held a file of anyone's.
 func unfinishedWorktree(dir string) bool {
 	link, err := os.ReadFile(filepath.Join(dir, ".git"))
 	if err != nil {
@@ -1365,8 +1137,6 @@ func unfinishedWorktree(dir string) bool {
 	return strings.Trim(strings.TrimSpace(string(head)), "0") == ""
 }
 
-// discard removes a worktree that was stopped while it was being added, with
-// its registration, so the next request makes it again. The branch stays.
 func (g *Git) discard(ctx context.Context, entry listed) error {
 	ctx, unlock, err := lockClone(ctx, g.Clone)
 	if err != nil {
@@ -1479,9 +1249,6 @@ func (g *Git) Prune(ctx context.Context) error {
 
 func (g *Git) path(name string) string { return filepath.Join(g.Directory, name) }
 
-// sshEnvironment returns the environment that puts SSH in batch mode, or
-// nothing when the owner has an SSH command of their own: GIT_SSH_COMMAND or
-// GIT_SSH in the environment, or core.sshCommand in their Git configuration.
 func (g *Git) sshEnvironment(ctx context.Context) ([]string, error) {
 	if os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
 		return nil, nil
@@ -1496,9 +1263,6 @@ func (g *Git) sshEnvironment(ctx context.Context) ([]string, error) {
 	return []string{"GIT_SSH_COMMAND=ssh -o BatchMode=yes"}, nil
 }
 
-// run runs Git in the clone with hooks disabled and no prompt. The owner's
-// Git configuration, agent and SSH command stay in reach, because fetching
-// the owner's remotes may need their credentials.
 func (g *Git) run(ctx context.Context, args ...string) (string, error) {
 	return g.runEnv(ctx, nil, args...)
 }
@@ -1507,8 +1271,6 @@ func (g *Git) runEnv(ctx context.Context, extra []string, args ...string) (strin
 	return g.runIn(ctx, g.Clone, extra, args...)
 }
 
-// runIn runs Git the way run does, in dir rather than the clone. A command
-// that fails returns what it wrote to standard output with its error.
 func (g *Git) runIn(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
 	out, err := g.runInRaw(ctx, dir, extra, args...)
 	return strings.TrimSpace(out), err
@@ -1518,7 +1280,6 @@ func (g *Git) runInRaw(ctx context.Context, dir string, extra []string, args ...
 	return g.runInput(ctx, dir, extra, nil, args...)
 }
 
-// runInput runs Git the way runInRaw does, with input as its standard input.
 func (g *Git) runInput(ctx context.Context, dir string, extra []string, input io.Reader, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "gc.auto=0"}, args...)...)
 	cmd.Stdin = input
@@ -1562,7 +1323,6 @@ func (e *Error) Error() string {
 }
 func (e *Error) Unwrap() error { return e.Err }
 
-// exitCode reports whether err is a Git command that exited with code.
 func exitCode(err error, code int) bool {
 	var e *Error
 	var exit *exec.ExitError

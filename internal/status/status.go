@@ -40,7 +40,6 @@ var (
 	token       = regexp.MustCompile(`[^\s"'()\[\]{}<>,;]+`)
 )
 
-// Prose words written with a slash; any other slashed token is a ref or path.
 var slashWords = []string{"and/or", "either/or", "i/o", "input/output", "read/write", "yes/no", "on/off", "ci/cd", "pass/fail", "n/a", "w/o", "24/7"}
 
 // Check returns why content cannot be the workstream status, or nil. Every
@@ -137,7 +136,6 @@ func sentences(s string) int {
 	return n
 }
 
-// identifiers reports the first identifier in text, naming its class.
 func identifiers(field, text string, known []string) error {
 	found := func(class, value, instead string) error {
 		return fmt.Errorf("%s contains %s (%q); %s", field, class, value, instead)
@@ -185,8 +183,6 @@ func identifierShaped(id string) bool {
 	return strings.TrimSpace(id) != "" && (len(id) >= 16 || strings.ContainsAny(id, "_0123456789"))
 }
 
-// wholeToken reports whether s appears in text bounded by characters that
-// cannot be part of an identifier.
 func wholeToken(text, s string) bool {
 	for from := 0; from <= len(text)-len(s); {
 		i := strings.Index(text[from:], s)

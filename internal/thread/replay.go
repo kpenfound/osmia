@@ -45,7 +45,6 @@ func Replay(t trace.Thread, before uint64, limits ReplayLimits) (string, uint64,
 		if q.Response == nil || q.CompletedAt.IsZero() {
 			continue
 		}
-		// Interrupted or failed attempts may contain only partial output.
 		r := q.Response
 		if r.Failure != "" || r.Result.IsError || r.Result.Cancelled || r.Result.TimedOut || r.Result.ExitCode != 0 || r.Result.Signal != 0 {
 			continue

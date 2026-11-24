@@ -86,11 +86,11 @@ var (
 // without text are reported.
 func ParseSpec(content string) Spec {
 	s := Spec{Criteria: []Criterion{}, Diagnostics: []Diagnostic{}}
-	lines := map[int][]int{} // criterion number -> source lines
+	lines := map[int][]int{}
 	var (
-		level    int // heading level of the criteria section, 0 outside it
+		level    int
 		sections []int
-		open     = -1 // index of the criterion still accepting continuation lines
+		open     = -1
 		comment  bool
 		code     string
 	)
@@ -173,8 +173,6 @@ func ParseSpec(content string) Spec {
 	return s
 }
 
-// stripComments removes HTML comment text from a line, given whether a
-// comment is already open, and reports whether one is still open at its end.
 func stripComments(line string, open bool) (string, bool) {
 	var out strings.Builder
 	for {

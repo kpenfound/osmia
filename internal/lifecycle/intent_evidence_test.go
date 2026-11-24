@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -20,46 +21,42 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// recordSealed records a sealed spec, plan and seal for the workstream, as the
-// owner's ratification leaves them.
 func recordSealed(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, spec string, units []plan.Unit) {
 	t.Helper()
 	encoded, err := plan.Encode(plan.Plan{Version: plan.Version, Units: units})
-	must(t, err)
+	intakefixture.Must(t, err)
 	sealed, err := seal.Encode(seal.Seal{Version: seal.Version, Seal: 1, Round: 1, Revision: shed.Pin{Spec: 1, Plan: 1}, SpecHash: seal.SpecHash(spec),
 		Base: seal.Base{Remote: "upstream", Branch: "main", Commit: strings.Repeat("a", 40)}, Branch: "osmia/" + string(stream), Workspace: "/nonexistent/" + string(stream)})
-	must(t, err)
+	intakefixture.Must(t, err)
 	header := func(id string) trace.Header {
-		return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"}
+		return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: 1, Project: repo.Project(), Workstream: stream, At: at, Actor: intake.OwnerActor, Cause: "fixture"}
 	}
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{
+	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{
 		{Header: header(plan.SpecDocument), Path: plan.SpecPath, Content: spec},
 		{Header: header(plan.PlanDocument), Path: plan.PlanPath, Content: string(encoded)},
 		{Header: header(seal.DocumentID), Path: seal.Path, Content: string(sealed)},
 	}))
 }
 
-// recordFinalReport appends a final report to the workstream's trace.
 func recordFinalReport(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, at time.Time, report api.FinalReport) {
 	t.Helper()
 	existing, err := delivery.FinalReports(repo, stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	data, err := json.Marshal(report)
-	must(t, err)
-	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: len(existing) + 1, Project: repo.Project(), Workstream: stream, At: at, Actor: ownerActor, Cause: "fixture"}
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
+	intakefixture.Must(t, err)
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: delivery.FinalReportDocument, Revision: len(existing) + 1, Project: repo.Project(), Workstream: stream, At: at, Actor: intake.OwnerActor, Cause: "fixture"}
+	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{{Header: h, Path: delivery.FinalReportPath, Content: string(data) + "\n"}}))
 }
 
-// requestText is a decide-transition request as Jev reads it: the summary, as
-// the JSON it carries, followed by the whole request.
 func requestText(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	state, err := json.Marshal(r.State)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var summary string
 	if json.Unmarshal(state, &summary) == nil {
 		state = []byte(summary)
@@ -67,11 +64,10 @@ func requestText(t *testing.T, r systemone.Request) string {
 	return string(state) + "\n" + requestJSON(t, r)
 }
 
-// requestJSON is the whole request as it is sent.
 func requestJSON(t *testing.T, r systemone.Request) string {
 	t.Helper()
 	data, err := json.Marshal(r)
-	must(t, err)
+	intakefixture.Must(t, err)
 	return string(data)
 }
 
@@ -93,19 +89,12 @@ func requireNotIn(t *testing.T, what, text string, unwanted ...string) {
 	}
 }
 
-// genericIntent is the sentence the dependency exits carried before they read
-// the dependent's approved intent.
 const genericIntent = "dropping a dependency must not change what the owner approved"
 
 func unitOf(id, title, task string, criteria ...string) plan.Unit {
 	return plan.Unit{ID: id, Title: title, Task: task, Acceptance: []string{"The " + id + " unit works."}, Criteria: criteria}
 }
 
-// The request for a dependency exit holds the approved intent of the
-// dependent, not a generic sentence: its sealed intent and acceptance outcomes,
-// its contracts, the plan units that rely on the upstream, and the upstream's
-// planned deliverables and final outcome. Every count is computed by code, and
-// the code in the records stays out.
 func TestADependencyExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -123,13 +112,13 @@ func TestADependencyExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	recordFinalReport(t, f.repository, f.upstream, at, api.FinalReport{Review: 1, Outcome: delivery.FinalReviewed, Summary: "UPSTREAM-SUMMARY says the endpoint is unfinished",
 		Findings: []api.FinalFinding{{Severity: delivery.FindingBlocking, Finding: "The endpoint is unfinished."}}})
 	groups, _, err := trace.Workgroups(f.repository)
-	must(t, err)
-	must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{
 		Behavior:  "Downstream depends on upstream.",
 		Contracts: []trace.Contract{{Name: "widget-protocol", Text: "WIDGET-CONTRACT the upstream speaks widgets."}},
 		Graph:     []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}},
 		Slices:    []trace.Slice{{Workstream: f.downstream, ContractCriteria: []int{2}}},
-	}, at, ownerActor, "fixture"))
+	}, at, intake.OwnerActor, "fixture"))
 
 	p := &jevfixture.Transitions{}
 	routeJev(f.s, p)
@@ -155,9 +144,6 @@ func TestADependencyExitCarriesTheApprovedIntentForJev(t *testing.T) {
 	}
 }
 
-// An upstream whose records hold no plan, delivery or final report still routes,
-// and the request says what is missing instead of failing the exit. So does a
-// dependent that was never sealed.
 func TestADependencyExitWhoseUpstreamHasNoPlanOrOutcomeStillRoutes(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
@@ -182,8 +168,6 @@ func TestADependencyExitWhoseUpstreamHasNoPlanOrOutcomeStillRoutes(t *testing.T)
 	}
 }
 
-// A dependent that was never sealed is judged on what the records lack: the
-// request says so, and the exit still routes.
 func TestADependencyExitOfADependentWithoutASealedSpecStillRoutes(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
@@ -205,9 +189,6 @@ func TestADependencyExitOfADependentWithoutASealedSpecStillRoutes(t *testing.T) 
 	}
 }
 
-// When Jev answers that dropping the dependency would change what the owner
-// approved, the move goes to the owner as a recovery card. No waiver is
-// written, nothing reaches Hearsay and the dependent keeps waiting.
 func TestAnIntentChangingDropOfADependencyGoesToTheOwnerAndNothingIsDropped(t *testing.T) {
 	t.Parallel()
 	f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
@@ -273,9 +254,6 @@ func TestAnIntentChangingDropOfADependencyGoesToTheOwnerAndNothingIsDropped(t *t
 	}
 }
 
-// With large records, the request for a dependency exit stays within 72 KiB,
-// carries no code, counts what the records hold and says what was cut. The exit
-// from a cleared edge wait has its own large-records test.
 func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T) {
 	t.Parallel()
 	const code = "CODE-MARKER-FUNC"
@@ -307,9 +285,9 @@ func TestIntentEvidenceOfLargeRecordsStaysBoundedAndSaysWhatWasCut(t *testing.T)
 			contracts = append(contracts, trace.Contract{Name: fmt.Sprintf("contract-%d", i), Text: long("clause", 500)})
 		}
 		groups, _, err := trace.Workgroups(f.repository)
-		must(t, err)
-		must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
-			Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, ownerActor, "fixture"))
+		intakefixture.Must(t, err)
+		intakefixture.Must(t, trace.RecordProjectSpec(ctx, f.repository, groups[0], trace.ProjectSpec{Behavior: "Large.", Contracts: contracts,
+			Graph: []trace.Edge{{From: f.upstream, To: f.downstream, Type: trace.EdgeHardBlock}}}, at, intake.OwnerActor, "fixture"))
 
 		p := &jevfixture.Transitions{}
 		routeJev(f.s, p)

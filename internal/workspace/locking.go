@@ -18,16 +18,8 @@ import (
 
 var cloneLocks sync.Map
 
-// cleanupDeadline bounds the restoration and settlement LocalStep runs for
-// its checkpoints, and any other cleanup that takes a clone lock after the
-// context that asked for the work has ended. Commands the cleanup starts are
-// killed when it passes.
 var cleanupDeadline = 2 * time.Minute
 
-// cloneLock is the ownership of one clone. A channel holds it so waiting for
-// it can end with a context. The token is released when the owner lets go and
-// no command started under the ownership is still running: a command that
-// outlives a step keeps the clone locked until it exits.
 type cloneLock struct {
 	token chan struct{}
 
@@ -66,8 +58,6 @@ func (l *cloneLock) acquire(ctx context.Context) error {
 	return nil
 }
 
-// release gives up the owner's hold. The clone stays locked while a command
-// started under the hold is still running.
 func (l *cloneLock) release() {
 	l.mu.Lock()
 	l.owned = false
@@ -84,8 +74,6 @@ func (l *cloneLock) started() {
 	l.mu.Unlock()
 }
 
-// exited records that a command started under the lock has exited, and frees
-// the clone when its owner has already let go.
 func (l *cloneLock) exited() {
 	l.mu.Lock()
 	l.running--
@@ -211,10 +199,6 @@ func holdFor(ctx context.Context, clone string) *lockHold {
 
 func holdsClone(ctx context.Context, clone string) bool { return holdFor(ctx, clone) != nil }
 
-// lockClone lends ownership to synchronous nested calls using the returned
-// context. Callers must not share that context with concurrent goroutines.
-// Waiting ends with the context: the error is then a ContentionError naming
-// the clone and the wait, and nothing has run.
 func lockClone(ctx context.Context, path string) (context.Context, func(), error) {
 	key := cloneKey(path)
 	if holdsClone(ctx, key) {
@@ -297,8 +281,6 @@ func LocalStep(ctx context.Context, operation string, at time.Time, providers []
 		for _, p := range opened {
 			var cleanupErr error
 			if j, ok := p.(*Jujutsu); ok && CloneQuiescence(j.Clone).Running > 0 {
-				// A command the step started is still running. The checkpoint
-				// stays for the Recover that runs once the command has exited.
 				cleanupErr = errors.New("a command started by the step is still running")
 			} else if ctx.Err() != nil {
 				_, cleanupErr = p.Recover(cleanup)
@@ -317,8 +299,6 @@ func LocalStep(ctx context.Context, operation string, at time.Time, providers []
 		if recoverErr != nil {
 			return quarantine(p, recoverErr)
 		}
-		// A checkpoint write may fail after its rename. Include it in
-		// cleanup even when Checkpoint reports that durability error.
 		opened = append(opened, p)
 		if err = p.Checkpoint(ctx, operation, at); err != nil {
 			return err
@@ -377,8 +357,6 @@ func Quiesced(ctx context.Context, providers []Provider, read func(context.Conte
 	return read(ctx)
 }
 
-// quarantine marks the clone of p as needing recovery and wraps the failure
-// that left it so. Its checkpoint stays on disk.
 func quarantine(p Provider, err error) error {
 	var clone string
 	if j, ok := p.(*Jujutsu); ok {

@@ -143,7 +143,6 @@ func TestCheckAttentionFollowsOwnerGates(t *testing.T) {
 	}
 }
 
-// chief creates a trace with a chief-of-staff thread whose turn is claimed.
 func chief(t *testing.T) (*trace.Repository, coreadapter.Scope, config.Root, config.Project) {
 	t.Helper()
 	ctx := context.Background()

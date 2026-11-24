@@ -10,48 +10,25 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// A workstream whose last unit has merged goes through the whole draft-first
-// flow on a started service, with a fake pull request host that shows Dagger
-// Cloud statuses and a fake `dagger` on the search path:
-//
-//   - the service assembles it, signs and pushes the branch and opens the pull
-//     request as a draft, with no approval;
-//   - no status is read for 2 minutes after the push, the first read finds no
-//     `load`, and the chief of staff gets one notice;
-//   - the statuses arrive late, the run fails, and one `dagger cloud checks
-//     rerun --failed` is made from the workstream's checkout; the original
-//     failure keeps showing across polls and across a restart without being
-//     taken as the rerun's result, and only the rerun's own posting settles
-//     it, recording the failed check as a flake;
-//   - the final read starts on that fresh result and finds a blocking problem
-//     that the chief of staff triages as needing code;
-//   - the revision's commit is pushed to the same pull request with no
-//     approval, a new cycle passes, and the chief of staff records the brief;
-//   - the owner approves "Mark ready for review", which adds the "Before you
-//     ship" items to the draft, marks it ready and delivers the workstream.
-//
-// The final stage takes no check slot, because every slot is held for the
-// whole journey, and runs no unit check selection.
 func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	ctx := context.Background()
 	j := newFlowJourney(t)
 	stream := j.stream
 
-	// The reader of final review 1 finds one blocking problem; the reader of
-	// final review 2 finds none. The chief of staff triages the first review's
-	// finding as needing code and records the brief of the second.
 	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
+		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Dedupe is not wired in.", "findings": []any{
 			map[string]any{"severity": "blocking", "criteria": []any{"spec#2"}, "finding": "The upload path never calls Dedupe.", "action": "Call Dedupe before sending a chunk."}}})
 		return err
 	})
 	j.finalTurn(2, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
 	j.chief.plan(1, briefPlan{Calls: []briefCall{
@@ -60,8 +37,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}})
 	j.chief.plan(2, briefPlan{Text: briefText, Items: []string{briefShipFirst, briefShipNext}})
 
-	// The last unit merged: the service assembles the workstream, rebases it,
-	// pushes it and opens the draft with nobody's approval.
 	j.start(t)
 	first := j.awaitPushes(t, 1)[0]
 	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pushCount(t) != 1 {
@@ -69,24 +44,21 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	pr := j.pulls.Prs[0]
 	tip, _ := j.forkBranch(t)
-	if !pr.Draft || pr.State != "open" || pr.Base != "main" || pr.Head != featureBranch(stream) || pr.HeadCommit != tip || first.Commit != tip || first.PullRequest != pr.Number || !first.Draft || first.Number != 1 || first.Review != 1 {
+	if !pr.Draft || pr.State != "open" || pr.Base != "main" || pr.Head != intake.FeatureBranch(stream) || pr.HeadCommit != tip || first.Commit != tip || first.PullRequest != pr.Number || !first.Draft || first.Number != 1 || first.Review != 1 {
 		t.Fatalf("pull request %+v, push %+v, branch at %s", pr, first, tip)
 	}
-	if strings.Contains(pr.Body, "Before you ship") || j.feature(t) != AssembledState {
+	if strings.Contains(pr.Body, "Before you ship") || j.feature(t) != intake.AssembledState {
 		t.Fatalf("draft body %q, workstream %s", pr.Body, j.feature(t))
 	}
-	if docs := streamDocuments(t, j.live(), stream, delivery.DeliveryDocument); len(docs) != 0 {
+	if docs := intakefixture.StreamDocuments(t, j.live(), stream, delivery.DeliveryDocument); len(docs) != 0 {
 		t.Fatalf("an approval was recorded for the draft: %+v", docs)
 	}
 	firstCommit := first.Commit
 
-	// No status is read before the 2 minutes after the push have passed.
 	j.step(t, 1, 90*time.Second, "no status is read until 2m0s after the push")
 	if got := j.host.totalReads(); got != 0 {
 		t.Fatalf("%d status reads 90 seconds after the push", got)
 	}
-	// The first read, just after the wait, finds nothing posted yet: the chief
-	// of staff gets one notice for the push, and the watch goes on.
 	why := j.stepTo(t, 1, first.At.Add(delivery.FinalChecksWait+5*time.Second), "no `load` status")
 	if got := j.host.readCount(firstCommit); got != 1 || !strings.Contains(why, "posted no `load` status") {
 		t.Fatalf("%d reads of the pushed commit, waiting for %q", got, why)
@@ -96,7 +68,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	j.awaitHeard(t, "posted no `load` status")
 
-	// The statuses arrive late: the module loaded and the run is pending.
 	j.host.loaded(firstCommit)
 	j.host.pending(firstCommit)
 	j.step(t, 1, flowPoll, "is pending")
@@ -104,8 +75,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("a pending run settled the push: %+v, %d reruns", j.checkRuns(t, 1), len(j.rerunCalls(t)))
 	}
 
-	// The run completes with one failed check: one rerun of the failed checks
-	// is requested, from the workstream's checkout, with the Cloud token.
 	failedRun := j.host.completed(firstCommit, "failure", 2)
 	failedCheck := j.host.failedCheck(firstCommit, "test:resume", "abc123")
 	j.step(t, 1, flowPoll, "the failed checks were rerun")
@@ -118,9 +87,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	requested := j.clock.Peek()
 
-	// The host still shows the original failure on the next poll. It is not
-	// the rerun's result: nothing is recorded, nothing is read and no second
-	// rerun is made.
 	readsBefore := j.host.readCount(firstCommit)
 	why = j.step(t, 1, flowPoll, "posted before the rerun was requested")
 	if got := j.host.readCount(firstCommit); got != readsBefore+1 {
@@ -133,16 +99,12 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatal("the final read started on the original failure")
 	}
 
-	// The service restarts while it watches. Nothing is pushed, rerun or
-	// noticed again, and the original failure is still not the rerun's result.
 	j.restart(t)
 	why = j.step(t, 1, flowPoll, "posted before the rerun was requested")
 	if len(j.rerunCalls(t)) != 1 || j.loadMissingNotices(t, 1, 1) != 1 || j.pushCount(t) != 1 || j.pulls.Creates != 1 || len(j.pushes(t)) != 1 || len(j.checkRuns(t, 1)) != 0 {
 		t.Fatalf("after the restart: %d reruns, %d notices, %d pushes, %d pull requests, runs %+v (waiting for %q)", len(j.rerunCalls(t)), j.loadMissingNotices(t, 1, 1), j.pushCount(t), j.pulls.Creates, j.checkRuns(t, 1), why)
 	}
 
-	// The rerun's own posting starts to arrive, pending; then it completes and
-	// the check that failed shows as passed again.
 	j.host.pending(firstCommit)
 	j.step(t, 1, flowPoll, "is pending")
 	fresh := j.host.completed(firstCommit, "success", 2)
@@ -159,13 +121,12 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("the check result carries a local run: %+v", run)
 	}
 
-	// The final read ran on the fresh result.
 	report := j.awaitReport(t, 1)
 	if report.Commit != first.Reviewed || len(report.Findings) != 1 {
 		t.Fatalf("report %+v", report)
 	}
-	reader, err := j.live().Thread(stream, committeeAgent(1))
-	must(t, err)
+	reader, err := j.live().Thread(stream, intake.CommitteeAgent(1))
+	intakefixture.Must(t, err)
 	prompt := reader.Turns[len(reader.Turns)-1].Request.Prompt
 	for _, want := range []string{"Dagger Cloud ran the project's checks", "The result is passed.", fmt.Sprintf("pull request #%d, push 1, commit %s", pr.Number, firstCommit), "3 checks, 3 passed, 0 failed, 0 cancelled", "Flaky, failed and then passed on rerun: test:resume", fresh.TargetURL} {
 		if !strings.Contains(prompt, want) {
@@ -176,14 +137,13 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("the reader's prompt carries the original failure:\n%s", prompt)
 	}
 
-	// The chief of staff triages the blocking finding as needing code.
 	intakefixture.Eventually(t, "the chief of staff never triaged the finding", func() bool {
 		all, _, err := followup.ReadTriage(j.live(), stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		return len(all) == 1
 	})
 	all, _, err := followup.ReadTriage(j.live(), stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if all[0].Finding != "finding-1" || all[0].Outcome != followup.TriageCode || all[0].ByJev() {
 		t.Fatalf("triage %+v (calls %q)", all, j.chief.calls(1))
 	}
@@ -192,10 +152,6 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	j.requireNoProblems(t)
 
-	// The revision's commit lands on the feature branch while the service is
-	// stopped. The service pushes it to the same pull request without an
-	// approval and starts a new cycle: its statuses are read only 2 minutes
-	// after that push, and the old commit's are not read again.
 	j.halt(t)
 	moveFeature(t, j.shedFixture, stream, map[string]string{"internal/trace/upload.go": "package trace\n\n// Upload calls Dedupe before it sends a chunk.\n"})
 	j.held = nil
@@ -209,7 +165,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	if tip, _ := j.forkBranch(t); tip != secondCommit || j.pulls.Prs[0].Number != pr.Number {
 		t.Fatalf("the branch is at %s, the push signed %s", tip, secondCommit)
 	}
-	if docs := streamDocuments(t, j.live(), stream, delivery.DeliveryDocument); len(docs) != 0 || j.feature(t) != AssembledState {
+	if docs := intakefixture.StreamDocuments(t, j.live(), stream, delivery.DeliveryDocument); len(docs) != 0 || j.feature(t) != intake.AssembledState {
 		t.Fatalf("the push needed an approval: %+v, workstream %s", docs, j.feature(t))
 	}
 	oldReads := j.host.readCount(firstCommit)
@@ -232,14 +188,10 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 		t.Fatalf("report %+v", report)
 	}
 
-	// The chief of staff records the brief, and the owner's card appears with
-	// the findings, the check result and the brief.
-	// A presentation read while the brief was being recorded can show the brief
-	// without its items in the description; the owner reads it again.
 	var presented api.DeliveryPresentation
 	intakefixture.Eventually(t, "the delivery card never showed the second review's brief and its description", func() bool {
 		p, err := j.c.Delivery(ctx, stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		presented = p
 		return p.Report.Review == 2 && p.Brief != nil && p.Brief.State == api.BriefRecorded && strings.Contains(p.Draft, briefBlock)
 	})
@@ -255,24 +207,20 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 	j.requireNoProblems(t)
 
-	// The owner approves. The service puts the items on the draft, marks it
-	// ready and delivers the workstream; it opens nothing and pushes nothing.
 	if _, err := j.approvePresented(presented); err != nil {
 		t.Fatal(err)
 	}
-	intakefixture.Eventually(t, "the workstream was never delivered", func() bool { return j.feature(t) == DeliveredState })
+	intakefixture.Eventually(t, "the workstream was never delivered", func() bool { return j.feature(t) == intake.DeliveredState })
 	final := j.pulls.Prs[0]
 	if len(j.pulls.Prs) != 1 || j.pulls.Creates != 1 || j.pulls.Readies != 1 || j.pulls.Updates != 1 || final.Draft || final.State != "open" || !strings.Contains(final.Body, briefBlock) || final.HeadCommit != secondCommit || j.pushCount(t) != 2 || len(j.pushes(t)) != 2 {
 		t.Fatalf("pull requests %+v: %d created, %d ready calls, %d updates, %d pushes", j.pulls.Prs, j.pulls.Creates, j.pulls.Readies, j.pulls.Updates, j.pushCount(t))
 	}
 	ready, recorded, err := delivery.ReadyAt(j.live(), stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !recorded || ready.Source != api.ReadyByApproval || ready.PullRequest != pr.Number {
 		t.Fatalf("the ready record %+v", ready)
 	}
 
-	// The final stage took no check slot and made no check selection or local
-	// run, and none of its records carries one.
 	j.requireNoCheckSlotWait(t)
 	if j.checks.calls.Load() != 0 {
 		t.Fatalf("the unit check runner was asked %d times", j.checks.calls.Load())
@@ -283,7 +231,7 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 				t.Fatalf("final review %d recorded a local check: %+v", review, run)
 			}
 		}
-		for _, d := range streamDocuments(t, j.live(), stream, delivery.FinalCheckAttemptDocument(review, 1)) {
+		for _, d := range intakefixture.StreamDocuments(t, j.live(), stream, delivery.FinalCheckAttemptDocument(review, 1)) {
 			t.Fatalf("final review %d recorded a local attempt: %+v", review, d)
 		}
 	}
@@ -298,21 +246,17 @@ func TestDraftFirstFlowFromTheLastMergeToDelivery(t *testing.T) {
 	}
 }
 
-// reportOf returns final review k's recorded report, if the reader
-// has recorded one.
-func (j *flowJourney) reportOf(t *testing.T, review int) (FinalReport, bool) {
+func (j *flowJourney) reportOf(t *testing.T, review int) (api.FinalReport, bool) {
 	t.Helper()
-	report, found, err := latestFinalReport(j.live(), j.stream)
-	must(t, err)
+	report, found, err := delivery.LatestFinalReport(j.live(), j.stream)
+	intakefixture.Must(t, err)
 	return report, found && report.Review == review
 }
 
-// credentialNotices counts the chief of staff's notices that final review k
-// waits for a GitHub credential.
 func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 	t.Helper()
 	entries, err := j.live().Outbox(j.stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	n := 0
 	for _, e := range entries {
 		if e.Event.ID == trace.EventID(fmt.Sprintf("final-review-%d-credential-notice", review), "chief") {
@@ -322,20 +266,11 @@ func (j *flowJourney) credentialNotices(t *testing.T, review int) int {
 	return n
 }
 
-// A service started without a GitHub credential takes the assembled
-// workstream through its final rebase and holds it there: nothing is pushed,
-// no pull request is opened or read, no check record is written, the final
-// read does not start and no delivery card appears. The wait names the
-// missing GITHUB_TOKEN in the workstream's status and in one notice to the
-// chief of staff. Restarted with a credential, the same review signs and
-// pushes the commit and opens the draft once, reads no status for 2 minutes,
-// watches the statuses to a completed result and only then starts the final
-// read.
 func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T) {
 	j := newFlowJourney(t)
 	stream := j.stream
 	j.finalTurn(1, 1, func(ctx context.Context, tools *mcp.ClientSession) error {
-		_, err := callTool(ctx, tools, FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
+		_, err := intakefixture.CallTool(ctx, tools, service.FinalReportTool, map[string]any{"summary": "Uploads resume and skip acknowledged chunks.", "findings": []any{}})
 		return err
 	})
 	j.chief.plan(1, briefPlan{Text: briefText, Items: []string{briefShipFirst}})
@@ -348,8 +283,6 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 	if !strings.Contains(why, "waits for a GitHub credential") {
 		t.Fatalf("final review 1 waits for %q", why)
 	}
-	// Time passing changes nothing: the review keeps waiting, one attempt
-	// after another, and touches neither the fork nor the host.
 	for range 3 {
 		j.step(t, 1, flowPoll, "GITHUB_TOKEN")
 	}
@@ -370,10 +303,10 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		if reads := j.host.totalReads(); reads != 0 {
 			t.Fatalf("%d status reads without a credential", reads)
 		}
-		if entries := j.entries(t, stream); len(entries) != 0 || j.feature(t) != AssembledState {
+		if entries := j.entries(t, stream); len(entries) != 0 || j.feature(t) != intake.AssembledState {
 			t.Fatalf("delivery entries %+v, workstream %s", entries, j.feature(t))
 		}
-		if reader, err := j.live().Thread(stream, committeeAgent(1)); err == nil && len(reader.Turns) != 0 {
+		if reader, err := j.live().Thread(stream, intake.CommitteeAgent(1)); err == nil && len(reader.Turns) != 0 {
 			t.Fatalf("the final reader was asked %d times without a credential", len(reader.Turns))
 		}
 	}
@@ -398,8 +331,6 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 		t.Fatal("the workstream is missing from the status")
 	}
 
-	// A restart with a credential retries the review through the draft
-	// publication.
 	j.pulls.Mu.Lock()
 	j.pulls.Uncredentialed = false
 	j.pulls.Mu.Unlock()
@@ -412,7 +343,6 @@ func TestAssembledWorkstreamWaitsForAGitHubCredentialThenPublishes(t *testing.T)
 	if j.credentialNotices(t, 1) != 1 {
 		t.Fatalf("%d credential notices after the restart", j.credentialNotices(t, 1))
 	}
-	// The attempt that published waits out the 2 minutes after the push.
 	j.awaitWaiting(t, 1, first.At, "no status is read until 2m0s after the push")
 	if reads := j.host.totalReads(); reads != 0 {
 		t.Fatalf("%d status reads right after the push", reads)

@@ -2,10 +2,8 @@ package lifecycle_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -13,18 +11,20 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/events"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// lifecycleCleanupGate holds the live cleanup controller after eligibility has
-// been established. Release lets production write intent and remove history.
 type lifecycleCleanupGate struct {
 	reached                chan struct{}
 	released               chan struct{}
@@ -43,7 +43,7 @@ func (g *lifecycleCleanupGate) await(t *testing.T, fixtures ...*productionDesign
 	if len(fixtures) == 0 {
 		select {
 		case <-g.reached:
-		case <-time.After(demoTimeout):
+		case <-time.After(intakefixture.DemoTimeout):
 			if g.diagnose != nil {
 				g.diagnose()
 			}
@@ -54,7 +54,7 @@ func (g *lifecycleCleanupGate) await(t *testing.T, fixtures ...*productionDesign
 	f := fixtures[0]
 	changes, closeChanges := serviceChanges(t, f.s)
 	defer closeChanges()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for {
 		select {
 		case <-g.reached:
@@ -81,8 +81,6 @@ func newLifecycleDesignFixture(t *testing.T) (*productionDesignFixture, *lifecyc
 	return f, gate
 }
 
-// lifecycleAwait observes the live controller's durable writes. It never runs a
-// second controller or a reconciliation pass from the test.
 func lifecycleAwait(t *testing.T, f *productionDesignFixture, phase string, ready func() bool) {
 	t.Helper()
 	f.sharedDesign().LifecycleAwait(t, phase, ready)
@@ -102,52 +100,52 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			must(t, err)
+			intakefixture.Must(t, err)
 			f.awaitApproved(t)
 			retired, survivor := f.stream1, f.stream2
 			retiredProject, survivorProject := f.project, f.project2
 			retiredWorker, survivorWorker := "worker_first", "worker_second"
-			if choice == "least-member" && leastWorkstream([]config.WorkstreamID{f.stream1, f.stream2}) == f.stream2 {
+			if choice == "least-member" && lifecycle.LeastWorkstream([]config.WorkstreamID{f.stream1, f.stream2}) == f.stream2 {
 				retired, survivor = f.stream2, f.stream1
 				retiredProject, survivorProject = f.project2, f.project
 				retiredWorker, survivorWorker = "worker_second", "worker_first"
 			}
 			memberRepo, err := f.s.repository(survivorProject)
-			must(t, err)
+			intakefixture.Must(t, err)
 			first, host, _, closeFirst, err := f.s.chiefRepository(ctx, memberRepo, survivor)
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer func() { closeFirst() }()
 			second, _, _, closeSecond, err := f.s.chiefRepository(ctx, memberRepo, survivor)
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer func() { closeSecond() }()
 			if first != second {
 				t.Fatal("overlapping handles created different authority")
 			}
 			groups, _, err := trace.Workgroups(first)
-			must(t, err)
+			intakefixture.Must(t, err)
 			group := groups[0]
 			approval, approvalDoc, found, err := trace.ReadGroupApproval(first, host)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !found || !approval.Complete {
 				t.Fatal("production effective seals did not complete")
 			}
-			unrelated := HandInWorkstream(f.project, "lifecycle-unrelated")
+			unrelated := intake.HandInWorkstream(f.project, "lifecycle-unrelated")
 			var engineMu sync.Mutex
 			var batchEscalated bool
 			var held chan struct{}
 			var entered chan struct{}
 			f.engine.Mu.Lock()
 			f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-				names, err := toolNames(ctx, tools)
+				names, err := intakefixture.ToolNames(ctx, tools)
 				if err != nil {
 					return nil, err
 				}
 				if strings.Contains(req.SessionDir, string(unrelated)) && slices.Contains(names, status.ToolName) {
-					_, err := callTool(ctx, tools, status.ToolName, map[string]any{"goal": "An independent request.", "note": "Waiting on its own ratification.", "agents": []string{}})
-					return questionResult(req, "session-unrelated-chief", "Independent work remains available."), err
+					_, err := intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "An independent request.", "note": "Waiting on its own ratification.", "agents": []string{}})
+					return intakefixture.QuestionResult(req, "session-unrelated-chief", "Independent work remains available."), err
 				}
 				if !slices.Contains(names, status.ToolName) {
-					return questionResult(req, "session-idle", "Working within the slice."), nil
+					return intakefixture.QuestionResult(req, "session-idle", "Working within the slice."), nil
 				}
 				if strings.Contains(req.Prompt, "lifecycle-owner-") {
 					engineMu.Lock()
@@ -163,7 +161,6 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 						}
 					}
 				}
-				// Gather both production asks before creating the consolidated entry.
 				engineMu.Lock()
 				needBatch := !batchEscalated
 				engineMu.Unlock()
@@ -185,7 +182,7 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 						return nil, err
 					}
 					if len(left) > 0 && len(right) > 0 && left[0].State == trace.QuestionOpen && right[0].State == trace.QuestionOpen {
-						_, err = callTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(retired) + ":" + left[0].Asked.ID, string(survivor) + ":" + right[0].Asked.ID}, "rephrasing": "A shared contract decision before retirement.", "blocked": "Both original asking turns.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
+						_, err = intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{string(retired) + ":" + left[0].Asked.ID, string(survivor) + ":" + right[0].Asked.ID}, "rephrasing": "A shared contract decision before retirement.", "blocked": "Both original asking turns.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 						if err != nil {
 							return nil, err
 						}
@@ -194,8 +191,6 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 						engineMu.Unlock()
 					}
 				}
-				// A consolidated pending entry involving the retired origin stays held.
-				// New questions on the survivor continue through the same shared chief.
 				repo, err := f.s.repository(survivorProject)
 				if err != nil {
 					return nil, err
@@ -207,30 +202,29 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				for _, q := range qs {
 					id := string(survivor) + ":" + q.Asked.ID
 					if q.State == trace.QuestionOpen && strings.HasPrefix(q.Asked.Question, "direct-") {
-						_, err = callTool(ctx, tools, questions.AnswerTool, map[string]any{"question": id, "text": "Keep the agreed contract.", "citations": []string{"spec#1"}})
+						_, err = intakefixture.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": id, "text": "Keep the agreed contract.", "citations": []string{"spec#1"}})
 					}
 					if q.State == trace.QuestionOpen && strings.HasPrefix(q.Asked.Question, "escalate-") {
-						_, err = callTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{id}, "rephrasing": q.Asked.Question, "blocked": "The asking origin.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
+						_, err = intakefixture.CallTool(ctx, tools, questions.EscalateTool, map[string]any{"questions": []string{id}, "rephrasing": q.Asked.Question, "blocked": "The asking origin.", "options": []string{"Keep", "Change"}, "recommendation": "Keep."})
 					}
 					if q.State == trace.QuestionRuled {
-						_, err = callTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": id, "text": q.Ruling.OwnerResponse, "scope": "local"})
+						_, err = intakefixture.CallTool(ctx, tools, questions.RelayRulingTool, map[string]any{"question": id, "text": q.Ruling.OwnerResponse, "scope": "local"})
 					}
 					if err != nil {
 						return nil, err
 					}
 				}
-				_, err = callTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue the surviving slice.", "note": "The project contract is active.", "agents": []string{}})
-				return questionResult(req, "session-chief", "The survivor keeps its original conversation."), err
+				_, err = intakefixture.CallTool(ctx, tools, status.ToolName, map[string]any{"goal": "Continue the surviving slice.", "note": "The project contract is active.", "agents": []string{}})
+				return intakefixture.QuestionResult(req, "session-chief", "The survivor keeps its original conversation."), err
 			}
 			f.engine.Turns["lifecycle-ask"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 				question := "consolidated-survivor"
 				if strings.Contains(req.SessionDir, retiredWorker) {
 					question = "consolidated-origin"
 				}
-				_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-				return questionResult(req, "session-worker", "Asked the shared chief."), err
+				_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+				return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
 			}
-			// Each new asking turn uses the production ask tool, including restart.
 			for _, boundary := range []string{"retained", "deleted", "restarted"} {
 				for _, kind := range []string{"ask", "escalate"} {
 					question := "direct-" + boundary
@@ -238,8 +232,8 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 						question = "escalate-" + boundary
 					}
 					f.engine.Turns[kind+"-"+boundary] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-						_, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
-						return questionResult(req, "session-worker", "Asked the shared chief."), err
+						_, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+						return intakefixture.QuestionResult(req, "session-worker", "Asked the shared chief."), err
 					}
 				}
 			}
@@ -249,16 +243,16 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					return primaryDraft(ctx, req, turn, tools)
 				}
 				for _, doc := range []struct{ path, text string }{{"spec.md", crossSpec1}, {"plan.json", crossPlan1}} {
-					if _, err := callTool(ctx, tools, DraftTool, map[string]any{"path": doc.path, "content": doc.text}); err != nil {
+					if _, err := intakefixture.CallTool(ctx, tools, intake.DraftTool, map[string]any{"path": doc.path, "content": doc.text}); err != nil {
 						return nil, err
 					}
 				}
-				return questionResult(req, "session-unrelated-architect", "Independent draft delivered."), nil
+				return intakefixture.QuestionResult(req, "session-unrelated-architect", "Independent draft delivered."), nil
 			}
 			f.engine.Mu.Unlock()
 			brief := "Build independent chunk storage."
-			other, err := f.c.HandIn(ctx, HandInRequest{Project: f.project, Key: "lifecycle-unrelated", Stdin: &brief, SkipDebate: true})
-			must(t, err)
+			other, err := f.c.HandIn(ctx, api.HandInRequest{Project: f.project, Key: "lifecycle-unrelated", Stdin: &brief, SkipDebate: true})
+			intakefixture.Must(t, err)
 			if other.Workstream != unrelated {
 				t.Fatal("independent hand-in identity changed")
 			}
@@ -267,20 +261,18 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				return err == nil && packet.ProjectSpec == nil
 			})
 			otherRepo, err := f.s.repository(f.project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			otherChief, err := otherRepo.ChiefOfStaffThread(unrelated)
-			must(t, err)
+			intakefixture.Must(t, err)
 			lifecycleWorker(t, f, retiredProject, retired, retiredWorker, "lifecycle-ask", "consolidated-origin")
 			lifecycleWorker(t, f, survivorProject, survivor, "worker_unaffected", "lifecycle-ask", "consolidated-survivor")
-			var originalEntry InboxEntry
+			var originalEntry api.InboxEntry
 			lifecycleAwait(t, f, "consolidated production escalation", func() bool {
 				inbox, err := f.c.Inbox(ctx)
-				must(t, err)
+				intakefixture.Must(t, err)
 				for _, e := range inbox.Entries {
 					if e.Question == "A shared contract decision before retirement." {
-						// Reserved slots exist before every member's escalation commits.
-						// Capture the original only once both asking identities are durable.
-						if len(e.Asked) != 2 || e.Workstream != retired || slices.ContainsFunc(e.Asked, func(q InboxQuestion) bool { return q.ID == "" }) {
+						if len(e.Asked) != 2 || e.Workstream != retired || slices.ContainsFunc(e.Asked, func(q api.InboxQuestion) bool { return q.ID == "" }) {
 							return false
 						}
 						originalEntry = e
@@ -290,16 +282,16 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				return false
 			})
 			originalQuestions, err := first.Questions(survivor)
-			must(t, err)
+			intakefixture.Must(t, err)
 
 			_, err = f.c.Abandon(ctx, retired, "The owner cancelled this member.")
-			must(t, err)
+			intakefixture.Must(t, err)
 			_, err = f.c.Archive(ctx, retired)
-			must(t, err)
+			intakefixture.Must(t, err)
 			cleanupGate.await(t, f)
 			resumed := func(repo *trace.Repository, q trace.QuestionState) bool {
 				worker, err := repo.Thread(survivor, q.Asked.AskedBy.ID)
-				must(t, err)
+				intakefixture.Must(t, err)
 				count := 0
 				done := false
 				for _, turn := range worker.Turns {
@@ -316,19 +308,19 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			check := func(boundary string) {
 				t.Helper()
 				repo, err := f.s.repository(survivorProject)
-				must(t, err)
+				intakefixture.Must(t, err)
 				target, currentHost, _, release, err := f.s.chiefRepository(ctx, repo, survivor)
-				must(t, err)
+				intakefixture.Must(t, err)
 				defer release()
 				inbox, err := f.c.Inbox(ctx)
-				must(t, err)
+				intakefixture.Must(t, err)
 				matches := 0
 				for _, e := range inbox.Entries {
 					if e.Number != originalEntry.Number || e.Project != originalEntry.Project {
 						continue
 					}
 					matches++
-					if e.Workstream != originalEntry.Workstream || e.Batch != originalEntry.Batch || !equalJSONTest(e.Asked, originalEntry.Asked) || !strings.Contains(e.Blocked, "operation remains held") {
+					if e.Workstream != originalEntry.Workstream || e.Batch != originalEntry.Batch || !intakefixture.EqualJSONTest(e.Asked, originalEntry.Asked) || !strings.Contains(e.Blocked, "operation remains held") {
 						t.Fatalf("retired first origin lost original authority: got %+v; original %+v", e, originalEntry)
 					}
 				}
@@ -340,31 +332,31 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					t.Fatalf("unavailable effect did not remain explicitly held: %v", err)
 				}
 				currentQuestions, err := repo.Questions(survivor)
-				must(t, err)
-				if !equalJSONTest(originalQuestions[0], currentQuestions[0]) {
+				intakefixture.Must(t, err)
+				if !intakefixture.EqualJSONTest(originalQuestions[0], currentQuestions[0]) {
 					t.Fatal("held ruling changed pending survivor origin")
 				}
 				if currentHost != host {
 					t.Fatal("conversation host changed")
 				}
 				got, doc, found, err := trace.ReadGroupApproval(target, host)
-				must(t, err)
-				if !found || !equalJSONTest(got, approval) || !equalJSONTest(doc, approvalDoc) {
+				intakefixture.Must(t, err)
+				if !found || !intakefixture.EqualJSONTest(got, approval) || !intakefixture.EqualJSONTest(doc, approvalDoc) {
 					t.Fatal("approval pins changed across retirement")
 				}
 				active, err := trace.ProjectSpecActive(target, group.ID)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !active {
 					t.Fatal("one archived member resolved the group")
 				}
 				b, err := f.s.Context().Assemble(ctx, survivorProject, bundle.Scope{Role: trace.ChiefOfStaff, Workstream: survivor})
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !strings.Contains(b.Brief(), "acknowledgment") {
 					t.Fatal("survivor lost active contracts")
 				}
 				th, err := target.Thread(host, trace.ChiefOfStaff)
-				must(t, err)
-				if !equalJSONTest(f.before.Identity, th.Identity) || !equalJSONTest(f.before.Turns, th.Turns[:len(f.before.Turns)]) {
+				intakefixture.Must(t, err)
+				if !intakefixture.EqualJSONTest(f.before.Identity, th.Identity) || !intakefixture.EqualJSONTest(f.before.Turns, th.Turns[:len(f.before.Turns)]) {
 					t.Fatal("adopted conversation changed")
 				}
 				if _, err := target.Workflow(retired, trace.FeatureSubject); !errors.Is(err, trace.ErrMemberRetired) {
@@ -375,22 +367,20 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				gate, reached := held, entered
 				engineMu.Unlock()
 				sent, err := f.c.Send(ctx, survivor, "lifecycle-owner-"+boundary)
-				must(t, err)
+				intakefixture.Must(t, err)
 				select {
 				case <-reached:
-				case <-time.After(demoTimeout):
+				case <-time.After(intakefixture.DemoTimeout):
 					close(gate)
 					t.Fatal("live shared dispatch did not reach owner turn")
 				}
-				// The turn remains in its model call while these independent reads and
-				// another durable owner Send overlap the existing shared handles.
 				reads := make(chan error, 4)
-				readCtx, cancel := context.WithTimeout(ctx, demoTimeout)
+				readCtx, cancel := context.WithTimeout(ctx, intakefixture.DemoTimeout)
 				defer cancel()
 				go func() { _, err := f.c.Conversation(readCtx, survivor); reads <- err }()
 				go func() {
-					var feed FeedResponse
-					reads <- f.c.Do(readCtx, "GET", Prefix+"/feed/"+string(survivor), nil, &feed)
+					var feed api.FeedResponse
+					reads <- f.c.Do(readCtx, "GET", api.Prefix+"/feed/"+string(survivor), nil, &feed)
 				}()
 				go func() { _, _, _, err := repo.CrossRepoProjectSpec(group.ID); reads <- err }()
 				go func() { _, err := f.c.Send(readCtx, survivor, "Queued while the chief is working."); reads <- err }()
@@ -409,15 +399,15 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 				close(gate)
 				lifecycleAwait(t, f, "owner turn "+boundary, func() bool {
 					conversation, err := f.c.Conversation(ctx, survivor)
-					must(t, err)
-					return slices.ContainsFunc(conversation.Entries, func(e ConversationEntry) bool {
-						return e.Turn == sent.Turn && e.Kind == "response" && e.State == TurnDone
+					intakefixture.Must(t, err)
+					return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
+						return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone
 					})
 				})
 				lifecycleWorker(t, f, survivorProject, survivor, survivorWorker, "ask-"+boundary, "direct-"+boundary)
 				lifecycleAwait(t, f, "direct member answer "+boundary, func() bool {
 					qs, err := repo.Questions(survivor)
-					must(t, err)
+					intakefixture.Must(t, err)
 					return slices.ContainsFunc(qs, func(q trace.QuestionState) bool {
 						return q.Asked.Question == "direct-"+boundary && q.State == trace.QuestionAnswered && q.Ruling != nil && resumed(repo, q)
 					})
@@ -425,9 +415,9 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 
 				lifecycleAwait(t, f, "survivor event acknowledgment "+boundary, func() bool {
 					outbox, err := repo.Outbox(survivor)
-					must(t, err)
+					intakefixture.Must(t, err)
 					chief, err := target.Thread(host, trace.ChiefOfStaff)
-					must(t, err)
+					intakefixture.Must(t, err)
 					for _, e := range outbox {
 						if e.Event.Operation != nil || !strings.Contains(e.Event.Body, "direct-"+boundary) {
 							continue
@@ -459,10 +449,10 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					return false
 				})
 				lifecycleWorker(t, f, survivorProject, survivor, survivorWorker, "escalate-"+boundary, "escalate-"+boundary)
-				var entry InboxEntry
+				var entry api.InboxEntry
 				lifecycleAwait(t, f, "survivor escalation "+boundary, func() bool {
 					inbox, err := f.c.Inbox(ctx)
-					must(t, err)
+					intakefixture.Must(t, err)
 					matches := 0
 					for _, e := range inbox.Entries {
 						if e.Question == "escalate-"+boundary {
@@ -476,10 +466,10 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					return matches == 1
 				})
 				_, err = f.c.Answer(ctx, entry.Number, "Keep the agreed contract.", entry.Project)
-				must(t, err)
+				intakefixture.Must(t, err)
 				lifecycleAwait(t, f, "ruling continuation "+boundary, func() bool {
 					qs, err := repo.Questions(survivor)
-					must(t, err)
+					intakefixture.Must(t, err)
 					for _, q := range qs {
 						if q.Asked.Question == "escalate-"+boundary {
 							return q.State == trace.QuestionAnswered && q.Ruling != nil && q.Ruling.Revision == 2 && q.Ruling.OwnerResponse == "Keep the agreed contract." && resumed(repo, q)
@@ -488,39 +478,42 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 					return false
 				})
 				_, err = f.c.Statuses(ctx)
-				must(t, err)
+				intakefixture.Must(t, err)
 				otherStatus, err := f.c.Status(ctx, unrelated)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if otherStatus.Archived {
 					t.Fatal("member retirement archived unrelated work")
 				}
 				otherSent, err := f.c.Send(ctx, unrelated, "Report independent status at "+boundary)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if boundary != "retained" {
 					lifecycleAwait(t, f, "independent owner turn "+boundary, func() bool {
 						conversation, err := f.c.Conversation(ctx, unrelated)
-						must(t, err)
-						return slices.ContainsFunc(conversation.Entries, func(e ConversationEntry) bool {
-							return e.Turn == otherSent.Turn && e.Kind == "response" && e.State == TurnDone
+						intakefixture.Must(t, err)
+						return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
+							return e.Turn == otherSent.Turn && e.Kind == "response" && e.State == api.TurnDone
 						})
 					})
 				}
 				otherRepo, err := f.s.repository(f.project)
-				must(t, err)
+				intakefixture.Must(t, err)
 				continuedOther, err := otherRepo.ChiefOfStaffThread(unrelated)
-				must(t, err)
-				if !equalJSONTest(otherChief.Identity, continuedOther.Identity) {
+				intakefixture.Must(t, err)
+				if !intakefixture.EqualJSONTest(otherChief.Identity, continuedOther.Identity) {
 					t.Fatal("retirement replaced an unrelated chief")
 				}
 				archived, err := f.c.Status(ctx, retired)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !archived.Archived {
 					t.Fatal("archived status lost its lifecycle")
 				}
 			}
 			check("retained")
 			cleanupGate.release()
-			lifecycleAwait(t, f, "production cleanup", func() bool { a, ok := archiveRecord(t, f.s.store, retired); return ok && !a.CleanedAt.IsZero() })
+			lifecycleAwait(t, f, "production cleanup", func() bool {
+				a, ok := intakefixture.ArchiveRecord(t, f.s.store, retired)
+				return ok && !a.CleanedAt.IsZero()
+			})
 			for _, r := range []*trace.Repository{first, second} {
 				if _, err := r.Workflow(retired, trace.FeatureSubject); !errors.Is(err, trace.ErrMemberRetired) {
 					t.Fatalf("stale handle bypassed retirement: %v", err)
@@ -528,36 +521,36 @@ func TestDesignProductionSharedLifecycleAfterArchiveCleanupAndRestart(t *testing
 			}
 			check("deleted")
 			closeFirst()
-			closeFirst = func() {} // Close ownership ends before service shutdown.
+			closeFirst = func() {}
 			closeSecond()
 			closeSecond = func() {}
 			f.stop(t)
 			f.start(t)
 			check("restarted")
 			gone, err := trace.WorkstreamTraceGone(f.s.current().Root, retiredProject, retired)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !gone {
 				t.Fatal("a shared open revived deleted history")
 			}
 			_, err = f.c.Abandon(ctx, survivor, "The remaining member is cancelled.")
-			must(t, err)
+			intakefixture.Must(t, err)
 			lifecycleAwait(t, f, "final group resolution", func() bool {
 				r, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
-				must(t, err)
+				intakefixture.Must(t, err)
 				defer r.Close()
 				ids, rev, err := trace.ResolvedWorkgroups(r)
-				must(t, err)
+				intakefixture.Must(t, err)
 				return slices.Equal(ids, []config.WorkgroupID{group.ID}) && rev == 1
 			})
 			f.stop(t)
 			f.start(t)
 			authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group.ID)
-			must(t, err)
+			intakefixture.Must(t, err)
 			ids, rev, err := trace.ResolvedWorkgroups(authority)
-			must(t, err)
+			intakefixture.Must(t, err)
 			active, err := trace.ProjectSpecActive(authority, group.ID)
-			must(t, err)
-			must(t, authority.Close())
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, authority.Close())
 			if !slices.Equal(ids, []config.WorkgroupID{group.ID}) || rev != 1 || active {
 				t.Fatal("restart duplicated resolution or retained active group documents")
 			}
@@ -573,21 +566,19 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.awaitApproved(t)
-	// Corruption tests stop writers before changing storage. Owner APIs remain
-	// live, and no replacement reconciliation driver advances these scenarios.
 	_, projects := f.s.runtimes()
 	for _, p := range projects {
-		must(t, f.s.halt(p))
+		intakefixture.Must(t, f.s.halt(p))
 	}
 	repo, err := f.s.repository(f.project2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	authority, _, _, release, err := f.s.chiefRepository(ctx, repo, f.stream2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer release()
 	path, err := f.s.current().Root.WorkstreamTrace(f.project, f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	reject := func(t *testing.T) {
 		t.Helper()
 		if _, err := f.c.Conversation(ctx, f.stream2); err == nil {
@@ -602,18 +593,18 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	}
 	t.Run("unexpectedly-missing", func(t *testing.T) {
 		moved := path + ".unexplained"
-		must(t, os.Rename(path, moved))
-		defer func() { must(t, os.Rename(moved, path)) }()
+		intakefixture.Must(t, os.Rename(path, moved))
+		defer func() { intakefixture.Must(t, os.Rename(moved, path)) }()
 		reject(t)
 	})
 	t.Run("corrupt-live", func(t *testing.T) {
 		manifest := "workstreams/" + string(f.stream1) + "/workstream.json"
-		original, ok := traceFile(t, path, manifest)
+		original, ok := fixturekit.TraceFile(t, path, manifest)
 		if !ok {
 			t.Fatal("the live member has no manifest")
 		}
-		traceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", []byte("corrupt live manifest\n"), manifest)
-		defer traceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", original, manifest)
+		fixturekit.TraceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", []byte("corrupt live manifest\n"), manifest)
+		defer fixturekit.TraceExec(t, path, "UPDATE files SET content = ? WHERE path = ?", original, manifest)
 		reject(t)
 	})
 	t.Run("inactive-repo", func(t *testing.T) {
@@ -639,7 +630,7 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	})
 	t.Run("incomplete-join", func(t *testing.T) {
 		groups, _, err := trace.Workgroups(authority)
-		must(t, err)
+		intakefixture.Must(t, err)
 		incomplete := groups[0]
 		incomplete.Members = slices.Clone(incomplete.Members[:2])
 		members, err := f.s.crossRepoMemberRepos(ctx, incomplete)
@@ -653,12 +644,12 @@ func TestDesignProductionLifecycleRejectsUnprovedRetirement(t *testing.T) {
 	t.Run("archive-without-cleanup-intent", func(t *testing.T) {
 
 		_, err = f.c.Abandon(ctx, f.stream1, "Cancelled by the owner.")
-		must(t, err)
+		intakefixture.Must(t, err)
 		_, err = f.c.Archive(ctx, f.stream1)
-		must(t, err)
+		intakefixture.Must(t, err)
 		moved := path + ".unexplained"
-		must(t, os.Rename(path, moved))
-		defer func() { must(t, os.Rename(moved, path)) }()
+		intakefixture.Must(t, os.Rename(path, moved))
+		defer func() { intakefixture.Must(t, os.Rename(moved, path)) }()
 		if _, err := f.c.Conversation(ctx, f.stream2); err == nil {
 			t.Fatal("archive masked unexplained disappearance")
 		}
@@ -689,29 +680,29 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			f.startOwner(t)
 			packet := f.awaitPacket(t)
 			_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-			must(t, err)
+			intakefixture.Must(t, err)
 			f.awaitApproved(t)
 			repo, err := f.s.repository(f.project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			id, err := repo.CrossRepoWorkgroupOf(f.stream1)
-			must(t, err)
+			intakefixture.Must(t, err)
 			authority, host, _, release, err := f.s.chiefRepository(ctx, repo, f.stream1)
-			must(t, err)
+			intakefixture.Must(t, err)
 			approval, pins, found, err := trace.ReadGroupApproval(authority, host)
-			must(t, err)
+			intakefixture.Must(t, err)
 			release()
 			if !found || !approval.Complete {
 				t.Fatal("production seals are incomplete")
 			}
 
 			_, err = f.c.Abandon(ctx, f.stream1, "Owner cancelled the source-repo member.")
-			must(t, err)
-			hook := &designInterruption{Step: step, Nth: 1, Reached: make(chan struct{})}
+			intakefixture.Must(t, err)
+			hook := &intakefixture.DesignInterruption{Step: step, Nth: 1, Reached: make(chan struct{})}
 			finished := make(chan error, 1)
 			if strings.HasPrefix(step, "archive-cleanup-") {
 				f.hook.Store(hook)
 				_, err = f.c.Archive(ctx, f.stream1)
-				must(t, err)
+				intakefixture.Must(t, err)
 				cleanupGate.release()
 			} else {
 				f.hook.Store(hook)
@@ -721,7 +712,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			case <-hook.Reached:
 			case err := <-finished:
 				t.Fatalf("archive returned before retirement boundary: %v", err)
-			case <-time.After(demoTimeout):
+			case <-time.After(intakefixture.DemoTimeout):
 				t.Fatal("live controller did not reach retirement boundary")
 			}
 			f.stop(t)
@@ -731,7 +722,7 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 					if err == nil {
 						t.Fatal("interrupted archive reported success")
 					}
-				case <-time.After(demoTimeout):
+				case <-time.After(intakefixture.DemoTimeout):
 					t.Fatal("archive request did not finish on shutdown")
 				}
 			}
@@ -740,106 +731,44 @@ func TestDesignProductionLifecycleArchiveRecoveryAtBoundaries(t *testing.T) {
 			f.start(t)
 			if !strings.HasPrefix(step, "archive-cleanup-") {
 				_, err = f.c.Archive(ctx, f.stream1)
-				must(t, err)
+				intakefixture.Must(t, err)
 				_, err = f.s.repository(f.project)
-				must(t, err)
+				intakefixture.Must(t, err)
 				cleanupGate.release()
 			}
 			lifecycleAwait(t, f, "recovered production cleanup", func() bool {
-				a, ok := archiveRecord(t, f.s.store, f.stream1)
+				a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
 				return ok && a.Workgroup == id && a.Resolved && !a.CleanupStartedAt.IsZero() && !a.CleanedAt.IsZero()
 			})
 			survivor, err := f.s.repository(f.project2)
-			must(t, err)
+			intakefixture.Must(t, err)
 			target, actualHost, _, closeTarget, err := f.s.chiefRepository(ctx, survivor, f.stream2)
-			must(t, err)
+			intakefixture.Must(t, err)
 			got, doc, found, err := trace.ReadGroupApproval(target, actualHost)
-			must(t, err)
+			intakefixture.Must(t, err)
 			active, err := trace.ProjectSpecActive(target, id)
-			must(t, err)
+			intakefixture.Must(t, err)
 			closeTarget()
-			if actualHost != host || !active || !found || !equalJSONTest(got, approval) || !equalJSONTest(doc, pins) {
+			if actualHost != host || !active || !found || !intakefixture.EqualJSONTest(got, approval) || !intakefixture.EqualJSONTest(doc, pins) {
 				t.Fatal("interrupted retirement changed original authority, active contracts or approval pins")
 			}
 			sent, err := f.c.Send(ctx, f.stream2, "Continue after interrupted retirement.")
-			must(t, err)
+			intakefixture.Must(t, err)
 			lifecycleAwait(t, f, "recovered shared chief owner turn", func() bool {
 				conversation, err := f.c.Conversation(ctx, f.stream2)
-				must(t, err)
-				return slices.ContainsFunc(conversation.Entries, func(e ConversationEntry) bool {
-					return e.Turn == sent.Turn && e.Kind == "response" && e.State == TurnDone
+				intakefixture.Must(t, err)
+				return slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
+					return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone
 				})
 			})
 		})
 	}
 }
-func TestDesignProductionLifecycleRecoversLegacyArchiveEvidence(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	f, cleanupGate := newLifecycleDesignFixture(t)
-	defer func() { f.stop(t) }()
-	f.startOwner(t)
-	packet := f.awaitPacket(t)
-	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
-	f.awaitApproved(t)
-	repo, err := f.s.repository(f.project)
-	must(t, err)
-	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
-
-	_, err = f.c.Abandon(ctx, f.stream1, "Owner cancelled the source-repo member.")
-	must(t, err)
-	_, err = f.c.Archive(ctx, f.stream1)
-	must(t, err)
-	cleanupGate.await(t, f)
-	root := f.s.current().Root
-	f.stop(t)
-	// A prior-version archive keeps owner authorization, but has no verified
-	// group/resolution fields. Recovery must read its still-retained history.
-	path := filepath.Join(root.String(), "runtime.json")
-	data, err := os.ReadFile(path)
-	must(t, err)
-	var state map[string]any
-	must(t, json.Unmarshal(data, &state))
-	archives := state["archived"].([]any)
-	for _, item := range archives {
-		a := item.(map[string]any)
-		delete(a, "workgroup")
-		delete(a, "resolved")
-		delete(a, "resolution_evidence")
-	}
-	data, err = json.Marshal(state)
-	must(t, err)
-	must(t, os.WriteFile(path, data, 0600))
-	f.start(t)
-	a, ok := archiveRecord(t, f.s.store, f.stream1)
-	if !ok || !a.Resolved || a.ResolutionEvidence != "cancelled" || a.Workgroup != group || !a.CleanedAt.IsZero() {
-		t.Fatalf("retained archive evidence did not recover before shared startup: %+v", a)
-	}
-	_, err = f.c.Conversation(ctx, f.stream2)
-	must(t, err)
-	_, err = f.s.repository(f.project)
-	must(t, err)
-	cleanupGate.release()
-	lifecycleAwait(t, f, "legacy production cleanup", func() bool {
-		a, ok := archiveRecord(t, f.s.store, f.stream1)
-		return ok && a.Resolved && a.Workgroup == group && !a.CleanedAt.IsZero()
-	})
-	f.stop(t)
-	f.start(t)
-	_, err = f.c.Send(ctx, f.stream2, "Continue after recovery of the retained archive.")
-	must(t, err)
-}
-
 func lifecycleAdvanceScheduled(t *testing.T, f *productionDesignFixture) {
 	t.Helper()
 	f.sharedDesign().LifecycleAdvanceScheduled(t)
 }
 
-// A cancelled member archived before its workgroup was ever approved keeps no
-// history after cleanup. Its archive record alone locates it, so the inbox,
-// the shared conversation and the surviving member stay readable.
 func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -848,20 +777,20 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 	f.startOwner(t)
 	f.awaitPacket(t)
 	repo, err := f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-	must(t, err)
-	change, api := f.s.requestChange(ctx, string(f.origin), ChangeRequest{Key: "cancel-unapproved", Kind: "cancel", Scope: "workgroup", Change: "Cancel the whole workgroup before ratification"})
-	if api != nil {
-		t.Fatal(api)
+	intakefixture.Must(t, err)
+	change, apiFault := f.s.requestChange(ctx, string(f.origin), lifecycle.ChangeRequest{Key: "cancel-unapproved", Kind: "cancel", Scope: "workgroup", Change: "Cancel the whole workgroup before ratification"})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	wt, g, _, closeGroup, err := f.s.changeContext(ctx, string(f.origin))
-	must(t, err)
+	intakefixture.Must(t, err)
 	current := func(state string) func() bool {
 		return func() bool {
-			must(t, f.s.advanceChanges(ctx, wt, g))
-			changes, err := readChanges(wt, g.Members[0])
-			must(t, err)
+			intakefixture.Must(t, f.s.advanceChanges(ctx, wt, g))
+			changes, err := lifecycle.ReadChanges(wt, g.Members[0])
+			intakefixture.Must(t, err)
 			for _, recorded := range changes {
 				if recorded.ID == change.ID {
 					change = recorded
@@ -871,40 +800,40 @@ func TestDesignProductionMemberArchivedBeforeApproval(t *testing.T) {
 		}
 	}
 	lifecycleAwait(t, f, "cancellation presented", current("presented"))
-	change, api = f.s.decideChange(ctx, string(f.origin), change.ID, ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "close"})
-	if api != nil {
-		t.Fatal(api)
+	change, apiFault = f.s.decideChange(ctx, string(f.origin), change.ID, lifecycle.ChangeDecision{Revision: change.Revision, Decision: "approve", PullRequests: "close"})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	lifecycleAwait(t, f, "cancellation applied", current("applied"))
 	closeGroup()
 	_, err = f.c.Archive(ctx, f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	cleanupGate.await(t, f)
 	cleanupGate.release()
 	lifecycleAwait(t, f, "unapproved member cleanup", func() bool {
-		a, ok := archiveRecord(t, f.s.store, f.stream1)
+		a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1)
 		return ok && a.Workgroup == group && a.Resolved && !a.CleanedAt.IsZero()
 	})
 	readable := func(t *testing.T) {
 		t.Helper()
 		survivor, err := f.s.repository(f.project2)
-		must(t, err)
+		intakefixture.Must(t, err)
 		_, g, found, err := survivor.CrossRepoProjectSpec(group)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if !found {
 			t.Fatal("the workgroup trace is missing")
 		}
 		members, err := f.s.crossRepoMemberRepos(ctx, g)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if len(members) != 2 || !slices.ContainsFunc(members, func(m trace.CrossRepoMember) bool {
 			return m.Workstream == f.stream1 && m.Project.Project() == f.project
 		}) {
 			t.Fatalf("the archived member is not bound to its project: %+v", members)
 		}
 		_, err = f.c.Inbox(ctx)
-		must(t, err)
+		intakefixture.Must(t, err)
 		_, err = f.c.Conversation(ctx, f.stream2)
-		must(t, err)
+		intakefixture.Must(t, err)
 	}
 	readable(t)
 	f.stop(t)

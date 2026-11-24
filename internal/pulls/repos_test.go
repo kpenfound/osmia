@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// repositoryServer stands in for the GitHub REST API: a remote system whose
-// real behaviour this fake does not reproduce. It checks the bearer token on
-// every request and hands the request to handle.
 func repositoryServer(t *testing.T, handle func(w http.ResponseWriter, r *http.Request, body map[string]any)) GitHub {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

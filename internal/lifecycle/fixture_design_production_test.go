@@ -4,13 +4,9 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// newProductionDesignFixture prepares repos and injected engines only. The
-// owner endpoint and production architect tools create all feature members,
-// handed inputs and draft documents after the real design exchange.
 func newProductionDesignFixture(t *testing.T) *productionDesignFixture {
 	t.Helper()
 	return newConfiguredProductionDesignFixture(t, productionDesignConfiguration{})
@@ -32,8 +28,6 @@ func (f *productionDesignFixture) checkContinuation(t *testing.T) {
 	f.sharedDesign().CheckContinuation(t)
 }
 
-var equalJSONTest = intakefixture.EqualJSONTest
-
 func (f *productionDesignFixture) assertBarrier(t *testing.T) {
 	t.Helper()
 	f.sharedDesign().AssertBarrier(t)
@@ -41,4 +35,14 @@ func (f *productionDesignFixture) assertBarrier(t *testing.T) {
 func (f *productionDesignFixture) awaitApproved(t *testing.T) {
 	t.Helper()
 	f.sharedDesign().AwaitApproved(t)
+}
+
+func (f *productionDesignFixture) start(t *testing.T) {
+	t.Helper()
+	f.architectFixture.start(t)
+	f.checkRepos(t)
+}
+func (f *productionDesignFixture) checkRepos(t *testing.T) {
+	t.Helper()
+	f.sharedDesign().CheckRepos(t)
 }

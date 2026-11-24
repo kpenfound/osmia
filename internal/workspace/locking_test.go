@@ -24,7 +24,6 @@ func TestGitConcurrentWorktreeUpkeep(t *testing.T) {
 	for _, name := range []string{"a", "b"} {
 		go func() {
 			<-start
-			// Separate providers of the same clone share the lock.
 			g := &Git{Clone: f.clone, Directory: f.provider.Directory}
 			for n := range 10 {
 				w, err := g.Acquire(ctx, vcs.Request{Name: name, Branch: name, Ref: "main"})
@@ -68,11 +67,6 @@ func TestGitConcurrentWorktreeUpkeep(t *testing.T) {
 	}
 }
 
-// A directory removed while Git is forgetting its worktree is half gone for a
-// moment: its .git file is deleted before the directory itself. Git lists such a
-// worktree as prunable but `git worktree remove` refuses it, because the
-// directory exists without a .git file. Concurrent upkeep meets this state
-// whenever one provider forgets a worktree whose directory another is deleting.
 func TestGitForgetsAWorktreeWhoseDirectoryIsHalfRemoved(t *testing.T) {
 	t.Parallel()
 	for name, forget := range map[string]func(*Git, context.Context) error{
@@ -112,8 +106,6 @@ func TestGitForgetsAWorktreeWhoseDirectoryIsHalfRemoved(t *testing.T) {
 }
 
 func TestGitConcurrentReplaysUseOperationScratchWorktrees(t *testing.T) {
-	// A wrapper gates core's first command after the scratch worktree is added,
-	// proving both scratch directories coexist while their replays are active.
 	f := newFixture(t)
 	base := git(t, "-C", f.clone, "rev-parse", "HEAD")
 	onto := f.advance(t, "upstream.txt")
@@ -164,17 +156,7 @@ exec "` + realGit + `" "$@"
 		}()
 	}
 	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(gate, "release"), nil, 0600) })
-	deadline := time.Now().Add(10 * time.Second)
-	both := false
-	for time.Now().Before(deadline) {
-		entries, _ := os.ReadDir(gate)
-		if len(entries) == 2 {
-			both = true
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if !both {
+	if !pollUntil(func() bool { entries, _ := os.ReadDir(gate); return len(entries) == 2 }) {
 		cancel()
 		t.Fatal("both operation scratch worktrees did not coexist")
 	}
@@ -343,8 +325,6 @@ func TestJujutsuCancelledLocalStepRecoversBeforeAnotherStep(t *testing.T) {
 	}
 }
 
-// TestJujutsuStepCrashHelper is a child process killed before LocalStep's
-// defers, exercising the same on-disk checkpoint startup Recover consumes.
 func TestJujutsuStepCrashHelper(t *testing.T) {
 	clone := os.Getenv("OSMIA_STEP_CRASH_CLONE")
 	if clone == "" {
@@ -353,8 +333,6 @@ func TestJujutsuStepCrashHelper(t *testing.T) {
 	j := &Jujutsu{Clone: clone, Directory: os.Getenv("OSMIA_STEP_CRASH_DIRECTORY")}
 	base := os.Getenv("OSMIA_STEP_CRASH_BASE")
 	err := LocalStep(context.Background(), "a/second", time.Now(), []Provider{j}, func(ctx context.Context) error {
-		// Creation changes repository workspace metadata. A crash inside the
-		// step must restore it; a crash after settlement must inspect and reuse it.
 		if _, err := j.Acquire(ctx, vcs.Request{Name: "a-step", Branch: "a-step", Ref: base}); err != nil {
 			return err
 		}
@@ -444,8 +422,6 @@ func TestJujutsuRecoveryPreservesAnotherOperationsSettledReplay(t *testing.T) {
 			if err := applyB(); err != nil || runs != 1 {
 				t.Fatalf("B replayed %d times: %v", runs, err)
 			}
-			// A's settled creation is recognised even when it has not written
-			// its result. An interrupted creation is retried from its checkpoint.
 			_, exists, err := restarted.Workspace(ctx, "a-step")
 			if err != nil || exists != (location == "between") {
 				t.Fatalf("A workspace after recovery: %t: %v", exists, err)
@@ -479,7 +455,6 @@ func TestJujutsuRecoveryPreservesAnotherOperationsSettledReplay(t *testing.T) {
 	}
 }
 
-// Retain explicit coverage of the collision classifier's non-retry cases.
 func TestFetchCollisionClassification(t *testing.T) {
 	for _, text := range []string{"authentication failed", "cannot lock ref: permission denied", "connection refused"} {
 		if fetchRefCollision(errors.New(text)) {
@@ -491,8 +466,6 @@ func TestFetchCollisionClassification(t *testing.T) {
 func TestGitOtherRefsAndFetchDoNotWaitForWorktreeLock(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	// A separate operation may fetch or work on another ref while a worktree
-	// mutation owns the clone lock. Its context carries no borrowed ownership.
 	_, unlock, err := lockClone(context.Background(), f.clone)
 	if err != nil {
 		t.Fatal(err)

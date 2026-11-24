@@ -10,14 +10,19 @@ import (
 	"testing"
 	"time"
 
-	wire "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/eventstream"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -27,8 +32,7 @@ func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
 		for _, interval := range []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute} {
 			t.Run(fmt.Sprintf("delivered-%v/%s", delivered, interval), func(t *testing.T) {
 				cfg, repo, host, refresh, _ := stopFixture(t)
-				// Keep a fixed clock so both sides of the exact boundary are tested.
-				clock := &fixedClock{At: demoStart}
+				clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 				refresh.s.options.Reconciliation.Now = clock.Now
 				cfg.Project.PullRequestPoll = interval.String()
 				cfg.Projects[0] = cfg.Project
@@ -38,27 +42,27 @@ func TestBaseRefreshPullRequestPollInterval(t *testing.T) {
 					host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
 				}
 				ctx := context.Background()
-				must(t, refresh.Pass(ctx))
-				op := latestBaseRefreshOperation(t, repo, stream)
+				intakefixture.Must(t, refresh.Pass(ctx))
+				op := latestBaseRefreshOperation(t, repo, fixturekit.Stream)
 				_, err := refresh.Apply(ctx, op)
-				must(t, err)
+				intakefixture.Must(t, err)
 				calls := host.Finds
 				for _, advance := range []time.Duration{time.Minute, interval - time.Minute - time.Nanosecond} {
 					clock.Advance(advance)
-					must(t, refresh.Pass(ctx))
-					if n := baseRefreshOperationCount(t, repo, stream); n != 1 || host.Finds != calls {
+					intakefixture.Must(t, refresh.Pass(ctx))
+					if n := baseRefreshOperationCount(t, repo, fixturekit.Stream); n != 1 || host.Finds != calls {
 						t.Fatalf("early refresh: operations=%d finds=%d, want 1/%d", n, host.Finds, calls)
 					}
 				}
 				clock.Advance(time.Nanosecond)
-				must(t, refresh.Pass(ctx))
-				must(t, refresh.Pass(ctx))
-				if n := baseRefreshOperationCount(t, repo, stream); n != 2 {
+				intakefixture.Must(t, refresh.Pass(ctx))
+				intakefixture.Must(t, refresh.Pass(ctx))
+				if n := baseRefreshOperationCount(t, repo, fixturekit.Stream); n != 2 {
 					t.Fatalf("due operations=%d", n)
 				}
-				next := latestBaseRefreshOperation(t, repo, stream)
+				next := latestBaseRefreshOperation(t, repo, fixturekit.Stream)
 				_, err = refresh.Apply(ctx, next)
-				must(t, err)
+				intakefixture.Must(t, err)
 				wantCalls := calls
 				if delivered {
 					wantCalls++
@@ -76,24 +80,24 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 		for _, previous := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/previous-%v", kind, previous), func(t *testing.T) {
 				f := newEdgeGraphFixture(t, kind)
-				clock := &fixedClock{At: f.s.now()}
+				clock := &fixturekit.FixedClock{At: f.s.now()}
 				f.s.options.Reconciliation.Now = clock.Now
-				p := DeliveryPublication{Status: publicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: featureBranch(f.upstream), PullRequest: 42}
+				p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: intake.FeatureBranch(f.upstream), PullRequest: 42}
 				recordUpstreamOwnPullRequest(t, f.s, f.repository, f.upstream, p)
-				host := &fakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
+				host := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
 				f.s.options.PullRequests = host
 				ctx := context.Background()
 				if previous {
-					must(t, f.s.edgeResolverPass(ctx, f.repository))
+					intakefixture.Must(t, f.s.edgeResolverPass(ctx, f.repository))
 					clock.Advance(10*time.Minute - time.Nanosecond)
-					must(t, f.s.edgeResolverPass(ctx, f.repository))
+					intakefixture.Must(t, f.s.edgeResolverPass(ctx, f.repository))
 					if host.Finds != 1 {
 						t.Fatal("open edge polled before interval")
 					}
 					clock.Advance(time.Nanosecond)
 				}
-				before, rev, _, err := edgeObservationAt(f.repository, f.downstream)
-				must(t, err)
+				before, rev, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
+				intakefixture.Must(t, err)
 				failure := errors.New("upstream unavailable")
 				host.FindErr = failure
 				err = f.s.edgeResolverPass(ctx, f.repository)
@@ -101,28 +105,28 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 					t.Fatalf("provider error changed: %v", err)
 				}
 				calls := host.Finds
-				after, afterRev, _, err := edgeObservationAt(f.repository, f.downstream)
-				must(t, err)
+				after, afterRev, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
+				intakefixture.Must(t, err)
 				if rev != afterRev || !reflect.DeepEqual(before, after) {
 					t.Fatal("failed attempt wrote merge evidence")
 				}
-				must(t, f.s.edgeWaitPass(ctx, f.repository))
+				intakefixture.Must(t, f.s.edgeWaitPass(ctx, f.repository))
 				if kind == trace.EdgeHardBlock {
-					waiting, err := edgeWaitDisplay(f.repository, f.downstream)
-					must(t, err)
+					waiting, err := lifecycle.EdgeWaitDisplay(f.repository, f.downstream)
+					intakefixture.Must(t, err)
 					if waiting == "" {
 						t.Fatal("failed lookup released dependent")
 					}
 				} else {
-					_, waiting, err := unresolvedMergeOrderEdge(f.repository, f.downstream)
-					must(t, err)
+					_, waiting, err := lifecycle.UnresolvedMergeOrderEdge(f.repository, f.downstream)
+					intakefixture.Must(t, err)
 					if !waiting {
 						t.Fatal("failed lookup released merge order")
 					}
 				}
 				for _, advance := range []time.Duration{0, time.Minute, 9*time.Minute - time.Nanosecond} {
 					clock.Advance(advance)
-					must(t, f.s.edgeResolverPass(ctx, f.repository))
+					intakefixture.Must(t, f.s.edgeResolverPass(ctx, f.repository))
 					if host.Finds != calls {
 						t.Fatal("failed attempt retried before interval")
 					}
@@ -134,8 +138,8 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 				if host.Finds != calls+1 {
 					t.Fatalf("retry finds=%d want %d", host.Finds, calls+1)
 				}
-				_, afterRev, _, err = edgeObservationAt(f.repository, f.downstream)
-				must(t, err)
+				_, afterRev, _, err = lifecycle.EdgeObservationAt(f.repository, f.downstream)
+				intakefixture.Must(t, err)
 				if afterRev != rev {
 					t.Fatal("retry failure recorded evidence")
 				}
@@ -144,8 +148,6 @@ func TestEdgePullRequestPollAttempts(t *testing.T) {
 	}
 }
 
-// Run the loaded pipeline's actual polling hooks while leaving operation
-// application under test control. Reload must replace these hook closures.
 func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 	t.Helper()
 	p := s.sole().pipeline
@@ -154,24 +156,21 @@ func pollHooks(t *testing.T, s *Service, repo *trace.Repository) {
 	}
 	for _, hook := range p.Current.Load().Polls {
 		if hook.Name == "base-refresh" || hook.Name == "edge-refresh" {
-			must(t, hook.Pass(context.Background()))
+			intakefixture.Must(t, hook.Pass(context.Background()))
 		}
 	}
 }
 
-// setPullRequestPoll saves interval as the project's pull_request_poll the way
-// the Settings API does: the settings are stored as a new revision and the
-// service adopts them.
 func setPullRequestPoll(t *testing.T, s *Service, cfg *config.Config, interval string) {
 	t.Helper()
 	id := cfg.Project.ID
 	first, err := projectstore.Open(cfg.Root).Current(id)
-	must(t, err)
-	saved, api := service.InspectForTest(s.core()).SaveProjectConfig(context.Background(), id, wire.ProjectConfigEdit{Pin: first.Pin, Set: wire.ProjectConfigValues{PullRequestPoll: &interval}})
-	if api != nil {
-		t.Fatal(api)
+	intakefixture.Must(t, err)
+	saved, apiFault := service.InspectForTest(s.core()).SaveProjectConfig(context.Background(), id, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{PullRequestPoll: &interval}})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
-	if saved.Outcome != wire.ProjectConfigApplied {
+	if saved.Outcome != api.ProjectConfigApplied {
 		t.Fatalf("save: %+v", saved)
 	}
 }
@@ -182,56 +181,54 @@ func TestPullRequestPollReloadRetainsAttempts(t *testing.T) {
 		t.Run(interval.String(), func(t *testing.T) {
 			ctx := context.Background()
 			cfg, repo, host, refresh := ownPRFixture(t)
-			clock := &fixedClock{At: demoStart}
+			clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 			s := refresh.s
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
 			s.hub = eventstream.New()
-			_, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream, quiet}, demoStart, ownerActor, "fixture")
-			must(t, err)
+			_, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
+			intakefixture.Must(t, err)
 			p := deliverWithPullRequest(t, repo, cfg, 42)
-			// quiet is archived without touching stream's publication.
-			archive := runtime.Archive{Project: cfg.Project.ID, Workstream: quiet, State: DeliveredState, ArchivedAt: demoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: p.Upstream, Fork: p.Fork, Branch: featureBranch(quiet), Commit: "archive-head", PullRequest: 43}}
-			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, quiet}}})
-			must(t, err)
+			archive := runtime.Archive{Project: cfg.Project.ID, Workstream: fixturekit.Quiet, State: intake.DeliveredState, ArchivedAt: fixturekit.DemoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: p.Upstream, Fork: p.Fork, Branch: intake.FeatureBranch(fixturekit.Quiet), Commit: "archive-head", PullRequest: 43}}
+			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
+			intakefixture.Must(t, err)
 			defer store.Close()
 			s.store = store
-			must(t, store.SetArchived(archive))
-			// Failed archived reads must survive reload too.
+			intakefixture.Must(t, store.SetArchived(archive))
 			host.FindErr = errors.New("provider unavailable")
 			stages, err := s.stages(cfg, repo)
-			must(t, err)
-			pipeline := newTestPipeline()
+			intakefixture.Must(t, err)
+			pipeline := service.NewPipelineForTest()
 			pipeline.Current.Store(stages)
 			s.installPipeline(pipeline)
 			pollHooks(t, s, repo)
-			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, stream))
-			must(t, err)
+			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, fixturekit.Stream))
+			intakefixture.Must(t, err)
 			if host.Finds != 2 {
 				t.Fatalf("initial lookups=%d", host.Finds)
 			}
 			setPullRequestPoll(t, s, cfg, interval.String())
 			for i := 0; i < 2; i++ {
-				_, api := s.reload()
-				if api != nil {
-					t.Fatal(api)
+				_, apiFault := s.reload()
+				if apiFault != nil {
+					t.Fatal(apiFault)
 				}
 				pollHooks(t, s, repo)
-				if host.Finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
+				if host.Finds != 2 || baseRefreshOperationCount(t, repo, fixturekit.Stream) != 1 {
 					t.Fatal("reload restarted cooldown")
 				}
 			}
 			clock.Advance(interval - time.Nanosecond)
 			pollHooks(t, s, repo)
-			if host.Finds != 2 || baseRefreshOperationCount(t, repo, stream) != 1 {
+			if host.Finds != 2 || baseRefreshOperationCount(t, repo, fixturekit.Stream) != 1 {
 				t.Fatal("poll before reloaded interval")
 			}
 			clock.Advance(time.Nanosecond)
 			pollHooks(t, s, repo)
-			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, stream))
-			must(t, err)
-			if host.Finds != 4 || baseRefreshOperationCount(t, repo, stream) != 2 {
-				t.Fatalf("due lookups=%d operations=%d", host.Finds, baseRefreshOperationCount(t, repo, stream))
+			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, fixturekit.Stream))
+			intakefixture.Must(t, err)
+			if host.Finds != 4 || baseRefreshOperationCount(t, repo, fixturekit.Stream) != 2 {
+				t.Fatalf("due lookups=%d operations=%d", host.Finds, baseRefreshOperationCount(t, repo, fixturekit.Stream))
 			}
 		})
 	}
@@ -243,41 +240,40 @@ func TestOwnerRebaseMakesBaseAndEdgesDueOnce(t *testing.T) {
 			f := newEdgeGraphFixture(t, trace.EdgeHardBlock)
 			f.s.setSole(runtimeFor(f.repository))
 			streams, err := f.repository.Workstreams()
-			must(t, err)
+			intakefixture.Must(t, err)
 			store, _, err := runtime.Open(runtime.Inputs{Config: f.s.current(), Workstreams: map[config.ProjectID][]config.WorkstreamID{f.project: streams}})
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer store.Close()
 			f.s.store = store
-			clock := &fixedClock{At: f.s.now()}
+			clock := &fixturekit.FixedClock{At: f.s.now()}
 			f.s.options.Reconciliation.Now = clock.Now
-			host := &fakePulls{}
+			host := &fixturekit.FakePulls{}
 			f.s.options.PullRequests = host
 			for i, member := range []config.WorkstreamID{f.upstream, f.downstream} {
-				p := DeliveryPublication{Status: publicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: featureBranch(member), PullRequest: 42 + i}
+				p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/repo", Fork: "owner/fork", Branch: intake.FeatureBranch(member), PullRequest: 42 + i}
 				recordUpstreamOwnPullRequest(t, f.s, f.repository, member, p)
 				host.Prs = append(host.Prs, pulls.PullRequest{Number: p.PullRequest, State: "open", Head: p.Branch, HeadRepository: p.Fork})
 			}
 			refresh := &baseRefresher{s: f.s, repository: f.repository}
 			ctx := context.Background()
 			pass := func() {
-				must(t, refresh.Pass(ctx))
-				must(t, f.s.edgeResolverPass(ctx, f.repository))
+				intakefixture.Must(t, refresh.Pass(ctx))
+				intakefixture.Must(t, f.s.edgeResolverPass(ctx, f.repository))
 				for _, member := range []config.WorkstreamID{f.upstream, f.downstream} {
 					_, err := refresh.Apply(ctx, latestBaseRefreshOperation(t, f.repository, member))
-					must(t, err)
+					intakefixture.Must(t, err)
 				}
 			}
 			pass()
 			before := host.Finds
 			if projectRequest {
-				out, api := f.s.rebaseProject(ctx, ProjectRebaseRequest{Project: f.project})
-				if api != nil || len(out.Covered) != 2 {
-					t.Fatalf("project rebase: %+v %v", out, api)
+				out, apiFault := f.s.rebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
+				if apiFault != nil || len(out.Covered) != 2 {
+					t.Fatalf("project rebase: %+v %v", out, apiFault)
 				}
-			} else if _, api := f.s.rebaseWorkstream(ctx, string(f.downstream)); api != nil {
-				t.Fatal(api)
+			} else if _, apiFault := f.s.rebaseWorkstream(ctx, string(f.downstream)); apiFault != nil {
+				t.Fatal(apiFault)
 			}
-			// The request shares its timestamp with the preceding check.
 			pass()
 			want := before + 2
 			if projectRequest {
@@ -297,8 +293,8 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
-	host := &fakePulls{}
-	clock := &fixedClock{At: demoStart}
+	host := &fixturekit.FakePulls{}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	ticks := make(chan time.Time)
 	var passed atomic.Int64
 	opts.PullRequests = host
@@ -306,41 +302,35 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 	opts.Reconciliation.Ticks = ticks
 	opts.schedulePassed = func() { passed.Add(1) }
 	s, c := start(t, opts)
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	intakefixture.Must(t, err)
 	repo := s.sole().repository
 	member := config.WorkstreamID("w_00000000000000000000000000000892")
-	must(t, repo.CreateWorkstream(ctx, member, clock.Now(), ownerActor))
-	_, err = trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, clock.Now(), ownerActor, "fixture")
-	must(t, err)
-	p := DeliveryPublication{Status: publicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: featureBranch(member), PullRequest: 42}
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, member, clock.Now(), intake.OwnerActor))
+	_, err = trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, clock.Now(), intake.OwnerActor, "fixture")
+	intakefixture.Must(t, err)
+	p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: intake.FeatureBranch(member), PullRequest: 42}
 	host.Mu.Lock()
 	host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
 	host.Mu.Unlock()
 	recordUpstreamOwnPullRequest(t, s, repo, member, p)
-	must(t, s.refreshRuntime())
+	intakefixture.Must(t, s.refreshRuntime())
 	tick := func() {
 		t.Helper()
 		before := passed.Load()
 		select {
 		case ticks <- clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(intakefixture.DemoTimeout):
 			t.Fatal("reconciler did not accept tick")
 		}
-		deadline := time.Now().Add(demoTimeout)
-		for passed.Load() <= before {
-			if time.Now().After(deadline) {
-				t.Fatal("pass did not complete")
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		intakefixture.Eventually(t, "pass did not complete", func() bool { return passed.Load() > before })
 	}
 	waitChecked := func(want int) {
 		t.Helper()
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(intakefixture.DemoTimeout)
 		for {
-			state, err := repo.Workflow(member, baseRefreshAction)
-			must(t, err)
+			state, err := repo.Workflow(member, lifecycle.BaseRefreshAction)
+			intakefixture.Must(t, err)
 			if state.Value == "checked" && baseRefreshOperationCount(t, repo, member) == want {
 				return
 			}
@@ -362,12 +352,12 @@ func TestServiceDefaultPullRequestPollingAndRebaseAPI(t *testing.T) {
 		}
 	}
 	view, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if view.Effective.For(added.Project.ID).Project.PullRequestPoll != "10m" {
 		t.Fatal("configuration omits default interval")
 	}
 	_, err = c.RebaseWorkstream(ctx, member)
-	must(t, err)
+	intakefixture.Must(t, err)
 	waitChecked(2)
 	tick()
 	host.Mu.Lock()
@@ -384,27 +374,27 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			ctx := context.Background()
 			cfg, repo, host, refresh := ownPRFixture(t)
 			s := refresh.s
-			clock := &fixedClock{At: demoStart}
+			clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 			s.options.Config = cfg.Root.Options("")
 			s.options.Reconciliation.Now = clock.Now
 			s.hub = eventstream.New()
-			group, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream, quiet}, demoStart, ownerActor, "fixture")
-			must(t, err)
-			must(t, trace.RecordProjectSpec(ctx, repo, group, trace.ProjectSpec{Behavior: "Dependency waits for merge", Graph: []trace.Edge{{From: quiet, To: stream, Type: trace.EdgeHardBlock}}}, demoStart, ownerActor, "fixture"))
-			p := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(quiet), PullRequest: 42}
-			recordUpstreamOwnPullRequest(t, s, repo, quiet, p)
+			group, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{fixturekit.Stream, fixturekit.Quiet}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, trace.RecordProjectSpec(ctx, repo, group, trace.ProjectSpec{Behavior: "Dependency waits for merge", Graph: []trace.Edge{{From: fixturekit.Quiet, To: fixturekit.Stream, Type: trace.EdgeHardBlock}}}, fixturekit.DemoStart, intake.OwnerActor, "fixture"))
+			p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: intake.FeatureBranch(fixturekit.Quiet), PullRequest: 42}
+			recordUpstreamOwnPullRequest(t, s, repo, fixturekit.Quiet, p)
 			host.Prs = []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}
 			failure := errors.New("upstream unavailable")
 			if failed {
 				host.FindErr = failure
 			}
-			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, quiet}}})
-			must(t, err)
+			store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
+			intakefixture.Must(t, err)
 			defer store.Close()
 			s.store = store
 			stage, err := s.stages(cfg, repo)
-			must(t, err)
-			pipeline := newTestPipeline()
+			intakefixture.Must(t, err)
+			pipeline := service.NewPipelineForTest()
 			pipeline.Current.Store(stage)
 			s.installPipeline(pipeline)
 			pass := func(wantError bool) {
@@ -420,7 +410,7 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 								t.Fatalf("lookup error=%v", err)
 							}
 						} else {
-							must(t, err)
+							intakefixture.Must(t, err)
 						}
 					}
 				}
@@ -431,9 +421,9 @@ func TestEdgePullRequestPollReload(t *testing.T) {
 			}
 			setPullRequestPoll(t, s, cfg, "20m")
 			for i := 0; i < 2; i++ {
-				_, api := s.reload()
-				if api != nil {
-					t.Fatal(api)
+				_, apiFault := s.reload()
+				if apiFault != nil {
+					t.Fatal(apiFault)
 				}
 				pass(false)
 				if host.Finds != 1 {
@@ -462,67 +452,67 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 			f.stop(t)
 			ctx := context.Background()
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer repo.Close()
 			base, baseTip := sealDependent(t, f, repo, config.WorkspacesGit, "", map[string]string{"base.go": "base\n"})
 			dependent, _ := sealDependent(t, f, repo, config.WorkspacesGit, base, map[string]string{"dependent.go": "dependent\n"})
 			cfg := f.s.about(repo)
-			p := DeliveryPublication{Status: publicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: cfg.Project.BaseBranch, Branch: featureBranch(base), Commit: baseTip, PullRequest: 42}
+			p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Base: cfg.Project.BaseBranch, Branch: intake.FeatureBranch(base), Commit: baseTip, PullRequest: 42}
 			recordUpstreamOwnPullRequest(t, f.s, repo, base, p)
-			host := &fakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
+			host := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{Number: 42, State: "open", Head: p.Branch, HeadRepository: p.Fork}}}
 			f.s.options.PullRequests = host
-			clock := &fixedClock{At: f.s.now()}
+			clock := &fixturekit.FixedClock{At: f.s.now()}
 			f.s.options.Reconciliation.Now = clock.Now
 			refresh := &baseRefresher{s: f.s, repository: repo}
-			must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
 			op := latestBaseRefreshOperation(t, repo, dependent)
 			_, err = refresh.Apply(ctx, op)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if host.Finds != 1 {
 				t.Fatalf("dependency lookup count=%d", host.Finds)
 			}
 			clock.Advance(10*time.Minute - time.Nanosecond)
-			must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
 			if host.Finds != 1 || baseRefreshOperationCount(t, repo, dependent) != 1 {
 				t.Fatal("dependency polled early")
 			}
 			clock.Advance(time.Nanosecond)
-			must(t, refresh.Pass(ctx))
-			must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
 			if baseRefreshOperationCount(t, repo, dependent) != 2 {
 				t.Fatal("due dependency refresh not scheduled once")
 			}
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, dependent))
-			must(t, err)
+			intakefixture.Must(t, err)
 			if host.Finds != 2 {
 				t.Fatalf("dependency retry count=%d", host.Finds)
 			}
 
 			f.s.setSole(runtimeFor(repo))
 			streams, err := repo.Workstreams()
-			must(t, err)
+			intakefixture.Must(t, err)
 			store, _, err := runtime.Open(runtime.Inputs{Config: f.s.current(), Workstreams: map[config.ProjectID][]config.WorkstreamID{f.project: streams}})
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer store.Close()
 			f.s.store = store
-			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: repo.Project(), Workstream: dependent, At: clock.Now(), Actor: foremanActor, Cause: "fixture"}
-			_, err = repo.SetFeatureState(ctx, h, BuildingState, "ready for drift")
-			must(t, err)
+			h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "building", Revision: 1, Project: repo.Project(), Workstream: dependent, At: clock.Now(), Actor: service.TestForemanActor, Cause: "fixture"}
+			_, err = repo.SetFeatureState(ctx, h, intakefixture.BuildingState, "ready for drift")
+			intakefixture.Must(t, err)
 			if projectRequest {
-				out, api := f.s.rebaseProject(ctx, ProjectRebaseRequest{Project: f.project})
-				if api != nil || len(out.Covered) != 2 {
-					t.Fatalf("project request: %+v %v", out, api)
+				out, apiFault := f.s.rebaseProject(ctx, api.ProjectRebaseRequest{Project: f.project})
+				if apiFault != nil || len(out.Covered) != 2 {
+					t.Fatalf("project request: %+v %v", out, apiFault)
 				}
-			} else if _, api := f.s.rebaseWorkstream(ctx, string(dependent)); api != nil {
-				t.Fatal(api)
+			} else if _, apiFault := f.s.rebaseWorkstream(ctx, string(dependent)); apiFault != nil {
+				t.Fatal(apiFault)
 			}
-			must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
 			_, err = refresh.Apply(ctx, latestBaseRefreshOperation(t, repo, dependent))
-			must(t, err)
+			intakefixture.Must(t, err)
 			if host.Finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
 				t.Fatal("drift request did not immediately recheck dependency")
 			}
-			must(t, refresh.Pass(ctx))
+			intakefixture.Must(t, refresh.Pass(ctx))
 			if host.Finds != 3 || baseRefreshOperationCount(t, repo, dependent) != 3 {
 				t.Fatal("dependency bypass ran more than once")
 			}
@@ -530,20 +520,18 @@ func TestUndeliveredDependencyPullRequestPollInterval(t *testing.T) {
 	}
 }
 
-// Select by the check sequence because immediate owner checks may share a
-// timestamp with the preceding operation.
 func latestBaseRefreshOperation(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) coreadapter.Operation {
 	t.Helper()
 	ops, err := repo.Operations(stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var latest coreadapter.Operation
 	check := 0
 	for _, record := range ops {
-		if record.Operation.Action != baseRefreshAction {
+		if record.Operation.Action != lifecycle.BaseRefreshAction {
 			continue
 		}
-		var in baseRefreshInput
-		must(t, json.Unmarshal(record.Operation.Input, &in))
+		var in lifecycle.BaseRefreshInput
+		intakefixture.Must(t, json.Unmarshal(record.Operation.Input, &in))
 		if in.Check > check {
 			check, latest = in.Check, record.Operation
 		}

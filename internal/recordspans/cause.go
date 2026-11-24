@@ -35,8 +35,6 @@ const (
 	CauseOther             = "other"
 )
 
-// The actors whose transitions are told apart. They are the IDs of the service
-// roles that record a unit's transitions.
 const (
 	actorChecks   = "checks"
 	actorReviewer = "reviewer"

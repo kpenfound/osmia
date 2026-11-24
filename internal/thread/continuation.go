@@ -9,19 +9,8 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// resumeFallbackKey is the context key carrying fallbackAllowed into a
-// CheckResume call, the only way an implementation reached through
-// coreadapter.Turns can learn which role's turn is asking: the interface
-// itself carries no scope. A CheckResume that already has its own way to
-// verify a saved session, such as a fixture's fake engine or a real
-// backend's own API, has no reason to consult it; it exists only for an
-// implementation that would otherwise have no verification at all and
-// wants to confine a heuristic trust fallback to the role thread.Runner's
-// ResumableRoles grants it to.
 type resumeFallbackKey struct{}
 
-// withResumeFallbackAllowed attaches whether a CheckResume implementation
-// may use a role-blind heuristic fallback for the turn ctx belongs to.
 func withResumeFallbackAllowed(ctx context.Context, allowed bool) context.Context {
 	return context.WithValue(ctx, resumeFallbackKey{}, allowed)
 }
@@ -35,24 +24,6 @@ func ResumeFallbackAllowed(ctx context.Context) bool {
 	return allowed
 }
 
-// source finds the most recent completed turn whose session the next turn
-// could continue from. It reports two distinct kinds of continuation
-// separately: stopped reports a turn that was interrupted by an explicit
-// Stop, whose exact in-flight session every role has always resumed so no
-// work is lost (existing behaviour, unconditional on role); clean reports an
-// ordinarily completed turn's session, which every role may try to resume,
-// subject to whatever the configured Turns answers for CheckResume. Either
-// kind returns healthy so a caller that does not need the distinction can
-// still use it.
-//
-// A turn stopped by an explicit Stop before its session started leaves the
-// source as it was: the turn before it, not this one, is still what the next
-// turn may continue from (base behaviour, unconditional on role). A turn a
-// restart abandoned unanswered, with no session and no explicit Stop, gets
-// the same treatment, but only for a role resumableRoles grants: that is the
-// one place session turns look past an interrupted turn to the session's
-// last recorded model session, confined to the session role so every other
-// role's source selection is exactly what it was before that role existed.
 func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (profile coreadapter.Profile, session coreadapter.BackendSession, boundary uint64, stopped, clean bool) {
 	for _, q := range t.Turns {
 		if q.Sequence >= before {
@@ -74,25 +45,17 @@ func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (pr
 			profile = q.Attempts[len(q.Attempts)-1].Profile
 		}
 		session = res.Result.Session
-		// A stopped session did not fail, so the next turn resumes it.
 		stopped = res.Stop != nil
 		clean = !stopped && res.Failure == "" && !res.Result.IsError && !res.Result.Cancelled && !res.Result.TimedOut && res.Result.ExitCode == 0 && res.Result.Signal == 0
 	}
 	return profile, session, boundary, stopped, clean
 }
 
-// failed reports whether an attempt that was not stopped ended in failure.
 func failed(result coreadapter.SessionResult, runErr error) bool {
 	return runErr != nil || result.Cancelled || result.IsError || result.TimedOut || result.ExitCode != 0 || result.Signal != 0
 }
 
-// execute runs the turn's attempts. An infrastructure failure is retried on
-// the same profile up to MaxRetries times, then on each fallback in turn with
-// the same bound; a behavioural failure ends the turn. The agent session runs under the context
-// Stoppable attached to ctx; a turn stopped before or during its session
-// returns its Stop as runErr, and an attempt a stop ended records no failure.
 func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn, prepared coreadapter.PreparedTurn) (result coreadapter.SessionResult, runErr, persistErr error) {
-	// Leases span every attempt of the turn and are released exactly once.
 	cleanup, workspace, retain := prepared.Cleanup, prepared.WorkspaceLease, prepared.RetainWorkspace
 	prepared.Cleanup, prepared.WorkspaceLease = nil, nil
 	defer func() {
@@ -110,7 +73,6 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		result = coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: r.Now(), Cancelled: true, ErrorSubtype: "stopped"}
 		return result, stop, nil
 	}
-	// Keep workspace identity validation in the adapter without transferring release.
 	if workspace != nil {
 		copy := *workspace
 		copy.Lease = nil
@@ -121,18 +83,9 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	if err != nil {
 		return result, nil, err
 	}
-	// attempts counts the attempts on the current profile; tried holds every
-	// profile the turn has run on, so a fallback never returns to one.
 	attempts, tried := 1, map[string]bool{prepared.Profile.Name: true}
 	forceReplay := false
 	reason, retry := "no compatible completed session", ""
-	// Every role may try to resume a stopped or clean source: this is base
-	// behaviour, unconditional on role, deciding only whether CheckResume is
-	// asked at all. What CheckResume itself may answer is a separate matter:
-	// fallbackAllowed below confines a role-blind heuristic fallback (used
-	// when the configured Turns cannot verify resumability itself) to the
-	// one role resumableRoles grants, so a role CheckResume already answers
-	// for directly, the same way on base, keeps that exact answer.
 	healthy := stoppedSource || cleanSource
 	fallbackAllowed := r.ResumableRoles != nil && r.ResumableRoles(t.Identity.Role)
 	for {
@@ -171,15 +124,12 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		if errors.Is(runErr, context.Canceled) {
 			result.Cancelled = true
 		}
-		// A session that ended cleanly keeps its result even when a stop came
-		// after it; one that ended otherwise was ended by the stop.
 		var stop *Stop
 		clean := runErr == nil && !result.Cancelled && !result.IsError && !result.TimedOut && result.ExitCode == 0 && result.Signal == 0
 		if s := stopped(run); s != nil && !clean {
 			stop, result.Cancelled, runErr = s, true, s
 		}
 		hadSession := result.Session.ID != ""
-		// Empty or malformed session references are unavailable, never resume hints.
 		if !coreadapter.ValidSession(result.Session) {
 			result.Session = coreadapter.BackendSession{}
 			if runErr == nil {
@@ -203,8 +153,6 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 			}
 			registry := limited && result.Limit.Kind == coreadapter.RegistryLimitKind
 			if registry {
-				// Every backend's sandbox comes from the same registry
-				// account, so another profile would only spend the limit.
 				fallback = coreadapter.Profile{}
 			}
 			if tried[fallback.Name] {
@@ -238,7 +186,6 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		if run.Err() != nil {
 			break
 		}
-		// Explicit no-work errors must not be accompanied by evidence of execution.
 		unstarted := result.FinalResponse == "" && result.Outcome == nil && result.Usage.Turns == 0 && result.Usage.CostUSD == 0 && !hadSession
 		if unstarted && path == "resume" && errors.Is(runErr, coreadapter.ErrResumeUnavailable) {
 			forceReplay, reason, retry = true, "resume rejected before work; replay", ""

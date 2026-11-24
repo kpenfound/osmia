@@ -4,7 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestHandInBaseIsPinnedToItsIdempotencyKey(t *testing.T) {
@@ -12,34 +15,34 @@ func TestHandInBaseIsPinnedToItsIdempotencyKey(t *testing.T) {
 	opts, _ := conversationFixture(t, "base-hand-")
 	s, c := start(t, opts)
 	text := "Build on the earlier feature"
-	req := HandInRequest{Project: project, Key: "dependent", Stdin: &text, Base: stream}
+	req := api.HandInRequest{Project: fixturekit.Project, Key: "dependent", Stdin: &text, Base: fixturekit.Stream}
 	first, err := c.HandIn(context.Background(), req)
-	must(t, err)
+	intakefixture.Must(t, err)
 	second, err := c.HandIn(context.Background(), req)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if first.Workstream != second.Workstream {
 		t.Fatal("retry created another workstream")
 	}
-	req.Base = quiet
+	req.Base = fixturekit.Quiet
 	_, err = c.HandIn(context.Background(), req)
-	assertCode(t, err, Conflict)
-	repo, err := s.repository(project)
-	must(t, err)
+	fixturekit.AssertCode(t, err, api.Conflict)
+	repo, err := s.repository(fixturekit.Project)
+	intakefixture.Must(t, err)
 	base, err := repo.WorkstreamBase(first.Workstream)
-	must(t, err)
-	if base.Base != stream || base.Revision != 1 {
+	intakefixture.Must(t, err)
+	if base.Base != fixturekit.Stream || base.Revision != 1 {
 		t.Fatalf("base %+v", base)
 	}
-	_, err = repo.SetWorkstreamBase(context.Background(), first.Workstream, quiet, base.Revision, s.now())
-	must(t, err)
-	req.Base = stream
+	_, err = repo.SetWorkstreamBase(context.Background(), first.Workstream, fixturekit.Quiet, base.Revision, s.now())
+	intakefixture.Must(t, err)
+	req.Base = fixturekit.Stream
 	_, err = c.HandIn(context.Background(), req)
-	must(t, err)
-	req.Base = quiet
+	intakefixture.Must(t, err)
+	req.Base = fixturekit.Quiet
 	_, err = c.HandIn(context.Background(), req)
-	assertCode(t, err, Conflict)
+	fixturekit.AssertCode(t, err, api.Conflict)
 	req.Key = "missing"
 	req.Base = config.WorkstreamID("w_ffffffffffffffffffffffffffffffff")
 	_, err = c.HandIn(context.Background(), req)
-	assertCode(t, err, Validation)
+	fixturekit.AssertCode(t, err, api.Validation)
 }

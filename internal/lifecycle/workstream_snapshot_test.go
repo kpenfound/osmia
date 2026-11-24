@@ -15,7 +15,6 @@ func TestSchedulingScansPreserveTraceErrors(t *testing.T) {
 	if _, err := snapshotWorkstreamBase(repo, missing); err == nil {
 		t.Fatal("unknown workstream was silently skipped")
 	}
-	// A directory without a database is damaged state, not a destroyed session.
 	path, err := cfg.Root.WorkstreamTrace(repo.Project(), missing)
 	must(t, err)
 	must(t, os.Mkdir(path, 0700))

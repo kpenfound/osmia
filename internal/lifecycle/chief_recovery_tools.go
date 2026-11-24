@@ -20,7 +20,6 @@ const (
 	RetryChangeTool    = "retry_change"
 )
 
-// decodeOne decodes one JSON object with no unknown fields.
 func decodeOne(raw json.RawMessage, v any) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()

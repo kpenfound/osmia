@@ -178,8 +178,6 @@ func (d DeltaRunner) Inspect(ctx context.Context, op coreadapter.Operation) (cor
 		result := RetiredDeltaResult(in)
 		return coreadapter.Observation{State: coreadapter.EffectCompleted, Evidence: result.Evidence, Result: &result}, nil
 	}
-	// Apply also reconciles completion and missing-tool failures. A recorded
-	// tool contribution alone does not replace the owned turn response.
 	return coreadapter.Observation{State: coreadapter.EffectAbsent, Evidence: "delta turn requires reconciliation"}, nil
 }
 func (d DeltaRunner) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
@@ -203,8 +201,6 @@ func (d DeltaRunner) Apply(ctx context.Context, op coreadapter.Operation) (corea
 		if !captured {
 			return RetiredDeltaResult(in), nil
 		}
-		// Captured shared responses reconcile through the ordinary turn path.
-		// Archiving a controller cannot replace their recorded outcome.
 	}
 	ctx, release := d.S.Stoppable(ctx, wt.Project(), c.Host)
 	defer release()
@@ -299,19 +295,15 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// Removal stops new group work while the controller drains its
-		// admitted turns. The retained trace is still owned by that runtime.
 		if !s.Current().Active(repo.Project()) {
 			return nil
 		}
-		// Archive records are authoritative even while cleanup still retains
-		// the terminal member's trace. Its conversation is no longer live.
 		if _, archived := s.ArchivedWorkstream(string(stream)); archived {
 			continue
 		}
 		if kind, err := repo.Kind(stream); err != nil {
 			return err
-		} else if kind == trace.SessionKind || stream == librarianWorkstream(repo.Project()) {
+		} else if kind == trace.SessionKind {
 			continue
 		}
 		group, local := trace.WorkgroupOf(groups, stream)
@@ -334,8 +326,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 				crossRepo[cross] = cached
 			}
 			group = cached.group
-			// A retained conversation source locator can point at the group
-			// without being a member eligible to drive its change journal.
 			if group.ID == cross && len(group.Members) > 0 && !slices.Contains(group.Members, stream) {
 				continue
 			}
@@ -346,8 +336,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 						return err
 					}
 					if len(live) == 0 {
-						// Only a group with no live member needs its own trace here;
-						// an active group's pass reads none until it has a leader.
 						authority, err := trace.OpenWorkgroupAuthority(s.Current().Root, cross)
 						if authority != nil {
 							defer authority.Close()
@@ -370,8 +358,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 					cached.retirementChecked = true
 				}
 				if cached.retired {
-					// The adopted source remains a locator after all real members
-					// retire. Authority is retained, but grants no member effects.
 					if cached.pending {
 						s.Log().Warn("workgroup changes remain held", "workgroup", cross, "member", group.Members[1], "error", "no live member remains to reconcile pending project decisions")
 					}
@@ -379,8 +365,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 				}
 				scanMembers = group.Members[1:]
 			} else {
-				// Incomplete shared membership must still reach routing's
-				// validation rather than being hidden by the early gate.
 				scanMembers = nil
 			}
 		}
@@ -389,8 +373,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 		}
 		wt, g, _, close, err := s.ChangeContext(ctx, string(stream))
 		if errors.Is(err, errWorkgroupJoining) {
-			// Production allocation records member links before adoption and
-			// the fixed shared bindings finish. Admission stays fenced.
 			continue
 		}
 		if err != nil {
@@ -398,14 +380,12 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 				return canceled
 			}
 			if errors.Is(err, ErrNoLiveWorkgroupContext) {
-				// The final live member can archive after the initial read.
 				s.Log().Warn("workgroup changes remain held", "workgroup", cross, "error", err.Error())
 				continue
 			}
 			if !s.Current().Active(repo.Project()) {
 				return nil
 			}
-			// Retirement can race the initial archive read and routing.
 			if _, archived := s.ArchivedWorkstream(string(stream)); archived {
 				continue
 			}
@@ -429,21 +409,6 @@ func (s *Controller) ChangePass(ctx context.Context, repo *trace.Repository) err
 	return nil
 }
 
-// RetiredChangesPending reports whether a workgroup's retained authority
-// holds a project decision that no member remains to settle: an unsettled
-// change, or an amendment request not yet drafted into a change.
-func (s *Controller) RetiredChangesPending(id config.WorkgroupID, g trace.Workgroup) (bool, error) {
-	wt, err := trace.OpenWorkgroupAuthority(s.Current().Root, id)
-	if err != nil {
-		if wt != nil {
-			wt.Close()
-		}
-		return false, err
-	}
-	defer wt.Close()
-	return retiredChangesPending(wt, g)
-}
-
 func retiredChangesPending(wt *trace.Repository, g trace.Workgroup) (bool, error) {
 	requests, _, err := trace.ProjectAmendments(wt)
 	if err != nil {
@@ -465,8 +430,6 @@ func retiredChangesPending(wt *trace.Repository, g trace.Workgroup) (bool, error
 	}), nil
 }
 func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g trace.Workgroup) error {
-	// An idle pass takes no group lock. Re-read pending work under the lock
-	// so owner decisions and application consume the same durable revision.
 	requests, _, err := trace.ProjectAmendments(wt)
 	if err != nil {
 		return err
@@ -481,7 +444,6 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 		return nil
 	}
 	lock := s.GroupApprovalLock(g.ID)
-	// A busy group remains pending without waiting for an owner action.
 	if !lock.TryLock() {
 		return nil
 	}
@@ -587,8 +549,6 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 			if c.FailureSettled {
 				continue
 			}
-			// The requester hears the failure the way it hears a rejection,
-			// and the chief of staff is told through a member's events.
 			if err := s.SettleChangeRequester(ctx, c); err != nil && !errors.Is(err, trace.ErrMemberRetired) {
 				return err
 			}
@@ -742,8 +702,6 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 				c = latest
 			}
 		}
-		// A turn may recover after its contribution advanced the journal.
-		// Repeating that contribution must succeed even in the next stage.
 		if NameRecorded(c, agent, name) {
 			return json.RawMessage(`{"recorded":true}`), nil
 		}
@@ -765,12 +723,9 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 					if a.Workgroup != c.Workgroup {
 						return nil, errors.New("retired delta member identity differs from its workgroup")
 					}
-					// A member archived since the request is frozen too.
 					members[n].Retired = true
 				}
 			}
-			// A retired member's slice is frozen: an omitted slice carries its
-			// ratified text forward, and a changed one is refused.
 			carried := false
 			for _, m := range members {
 				if _, found := trace.SliceFor(after, m.Workstream); !found && m.Retired {
@@ -797,8 +752,6 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 			}
 			for _, sl := range after.Slices {
 				if slices.ContainsFunc(members, func(m amendment.Member) bool { return m.Workstream == sl.Workstream && m.Retired }) {
-					// ClassifyImpact refused any change; the ratified slice
-					// already passed validation and needs no retired history.
 					continue
 				}
 				_, _, repo, api := s.ConversationTrace(string(sl.Workstream))
@@ -911,8 +864,6 @@ func (s *Controller) ChangeTurns(ctx context.Context, wt *trace.Repository, c Wo
 	if err := os.MkdirAll(views, 0700); err != nil {
 		return nil, err
 	}
-	// Both roles hold the backend's web tools on these debate turns, through
-	// the same grants as the architect's and the committee's other paths.
 	grant := intake.ArchitectGrant("file_read", tool)
 	if role == committeeRole {
 		grant = intake.CommitteeDebateGrant("file_read", tool)

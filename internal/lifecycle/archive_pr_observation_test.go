@@ -9,9 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -21,7 +27,7 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 		t.Run("edge-"+edge, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			host := &fakePulls{}
+			host := &fixturekit.FakePulls{}
 			var interrupt, reached atomic.Bool
 			f := resolutionApprovedFixture(t, productionDesignConfiguration{wait: lifecycleAwait, checkpoint: func(ctx context.Context, step string) error {
 				if step == "archive-own-pr-merge-observed" && interrupt.Load() {
@@ -34,18 +40,18 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			defer f.stop(t)
 			publications := deliverResolutionMembers(t, f)
 			repo, err := f.s.repository(f.project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			group, err := repo.CrossRepoWorkgroupOf(f.stream1)
-			must(t, err)
+			intakefixture.Must(t, err)
 			checkGroup := func(resolved bool) {
 				t.Helper()
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-				must(t, err)
+				intakefixture.Must(t, err)
 				defer authority.Close()
 				ids, rev, err := trace.ResolvedWorkgroups(authority)
-				must(t, err)
+				intakefixture.Must(t, err)
 				active, err := trace.ProjectSpecActive(authority, group)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if resolved {
 					if !slices.Equal(ids, []config.WorkgroupID{group}) || rev != 1 || active {
 						t.Fatalf("groups=%v rev=%d active=%v", ids, rev, active)
@@ -54,7 +60,7 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 					t.Fatalf("premature retirement: groups=%v rev=%d active=%v", ids, rev, active)
 				}
 				_, found, err := trace.ProjectSpecFor(authority, group)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !found {
 					t.Fatal("project spec history lost")
 				}
@@ -68,29 +74,25 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			}
 			awaitFirstMerge := func() {
 				lifecycleAwait(t, f, "first member merge observed", func() bool {
-					if a, ok := archiveRecord(t, f.s.store, f.stream1); ok {
-						return archiveResolved(a)
+					if a, ok := intakefixture.ArchiveRecord(t, f.s.store, f.stream1); ok {
+						return lifecycle.ArchiveResolved(a)
 					}
-					out, rev, err := ownPullRequestOutcomeAt(repo, f.stream1)
-					must(t, err)
+					out, rev, err := delivery.OwnPullRequestOutcomeAt(repo, f.stream1)
+					intakefixture.Must(t, err)
 					return rev > 0 && out.Outcome == "merged"
 				})
 			}
 			if edge == trace.EdgeHardBlock {
-				// The sink's workspace is eligible for cleanup only after its
-				// upstream wait clears through the ordinary edge observer.
 				merge(0)
 				awaitFirstMerge()
 				down, err := f.s.repository(f.project2)
-				must(t, err)
+				intakefixture.Must(t, err)
 				lifecycleAwait(t, f, "upstream wait cleared before sink archive", func() bool {
-					waiting, err := edgeWaitDisplay(down, f.stream2)
-					must(t, err)
+					waiting, err := lifecycle.EdgeWaitDisplay(down, f.stream2)
+					intakefixture.Must(t, err)
 					return waiting == ""
 				})
 			}
-			// A hard-block sink has no downstream observer. The other graphs have
-			// no merge observers at all, including when every member is archived.
 			archived := resolutionMembers(f)
 			if edge == trace.EdgeHardBlock {
 				archived = archived[1:]
@@ -98,13 +100,13 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			before := map[config.WorkstreamID]runtime.Archive{}
 			for _, m := range archived {
 				_, err := f.c.Archive(ctx, m.stream)
-				must(t, err)
+				intakefixture.Must(t, err)
 				lifecycleAwait(t, f, "unmerged member cleanup", func() bool {
-					a, ok := archiveRecord(t, f.s.store, m.stream)
+					a, ok := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
 					return ok && !a.CleanedAt.IsZero()
 				})
-				a, _ := archiveRecord(t, f.s.store, m.stream)
-				if archiveResolved(a) || a.Publication.PullRequest <= 0 {
+				a, _ := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
+				if lifecycle.ArchiveResolved(a) || a.Publication.PullRequest <= 0 {
 					t.Fatalf("unmerged archive=%+v", a)
 				}
 				before[m.stream] = a
@@ -118,8 +120,8 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			interrupt.Store(true)
 			merge(1)
 			lifecycleAwait(t, f, "exact archived sink merge before persistence", reached.Load)
-			a, _ := archiveRecord(t, f.s.store, f.stream2)
-			if archiveResolved(a) {
+			a, _ := intakefixture.ArchiveRecord(t, f.s.store, f.stream2)
+			if lifecycle.ArchiveResolved(a) {
 				t.Fatal("interruption did not precede archive merge persistence")
 			}
 			checkGroup(false)
@@ -128,16 +130,16 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			f.start(t)
 			lifecycleAwait(t, f, "all archived publications resolved after restart", func() bool {
 				for _, m := range archived {
-					a, ok := archiveRecord(t, f.s.store, m.stream)
-					if !ok || !archiveResolved(a) {
+					a, ok := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
+					if !ok || !lifecycle.ArchiveResolved(a) {
 						return false
 					}
 				}
 				authority, err := trace.OpenWorkgroupAuthority(f.s.current().Root, group)
-				must(t, err)
+				intakefixture.Must(t, err)
 				defer authority.Close()
 				_, rev, err := trace.ResolvedWorkgroups(authority)
-				must(t, err)
+				intakefixture.Must(t, err)
 				return rev == 1
 			})
 			checkGroup(true)
@@ -148,13 +150,13 @@ func TestDesignProductionArchivedOwnPullRequestsWithoutObservers(t *testing.T) {
 			f.start(t)
 			checkGroup(true)
 			for _, m := range archived {
-				a, _ := archiveRecord(t, f.s.store, m.stream)
+				a, _ := intakefixture.ArchiveRecord(t, f.s.store, m.stream)
 				old := before[m.stream]
-				if !archiveResolved(a) || a.ResolutionEvidence != "merged" || a.MergeCommit == "" || a.MergeReference != fmt.Sprintf("%s#%d", old.Publication.Upstream, old.Publication.PullRequest) || a.Publication != old.Publication || a.ArchivedAt != old.ArchivedAt || a.CleanedAt != old.CleanedAt {
+				if !lifecycle.ArchiveResolved(a) || a.ResolutionEvidence != "merged" || a.MergeCommit == "" || a.MergeReference != fmt.Sprintf("%s#%d", old.Publication.Upstream, old.Publication.PullRequest) || a.Publication != old.Publication || a.ArchivedAt != old.ArchivedAt || a.CleanedAt != old.CleanedAt {
 					t.Fatalf("archive identity or evidence changed: %+v", a)
 				}
 				gone, err := trace.WorkstreamTraceGone(f.s.current().Root, m.project, m.stream)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !gone {
 					t.Fatal("archived observation recreated deleted history")
 				}
@@ -172,19 +174,19 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	cfg, repo, host, refresh := ownPRFixture(t)
-	clock := &fixedClock{At: demoStart}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	refresh.s.options.Reconciliation.Now = clock.Now
 	p := deliverWithPullRequest(t, repo, cfg, 42)
-	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{stream}, demoStart, ownerActor, "fixture")
-	must(t, err)
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, quiet}}})
-	must(t, err)
+	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{fixturekit.Stream}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
+	intakefixture.Must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
+	intakefixture.Must(t, err)
 	defer store.Close()
 	refresh.s.store = store
-	a := runtime.Archive{Project: cfg.Project.ID, Workstream: stream, State: DeliveredState, ArchivedAt: demoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: p.Upstream, Fork: p.Fork, Branch: p.Branch, Commit: p.Commit, PullRequest: p.PullRequest}}
-	must(t, store.SetArchived(a))
-	docs, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	a := runtime.Archive{Project: cfg.Project.ID, Workstream: fixturekit.Stream, State: intake.DeliveredState, ArchivedAt: fixturekit.DemoStart, ResolutionEvidence: "unresolved", Publication: runtime.ArchivePublication{Upstream: p.Upstream, Fork: p.Fork, Branch: p.Branch, Commit: p.Commit, PullRequest: p.PullRequest}}
+	intakefixture.Must(t, store.SetArchived(a))
+	docs, err := trace.Read[trace.Document](repo, fixturekit.Stream)
+	intakefixture.Must(t, err)
 	for i, scenario := range []string{"failure", "earlier PR", "open", "closed", "missing", "merged"} {
 		host.FindErr = nil
 		host.Prs = nil
@@ -204,26 +206,26 @@ func TestArchivedOwnPullRequestCadenceAndExactIdentity(t *testing.T) {
 		if scenario != "missing" {
 			host.Prs = []pulls.PullRequest{pr}
 		}
-		must(t, refresh.Pass(ctx))
-		got, _ := archiveRecord(t, store, stream)
-		if archiveResolved(got) != (scenario == "merged") || host.Finds != i+1 {
+		intakefixture.Must(t, refresh.Pass(ctx))
+		got, _ := intakefixture.ArchiveRecord(t, store, fixturekit.Stream)
+		if lifecycle.ArchiveResolved(got) != (scenario == "merged") || host.Finds != i+1 {
 			t.Fatalf("%s: archive=%+v finds=%d", scenario, got, host.Finds)
 		}
 		clock.Advance(10*time.Minute - time.Nanosecond)
-		must(t, refresh.Pass(ctx))
+		intakefixture.Must(t, refresh.Pass(ctx))
 		if host.Finds != i+1 {
 			t.Fatalf("%s retried before cadence", scenario)
 		}
 		clock.Advance(time.Nanosecond)
 	}
-	must(t, (&workgroupResolver{s: refresh.s, repository: repo}).Pass(ctx))
+	intakefixture.Must(t, (&workgroupResolver{s: refresh.s, repository: repo}).Pass(ctx))
 	ids, rev, err := trace.ResolvedWorkgroups(repo)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !slices.Equal(ids, []config.WorkgroupID{g.ID}) || rev != 1 {
 		t.Fatalf("single member group=%v rev=%d", ids, rev)
 	}
-	after, err := trace.Read[trace.Document](repo, stream)
-	must(t, err)
+	after, err := trace.Read[trace.Document](repo, fixturekit.Stream)
+	intakefixture.Must(t, err)
 	if !slices.Equal(docs, after) {
 		t.Fatal("archived observation mutated retained member history")
 	}
@@ -232,31 +234,31 @@ func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) 
 	t.Parallel()
 	ctx := context.Background()
 	opts, clone := projectFixture(t)
-	host := &fakePulls{}
-	clock := &fixedClock{At: demoStart}
+	host := &fixturekit.FakePulls{}
+	clock := &fixturekit.FixedClock{At: fixturekit.DemoStart}
 	opts.PullRequests = host
 	opts.Reconciliation.Now = clock.Now
 	s, c := start(t, opts)
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	intakefixture.Must(t, err)
 	repo := s.sole().repository
 	member := config.WorkstreamID("w_00000000000000000000000000000891")
-	must(t, repo.CreateWorkstream(ctx, member, clock.Now(), ownerActor))
-	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, clock.Now(), ownerActor, "fixture")
-	must(t, err)
-	p := DeliveryPublication{Status: publicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: featureBranch(member), PullRequest: 42, URL: "https://example.invalid/pull/42"}
-	resolutionDocument(t, repo, member, publicationDocument, publicationPath, p)
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered", Revision: 1, Project: added.Project.ID, Workstream: member, At: clock.Now(), Actor: ownerActor, Cause: "fixture"}
-	_, err = repo.SetFeatureState(ctx, h, DeliveredState, "Owner-approved ready PR")
-	must(t, err)
-	must(t, s.refreshRuntime())
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, member, clock.Now(), intake.OwnerActor))
+	g, err := trace.CreateWorkgroup(ctx, repo, []config.WorkstreamID{member}, clock.Now(), intake.OwnerActor, "fixture")
+	intakefixture.Must(t, err)
+	p := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "dagger/dagger", Fork: "owner/dagger", Branch: intake.FeatureBranch(member), PullRequest: 42, URL: "https://example.invalid/pull/42"}
+	resolutionDocument(t, repo, member, delivery.PublicationDocument, delivery.PublicationPath, p)
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "delivered", Revision: 1, Project: added.Project.ID, Workstream: member, At: clock.Now(), Actor: intake.OwnerActor, Cause: "fixture"}
+	_, err = repo.SetFeatureState(ctx, h, intake.DeliveredState, "Owner-approved ready PR")
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, s.refreshRuntime())
 	_, err = c.Archive(ctx, member)
-	must(t, err)
+	intakefixture.Must(t, err)
 	await := func(phase string, ready func() bool) {
 		t.Helper()
 		changes, closeChanges := serviceChanges(t, s)
 		defer closeChanges()
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(intakefixture.DemoTimeout)
 		for !ready() {
 			if time.Now().After(deadline) {
 				t.Fatalf("timed out waiting for %s", phase)
@@ -266,37 +268,37 @@ func TestSingleMemberArchivedOwnPullRequestAfterCleanupAndRestart(t *testing.T) 
 		}
 	}
 	await("single member cleanup", func() bool {
-		a, ok := archiveRecord(t, s.store, member)
+		a, ok := intakefixture.ArchiveRecord(t, s.store, member)
 		return ok && !a.CleanedAt.IsZero()
 	})
-	before, _ := archiveRecord(t, s.store, member)
-	if archiveResolved(before) {
+	before, _ := intakefixture.ArchiveRecord(t, s.store, member)
+	if lifecycle.ArchiveResolved(before) {
 		t.Fatal("archive or cleanup supplied a merge")
 	}
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	host.Mu.Lock()
 	host.Prs = []pulls.PullRequest{{Number: 42, Merged: true, MergeCommit: "single-merge", State: "closed", Head: p.Branch, HeadRepository: p.Fork}}
 	host.Mu.Unlock()
 	s, c = start(t, opts)
 	await("single archived merge and resolution", func() bool {
-		a, _ := archiveRecord(t, s.store, member)
+		a, _ := intakefixture.ArchiveRecord(t, s.store, member)
 		ids, rev, err := trace.ResolvedWorkgroups(s.sole().repository)
-		must(t, err)
-		return archiveResolved(a) && rev == 1 && slices.Equal(ids, []config.WorkgroupID{g.ID})
+		intakefixture.Must(t, err)
+		return lifecycle.ArchiveResolved(a) && rev == 1 && slices.Equal(ids, []config.WorkgroupID{g.ID})
 	})
 	view, err := c.Status(ctx, member)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if view.DisplayState != "delivered (merged)" || view.Wait != "" {
 		t.Fatalf("single archived status=%+v", view)
 	}
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	s, _ = start(t, opts)
 	ids, rev, err := trace.ResolvedWorkgroups(s.sole().repository)
-	must(t, err)
-	a, _ := archiveRecord(t, s.store, member)
+	intakefixture.Must(t, err)
+	a, _ := intakefixture.ArchiveRecord(t, s.store, member)
 	gone, err := trace.WorkstreamTraceGone(s.current().Root, added.Project.ID, member)
-	must(t, err)
-	if !gone || !archiveResolved(a) || a.MergeCommit != "single-merge" || a.Publication != before.Publication || a.CleanedAt != before.CleanedAt || !slices.Equal(ids, []config.WorkgroupID{g.ID}) || rev != 1 {
+	intakefixture.Must(t, err)
+	if !gone || !lifecycle.ArchiveResolved(a) || a.MergeCommit != "single-merge" || a.Publication != before.Publication || a.CleanedAt != before.CleanedAt || !slices.Equal(ids, []config.WorkgroupID{g.ID}) || rev != 1 {
 		t.Fatalf("single member recovery: gone=%v archive=%+v groups=%v revision=%d", gone, a, ids, rev)
 	}
 }

@@ -7,8 +7,8 @@ import (
 )
 
 // CheckAcceptanceProblems checks only newly submitted criteria and acceptance
-// text. Prior text is exempt so revisions can carry legacy acceptance forward.
-// Stored document validation deliberately does not call this admission check.
+// text. Text carried over unchanged from the prior revision is exempt. Stored
+// document validation does not call it.
 func CheckAcceptanceProblems(spec, graph, priorSpec, priorGraph string) []string {
 	var out []string
 	priorCriteria := map[string]int{}
@@ -51,9 +51,7 @@ func CheckAcceptanceProblems(spec, graph, priorSpec, priorGraph string) []string
 }
 
 var (
-	checkExamples = regexp.MustCompile("\"([^\"]*)\"|“([^”]*)”|‘([^’]*)’|(?:^|[[:space:](])'([^'\\n]*)'|`([^`]*)`")
-	// A period separates sentences only before whitespace or at the end, so
-	// relative package paths and dotted package names stay with their scopes.
+	checkExamples     = regexp.MustCompile("\"([^\"]*)\"|“([^”]*)”|‘([^’]*)’|(?:^|[[:space:](])'([^'\\n]*)'|`([^`]*)`")
 	checkSentences    = regexp.MustCompile(`[!?;\n]+|\.(?:[[:space:]]|$)`)
 	checkNegation     = regexp.MustCompile(`\b(?:never|not|no|without|cannot|can't|mustn't|needn't|[a-z]+n['’]t|avoid\w*|disallow\w*|prohibit\w*|forbid\w*|reject\w*)\b`)
 	checkMention      = regexp.MustCompile(`\b(?:wording|validator|detector|reviewer|prompt|instructions|policy|guard|invalid|defect|examples?|quotes?|describes?|mentions?)\b`)
@@ -66,17 +64,12 @@ var (
 	checkGlobalScope  = regexp.MustCompile(`^(?:all|every|full|entire|complete|whole|project|repository|repo|workspace|codebase|ci|parallel|sequence|container)$`)
 )
 
-// wholeCheckObligation is intentionally narrow: uncertain prose is left to
-// planning judgment, rather than rejecting descriptions of the rule itself.
 func wholeCheckObligation(text string) bool {
 	text = checkExamples.ReplaceAllStringFunc(strings.ToLower(text), func(quoted string) string {
 		for _, content := range checkExamples.FindStringSubmatch(quoted)[1:] {
 			if content == "" {
 				continue
 			}
-			// A complete run or pass statement is quoted content. A command
-			// or subject alone remains part of the surrounding requirement:
-			// Run `dagger check` and `all checks` pass are obligations.
 			if checkRunning.MatchString(content) || checkPassing.MatchString(content) {
 				return " "
 			}
@@ -90,9 +83,6 @@ func wholeCheckObligation(text string) bool {
 		}
 		matches := append(checkPassing.FindAllStringIndex(sentence, -1), checkRunning.FindAllStringIndex(sentence, -1)...)
 		for _, match := range matches {
-			// A following package or test-set scope belongs to this check's
-			// subject. Project-wide and execution-location qualifiers do not
-			// narrow the tests, and another unscoped check remains an obligation.
 			scope := checkScope.FindStringSubmatch(sentence[match[1]:])
 			if scope == nil || checkGlobalScope.MatchString(scope[1]) {
 				return true

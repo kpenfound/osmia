@@ -13,29 +13,27 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/agent"
-	apiTypes "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/api"
 	checkrun "github.com/kpenfound/osmia/internal/checks"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// crossRepoWiringFixture is two active projects in one running service, each
-// with its own trace and workstream, wired so a real chief-of-staff turn
-// runs the production question tools over MCP against whichever repository
-// Options.Threads is called with: either project's own, for an ordinary
-// workstream's worker, or a cross-repo workgroup's own trace, for the
-// shared chief of staff that production's conversation path
-// resolves to.
 type crossRepoWiringFixture struct {
 	opts               Options
 	cfg                *config.Config
-	clock              *fixedClock
-	engine             *demoEngine
+	clock              *fixturekit.FixedClock
+	engine             *fixturekit.DemoEngine
 	ticks              chan time.Time
 	project1, project2 config.ProjectID
 	stream1, stream2   config.WorkstreamID
@@ -44,19 +42,14 @@ type crossRepoWiringFixture struct {
 	problems           []string
 }
 
-// newCrossRepoWiringFixture builds the two projects, each with one
-// workstream and one mason thread ready to ask a question. agents maps
-// every thread ID this test will claim a turn on, across both projects and
-// the shared chief-of-staff thread, to the agent ID that thread's turns are
-// recorded under.
 func newCrossRepoWiringFixture(t *testing.T, agents map[string]string) *crossRepoWiringFixture {
 	t.Helper()
 	home, err := os.MkdirTemp("", "wgw-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	opts := fixtureAt(t, home)
 	opts.Workstreams = nil
-	f := &crossRepoWiringFixture{opts: opts, project1: project, project2: otherProject, stream1: stream, stream2: otherStream, live: map[config.ProjectID]*trace.Repository{}}
+	f := &crossRepoWiringFixture{opts: opts, project1: fixturekit.Project, project2: otherProject, stream1: fixturekit.Stream, stream2: otherStream, live: map[config.ProjectID]*trace.Repository{}}
 	setup := intakefixture.NewWiringSetup(t, home, opts.Config, agents, func(r *trace.Repository) {
 		f.mu.Lock()
 		f.live[r.Project()] = r
@@ -68,14 +61,12 @@ func newCrossRepoWiringFixture(t *testing.T, agents map[string]string) *crossRep
 	return f
 }
 
-// settle sends several ticks, so every pass they caused has finished by the
-// time it returns.
 func (f *crossRepoWiringFixture) settle(t *testing.T, s *Service) {
 	t.Helper()
 	for range 8 {
 		select {
 		case f.ticks <- f.clock.Now():
-		case <-time.After(demoTimeout):
+		case <-time.After(intakefixture.DemoTimeout):
 			s.Close()
 			t.Fatal("service did not finish its pass")
 		}
@@ -92,46 +83,46 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	ctx := context.Background()
 	f := newCrossRepoWiringFixture(t, map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff})
 	f.engine.Turns["*"] = func(_ context.Context, req agent.Request, _ *agent.Turn, _ *mcp.ClientSession) (*agent.Result, error) {
-		return questionResult(req, "session-chief", "The agreed work continues."), nil
+		return intakefixture.QuestionResult(req, "session-chief", "The agreed work continues."), nil
 	}
 	s, err := Start(ctx, f.opts)
-	must(t, err)
-	defer func() { must(t, s.Close()) }()
-	id, api := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatal(api)
+	intakefixture.Must(t, err)
+	defer func() { intakefixture.Must(t, s.Close()) }()
+	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
-	leader := leastWorkstream([]config.WorkstreamID{f.stream1, f.stream2})
+	leader := lifecycle.LeastWorkstream([]config.WorkstreamID{f.stream1, f.stream2})
 	project := f.project1
 	if leader == f.stream2 {
 		project = f.project2
 	}
 	repo, err := s.repository(project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	const source config.WorkstreamID = "w_00000000000000000000000000000000"
 	if source >= leader {
 		t.Fatal("retained source must sort before the dispatch leader")
 	}
-	must(t, repo.CreateWorkstream(ctx, source, f.clock.Now(), ownerActor))
-	must(t, repo.RetractChiefOfStaff(ctx, source))
-	must(t, repo.RecordCrossRepoWorkgroup(ctx, source, id, f.clock.Now(), ownerActor, "design-start"))
+	intakefixture.Must(t, repo.CreateWorkstream(ctx, source, f.clock.Now(), intake.OwnerActor))
+	intakefixture.Must(t, repo.RetractChiefOfStaff(ctx, source))
+	intakefixture.Must(t, repo.RecordCrossRepoWorkgroup(ctx, source, id, f.clock.Now(), intake.OwnerActor, "design-start"))
 	for lifetime := 0; lifetime < 2; lifetime++ {
 		if lifetime > 0 {
-			must(t, s.Close())
+			intakefixture.Must(t, s.Close())
 			s, err = Start(ctx, f.opts)
-			must(t, err)
+			intakefixture.Must(t, err)
 		}
 		c := NewClient(s.Socket())
 		sent, err := c.Send(ctx, leader, "Report the workgroup's status.")
-		must(t, err)
+		intakefixture.Must(t, err)
 		wait, closeWait := serviceChanges(t, s)
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(intakefixture.DemoTimeout)
 		for {
 			f.settle(t, s)
 			conversation, err := c.Conversation(ctx, leader)
-			must(t, err)
-			if slices.ContainsFunc(conversation.Entries, func(e ConversationEntry) bool {
-				return e.Turn == sent.Turn && e.Kind == "response" && e.State == TurnDone && e.Text == "The agreed work continues."
+			intakefixture.Must(t, err)
+			if slices.ContainsFunc(conversation.Entries, func(e api.ConversationEntry) bool {
+				return e.Turn == sent.Turn && e.Kind == "response" && e.State == api.TurnDone && e.Text == "The agreed work continues."
 			}) {
 				break
 			}
@@ -145,55 +136,39 @@ func TestWorkgroupChiefDispatchVisitsLeaderAfterRetainedSourceLocatorAcrossResta
 	}
 }
 
-// repositories waits for both projects' own, now-live repository instances:
-// Options.Threads records every repository it is called with, including a
-// cross-repo workgroup's own trace on the calls the conversation path
-// makes, so this polls for the two real projects' own entries by ID rather
-// than reading a fixed number of calls off a channel.
 func (f *crossRepoWiringFixture) repositories(t *testing.T, s *Service) (repo1, repo2 *trace.Repository) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
-	for {
-		f.mu.Lock()
-		repo1, repo2 = f.live[f.project1], f.live[f.project2]
-		f.mu.Unlock()
-		if repo1 != nil && repo2 != nil {
-			return repo1, repo2
-		}
-		if time.Now().After(deadline) {
+	defer func() {
+		if t.Failed() {
 			s.Close()
-			t.Fatal("both projects' own repositories were never opened")
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	}()
+	intakefixture.Eventually(t, "both projects' own repositories were never opened", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		repo1, repo2 = f.live[f.project1], f.live[f.project2]
+		return repo1 != nil && repo2 != nil
+	})
+	return repo1, repo2
 }
 
-// TestCrossRepoWorkgroupWiringAcrossARestart is the service-level two-repo
-// test spec#4's and spec#5's dispatch acceptance rests on: a role in each
-// member asks, both questions reach the one shared chief thread (through
-// production event delivery, never a thread of either member's own
-// repository), the chief's answer tool runs against the workgroup's own
-// trace and resumes each asker in its own repo. A real service restart in
-// the middle drops and duplicates nothing. The chief's escalate,
-// relay_ruling and the owner's inbox for a cross-repo workgroup belong to
-// unit wg-inbox, built on this dispatch; they are not exercised here.
 func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	const question1, question2 = "Where does the server store chunks?", "Does the client ever see the offset?"
 	const answer1, answer2 = "In a content-addressed store.", "No, only the server does."
 
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": demoAgent, "thread_mason2": "agent_mason2"}
+	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": intakefixture.DemoAgent, "thread_mason2": "agent_mason2"}
 	f := newCrossRepoWiringFixture(t, agents)
 	opts, clock := f.opts, f.clock
 
-	ask := func(question string) demoTurn {
+	ask := func(question string) intakefixture.DemoTurn {
 		return func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			out, err := callTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
+			out, err := intakefixture.CallTool(ctx, tools, questions.AskTool, map[string]any{"question": question})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("%s ask: %s %v", req.Name, out, err)
 			}
-			return questionResult(req, "session-"+req.Name, "Asked"), nil
+			return intakefixture.QuestionResult(req, "session-"+req.Name, "Asked"), nil
 		}
 	}
 	f.engine.Turns["build1"] = ask(question1)
@@ -207,10 +182,8 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		needAnswer1 := !answered1 && strings.Contains(req.Prompt, "asked by the mason: "+question1)
 		flagMu.Unlock()
 		acted := false
-		// Neither member is the workgroup's own synthetic host, so each
-		// member's own question must be named qualified.
 		if needAnswer2 {
-			out, err := callTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream2) + ":1", "text": answer2, "citations": []string{"charter#1"}})
+			out, err := intakefixture.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream2) + ":1", "text": answer2, "citations": []string{"charter#1"}})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("answer2: %s %v", out, err)
 			}
@@ -220,7 +193,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 			acted = true
 		}
 		if needAnswer1 {
-			out, err := callTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream1) + ":1", "text": answer1, "citations": []string{"charter#1"}})
+			out, err := intakefixture.CallTool(ctx, tools, questions.AnswerTool, map[string]any{"question": string(f.stream1) + ":1", "text": answer1, "citations": []string{"charter#1"}})
 			if err != nil || !strings.Contains(out, `"recorded":true`) {
 				f.problem("answer1: %s %v", out, err)
 			}
@@ -230,20 +203,20 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 			acted = true
 		}
 		if acted {
-			return questionResult(req, "session-chief", "Handled"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
 		}
 		if strings.Contains(req.Prompt, "asked by the mason: "+question1) || strings.Contains(req.Prompt, "asked by the mason: "+question2) {
-			return questionResult(req, "session-chief", "Nothing further"), nil
+			return intakefixture.QuestionResult(req, "session-chief", "Nothing further"), nil
 		}
 		f.problem("unexpected chief-of-staff turn:\n%s", req.Prompt)
-		return questionResult(req, "session-chief", "Nothing to do"), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 	}
 	f.engine.Turns[questions.TurnID("1")] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		return questionResult(req, "session-"+req.Name, "Continued"), nil
+		return intakefixture.QuestionResult(req, "session-"+req.Name, "Continued"), nil
 	}
 
 	s, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	closed := false
 	defer func() {
 		if !closed {
@@ -252,20 +225,17 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	}()
 	repo1, repo2 := f.repositories(t, s)
 
-	id, api := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatalf("draft workgroup: %v", api)
+	id, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 
-	// Each member's own worker asks its own question: a notice is recorded
-	// on its own trace, which production event delivery must carry to the
-	// shared chief-of-staff thread, since this workgroup spans two repos.
 	_, err = repo1.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_build1", Revision: 1, Project: f.project1, Workstream: f.stream1, At: clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "test"},
-		AgentID: demoAgent, ThreadID: "thread_mason", TurnID: "build1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: build1"})
-	must(t, err)
+		AgentID: intakefixture.DemoAgent, ThreadID: "thread_mason", TurnID: "build1", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: build1"})
+	intakefixture.Must(t, err)
 	_, err = repo2.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_build2", Revision: 1, Project: f.project2, Workstream: f.stream2, At: clock.Now(), Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "test"},
 		AgentID: "agent_mason2", ThreadID: "thread_mason2", TurnID: "build2", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"}, SystemPrompt: "You are the mason.", Prompt: "Work: build2"})
-	must(t, err)
+	intakefixture.Must(t, err)
 
 	f.settle(t, s)
 	clock.Advance(time.Minute)
@@ -281,7 +251,7 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		}
 		return true
 	}
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for !bothAnswered() {
 		select {
 		case f.ticks <- clock.Now():
@@ -296,8 +266,6 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		}
 	}
 
-	// Neither member's own repository ever got a chief-of-staff thread of
-	// its own: the shared thread lives only in the workgroup's own trace.
 	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread: %v", err)
 	}
@@ -305,8 +273,6 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread: %v", err)
 	}
 
-	// Each answer resumes its own asker, in its own repo, with the answer's
-	// own text: nothing leaked across members.
 	resumedWith := func(repo *trace.Repository, stream config.WorkstreamID, agentID, text string) bool {
 		th, err := repo.Thread(stream, agentID)
 		if err != nil {
@@ -315,15 +281,13 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		i := slices.IndexFunc(th.Turns, func(q trace.QueuedTurn) bool { return q.Request.TurnID == questions.TurnID("1") })
 		return i >= 0 && strings.Contains(th.Turns[i].Request.Prompt, text)
 	}
-	// The answer tools must return to the scripted chief before restart
-	// cancels its turn, even when their durable effects are already visible.
 	answersReturned := func() bool {
 		flagMu.Lock()
 		defer flagMu.Unlock()
 		return answered1 && answered2
 	}
-	deadline = time.Now().Add(demoTimeout)
-	for !(resumedWith(repo1, f.stream1, demoAgent, answer1) && resumedWith(repo2, f.stream2, "agent_mason2", answer2) && answersReturned()) {
+	deadline = time.Now().Add(intakefixture.DemoTimeout)
+	for !(resumedWith(repo1, f.stream1, intakefixture.DemoAgent, answer1) && resumedWith(repo2, f.stream2, "agent_mason2", answer2) && answersReturned()) {
 		select {
 		case f.ticks <- clock.Now():
 		case <-time.After(20 * time.Millisecond):
@@ -337,12 +301,10 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		}
 	}
 
-	// Restart: both answers are already delivered, and nothing about the
-	// recorded trace state is lost or duplicated.
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	closed = true
 	s2, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	closed2 := false
 	defer func() {
 		if !closed2 {
@@ -351,19 +313,19 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	}()
 	repo1b, repo2b := f.repositories(t, s2)
 
-	th1Before, err := repo1b.Thread(f.stream1, demoAgent)
-	must(t, err)
+	th1Before, err := repo1b.Thread(f.stream1, intakefixture.DemoAgent)
+	intakefixture.Must(t, err)
 	th2Before, err := repo2b.Thread(f.stream2, "agent_mason2")
-	must(t, err)
+	intakefixture.Must(t, err)
 	before1, before2 := slices.Clone(th1Before.Turns), slices.Clone(th2Before.Turns)
 
 	clock.Advance(time.Minute)
 	f.settle(t, s2)
 
-	th1After, err := repo1b.Thread(f.stream1, demoAgent)
-	must(t, err)
+	th1After, err := repo1b.Thread(f.stream1, intakefixture.DemoAgent)
+	intakefixture.Must(t, err)
 	th2After, err := repo2b.Thread(f.stream2, "agent_mason2")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(th1After.Turns) != len(before1) {
 		t.Fatalf("member1's own thread duplicated a turn across the restart: before=%+v after=%+v", before1, th1After.Turns)
 	}
@@ -371,12 +333,12 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 		t.Fatalf("member2's own thread duplicated a turn across the restart: before=%+v after=%+v", before2, th2After.Turns)
 	}
 	q1After, err := repo1b.Questions(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if q1After[0].State != trace.QuestionAnswered || q1After[0].Ruling == nil || q1After[0].Ruling.ReturnedAnswer != answer1 {
 		t.Fatalf("member1's question regressed across the restart: %+v", q1After[0])
 	}
 	q2After, err := repo2b.Questions(f.stream2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if q2After[0].State != trace.QuestionAnswered || q2After[0].Ruling == nil || q2After[0].Ruling.ReturnedAnswer != answer2 {
 		t.Fatalf("member2's question regressed across the restart: %+v", q2After[0])
 	}
@@ -389,14 +351,9 @@ func TestCrossRepoWorkgroupWiringAcrossARestart(t *testing.T) {
 	_ = id
 }
 
-// driveTicksUntil sends ticks to f's reconciliation loop, retrying on a
-// short timeout, until condition holds or demoTimeout passes: the pass that
-// this test blocks never finishes, so a tick aimed at it is never received,
-// and only a send that keeps retrying lets the other project's own loop,
-// and this one before it blocks, still make progress.
 func (f *crossRepoWiringFixture) driveTicksUntil(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(demoTimeout)
+	deadline := time.Now().Add(intakefixture.DemoTimeout)
 	for !condition() {
 		select {
 		case f.ticks <- f.clock.Now():
@@ -408,19 +365,10 @@ func (f *crossRepoWiringFixture) driveTicksUntil(t *testing.T, condition func() 
 	}
 }
 
-// TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRuns
-// covers the second acceptance item: while the conversation path is inside a model turn on the shared
-// chief-of-staff thread, holding the workgroup's own trace open the whole
-// time, a second owner message to the other member and a conversation read
-// of the first still answer within the service's own read-latency bound.
-// Were the workgroup trace's exclusive lock, the OS flock or the
-// in-process mutex workgroupProcessLock serializes it behind, held across
-// that call, either request would wait for the blocked turn to finish
-// instead (acquireWorkgroupTrace, workgroup_trace.go).
 func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRuns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": demoAgent, "thread_mason2": "agent_mason2"}
+	agents := map[string]string{trace.ChiefOfStaff: trace.ChiefOfStaff, "thread_mason": intakefixture.DemoAgent, "thread_mason2": "agent_mason2"}
 	f := newCrossRepoWiringFixture(t, agents)
 	opts := f.opts
 
@@ -435,22 +383,20 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return questionResult(req, "session-chief", "Handled"), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Handled"), nil
 	}
 
 	s, err := Start(ctx, opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { s.Close() })
 	c := NewClient(s.Socket())
 	t.Cleanup(func() { c.Close() })
 	f.repositories(t, s)
 
-	if _, api := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); api != nil {
-		t.Fatalf("draft workgroup: %v", api)
+	if _, apiFault := s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2}); apiFault != nil {
+		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 
-	// The owner's first message to member1 creates the shared chief thread
-	// and enqueues its first turn, which the fake engine above blocks.
 	if _, err := c.Send(ctx, f.stream1, "First message"); err != nil {
 		t.Fatalf("send first message: %v", err)
 	}
@@ -465,16 +411,11 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 	}
 	f.driveTicksUntil(t, startedFired)
 
-	// While that turn is blocked inside reconciler.Apply, holding the
-	// workgroup's own trace open, a second owner message to member2 and a
-	// conversation read of member1 must each still answer within the service's
-	// read-latency bound. The turn stays held until the test ends, so a request
-	// queued behind it would never return.
 	begin := time.Now()
 	if _, err := c.Send(ctx, f.stream2, "Second message, to the other member"); err != nil {
 		t.Fatalf("second owner message while the chief turn was held: %v", err)
 	}
-	if elapsed := time.Since(begin); elapsed > coreReadBound {
+	if elapsed := time.Since(begin); elapsed > time.Second {
 		t.Fatalf("owner message to the other member took %s while the chief turn was held", elapsed)
 	}
 	begin = time.Now()
@@ -482,7 +423,7 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 	if err != nil {
 		t.Fatalf("conversation read while the chief turn was held: %v", err)
 	}
-	if elapsed := time.Since(begin); elapsed > coreReadBound {
+	if elapsed := time.Since(begin); elapsed > time.Second {
 		t.Fatalf("conversation read took %s while the chief turn was held", elapsed)
 	}
 	if len(conv.Entries) == 0 || conv.Entries[0].Text != "First message" {
@@ -490,30 +431,25 @@ func TestOwnerMessageAndConversationReadStayResponsiveWhileAWorkgroupChiefTurnRu
 	}
 }
 
-// TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart
-// verifies completed production sealing and restart preserve one workgroup
-// and shared chief, with no member wrapping or duplicate conversations.
 func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *testing.T) {
 	t.Parallel()
 	f := newCrossRepoRatifyFixture(t)
 	defer f.stop(t)
 	ctx := context.Background()
 
-	// Both registered upstreams are real local bare repos for the production
-	// fetch, branch and seal operations.
 	main1 := f.upstream(t)
 	home := filepath.Dir(f.clone)
 	clone2 := filepath.Join(home, "clone2")
 	bare2 := filepath.Join(home, "remotes", "owner", "other.git")
-	must(t, os.MkdirAll(filepath.Dir(bare2), 0700))
-	demoGit(t, home, "-C", clone2, "branch", "-M", "main")
-	demoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone2, bare2)
-	demoGit(t, home, "-C", clone2, "remote", "add", "upstream", bare2)
-	main2 := strings.TrimSpace(demoGit(t, home, "-C", bare2, "rev-parse", "refs/heads/main"))
+	intakefixture.Must(t, os.MkdirAll(filepath.Dir(bare2), 0700))
+	fixturekit.DemoGit(t, home, "-C", clone2, "branch", "-M", "main")
+	fixturekit.DemoGit(t, home, "clone", "--quiet", "--bare", "--no-hardlinks", clone2, bare2)
+	fixturekit.DemoGit(t, home, "-C", clone2, "remote", "add", "upstream", bare2)
+	main2 := strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", bare2, "rev-parse", "refs/heads/main"))
 
-	id, api := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatalf("draft workgroup: %v", api)
+	id, apiFault := f.s.DraftWorkgroup(ctx, []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatalf("draft workgroup: %v", apiFault)
 	}
 	packets := f.awaitDecisionPackets(t)
 	if _, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, packets[0].ProjectSpecRevision); err != nil {
@@ -524,14 +460,14 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Helper()
 		wait, closeWait := serviceChanges(t, f.s)
 		defer closeWait()
-		deadline := time.Now().Add(demoTimeout)
+		deadline := time.Now().Add(intakefixture.DemoTimeout)
 		var decision trace.GroupApproval
 		for {
 			repo, err := f.s.repository(f.project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			var found bool
 			decision, found, err = repo.GroupApprovalOf(f.stream1)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if found && decision.Complete {
 				break
 			}
@@ -539,11 +475,11 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 				var diagnostic strings.Builder
 				for _, packet := range packets {
 					r, err := f.s.repository(packet.Project)
-					must(t, err)
+					intakefixture.Must(t, err)
 					state, err := r.Workflow(packet.Workstream, trace.FeatureSubject)
-					must(t, err)
+					intakefixture.Must(t, err)
 					ops, err := r.Operations(packet.Workstream)
-					must(t, err)
+					intakefixture.Must(t, err)
 					fmt.Fprintf(&diagnostic, "member=%s state=%s operations=%+v\n", packet.Workstream, state.Value, ops)
 				}
 				t.Fatalf("group sealing did not complete: found=%v decision=%+v\n%s", found, decision, diagnostic.String())
@@ -555,17 +491,17 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		}
 		for i, packet := range packets {
 			repo, err := f.s.repository(packet.Project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			approval, found, err := repo.GroupApprovalOf(packet.Workstream)
-			must(t, err)
-			if !found || !equalJSONTest(approval, decision) || !slices.ContainsFunc(decision.Members, func(pin trace.GroupMemberApproval) bool {
+			intakefixture.Must(t, err)
+			if !found || !intakefixture.EqualJSONTest(approval, decision) || !slices.ContainsFunc(decision.Members, func(pin trace.GroupMemberApproval) bool {
 				return pin.Project == packet.Project && pin.Workstream == packet.Workstream && pin.Spec == packet.Packet.Revision.Spec && pin.Plan == packet.Packet.Revision.Plan
 			}) {
 				t.Fatalf("member %s lost its exact approval pins: %+v", packet.Workstream, approval)
 			}
 			sealed, doc, found, err := seal.Latest(repo, packet.Workstream)
-			must(t, err)
-			if !found || doc.Revision != 1 || sealed.Revision != packet.Packet.Revision || sealed.Base.Remote != "upstream" || sealed.Base.Branch != "main" || sealed.Base.Commit != [2]string{main1, main2}[i] || sealed.Branch != featureBranch(packet.Workstream) {
+			intakefixture.Must(t, err)
+			if !found || doc.Revision != 1 || sealed.Revision != packet.Packet.Revision || sealed.Base.Remote != "upstream" || sealed.Base.Branch != "main" || sealed.Base.Commit != [2]string{main1, main2}[i] || sealed.Branch != intake.FeatureBranch(packet.Workstream) {
 				t.Fatalf("member %s has no completed pinned seal: %+v document=%+v found=%v", packet.Workstream, sealed, doc, found)
 			}
 		}
@@ -573,72 +509,61 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	}
 	completed := checkCompletedSeals(t)
 
-	// Right after the seal: the workgroup record exists in the
-	// workgroup-level trace, naming the host and both real members, read
-	// from either member's own pointer.
 	checkWorkgroupRecord := func(t *testing.T) {
 		t.Helper()
 		repo1, err := f.s.repository(f.project)
-		must(t, err)
+		intakefixture.Must(t, err)
 		repo2, err := f.s.repository(f.project2)
-		must(t, err)
+		intakefixture.Must(t, err)
 		gid1, err := repo1.CrossRepoWorkgroupOf(f.stream1)
-		must(t, err)
+		intakefixture.Must(t, err)
 		gid2, err := repo2.CrossRepoWorkgroupOf(f.stream2)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if gid1 != id || gid2 != id {
 			t.Fatalf("members do not both point to the sealed workgroup: member1=%s member2=%s want=%s", gid1, gid2, id)
 		}
 		_, g, found, err := repo1.CrossRepoProjectSpec(id)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if !found || len(g.Members) != 3 || g.Members[1] != f.stream1 || g.Members[2] != f.stream2 {
 			t.Fatalf("workgroup record is not exactly the host and the two real members: %+v found=%v", g, found)
 		}
 	}
 	checkWorkgroupRecord(t)
 
-	// The shared chief-of-staff thread lives only in the workgroup-level
-	// trace: the owner's first message to each member, through the real
-	// production path, gives neither member's own repository a thread of
-	// its own.
 	repo1, err := f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	repo2, err := f.s.repository(f.project2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	sent1, err := f.c.Send(ctx, f.stream1, "Where does the acknowledgment live?")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 	sent2, err := f.c.Send(ctx, f.stream2, "Does the client ever see the offset?")
-	must(t, err)
+	intakefixture.Must(t, err)
 	if _, err := repo2.ChiefOfStaffThread(f.stream2); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member2's own repository got a chief-of-staff thread of its own: %v", err)
 	}
 
-	// Check and review activity belongs to the member trace even though its
-	// conversation lives in the shared workgroup trace.
 	for i, member := range []struct {
 		repo   *trace.Repository
 		stream config.WorkstreamID
 	}{{repo1, f.stream1}, {repo2, f.stream2}} {
 		unit := fmt.Sprintf("feed-member-%d", i)
-		feedDocument(t, member.repo, member.stream, checkSelectionDocument(unit, 1), checkSelectionPath(unit, 1), 1, demoStart, UnitCheckSelection{Unit: unit, Run: 1, StartedAt: demoStart, Selection: checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set")})
-		feedDocument(t, member.repo, member.stream, finalReportDocument, finalReportPath, 1, demoStart, FinalReport{Review: i + 1, Outcome: finalFailed, Failure: unit})
+		fixturekit.FeedDocument(t, member.repo, member.stream, execution.CheckSelectionDocument(unit, 1), execution.CheckSelectionPath(unit, 1), 1, fixturekit.DemoStart, execution.UnitCheckSelection{Unit: unit, Run: 1, StartedAt: fixturekit.DemoStart, Selection: checkrun.FullSelection("unconfigured", "OPENROUTER_API_KEY is not set")})
+		fixturekit.FeedDocument(t, member.repo, member.stream, delivery.FinalReportDocument, delivery.FinalReportPath, 1, fixturekit.DemoStart, api.FinalReport{Review: i + 1, Outcome: delivery.FinalFailed, Failure: unit})
 	}
 
-	// Member conversation addresses resolve to the shared thread. Member feeds
-	// contain only their own activity; the workgroup feed owns both messages.
 	checkShared := func(t *testing.T) {
 		t.Helper()
 		for _, m := range []config.WorkstreamID{f.stream1, f.stream2} {
 			conv, err := f.c.Conversation(ctx, m)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if len(conv.Entries) != 2 || conv.Entries[0].Turn != sent1.Turn || conv.Entries[1].Turn != sent2.Turn {
 				t.Fatalf("workstream %s's shared conversation: %+v", m, conv.Entries)
 			}
-			var feed FeedResponse
-			must(t, f.c.Do(ctx, "GET", Prefix+"/feed/"+string(m), nil, &feed))
+			var feed api.FeedResponse
+			intakefixture.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/feed/"+string(m), nil, &feed))
 			unit := "feed-member-0"
 			review := 1
 			if m == f.stream2 {
@@ -670,8 +595,8 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 				}
 			}
 		}
-		var shared apiTypes.WorkgroupFeedResponse
-		must(t, f.c.Do(ctx, "GET", Prefix+"/workgroups/"+string(id)+"/feed", nil, &shared))
+		var shared api.WorkgroupFeedResponse
+		intakefixture.Must(t, f.c.Do(ctx, "GET", api.Prefix+"/workgroups/"+string(id)+"/feed", nil, &shared))
 		var sawFirst, sawSecond bool
 		for _, e := range shared.Entries {
 			sawFirst = sawFirst || e.Turn == sent1.Turn
@@ -686,32 +611,28 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 	}
 	checkShared(t)
 
-	// Restart: ensureWorkgroups and ensureChiefsOfStaff both run again on
-	// start, and must still exclude a cross-repo member.
 	f.stop(t)
 	f.start(t)
-	if after := checkCompletedSeals(t); !equalJSONTest(after, completed) {
+	if after := checkCompletedSeals(t); !intakefixture.EqualJSONTest(after, completed) {
 		t.Fatalf("restart changed the completed approval: before=%+v after=%+v", completed, after)
 	}
 
 	repo1, err = f.s.repository(f.project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	repo2, err = f.s.repository(f.project2)
-	must(t, err)
+	intakefixture.Must(t, err)
 
-	// Neither member gained its own one-workstream workgroup.
 	groups1, _, err := trace.Workgroups(repo1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(groups1) != 0 {
 		t.Fatalf("member1's own repository was wrapped in its own one-workstream workgroup: %+v", groups1)
 	}
 	groups2, _, err := trace.Workgroups(repo2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(groups2) != 0 {
 		t.Fatalf("member2's own repository was wrapped in its own one-workstream workgroup: %+v", groups2)
 	}
 
-	// Neither member gained a chief-of-staff thread of its own.
 	if _, err := repo1.ChiefOfStaffThread(f.stream1); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("member1's own repository got a chief-of-staff thread after restart: %v", err)
 	}
@@ -719,9 +640,6 @@ func TestCrossRepoWorkgroupFromRealSealExcludesStartupWrappingAcrossARestart(t *
 		t.Fatalf("member2's own repository got a chief-of-staff thread after restart: %v", err)
 	}
 
-	// Nothing is duplicated: the workgroup record is still exactly the
-	// host and the two real members. The shared conversation and workgroup
-	// feed retain the same two messages, and member feeds retain only activity.
 	checkWorkgroupRecord(t)
 	checkShared(t)
 }

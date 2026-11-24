@@ -168,7 +168,6 @@ func Objections(n int) string {
 	return strconv.Itoa(n) + " objections"
 }
 
-// stand agrees the verb with a count of objections.
 func stand(n int) string {
 	if n == 1 {
 		return "stands"
@@ -184,8 +183,6 @@ func PacketRound(path string) (int, bool) { return fileRound(path, packetName) }
 // holds, and whether it is one.
 func RatificationRound(path string) (int, bool) { return fileRound(path, ratificationName) }
 
-// fileRound returns the round of the shed file shed/round-<n>/<name>.json a
-// path names, and whether it names one.
 func fileRound(path, name string) (int, bool) {
 	rest, ok := strings.CutPrefix(path, "shed/round-")
 	if !ok {

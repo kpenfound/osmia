@@ -7,8 +7,6 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 )
 
-// pollOrder resumes after the last admitted stream so a full pool cannot
-// repeatedly admit only the beginning of a large scan.
 func pollOrder[T any](ctx context.Context, s *Controller, kind string, items []T, stream func(T) config.WorkstreamID) []T {
 	if s.PollCursor == nil {
 		return items

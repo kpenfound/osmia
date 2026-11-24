@@ -137,9 +137,6 @@ func normalize(p Plan) Plan {
 	return out
 }
 
-// parseCriterionProofs reads a version 1 plan, whose units named a proof for
-// each criterion they addressed, as a Version plan: each addressed criterion
-// becomes a cited criterion and its proof an acceptance item.
 func parseCriterionProofs(data []byte) (Plan, error) {
 	var old struct {
 		Version int `json:"version"`

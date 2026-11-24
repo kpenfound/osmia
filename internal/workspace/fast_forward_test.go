@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// featureCommits makes n commits in the clone on top of from, without moving
-// any branch, and returns the last. The clone holds from as it fetched it.
 func (f fixture) featureCommits(t *testing.T, from string, n int) string {
 	t.Helper()
 	git(t, "-C", f.clone, "checkout", "--quiet", "--detach", from)
@@ -51,7 +49,6 @@ func TestFastForwardMovesTheBaseToTheCommitWithoutAMergeCommit(t *testing.T) {
 	if n := strings.Fields(git(t, "-C", f.upstream, "rev-list", base+".."+tip)); len(n) != 3 {
 		t.Fatalf("the history between the old base and the new tip is %d commits, want the feature's 3", len(n))
 	}
-	// Landing the same commit again is a push of what is already there.
 	if again, err := f.provider.FastForward(ctx, "upstream", tip, "main"); err != nil || again.Outcome != FastForwardPushed {
 		t.Fatalf("landing what the base holds is %+v: %v", again, err)
 	}
@@ -81,7 +78,6 @@ func TestFastForwardReportsAMovedBaseAndMovesNothing(t *testing.T) {
 			t.Fatalf("a rejected push moved the base to %s, want %s", got, moved)
 		}
 	}
-	// A commit the base already passed is not forced over it either.
 	if result, err := f.provider.FastForward(ctx, "upstream", base, "main"); err != nil || result.Outcome != FastForwardBaseMoved {
 		t.Fatalf("pushing an ancestor of the base is %+v: %v", result, err)
 	}
@@ -125,8 +121,6 @@ func TestFastForwardCallsAnythingWithoutAVerdictUnknown(t *testing.T) {
 	}
 	tip := f.featureCommits(t, base, 1)
 
-	// The push goes where nothing answers: a dropped connection or a host that
-	// cannot be read says nothing of the upstream.
 	git(t, "-C", f.clone, "config", "remote.upstream.pushurl", filepath.Join(filepath.Dir(f.upstream), "gone.git"))
 	result, err := f.provider.FastForward(ctx, "upstream", tip, "main")
 	if err == nil || result.Outcome != FastForwardUnknown {
@@ -137,7 +131,6 @@ func TestFastForwardCallsAnythingWithoutAVerdictUnknown(t *testing.T) {
 		t.Fatalf("the base moved to %s", got)
 	}
 
-	// A cancellation is no verdict either, and nothing was pushed by it.
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	if result, err := f.provider.FastForward(cancelled, "upstream", tip, "main"); err == nil || result.Outcome != FastForwardUnknown {

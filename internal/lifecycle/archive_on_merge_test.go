@@ -6,82 +6,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 const autoArchivePullRequest = 7
 
-// autoArchiveFixture is one project's trace and runtime store with a service
-// view over them, and the fake pull request host the service would look up.
 type autoArchiveFixture struct {
 	t     *testing.T
 	cfg   *config.Config
 	repo  *trace.Repository
 	store *runtime.Store
 	s     *Service
-	host  *fakePulls
+	host  *fixturekit.FakePulls
 }
 
 func newAutoArchiveFixture(t *testing.T, key string) *autoArchiveFixture {
 	t.Helper()
 	opts, cfg := conversationFixture(t, key)
-	host := &fakePulls{}
+	host := &fixturekit.FakePulls{}
 	opts.PullRequests = host
 	repo, err := trace.Open(cfg.Root, cfg.Project)
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { repo.Close() })
-	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {stream, quiet}}})
-	must(t, err)
+	store, _, err := runtime.Open(runtime.Inputs{Config: cfg, Workstreams: map[config.ProjectID][]config.WorkstreamID{cfg.Project.ID: {fixturekit.Stream, fixturekit.Quiet}}})
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { store.Close() })
 	s := &Service{cfg: cfg, store: store, options: opts}
 	s.setSole(runtimeFor(repo))
 	return &autoArchiveFixture{t: t, cfg: cfg, repo: repo, store: store, s: s, host: host}
 }
 
-// pass runs the archiver once, with whatever boundary hook is installed now.
 func (f *autoArchiveFixture) pass() error {
 	return (&lifecycle.MergeArchiver{S: f.s.lifecycle(), Repository: f.repo}).Pass(context.Background())
 }
 
 func (f *autoArchiveFixture) mustPass() {
 	f.t.Helper()
-	must(f.t, f.pass())
+	intakefixture.Must(f.t, f.pass())
 }
 
-// deliver records the stream delivered with an open pull request numbered pr.
-func (f *autoArchiveFixture) deliver(pr int) DeliveryPublication {
+func (f *autoArchiveFixture) deliver(pr int) api.DeliveryPublication {
 	f.t.Helper()
-	return fixturekit.RecordDeliveredPublication(f.t, f.repo, f.cfg, stream, featureBranch(stream), pr, foremanActor)
+	return fixturekit.RecordDeliveredPublication(f.t, f.repo, f.cfg, fixturekit.Stream, intake.FeatureBranch(fixturekit.Stream), pr, service.TestForemanActor)
 }
 
 func (f *autoArchiveFixture) outcome(pr int, outcome string) {
 	f.t.Helper()
-	resolutionDocument(f.t, f.repo, stream, ownPullRequestOutcomeDocument, ownPullRequestOutcomePath, ownPullRequestOutcome{PullRequest: pr, Outcome: outcome, MergeCommit: "merge-commit"})
+	resolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.OwnPullRequestOutcomeDocument, delivery.OwnPullRequestOutcomePath, delivery.OwnPullRequestOutcome{PullRequest: pr, Outcome: outcome, MergeCommit: "merge-commit"})
 }
 
-// publish records another current publication of the stream, for pr.
-func (f *autoArchiveFixture) publish(p DeliveryPublication, pr int) {
+func (f *autoArchiveFixture) publish(p api.DeliveryPublication, pr int) {
 	f.t.Helper()
 	p.PullRequest = pr
 	p.URL = p.URL[:len(p.URL)-1] + string(rune('0'+pr))
-	resolutionDocument(f.t, f.repo, stream, publicationDocument, publicationPath, p)
+	resolutionDocument(f.t, f.repo, fixturekit.Stream, delivery.PublicationDocument, delivery.PublicationPath, p)
 }
 
 func (f *autoArchiveFixture) setState(id, state string) {
 	f.t.Helper()
-	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: stream, At: demoStart, Actor: foremanActor, Cause: "fixture"}
+	h := trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: f.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: service.TestForemanActor, Cause: "fixture"}
 	_, err := f.repo.SetFeatureState(context.Background(), h, state, "fixture moves the workstream")
-	must(f.t, err)
+	intakefixture.Must(f.t, err)
 }
 
 func (f *autoArchiveFixture) archive() (runtime.Archive, bool) {
 	f.t.Helper()
-	return archiveRecord(f.t, f.store, stream)
+	return intakefixture.ArchiveRecord(f.t, f.store, fixturekit.Stream)
 }
 
 func (f *autoArchiveFixture) archives() int {
@@ -89,7 +89,6 @@ func (f *autoArchiveFixture) archives() int {
 	return len(state.Archived)
 }
 
-// during runs hook the first time the archiver reaches step.
 func (f *autoArchiveFixture) during(step string, hook func()) {
 	done := false
 	f.s.boundary = func(name string) error {
@@ -107,18 +106,18 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 	owner := newAutoArchiveFixture(t, "auto-archive-owner-")
 	for _, f := range []*autoArchiveFixture{auto, owner} {
 		f.deliver(autoArchivePullRequest)
-		f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
+		f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 	}
 	auto.mustPass()
-	if resp, api := owner.s.archive(string(stream)); api != nil || !resp.Archived || resp.ArchivedBy != "owner" {
-		t.Fatalf("owner archive: %+v %v", resp, api)
+	if resp, apiFault := owner.s.archive(string(fixturekit.Stream)); apiFault != nil || !resp.Archived || resp.ArchivedBy != "owner" {
+		t.Fatalf("owner archive: %+v %v", resp, apiFault)
 	}
 	chief, ok := auto.archive()
 	if !ok {
 		t.Fatal("the merged workstream was not archived")
 	}
-	if chief.Actor != runtime.ArchiveActorChief || chief.State != DeliveredState || chief.DeliveryLink != "https://example.invalid/pull/7" || chief.ResolutionEvidence != "merged" || !chief.Resolved ||
-		chief.Publication.PullRequest != autoArchivePullRequest || chief.Publication.Branch != featureBranch(stream) || chief.MergeCommit != "merge-commit" || chief.MergeReference == "" {
+	if chief.Actor != runtime.ArchiveActorChief || chief.State != intake.DeliveredState || chief.DeliveryLink != "https://example.invalid/pull/7" || chief.ResolutionEvidence != "merged" || !chief.Resolved ||
+		chief.Publication.PullRequest != autoArchivePullRequest || chief.Publication.Branch != intake.FeatureBranch(fixturekit.Stream) || chief.MergeCommit != "merge-commit" || chief.MergeReference == "" {
 		t.Fatalf("automatic archive=%+v", chief)
 	}
 	if lifecycle.ArchivedBy(chief) != "chief_of_staff" {
@@ -135,8 +134,8 @@ func TestAutoArchiveRecordsTheChiefOfStaffAndMatchesTheOwnersArchive(t *testing.
 	if auto.host.Finds != 0 {
 		t.Fatalf("the automatic archive looked up pull requests %d times", auto.host.Finds)
 	}
-	if resp, api := auto.s.archive(string(stream)); api != nil || resp.ArchivedBy != "chief_of_staff" {
-		t.Fatalf("repeated owner archive reports %+v %v", resp, api)
+	if resp, apiFault := auto.s.archive(string(fixturekit.Stream)); apiFault != nil || resp.ArchivedBy != "chief_of_staff" {
+		t.Fatalf("repeated owner archive reports %+v %v", resp, apiFault)
 	}
 }
 
@@ -159,22 +158,22 @@ func TestAutoArchiveSkipsAWorkstreamWithoutAMergedCurrentPullRequest(t *testing.
 		}},
 		{"merged outcome of an earlier pull request", func(f *autoArchiveFixture) {
 			p := f.deliver(autoArchivePullRequest)
-			f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
+			f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 			f.publish(p, autoArchivePullRequest+1)
 		}},
 		{"owner-recorded merge without a pull request", func(f *autoArchiveFixture) {
-			recordResolutionMerge(f.t, f.repo, stream)
-			f.setState("delivered", DeliveredState)
+			recordResolutionMerge(f.t, f.repo, fixturekit.Stream)
+			f.setState("delivered", intake.DeliveredState)
 		}},
 		{"abandoned", func(f *autoArchiveFixture) {
 			f.deliver(autoArchivePullRequest)
-			f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
-			f.setState("abandoned", AbandonedState)
+			f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
+			f.setState("abandoned", intake.AbandonedState)
 		}},
 		{"reopened out of delivered", func(f *autoArchiveFixture) {
 			f.deliver(autoArchivePullRequest)
-			f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
-			f.setState("reopened", BuildingState)
+			f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
+			f.setState("reopened", intakefixture.BuildingState)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,7 +185,7 @@ func TestAutoArchiveSkipsAWorkstreamWithoutAMergedCurrentPullRequest(t *testing.
 				state, _ := f.store.Snapshot()
 				t.Fatalf("archived: %+v", state.Archived)
 			}
-			if _, api := f.s.lifecycle().ArchiveOnMerge(string(stream)); api == nil {
+			if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(fixturekit.Stream)); apiFault == nil {
 				t.Fatal("the archive itself accepted a workstream without a merged current pull request")
 			}
 			if f.archives() != 0 || f.host.Finds != 0 {
@@ -200,10 +199,10 @@ func TestAutoArchiveSkipsASession(t *testing.T) {
 	t.Parallel()
 	f := newAutoArchiveFixture(t, "auto-archive-session-")
 	session := config.WorkstreamID("w_00000000000000000000000000000b01")
-	must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", demoStart, foremanActor))
+	intakefixture.Must(t, f.repo.CreateSessionWorkstream(context.Background(), session, "default", "deadbeef", "osmia/session/"+string(session), "a session", fixturekit.DemoStart, service.TestForemanActor))
 	f.mustPass()
-	if _, api := f.s.lifecycle().ArchiveOnMerge(string(session)); api == nil || f.archives() != 0 {
-		t.Fatalf("session archive: %v archives=%d", api, f.archives())
+	if _, apiFault := f.s.lifecycle().ArchiveOnMerge(string(session)); apiFault == nil || f.archives() != 0 {
+		t.Fatalf("session archive: %v archives=%d", apiFault, f.archives())
 	}
 }
 
@@ -211,7 +210,7 @@ func TestAutoArchiveRepeatedPassesAndOwnerArchiveFirst(t *testing.T) {
 	t.Parallel()
 	f := newAutoArchiveFixture(t, "auto-archive-repeat-")
 	f.deliver(autoArchivePullRequest)
-	f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
+	f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 	f.mustPass()
 	first, _ := f.archive()
 	for range 3 {
@@ -223,9 +222,9 @@ func TestAutoArchiveRepeatedPassesAndOwnerArchiveFirst(t *testing.T) {
 
 	owner := newAutoArchiveFixture(t, "auto-archive-owner-first-")
 	owner.deliver(autoArchivePullRequest)
-	owner.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
-	if _, api := owner.s.archive(string(stream)); api != nil {
-		t.Fatal(api)
+	owner.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
+	if _, apiFault := owner.s.archive(string(fixturekit.Stream)); apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	recorded, _ := owner.archive()
 	owner.mustPass()
@@ -241,7 +240,7 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 			t.Run(step+"/"+change, func(t *testing.T) {
 				f := newAutoArchiveFixture(t, "auto-archive-race-")
 				p := f.deliver(autoArchivePullRequest)
-				f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
+				f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 				f.during(step, func() {
 					switch change {
 					case "new publication":
@@ -249,14 +248,13 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 					case "outcome closed":
 						f.outcome(autoArchivePullRequest, "closed")
 					case "reopened":
-						f.setState("reopened", BuildingState)
+						f.setState("reopened", intakefixture.BuildingState)
 					}
 				})
 				f.mustPass()
 				if f.archives() != 0 {
 					t.Fatal("archived on evidence that no longer held at commit")
 				}
-				// A later pass archives once the current pull request qualifies.
 				f.s.boundary = nil
 				f.mustPass()
 				if f.archives() != 0 {
@@ -264,15 +262,15 @@ func TestAutoArchiveWritesNothingWhenEvidenceChangesBeforeCommit(t *testing.T) {
 				}
 				switch change {
 				case "new publication":
-					f.outcome(autoArchivePullRequest+1, ownPullRequestOutcomeMerged)
+					f.outcome(autoArchivePullRequest+1, delivery.OwnPullRequestOutcomeMerged)
 				case "outcome closed":
-					f.outcome(autoArchivePullRequest, ownPullRequestOutcomeMerged)
+					f.outcome(autoArchivePullRequest, delivery.OwnPullRequestOutcomeMerged)
 				case "reopened":
-					f.setState("redelivered", DeliveredState)
+					f.setState("redelivered", intake.DeliveredState)
 				}
 				f.mustPass()
 				a, ok := f.archive()
-				if !ok || f.archives() != 1 || a.Actor != runtime.ArchiveActorChief || a.State != DeliveredState {
+				if !ok || f.archives() != 1 || a.Actor != runtime.ArchiveActorChief || a.State != intake.DeliveredState {
 					t.Fatalf("later pass archive=%+v ok=%v", a, ok)
 				}
 				if change == "new publication" && a.Publication.PullRequest != autoArchivePullRequest+1 {
@@ -290,10 +288,10 @@ func TestAutoArchiveEvidenceIsOnlyTheCurrentPublicationsMergedOutcome(t *testing
 		e     lifecycle.MemberEvidence
 		merge bool
 	}{
-		{"merged current", lifecycle.MemberEvidence{Published: true, Publication: DeliveryPublication{PullRequest: 3}, Outcome: ownPullRequestOutcome{PullRequest: 3, Outcome: ownPullRequestOutcomeMerged}}, true},
-		{"merged earlier", lifecycle.MemberEvidence{Published: true, Publication: DeliveryPublication{PullRequest: 4}, Outcome: ownPullRequestOutcome{PullRequest: 3, Outcome: ownPullRequestOutcomeMerged}}, false},
-		{"owner merge only", lifecycle.MemberEvidence{OwnerMerge: true, Merge: DeliveryMerge{Upstream: seal.Base{Commit: "c"}}}, false},
-		{"unpublished outcome", lifecycle.MemberEvidence{Outcome: ownPullRequestOutcome{PullRequest: 3, Outcome: ownPullRequestOutcomeMerged}}, false},
+		{"merged current", lifecycle.MemberEvidence{Published: true, Publication: api.DeliveryPublication{PullRequest: 3}, Outcome: delivery.OwnPullRequestOutcome{PullRequest: 3, Outcome: delivery.OwnPullRequestOutcomeMerged}}, true},
+		{"merged earlier", lifecycle.MemberEvidence{Published: true, Publication: api.DeliveryPublication{PullRequest: 4}, Outcome: delivery.OwnPullRequestOutcome{PullRequest: 3, Outcome: delivery.OwnPullRequestOutcomeMerged}}, false},
+		{"owner merge only", lifecycle.MemberEvidence{OwnerMerge: true, Merge: api.DeliveryMerge{Upstream: seal.Base{Commit: "c"}}}, false},
+		{"unpublished outcome", lifecycle.MemberEvidence{Outcome: delivery.OwnPullRequestOutcome{PullRequest: 3, Outcome: delivery.OwnPullRequestOutcomeMerged}}, false},
 	} {
 		if got := tc.e.OwnPullRequestMerged(); got != tc.merge {
 			t.Errorf("%s: OwnPullRequestMerged=%v", tc.name, got)

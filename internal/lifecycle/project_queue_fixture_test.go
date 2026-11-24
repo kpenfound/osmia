@@ -1,12 +1,14 @@
 package lifecycle_test
 
 import (
-	config "github.com/kpenfound/osmia/internal/config"
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
-	thread "github.com/kpenfound/osmia/internal/thread"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	slices "slices"
 	testing "testing"
+
+	config "github.com/kpenfound/osmia/internal/config"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	thread "github.com/kpenfound/osmia/internal/thread"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func (f *twoProjectFixture) queue(t *testing.T, repo *trace.Repository, id config.ProjectID, turn string) {
@@ -14,11 +16,10 @@ func (f *twoProjectFixture) queue(t *testing.T, repo *trace.Repository, id confi
 	fixturekit.QueueProjectTurn(t, repo, id, f.streams[id], f.clock.Now(), turn)
 }
 
-// dispatchedTurns lists the turns the project's trace has turn operations for.
 func (f *twoProjectFixture) dispatchedTurns(t *testing.T, repo *trace.Repository, id config.ProjectID) []string {
 	t.Helper()
 	ops, err := repo.Operations(f.streams[id])
-	must(t, err)
+	intakefixture.Must(t, err)
 	var out []string
 	for _, op := range ops {
 		if in, err := thread.DecodeTurn(op.Operation); err == nil {

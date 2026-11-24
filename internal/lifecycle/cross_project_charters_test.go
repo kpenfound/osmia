@@ -12,6 +12,8 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -40,9 +42,9 @@ func TestWorkgroupSpecDrafterReceivesEveryMemberCharter(t *testing.T) {
 		return original(ctx, req, turn, tools)
 	}
 	f.engine.Mu.Unlock()
-	_, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatal(api)
+	_, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	f.awaitProjectSpec(t)
 	select {
@@ -62,7 +64,7 @@ func TestWorkgroupCommitteeReceivesEveryMemberCharter(t *testing.T) {
 		f.engine.Mu.Lock()
 		original := f.engine.Turns[turnID]
 		f.engine.Turns[turnID] = func(ctx context.Context, req agent.Request, turn *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-			text, err := readTool(ctx, tools, "context.md")
+			text, err := intakefixture.ReadTool(ctx, tools, "context.md")
 			if err != nil {
 				return nil, err
 			}
@@ -92,15 +94,15 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	defer repo.Close()
 	f.s.setSole(runtimeFor(repo))
 	ctx := context.Background()
-	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), serviceActor, "fixture")
-	must(t, err)
-	change, api := f.s.requestChange(ctx, string(stream), ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
-	if api != nil {
-		t.Fatal(api)
+	_, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{stream}, f.s.now(), intake.ServiceActor, "fixture")
+	intakefixture.Must(t, err)
+	change, apiFault := f.s.requestChange(ctx, string(stream), lifecycle.ChangeRequest{Key: "charter-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared behavior"})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	change.State = "drafting"
-	must(t, f.s.saveChange(ctx, repo, &change))
-	tool := f.s.deltaTool(repo, change, architectAgent, deltaDraftTool)
+	intakefixture.Must(t, f.s.saveChange(ctx, repo, &change))
+	tool := f.s.deltaTool(repo, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, field := range []string{"behavior", "contract"} {
 		for _, citation := range []string{"charter#999", "p_missing/charter#1"} {
 			after := change.Before
@@ -110,9 +112,9 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 				after.Contracts = []trace.Contract{{Name: "journal", Text: "Follow " + citation}}
 			}
 			raw, err := json.Marshal(after)
-			must(t, err)
+			intakefixture.Must(t, err)
 			out, err := tool.Handle(ctx, raw)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 				t.Fatalf("invalid %s citation %s accepted: %s", field, citation, out)
 			}
@@ -125,9 +127,9 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 	after := change.Before
 	after.Behavior = "Follow charter#1."
 	raw, err := json.Marshal(after)
-	must(t, err)
+	intakefixture.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, stream, change.ID).State != "debating" {
 		t.Fatalf("valid charter citation refused: %s", out)
 	}
@@ -136,32 +138,34 @@ func TestSharedDeltaRefusesInvalidCharterCitations(t *testing.T) {
 func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	t.Parallel()
 	f := newConfiguredProductionDesignFixture(t, productionDesignConfiguration{options: func(opts *Options) {
-		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool { return op.Action == deltaTurnAction }
+		opts.Reconciliation.Hold = func(_ config.WorkstreamID, op coreadapter.Operation) bool {
+			return op.Action == lifecycle.DeltaTurnAction
+		}
 	}})
 	defer f.stop(t)
 	ctx := context.Background()
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.origin, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.awaitApproved(t)
 	writeCharter(t, f.c, f.project, "1. Keep changes small.\n\n2. A alone has this rule.\n")
 	writeCharter(t, f.c, f.project2, "1. Keep changes small.\n\n3. B alone has this rule.\n")
-	change, api := f.s.requestChange(ctx, string(f.stream2), ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
-	if api != nil {
-		t.Fatal(api)
+	change, apiFault := f.s.requestChange(ctx, string(f.stream2), lifecycle.ChangeRequest{Key: "qualified-delta", Kind: "amend", Scope: "workgroup", Change: "Clarify the shared rules"})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	wt, _, _, close, err := f.s.changeContext(ctx, string(f.stream2))
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer close()
-	tool := f.s.deltaTool(wt, change, architectAgent, deltaDraftTool)
+	tool := f.s.deltaTool(wt, change, intake.ArchitectAgent, lifecycle.DeltaDraftTool)
 	for _, citation := range []string{"charter#2", string(f.project) + "/charter#3", "p_missing/charter#1"} {
 		after := change.Before
 		after.Behavior = "Follow " + citation
 		raw, err := json.Marshal(after)
-		must(t, err)
+		intakefixture.Must(t, err)
 		out, err := tool.Handle(ctx, raw)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if !strings.Contains(string(out), `"recorded":false`) || !strings.Contains(string(out), citation) {
 			t.Fatalf("invalid citation %s accepted: %s", citation, out)
 		}
@@ -175,9 +179,9 @@ func TestCrossProjectSharedDeltaCharterCitations(t *testing.T) {
 	after.Contracts = append([]trace.Contract(nil), after.Contracts...)
 	after.Contracts[0].Text += " Follow " + string(f.project) + "/charter#2."
 	raw, err := json.Marshal(after)
-	must(t, err)
+	intakefixture.Must(t, err)
 	out, err := tool.Handle(ctx, raw)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !strings.Contains(string(out), `"recorded":true`) || currentChange(t, f.s, f.stream2, change.ID).State != "debating" {
 		t.Fatalf("valid local and qualified citations refused: %s", out)
 	}

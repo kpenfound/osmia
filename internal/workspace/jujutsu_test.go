@@ -15,9 +15,6 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 )
 
-// requireJJ skips a test that needs jj where jj is not installed, and fails it
-// where OSMIA_REQUIRE_JJ says jj must be there, as in the dagger test
-// containers.
 func requireJJ(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("jj"); err != nil {
@@ -28,8 +25,6 @@ func requireJJ(t *testing.T) {
 	}
 }
 
-// newJujutsuFixture is the fixture's clone with a Jujutsu provider whose
-// directory stands where the Osmia root keeps it, beside the clone.
 func newJujutsuFixture(t *testing.T) (fixture, *Jujutsu) {
 	t.Helper()
 	requireJJ(t)
@@ -46,7 +41,6 @@ func acquireJJ(t *testing.T, j *Jujutsu, req vcs.Request) Worktree {
 	return acquired.(Worktree)
 }
 
-// writeFiles writes files into dir, removing those whose content is empty.
 func writeFiles(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
 	for name, content := range files {
@@ -66,7 +60,6 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// snapshotJJ writes files into the workspace and snapshots it on base.
 func snapshotJJ(t *testing.T, j *Jujutsu, w Worktree, base string, files map[string]string) string {
 	t.Helper()
 	writeFiles(t, w.Path, files)
@@ -77,8 +70,6 @@ func snapshotJJ(t *testing.T, j *Jujutsu, w Worktree, base string, files map[str
 	return commit
 }
 
-// plainCommit reports whether Git reads commit as a commit Git itself would
-// write: a tree, parents, an author and a committer, and the message.
 func plainCommit(t *testing.T, clone, commit string) {
 	t.Helper()
 	header, _, _ := strings.Cut(git(t, "-C", clone, "cat-file", "commit", commit), "\n\n")
@@ -89,9 +80,6 @@ func plainCommit(t *testing.T, clone, commit string) {
 	}
 }
 
-// The fake executables are all written before any runs, and the test is not
-// parallel, so no process forked meanwhile holds one open for writing while
-// it is executed.
 func TestCheckJJReportsAMissingOrTooOldJJWithTheVersionFound(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -130,9 +118,6 @@ func TestCheckJJReportsAMissingOrTooOldJJWithTheVersionFound(t *testing.T) {
 	}
 }
 
-// The repository lives under the provider's directory on the clone's Git
-// store: the clone's checkout gets no .jj, its configuration does not change,
-// and the workspace's branch is a branch of the clone.
 func TestJujutsuKeepsItsRepositoryOutsideTheClone(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -215,11 +200,6 @@ func TestJujutsuAcquireCreatesTheBranchAndTheWorkspaceOnce(t *testing.T) {
 	}
 }
 
-// Recovery after an interruption: an interrupted repository is made again, a
-// branch without its workspace gets the workspace on that branch, a workspace
-// whose directory is gone or whose making stopped before its branch was
-// recorded is forgotten and made again, and a directory in the way that is no
-// workspace is reported, not removed.
 func TestJujutsuAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -288,8 +268,6 @@ func TestJujutsuAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	if tip, found, err := j.Branch(ctx, "osmia/w3"); err != nil || !found || tip != base {
 		t.Fatalf("a released workspace's branch: %s %v %v", tip, found, err)
 	}
-	// A workspace whose making stopped before the repository registered it
-	// is made again.
 	w = acquireJJ(t, j, vcs.Request{Name: "w4", Ref: base, Branch: "osmia/w4"})
 	if _, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "workspace", "forget", "w4"); err != nil {
 		t.Fatal(err)
@@ -310,11 +288,6 @@ func TestJujutsuAcquireRecoversWhatAnInterruptionLeft(t *testing.T) {
 	}
 }
 
-// A snapshot commits the workspace's whole tree on top of its branch's
-// commit: changes, deletions and untracked files, not what the repository
-// ignores nor what the clone's own excludes file names. The branch moves to
-// it, Git reads it as a plain commit, and a workspace with nothing new is
-// its own snapshot.
 func TestJujutsuSnapshotCommitsExactlyTheWorkspaceOnTopOfItsBase(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -370,8 +343,6 @@ func TestJujutsuSnapshotCommitsExactlyTheWorkspaceOnTopOfItsBase(t *testing.T) {
 	if parent := git(t, "-C", f.clone, "rev-parse", second+"^"); parent != first {
 		t.Fatalf("the second snapshot's parent is %s, want %s", parent, first)
 	}
-	// A snapshot committed before an interruption kept the branch from
-	// moving is completed with what the workspace gained since.
 	writeFiles(t, ws.Path, map[string]string{"interrupted": "committed\n"})
 	if _, err := j.run(ctx, ws.Path, nil, "commit", "--message", "Snapshot of osmia-unit/w1/u1"); err != nil {
 		t.Fatal(err)
@@ -393,8 +364,6 @@ func TestJujutsuSnapshotCommitsExactlyTheWorkspaceOnTopOfItsBase(t *testing.T) {
 	if again, err := j.Snapshot(ctx, ws, base); err != nil || again != third {
 		t.Fatalf("a snapshot after the completed one: %s %v; want %s", again, err, third)
 	}
-	// A commit in the workspace that is no snapshot of its branch is not
-	// taken for one.
 	writeFiles(t, ws.Path, map[string]string{"other": "committed by someone else\n"})
 	if _, err := j.run(ctx, ws.Path, nil, "commit", "--message", "Something else"); err != nil {
 		t.Fatal(err)
@@ -407,8 +376,6 @@ func TestJujutsuSnapshotCommitsExactlyTheWorkspaceOnTopOfItsBase(t *testing.T) {
 	}
 }
 
-// A workspace that does not descend from the base it is snapshotted against
-// is refused before anything is committed.
 func TestJujutsuSnapshotRefusesAWorkspaceThatDoesNotDescendFromItsBase(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -434,11 +401,6 @@ func TestJujutsuSnapshotRefusesAWorkspaceThatDoesNotDescendFromItsBase(t *testin
 	}
 }
 
-// A unit worked in a Jujutsu workspace lands as the very commit the same work
-// in a Git worktree lands as, and the feature branch pushed to the fork is a
-// plain Git branch whatever backend made it. Advance moves the feature
-// workspace's branch and files to the landed commit once, and refuses a
-// workspace at any other commit.
 func TestJujutsuLandsAndPushesTheCommitGitWould(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -513,17 +475,21 @@ func TestJujutsuLandsAndPushesTheCommitGitWould(t *testing.T) {
 	}
 }
 
-// A rebase of a unit's snapshot onto a new feature branch tip makes the
-// commit Git's does; Move puts the unit's branch and files on it, completes a
-// move interrupted after the branch moved, and refuses a workspace at any
-// other commit. A rebase that conflicts is Jujutsu's commit on the new tip
-// holding the conflict stored, which a workspace on it materializes with
-// markers: a snapshot that leaves them keeps the conflict, and one of the
-// resolved files holds none.
-func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
-	t.Parallel()
+type jjRebaseFixture struct {
+	f        fixture
+	j        *Jujutsu
+	base     string
+	feature  Worktree
+	unit     Worktree
+	snapshot string
+	tip      string
+	commit   string
+	at       time.Time
+}
+
+func newJJRebaseFixture(t *testing.T) *jjRebaseFixture {
+	t.Helper()
 	f, j := newJujutsuFixture(t)
-	ctx := context.Background()
 	base := git(t, "-C", f.scratch, "rev-parse", "HEAD")
 	git(t, "-C", f.clone, "branch", "osmia/w1", base)
 	feature := acquireJJ(t, j, vcs.Request{Name: "w1", Branch: "osmia/w1"})
@@ -531,66 +497,101 @@ func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
 	snapshot := snapshotJJ(t, j, unit, base, map[string]string{"unit.go": "unit\n", "README": "widgets by the unit\n"})
 	tip := snapshotJJ(t, j, feature, base, map[string]string{"landed.go": "landed\n"})
 	at := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	commit, conflicts, err := j.Rebase(ctx, tip, snapshot, "Rebase unit u1", at)
+	commit, conflicts, err := j.Rebase(context.Background(), tip, snapshot, "Rebase unit u1", at)
 	if err != nil || len(conflicts) != 0 {
 		t.Fatalf("rebase %s %v: %v", commit, conflicts, err)
 	}
-	if byGit, _, err := f.provider.Rebase(ctx, tip, snapshot, "Rebase unit u1", at); err != nil || byGit != commit {
-		t.Fatalf("Git's rebase made %s, %v; want %s", byGit, err, commit)
-	}
-	writeFiles(t, unit.Path, map[string]string{"stray": "dropped by the move\n"})
-	if err := j.Move(ctx, unit, tip, commit); err == nil || !strings.Contains(err.Error(), "is at "+snapshot+", not "+tip) {
-		t.Fatalf("a move from another commit: %v", err)
-	}
-	if err := j.Move(ctx, unit, snapshot, commit); err != nil {
+	return &jjRebaseFixture{f: f, j: j, base: base, feature: feature, unit: unit, snapshot: snapshot, tip: tip, commit: commit, at: at}
+}
+
+func (r *jjRebaseFixture) moveOntoConflict(t *testing.T) (conflicting, conflicted string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := r.j.Move(ctx, r.unit, r.snapshot, r.commit); err != nil {
 		t.Fatal(err)
 	}
-	if head, _, err := j.Branch(ctx, "osmia-unit/w1/u1"); err != nil || head != commit {
-		t.Fatalf("the unit branch is at %s, %v; want %s", head, err, commit)
-	}
-	for path, want := range map[string]string{"unit.go": "unit\n", "landed.go": "landed\n", "README": "widgets by the unit\n"} {
-		if data, err := os.ReadFile(filepath.Join(unit.Path, path)); err != nil || string(data) != want {
-			t.Fatalf("%s after the move: %q %v", path, data, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(unit.Path, "stray")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a file of the workspace's own after the move: %v", err)
-	}
-	if again, err := j.Snapshot(ctx, unit, tip); err != nil || again != commit {
-		t.Fatalf("a snapshot after the move: %s %v; want %s", again, err, commit)
-	}
-	// A move interrupted after the branch moved completes.
-	conflicting := snapshotJJ(t, j, feature, tip, map[string]string{"README": "widgets by the feature\n"})
-	conflicted, conflicts, err := j.Rebase(ctx, conflicting, commit, "Rebase unit u1 again", at)
+	conflicting = snapshotJJ(t, r.j, r.feature, r.tip, map[string]string{"README": "widgets by the feature\n"})
+	conflicted, conflicts, err := r.j.Rebase(ctx, conflicting, r.commit, "Rebase unit u1 again", r.at)
 	if err != nil || !slices.Equal(conflicts, []string{"README"}) {
 		t.Fatalf("a conflicted rebase %s %v: %v", conflicted, conflicts, err)
 	}
-	if stored, err := j.StoredConflicts(ctx, conflicted); err != nil || !slices.Equal(stored, []string{"README"}) {
+	return conflicting, conflicted
+}
+
+func TestJujutsuRebaseMakesTheCommitGitMakes(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	if byGit, _, err := r.f.provider.Rebase(context.Background(), r.tip, r.snapshot, "Rebase unit u1", r.at); err != nil || byGit != r.commit {
+		t.Fatalf("Git's rebase made %s, %v; want %s", byGit, err, r.commit)
+	}
+}
+
+func TestJujutsuMoveRefusesAMoveFromAnotherCommit(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	if err := r.j.Move(context.Background(), r.unit, r.tip, r.commit); err == nil || !strings.Contains(err.Error(), "is at "+r.snapshot+", not "+r.tip) {
+		t.Fatalf("a move from another commit: %v", err)
+	}
+}
+
+func TestJujutsuMoveReplacesTheWorkspaceWithTheRebasedCommit(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	ctx := context.Background()
+	writeFiles(t, r.unit.Path, map[string]string{"stray": "dropped by the move\n"})
+	if err := r.j.Move(ctx, r.unit, r.snapshot, r.commit); err != nil {
+		t.Fatal(err)
+	}
+	if head, _, err := r.j.Branch(ctx, "osmia-unit/w1/u1"); err != nil || head != r.commit {
+		t.Fatalf("the unit branch is at %s, %v; want %s", head, err, r.commit)
+	}
+	for path, want := range map[string]string{"unit.go": "unit\n", "landed.go": "landed\n", "README": "widgets by the unit\n"} {
+		if data, err := os.ReadFile(filepath.Join(r.unit.Path, path)); err != nil || string(data) != want {
+			t.Fatalf("%s after the move: %q %v", path, data, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(r.unit.Path, "stray")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a file of the workspace's own after the move: %v", err)
+	}
+	if again, err := r.j.Snapshot(ctx, r.unit, r.tip); err != nil || again != r.commit {
+		t.Fatalf("a snapshot after the move: %s %v; want %s", again, err, r.commit)
+	}
+}
+
+func TestJujutsuConflictedRebaseStoresTheConflictThatGitDoesNotStore(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	ctx := context.Background()
+	conflicting, conflicted := r.moveOntoConflict(t)
+	if stored, err := r.j.StoredConflicts(ctx, conflicted); err != nil || !slices.Equal(stored, []string{"README"}) {
 		t.Fatalf("the conflicted rebase stores %v: %v", stored, err)
 	}
-	if c, err := j.Commit(ctx, conflicted); err != nil || !slices.Equal(c.Parents, []string{conflicting}) || c.Message != "Rebase unit u1 again" {
+	if c, err := r.j.Commit(ctx, conflicted); err != nil || !slices.Equal(c.Parents, []string{conflicting}) || c.Message != "Rebase unit u1 again" {
 		t.Fatalf("the conflicted rebase %+v: %v", c, err)
 	}
-	byGit, byGitConflicts, err := f.provider.Rebase(ctx, conflicting, commit, "Rebase unit u1 again", at)
+	byGit, byGitConflicts, err := r.f.provider.Rebase(ctx, conflicting, r.commit, "Rebase unit u1 again", r.at)
 	if err != nil || !slices.Equal(byGitConflicts, []string{"README"}) {
 		t.Fatalf("Git's conflicted rebase %s %v: %v", byGit, byGitConflicts, err)
 	}
-	if stored, err := f.provider.StoredConflicts(ctx, byGit); err != nil || len(stored) != 0 {
+	if stored, err := r.f.provider.StoredConflicts(ctx, byGit); err != nil || len(stored) != 0 {
 		t.Fatalf("Git's conflicted rebase stores %v: %v", stored, err)
 	}
-	for _, clean := range []string{commit, byGit} {
-		if stored, err := j.StoredConflicts(ctx, clean); err != nil || len(stored) != 0 {
+	for _, clean := range []string{r.commit, byGit} {
+		if stored, err := r.j.StoredConflicts(ctx, clean); err != nil || len(stored) != 0 {
 			t.Fatalf("commit %s stores %v: %v", clean, stored, err)
 		}
 	}
-	git(t, "-C", f.clone, "update-ref", "refs/heads/osmia-unit/w1/u1", conflicted, commit)
-	if err := j.Move(ctx, unit, commit, conflicted); err != nil {
-		t.Fatal(err)
-	}
-	if marked, err := j.MarkedFiles(unit, []string{"README", "unit.go", "missing"}); err != nil || !slices.Equal(marked, []string{"README"}) {
+}
+
+func TestJujutsuMoveOntoAConflictedCommitWritesMarkersInTheWorkspace(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	_, conflicted := r.moveOntoConflict(t)
+	r.moveWorkspaceOnto(t, conflicted)
+	if marked, err := r.j.MarkedFiles(r.unit, []string{"README", "unit.go", "missing"}); err != nil || !slices.Equal(marked, []string{"README"}) {
 		t.Fatalf("marked files %v: %v", marked, err)
 	}
-	data, err := os.ReadFile(filepath.Join(unit.Path, "README"))
+	data, err := os.ReadFile(filepath.Join(r.unit.Path, "README"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,43 +609,59 @@ func TestJujutsuRebaseAndMoveTheUnitsWorkspace(t *testing.T) {
 	if want := []string{"<<<<<<<", "widgets by the feature", "|||||||", "widgets", "=======", "widgets by the unit", ">>>>>>>"}; !slices.Equal(sides, want) {
 		t.Fatalf("the conflicted README reads %v, want %v:\n%s", sides, want, data)
 	}
-	kept := snapshotJJ(t, j, unit, conflicting, map[string]string{"unit.go": "unit, kept\n"})
-	if stored, err := j.StoredConflicts(ctx, kept); err != nil || !slices.Equal(stored, []string{"README"}) {
+}
+
+func TestJujutsuSnapshotWithMarkersLeftKeepsTheConflictThroughARebase(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	ctx := context.Background()
+	conflicting, conflicted := r.moveOntoConflict(t)
+	r.moveWorkspaceOnto(t, conflicted)
+	kept := snapshotJJ(t, r.j, r.unit, conflicting, map[string]string{"unit.go": "unit, kept\n"})
+	if stored, err := r.j.StoredConflicts(ctx, kept); err != nil || !slices.Equal(stored, []string{"README"}) {
 		t.Fatalf("a snapshot with the markers left stores %v: %v", stored, err)
 	}
-	// A rebase of a commit that holds the conflict keeps it stored.
-	moved := snapshotJJ(t, j, feature, conflicting, map[string]string{"landed2.go": "landed again\n"})
-	again, conflicts, err := j.Rebase(ctx, moved, kept, "Rebase unit u1 onto the moved tip", at)
+	moved := snapshotJJ(t, r.j, r.feature, conflicting, map[string]string{"landed2.go": "landed again\n"})
+	again, conflicts, err := r.j.Rebase(ctx, moved, kept, "Rebase unit u1 onto the moved tip", r.at)
 	if err != nil || !slices.Equal(conflicts, []string{"README"}) {
 		t.Fatalf("a rebase of the conflicted snapshot %s %v: %v", again, conflicts, err)
 	}
-	if stored, err := j.StoredConflicts(ctx, again); err != nil || !slices.Equal(stored, []string{"README"}) {
+	if stored, err := r.j.StoredConflicts(ctx, again); err != nil || !slices.Equal(stored, []string{"README"}) {
 		t.Fatalf("the rebased conflicted snapshot stores %v: %v", stored, err)
 	}
-	listed, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "file", "list", "--revision", again, "--template", `path ++ "\n"`)
+	listed, err := r.j.run(ctx, r.j.repository(), nil, "--ignore-working-copy", "file", "list", "--revision", again, "--template", `path ++ "\n"`)
 	if err != nil || !slices.Equal(strings.Fields(listed), []string{"README", "landed.go", "landed2.go", "unit.go"}) {
 		t.Fatalf("the rebased conflicted snapshot holds %q: %v", listed, err)
 	}
-	resolved := snapshotJJ(t, j, unit, conflicting, map[string]string{"README": "widgets by the feature and the unit\n"})
-	if stored, err := j.StoredConflicts(ctx, resolved); err != nil || len(stored) != 0 {
+}
+
+func TestJujutsuResolvedSnapshotStoresNoConflictAndDiffsCleanly(t *testing.T) {
+	t.Parallel()
+	r := newJJRebaseFixture(t)
+	ctx := context.Background()
+	conflicting, conflicted := r.moveOntoConflict(t)
+	r.moveWorkspaceOnto(t, conflicted)
+	resolved := snapshotJJ(t, r.j, r.unit, conflicting, map[string]string{"README": "widgets by the feature and the unit\n"})
+	if stored, err := r.j.StoredConflicts(ctx, resolved); err != nil || len(stored) != 0 {
 		t.Fatalf("the resolved snapshot stores %v: %v", stored, err)
 	}
-	if marked, err := j.Markers(ctx, resolved, []string{"README", "unit.go"}); err != nil || len(marked) != 0 {
+	if marked, err := r.j.Markers(ctx, resolved, []string{"README", "unit.go"}); err != nil || len(marked) != 0 {
 		t.Fatalf("the resolved snapshot's markers %v: %v", marked, err)
 	}
-	if diff, err := j.Diff(ctx, conflicting, resolved); err != nil || strings.Contains(diff, "jjconflict") || !strings.Contains(diff, "+widgets by the feature and the unit") {
+	if diff, err := r.j.Diff(ctx, conflicting, resolved); err != nil || strings.Contains(diff, "jjconflict") || !strings.Contains(diff, "+widgets by the feature and the unit") {
 		t.Fatalf("the resolved candidate's diff, %v:\n%s", err, diff)
 	}
 }
 
-// A replay in a workspace stops at each commit that conflicts with the
-// conflict markers in the workspace, reports the stop and its paths as they
-// were given, keeps a path whose markers are left conflicted, and goes on
-// from the workspace's resolved files, stop after stop, to a branch whose
-// commits keep their messages and authors on upstream and are committed by
-// Osmia at the given time. A resolution that leaves a commit's change empty
-// drops the commit. The feature branch the workspace was made from does not
-// move.
+func (r *jjRebaseFixture) moveWorkspaceOnto(t *testing.T, conflicted string) {
+	t.Helper()
+	ctx := context.Background()
+	git(t, "-C", r.f.clone, "update-ref", "refs/heads/osmia-unit/w1/u1", conflicted, r.commit)
+	if err := r.j.Move(ctx, r.unit, r.commit, conflicted); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestJujutsuReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -726,9 +743,6 @@ func TestJujutsuReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *t
 	if err != nil || commit == "" || len(conflicts) != 0 {
 		t.Fatalf("the last continue %q %v: %v", commit, conflicts, err)
 	}
-	// A replay interrupted after its branch moved, before it was recorded
-	// as finished, finishes on the same commit. By then it no longer records
-	// the stop it went on from.
 	interrupted.Replay.Stop, interrupted.Replay.Conflicts = "", nil
 	if err := writeMetadata(w.Path, interrupted); err != nil {
 		t.Fatal(err)
@@ -774,9 +788,6 @@ func TestJujutsuReplayInStopsAtEachConflictAndContinuesFromTheResolvedFiles(t *t
 	}
 }
 
-// A replay that meets no conflict ends in one call. A commit whose change
-// upstream already holds is dropped, and one that changed nothing to begin
-// with is kept. A workspace holding changes of its own is refused.
 func TestJujutsuReplayInDropsWhatUpstreamHolds(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -821,9 +832,6 @@ func TestJujutsuReplayInDropsWhatUpstreamHolds(t *testing.T) {
 	}
 }
 
-// What the provider commits reads the same through its history operations as
-// through Git's, and a replay of recorded commits makes the commit Git's
-// makes, leaving nothing behind.
 func TestJujutsuReadsItsCommitsAsGitDoes(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -874,12 +882,6 @@ func TestJujutsuReadsItsCommitsAsGitDoes(t *testing.T) {
 	}
 }
 
-// A workspace records the change ID of its first working-copy commit, which
-// its first snapshot commits. Carry gives a rebased commit, clean or holding
-// a stored conflict, that change ID and changes nothing else it records: the
-// same arguments carry the same commit, and once the unit's branch moves
-// there the repository reads the change and the stored conflict. Git has no
-// change IDs.
 func TestJujutsuCarriesAWorkspacesChangeThroughItsRebases(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -996,11 +998,6 @@ func TestJujutsuCarriesAWorkspacesChangeThroughItsRebases(t *testing.T) {
 	}
 }
 
-// Record keeps a workspace's files in its working-copy commit and moves no
-// branch; recording files it already kept makes no other commit. Changed
-// names, sorted, every path whose file differs from a commit Record returned,
-// once a later record hides that commit too, and refuses a since that is not
-// a full commit ID. Git records nothing and names nothing.
 func TestJujutsuRecordsAWorkspacesFilesAndNamesWhatChangedSince(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)

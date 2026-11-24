@@ -62,8 +62,6 @@ func FetchUpstreamBase(ctx context.Context, cfg *config.Config, g workspace.Prov
 	return seal.Base{Remote: remote, Branch: cfg.Project.BaseBranch, Commit: commit}, nil
 }
 
-// upstreamOf returns the trace the upstream workstream lives in, or false when
-// it cannot be read now.
 func (s *Controller) upstreamOf(repo *trace.Repository, from config.WorkstreamID) (*trace.Repository, bool) {
 	if archive, archived := s.ArchivedWorkstream(string(from)); archived {
 		if !archive.CleanupStartedAt.IsZero() || !archive.CleanedAt.IsZero() {
@@ -79,12 +77,6 @@ func (s *Controller) upstreamOf(repo *trace.Repository, from config.WorkstreamID
 	return found, api == nil
 }
 
-// observeIntegration records, in the status of an upstream that has not
-// merged, whether its changes are already in the base branch of its project: the
-// same evidence check MoveOntoUpstream uses. Only an upstream that ended or was
-// delivered is checked, and only when its branch holds changes of its own, so a
-// live upstream that has not built anything yet is never read as integrated. A
-// check that cannot be made leaves no evidence; it never fails the observation.
 func (s *Controller) observeIntegration(ctx context.Context, repo *trace.Repository, edge trace.Edge, out EdgeMergeStatus) (EdgeMergeStatus, error) {
 	upstream, ok := s.upstreamOf(repo, edge.From)
 	if !ok {
@@ -133,9 +125,6 @@ func (s *Controller) observeIntegration(ctx context.Context, repo *trace.Reposit
 	return out, nil
 }
 
-// dependencyDecided reports whether the dependency's decision subject already
-// holds a decision for the cause: its latest transition cites it. A decision to
-// keep the dependency is made once for the evidence it rests on.
 func dependencyDecided(repo *trace.Repository, stream config.WorkstreamID, subject, cause string) (bool, error) {
 	transitions, err := trace.Read[trace.Transition](repo, stream)
 	if err != nil {
@@ -150,11 +139,6 @@ func dependencyDecided(repo *trace.Repository, stream config.WorkstreamID, subje
 	return last.Subject != "" && last.Cause == cause, nil
 }
 
-// raiseEdgeExits raises, for each unmerged effective edge of stream whose
-// upstream ended or is already in its project's base branch, the exit from
-// waiting that the router decides. observed is the observation just recorded.
-// The exit is raised again for the same evidence until it is decided, and an
-// occurrence already decided is reused, so Jev is asked once.
 func (s *Controller) raiseEdgeExits(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, observed EdgeObservation) error {
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil || feature.Value == AbandonedState {
@@ -165,8 +149,6 @@ func (s *Controller) raiseEdgeExits(ctx context.Context, repo *trace.Repository,
 		return err
 	}
 	for _, e := range edges {
-		// A delivered dependent no longer builds; only its pull request's
-		// readiness can still wait on a merge-order edge.
 		if feature.Value == DeliveredState && e.Type != trace.EdgeMergeOrder {
 			continue
 		}
@@ -202,10 +184,6 @@ func (s *Controller) raiseEdgeExits(ctx context.Context, repo *trace.Repository,
 	return nil
 }
 
-// raiseBaseExit raises the exit from the park of stream on its same-repo base
-// when the base was abandoned: its default keeps the park, and the base's
-// changes already being in the base branch, by the evidence MoveOntoUpstream
-// uses, lets the dependent move on instead.
 func (s *Controller) raiseBaseExit(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID) error {
 	if _, archived := s.ArchivedWorkstream(string(stream)); archived {
 		return nil
@@ -276,49 +254,29 @@ func (s *Controller) raiseBaseExit(ctx context.Context, repo *trace.Repository, 
 	return err
 }
 
-// dependencyCase is what the exit about one dependency is built from.
 type dependencyCase struct {
-	Upstream config.WorkstreamID
-	// Type is the graph edge's type, or BaseEdgeType for the same-repo base.
-	Type    string
-	Trigger string
-	Cause   string
-	// Ended says why the dependency cannot be met: EndedAbandoned,
-	// EndedClosed, or ownerEnded for a drop the owner chose.
-	Ended string
-	// Integrated says the upstream's changes are already in the base branch.
-	Integrated bool
-	// Edge and Status are a graph edge and its last observation; Wait the
-	// base wait and BaseUpstream and Held what MoveOntoUpstream reads for the
-	// same-repo base.
+	Upstream     config.WorkstreamID
+	Type         string
+	Trigger      string
+	Cause        string
+	Ended        string
+	Integrated   bool
 	Edge         *trace.Edge
 	Status       EdgeMergeStatus
 	Wait         trace.WorkflowState
 	BaseUpstream *seal.Base
 	Held         string
-	// Authority, when set, is the owner's decision to drop the dependency.
-	Authority *router.Authority
-	Actor     trace.Actor
-	Note      string
+	Authority    *router.Authority
+	Actor        trace.Actor
+	Note         string
 }
 
-// ownerEnded is the waiver's Ended for a dependency the owner dropped before it
-// ended.
 const ownerEnded = "owner"
 
-// chiefEnded is the waiver's Ended for a dependency the chief of staff dropped
-// before it ended.
 const chiefEnded = trace.ChiefOfStaff
 
 func (c dependencyCase) base() bool { return c.Type == BaseEdgeType }
 
-// dependencyExit returns the exit about one dependency. When the upstream ended
-// its default keeps the dependency, as the factory always has, and dropping it
-// is the other target at the strict bar. When the upstream's changes are
-// already in the base branch its default lets the dependent go on, and keeping
-// it is the other target at the modest bar. Every way of entering a target
-// (the default, Jev's pick and the owner's drop) enters it through the same
-// effect.
 func (s *Controller) dependencyExit(repo *trace.Repository, stream config.WorkstreamID, state trace.WorkflowState, c dependencyCase) router.Exit {
 	subject := DependencySubject(c.Upstream, c.Type)
 	id := fmt.Sprintf("%s-%d", subject, state.Version+1)
@@ -385,7 +343,6 @@ func (s *Controller) dependencyExit(repo *trace.Repository, stream config.Workst
 	return exit
 }
 
-// evidence is a plain statement of what the exit rests on, from records only.
 func (c dependencyCase) evidence() string {
 	switch {
 	case c.Integrated && c.base():
@@ -402,10 +359,6 @@ func (c dependencyCase) evidence() string {
 	return "it was abandoned without being delivered"
 }
 
-// dependencyUnmet returns why entering waived or adopted would no longer be
-// right: the dependent was abandoned, the edge merged or was dropped, or the
-// wait ended meanwhile. They change without the decision subject moving, so the
-// router reads them again when it applies a target.
 func (s *Controller) dependencyUnmet(repo *trace.Repository, stream config.WorkstreamID, c dependencyCase) (string, error) {
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -444,9 +397,6 @@ func (s *Controller) dependencyUnmet(repo *trace.Repository, stream config.Works
 	return "", nil
 }
 
-// waiverDocument returns the next revision of the dependent's waivers with the
-// dropped dependency added. The waiver names who decided and, for Jev, the
-// judgment; it is no merge evidence and touches no other record.
 func waiverDocument(repo *trace.Repository, stream config.WorkstreamID, p router.Plan, c dependencyCase) (trace.Document, error) {
 	waivers, revision, err := EdgeWaiversAt(repo, stream)
 	if err != nil {
@@ -465,9 +415,6 @@ func waiverDocument(repo *trace.Repository, stream config.WorkstreamID, p router
 	return trace.Document{Header: h, Path: EdgeWaiverPath, Content: string(data)}, nil
 }
 
-// waive is the one effect of dropping a dependency: the waiver in the
-// dependent's own trace and, when no other dependency still holds the dependent,
-// the end of its wait, recorded in the same commit.
 func (c dependencyCase) waive(s *Controller, repo *trace.Repository, stream config.WorkstreamID) router.EffectFunc {
 	return func(ctx context.Context, p router.Plan) (router.Effect, error) {
 		doc, err := waiverDocument(repo, stream, p, c)
@@ -496,11 +443,6 @@ func (c dependencyCase) waive(s *Controller, repo *trace.Repository, stream conf
 	}
 }
 
-// adopt is the effect of going on because the upstream's changes are already in
-// the base branch: for an edge, the observation records it merged at the commit
-// of the base branch that holds them, which is the evidence it rests on; for the
-// base, the base observation is pinned to upstream. The wait ends in the same
-// commit.
 func (c dependencyCase) adopt(s *Controller, repo *trace.Repository, stream config.WorkstreamID) router.EffectFunc {
 	return func(ctx context.Context, p router.Plan) (router.Effect, error) {
 		effect := router.Effect{Events: []trace.Event{trace.Notice(p.TransitionID, waitKind(c), p.Reason)}}
@@ -544,7 +486,6 @@ func (c dependencyCase) adopt(s *Controller, repo *trace.Repository, stream conf
 	}
 }
 
-// waitKind is the kind of notice the dependency's wait carries.
 func waitKind(c dependencyCase) string {
 	if c.base() {
 		return "base"
@@ -552,11 +493,6 @@ func waitKind(c dependencyCase) string {
 	return "edge"
 }
 
-// releaseEdgeWait returns the transaction that ends the dependent's edge wait
-// when the dependency c no longer holds it and no other effective hard_block
-// edge does. observed is the observation as it will stand once the decision is
-// recorded. The dependent is then schedulable at once; the next edge-wait pass
-// finds the wait already ended.
 func releaseEdgeWait(repo *trace.Repository, stream config.WorkstreamID, c dependencyCase, observed EdgeObservation, p router.Plan) ([]trace.Transaction, error) {
 	state, err := repo.Workflow(stream, EdgeWaitSubject)
 	if err != nil || state.Value != "waiting" {
@@ -581,8 +517,6 @@ func releaseEdgeWait(repo *trace.Repository, stream config.WorkstreamID, c depen
 	return []trace.Transaction{{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: h, Subject: EdgeWaitSubject, From: state.Value, To: "available", Reason: reason}), Events: []trace.Event{trace.Notice(id, "edge", reason)}}}, nil
 }
 
-// releaseBaseWait returns the transaction that ends the dependent's park on its
-// base.
 func releaseBaseWait(repo *trace.Repository, stream config.WorkstreamID, p router.Plan) ([]trace.Transaction, error) {
 	state, err := repo.Workflow(stream, BaseWaitSubject)
 	if err != nil || state.Value != "waiting" {
@@ -594,9 +528,6 @@ func releaseBaseWait(repo *trace.Repository, stream config.WorkstreamID, p route
 	return []trace.Transaction{{ExpectedVersion: state.Version, Transition: codeDefault(trace.Transition{Header: h, Subject: BaseWaitSubject, From: state.Value, To: "available", Reason: reason}), Events: []trace.Event{trace.Notice(id, "base", reason)}}}, nil
 }
 
-// baseObservationDocument returns the next revision of the base observation,
-// pinned to upstream: the dependent continues from it and the next drift
-// rebase replays its own commits onto it.
 func baseObservationDocument(repo *trace.Repository, stream config.WorkstreamID, upstream seal.Base, p router.Plan) (trace.Document, error) {
 	data, err := json.Marshal(BaseObservation{Base: upstream})
 	if err != nil {
@@ -645,8 +576,6 @@ func (s *Controller) DropDependencyOf(ctx context.Context, project config.Projec
 	return s.dropDependency(ctx, project, stream, repo, req, ownerActor, &router.Authority{Kind: router.AuthorityOwner, Target: DependencyWaived, Ref: "owner request to drop the dependency"})
 }
 
-// dropDependency drops the dependency with the decision of actor, which
-// authority carries: the owner's, or the chief of staff's own.
 func (s *Controller) dropDependency(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repo *trace.Repository, req DropDependencyRequest, actor trace.Actor, authority *router.Authority) (DropDependencyResponse, *APIError) {
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot drop the dependency of workstream %s; check the trace repository", stream)}
 	feature, err := repo.Workflow(stream, trace.FeatureSubject)

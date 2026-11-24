@@ -14,13 +14,11 @@ const (
 	otherStream  config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
 )
 
-// twoProjectFixture is a root with two active projects that share one mason
-// slot, each with its own trace, workstream and mason thread.
 type twoProjectFixture struct {
 	opts     Options
 	cfg      *config.Config
-	clock    *demoClock
-	turns    *blockingTurns
+	clock    *fixturekit.DemoClock
+	turns    *fixturekit.BlockingTurns
 	streams  map[config.ProjectID]config.WorkstreamID
 	scenario *fixturekit.TwoProjectScenario
 }
@@ -33,15 +31,9 @@ func newTwoProjectFixture(t *testing.T) *twoProjectFixture {
 	return &twoProjectFixture{opts: opts, cfg: data.Loaded, clock: data.Clock, streams: data.Streams, turns: data.Turns, scenario: data}
 }
 
-var turn = intakefixture.Turn
-
-// block makes the named turn signal entered and wait for release or for its
-// context to end.
 func (f *twoProjectFixture) block(id config.ProjectID, name string) (entered, release chan struct{}) {
-	return f.turns.Block(turn(id, name))
+	return f.turns.Block(intakefixture.Turn(id, name))
 }
 func (f *twoProjectFixture) repository(id config.ProjectID) *trace.Repository {
 	return f.scenario.Repository(id)
 }
-
-var await = intakefixture.Await

@@ -214,7 +214,7 @@ func (s *Service) runtimes() (*config.Config, []*activeProject) {
 	s.projects = out
 	return cfg, out
 }
-func (s *Service) feedList(raw string) (FeedResponse, *APIError) {
+func (s *Service) feedList(raw string) (api.FeedResponse, *api.APIError) {
 	return service.InspectForTest(s.core()).Feed(raw)
 }
 func (s *Service) holds(p config.ProjectID, w config.WorkstreamID, r *trace.Repository, c scheduler.Candidate) (bool, error) {
@@ -298,10 +298,6 @@ func (s *Service) installPipeline(p *service.TestPipeline) {
 func (s *Service) stages(cfg *config.Config, r *trace.Repository) (*service.TestStages, error) {
 	return service.InspectForTest(s.core()).Stages(cfg, r)
 }
-
-type scheduleHook = service.TestScheduleHook
-
-var newTestPipeline = service.NewPipelineForTest
 
 func (s *Service) projectViews() []*activeProject { _, ps := s.runtimes(); return ps }
 

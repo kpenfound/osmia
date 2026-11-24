@@ -30,11 +30,8 @@ func ReseedCommit(cause string) (string, bool) {
 	return commit, ok && commit != ""
 }
 
-// reseedTimeout bounds one seed computation, which runs apart from the
-// callers waiting for it.
 const reseedTimeout = 2 * time.Minute
 
-// maxReported bounds the failure reasons a Reseeder remembers.
 const maxReported = 128
 
 // Source is the repository a re-seed reads: the files of a commit, and
@@ -99,9 +96,9 @@ type Reseeder struct {
 	// once. A nil Log drops them.
 	Log func(reason string)
 
-	project sync.Mutex // serialises seeds
+	project sync.Mutex
 
-	mu       sync.Mutex // guards the rest
+	mu       sync.Mutex
 	last     string
 	flights  map[string]*reseedFlight
 	reported map[string]bool
@@ -136,8 +133,6 @@ func (r *Reseeder) Reseed(ctx context.Context, commit string, src Source, ledger
 	}
 	r.mu.Unlock()
 	if !running {
-		// The attempt belongs to every caller waiting on it, not to the one
-		// that started it, so its cancellation does not fail the others.
 		go r.run(ctx, flight, commit, src, ledger)
 	}
 	select {
@@ -168,8 +163,6 @@ func (r *Reseeder) run(ctx context.Context, flight *reseedFlight, commit string,
 	close(flight.done)
 }
 
-// seed computes and records the map of commit. It reports false, with no
-// error, for a commit that comes before the last one seeded.
 func (r *Reseeder) seed(ctx context.Context, commit string, src Source, ledger Ledger) (bool, error) {
 	r.mu.Lock()
 	last := r.last

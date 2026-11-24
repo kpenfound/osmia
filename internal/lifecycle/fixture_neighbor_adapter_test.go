@@ -13,7 +13,3 @@ func (d drifter) driver() *service.TestDriftDriver {
 func (d drifter) requestDrifts(ctx context.Context, due func(config.WorkstreamID) (string, error)) ([]config.WorkstreamID, error) {
 	return d.driver().Request(ctx, due)
 }
-
-const driftMasonAgent = service.TestDriftMasonAgent
-const driftReviewerAgent = service.TestDriftReviewerAgent
-const driftsDirectory = service.TestDriftsDirectory

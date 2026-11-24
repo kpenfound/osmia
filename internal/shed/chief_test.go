@@ -11,8 +11,6 @@ func chief(round int, pin shed.Pin, ds ...shed.ChiefDecision) shed.ChiefDecision
 	return shed.ChiefDecisions{Version: shed.Version, Round: round, Revision: pin, Decisions: ds}
 }
 
-// The chief of staff's decisions round-trip and refuse what is not a
-// decision: an unknown one, one without a note and two on one objection.
 func TestChiefDecisionsRoundTripAndRefuseInvalidContent(t *testing.T) {
 	t.Parallel()
 	c := chief(1, one, shed.ChiefDecision{Objection: "agent_committee_1-r1-1", Decision: shed.Dismiss, Note: "The reply answers it.", Turn: "events_1"})
@@ -37,16 +35,11 @@ func TestChiefDecisionsRoundTripAndRefuseInvalidContent(t *testing.T) {
 			t.Fatalf("%s was encoded", name)
 		}
 	}
-	// No committee member may carry the chief of staff's file name.
 	if _, err := shed.Encode(record(1, "chief", one, 1)); err == nil {
 		t.Fatal("a member named chief was encoded")
 	}
 }
 
-// A charter veto the chief of staff dismisses blocks no longer and is not
-// shown to the owner; one it escalates still blocks and is; the owner's
-// ruling takes precedence over either, and the owner's own objection is
-// never the chief of staff's to decide.
 func TestChiefDecisionsShapeTheDissentTheOwnerSees(t *testing.T) {
 	t.Parallel()
 	veto, advice, vetoed := shed.ObjectionID(1, alice, 1), shed.ObjectionID(1, bob, 1), shed.ObjectionID(1, alice, 2)
@@ -87,8 +80,6 @@ func TestChiefDecisionsShapeTheDissentTheOwnerSees(t *testing.T) {
 	if standing := shed.Standing(entries); len(standing) != 3 {
 		t.Fatalf("a dismissed objection is still answered: %+v", standing)
 	}
-	// The chief of staff's dismissal stays in the ratified dissent record
-	// but is not the owner's disposition.
 	if r := shed.Ratify(1, one, entries); len(r.Dispositions) != 0 || len(r.Dissent) != 4 {
 		t.Fatalf("the ratification %+v", r)
 	}

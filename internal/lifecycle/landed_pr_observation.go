@@ -46,9 +46,6 @@ func (b *BaseRefresher) ObserveLandedPullRequests(ctx context.Context) error {
 	return nil
 }
 
-// landedPollDue reports whether stream is delivered by a landing whose pull
-// request outcome is not recorded and whose lookup is due. It forgets the
-// cadence of a workstream that needs no lookup.
 func (b *BaseRefresher) landedPollDue(stream config.WorkstreamID) (bool, error) {
 	project := b.Repository.Project()
 	if attempt, checked := b.S.Polls.Last(project, stream, LandedPoll); checked && b.S.Now().Sub(attempt.At) < b.S.About(b.Repository).Project.PullRequestPollInterval() {

@@ -126,8 +126,6 @@ func Resolve(ctx context.Context, repository *trace.Repository, stream config.Wo
 	return unresolved("it is not one of %s", CitationForms)
 }
 
-// latestDocument returns the content of the newest recorded revision of the
-// workstream document at path.
 func latestDocument(repository *trace.Repository, stream config.WorkstreamID, path string) (string, bool, error) {
 	documents, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {

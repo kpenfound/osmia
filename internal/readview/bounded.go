@@ -1,3 +1,6 @@
+// Package readview bounds and stabilises the reads behind the service's
+// views: Bounded answers within a time limit from a cache, and Consistent
+// retries a read until the trace and runtime generations it reads stay put.
 package readview
 
 import (
@@ -14,15 +17,11 @@ type Cache[T any] struct {
 	value      T
 	has        bool
 	generation uint64
-	// running is the refresh in flight, if any, and queued the one that
-	// starts when it finishes, with queuedFn the function it runs.
-	running  *refresh[T]
-	queued   *refresh[T]
-	queuedFn func() T
+	running    *refresh[T]
+	queued     *refresh[T]
+	queuedFn   func() T
 }
 
-// refresh is one run of a bounded view's function. done closes once value
-// is set.
 type refresh[T any] struct {
 	done  chan struct{}
 	value T
@@ -49,8 +48,6 @@ func (c *Cache[T]) Invalidate(update func(T) T) {
 	c.value = update(c.value)
 }
 
-// start requires c.mu. It runs fn as f in the background and, once fn
-// returns, starts the queued refresh, if any.
 func (c *Cache[T]) start(f *refresh[T], fn func() T) {
 	c.running = f
 	generation := c.generation
@@ -72,10 +69,6 @@ func (c *Cache[T]) start(f *refresh[T], fn func() T) {
 	}()
 }
 
-// join requires c.mu. It returns a refresh that begins no earlier than this
-// call: a new one when none is in flight, otherwise the one queued behind
-// the refresh in flight. At most one refresh runs at a time, and callers
-// arriving while one runs share the single refresh queued after it.
 func (c *Cache[T]) join(fn func() T) *refresh[T] {
 	if c.running == nil {
 		f := &refresh[T]{done: make(chan struct{})}

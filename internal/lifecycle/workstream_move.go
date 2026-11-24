@@ -209,8 +209,6 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	case res.Committed:
 		move := records.move
 		if res.Target != req.To {
-			// Jev departed from the chief of staff's proposal: the move
-			// recorded is the one it entered.
 			if entered, ok, err := latestWorkstreamMove(repo, stream); err == nil && ok {
 				move = entered
 			}
@@ -224,12 +222,8 @@ func (s *Controller) MoveWorkstream(ctx context.Context, repo *trace.Repository,
 	return WorkstreamMoveResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s was not moved to %s: the move is held (%s). %s Nothing moved, and the workstream stays %s", stream, req.To, res.Hold, res.Reason, feature.Value)}
 }
 
-// recoveryCard names where the owner decides a move that belongs to the owner
-// and has no card of its own.
 const recoveryCard = router.RecoveryCard
 
-// pendingOwnerMove says what became of a proposal that belongs to the owner: it
-// is a pending owner decision, and where the owner decides it.
 func pendingOwnerMove(stream config.WorkstreamID, to string, res router.Result, card string) string {
 	why := "the owner decides it"
 	switch {
@@ -243,11 +237,6 @@ func pendingOwnerMove(stream config.WorkstreamID, to string, res router.Result, 
 	return fmt.Sprintf("workstream %s was not moved to %s: %s. The move is pending as an owner decision on %s; nothing moved", stream, to, why, card)
 }
 
-// proposeGate routes the chief of staff's proposal to ratify or abandon the
-// workstream. A proposal carries no authority for an owner gate, so the router
-// commits nothing and leaves the move as a pending owner decision, on the
-// ratification card for a ratification and the recovery card otherwise. The
-// answer is the account of that, for the chief of staff to pass on.
 func (s *Controller) proposeGate(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor, turn string) *APIError {
 	res, err := s.proposeToOwner(ctx, repo, stream, to, note, actor, turn)
 	switch {
@@ -263,14 +252,6 @@ func (s *Controller) proposeGate(ctx context.Context, repo *trace.Repository, st
 	return &APIError{Code: Conflict, Message: pendingOwnerMove(stream, to, res, card)}
 }
 
-// moveWaitingMember handles a move of a member of a cross-repo workgroup that
-// waits for the workgroup spec's drafting. For a sketched member whose
-// committee review waits for the first workgroup spec, a move to sketched
-// asks the architect for another draft of a workgroup spec whose drafting
-// failed, and a move to in-shed is refused with what the member waits for.
-// For any member of a workgroup whose guarded contract redraft the service
-// stopped asking for, a move to sketched asks for another redraft. waiting is
-// false for any other move, which moves as usual.
 func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, feature, to, note string, actor trace.Actor) (WorkstreamMoveResponse, bool, *APIError) {
 	unreadable := &APIError{Code: Internal, Message: "cannot read the workstream's workgroup"}
 	required, err := repo.GroupApprovalRequired(stream)
@@ -289,16 +270,11 @@ func (s *Controller) moveWaitingMember(ctx context.Context, repo *trace.Reposito
 		return WorkstreamMoveResponse{}, true, unreadable
 	}
 	if drafted {
-		// A guarded contract redraft the service stopped asking for is
-		// asked for again by a move of any member to sketched.
 		if to != SketchedState {
 			return WorkstreamMoveResponse{}, false, nil
 		}
 		stopped, err := s.ProjectSpecRedraftStopped(id)
 		if errors.Is(err, trace.ErrLocked) {
-			// A redraft that stopped leaves the workgroup idle; a busy
-			// workgroup is drafting or refreshing, and the member moves as
-			// usual.
 			return WorkstreamMoveResponse{}, false, nil
 		}
 		if err != nil {
@@ -498,10 +474,6 @@ func (s *Controller) UnsketchedMembers(members []trace.CrossRepoMember) (string,
 	return strings.Join(parts, "; "), nil
 }
 
-// moveHanded handles a move to sketched or in-shed of a handed workstream,
-// whose spec and plan are not accepted yet. A move to sketched after drafting
-// stopped asks the architect for a new run of drafts with the note; any other
-// such move is refused with where drafting stands.
 func (s *Controller) moveHanded(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor) (WorkstreamMoveResponse, *APIError) {
 	d := &intake.Drafter{S: s.Intake().DrafterDependencies(), Repository: repo}
 	if to == InShedState {
@@ -525,10 +497,6 @@ func (s *Controller) moveHanded(ctx context.Context, repo *trace.Repository, str
 	return WorkstreamMoveResponse{Workstream: stream, State: intake.HandedState, Detail: detail}, nil
 }
 
-// proposeShed routes the chief of staff's proposal to ask the architect for a
-// redraft (to sketched) or to run another round of debate (to in-shed) after
-// debate concluded. Leaving the decision to the owner is the default, and Jev
-// may depart from it at the strict bar.
 func (s *Controller) proposeShed(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, to, note string, actor trace.Actor, turn string) (WorkstreamMoveResponse, *APIError) {
 	if s.Router == nil {
 		return WorkstreamMoveResponse{}, &APIError{Code: Internal, Message: "routing a workstream's moves is unavailable"}

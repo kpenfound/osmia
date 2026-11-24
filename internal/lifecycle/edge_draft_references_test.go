@@ -3,25 +3,31 @@ package lifecycle_test
 import (
 	context "context"
 	json "encoding/json"
-	bundle "github.com/kpenfound/osmia/internal/bundle"
-	pulls "github.com/kpenfound/osmia/internal/pulls"
 	os "os"
 	filepath "path/filepath"
 	strings "strings"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	bundle "github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	pulls "github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f, stream, repository, report, upstreamRepo, upstream := newCrossRepoEdgeDependent(t)
-	must(t, f.s.edgeResolverPass(ctx, repository))
+	intakefixture.Must(t, f.s.edgeResolverPass(ctx, repository))
 	provider := f.s.Context()
 	assertBuildReference := func(want, reference string) {
 		t.Helper()
-		view, err := provider.Assemble(ctx, repository.Project(), bundle.Scope{Role: masonRole, Workstream: stream})
-		must(t, err)
+		view, err := provider.Assemble(ctx, repository.Project(), bundle.Scope{Role: intakefixture.MasonRole, Workstream: stream})
+		intakefixture.Must(t, err)
 		if len(view.Dependencies) != 1 {
 			t.Fatalf("dependent context: %+v", view.Dependencies)
 		}
@@ -33,40 +39,40 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 			t.Fatalf("role context omits upstream build identity: %s", rendered)
 		}
 	}
-	assertBuildReference("owner/other-fork@"+featureBranch(upstream), "")
-	if _, api := f.s.deliveryPresentation(ctx, string(stream)); api == nil || api.Code != Conflict || !strings.Contains(api.Message, "waiting on owner:") {
-		t.Fatalf("publication without an upstream PR reference must wait: %v", api)
+	assertBuildReference("owner/other-fork@"+intake.FeatureBranch(upstream), "")
+	if _, apiFault := f.s.deliveryPresentation(ctx, string(stream)); apiFault == nil || apiFault.Code != api.Conflict || !strings.Contains(apiFault.Message, "waiting on owner:") {
+		t.Fatalf("publication without an upstream PR reference must wait: %v", apiFault)
 	}
 
 	home := filepath.Dir(f.clone)
 	fork := filepath.Join(home, "remotes", "owner", "dagger.git")
-	configureDeliverySigner(t, f.clone)
-	must(t, os.MkdirAll(filepath.Dir(fork), 0700))
-	demoGit(t, home, "init", "--quiet", "--bare", fork)
-	demoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
-	pull := &fakePulls{SyncHead: true, Fork: func() string {
-		return strings.TrimSpace(demoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+featureBranch(stream)))
+	fixturekit.ConfigureDeliverySigner(t, f.clone)
+	intakefixture.Must(t, os.MkdirAll(filepath.Dir(fork), 0700))
+	fixturekit.DemoGit(t, home, "init", "--quiet", "--bare", fork)
+	fixturekit.DemoGit(t, home, "-C", f.clone, "remote", "add", "origin", fork)
+	pull := &fixturekit.FakePulls{SyncHead: true, Fork: func() string {
+		return strings.TrimSpace(fixturekit.DemoGit(t, home, "-C", fork, "for-each-ref", "--format=%(objectname)", "refs/heads/"+intake.FeatureBranch(stream)))
 	}}
 	f.s.mu.Lock()
 	f.s.options.PullRequests = pull
 	f.s.mu.Unlock()
-	publication := DeliveryPublication{Status: publicationOpened, Upstream: "owner/other", Fork: "owner/other-fork", Branch: featureBranch(upstream), Commit: "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2", PullRequest: 77, URL: "https://example.invalid/owner/other/pull/77"}
+	publication := api.DeliveryPublication{Status: delivery.PublicationOpened, Upstream: "owner/other", Fork: "owner/other-fork", Branch: intake.FeatureBranch(upstream), Commit: "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2", PullRequest: 77, URL: "https://example.invalid/owner/other/pull/77"}
 	recordUpstreamOwnPullRequest(t, f.s, upstreamRepo, upstream, publication)
 	pull.Prs = append(pull.Prs, pulls.PullRequest{Number: publication.PullRequest, URL: publication.URL, State: "open", HeadRepository: publication.Fork, Head: publication.Branch, HeadCommit: publication.Commit, Base: "main"})
 	f.clock.Mu.Lock()
 	f.clock.At = f.clock.At.Add(11 * time.Minute)
 	f.clock.Mu.Unlock()
-	must(t, f.s.edgeResolverPass(ctx, repository))
+	intakefixture.Must(t, f.s.edgeResolverPass(ctx, repository))
 	assertBuildReference(publication.Fork+"@"+publication.Commit, "owner/other#77")
 
 	pub := &publicationFixture{shedFixture: f, stream: stream, repository: repository, report: report, fork: fork, pulls: pull}
-	must(t, pub.publisher().Pass(ctx))
+	intakefixture.Must(t, pub.publisher().Pass(ctx))
 	if operations := pub.operations(t); len(operations) != 0 {
 		t.Fatalf("unapproved dependent publication scheduled: %+v", operations)
 	}
-	presented, api := f.s.deliveryPresentation(ctx, string(stream))
-	if api != nil {
-		t.Fatal(api)
+	presented, apiFault := f.s.deliveryPresentation(ctx, string(stream))
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	if !presented.DraftPullRequest || !strings.Contains(presented.Draft, "stays a draft") {
 		t.Fatalf("a pending merge-order dependency must present a draft pull request that the description states: %v, %s", presented.DraftPullRequest, presented.Draft)
@@ -75,9 +81,9 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 		t.Fatalf("presentation omits the draft pull request signal: %s, %v", encoded, err)
 	}
 	missingDependency := "Implement the dependent interface."
-	_, api = f.s.approveDelivery(ctx, string(stream), DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &missingDependency})
-	if api == nil || api.Code != Validation || !strings.Contains(api.Message, "description must state the dependency on owner/other#77") {
-		t.Fatalf("approval accepted an omitted upstream reference: %v", api)
+	_, apiFault = f.s.approveDelivery(ctx, string(stream), api.DeliveryDecision{Review: presented.Report.Review, ReviewRevision: presented.ReviewRevision, Commit: presented.Report.Commit, DraftHash: presented.DraftHash, Description: &missingDependency})
+	if apiFault == nil || apiFault.Code != api.Validation || !strings.Contains(apiFault.Message, "description must state the dependency on owner/other#77") {
+		t.Fatalf("approval accepted an omitted upstream reference: %v", apiFault)
 	}
 	pub.publishDraft(t)
 	approval := pub.approve(t, nil)
@@ -91,15 +97,13 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 	if err != nil || result.Outcome != "succeeded" {
 		t.Fatalf("draft publication: %+v, %v", result, err)
 	}
-	// The approval is recorded and applied, and the pull request stays a draft
-	// until the dependency has merged.
-	if got := pub.feature(t); got != DeliveredState {
+	if got := pub.feature(t); got != intake.DeliveredState {
 		t.Fatalf("the dependent is %s after its approval", got)
 	}
 	if state, err := repository.Workflow(stream, "publication"); err != nil || state.Value != "published-1" {
 		t.Fatalf("the approval's outcome %+v: %v", state, err)
 	}
-	must(t, pub.publisher().Pass(ctx))
+	intakefixture.Must(t, pub.publisher().Pass(ctx))
 	pull.Mu.Lock()
 	defer pull.Mu.Unlock()
 	if len(pull.Prs) != 2 || pull.Creates != 1 || pull.Readies != 0 {
@@ -113,17 +117,17 @@ func TestMergeOrderDependentBuildReferencesAndLinkedDraftPublication(t *testing.
 func TestDeliveryPresentationOmitsDraftPullRequestWithoutPendingDependency(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "squash")
-	presented, api := p.s.deliveryPresentation(context.Background(), string(p.stream))
-	if api != nil {
-		t.Fatal(api)
+	presented, apiFault := p.s.deliveryPresentation(context.Background(), string(p.stream))
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	if presented.DraftPullRequest || strings.Contains(presented.Draft, "stays a draft") {
 		t.Fatalf("a workstream without a pending dependency presents a draft pull request: %v, %s", presented.DraftPullRequest, presented.Draft)
 	}
 	encoded, err := json.Marshal(presented)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var fields map[string]json.RawMessage
-	must(t, json.Unmarshal(encoded, &fields))
+	intakefixture.Must(t, json.Unmarshal(encoded, &fields))
 	if _, present := fields["draft_pull_request"]; present {
 		t.Fatalf("presentation serializes draft_pull_request without a pending dependency: %s", encoded)
 	}

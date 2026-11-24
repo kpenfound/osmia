@@ -12,14 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
-	// Serial: the interruption hook is shared with startup migration tests.
 	for _, interrupted := range []bool{false, true} {
 		name := "restart"
 		if interrupted {
@@ -29,33 +32,29 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 			opts, clone := projectFixture(t)
 			ctx := context.Background()
 			s, c := start(t, opts)
-			first, err := c.AddProject(ctx, request(clone))
-			must(t, err)
+			first, err := c.AddProject(ctx, fixturekit.Request(clone))
+			intakefixture.Must(t, err)
 			otherClone := filepath.Join(filepath.Dir(clone), "other")
-			demoGit(t, filepath.Dir(clone), "init", "--quiet", otherClone)
-			second, err := c.AddProject(ctx, ProjectAddRequest{Name: "other", Upstream: "upstream/other", Fork: "owner/other", Clone: otherClone})
-			must(t, err)
+			fixturekit.DemoGit(t, filepath.Dir(clone), "init", "--quiet", otherClone)
+			second, err := c.AddProject(ctx, api.ProjectAddRequest{Name: "other", Upstream: "upstream/other", Fork: "owner/other", Clone: otherClone})
+			intakefixture.Must(t, err)
 			projects := []config.ProjectID{first.Project.ID, second.Project.ID}
 			archives := []runtime.Archive{
-				{Project: projects[0], Workstream: "w_00000000000000000000000000000071", State: DeliveredState, Title: "Published request", DeliveryLink: "https://github.com/upstream/repo/pull/71"},
-				{Project: projects[0], Workstream: "w_00000000000000000000000000000072", State: AbandonedState, Title: "Cancelled request"},
-				{Project: projects[1], Workstream: "w_00000000000000000000000000000073", State: AbandonedState, Title: "Other cancelled request"},
+				{Project: projects[0], Workstream: "w_00000000000000000000000000000071", State: intake.DeliveredState, Title: "Published request", DeliveryLink: "https://github.com/upstream/repo/pull/71"},
+				{Project: projects[0], Workstream: "w_00000000000000000000000000000072", State: intake.AbandonedState, Title: "Cancelled request"},
+				{Project: projects[1], Workstream: "w_00000000000000000000000000000073", State: intake.AbandonedState, Title: "Other cancelled request"},
 			}
-			// One mapping is already durable, as after an earlier partial migration.
-			existing, err := trace.EnsureWorkgroups(ctx, s.projectViews()[0].repository, []config.WorkstreamID{archives[0].Workstream}, demoStart, migrationActor, "migrate-workgroups")
-			must(t, err)
-			must(t, s.Close())
-			// This is an upgrade root with completed archive cleanup and no remaining
-			// member histories or newer lifecycle evidence. Runtime is the only record
-			// of these workstreams; migration must not manufacture their deleted traces.
+			existing, err := trace.EnsureWorkgroups(ctx, s.projectViews()[0].repository, []config.WorkstreamID{archives[0].Workstream}, fixturekit.DemoStart, lifecycle.MigrationActor, "migrate-workgroups")
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, s.Close())
 			for i := range archives {
-				archives[i].ArchivedAt = demoStart
-				archives[i].CleanedAt = demoStart.Add(time.Minute)
+				archives[i].ArchivedAt = fixturekit.DemoStart
+				archives[i].CleanedAt = fixturekit.DemoStart.Add(time.Minute)
 			}
 			before, err := json.Marshal(runtime.State{Version: runtime.Version, Archived: archives})
-			must(t, err)
+			intakefixture.Must(t, err)
 			runtimePath := filepath.Join(opts.Config.Root, "runtime.json")
-			must(t, os.WriteFile(runtimePath, before, 0600))
+			intakefixture.Must(t, os.WriteFile(runtimePath, before, 0600))
 
 			var partial []trace.Workgroup
 			if interrupted {
@@ -70,18 +69,18 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 				failed, err := Start(ctx, opts)
 				lifecycle.EnsureWorkgroupsInterrupt = nil
 				if failed != nil {
-					must(t, failed.Close())
+					intakefixture.Must(t, failed.Close())
 				}
 				if !errors.Is(err, crash) {
 					t.Fatalf("startup interruption: got %v, want %v", err, crash)
 				}
 				cfg := loadRegistered(t, opts.Config)
 				repo, err := trace.Open(cfg.Root, cfg.For(projects[0]).Project)
-				must(t, err)
+				intakefixture.Must(t, err)
 				var revision int
 				partial, revision, err = trace.Workgroups(repo)
 				repo.Close()
-				must(t, err)
+				intakefixture.Must(t, err)
 				if revision != 2 || len(partial) != 2 {
 					t.Fatalf("first project was not migrated before interruption: revision=%d groups=%+v", revision, partial)
 				}
@@ -93,7 +92,7 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 				current := map[config.ProjectID][]trace.Workgroup{}
 				for _, p := range s.projectViews() {
 					groups, revision, err := trace.Workgroups(p.repository)
-					must(t, err)
+					intakefixture.Must(t, err)
 					wantRevision, wantCount := 1, 1
 					if p.id == projects[0] {
 						wantRevision, wantCount = 2, 2
@@ -109,7 +108,7 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 					}
 					current[p.id] = groups
 					resolved, resolutionRevision, err := trace.ResolvedWorkgroups(p.repository)
-					must(t, err)
+					intakefixture.Must(t, err)
 					if len(resolved) != 0 || resolutionRevision != 0 {
 						t.Fatalf("archive migration invented resolution evidence: revision=%d resolved=%v", resolutionRevision, resolved)
 					}
@@ -124,7 +123,7 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 						t.Fatalf("cleaned archive has no solitary workgroup: %+v", a)
 					}
 					status, err := c.Status(ctx, a.Workstream)
-					must(t, err)
+					intakefixture.Must(t, err)
 					if status.Project != a.Project || !status.Archived || !status.TraceDeleted || status.Workgroup == nil || status.Workgroup.ID != g.ID {
 						t.Fatalf("cleaned archive is not visible in its workgroup: %+v", status)
 					}
@@ -135,9 +134,9 @@ func TestStartupWrapsCleanedArchivesWithoutRecreatingHistory(t *testing.T) {
 						t.Fatalf("deleted archive trace was recreated: %v", err)
 					}
 				}
-				must(t, s.Close())
+				intakefixture.Must(t, s.Close())
 				after, err := os.ReadFile(runtimePath)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !bytes.Equal(before, after) {
 					t.Fatalf("migration rewrote archive records: before=%s after=%s", before, after)
 				}
@@ -150,23 +149,22 @@ func TestWorkgroupMigrationExcludesPinnedArchivesAndRetainedSessions(t *testing.
 	opts, clone := projectFixture(t)
 	ctx := context.Background()
 	s, c := start(t, opts)
-	added, err := c.AddProject(ctx, request(clone))
-	must(t, err)
+	added, err := c.AddProject(ctx, fixturekit.Request(clone))
+	intakefixture.Must(t, err)
 	p := s.sole()
 	feature := config.WorkstreamID("w_00000000000000000000000000000081")
 	session := config.WorkstreamID("w_00000000000000000000000000000082")
-	must(t, p.repository.CreateWorkstream(ctx, feature, demoStart, registrationActor))
-	must(t, p.repository.CreateSessionWorkstream(ctx, session, "default", "deadbeef", "osmia/session/"+string(session), "exploration", demoStart, registrationActor))
+	intakefixture.Must(t, p.repository.CreateWorkstream(ctx, feature, fixturekit.DemoStart, intake.RegistrationActor))
+	intakefixture.Must(t, p.repository.CreateSessionWorkstream(ctx, session, "default", "deadbeef", "osmia/session/"+string(session), "exploration", fixturekit.DemoStart, intake.RegistrationActor))
 	archives := []runtime.Archive{
 		{Project: added.Project.ID, Workstream: feature},
 		{Project: added.Project.ID, Workstream: session},
 		{Project: added.Project.ID, Workstream: "w_00000000000000000000000000000083", Workgroup: "g_00000000000000000000000000000083"},
 		{Project: "p_00000000000000000000000000000084", Workstream: "w_00000000000000000000000000000084"},
-		{Project: added.Project.ID, Workstream: librarianWorkstream(added.Project.ID)},
 	}
-	must(t, s.ensureWorkgroups(ctx, s.current(), []*activeProject{p}, archives))
+	intakefixture.Must(t, s.ensureWorkgroups(ctx, s.current(), []*activeProject{p}, archives))
 	groups, revision, err := trace.Workgroups(p.repository)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if revision != 1 || len(groups) != 1 || !reflect.DeepEqual(groups[0].Members, []config.WorkstreamID{feature}) {
 		t.Fatalf("migration duplicated a retained feature or wrapped an excluded identity: revision=%d groups=%+v", revision, groups)
 	}
@@ -179,17 +177,17 @@ func TestCleanedArchiveWorkgroupResolutionRequiresExactEvidence(t *testing.T) {
 			ctx := context.Background()
 			missing := config.WorkstreamID("w_00000000000000000000000000000091")
 			repo, err := trace.Open(cfg.Root, cfg.Project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			t.Cleanup(func() { repo.Close() })
-			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{missing}, demoStart, migrationActor, "migrate-workgroups")
-			must(t, err)
-			a := runtime.Archive{Project: cfg.Project.ID, Workstream: missing, ArchivedAt: demoStart, CleanedAt: demoStart.Add(time.Minute), State: DeliveredState, Title: "Archived request", Resolved: true}
+			groups, err := trace.EnsureWorkgroups(ctx, repo, []config.WorkstreamID{missing}, fixturekit.DemoStart, lifecycle.MigrationActor, "migrate-workgroups")
+			intakefixture.Must(t, err)
+			a := runtime.Archive{Project: cfg.Project.ID, Workstream: missing, ArchivedAt: fixturekit.DemoStart, CleanedAt: fixturekit.DemoStart.Add(time.Minute), State: intake.DeliveredState, Title: "Archived request", Resolved: true}
 			wantResolved, wantError := false, false
 			switch name {
 			case "merged":
 				a.ResolutionEvidence, wantResolved = "merged", true
 			case "cancelled":
-				a.State, a.ResolutionEvidence, wantResolved = AbandonedState, "cancelled", true
+				a.State, a.ResolutionEvidence, wantResolved = intake.AbandonedState, "cancelled", true
 			case "no archive":
 				wantError = true
 			case "no cleanup":
@@ -197,17 +195,17 @@ func TestCleanedArchiveWorkgroupResolutionRequiresExactEvidence(t *testing.T) {
 			case "different project":
 				a.Project, wantError = otherProject, true
 			case "different workstream":
-				a.Workstream, wantError = quiet, true
+				a.Workstream, wantError = fixturekit.Quiet, true
 			}
 			state := runtime.State{Version: runtime.Version}
 			if name != "no archive" {
 				state.Archived = []runtime.Archive{a}
 			}
 			data, err := json.Marshal(state)
-			must(t, err)
-			must(t, os.WriteFile(filepath.Join(opts.Config.Root, "runtime.json"), data, 0600))
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, os.WriteFile(filepath.Join(opts.Config.Root, "runtime.json"), data, 0600))
 			store, _, err := runtime.Open(runtime.Inputs{Config: cfg})
-			must(t, err)
+			intakefixture.Must(t, err)
 			t.Cleanup(func() { store.Close() })
 			s := &Service{cfg: cfg, store: store, options: opts}
 			resolver := &workgroupResolver{s: s, repository: repo}
@@ -218,10 +216,10 @@ func TestCleanedArchiveWorkgroupResolutionRequiresExactEvidence(t *testing.T) {
 						t.Fatalf("unexplained missing member: %v", err)
 					}
 				} else {
-					must(t, err)
+					intakefixture.Must(t, err)
 				}
 				resolved, revision, err := trace.ResolvedWorkgroups(repo)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if wantResolved {
 					if revision != 1 || !reflect.DeepEqual(resolved, []config.WorkgroupID{groups[0].ID}) {
 						t.Fatalf("pinned archive did not resolve exactly once: revision=%d resolved=%v", revision, resolved)

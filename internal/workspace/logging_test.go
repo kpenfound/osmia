@@ -11,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/ghlog"
 )
 
-// record is one decoded GitHub activity log line.
 type record struct {
 	Level    string `json:"level"`
 	Msg      string `json:"msg"`
@@ -25,9 +24,6 @@ type record struct {
 	Error    string
 }
 
-// decodeRecords parses every line of buf as one JSON object, failing the
-// test if any line does not parse: every line a logger writes must be valid
-// JSON.
 func decodeRecords(t *testing.T, buf *bytes.Buffer) []record {
 	t.Helper()
 	var records []record
@@ -68,7 +64,6 @@ func TestGitRecordsOneEntryPerRemoteOperation(t *testing.T) {
 	if err := provider.Push(ctx, "fork", first, "osmia/w", ""); err != nil {
 		t.Fatal(err)
 	}
-	// A rejected push: the branch is no longer at the expected commit.
 	if err := provider.Push(ctx, "fork", base, "osmia/w", "not-"+first); err == nil {
 		t.Fatal("expected a rejected push")
 	}

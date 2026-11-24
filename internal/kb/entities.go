@@ -82,7 +82,6 @@ func Validate(m Map) error {
 		}
 		ids[e.ID] = i
 	}
-	// names maps every lowercased ID and alias to the entity that holds it.
 	names := map[string]string{}
 	for _, e := range m.Entities {
 		names[strings.ToLower(e.ID)] = e.ID
@@ -125,8 +124,6 @@ func Validate(m Map) error {
 	return errors.Join(problems...)
 }
 
-// cycles returns the part_of cycles a depth-first walk finds, at least one in
-// every cyclic group, each starting at its smallest ID.
 func cycles(m Map) [][]string {
 	edges := map[string][]string{}
 	for _, e := range m.Entities {

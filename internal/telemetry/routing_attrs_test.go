@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The routing attributes are on the allow-list with the value kinds a span
-// needs, and free text, a probability or an uppercase word is dropped.
 func TestRoutingAttributesAreAllowListed(t *testing.T) {
 	for name, a := range map[string]Attr{
 		"decided by": DecidedBy("jev_gate"), "default state": DefaultState("in-shed"), "deviated": Deviated(false),

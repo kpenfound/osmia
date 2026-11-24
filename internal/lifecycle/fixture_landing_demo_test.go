@@ -8,6 +8,8 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,16 +17,16 @@ import (
 
 type landingDemo struct {
 	mu      sync.Mutex
-	reviews map[string][]UnitReviewIdentity
+	reviews map[string][]service.UnitReviewIdentity
 }
 
-func (d *landingDemo) reviewed(unit string) []UnitReviewIdentity {
+func (d *landingDemo) reviewed(unit string) []service.UnitReviewIdentity {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return slices.Clone(d.reviews[unit])
 }
 func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request, tools *mcp.ClientSession) (*agent.Result, error) {
-	return intakefixture.LandingReview(ctx, unit, req, tools, func(unit string, identity UnitReviewIdentity) {
+	return intakefixture.LandingReview(ctx, unit, req, tools, func(unit string, identity service.UnitReviewIdentity) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		d.reviews[unit] = append(d.reviews[unit], identity)
@@ -33,5 +35,5 @@ func (d *landingDemo) review(ctx context.Context, unit string, req agent.Request
 
 func landingByUnit(t *testing.T, repository *trace.Repository, stream config.WorkstreamID) map[string]trace.Document {
 	t.Helper()
-	return intakefixture.LandingByUnit(t, repository, stream, landingDocument)
+	return intakefixture.LandingByUnit(t, repository, stream, execution.LandingDocument)
 }

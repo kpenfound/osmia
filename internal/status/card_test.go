@@ -91,12 +91,10 @@ func TestFitCardCutsAWordWithNoBoundaryAndCountsCharacters(t *testing.T) {
 	if got := FitCard(exact, nil); got.Card == nil || *got.Card != exact || len(got.Adjustments) != 0 {
 		t.Fatalf("a card at its limits changed: %+v", got)
 	}
-	// The text is cut back to the last word boundary inside the limit.
 	got = FitCard(coreadapter.Card{Headline: strings.Repeat("a", 62) + " bbbbbb", Happened: "Done."}, nil)
 	if got.Card == nil || got.Card.Headline != strings.Repeat("a", 62)+"…" {
 		t.Fatalf("fitted %+v", got)
 	}
-	// A word that ends exactly where the text is cut is kept whole.
 	got = FitCard(coreadapter.Card{Headline: strings.Repeat("a", 63) + " bbb", Happened: "Done."}, nil)
 	if got.Card == nil || got.Card.Headline != strings.Repeat("a", 63)+"…" {
 		t.Fatalf("fitted %+v", got)

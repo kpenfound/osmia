@@ -10,9 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// decideFallback leaves the decide result of question id of the workstream as a
-// fallback, as the decide tool does while Jev is unconfigured, unless a result
-// is already recorded.
 func decideFallback(t *testing.T, repo *trace.Repository, stream config.WorkstreamID, id string) {
 	t.Helper()
 	if err := jevfixture.DecideQuestion(repo, stream, id); err != nil {
@@ -20,13 +17,10 @@ func decideFallback(t *testing.T, repo *trace.Repository, stream config.Workstre
 	}
 }
 
-// decided wraps the chief of staff's outcome tools so a call first leaves a
-// fallback decide result for each question it names.
 func decided(t *testing.T, repo *trace.Repository, host config.WorkstreamID, list []coreadapter.Tool) []coreadapter.Tool {
 	return jevfixture.AutoDecide(repo, host, list)
 }
 
-// judgments returns the judgment records of the fixture's workstream.
 func (f fixture) judgments(t *testing.T) []trace.Document {
 	t.Helper()
 	docs, err := trace.Read[trace.Document](f.repo, stream)

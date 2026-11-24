@@ -13,9 +13,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// boundedSystem is a fakeSystem whose operation is bounded: it can hang, fail
-// the way the workspace layer fails, and end an operation it is asked to give
-// up.
 type boundedSystem struct {
 	*fakeSystem
 	mu           sync.Mutex
@@ -89,7 +86,6 @@ func (b *boundedSystem) given() []GiveUpReason {
 	return append([]GiveUpReason(nil), b.giveUps...)
 }
 
-// permits counts the capacity an attempt takes and gives back.
 type permits struct {
 	mu       sync.Mutex
 	taken    int
@@ -137,7 +133,6 @@ func (b *boundedFixture) controller(t *testing.T, options Options) *Controller {
 	return c
 }
 
-// lastRetry returns the latest failure the operation recorded.
 func (b *boundedFixture) lastRetry(t *testing.T) trace.OperationAction {
 	t.Helper()
 	record := b.record(t)
@@ -150,7 +145,6 @@ func (b *boundedFixture) lastRetry(t *testing.T) trace.OperationAction {
 	return trace.OperationAction{}
 }
 
-// addOperation publishes a second operation of the workstream.
 func (b *boundedFixture) addOperation(t *testing.T, name string) {
 	t.Helper()
 	event := trace.Event{ID: trace.EventID(name, "effect"), Kind: "local-effect", Body: "Perform more local work"}
@@ -160,8 +154,6 @@ func (b *boundedFixture) addOperation(t *testing.T, name string) {
 	must(t, err)
 }
 
-// laneIsFree reports whether another attempt of the operation can claim its
-// workstream: the attempt that failed released it.
 func (b *boundedFixture) laneIsFree(t *testing.T) bool {
 	t.Helper()
 	b.clock.Advance(time.Hour)
@@ -174,9 +166,6 @@ func (b *boundedFixture) laneIsFree(t *testing.T) bool {
 	return true
 }
 
-// An attempt whose effect hangs is cut off at the attempt deadline and recorded
-// as a retry that names the deadline. Its capacity and workstream are free
-// again, and a later attempt runs.
 func TestAttemptIsCutOffAtItsDeadline(t *testing.T) {
 	ctx := context.Background()
 	b := newBoundedFixture(t)
@@ -205,7 +194,6 @@ func TestAttemptIsCutOffAtItsDeadline(t *testing.T) {
 	b.completed(t)
 }
 
-// A hung inspection is cut off the same way.
 func TestInspectionIsCutOffAtItsDeadline(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.hangInspect = true
@@ -223,8 +211,6 @@ func TestInspectionIsCutOffAtItsDeadline(t *testing.T) {
 	}
 }
 
-// A contention or recovery failure of the workspace layer is recorded as a
-// retry that names it, and releases the attempt's capacity and workstream.
 func TestWorkspaceFailuresAreRecordedWithTheirOwnReasons(t *testing.T) {
 	for _, tc := range []struct{ mode, want string }{
 		{"contended", "Clone lock contention"},
@@ -249,7 +235,6 @@ func TestWorkspaceFailuresAreRecordedWithTheirOwnReasons(t *testing.T) {
 	}
 }
 
-// failAttempts makes the given number of passes, one a minute apart.
 func (b *boundedFixture) failAttempts(t *testing.T, c *Controller, attempts int) {
 	t.Helper()
 	for range attempts {
@@ -258,14 +243,10 @@ func (b *boundedFixture) failAttempts(t *testing.T, c *Controller, attempts int)
 	}
 }
 
-// An operation that fails past the limit, with no durable outcome, is ended by
-// the adapter's give-up once the window has also passed, and not before. The
-// result is terminal: the operation is acknowledged and releases what it held.
 func TestAFailingOperationIsGivenUpAfterTheLimitAndTheWindow(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")
 	c := b.controller(t, Options{GiveUpWindow: 30 * time.Minute})
-	// Past the failure count but inside the window: it keeps retrying.
 	b.failAttempts(t, c, 2*GiveUpFailures)
 	if given := b.bounded.given(); len(given) != 0 {
 		t.Fatalf("given up inside the window: %+v", given)
@@ -273,7 +254,6 @@ func TestAFailingOperationIsGivenUpAfterTheLimitAndTheWindow(t *testing.T) {
 	if record := b.record(t); record.Result != nil || ConsecutiveFailures(record) != 2*GiveUpFailures {
 		t.Fatalf("after %d failures: %+v", 2*GiveUpFailures, record)
 	}
-	// The window passes: the next attempt ends the operation without applying.
 	_, appliedBefore := b.system.counts()
 	b.clock.Advance(30 * time.Minute)
 	must(t, c.Pass(context.Background()))
@@ -291,7 +271,6 @@ func TestAFailingOperationIsGivenUpAfterTheLimitAndTheWindow(t *testing.T) {
 	if _, applied := b.system.counts(); applied != appliedBefore {
 		t.Fatal("the effect was attempted after the operation was given up")
 	}
-	// The failure notices came once per failure, in order.
 	for i, failures := range b.bounded.failings {
 		if failures != i+1 {
 			t.Fatalf("the adapter was told of failures %v", b.bounded.failings)
@@ -300,7 +279,6 @@ func TestAFailingOperationIsGivenUpAfterTheLimitAndTheWindow(t *testing.T) {
 	if taken, released := b.permits.counts(); taken != released {
 		t.Fatalf("capacity taken %d, released %d", taken, released)
 	}
-	// Later operations of the workstream proceed.
 	b.bounded.setMode("")
 	b.addOperation(t, "later")
 	must(t, c.Pass(context.Background()))
@@ -309,7 +287,6 @@ func TestAFailingOperationIsGivenUpAfterTheLimitAndTheWindow(t *testing.T) {
 	}
 }
 
-// A streak below the failure limit keeps retrying however long ago it began.
 func TestAStreakBelowTheLimitKeepsRetrying(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")
@@ -325,7 +302,6 @@ func TestAStreakBelowTheLimitKeepsRetrying(t *testing.T) {
 	}
 }
 
-// A success ends the streak: the operation's result is the effect's.
 func TestASuccessEndsTheStreak(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")
@@ -339,17 +315,12 @@ func TestASuccessEndsTheStreak(t *testing.T) {
 	}
 }
 
-// An outcome the adapter recorded is never overwritten: Inspect finding one
-// completes the operation with it, even past the limit and the window, and the
-// adapter is not asked to give up.
 func TestADurableOutcomeWinsOverGivingUp(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")
 	c := b.controller(t, Options{GiveUpWindow: 30 * time.Minute})
 	b.failAttempts(t, c, 2*GiveUpFailures)
 	b.clock.Advance(30 * time.Minute)
-	// The effect completed and recorded its outcome durably, then the service
-	// restarted before the controller wrote its result.
 	b.system.mu.Lock()
 	b.system.effects[b.event.Operation.ID] = coreadapter.OperationResult{Outcome: "succeeded", Evidence: "recorded before the restart"}
 	b.system.mu.Unlock()
@@ -365,7 +336,6 @@ func TestADurableOutcomeWinsOverGivingUp(t *testing.T) {
 	}
 }
 
-// A give-up that fails leaves the operation pending for another attempt.
 func TestAGiveUpThatFailsIsRetried(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")
@@ -388,7 +358,6 @@ func TestAGiveUpThatFailsIsRetried(t *testing.T) {
 	}
 }
 
-// The give-up limit and an operation's attempts are readable by other code.
 func TestOperationStatusAndGiveUpLimitAreReadable(t *testing.T) {
 	b := newBoundedFixture(t)
 	b.bounded.setMode("fail")

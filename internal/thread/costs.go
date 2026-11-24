@@ -13,9 +13,6 @@ func AttemptID(request string, attempt int) string {
 	return trace.EventID(request, fmt.Sprintf("attempt-%d", attempt))
 }
 
-// costs appends one ledger record per attempt that returned a result. Records
-// already present under the same identity are kept, so a retry after restart
-// adds only the missing entries.
 func (r Runner) costs(ctx context.Context, role string, q trace.QueuedTurn) error {
 	existing, err := trace.Read[trace.Cost](r.Store, q.Request.Workstream)
 	if err != nil {

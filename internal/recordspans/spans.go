@@ -71,7 +71,6 @@ func (r Recorder) Observe(d trace.CommitDetail) {
 	}
 }
 
-// state sends the span of the interval a transition ended.
 func (r Recorder) state(d trace.CommitDetail, closed trace.ClosedState) {
 	t := closed.Transition
 	start, entered, state := closed.Created, InitialState, t.From
@@ -100,8 +99,6 @@ func (r Recorder) state(d trace.CommitDetail, closed trace.ClosedState) {
 	})
 }
 
-// turn sends the span of one turn, named and attributed by the pinned GenAI
-// conventions: an invocation of the agent of the turn's role.
 func (r Recorder) turn(d trace.CommitDetail, turn trace.FinishedTurn) {
 	w, res := d.Workstream, turn.Response.Result
 	outcome, cause := TurnOutcome(turn.Response)
@@ -162,9 +159,6 @@ func SlotWait(turn trace.FinishedTurn) time.Duration {
 	return turn.ClaimedAt.Sub(turn.Request.At)
 }
 
-// checkRun is the part of a check run record every kind shares: the unit check
-// run, the final review's check run and the session check run all record these
-// fields.
 type checkRun struct {
 	Status     string    `json:"status"`
 	StartedAt  time.Time `json:"started_at"`
@@ -199,7 +193,6 @@ func CheckKind(docPath string) (string, bool) {
 	return "", false
 }
 
-// check sends the span of the check run a document records.
 func (r Recorder) check(d trace.CommitDetail, doc trace.Document) {
 	kind, ok := CheckKind(doc.Path)
 	if !ok {

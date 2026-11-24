@@ -20,17 +20,11 @@ import (
 )
 
 func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g trace.Workgroup, c *WorkgroupChange) error {
-	// Production holds group coordination before this guard, then takes
-	// member locks. An owner archive holds only the shared guard. If archive
-	// owns this boundary, leave the original journal for the next live pass.
 	lock := s.ChangeApplicationLock(g.ID)
 	if !lock.TryLock() {
 		return nil
 	}
 	defer lock.Unlock()
-	// Archive may finish after the observer's read but before this lock.
-	// Consume the current decision and retirement proof under the same guard
-	// that excludes archive from every journal write and member effect.
 	changes, err := ReadChanges(wt, c.Host)
 	if err != nil {
 		return err
@@ -59,8 +53,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		_ = json.Unmarshal(data, &result)
 		c.Result = &result
 	}
-	// A member archived after the impact was presented is terminal. It is
-	// recorded as retired and receives no effect; nothing waits on it.
 	retire := func(stream config.WorkstreamID) error {
 		return s.RetireChangeMember(ctx, wt, c, stream)
 	}
@@ -68,8 +60,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		return row.Action != amendment.Leave && !slices.Contains(c.Applied, row.Workstream) && !slices.Contains(c.Retired, row.Workstream)
 	}
 
-	// Install every barrier before any member receives changed documents. A
-	// crash during this loop resumes it; approval has already pinned the delta.
 	for _, row := range c.Impact.Streams {
 		if c.State == "releasing" || !pending(row) || row.Action == amendment.FollowUp {
 			continue
@@ -94,8 +84,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	// Every live affected member reaches a safe boundary before the first
-	// effect.
 	for _, row := range c.Impact.Streams {
 		if !pending(row) {
 			continue
@@ -173,8 +161,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 		}
 		if c.Request.Kind == "cancel" {
 			if err := s.CancelChangeMember(ctx, repo, row.Workstream, *c); errors.Is(err, errAbandonmentRouting) {
-				// The router's worker decides the abandonment beside this pass;
-				// the member is applied once it has.
 				return nil
 			} else if err != nil {
 				return err
@@ -220,8 +206,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	// Release only after every member and the shared spec are reconciled. A
-	// member archived since its effect has no barrier left to release.
 	for _, row := range c.Impact.Streams {
 		if row.Action == amendment.Leave || slices.Contains(c.Retired, row.Workstream) {
 			continue
@@ -246,8 +230,6 @@ func (s *Controller) ApplyChange(ctx context.Context, wt *trace.Repository, g tr
 			return err
 		}
 	}
-	// A retired requester has no waiting unit to resume. Its ruling stays a
-	// recoverable diagnostic on the applied change; survivors do not wait.
 	if err := s.SettleChangeRequester(ctx, *c); err != nil && !errors.Is(err, trace.ErrMemberRetired) {
 		return err
 	}
@@ -318,8 +300,6 @@ func (s *Controller) ChangeSealReady(ctx context.Context, repo *trace.Repository
 	return st.Value == trace.SealPreparedState || st.Value == RatifiedState || st.Value == BuildingState || st.Value == AssembledState || st.Value == DeliveredState, err
 }
 func (s *Controller) CancelChangeMember(ctx context.Context, repo *trace.Repository, stream config.WorkstreamID, c WorkgroupChange) error {
-	// Inspect the actual current PR before disposition. A merge occurring after
-	// the impact was approved is retained rather than closed, drafted or undone.
 	if p, found, err := currentOwnPublication(repo, stream); err != nil {
 		return err
 	} else if found && p.PullRequest > 0 {
@@ -377,7 +357,6 @@ func (s *Controller) CancelChangeMember(ctx context.Context, repo *trace.Reposit
 			return err
 		}
 	}
-	// Existing abandonment cleanup snapshots unlanded files onto unit branches.
 	_, err = repo.CancelTurns(ctx, stream, s.Now(), abandonActor, "the owner cancelled the workstream")
 	return err
 }
@@ -442,8 +421,6 @@ func (s *Controller) SettleChangeRequester(ctx context.Context, c WorkgroupChang
 	if err != nil {
 		return err
 	}
-	// Reuse the local amendment continuation machinery on the equivalent
-	// recorded project-amendment wait; the durable records remain unchanged.
 	for n := range transitions {
 		if transitions[n].ID == trace.UnitSubject(req.Unit)+"_waiting_project_amendment_"+string(pa.Workgroup)+"_"+pa.ID {
 			transitions[n].ID = trace.UnitSubject(req.Unit) + "_waiting_amendment_" + req.ID
@@ -504,9 +481,6 @@ func (s *Controller) ReworkChangeMember(ctx context.Context, repo *trace.Reposit
 	if _, err := repo.CancelUnitTurns(ctx, stream, changed, s.Now(), amendmentActor, "superseded by the owner-approved delta"); err != nil {
 		return err
 	}
-	// A whole unit that landed while the impact waited retains that commit and
-	// receives a revision. An approved but unlanded candidate stays on its unit
-	// branch, and the mason resumes there under the new intent.
 	states, err := repo.WorkflowStates(stream)
 	if err != nil {
 		return err
@@ -562,8 +536,6 @@ func (s *Controller) ReworkChangeMember(ctx context.Context, repo *trace.Reposit
 	}
 	for _, u := range row.Units {
 		if states[trace.FeatureSubject].Value == RatifiedState || states[trace.FeatureSubject].Value == trace.SealPreparedState {
-			// The builder initializes the entire replacement plan after release.
-			// Pre-creating changed units here would race that initialization.
 			break
 		}
 		switch u.Action {
@@ -591,8 +563,6 @@ func (s *Controller) ReworkChangeMember(ctx context.Context, repo *trace.Reposit
 			txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: h("change-"+c.ID+"-planned-"+id, id), Subject: trace.UnitSubject(id), To: UnitPlanned, Reason: "owner-approved delta adds this unit behind its dependencies"}})
 		}
 	}
-	// Ready units are computed against the amended dependency graph. In
-	// particular a reopened dependent waits for the upstream revision.
 	plannedStates := map[string]string{}
 	for id, st := range states {
 		plannedStates[id] = st.Value
@@ -624,8 +594,6 @@ func (s *Controller) ReworkChangeMember(ctx context.Context, repo *trace.Reposit
 	}
 	sliceData, _ := json.Marshal(sl)
 	records := []trace.Document{doc(plan.SpecDocument, plan.SpecPath, sl.Spec, specRev), doc(plan.PlanDocument, plan.PlanPath, sl.Plan, planRev), doc(seal.DocumentID, seal.Path, string(encoded), sealDoc.Revision+1), doc(amendment.DocumentID(app.Amendment), amendment.Path(app.Amendment), string(data), 1), doc("change-applied-"+c.ID, "tools/change-applied-"+c.ID+".json", string(sliceData), 1)}
-	// PR-open work keeps its terminal publication record. Its repair units run
-	// through the same build loop, then ordinary review and delivery approval.
 	feature := states[trace.FeatureSubject]
 	if feature.Value == DeliveredState || feature.Value == AssembledState {
 		txs = append(txs, trace.Transaction{ExpectedVersion: feature.Version, Transition: trace.Transition{Header: h("change-"+c.ID+"-building", ""), Subject: trace.FeatureSubject, From: feature.Value, To: BuildingState, Reason: "rework the same feature branch; the existing pull request requires fresh delivery approval"}})
@@ -797,8 +765,6 @@ func (s *Controller) CreateChangeFollowup(ctx context.Context, wt *trace.Reposit
 	if err := s.PlanChangeMember(ctx, repo, id, sl, c.ID); err != nil {
 		return false, err
 	}
-	// Sealing is an existing reconciled repository operation. Group completion
-	// prepares ordinary members; a delta approval prepares its new follow-up.
 	st, err := repo.Workflow(id, trace.FeatureSubject)
 	if err != nil {
 		return false, err
@@ -825,8 +791,6 @@ func (s *Controller) CreateChangeFollowup(ctx context.Context, wt *trace.Reposit
 			}
 		}
 	}
-	// The merged member's own slice stays historical; outgoing dependencies
-	// now wait on its new follow-up's concrete merge when their edge needs it.
 	for n := range c.Result.Graph {
 		if c.Result.Graph[n].From == row.Workstream {
 			c.Result.Graph[n].From = id

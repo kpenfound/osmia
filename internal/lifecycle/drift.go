@@ -104,12 +104,8 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 	if err != nil {
 		return nil, err
 	}
-	librarian := librarianWorkstream(f.repository.Project())
 	reviewing := map[config.WorkstreamID]bool{}
 	for _, stream := range streams {
-		if stream == librarian {
-			continue
-		}
 		ops, err := f.repository.Operations(stream)
 		if err != nil {
 			return nil, err
@@ -127,7 +123,7 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 	state, _ := f.s.Effective()
 	var requested []config.WorkstreamID
 	for _, stream := range streams {
-		if stream == librarian || reviewing[stream] || scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
+		if reviewing[stream] || scheduler.Paused(state.Pauses, f.cfg.Project.ID, stream) {
 			continue
 		}
 		if session, err := isSession(f.repository, stream); err != nil {
@@ -383,8 +379,6 @@ func (d Drifter) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if result != nil {
 		return *result, nil
 	}
-	// Recover a surviving turn view in its own checkpointed local step,
-	// before the drift step can advance the resolution workspace.
 	if err := d.recoverView(ctx, stream, driftMasonAgent, func() (string, error) {
 		w, err := (Resolutions{DriftWorkspaces(d.cfg, d.repository)}).Find(ctx, stream)
 		return w.Path, err
@@ -826,7 +820,6 @@ func (d Drifter) Skip(ctx context.Context, stream config.WorkstreamID, k int, op
 	return coreadapter.OperationResult{Outcome: "succeeded", Evidence: reason}, nil
 }
 
-// driftBase performs remote observations before the checkpointed local step.
 func (d Drifter) driftBase(ctx context.Context, operation string, stream config.WorkstreamID, in DriftInput) (seal.Base, *coreadapter.OperationResult, error) {
 	previous, found, err := d.Latest(stream, in.Drift)
 	if err != nil {

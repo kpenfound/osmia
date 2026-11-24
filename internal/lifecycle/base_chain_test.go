@@ -10,7 +10,11 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
@@ -21,42 +25,41 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
-				requireJJ(t)
+				intakefixture.RequireJJ(t)
 			}
 			f := newDebateFixture(t, 1, 1)
 			base := f.upstream(t)
 			f.stop(t)
 			ctx := context.Background()
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer func() { repo.Close() }()
 			var streams []config.WorkstreamID
 			previousCommit := base
 			for i := 0; i < 3; i++ {
 				stream, err := config.NewWorkstreamID()
-				must(t, err)
-				must(t, repo.CreateWorkstreamOn(ctx, stream, backend, f.s.now(), ownerActor))
+				intakefixture.Must(t, err)
+				intakefixture.Must(t, repo.CreateWorkstreamOn(ctx, stream, backend, f.s.now(), intake.OwnerActor))
 				if i > 0 {
 					_, err = repo.SetWorkstreamBase(ctx, stream, streams[i-1], 0, f.s.now())
-					must(t, err)
+					intakefixture.Must(t, err)
 				}
-				header := trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: ownerActor, Cause: "owner-ratification"}
+				header := trace.Header{Schema: "osmia.trace.document", Version: 1, Revision: 1, Project: repo.Project(), Workstream: stream, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner-ratification"}
 				ratified, err := shed.EncodeRatification(shed.Ratify(1, shed.Pin{Spec: 1, Plan: 1}, nil))
-				must(t, err)
+				intakefixture.Must(t, err)
 				docs := []trace.Document{}
-				for _, d := range []struct{ id, path, content string }{{"spec", "spec.md", validSpec}, {"plan", "plan.json", validPlan}, {shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratified)}} {
+				for _, d := range []struct{ id, path, content string }{{"spec", "spec.md", intakefixture.ValidSpec}, {"plan", "plan.json", intakefixture.ValidPlan}, {shed.RatificationDocumentID(1), shed.RatificationPath(1), string(ratified)}} {
 					h := header
 					h.ID = d.id
 					docs = append(docs, trace.Document{Header: h, Path: d.path, Content: d.content})
 				}
-				must(t, repo.RecordDocuments(ctx, docs))
+				intakefixture.Must(t, repo.RecordDocuments(ctx, docs))
 				header.Schema, header.ID = "osmia.trace.transition", "in-shed"
-				_, err = repo.SetFeatureState(ctx, header, InShedState, "Owner approved the draft")
-				must(t, err)
-				z := &sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
-				must(t, z.Pass(ctx))
-				op := actionOperation(t, repo, stream, SealAction)
-				// Lose the response after branch creation, then move upstream before retry.
+				_, err = repo.SetFeatureState(ctx, header, intake.InShedState, "Owner approved the draft")
+				intakefixture.Must(t, err)
+				z := &intake.Sealer{S: f.s.intake().SealerDependencies(), Repository: repo}
+				intakefixture.Must(t, z.Pass(ctx))
+				op := fixturekit.ActionOperation(t, repo, stream, intake.SealAction)
 				f.s.boundary = func(name string) error {
 					if name == "seal-branch-created" {
 						return errors.New("interrupted")
@@ -70,77 +73,74 @@ func TestDependentChainSealsAndParksAcrossRestart(t *testing.T) {
 				if i == 0 {
 					advanceUpstream(t, f, map[string]string{"new-upstream": "moved during restart\n"})
 				}
-				must(t, repo.Close())
+				intakefixture.Must(t, repo.Close())
 				repo, err = trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-				must(t, err)
+				intakefixture.Must(t, err)
 				z.Repository = repo
 				result, err := z.Apply(ctx, op)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if result.Outcome != "succeeded" {
 					t.Fatal(result)
 				}
 				record, _, found, err := seal.Latest(repo, stream)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !found || record.Base.Commit != previousCommit || i > 0 && record.Base.Workstream != streams[i-1] {
 					t.Fatalf("unpinned dependent base %+v", record.Base)
 				}
 				observed, err := z.Inspect(ctx, op)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if observed.State != coreadapter.EffectCompleted {
 					t.Fatal(observed)
 				}
-				g, err := featureWorkspaces(f.s.about(repo), repo).Of(stream)
-				must(t, err)
+				g, err := intake.FeatureWorkspaces(f.s.about(repo), repo).Of(stream)
+				intakefixture.Must(t, err)
 				w, found, err := g.Workspace(ctx, string(stream))
-				must(t, err)
+				intakefixture.Must(t, err)
 				if !found {
 					t.Fatal("no feature workspace")
 				}
-				must(t, os.WriteFile(filepath.Join(w.Path, fmt.Sprintf("feature-%d", i)), []byte("feature\n"), 0600))
+				intakefixture.Must(t, os.WriteFile(filepath.Join(w.Path, fmt.Sprintf("feature-%d", i)), []byte("feature\n"), 0600))
 				previousCommit, err = g.Snapshot(ctx, w, record.Base.Commit)
-				must(t, err)
-				// Snapshot records the candidate; explicitly move the branch as a landing does.
+				intakefixture.Must(t, err)
 				tip, _, err := g.Branch(ctx, record.Branch)
-				must(t, err)
+				intakefixture.Must(t, err)
 				if tip != previousCommit {
-					must(t, g.Advance(ctx, w, tip, previousCommit))
+					intakefixture.Must(t, g.Advance(ctx, w, tip, previousCommit))
 				}
 				streams = append(streams, stream)
 			}
-			// Removing the ancestor's branch parks the whole descendant chain.
-			g, err := featureWorkspaces(f.s.about(repo), repo).Of(streams[0])
-			must(t, err)
+			g, err := intake.FeatureWorkspaces(f.s.about(repo), repo).Of(streams[0])
+			intakefixture.Must(t, err)
 			w, _, err := g.Workspace(ctx, string(streams[0]))
-			must(t, err)
-			must(t, g.Release(ctx, workspace.Worktree(w)))
-			demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", "-D", featureBranch(streams[0]))
-			must(t, f.s.baseWaitPass(ctx, repo))
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, g.Release(ctx, workspace.Worktree(w)))
+			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", "-D", intake.FeatureBranch(streams[0]))
+			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
-				waiting, err := baseWaiting(repo, stream)
-				must(t, err)
+				waiting, err := lifecycle.BaseWaiting(repo, stream)
+				intakefixture.Must(t, err)
 				if !waiting {
 					t.Fatal("descendant did not park")
 				}
 			}
-			// Restoring the branch releases those waits without starting a model turn.
 			firstSeal, _, _, err := seal.Latest(repo, streams[0])
-			must(t, err)
-			demoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", firstSeal.Branch, firstSeal.Base.Commit)
-			must(t, f.s.baseWaitPass(ctx, repo))
+			intakefixture.Must(t, err)
+			fixturekit.DemoGit(t, filepath.Dir(f.clone), "-C", f.clone, "branch", firstSeal.Branch, firstSeal.Base.Commit)
+			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
-				waiting, err := baseWaiting(repo, stream)
-				must(t, err)
+				waiting, err := lifecycle.BaseWaiting(repo, stream)
+				intakefixture.Must(t, err)
 				if waiting {
 					t.Fatal("restored dependency remained parked")
 				}
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: streams[0], At: f.s.now(), Actor: ownerActor, Cause: "owner"}
-			_, err = repo.SetFeatureState(ctx, h, AbandonedState, "Owner abandoned the base")
-			must(t, err)
-			must(t, f.s.baseWaitPass(ctx, repo))
+			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: streams[0], At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
+			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Owner abandoned the base")
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
 			for _, stream := range streams[1:] {
-				waiting, err := baseWaiting(repo, stream)
-				must(t, err)
+				waiting, err := lifecycle.BaseWaiting(repo, stream)
+				intakefixture.Must(t, err)
 				if !waiting {
 					t.Fatal("abandoned ancestor did not park descendant")
 				}

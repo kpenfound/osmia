@@ -29,10 +29,6 @@ func (b *BaseRefresher) ObserveArchivedPullRequests(ctx context.Context) error {
 	return nil
 }
 
-// archivePollDue reports whether a's pull request lookup is due: a's
-// merge is still unobserved and its cadence has elapsed. It forgets the
-// cadence of an archive that needs no further lookup. It reads only memory,
-// so a scan spends no git permit on an archive with nothing to look up.
 func (b *BaseRefresher) archivePollDue(a runtime.Archive) bool {
 	if a.State != DeliveredState || ArchiveResolved(a) || a.Publication.PullRequest <= 0 {
 		b.S.Polls.Forget(b.Repository.Project(), a.Workstream, ArchivePoll)
@@ -61,7 +57,6 @@ func (b *BaseRefresher) observeArchivedPullRequest(ctx context.Context, a runtim
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// A failed read supplies no evidence and retries on the next cadence.
 		return nil
 	}
 	for _, pr := range found {

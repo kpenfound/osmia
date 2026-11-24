@@ -41,7 +41,6 @@ func (c *fakeCertificateClient) GetCertificate(*tls.ClientHelloInfo) (*tls.Certi
 
 func TestHTTPSChecksIssuanceBeforeOpeningPort443(t *testing.T) {
 	t.Parallel()
-	// httptest provides test key material; no Tailscale client is used.
 	server := httptest.NewTLSServer(nil)
 	cert := server.TLS.Certificates[0]
 	server.Close()

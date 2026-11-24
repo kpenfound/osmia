@@ -15,9 +15,7 @@ type MergeArchiver struct {
 	S          *Controller
 	Repository *trace.Repository
 	mu         sync.Mutex
-	// refused is the reason this instance last logged for not archiving a
-	// workstream, so a steady refusal is logged once, not every pass.
-	refused map[config.WorkstreamID]string
+	refused    map[config.WorkstreamID]string
 }
 
 // Pass selects the delivered, unarchived workstreams whose recorded own pull
@@ -65,8 +63,6 @@ func (m *MergeArchiver) Pass(ctx context.Context) error {
 	return nil
 }
 
-// logRefusal logs reason for stream the first time it differs from what this
-// instance last logged for it. An empty reason clears what was logged.
 func (m *MergeArchiver) logRefusal(stream config.WorkstreamID, reason string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

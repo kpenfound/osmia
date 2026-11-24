@@ -5,12 +5,6 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-type pendingProject = service.TestPendingProject
-
-var conversationEntries = service.TestConversationEntries
-
 func (s *Service) dailyBudgetStatus() *api.DailyBudgetStatus {
 	return service.InspectForTest(s.core()).DailyBudget()
 }
-
-const Internal = api.Internal

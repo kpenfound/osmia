@@ -10,8 +10,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chiefName is the file name, without its extension, of the chief of staff's
-// decisions on the committee's objections of a round.
 const chiefName = "chief"
 
 // ChiefOfStaff is who disposed of an objection the chief of staff dismissed

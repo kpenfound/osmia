@@ -11,7 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-// git runs git in dir with a fixed identity and returns its output.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
@@ -23,8 +22,6 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// commitTree makes a repository holding files and the symbolic links named
-// by links, and returns it with its commit. Empty files keep directories.
 func commitTree(t *testing.T, files, links map[string]string) (clone, commit string) {
 	t.Helper()
 	clone = t.TempDir()
@@ -44,7 +41,6 @@ func commitTree(t *testing.T, files, links map[string]string) (clone, commit str
 	return clone, git(t, clone, "rev-parse", "HEAD")
 }
 
-// checkout writes the commit's files, links included, to a new directory.
 func checkout(t *testing.T, clone, commit string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -63,7 +59,6 @@ func checkout(t *testing.T, clone, commit string) string {
 }
 
 func TestSeedFromGitObjectsMatchesACheckout(t *testing.T) {
-	// fixtureFiles with a file in every directory it leaves empty.
 	withFiles := map[string]string{}
 	for name, content := range fixtureFiles {
 		if strings.HasSuffix(name, "/") {

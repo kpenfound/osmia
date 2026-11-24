@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -10,12 +11,6 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
-
-const finalRebasePath = delivery.FinalRebasePath
-const finalRebaseDocument = delivery.FinalRebaseDocument
-const finalFailed = delivery.FinalFailed
-
-var reportBlocking = delivery.ReportBlocking
 
 type finalReviewer struct {
 	s          *Service
@@ -33,7 +28,7 @@ func (d *finalReviewer) Pass(ctx context.Context) error { return d.driver().Pass
 func (d *finalReviewer) request(ctx context.Context, stream config.WorkstreamID) error {
 	return d.driver().Request(ctx, stream)
 }
-func (d *finalReviewer) governing(ctx context.Context, stream config.WorkstreamID) (finalReviewInput, seal.Seal, error) {
+func (d *finalReviewer) governing(ctx context.Context, stream config.WorkstreamID) (delivery.FinalReviewInput, seal.Seal, error) {
 	return d.driver().Governing(ctx, stream)
 }
 
@@ -44,32 +39,23 @@ func (d *finalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	return d.driver().Apply(ctx, op)
 }
 
-func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report FinalReport) (string, error) {
+func (d *finalReviewer) PublishDraft(ctx context.Context, cfg *config.Config, stream config.WorkstreamID, op coreadapter.Operation, report api.FinalReport) (string, error) {
 	return d.driver().PublishDraft(ctx, cfg, stream, op, report)
 }
 
-var latestFinalReport = delivery.LatestFinalReport
-
-func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (FinalReport, string, error) {
+func (d *finalReviewer) finalGate(ctx context.Context, stream config.WorkstreamID) (api.FinalReport, string, error) {
 	return d.driver().FinalGate(ctx, stream)
 }
 
-type FinalCheckRun = delivery.FinalCheckRun
-
-func (s *Service) deliveryPresentation(ctx context.Context, raw string) (DeliveryPresentation, *APIError) {
+func (s *Service) deliveryPresentation(ctx context.Context, raw string) (api.DeliveryPresentation, *api.APIError) {
 	return s.delivery().DeliveryPresentation(ctx, raw)
 }
-func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryDecision) (DeliveryApproval, *APIError) {
+func (s *Service) approveDelivery(ctx context.Context, raw string, req api.DeliveryDecision) (api.DeliveryApproval, *api.APIError) {
 	return s.delivery().ApproveDelivery(ctx, raw, req)
 }
-func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (DeliveryApproval, string, error) {
+func (s *Service) deliveryGate(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, description string) (api.DeliveryApproval, string, error) {
 	return s.delivery().DeliveryGate(ctx, repository, stream, description)
 }
-
-const PublishAction = delivery.PublishAction
-const publicationPath = delivery.PublicationPath
-const publicationDocument = delivery.PublicationDocument
-const publicationOpened = delivery.PublicationOpened
 
 type publisher struct {
 	s          *Service
@@ -85,8 +71,6 @@ func (d *publisher) driver() *delivery.Publisher {
 }
 func (d *publisher) Pass(ctx context.Context) error { return d.driver().Pass(ctx) }
 
-var decodePublish = delivery.DecodePublish
-
 func (d *publisher) Inspect(_ context.Context, op coreadapter.Operation) (coreadapter.Observation, error) {
 	return d.driver().Inspect(context.Background(), op)
 }
@@ -94,47 +78,17 @@ func (d *publisher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 	return d.driver().Apply(ctx, op)
 }
 
-var publications = delivery.Publications
-
-func (d *publisher) recordPublication(ctx context.Context, stream config.WorkstreamID, record DeliveryPublication) error {
+func (d *publisher) recordPublication(ctx context.Context, stream config.WorkstreamID, record api.DeliveryPublication) error {
 	return d.driver().RecordPublication(ctx, stream, record)
 }
 
-const ownPullRequestOutcomeMerged = delivery.OwnPullRequestOutcomeMerged
-
-var ownPullRequestOutcomeAt = delivery.OwnPullRequestOutcomeAt
-var ownPullRequestFinished = delivery.OwnPullRequestFinished
-
-const mergePath = delivery.MergePath
-
-type FinalRebase = delivery.FinalRebase
-type finalReviewInput = delivery.FinalReviewInput
-
-const finalReportDocument = delivery.FinalReportDocument
-const finalReportPath = delivery.FinalReportPath
-const finalReviewed = delivery.FinalReviewed
-
-var finalReviewActor = delivery.FinalReviewActor
-var finalTurnID = delivery.FinalTurnID
-var decodeFinalReview = delivery.DecodeFinalReview
-
-const FinalReviewAction = delivery.FinalReviewAction
-const FindingBlocking = delivery.FindingBlocking
-
-func (s *Service) inbox(ctx context.Context) (InboxResponse, *APIError) {
+func (s *Service) inbox(ctx context.Context) (api.InboxResponse, *api.APIError) {
 	c := s.intake()
 	c.DeliveryEntry = s.delivery().DeliveryEntry
 	c.PublicationEntry = s.delivery().PublicationEntry
 	return c.Inbox(ctx)
 }
 
-func (d *finalReviewer) followup(stream config.WorkstreamID, report FinalReport, revision int) (followup.Unit, bool, error) {
+func (d *finalReviewer) followup(stream config.WorkstreamID, report api.FinalReport, revision int) (followup.Unit, bool, error) {
 	return d.driver().Followup(stream, report, revision)
 }
-
-var finalSystemPrompt = delivery.FinalSystemPrompt
-var finalPrompt = delivery.FinalPrompt
-
-const ownPullRequestOutcomePath = delivery.OwnPullRequestOutcomePath
-
-var recordOwnPullRequestOutcome = delivery.RecordOwnPullRequestOutcome

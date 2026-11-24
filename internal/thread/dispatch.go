@@ -77,7 +77,6 @@ func DecodeTurn(op coreadapter.Operation) (TurnInput, error) {
 	return in, nil
 }
 
-// find returns the requested turn and whether every earlier turn has completed.
 func (d Dispatcher) find(in TurnInput) (trace.Thread, trace.QueuedTurn, bool, error) {
 	if d.Runner.Store == nil {
 		return trace.Thread{}, trace.QueuedTurn{}, false, errors.New("dispatcher requires a thread runner store")
@@ -180,10 +179,6 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 			return coreadapter.OperationResult{}, errors.Join(runErr, errors.New("turn did not complete"))
 		}
 	}
-	// Relay runs every time Apply observes a completed turn, not only the
-	// call that completed it, so a transient Relay failure gets the same
-	// reconciliation retries completion itself gets; Relay must therefore
-	// not repeat a side effect it already completed.
 	if d.Relay != nil {
 		if err := d.Relay(ctx, t, q); err != nil {
 			return coreadapter.OperationResult{}, err

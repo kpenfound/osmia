@@ -23,9 +23,6 @@ const (
 	crossMember2  config.WorkstreamID = "w_00000000000000000000000000000012"
 )
 
-// crossRepoFixture is two independent project repositories, each the
-// trace of one repo of a multi-repo project, with one workstream of its
-// own: the way a cross-repo workgroup's members each keep their own trace.
 type crossRepoFixture struct {
 	r1, r2 *trace.Repository
 	root   config.Root
@@ -73,10 +70,6 @@ func setupCrossRepo(t *testing.T) crossRepoFixture {
 	return crossRepoFixture{r1: r1, r2: r2, root: root, p1: p1, p2: p2}
 }
 
-// claimCrossRepoTurn creates agent's thread if needed, enqueues and claims
-// a turn naming stream and unit, and returns its scope. The chief's own
-// thread is never created here: CreateWorkgroupTrace already made it when
-// it created the workgroup's host workstream.
 func claimCrossRepoTurn(t *testing.T, r *trace.Repository, p config.ProjectID, stream config.WorkstreamID, agent, role, unit, turnID string) coreadapter.Scope {
 	t.Helper()
 	ctx := context.Background()
@@ -103,12 +96,6 @@ func claimCrossRepoTurn(t *testing.T, r *trace.Repository, p config.ProjectID, s
 	return coreadapter.Scope{Project: string(p), Workstream: string(stream), Unit: unit, Thread: threadID, Turn: turnID, Role: role}
 }
 
-// TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes is the
-// two-repo interface test spec#9 asks for: against the new authoritative
-// workgroup trace, a qualified non-host plan amendment made through the
-// chief of staff's actual route_amendment tool lands on the asking
-// member's own trace, in its own repo, never the workgroup's host, and the
-// asker resumes once the amendment is decided.
 func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) {
 	f := setupCrossRepo(t)
 	ctx := context.Background()
@@ -190,9 +177,6 @@ func TestCrossRepoRouteAmendmentToolLandsOnAskingMemberAndResumes(t *testing.T) 
 		t.Fatalf("member2's unit state %+v: %v", state, err)
 	}
 
-	// Once the amendment is decided, the owner resumes the unit directly:
-	// resuming is ordinary per-workstream workflow mechanics, unaffected
-	// by where route_amendment filed the amendment itself.
 	if _, err := f.r2.Transact(ctx, trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: "resumed", Revision: 1, Project: crossProject2, Workstream: crossMember2, Unit: "resume", At: start, Actor: owner, Cause: "test"}, Subject: unit, From: "waiting", To: "implementing", Reason: "amendment decided"}}); err != nil {
 		t.Fatal(err)
 	}

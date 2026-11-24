@@ -1,15 +1,13 @@
 package lifecycle_test
 
 import (
-	"github.com/kpenfound/osmia/internal/browsertest"
+	"testing"
+
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/servicetest"
 	"github.com/kpenfound/osmia/internal/trace"
-	"testing"
 )
-
-var openBrowser = browsertest.OpenBrowser
 
 func sidebarFixture(t *testing.T) (Options, *trace.Repository) {
 	t.Helper()

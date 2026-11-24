@@ -67,8 +67,6 @@ func testBaseResolver(t *testing.T, fork bool) {
 		t.Fatalf("undelivered parent mistaken for integrated: %+v", selected)
 	}
 	g.IsAncestor = false
-	// A squash publication supplies the actual fork base commit, and the merged
-	// hosting record detects its integration even without an ancestor relation.
 	publication := DeliveryPublication{Status: publicationOpened, Base: "main", Upstream: cfg.Project.Upstream, Fork: cfg.Project.PushRepository(), Branch: featureBranch(stream), Commit: "squashed-base", PullRequest: 5}
 	data, err = json.Marshal(publication)
 	must(t, err)

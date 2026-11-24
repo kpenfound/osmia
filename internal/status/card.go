@@ -9,21 +9,16 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 )
 
-// Card field limits, in characters.
 const (
 	headlineLimit = 64
 	happenedLimit = 140
 	needsYouLimit = 140
 )
 
-// ellipsis ends a card field the service shortened. It counts toward the
-// field's limit.
 const ellipsis = "…"
 
 const lineBreaks = "\r\n\v\f\u0085\u2028\u2029"
 
-// normalise returns text as one line of single-spaced characters without
-// control or format characters.
 func normalise(text string) string {
 	var b strings.Builder
 	for _, r := range text {
@@ -124,8 +119,6 @@ func FitCard(card coreadapter.Card, known []string) FittedCard {
 	return fitted
 }
 
-// fitField fits one card field to its limit. It returns "" for a field that
-// is empty or cannot be shown, and what it changed.
 func fitField(name, value string, limit int, known []string) (string, []string) {
 	var notes []string
 	if strings.ContainsAny(value, lineBreaks) {
@@ -151,8 +144,6 @@ func fitField(name, value string, limit int, known []string) (string, []string) 
 	return text, notes
 }
 
-// shorten returns text cut to at most limit characters, the last of which is
-// an ellipsis. It cuts at a word boundary when one falls inside the limit.
 func shorten(text string, limit int) string {
 	runes := []rune(text)
 	if len(runes) <= limit {

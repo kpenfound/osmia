@@ -20,14 +20,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// The OTLP default ports, used when the endpoint names none.
 const (
 	defaultGRPCPort = "4317"
 	defaultHTTPPort = "4318"
 	tracesPath      = "/v1/traces"
 )
 
-// requestTimeout bounds one export request of the built exporters.
 const requestTimeout = 10 * time.Second
 
 var headerName = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -57,7 +55,6 @@ func ParseHeaders(variable, raw string) (map[string]string, error) {
 	return headers, nil
 }
 
-// closingExporter shuts down the gRPC connection its exporter was given.
 type closingExporter struct {
 	sdktrace.SpanExporter
 	conn *grpc.ClientConn
@@ -87,8 +84,6 @@ func NewExporter(ctx context.Context, cfg config.Telemetry, headers map[string]s
 	return nil, fmt.Errorf("telemetry.protocol %q is not %s or %s", cfg.Protocol, config.TelemetryProtocolGRPC, config.TelemetryProtocolHTTP)
 }
 
-// endpoint splits the configured endpoint into host:port, with port filled in
-// when missing, and the base path.
 func endpoint(cfg config.Telemetry, port string) (hostPort, path string, err error) {
 	u, err := url.Parse("//" + cfg.Endpoint)
 	if err != nil || u.Hostname() == "" {
@@ -110,8 +105,6 @@ func newGRPCExporter(ctx context.Context, cfg config.Telemetry, headers map[stri
 	if cfg.Insecure {
 		creds = insecure.NewCredentials()
 	}
-	// The exporter's own dialing reads OTEL_EXPORTER_OTLP_* settings such as the
-	// compression, so the connection is dialed here and handed over.
 	conn, err := grpc.NewClient(hostPort, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return nil, fmt.Errorf("telemetry.endpoint: %w", err)
@@ -133,8 +126,6 @@ func newHTTPExporter(ctx context.Context, cfg config.Telemetry, headers map[stri
 	if cfg.Insecure {
 		scheme, tlsConfig = "http", nil
 	}
-	// A full URL sets host, path and security together, replacing anything the
-	// environment would supply.
 	return otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpointURL(scheme+"://"+hostPort+path+tracesPath),
 		otlptracehttp.WithTLSClientConfig(tlsConfig),

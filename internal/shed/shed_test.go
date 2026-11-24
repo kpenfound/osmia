@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,8 +27,6 @@ const (
 	bob                         = "agent_committee_2"
 
 	specOne = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n2. Progress is reported.\n"
-	// specTwo drops criterion 2 and planTwo renames the unit, so a citation
-	// that resolves against one revision does not against the other.
 	specTwo = "# Uploads\n\n## Acceptance criteria\n\n1. Uploads resume after a restart.\n"
 	planOne = `{"version":1,"units":[{"id":"resume","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":["internal.store"]}]}`
 	planTwo = `{"version":1,"units":[{"id":"restart","addresses":[{"criterion":"spec#1","proof":{"kind":"new-test","name":"TestResume"}}],"depends_on":[],"footprint":["internal.store"]}]}`
@@ -171,8 +170,6 @@ type fixture struct {
 	repo *trace.Repository
 }
 
-// setup creates a trace with a ruled charter, an
-// entity map and two revisions of the workstream's spec and plan.
 func setup(t *testing.T) fixture {
 	t.Helper()
 	ctx := context.Background()
@@ -216,8 +213,6 @@ func (f fixture) documents(t *testing.T, _ config.WorkstreamID, docs ...trace.Do
 	}
 }
 
-// turn returns a member's turn pinned to revision 1 of both documents, with
-// what Save was last given in saved.
 func (f fixture) turn(t *testing.T, round int, member string, earlier []shed.Record, saved *shed.Record) shed.Turn {
 	t.Helper()
 	graph, err := plan.Parse([]byte(planOne))
@@ -338,7 +333,7 @@ func TestObjectValidatesEveryCitationAndKind(t *testing.T) {
 	}
 	for i, in := range accepted {
 		recorded, id := call(t, object, in)
-		if want := shed.ObjectionID(1, alice, i+1); !recorded || id != want {
+		if want := fmt.Sprintf("agent_committee_1-r1-%d", i+1); !recorded || id != want {
 			t.Fatalf("objection %d: recorded %v %q, want %q", i+1, recorded, id, want)
 		}
 		if len(saved.Objections) != i+1 || !reflect.DeepEqual(saved.Objections[i], shed.Objection{ID: id, Kind: shed.Kind(in.Kind), Part: in.Part, Argument: in.Argument, Citations: in.Citations}) {
@@ -388,7 +383,6 @@ func TestConcedeSettlesOnlyTheMembersStandingObjections(t *testing.T) {
 	if recorded, reason := call(t, concede, concession{a1, "again"}); recorded || reason != "objection "+a1+" no longer stands" {
 		t.Fatalf("conceded twice: %v %q", recorded, reason)
 	}
-	// An objection made in this turn can be withdrawn in it, once.
 	recorded, made := call(t, object, input{"fit", "spec#1", "x", []string{"charter#1"}})
 	if !recorded || made != shed.ObjectionID(3, alice, 1) {
 		t.Fatalf("object: %v %q", recorded, made)
@@ -408,8 +402,6 @@ func TestConcedeSettlesOnlyTheMembersStandingObjections(t *testing.T) {
 	}
 }
 
-// A turn on a later revision has accepted nothing until it ends, so the
-// member can still concede what it raised against the earlier one.
 func TestConcedeOnALaterRevisionBeforeTheTurnEnds(t *testing.T) {
 	f := setup(t)
 	var saved shed.Record
@@ -421,9 +413,6 @@ func TestConcedeOnALaterRevisionBeforeTheTurnEnds(t *testing.T) {
 	}
 }
 
-// The turn that delivers the answer to a member's question continues the
-// attempt that asked: it is given what the member contributed before asking,
-// numbers its objections after them and may concede them.
 func TestToolsContinueTheContributionsTheTurnIsGiven(t *testing.T) {
 	f := setup(t)
 	var saved shed.Record
@@ -513,7 +502,6 @@ func TestRecordsReadsTheLatestRevisionOfEveryShedFile(t *testing.T) {
 	if path := shed.Path(12, alice); path != "shed/round-12/agent_committee_1.json" || shed.DocumentID(12, alice) != "shed-round-12-agent_committee_1" {
 		t.Fatalf("path %s", path)
 	}
-	// A file that records another round than its path names is refused.
 	misplaced, err := shed.Encode(record(4, bob, one, 0))
 	if err != nil {
 		t.Fatal(err)

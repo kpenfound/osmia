@@ -13,8 +13,6 @@ import (
 const pidOther config.ProjectID = "p_fedcba9876543210fedcba9876543210"
 const wOther config.WorkstreamID = "w_fedcba9876543210fedcba9876543210"
 
-// twoProjects extends the fixture with a second active project that has one
-// workstream of its own.
 func twoProjects(t *testing.T) Inputs {
 	t.Helper()
 	in := fixture(t)
@@ -38,7 +36,6 @@ func TestReferencesToEveryActiveProject(t *testing.T) {
 	must(t, s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: w1}, Mode: "soft", Source: PauseOwner, Reason: "test"}))
 	must(t, s.SetPriority(Priority{Project: pidOther, Workstreams: []config.WorkstreamID{wOther}}))
 	must(t, s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{w2, w1}}))
-	// A workstream is known only in its own project.
 	if err := s.SetPause(Pause{Target: Target{Scope: "workstream", Project: pid, Workstream: wOther}, Mode: "soft", Source: PauseOwner, Reason: "test"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("another project's workstream accepted: %v", err)
 	}
@@ -46,8 +43,6 @@ func TestReferencesToEveryActiveProject(t *testing.T) {
 	if len(ds) != 0 || len(effective.Pauses) != 2 || len(effective.Priorities) != 2 {
 		t.Fatalf("%+v %v", effective, ds)
 	}
-	// Once the second project is inactive its references are stale, and the
-	// first project's still apply.
 	one := in
 	one.Config = in.Config.WithoutProjectID(pidOther)
 	delete(one.Workstreams, pidOther)
@@ -61,7 +56,6 @@ func TestReferencesToEveryActiveProject(t *testing.T) {
 			t.Fatalf("diagnostic %+v", d)
 		}
 	}
-	// Workstreams of a project that is not loaded are refused.
 	if err := s.Resolve(Inputs{Config: one.Config, Workstreams: map[config.ProjectID][]config.WorkstreamID{pidOther: {wOther}}}); err == nil {
 		t.Fatal("workstreams of an inactive project accepted")
 	}

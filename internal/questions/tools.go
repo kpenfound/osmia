@@ -151,12 +151,6 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 			return nil, err
 		}
 		stream := config.WorkstreamID(scope.Workstream)
-		// A route_amendment naming a question resolves it the same way
-		// every other chief-of-staff question tool does: against the
-		// asking member's own workstream, which is where its citations,
-		// its seal and the amendment itself (unless it becomes a
-		// project-level amendment instead) belong, never against the
-		// chief's host workstream by default.
 		target := stream
 		var bound *jev.Result
 		if routed && input.Question != "" {
@@ -207,9 +201,6 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 				document = d
 			}
 		}
-		// The service refused the transition Jev's binding pick calls for: the
-		// question goes to the owner with Jev's judgment, so the pick never
-		// leaves it stuck.
 		hand := func(reason string, original error) (json.RawMessage, error) {
 			batch, handErr := handToOwner(ctx, repository, agent, scope, input.Question, bound, reason, now())
 			if handErr != nil {
@@ -238,8 +229,6 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 		if err := json.Unmarshal([]byte(document.Content), &sealed); err != nil {
 			return nil, err
 		}
-		// A revision the chief of staff files without a question takes every
-		// blocking finding of a final review it triaged as needing code.
 		change := input.Change
 		var taken []followup.Triage
 		if routed && input.Question == "" && strings.TrimSpace(change) != "" {
@@ -441,7 +430,6 @@ func chiefTools(repository *trace.Repository, agent string, scope coreadapter.Sc
 	return []coreadapter.Tool{answer, escalate, relay, amendmentTool(repository, agent, scope, now, true, nil), propose, logAssumption}
 }
 
-// refuse turns a refusal into the tool's result and passes other errors on.
 func refuse(err error) (json.RawMessage, error) {
 	var refused *trace.QuestionRefused
 	if errors.As(err, &refused) {
@@ -450,8 +438,6 @@ func refuse(err error) (json.RawMessage, error) {
 	return nil, err
 }
 
-// encode writes a tool result without escaping the angle brackets of the
-// citation forms.
 func encode(v any) (json.RawMessage, error) {
 	var b bytes.Buffer
 	e := json.NewEncoder(&b)
@@ -474,8 +460,6 @@ func decodeInput(raw json.RawMessage, into any) error {
 	return nil
 }
 
-// workstreamFor names the member a revision without a question is filed for;
-// a routed question names its own.
 func workstreamFor(question string, target config.WorkstreamID) config.WorkstreamID {
 	if question != "" {
 		return ""

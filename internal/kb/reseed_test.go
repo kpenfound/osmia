@@ -11,14 +11,12 @@ import (
 	"time"
 )
 
-// fakeSource serves trees by commit and counts the reads made of it.
 type fakeSource struct {
 	mu        sync.Mutex
 	trees     map[string]fs.FS
 	ancestors map[[2]string]bool
 	treeErr   error
-	// hold, when set, blocks every Tree until it is closed.
-	hold chan struct{}
+	hold      chan struct{}
 
 	treeReads, ancestorReads int
 }
@@ -59,7 +57,6 @@ func (s *fakeSource) failWith(err error) {
 	s.mu.Unlock()
 }
 
-// fakeLedger keeps the recorded revisions in memory and counts its reads.
 type fakeLedger struct {
 	mu       sync.Mutex
 	revision [][]byte
@@ -207,7 +204,6 @@ func TestReseedNeverSeedsAnAncestorOfTheLastSeededCommit(t *testing.T) {
 	if got := paths(t, ledger.revision[0]); !reflect.DeepEqual(got, []string{"api", "**", "web"}) {
 		t.Fatalf("map has %v", got)
 	}
-	// A commit that is not an ancestor moves the map forward.
 	src.trees["next"] = dirs("api")
 	if err := reseeder.Reseed(ctx, "next", src, ledger); err != nil {
 		t.Fatal(err)
@@ -235,7 +231,6 @@ func TestReseedRecordsNothingWhenTheBytesAreUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Each new commit costs one probe of the latest revision and no write.
 	if probes, revisions := ledger.counts(); probes != 2 || revisions != 1 {
 		t.Fatalf("%d probes and %d revisions, want 2 and 1", probes, revisions)
 	}
@@ -292,7 +287,6 @@ func TestReseedFailureIsSharedLoggedOnceAndRetried(t *testing.T) {
 		t.Fatalf("%d attempts for callers sharing one, want 1", trees)
 	}
 
-	// Later triggers at the same commit retry, and the same reason is logged once.
 	for range 3 {
 		if err := reseeder.Reseed(ctx, "c1", src, ledger); !errors.Is(err, boom) {
 			t.Fatalf("retry: %v", err)
@@ -311,7 +305,6 @@ func TestReseedFailureIsSharedLoggedOnceAndRetried(t *testing.T) {
 		t.Fatalf("a failed attempt recorded %d revisions", revisions)
 	}
 
-	// Once the read works, the same commit records its map.
 	src.failWith(nil)
 	if err := reseeder.Reseed(ctx, "c1", src, ledger); err != nil {
 		t.Fatal(err)
@@ -358,7 +351,6 @@ func TestReseedRecordsRevisionsInTheTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The map of c1 and the map of c3; c2 changed nothing.
 	if len(docs) != 2 || docs[0].Cause != "reseed-c1" || docs[1].Cause != "reseed-c3" || docs[1].Revision != 2 || docs[1].Actor != ReseedActor {
 		t.Fatalf("revisions: %+v", docs)
 	}

@@ -6,18 +6,17 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
 func fixture(t *testing.T) Options {
 	t.Helper()
 	home, err := os.MkdirTemp("", "os-")
-	must(t, err)
+	intakefixture.Must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
 	return fixtureAt(t, home)
 }
 
-// fixtureAt writes a minimal root and project configuration under home. Its
-// workstreams are created on Git worktrees whether or not jj is installed.
 func fixtureAt(t *testing.T, home string) Options {
 	t.Helper()
 	return testOptions(fixturekit.ConfigAt(t, home))
@@ -25,7 +24,7 @@ func fixtureAt(t *testing.T, home string) Options {
 func start(t *testing.T, opts Options) (*Service, *Client) {
 	t.Helper()
 	s, err := Start(context.Background(), opts)
-	must(t, err)
+	intakefixture.Must(t, err)
 	c := NewClient(s.Socket())
 	t.Cleanup(func() {
 		c.Close()
@@ -35,5 +34,3 @@ func start(t *testing.T, opts Options) (*Service, *Client) {
 	})
 	return s, c
 }
-
-var assertCode = fixturekit.AssertCode

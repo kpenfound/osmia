@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	wire "github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/cli"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/servicetest"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 )
 
-// fileState is a file's bytes and modification time, so a test can show a file
-// was neither rewritten nor touched.
 type fileState struct {
 	data    string
 	modTime time.Time
@@ -29,14 +29,12 @@ type fileState struct {
 func stateOf(t *testing.T, path string) fileState {
 	t.Helper()
 	data, err := os.ReadFile(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	info, err := os.Stat(path)
-	must(t, err)
+	intakefixture.Must(t, err)
 	return fileState{string(data), info.ModTime()}
 }
 
-// osmia runs an osmia command against root and returns its exit code and
-// output.
 func osmia(t *testing.T, root string, args ...string) (int, string, string) {
 	t.Helper()
 	var out, diag bytes.Buffer
@@ -44,15 +42,6 @@ func osmia(t *testing.T, root string, args ...string) (int, string, string) {
 	return code, out.String(), diag.String()
 }
 
-// The whole path on a store-backed root whose top-level file is read-only:
-// settings are read and saved, a save the service cannot adopt stays pending
-// across a reload of the top-level file, projects are added, created and
-// removed, an add is interrupted, the service restarts, stored settings stop
-// loading, startup refuses, the repair command corrects them and the service
-// starts again. The top-level file stays byte-identical and untouched
-// throughout, and no project file is written.
-//
-// Serial: the project creation needs GITHUB_TOKEN.
 func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "fixture-token")
 	ctx := context.Background()
@@ -61,16 +50,15 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	home := filepath.Dir(root)
 	top := filepath.Join(root, "config.toml")
 
-	// Project creation, with a fake GitHub whose repository is a local bare one.
 	cloneDir := filepath.Join(home, "clones")
 	remote, _ := servicetest.SeedRemote(t, home, "newrepo", "main")
 	github := servicetest.NewFakeGitHub(t, "owner")
 	github.Remote = func(string) string { return remote }
 	opts.Repositories = github.Client()
 	legacy, err := os.ReadFile(top)
-	must(t, err)
-	must(t, os.WriteFile(top, append(legacy, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
-	must(t, os.Chmod(top, 0400))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.WriteFile(top, append(legacy, fmt.Sprintf("\n[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", cloneDir)...), 0400))
+	intakefixture.Must(t, os.Chmod(top, 0400))
 	baseline := stateOf(t, top)
 	untouched := func(step string) {
 		t.Helper()
@@ -82,65 +70,59 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	s, c := start(t, opts)
 	untouched("startup")
 	store := projectstore.Open(mustRoot(t, root))
-	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(project)}) {
+	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project)}) {
 		t.Fatalf("registry at startup: %v", got)
 	}
 
-	// Read and save settings.
-	first, err := c.ProjectConfig(ctx, project)
-	must(t, err)
+	first, err := c.ProjectConfig(ctx, fixturekit.Project)
+	intakefixture.Must(t, err)
 	if first.Pin == "" || first.Revision != 1 || first.Error != nil {
 		t.Fatalf("first read: %+v", first)
 	}
-	saved, err := c.SaveProjectConfig(ctx, project, wire.ProjectConfigEdit{Pin: first.Pin, Set: wire.ProjectConfigValues{ChecksTimeout: textOf("45m")}})
-	must(t, err)
-	if saved.Outcome != wire.ProjectConfigApplied || saved.Pin == first.Pin || saved.Revision != 2 || s.current().For(project).Project.ChecksTimeout != "45m" {
+	saved, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{ChecksTimeout: textOf("45m")}})
+	intakefixture.Must(t, err)
+	if saved.Outcome != api.ProjectConfigApplied || saved.Pin == first.Pin || saved.Revision != 2 || s.current().For(fixturekit.Project).Project.ChecksTimeout != "45m" {
 		t.Fatalf("applied save: %+v", saved)
 	}
-	// A stale pin is a conflict and writes nothing.
-	_, err = c.SaveProjectConfig(ctx, project, wire.ProjectConfigEdit{Pin: first.Pin, Set: wire.ProjectConfigValues{Landing: textOf("squash")}})
-	assertCode(t, err, Conflict)
-	if got := storedSettings(t, root, project); !strings.Contains(got, `checks_timeout = "45m"`) || strings.Contains(got, "squash") {
+	_, err = c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: first.Pin, Set: api.ProjectConfigValues{Landing: textOf("squash")}})
+	fixturekit.AssertCode(t, err, api.Conflict)
+	if got := storedSettings(t, root, fixturekit.Project); !strings.Contains(got, `checks_timeout = "45m"`) || strings.Contains(got, "squash") {
 		t.Fatalf("a stale save changed the stored settings:\n%s", got)
 	}
-	// An invalid edit is refused naming the field, and not a file.
-	_, err = c.SaveProjectConfig(ctx, project, wire.ProjectConfigEdit{Pin: saved.Pin, Set: wire.ProjectConfigValues{ChecksTimeout: textOf("soon")}})
-	assertCode(t, err, Validation)
-	if !strings.Contains(err.Error(), config.ProjectSettingsLabel(project)+": checks_timeout: ") || strings.Contains(err.Error(), "config.toml") {
+	_, err = c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: saved.Pin, Set: api.ProjectConfigValues{ChecksTimeout: textOf("soon")}})
+	fixturekit.AssertCode(t, err, api.Validation)
+	if !strings.Contains(err.Error(), config.ProjectSettingsLabel(fixturekit.Project)+": checks_timeout: ") || strings.Contains(err.Error(), "config.toml") {
 		t.Fatalf("invalid edit: %v", err)
 	}
-	// A failure after the write is saved but not applied.
 	s.boundary = func(name string) error {
 		if name == "project-config-written" {
 			return errors.New("the scheduler is unreachable")
 		}
 		return nil
 	}
-	pending, err := c.SaveProjectConfig(ctx, project, wire.ProjectConfigEdit{Pin: saved.Pin, Set: wire.ProjectConfigValues{Landing: textOf("squash")}})
-	must(t, err)
+	pending, err := c.SaveProjectConfig(ctx, fixturekit.Project, api.ProjectConfigEdit{Pin: saved.Pin, Set: api.ProjectConfigValues{Landing: textOf("squash")}})
+	intakefixture.Must(t, err)
 	s.boundary = nil
-	if pending.Outcome != wire.ProjectConfigSavedNotApplied || !strings.Contains(pending.Reason, "the scheduler is unreachable") || s.current().For(project).Project.Landing != "commit-per-unit" {
+	if pending.Outcome != api.ProjectConfigSavedNotApplied || !strings.Contains(pending.Reason, "the scheduler is unreachable") || s.current().For(fixturekit.Project).Project.Landing != "commit-per-unit" {
 		t.Fatalf("not applied save: %+v", pending)
 	}
 	untouched("settings saves")
 
-	// With the save pending, a top-level change and a reload apply the top-level
-	// change only.
 	edited, err := os.ReadFile(top)
-	must(t, err)
-	must(t, os.Chmod(top, 0600))
-	must(t, os.WriteFile(top, append(edited, "\n[capacity]\nmasons = 7\n"...), 0600))
-	must(t, os.Chmod(top, 0400))
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, os.Chmod(top, 0600))
+	intakefixture.Must(t, os.WriteFile(top, append(edited, "\n[capacity]\nmasons = 7\n"...), 0600))
+	intakefixture.Must(t, os.Chmod(top, 0400))
 	baseline = stateOf(t, top)
 	reloaded, err := c.Reload(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	now, err := c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if reloaded.Digest != now.Digest || now.Effective.Capacity.Masons != 7 || len(now.Effective.Projects) != 1 || now.Effective.Projects[0].Landing != "commit-per-unit" || now.Effective.Projects[0].ChecksTimeout != "45m" {
 		t.Fatalf("after the reload: %+v", now.Effective.Projects)
 	}
-	read, err := c.ProjectConfig(ctx, project)
-	must(t, err)
+	read, err := c.ProjectConfig(ctx, fixturekit.Project)
+	intakefixture.Must(t, err)
 	if read.Pin != pending.Pin || !settingNamed(t, read, "landing").Pending || settingNamed(t, read, "landing").Value != "squash" {
 		t.Fatalf("the reload did not leave the saved revision pending: %+v", read)
 	}
@@ -149,15 +131,14 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	}
 	untouched("reload")
 
-	// Add, create and remove change the registry and write no project file.
 	cloneA := filepath.Join(home, "clone-a")
-	demoGit(t, home, "init", "--quiet", cloneA)
-	addedA, err := c.AddProject(ctx, request(cloneA))
-	must(t, err)
-	req := wire.ProjectCreateRequest{Name: "New Project", Repo: "newrepo", Description: "A new project", Charter: creationCharter}
+	fixturekit.DemoGit(t, home, "init", "--quiet", cloneA)
+	addedA, err := c.AddProject(ctx, fixturekit.Request(cloneA))
+	intakefixture.Must(t, err)
+	req := api.ProjectCreateRequest{Name: "New Project", Repo: "newrepo", Description: "A new project", Charter: creationCharter}
 	createdB, err := c.CreateProject(ctx, req)
-	must(t, err)
-	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(project), string(addedA.Project.ID), string(createdB.Project.ID)}) {
+	intakefixture.Must(t, err)
+	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project), string(addedA.Project.ID), string(createdB.Project.ID)}) {
 		t.Fatalf("registry after add and create: %v", got)
 	}
 	for _, id := range []config.ProjectID{addedA.Project.ID, createdB.Project.ID} {
@@ -169,41 +150,37 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		}
 	}
 	_, err = c.RemoveProject(ctx, addedA.Project.ID)
-	must(t, err)
-	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(project), string(createdB.Project.ID)}) {
+	intakefixture.Must(t, err)
+	if got := activeProjects(t, root); !reflect.DeepEqual(got, []string{string(fixturekit.Project), string(createdB.Project.ID)}) {
 		t.Fatalf("registry after the removal: %v", got)
 	}
 	untouched("add, create and remove")
 
-	// An add interrupted after its trace was created finishes on the next start
-	// with the same identity and one trace.
 	cloneC := filepath.Join(home, "clone-c")
-	demoGit(t, home, "init", "--quiet", cloneC)
+	fixturekit.DemoGit(t, home, "init", "--quiet", cloneC)
 	s.boundary = func(name string) error {
 		if name == "trace-created" {
 			return errors.New("crash")
 		}
 		return nil
 	}
-	_, err = c.AddProject(ctx, request(cloneC))
-	assertCode(t, err, Internal)
+	_, err = c.AddProject(ctx, fixturekit.Request(cloneC))
+	fixturekit.AssertCode(t, err, api.Internal)
 	s.boundary = nil
-	interrupted := interruptedProject(t, root, project, addedA.Project.ID, createdB.Project.ID)
+	interrupted := interruptedProject(t, root, fixturekit.Project, addedA.Project.ID, createdB.Project.ID)
 
-	// Restart: the interrupted add finishes, and the projects and settings
-	// survive in registry order.
-	must(t, s.Close())
+	intakefixture.Must(t, s.Close())
 	s, c = start(t, opts)
-	want := []string{string(project), string(createdB.Project.ID), string(interrupted)}
+	want := []string{string(fixturekit.Project), string(createdB.Project.ID), string(interrupted)}
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry after the restart: %v, want %v", got, want)
 	}
 	now, err = c.Configuration(ctx)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(now.Effective.ActiveProjects, want) {
 		t.Fatalf("effective.active_projects %v, want %v", now.Effective.ActiveProjects, want)
 	}
-	if p := s.current().For(project).Project; p.ChecksTimeout != "45m" || p.Landing != "squash" {
+	if p := s.current().For(fixturekit.Project).Project; p.ChecksTimeout != "45m" || p.Landing != "squash" {
 		t.Fatalf("the last saved settings after the restart: %+v", p)
 	}
 	if entries, err := os.ReadDir(filepath.Join(root, "projects")); err != nil || len(entries) != 3 {
@@ -226,18 +203,16 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 		t.Fatalf("osmia config shows %v, want %v\n%s", shown, want, text)
 	}
 	untouched("restart")
-	cloneOfProject := s.current().For(project).Project.Clone
+	cloneOfProject := s.current().For(fixturekit.Project).Project.Clone
 
-	// Stored settings that stop loading refuse startup, naming the project, the
-	// field and the reason and pointing to the repair command.
-	must(t, s.Close())
-	must(t, os.RemoveAll(cloneOfProject))
-	must(t, os.WriteFile(cloneOfProject, []byte("not a directory"), 0600))
+	intakefixture.Must(t, s.Close())
+	intakefixture.Must(t, os.RemoveAll(cloneOfProject))
+	intakefixture.Must(t, os.WriteFile(cloneOfProject, []byte("not a directory"), 0600))
 	_, err = Start(ctx, opts)
 	if err == nil {
 		t.Fatal("startup did not refuse stored settings that do not load")
 	}
-	for _, want := range []string{config.ProjectSettingsLabel(project), "clone", "must be a directory", "osmia project settings " + string(project) + " set clone=VALUE"} {
+	for _, want := range []string{config.ProjectSettingsLabel(fixturekit.Project), "clone", "must be a directory", "osmia project settings " + string(fixturekit.Project) + " set clone=VALUE"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("the refusal lacks %q: %v", want, err)
 		}
@@ -245,10 +220,9 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	if strings.Contains(err.Error(), "config.toml") || strings.Contains(err.Error(), "by hand") {
 		t.Fatalf("the refusal points at a file: %v", err)
 	}
-	// The command refuses nothing while the service is stopped.
 	repaired := filepath.Join(home, "repaired-clone")
-	demoGit(t, home, "init", "--quiet", repaired)
-	code, text, diag = osmia(t, root, "project", "settings", string(project), "set", "clone="+repaired)
+	fixturekit.DemoGit(t, home, "init", "--quiet", repaired)
+	code, text, diag = osmia(t, root, "project", "settings", string(fixturekit.Project), "set", "clone="+repaired)
 	if code != 0 {
 		t.Fatalf("repair: %d %s %s", code, text, diag)
 	}
@@ -257,17 +231,15 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 	if got := activeProjects(t, root); !reflect.DeepEqual(got, want) {
 		t.Fatalf("registry after the repair: %v, want %v", got, want)
 	}
-	if p := s.current().For(project).Project; p.Clone != repaired || p.ChecksTimeout != "45m" || p.Landing != "squash" {
+	if p := s.current().For(fixturekit.Project).Project; p.Clone != repaired || p.ChecksTimeout != "45m" || p.Landing != "squash" {
 		t.Fatalf("settings after the repair: %+v", p)
 	}
 	untouched("the start after the repair")
-	// The first settings, two saves and the repair are the project's revisions,
-	// and no project file was written.
-	if revisions, err := store.Revisions(project); err != nil || len(revisions) != 4 {
+	if revisions, err := store.Revisions(fixturekit.Project); err != nil || len(revisions) != 4 {
 		t.Fatalf("revisions: %d %v", len(revisions), err)
 	}
 	files, err := filepath.Glob(filepath.Join(root, "projects", "*", "config.toml"))
-	must(t, err)
+	intakefixture.Must(t, err)
 	if len(files) != 0 {
 		t.Fatalf("project files: %v", files)
 	}
@@ -277,13 +249,13 @@ func TestSettingsStoreRunsTheWholePath(t *testing.T) {
 func mustRoot(t *testing.T, root string) config.Root {
 	t.Helper()
 	resolved, err := config.ResolveRoot(root, "")
-	must(t, err)
+	intakefixture.Must(t, err)
 	return resolved
 }
 
 func textOf(s string) *string { return &s }
 
-func settingNamed(t *testing.T, snapshot wire.ProjectConfigResponse, name string) wire.ProjectConfigSetting {
+func settingNamed(t *testing.T, snapshot api.ProjectConfigResponse, name string) api.ProjectConfigSetting {
 	t.Helper()
 	for _, s := range snapshot.Settings {
 		if s.Name == name {
@@ -291,11 +263,9 @@ func settingNamed(t *testing.T, snapshot wire.ProjectConfigResponse, name string
 		}
 	}
 	t.Fatalf("no setting %s", name)
-	return wire.ProjectConfigSetting{}
+	return api.ProjectConfigSetting{}
 }
 
-// interruptedProject is the identity of the project directory that is not one
-// of known: the interrupted registration's.
 func interruptedProject(t *testing.T, root string, known ...config.ProjectID) config.ProjectID {
 	t.Helper()
 	var found []config.ProjectID

@@ -2,8 +2,9 @@ package lifecycle_test
 
 import (
 	"context"
-	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"path/filepath"
+
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -11,11 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// runChief binds the fake chief of staff through the thread dispatcher. It
-// exercises the Runner's resume mechanism directly, as chiefTurns always
-// authorizes resume; production confines that capability to the session role
-// alone (thread.Runner.ResumableRoles, set only in internal/service/enforcement.go).
-func runChief(opts *Options, cfg *config.Config, turns *chiefTurns) {
+func runChief(opts *Options, cfg *config.Config, turns *fixturekit.ChiefTurns) {
 	opts.Threads = func(r *trace.Repository, _ *config.Config) (coreadapter.Reconciler, error) {
 		return thread.Dispatcher{Runner: thread.Runner{Jev: fixturekit.UnconfiguredJudge(nil), Store: r, Turns: turns, Now: opts.Reconciliation.Now, ResumableRoles: func(string) bool { return true }},
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {

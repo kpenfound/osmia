@@ -8,18 +8,7 @@ import (
 	"github.com/kpenfound/osmia/internal/service"
 )
 
-var baseEntry = service.TestBaseEntry
-var reapSandboxes = service.TestReapSandboxes
-var masonGrant = service.TestMasonGrant
-var reviewerGrant = service.TestReviewerGrant
-var driftMasonTools = service.TestDriftMasonTools
-var chiefContext = service.TestChiefContext
-var concurrentOperation = service.TestConcurrentOperation
-
 const discoveryTool = "record_discovery"
-const coreReadBound = time.Second
-
-type notifyLedger = service.TestNotifyLedger
 
 type testNotifier struct {
 	s      *Service

@@ -9,15 +9,10 @@ import (
 	"time"
 )
 
-// killWait bounds how long a command that was told to stop is waited on
-// before its caller gets control back.
 var killWait = 10 * time.Second
 
-// pipeWait bounds the wait for a command's output pipes once it has exited,
-// so a descendant that keeps them open does not hold Wait.
 const pipeWait = 2 * time.Second
 
-// terminate stops the command and the processes it started.
 var terminate = func(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
@@ -43,12 +38,6 @@ func (e *ProcessError) Error() string {
 }
 func (e *ProcessError) Is(target error) bool { return target == ErrProcessRunning }
 
-// runCommand starts cmd and waits for it. When ctx ends first it stops the
-// command with its process group and waits for the exit, up to killWait. A
-// command that is still running then is left to a goroutine that frees the
-// clone lock once it exits, and runCommand returns ctx's error joined with a
-// ProcessError. A command started under a clone's ownership counts against
-// that lock until it exits, so ownership is not released while it runs.
 func runCommand(ctx context.Context, lock *cloneLock, cmd *exec.Cmd, name string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = pipeWait

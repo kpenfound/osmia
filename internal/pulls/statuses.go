@@ -50,7 +50,6 @@ type StatusReader interface {
 
 const (
 	statusPageSize = 100
-	// maxStatusPages bounds the pages one read follows.
 	maxStatusPages = 50
 )
 
@@ -93,7 +92,6 @@ func (g GitHub) CommitStatuses(ctx context.Context, repository, commit string) (
 	return CommitStatuses{}, fmt.Errorf("read the statuses of %s@%s: more than %d pages", repository, commit, maxStatusPages)
 }
 
-// later reports whether a was posted after b.
 func later(a, b CommitStatus) bool {
 	if !a.UpdatedAt.Equal(b.UpdatedAt) {
 		return a.UpdatedAt.After(b.UpdatedAt)

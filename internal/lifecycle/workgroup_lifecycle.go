@@ -157,8 +157,6 @@ func (s *Controller) WorkgroupMembers(ctx context.Context, g trace.Workgroup) ([
 				return err
 			}
 			if liveErr := validateLive(); liveErr != nil {
-				// A concurrent archive may retire the member after the first read.
-				// Only matching durable evidence permits the terminal binding.
 				retired, err = resolveLifecycle(g.ID, pin.Workstream)
 				if err != nil {
 					return nil, false, err
@@ -227,9 +225,6 @@ func (s *Controller) WorkgroupFullyRetired(ctx context.Context, g trace.Workgrou
 	return s.validateRetiredWorkgroup(ctx, authority, g)
 }
 
-// validateRetiredWorkgroup checks every member's archive evidence against its
-// project: the approved project once the group is ratified, or the project
-// its archive record names when every member retired before ratification.
 func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *trace.Repository, g trace.Workgroup) (bool, error) {
 	projects, found, err := authority.ApprovedMembersOf(g)
 	if err != nil {
@@ -245,8 +240,6 @@ func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *tr
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		// Fully retired groups need no member runtime, including during
-		// startup before every configured repo's controller is published.
 		retired, err := s.MemberLifecycle(project)(g.ID, stream)
 		if err != nil {
 			return false, err
@@ -258,10 +251,6 @@ func (s *Controller) validateRetiredWorkgroup(ctx context.Context, authority *tr
 	return true, nil
 }
 
-// archivedWorkgroupMembers maps each real member of an unratified workgroup
-// to the project of its archive record for g. Without an approval the archive
-// record is the only durable identity a retired member keeps, so a member
-// lacking one is not retired.
 func (s *Controller) archivedWorkgroupMembers(g trace.Workgroup) (map[config.WorkstreamID]config.ProjectID, error) {
 	projects := map[config.WorkstreamID]config.ProjectID{}
 	archives := s.MemberArchives()

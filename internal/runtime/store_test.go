@@ -23,7 +23,6 @@ const w2 config.WorkstreamID = "w_1123456789abcdef0123456789abcdef"
 
 func fixture(t *testing.T) Inputs {
 	t.Helper()
-	// Short roots keep Unix socket paths within the loader's portable limit.
 	home, err := os.MkdirTemp("", "osmia-runtime-")
 	must(t, err)
 	t.Cleanup(func() { os.RemoveAll(home) })
@@ -47,8 +46,6 @@ clone = "`+filepath.Join(home, "clone")+`"
 	return Inputs{c, map[config.ProjectID][]config.WorkstreamID{pid: {w1, w2}}}
 }
 
-// register adds the project id with settings as its first revision to the
-// project store of the root at rootDirectory.
 func register(t *testing.T, rootDirectory string, id config.ProjectID, settings string) {
 	t.Helper()
 	root, err := config.ResolveRoot(rootDirectory, "")
@@ -143,13 +140,6 @@ func TestOperatorPauseSourceOpensAsOwner(t *testing.T) {
 	}
 }
 
-// TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks covers spec#8: a reader
-// that assembles a response from more than one call into the store can tell,
-// from Generation alone, whether a mutation landed between them, without
-// ever waiting on the store's lock itself. Generation advances once per
-// mutation that actually changes the persisted state, stays put across a
-// read-only call and a mutation that changes nothing, and a reader never
-// retries forever when mutations keep landing: it just sees a later value.
 func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)
@@ -169,8 +159,6 @@ func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
 		t.Fatalf("a read-only call changed the generation: %d, want %d", s.Generation(), afterChange)
 	}
 
-	// Setting the same profile again changes nothing on disk, so it must
-	// not advance the generation either.
 	must(t, s.SetProfile("mason", "other"))
 	if s.Generation() != afterChange {
 		t.Fatalf("a no-op mutation changed the generation: %d, want %d", s.Generation(), afterChange)
@@ -182,9 +170,6 @@ func TestGenerationAdvancesOnlyOnAChangeAndNeverBlocks(t *testing.T) {
 	}
 }
 
-// TestUnchangedMutationLeavesTheFileInPlace shows that a mutation that
-// changes nothing does not rewrite runtime.json, while still refusing a file
-// changed outside the store.
 func TestUnchangedMutationLeavesTheFileInPlace(t *testing.T) {
 	in := fixture(t)
 	s := open(t, in)
@@ -239,7 +224,6 @@ func TestRoundTripsAndChangedDefaults(t *testing.T) {
 	if !bytes.Equal(original, unchanged) {
 		t.Fatal("mutation rewrote config")
 	}
-	// Load changed declarative input through the actual loader.
 	must(t, os.WriteFile(configPath, append(original, []byte("\n[roles.mason]\nprofile = 'other'\n")...), 0600))
 	changed, err := projectstore.LoadConfig(config.Options{Root: in.Config.Root.String()})
 	must(t, err)
@@ -292,7 +276,6 @@ func TestStaleReferencesAreRetainedAndNeverRetargeted(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatal(ds)
 	}
-	// A different project must not inherit any project-scoped records.
 	changed, _ = copyInputs(in)
 	changed.Config.Project.ID = "p_2123456789abcdef0123456789abcdef"
 	changed.Config.Projects = []config.Project{changed.Config.Project}
@@ -460,7 +443,6 @@ func TestConcurrentMutationsAndReaderIsolation(t *testing.T) {
 	if effective.Profiles["mason"] != "default" {
 		t.Fatal("reader mutated state")
 	}
-	// Identical state encodes byte-for-byte identically.
 	before := disk(t, in)
 	must(t, s.SetPause(raw.Pauses[0]))
 	if !bytes.Equal(before, disk(t, in)) {
@@ -552,7 +534,6 @@ func TestProjectlessInputs(t *testing.T) {
 	if _, _, err := Open(withListed); err == nil {
 		t.Fatal("active identity opened without a loaded project")
 	}
-	// Supplying the loaded project restores project-scoped references.
 	full := fixture(t)
 	full.Config.Root = in.Config.Root
 	if err := s.Resolve(full); err != nil {

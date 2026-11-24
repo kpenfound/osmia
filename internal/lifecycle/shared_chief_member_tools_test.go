@@ -10,16 +10,14 @@ import (
 	"testing"
 
 	"github.com/kpenfound/agentcore/agent"
+	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestDesignProductionSharedChiefActsOnAMember covers a cross-repo
-// workgroup's shared chief of staff, whose conversation belongs to the
-// workgroup trace's host: naming a member with workstream, its tools read
-// that member's records and code and act on its own trace in its own repo,
-// and a workstream outside the workgroup is refused.
 func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -28,14 +26,14 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	f.startOwner(t)
 	packet := f.awaitPacket(t)
 	_, err := f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.awaitApproved(t)
 	repo, err := f.s.repository(f.project2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.wait(t, "member building", func() bool {
 		feature, err := repo.Workflow(f.stream2, trace.FeatureSubject)
-		must(t, err)
-		return feature.Value == BuildingState
+		intakefixture.Must(t, err)
+		return feature.Value == intakefixture.BuildingState
 	})
 
 	member := string(f.stream2)
@@ -58,25 +56,23 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		if !strings.HasPrefix(req.Name, "message_") || !strings.HasSuffix(strings.TrimSpace(req.Prompt), marker) {
 			return fallback(ctx, req, verified, tools)
 		}
-		// A failed call is a result too, so the turn completes and the
-		// assertions below name it.
 		for i, c := range calls {
-			result, err := callTool(ctx, tools, c.tool, c.input)
+			result, err := intakefixture.CallTool(ctx, tools, c.tool, c.input)
 			if err != nil {
 				result = fmt.Sprintf("%s failed: %v", c.tool, err)
 			}
 			results[i] = result
 		}
-		return questionResult(req, "session-chief", "Client work settled."), nil
+		return intakefixture.QuestionResult(req, "session-chief", "Client work settled."), nil
 	}
 	f.engine.Mu.Unlock()
 	sent, err := f.c.Send(ctx, f.stream1, marker)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.wait(t, "shared chief member turn completion", func() bool {
 		entries, err := f.c.Conversation(ctx, f.stream1)
-		must(t, err)
+		intakefixture.Must(t, err)
 		for _, e := range entries.Entries {
-			if e.Turn == sent.Turn && e.State == TurnDone {
+			if e.Turn == sent.Turn && e.State == api.TurnDone {
 				return true
 			}
 		}
@@ -84,7 +80,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	})
 
 	docs, err := trace.Read[trace.Document](repo, f.stream2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	var listed map[string]int
 	_ = json.Unmarshal([]byte(results[0]), &listed)
 	var units []string
@@ -92,7 +88,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	for _, d := range docs {
 		if d.Path == plan.PlanPath {
 			graph, err := plan.Parse([]byte(d.Content))
-			must(t, err)
+			intakefixture.Must(t, err)
 			units = units[:0]
 			for _, u := range graph.Units {
 				units = append(units, u.ID)
@@ -115,7 +111,7 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		t.Fatalf("move_workstream did not read the member's sealed plan %v: %s", units, results[3])
 	}
 	clone := f.repos[1].Clone
-	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+featureBranch(f.stream2))
+	tip := gitOutput(t, clone, "rev-parse", "--verify", "--quiet", "refs/heads/"+intake.FeatureBranch(f.stream2))
 	if tip == "" {
 		tip = gitOutput(t, clone, "rev-parse", "HEAD")
 	}
@@ -128,12 +124,11 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 		t.Fatalf("inspect_code did not read the member's clone at %s: %s", tip, results[4])
 	}
 
-	// The host conversation's own trace records none of the member's work.
 	authority, host, _, closeAuthority, err := f.s.chiefRepository(ctx, repo, f.stream2)
-	must(t, err)
+	intakefixture.Must(t, err)
 	hosted, err := trace.Read[trace.Document](authority, host)
 	closeAuthority()
-	must(t, err)
+	intakefixture.Must(t, err)
 	for _, d := range hosted {
 		if strings.HasPrefix(d.Path, "discoveries/") {
 			t.Fatalf("the member's discovery was recorded on the host: %s", d.Path)
@@ -141,8 +136,6 @@ func TestDesignProductionSharedChiefActsOnAMember(t *testing.T) {
 	}
 }
 
-// gitOutput runs git in dir and returns its trimmed output, or nothing when
-// git exits unsuccessfully.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

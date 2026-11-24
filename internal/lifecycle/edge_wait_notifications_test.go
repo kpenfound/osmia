@@ -2,12 +2,18 @@ package lifecycle_test
 
 import (
 	context "context"
-	config "github.com/kpenfound/osmia/internal/config"
-	pulls "github.com/kpenfound/osmia/internal/pulls"
-	"github.com/kpenfound/osmia/internal/service"
-	trace "github.com/kpenfound/osmia/internal/trace"
 	testing "testing"
 	time "time"
+
+	"github.com/kpenfound/osmia/internal/api"
+	config "github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	pulls "github.com/kpenfound/osmia/internal/pulls"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
+	trace "github.com/kpenfound/osmia/internal/trace"
 )
 
 func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
@@ -27,9 +33,9 @@ func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
 
 			assertStatusAndSilence := func(want string) {
 				t.Helper()
-				statuses, _, api := f.s.statuses()
-				if api != nil {
-					t.Fatal(api)
+				statuses, _, apiFault := f.s.statuses()
+				if apiFault != nil {
+					t.Fatal(apiFault)
 				}
 				found := false
 				for _, status := range statuses {
@@ -47,9 +53,9 @@ func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
 				if entries := f.inboxLen(t); entries != 0 {
 					t.Fatalf("wait or release created %d durable inbox entries", entries)
 				}
-				inbox, api := f.s.inbox(ctx)
-				if api != nil || len(inbox.Entries) != 0 {
-					t.Fatalf("owner inbox = %+v, %v", inbox, api)
+				inbox, apiFault := f.s.inbox(ctx)
+				if apiFault != nil || len(inbox.Entries) != 0 {
+					t.Fatalf("owner inbox = %+v, %v", inbox, apiFault)
 				}
 				n.pass(ctx)
 				if diagnostics := n.diagnostics(); len(diagnostics) != 0 {
@@ -65,19 +71,18 @@ func TestEdgeWaitAndReleaseKeepInboxAndNotificationLedgerEmpty(t *testing.T) {
 			}
 
 			f.resolvePasses(t)
-			assertStatusAndSilence(edgeWaitMessage(string(f.upstream)))
-			recordUpstreamOwnPullRequest(t, f.s, f.repository, f.upstream, DeliveryPublication{
-				Status: publicationOpened, Upstream: "owner/repo-a", Fork: "owner/repo-a-fork",
-				Branch: featureBranch(f.upstream), PullRequest: 123,
+			assertStatusAndSilence(lifecycle.EdgeWaitMessage(string(f.upstream)))
+			recordUpstreamOwnPullRequest(t, f.s, f.repository, f.upstream, api.DeliveryPublication{
+				Status: delivery.PublicationOpened, Upstream: "owner/repo-a", Fork: "owner/repo-a-fork",
+				Branch: intake.FeatureBranch(f.upstream), PullRequest: 123,
 			})
-			provider := &fakePulls{Prs: []pulls.PullRequest{{
-				Number: 123, State: "open", HeadRepository: "owner/repo-a-fork", Head: featureBranch(f.upstream), Base: "main",
+			provider := &fixturekit.FakePulls{Prs: []pulls.PullRequest{{
+				Number: 123, State: "open", HeadRepository: "owner/repo-a-fork", Head: intake.FeatureBranch(f.upstream), Base: "main",
 			}}}
 			f.s.options.PullRequests = provider
 			for range 3 {
 				f.resolvePasses(t)
 				assertStatusAndSilence("waiting on owner: owner/repo-a#123 merge")
-				// Reload the durable ledger as a newly started notifier does.
 				n = newNotifier(f.s, time.Second, nil)
 				assertStatusAndSilence("waiting on owner: owner/repo-a#123 merge")
 			}

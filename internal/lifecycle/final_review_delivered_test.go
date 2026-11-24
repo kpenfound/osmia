@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The final reviewer's pass reads a workstream assembled, and its publication
-// can deliver it before the pass asks for the review. A delivered workstream
-// with no maintenance pending is asked for no review.
 func TestFinalReviewOfAWorkstreamDeliveredDuringThePassAsksForNothing(t *testing.T) {
 	t.Parallel()
 	p := newPublicationFixture(t, "commit-per-unit")
@@ -19,21 +19,21 @@ func TestFinalReviewOfAWorkstreamDeliveredDuringThePassAsksForNothing(t *testing
 		t.Fatal(result)
 	}
 	feature, err := p.repository.Workflow(p.stream, trace.FeatureSubject)
-	must(t, err)
-	if feature.Value != DeliveredState {
+	intakefixture.Must(t, err)
+	if feature.Value != intake.DeliveredState {
 		t.Fatalf("feature is %s, not delivered", feature.Value)
 	}
-	pending, err := upstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
-	must(t, err)
+	pending, err := lifecycle.UpstreamDeliveryPending(p.repository, p.s.cfg, p.stream)
+	intakefixture.Must(t, err)
 	if pending {
 		t.Fatal("a fresh delivery has maintenance pending")
 	}
 	reviewer := &finalReviewer{s: p.s, repository: p.repository}
-	must(t, reviewer.request(ctx, p.stream))
+	intakefixture.Must(t, reviewer.request(ctx, p.stream))
 	ops, err := p.repository.Operations(p.stream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	for _, o := range ops {
-		if o.Operation.Action == deliveryReviewAction {
+		if o.Operation.Action == lifecycle.DeliveryReviewAction {
 			t.Fatalf("maintenance review asked for with nothing pending: %s", o.Operation.Input)
 		}
 	}

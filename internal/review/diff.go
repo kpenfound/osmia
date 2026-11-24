@@ -1,3 +1,5 @@
+// Package review gives a reviewer the pinned diff it judges and the identity
+// that ties a returned review to the candidate and diff it was prepared for.
 package review
 
 import (
@@ -17,10 +19,8 @@ import (
 
 const DiffToolName = "workstream_diff"
 
-// diffOutputLimit bounds one workstream_diff response.
 const diffOutputLimit = 64 * 1024
 
-// selectedDiff is what a workstream_diff call asks for.
 type selectedDiff struct {
 	FilesOnly bool     `json:"files_only"`
 	Paths     []string `json:"paths"`
@@ -47,8 +47,6 @@ type ChangedFile struct {
 	Binary  bool   `json:"binary,omitempty"`
 }
 
-// render returns the selected files, or the selected part of the diff cut at
-// a line boundary within diffOutputLimit.
 func (s selectedDiff) render(files []gitdiff.File) (listed []ChangedFile, text string, truncated bool) {
 	var out strings.Builder
 	for _, f := range files {

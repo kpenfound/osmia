@@ -51,7 +51,6 @@ var agentCoauthor = regexp.MustCompile(`(?i)^(claude( code| (opus|sonnet|haiku)(
 // attribution and prose, including quoted examples of trailers.
 func CleanDeliveryMessage(message string) string {
 	lines := strings.Split(strings.TrimSpace(message), "\n")
-	// Only the final paragraph can be the trailer block.
 	start := len(lines) - 1
 	for start > 0 && strings.TrimSpace(lines[start-1]) != "" {
 		start--
@@ -71,12 +70,6 @@ func CleanDeliveryMessage(message string) string {
 	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
-// deliveryIntentHash identifies a delivery's approved intent: the
-// publication operation, the reviewed base and head, the approved messages
-// and the squash or per-unit layout. It is the signing ID core's commit
-// signer records a signing under and the legacy recovery ref's suffix, so
-// one approved delivery maps to one signing and a retry under the same
-// intent finds it rather than making one again.
 func deliveryIntentHash(operation, base, head string, messages []DeliveryMessage, squash bool) string {
 	intent, _ := json.Marshal(struct {
 		Operation, Base, Head string
@@ -86,33 +79,6 @@ func deliveryIntentHash(operation, base, head string, messages []DeliveryMessage
 	return fmt.Sprintf("%x", sha256.Sum256(intent))
 }
 
-// legacyDeliveryRefPrefix is where the signed-commit construction this
-// implementation replaced kept its completed result, outside the branches,
-// until a publication reusing it was published or abandoned. A delivery it
-// already signed is still reused from there rather than signed again.
-const legacyDeliveryRefPrefix = "refs/osmia/delivery/"
-
-// legacyDelivery looks for a delivery the replaced implementation signed and
-// kept under legacyDeliveryRefPrefix+hash, verifying its tree against the
-// reviewed head before it is reused.
-func (g *Git) legacyDelivery(ctx context.Context, hash, tree string) (string, bool, error) {
-	saved, err := g.run(ctx, "rev-parse", "--verify", "--quiet", legacyDeliveryRefPrefix+hash)
-	if err != nil {
-		if exitCode(err, 1) {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-	c, err := g.Commit(ctx, saved)
-	if err != nil {
-		return "", false, err
-	}
-	if c.Tree != tree {
-		return "", false, errors.New("recorded signed delivery differs from reviewed tree")
-	}
-	return saved, true, nil
-}
-
 // SignDelivery makes owner-attributed, signed commits of the reviewed
 // history through core's commit signer (core/vcs/git.Signer), which uses the
 // clone's configured identity, signing key and signing format and never
@@ -120,13 +86,9 @@ func (g *Git) legacyDelivery(ctx context.Context, hash, tree string) (string, bo
 // reviewed linear history, removes agent co-author trailers, adds the
 // owner's Signed-off-by trailer, and derives a durable signing ID from the
 // publication operation and the approved intent, so a retry finds the same
-// signing rather than making one again. A delivery the replaced
-// implementation already signed and kept under the legacy
-// refs/osmia/delivery/<hash> ref is reused the same way, until it is
-// published or abandoned.
+// signing rather than making one again.
 func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, messages []DeliveryMessage, squash bool) (string, error) {
-	original, err := g.Commit(ctx, head)
-	if err != nil {
+	if _, err := g.Commit(ctx, head); err != nil {
 		return "", err
 	}
 	if squash {
@@ -160,11 +122,6 @@ func (g *Git) SignDelivery(ctx context.Context, operation, base, head string, me
 		}
 	}
 	hash := deliveryIntentHash(operation, base, head, messages, squash)
-	if saved, ok, err := g.legacyDelivery(ctx, hash, original.Tree); err != nil {
-		return "", err
-	} else if ok {
-		return saved, nil
-	}
 	value := func(key string) (string, error) {
 		v, err := g.run(ctx, "config", "--get", key)
 		if err != nil || strings.TrimSpace(v) == "" {

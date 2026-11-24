@@ -142,20 +142,14 @@ type Inputs struct {
 	Workstreams map[config.ProjectID][]config.WorkstreamID
 }
 type Store struct {
-	mu    sync.RWMutex
-	root  *os.Root
-	input Inputs
-	state State
-	disk  []byte
-	ops   fileOps
-	// changed is called after a mutation changes the persisted state.
-	changed func()
-	// pauseEnded is called after a mutation removes or replaces a stored pause.
+	mu         sync.RWMutex
+	root       *os.Root
+	input      Inputs
+	state      State
+	disk       []byte
+	ops        fileOps
+	changed    func()
 	pauseEnded func(ended Pause, replaced bool)
-	// generation counts the mutations that have actually changed the
-	// persisted state, so a caller that reads the store more than once
-	// while assembling one response can tell whether a mutation landed
-	// between those reads.
 	generation atomic.Uint64
 }
 
@@ -190,7 +184,6 @@ func (s *Store) ObservePauseEnd(f func(ended Pause, replaced bool)) {
 	s.pauseEnded = f
 }
 
-// endedPauses lists the pauses of before that next no longer holds, in order.
 func endedPauses(before, next []Pause, f func(Pause, bool)) {
 	for _, p := range before {
 		if slices.ContainsFunc(next, func(n Pause) bool { return n.Target == p.Target && n.Source == p.Source && n.SetAt.Equal(p.SetAt) }) {
@@ -690,8 +683,6 @@ func (s *Store) mutate(f func(*State, Inputs) error) error {
 		return err
 	}
 	data = append(data, '\n')
-	// A mutation that changes nothing still checks the file on disk, but
-	// does not rewrite it.
 	unchanged := bytes.Equal(data, s.disk)
 	if unchanged {
 		err = s.checkDisk()
@@ -865,7 +856,6 @@ func (s *Store) ClearProfile(role string) error {
 	return s.mutate(func(st *State, _ Inputs) error { delete(st.Profiles, role); return nil })
 }
 
-// uniqueKeys rejects ambiguous objects before decoding into typed state.
 func uniqueKeys(d *json.Decoder) error {
 	token, err := d.Token()
 	if err != nil {
@@ -923,9 +913,6 @@ func (s *Store) UpdateArchive(a Archive) error {
 	return s.mutate(func(st *State, _ Inputs) error {
 		for i, old := range st.Archived {
 			if old.Project == a.Project && old.Workstream == a.Workstream {
-				// Cleanup may have read history before a dependent durably observed
-				// this exact publication's merge. Preserve that monotonic evidence
-				// while applying cleanup's metadata and progress.
 				if old.ResolutionEvidence == "merged" && old.Publication.PullRequest > 0 && (old.MergeReference == "" || old.MergeReference == fmt.Sprintf("%s#%d", old.Publication.Upstream, old.Publication.PullRequest)) &&
 					a.State == old.State && a.Publication == old.Publication && a.ResolutionEvidence == "unresolved" && !a.Resolved {
 					a.Resolved, a.ResolutionEvidence = old.Resolved, old.ResolutionEvidence

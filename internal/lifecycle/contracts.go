@@ -58,8 +58,6 @@ type draftStatus = intake.DraftStatus
 const Conflict = api.Conflict
 const Validation = api.Validation
 
-var librarianWorkstream = intake.LibrarianWorkstream
-
 type ArchiveResponse = api.ArchiveResponse
 
 var latestFinalReport = delivery.LatestFinalReport

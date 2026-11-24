@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev/jevfixture"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/router"
@@ -17,7 +18,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// routeSpans collects the route spans the fixture's router sends.
 type routeSpans struct {
 	mu    sync.Mutex
 	spans []router.SpanRoute
@@ -29,7 +29,6 @@ func (l *routeSpans) add(s router.SpanRoute) {
 	l.spans = append(l.spans, s)
 }
 
-// of returns the spans of the trigger.
 func (l *routeSpans) of(trigger string) []router.SpanRoute {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -42,15 +41,12 @@ func (l *routeSpans) of(trigger string) []router.SpanRoute {
 	return out
 }
 
-// collectSpans makes the service's router send its route spans to the result.
 func collectSpans(s *Service) *routeSpans {
 	l := &routeSpans{}
 	s.core().Router().Spans = l.add
 	return l
 }
 
-// masonCapacityFixture is a debate fixture whose service has room for a mason, so
-// that a dependent's first unit can start once nothing holds it.
 func masonCapacityFixture(t *testing.T) *shedFixture {
 	t.Helper()
 	return newDebateFixtureWith(t, 1, 1, "", func(opts *Options) {
@@ -58,22 +54,20 @@ func masonCapacityFixture(t *testing.T) *shedFixture {
 	})
 }
 
-// build runs the build of both sealed workstreams, as the service's build pass
-// does: each starts building, with its units planned and ready.
 func (f *edgeGraphFixture) build(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	b := &builder{S: f.s.intake().BuilderDependencies(), Repository: f.repository}
-	must(t, b.Pass(ctx))
+	b := &intake.Builder{S: f.s.intake().BuilderDependencies(), Repository: f.repository}
+	intakefixture.Must(t, b.Pass(ctx))
 	for _, stream := range []config.WorkstreamID{f.upstream, f.downstream} {
 		ops, err := f.repository.Operations(stream)
-		must(t, err)
+		intakefixture.Must(t, err)
 		for _, op := range ops {
-			if op.Operation.Action != BuildAction || op.Result != nil {
+			if op.Operation.Action != intake.BuildAction || op.Result != nil {
 				continue
 			}
 			result, err := b.Apply(ctx, op.Operation)
-			must(t, err)
+			intakefixture.Must(t, err)
 			if result.Outcome != "succeeded" {
 				t.Fatalf("building %s: %+v", stream, result)
 			}
@@ -81,41 +75,28 @@ func (f *edgeGraphFixture) build(t *testing.T) {
 	}
 }
 
-// dependentWork is what a dependent's work looks like in the trace: the state of
-// its first unit and the turns queued for the unit's mason.
 func (f *edgeGraphFixture) dependentWork(t *testing.T) (state string, turns int) {
 	t.Helper()
 	unit, err := f.repository.Workflow(f.downstream, trace.UnitSubject("resume"))
-	must(t, err)
-	th, err := f.repository.Thread(f.downstream, masonAgent("resume"))
+	intakefixture.Must(t, err)
+	th, err := f.repository.Thread(f.downstream, intakefixture.MasonAgent("resume"))
 	if err == nil {
 		turns = len(th.Turns)
 	}
 	return unit.Value, turns
 }
 
-// publish runs one Hearsay publish pass over the fixture's trace against a fake
-// listener and returns the decisions it received.
 func (f *edgeGraphFixture) publish(t *testing.T, hooks *fixturekit.Hooks) []fixturekit.HooksPost {
 	t.Helper()
 	os.Setenv(service.RoutingPublishTokenEnv, "journey-publisher-token")
 	res, err := service.InspectForTest(f.s.core()).PublishToHearsay(context.Background(), f.repository, hooks.URL)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if res.Unreachable {
 		t.Fatalf("the publish pass: %+v", res)
 	}
 	return fixturekit.Decisions(hooks.Take())
 }
 
-// A dependent waits on an upstream that was abandoned. The upstream ends, the
-// router decides the exit from waiting, and Jev drops the dependency. The
-// dependent leaves waiting and goes on to do its work: its first unit starts and
-// its mason's turn is queued, which the pass of the mason controller would not
-// do while the dependent waited, and it is not parked again by repeated
-// reconciliation or a restart. The waiver is in the dependent's own trace, the
-// shared project spec is unchanged, the waiver is never a merge, the feed calls
-// the drop Jev's decision once, and Hearsay is told of it once as Jev's decision
-// on the work source with no author.
 func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -127,20 +108,17 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	fixturekit.RecordHanded(t, f.repository, f.upstream, "stdin", f.s.now())
 	fixturekit.RecordHanded(t, f.repository, f.downstream, "stdin", f.s.now())
 	specBefore, _, _, err := f.repository.ProjectSpecOf(f.downstream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	f.build(t)
 	m := newMasonController(f.s, f.repository)
 	hooks := fixturekit.NewHooks(t)
 
-	// While the upstream lives the dependent waits: nothing of it starts and its
-	// mason's turn would be held.
 	f.resolvePasses(t)
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	if state, turns := f.dependentWork(t); state != "ready" || turns != 0 || !f.holdsMason(t, f.downstream) {
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
 
-	// The upstream is abandoned: the exit is Jev's to decide.
 	endStream(t, f.repository, f.s.now(), f.upstream)
 	f.resolvePasses(t)
 	subject := lifecycle.DependencySubject(f.upstream, trace.EdgeHardBlock)
@@ -156,7 +134,7 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		t.Fatalf("route spans %+v", got)
 	}
 	waivers, revision, err := lifecycle.EdgeWaiversAt(f.repository, f.downstream)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if revision != 1 || len(waivers.Waivers) != 1 || waivers.Waivers[0].Upstream != f.upstream || waivers.Waivers[0].DecidedBy != trace.DecidedByJev || waivers.Waivers[0].Judgment != dropped.Judgment {
 		t.Fatalf("waivers %+v at revision %d", waivers, revision)
 	}
@@ -164,7 +142,6 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		t.Fatalf("the shared project spec changed: %+v %v", specAfter, err)
 	}
 
-	// The dependent goes on: its work is scheduled, not parked again.
 	check := func(when string) {
 		t.Helper()
 		if f.holdsMason(t, f.downstream) {
@@ -176,25 +153,25 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		if state, turns := f.dependentWork(t); state != "implementing" || turns != 1 {
 			t.Fatalf("%s: the dependent's first unit is %q with %d mason turns, want implementing and 1", when, state, turns)
 		}
-		observed, _, _, err := edgeObservationAt(f.repository, f.downstream)
-		must(t, err)
+		observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
+		intakefixture.Must(t, err)
 		for _, e := range observed.Edges {
 			if e.Merged {
 				t.Fatalf("%s: a waiver was recorded as a merge: %+v", when, e)
 			}
 		}
 	}
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	check("after the drop")
 	for range 3 {
 		f.resolvePasses(t)
-		must(t, m.Pass(ctx))
+		intakefixture.Must(t, m.Pass(ctx))
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
 	m = newMasonController(f.s, f.repository)
 	f.resolvePasses(t)
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	check("after a restart")
 	if n := len(p.TransitionRequests()); n != 1 {
 		t.Fatalf("Jev was asked %d times for one piece of evidence", n)
@@ -203,8 +180,6 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 		t.Fatalf("%d departures in the feed, want 1", n)
 	}
 
-	// Hearsay is told of the waiver once, as Jev's decision with no author, and
-	// not as a second decision for the transition that moved the decision.
 	var waivered, routed int
 	for _, d := range f.publish(t, hooks) {
 		switch {
@@ -230,13 +205,6 @@ func TestJourneyADependentOnAnAbandonedUpstreamLeavesWaitingAndGoesOn(t *testing
 	}
 }
 
-// A dependent waits on an upstream that was merged outside the factory. Once the
-// upstream's changes are in the base branch the exit from waiting is raised and
-// the router follows its default: the dependent goes on. It needs no waiver and
-// no workgroup change, and the edge is recorded as merged at the base commit
-// that holds the changes. The dependent starts its work and stays released
-// through reconciliation and a restart, and nothing of it reaches Hearsay as a
-// waiver.
 func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoesOn(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -252,12 +220,11 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 	hooks := fixturekit.NewHooks(t)
 
 	f.resolvePasses(t)
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	if state, turns := f.dependentWork(t); state != "ready" || turns != 0 || !f.holdsMason(t, f.downstream) {
 		t.Fatalf("the dependent works while it waits: unit %q, %d mason turns, want ready and 0", state, turns)
 	}
 
-	// The upstream ended and its changes were merged by hand.
 	endStream(t, f.repository, f.s.now(), f.upstream)
 	merged := advanceUpstream(t, sf, map[string]string{"upstream.go": "upstream\n", "UPSTREAM.md": "merged by hand\n"})
 	f.resolvePasses(t)
@@ -268,8 +235,8 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 	if got := spans.of(lifecycle.TriggerUpstreamIntegrated); len(got) != 1 || got[0].Outcome != router.OutcomeFollowed || got[0].Chosen != lifecycle.DependencyAdopted {
 		t.Fatalf("route spans %+v", got)
 	}
-	observed, _, _, err := edgeObservationAt(f.repository, f.downstream)
-	must(t, err)
+	observed, _, _, err := lifecycle.EdgeObservationAt(f.repository, f.downstream)
+	intakefixture.Must(t, err)
 	if len(observed.Edges) != 1 || !observed.Edges[0].Merged || observed.Edges[0].Commit != merged {
 		t.Fatalf("the observation %+v", observed)
 	}
@@ -289,21 +256,19 @@ func TestJourneyADependentOnAnUpstreamMergedOutsideTheFactoryLeavesWaitingAndGoe
 			t.Fatalf("%s: the dependent's first unit is %q with %d mason turns, want implementing and 1", when, state, turns)
 		}
 	}
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	check("after the exit")
 	for range 3 {
 		f.resolvePasses(t)
-		must(t, m.Pass(ctx))
+		intakefixture.Must(t, m.Pass(ctx))
 	}
 	check("after repeated reconciliation")
 	f.reopened(t)
 	m = newMasonController(f.s, f.repository)
 	f.resolvePasses(t)
-	must(t, m.Pass(ctx))
+	intakefixture.Must(t, m.Pass(ctx))
 	check("after a restart")
 
-	// Going on is not a drop: no waiver is posted, and Jev was asked only about
-	// the two exits from waiting.
 	for _, d := range f.publish(t, hooks) {
 		if strings.Contains(d.Str("decision"), "-waiver-") {
 			t.Fatalf("a dependent that went on because its upstream's changes are integrated has a waiver posted: %s", d.Raw)

@@ -1,13 +1,12 @@
 package lifecycle_test
 
 import (
-	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	testing "testing"
+
+	"github.com/kpenfound/osmia/internal/service"
+	fixturekit "github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 )
 
-// fakeWebhook records the bodies posted to it and answers with status. It
-// stands in for the owner's real webhook endpoint, leaving that endpoint's
-// actual network behaviour and availability unverified.
 type fakeWebhook struct{ *fixturekit.Webhook }
 
 func newFakeWebhook(t *testing.T) *fakeWebhook { return &fakeWebhook{fixturekit.NewWebhook(t)} }
@@ -26,7 +25,7 @@ func setWebhook(t *testing.T, opts Options, webhook string) {
 	fixturekit.SetWebhook(t, opts.Config.Root, webhook)
 }
 
-func readLedger(t *testing.T, opts Options) notifyLedger {
+func readLedger(t *testing.T, opts Options) service.TestNotifyLedger {
 	t.Helper()
-	return fixturekit.ReadNotificationLedger[notifyLedger](t, opts.Config.Root)
+	return fixturekit.ReadNotificationLedger[service.TestNotifyLedger](t, opts.Config.Root)
 }

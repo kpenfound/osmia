@@ -16,7 +16,6 @@ import (
 
 var routingOptions = []string{"answer", "route_amendment", "escalate"}
 
-// askAs has a worker of the role ask a question and returns its number.
 func askAs(t *testing.T, f fixture, agent, role, turn, text string) string {
 	t.Helper()
 	scope := f.turn(t, agent, role, turn)
@@ -29,8 +28,6 @@ func askAs(t *testing.T, f fixture, agent, role, turn, text string) string {
 	return rest[:strings.Index(rest, `"`)]
 }
 
-// rawChief returns the chief of staff's tools as the service gives them, with
-// no decide result recorded for the caller.
 func rawChief(t *testing.T, f fixture, turn string) map[string]coreadapter.Tool {
 	t.Helper()
 	scope := f.turn(t, "chief-"+turn, trace.ChiefOfStaff, turn)
@@ -82,7 +79,6 @@ func TestOutcomeToolsRefuseBeforeDecideAndOnAnotherQuestionsResult(t *testing.T)
 	if f.head(t) != before {
 		t.Fatal("a refused outcome changed the trace")
 	}
-	// Only another question's result exists.
 	decideFallback(t, f.repo, stream, two)
 	before = f.head(t)
 	for name, input := range inputs(one) {
@@ -127,7 +123,6 @@ func TestABindingPickAllowsOnlyItsOutcomeWithTheChiefsTextAndSurvivesARestart(t 
 				}
 			}
 			check(rawChief(t, f, "chief1"))
-			// A later turn, after a restart, with no new request.
 			if err := f.repo.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +199,6 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 	if res.Status != jev.Binding {
 		t.Fatalf("result %+v", res)
 	}
-	// The workstream has no seal, so the amendment cannot be filed.
 	got := call(t, rawChief(t, f, "chief1")["route_amendment"], inputs(id)["route_amendment"])
 	if !strings.Contains(got, `"recorded":true`) || !strings.Contains(got, "owner's inbox") {
 		t.Fatalf("route: %s", got)
@@ -221,8 +215,6 @@ func TestARefusedAmendmentRoutingGoesToTheOwnerWithJevsJudgment(t *testing.T) {
 	}
 }
 
-// Relaying the owner's ruling on an escalated question needs no decide result,
-// and neither does any other question the chief of staff relays.
 func TestRelayingAnOwnersRulingNeedsNoDecideResult(t *testing.T) {
 	f := setup(t)
 	id := askAs(t, f, "mason1", "mason", "build1", "Where does state live?")

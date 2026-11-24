@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// The dagger test containers pin a jj release and set OSMIA_REQUIRE_JJ, so a
-// missing binary there fails; elsewhere the test skips.
 func TestJJAvailable(t *testing.T) {
 	path, err := exec.LookPath("jj")
 	if err != nil {

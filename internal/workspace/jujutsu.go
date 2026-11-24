@@ -85,8 +85,6 @@ func CheckJJ(ctx context.Context, executable string) (string, error) {
 	return version, nil
 }
 
-// parseVersion reads the major, minor and patch numbers of a release such as
-// 0.45.1 or 0.45.1-7c41cdeb.
 func parseVersion(version string) ([]int, bool) {
 	release, _, _ := strings.Cut(version, "-")
 	release, _, _ = strings.Cut(release, "+")
@@ -108,20 +106,10 @@ func parseVersion(version string) ([]int, bool) {
 // Check reports whether the provider's jj is supported, as CheckJJ does.
 func (j *Jujutsu) Check(ctx context.Context) (string, error) { return CheckJJ(ctx, j.JJ) }
 
-// repositoryName names the directory under Directory that holds the Jujutsu
-// repository. A leading dot keeps it apart from every workspace name.
 const repositoryName = ".jujutsu"
 
-// metadataName names the file in a workspace's .jj directory that records the
-// branch the workspace is on and the replay in progress there.
 const metadataName = "osmia.json"
 
-// jjSettings are the settings every jj command runs with; the owner's own jj
-// configuration does not apply. Commits carry no change-id header but those
-// Carry makes, so any other commit holds what the same commit made by Git
-// holds; conflicts are written
-// into files with Git's markers; every file is tracked whatever its size; and
-// importing a branch that moved abandons nothing a workspace may stand on.
 var jjSettings = []string{
 	"user.name=Osmia",
 	"user.email=osmia@localhost",
@@ -132,27 +120,16 @@ var jjSettings = []string{
 	"snapshot.max-new-file-size=1099511627776",
 }
 
-// stamp returns the settings that commit what a command rewrites at the given
-// time, as Git's replay does.
 func stamp(at time.Time) []string {
 	return []string{"debug.commit-timestamp=" + strconv.Quote(at.UTC().Format(time.RFC3339))}
 }
 
-// metadata is what the provider records about one of its workspaces: its
-// branch, the change ID of its first working-copy commit, and the replay in
-// progress there.
 type metadata struct {
 	Branch string  `json:"branch"`
 	Change string  `json:"change,omitempty"`
 	Replay *replay `json:"replay,omitempty"`
 }
 
-// replay is a replay in progress in a workspace: the commits of its branch,
-// from Head back to where it meets Onto, each copied onto the copy of the one
-// before it, the first onto Onto. A copy is named by its change ID, which
-// stays the same while the copy is resolved and its descendants rebased.
-// Stop is the original whose copy the replay stopped at, and Conflicts the
-// paths that copy held conflicted then.
 type replay struct {
 	Onto      string   `json:"onto"`
 	Head      string   `json:"head"`
@@ -164,8 +141,7 @@ type replay struct {
 type step struct {
 	Original string `json:"original"`
 	Change   string `json:"change"`
-	// Empty is an original that changes nothing, which is kept.
-	Empty bool `json:"empty,omitempty"`
+	Empty    bool   `json:"empty,omitempty"`
 }
 
 func (j *Jujutsu) git() *Git               { return &Git{Clone: j.Clone, Directory: j.Directory} }
@@ -176,9 +152,6 @@ func (j *Jujutsu) worktree(name, branch string) Worktree {
 	return Worktree{Path: j.path(name), Branch: branch, mounts: []string{j.repository(), filepath.Join(j.Clone, ".git")}}
 }
 
-// initialize makes the repository when Directory has none: a Jujutsu
-// repository on the clone's Git store with no workspace of its own. It is
-// made aside and renamed into place, so an interrupted one is made again.
 func (j *Jujutsu) initialize(ctx context.Context) error {
 	if exists, err := j.initialized(); err != nil || exists {
 		return err
@@ -222,14 +195,11 @@ func (j *Jujutsu) initialized() (bool, error) {
 	return err == nil, err
 }
 
-// importBranches has the repository take in the clone's branches as they are.
 func (j *Jujutsu) importBranches(ctx context.Context) error {
 	_, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "git", "import")
 	return err
 }
 
-// moveBranch points the clone's branch at commit to, only from commit from,
-// and has the repository import it.
 func (j *Jujutsu) moveBranch(ctx context.Context, branch, to, from string) error {
 	if _, err := j.git().runEnv(ctx, identity, "update-ref", "-m", "osmia: jujutsu", "refs/heads/"+branch, to, from); err != nil {
 		return err
@@ -237,7 +207,6 @@ func (j *Jujutsu) moveBranch(ctx context.Context, branch, to, from string) error
 	return j.importBranches(ctx)
 }
 
-// registered returns the names of the repository's workspaces.
 func (j *Jujutsu) registered(ctx context.Context) ([]string, error) {
 	out, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "workspace", "list", "-T", `name ++ "\0"`)
 	if err != nil {
@@ -246,7 +215,6 @@ func (j *Jujutsu) registered(ctx context.Context) ([]string, error) {
 	return splitNull(out), nil
 }
 
-// forget removes a workspace's directory, then the repository's record of it.
 func (j *Jujutsu) forget(ctx context.Context, name string) error {
 	if err := os.RemoveAll(j.path(name)); err != nil {
 		return err
@@ -359,9 +327,6 @@ func (j *Jujutsu) Acquire(ctx context.Context, req vcs.Request) (vcs.Workspace, 
 	return j.worktree(req.Name, req.Branch), nil
 }
 
-// unregistered reports whether the directory at path is a workspace of the
-// repository that the repository has no record of: what a workspace's
-// making left when it stopped before registering the workspace.
 func (j *Jujutsu) unregistered(path string) bool {
 	target, err := os.ReadFile(filepath.Join(path, ".jj", "repo"))
 	if err != nil {
@@ -374,8 +339,6 @@ func (j *Jujutsu) unregistered(path string) bool {
 	return sameFile(repo, filepath.Join(j.repository(), ".jj", "repo"))
 }
 
-// sameFile reports whether two paths name the same file once their symbolic
-// links are resolved.
 func sameFile(a, b string) bool {
 	ai, err := os.Stat(a)
 	if err != nil {
@@ -437,7 +400,6 @@ func (j *Jujutsu) Prune(ctx context.Context) error {
 	return nil
 }
 
-// revision is what the provider reads of one commit in the repository.
 type revision struct {
 	commit      string
 	parents     []string
@@ -445,9 +407,6 @@ type revision struct {
 	description string
 }
 
-// describe reads one revision, in the workspace or repository at dir. A
-// snapshot first records the files of the workspace in its working-copy
-// commit.
 func (j *Jujutsu) describe(ctx context.Context, dir string, snapshot bool, rev string) (revision, error) {
 	args := []string{"log", "--no-graph", "--revisions", rev, "--template", `commit_id ++ "\n" ++ parents.map(|p| p.commit_id()).join(" ") ++ "\n" ++ if(empty, "empty", "changed") ++ "\n" ++ description`}
 	if !snapshot {
@@ -464,7 +423,6 @@ func (j *Jujutsu) describe(ctx context.Context, dir string, snapshot bool, rev s
 	return revision{commit: fields[0], parents: strings.Fields(fields[1]), empty: fields[2] == "empty", description: fields[3]}, nil
 }
 
-// head returns the commit the workspace's branch points at.
 func (j *Jujutsu) head(ctx context.Context, w Worktree) (string, error) {
 	head, found, err := j.git().Branch(ctx, w.Branch)
 	if err != nil {
@@ -541,10 +499,6 @@ func (j *Jujutsu) Snapshot(ctx context.Context, w Worktree, base string) (string
 	return snapshot.commit, j.moveBranch(ctx, w.Branch, snapshot.commit, head)
 }
 
-// checkout puts the workspace on a new working-copy commit on commit, with
-// commit's files; what the workspace held besides is dropped. Files the
-// repository ignores stay unless commit tracks them. A workspace already
-// there with nothing of its own is left as it is.
 func (j *Jujutsu) checkout(ctx context.Context, w Worktree, commit string) error {
 	current, err := j.describe(ctx, w.Path, true, "@")
 	if err != nil {
@@ -631,17 +585,6 @@ func (j *Jujutsu) Advance(ctx context.Context, w Worktree, from, to string) erro
 	return err
 }
 
-// TODO: Move Jujutsu's persistent replay (ReplayIn, ReplayInFrom,
-// ContinueReplay, Replaying) to agentcore's revision replay once core's
-// jj.Replayer commits a replayed revision deterministically. Today it
-// duplicates with `jj duplicate`, which gives the duplicate a new random
-// change id on every call, and it commits at the wall-clock time of the
-// call rather than a caller-chosen, reproducible one, so replaying the same
-// range twice, including once before and once after a service restart,
-// would not reproduce the same commit the way Osmia's own implementation
-// and core's own Git replayer both do, risking a changed candidate that
-// skips the owner's approval of it.
-//
 // ReplayIn replays the workspace's branch onto onto in the workspace itself,
 // as Replay does, and returns the commit its branch then points at. Each
 // commit is copied onto the copy of the one before it, keeping its message
@@ -716,8 +659,6 @@ func (j *Jujutsu) ReplayInFrom(ctx context.Context, w Worktree, base, onto strin
 	return j.proceed(ctx, w, meta, at)
 }
 
-// duplicate copies commit original onto the commit parent names and returns
-// the copy's change ID. Nothing else moves.
 func (j *Jujutsu) duplicate(ctx context.Context, original, parent string, at time.Time) (string, error) {
 	settings := append(stamp(at), "templates.commit_summary=change_id")
 	_, stderr, err := j.runOutput(ctx, j.repository(), settings, "--ignore-working-copy", "duplicate", original, "--onto", parent)
@@ -734,13 +675,11 @@ func (j *Jujutsu) duplicate(ctx context.Context, original, parent string, at tim
 	return "", fmt.Errorf("jj duplicate of %s named no copy: %s", original, strings.TrimSpace(stderr))
 }
 
-// stepState is where one copy of a replay stands.
 type stepState struct {
 	commit          string
 	conflict, empty bool
 }
 
-// steps reads the replay's copies that are still there, by change ID.
 func (j *Jujutsu) steps(ctx context.Context, r *replay) (map[string]stepState, error) {
 	states := map[string]stepState{}
 	if len(r.Steps) == 0 {
@@ -762,7 +701,6 @@ func (j *Jujutsu) steps(ctx context.Context, r *replay) (map[string]stepState, e
 	return states, nil
 }
 
-// conflicts returns the paths a revision holds conflicted, sorted.
 func (j *Jujutsu) conflicts(ctx context.Context, rev string) ([]string, error) {
 	out, err := j.run(ctx, j.repository(), nil, "--ignore-working-copy", "file", "list", "--revision", rev, "--template", `if(conflict, path ++ "\0")`)
 	if err != nil {
@@ -773,11 +711,6 @@ func (j *Jujutsu) conflicts(ctx context.Context, rev string) ([]string, error) {
 	return paths, nil
 }
 
-// proceed takes the replay in the workspace as far as it goes: a copy that
-// is empty though its original was not is dropped, the first copy that
-// conflicts is where it stops, with the workspace on it and the stop and its
-// conflicted paths recorded, and with none left the recorded stop is dropped,
-// then the branch moves to the last copy and the workspace onto it.
 func (j *Jujutsu) proceed(ctx context.Context, w Worktree, meta metadata, at time.Time) (string, []string, error) {
 	r := meta.Replay
 	states, err := j.steps(ctx, r)
@@ -1034,8 +967,6 @@ func (j *Jujutsu) RebaseFrom(ctx context.Context, base, onto, head, message stri
 	return rebased.commit, conflicts, err
 }
 
-// create makes an empty commit on parent with message and returns its change
-// ID. Nothing else moves.
 func (j *Jujutsu) create(ctx context.Context, parent, message string, at time.Time) (string, error) {
 	settings := append(stamp(at), "templates.commit_summary=change_id")
 	_, stderr, err := j.runOutput(ctx, j.repository(), settings, "--ignore-working-copy", "new", "--no-edit", parent, "--message", message)
@@ -1069,7 +1000,6 @@ func (j *Jujutsu) StoredConflicts(ctx context.Context, commit string) ([]string,
 	return j.conflicts(ctx, commit)
 }
 
-// changePattern is a full Jujutsu change ID.
 var changePattern = regexp.MustCompile(`^[k-z]{32}$`)
 
 // Change returns the change ID of the workspace's first working-copy
@@ -1080,7 +1010,6 @@ func (j *Jujutsu) Change(_ context.Context, w Worktree) (string, error) {
 	return meta.Change, err
 }
 
-// commitIDPattern is a full Git commit ID, SHA-1 or SHA-256.
 var commitIDPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 // ChangeOf returns the change ID the repository gives commit: one it made,
@@ -1150,10 +1079,6 @@ func (j *Jujutsu) Record(ctx context.Context, w Worktree) (string, error) {
 		if attempt >= 2 || !snapshotCollision(err) {
 			return current.commit, err
 		}
-		// Recover snapshots files before restoring them. Recopying those
-		// files in the same second can create the same Git commit with a
-		// different jj identity when change-id headers are disabled. Retry
-		// once Git's committer timestamp can distinguish the snapshot.
 		next := time.Now().Truncate(time.Second).Add(time.Second)
 		timer := time.NewTimer(time.Until(next) + time.Millisecond)
 		select {
@@ -1244,7 +1169,6 @@ func (j *Jujutsu) FastForward(ctx context.Context, remote, commit, branch string
 	return j.git().FastForward(ctx, remote, commit, branch)
 }
 
-// readMetadata reads what the provider recorded about the workspace at path.
 func readMetadata(path string) (metadata, error) {
 	data, err := os.ReadFile(filepath.Join(path, ".jj", metadataName))
 	if err != nil {
@@ -1257,8 +1181,6 @@ func readMetadata(path string) (metadata, error) {
 	return meta, nil
 }
 
-// writeMetadata replaces what the provider recorded about the workspace at
-// path in one rename.
 func writeMetadata(path string, meta metadata) error {
 	data, err := json.Marshal(meta)
 	if err != nil {
@@ -1281,9 +1203,6 @@ func splitNull(out string) []string {
 	return fields
 }
 
-// run runs jj in dir, on the repository or workspace there when dir is not
-// empty, with jjSettings and the extra settings, and returns its standard
-// output. The owner's jj configuration and Git excludes file do not apply.
 func (j *Jujutsu) run(ctx context.Context, dir string, settings []string, args ...string) (string, error) {
 	out, _, err := j.runOutput(ctx, dir, settings, args...)
 	return strings.TrimSpace(out), err

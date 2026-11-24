@@ -5,113 +5,108 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/seal"
+	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// sealDependent creates a workstream on the backend, building on base when
-// it is not empty, seals it and commits the files onto its feature branch. It
-// returns the workstream and its feature branch tip.
 func sealDependent(t *testing.T, f *shedFixture, repo *trace.Repository, backend string, base config.WorkstreamID, files map[string]string) (config.WorkstreamID, string) {
 	t.Helper()
 	return intakefixture.SealDependent(t, f.s.intake(), repo, backend, base, files)
 }
 
-// A workstream parked because its base was abandoned shows in the inbox with
-// the decision to continue from upstream. The decision is refused for another
-// base and while upstream lacks or conflicts with the base's changes the
-// workstream holds. Once upstream holds them as other commits, it releases the
-// park as an owner transition and pins the base observation to upstream, and
-// the next drift rebase replays only the workstream's own commit onto
-// upstream and moves its seal there.
 func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *testing.T) {
 	t.Parallel()
 	for _, backend := range []string{config.WorkspacesGit, config.WorkspacesJujutsu} {
 		t.Run(backend, func(t *testing.T) {
 			if backend == config.WorkspacesJujutsu {
-				requireJJ(t)
+				intakefixture.RequireJJ(t)
 			}
 			f := newDebateFixture(t, 1, 1)
 			f.upstream(t)
 			f.stop(t)
 			ctx := context.Background()
 			repo, err := trace.Open(f.s.cfg.Root, f.s.cfg.Project)
-			must(t, err)
+			intakefixture.Must(t, err)
 			defer repo.Close()
 			base, held := sealDependent(t, f, repo, backend, "", map[string]string{"base.go": "base\n"})
 			stream, _ := sealDependent(t, f, repo, backend, base, map[string]string{"dependent.go": "dependent\n"})
 			cfg := f.s.about(repo)
-			g, err := featureWorkspaces(cfg, repo).Of(stream)
-			must(t, err)
+			g, err := intake.FeatureWorkspaces(cfg, repo).Of(stream)
+			intakefixture.Must(t, err)
 
-			if _, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); api == nil || api.Code != Conflict {
-				t.Fatalf("an unparked workstream moved onto upstream: %v", api)
+			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+				t.Fatalf("an unparked workstream moved onto upstream: %v", apiFault)
 			}
-			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: ownerActor, Cause: "owner"}
-			_, err = repo.SetFeatureState(ctx, h, AbandonedState, "Merged out of factory")
-			must(t, err)
-			must(t, f.s.baseWaitPass(ctx, repo))
+			h := trace.Header{Schema: "osmia.trace.transition", Version: 1, ID: "owner-abandoned", Revision: 1, Project: repo.Project(), Workstream: base, At: f.s.now(), Actor: intake.OwnerActor, Cause: "owner"}
+			_, err = repo.SetFeatureState(ctx, h, intake.AbandonedState, "Merged out of factory")
+			intakefixture.Must(t, err)
+			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
 			entry := parkedBaseEntry(t, repo, stream)
-			if entry.Kind != InboxBase || !slices.Equal(entry.Options, []string{BaseDecisionUpstream}) || entry.Answer.Path != Prefix+"/base/"+string(stream)+"/upstream" || entry.Answer.Body["base"] != string(base) {
+			if entry.Kind != api.InboxBase || !slices.Equal(entry.Options, []string{api.BaseDecisionUpstream}) || entry.Answer.Path != api.Prefix+"/base/"+string(stream)+"/upstream" || entry.Answer.Body["base"] != string(base) {
 				t.Fatalf("the parked base's inbox entry %+v", entry)
 			}
 
-			if _, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, stream); api == nil || api.Code != Conflict {
-				t.Fatalf("moved onto upstream for another base: %v", api)
+			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, stream); apiFault == nil || apiFault.Code != api.Conflict {
+				t.Fatalf("moved onto upstream for another base: %v", apiFault)
 			}
-			if _, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); api == nil || api.Code != Conflict {
-				t.Fatalf("moved onto upstream lacking the base's changes: %v", api)
+			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+				t.Fatalf("moved onto upstream lacking the base's changes: %v", apiFault)
 			}
 			advanceUpstream(t, f, map[string]string{"base.go": "upstream's own\n"})
-			if _, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); api == nil || api.Code != Conflict {
-				t.Fatalf("moved onto upstream conflicting with the base's changes: %v", api)
+			if _, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base); apiFault == nil || apiFault.Code != api.Conflict {
+				t.Fatalf("moved onto upstream conflicting with the base's changes: %v", apiFault)
 			}
-			if waiting, err := baseWaiting(repo, stream); err != nil || !waiting {
+			if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || !waiting {
 				t.Fatalf("a refused decision released the park: %v %v", waiting, err)
 			}
 
 			upstream := advanceUpstream(t, f, map[string]string{"base.go": "base\n", "UPSTREAM.md": "upstream\n"})
-			out, api := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base)
-			if api != nil {
-				t.Fatal(api)
+			out, apiFault := f.s.moveOntoUpstream(ctx, cfg, repo, g, stream, base)
+			if apiFault != nil {
+				t.Fatal(apiFault)
 			}
 			want := seal.Base{Remote: "upstream", Branch: "main", Commit: upstream}
 			if out.Workstream != stream || out.Base != base || out.Integrated != held || out.Upstream != want {
 				t.Fatalf("the decision %+v", out)
 			}
-			if waiting, err := baseWaiting(repo, stream); err != nil || waiting {
+			if waiting, err := lifecycle.BaseWaiting(repo, stream); err != nil || waiting {
 				t.Fatalf("the decision left the park: %v %v", waiting, err)
 			}
-			released := transitionByID(t, repo, stream, "base-wait-2")
-			if released.Actor != ownerActor || released.From != "waiting" || released.To != "available" {
+			released := intakefixture.TransitionByID(t, repo, stream, "base-wait-2")
+			if released.Actor != intake.OwnerActor || released.From != "waiting" || released.To != "available" {
 				t.Fatalf("the release %+v", released)
 			}
-			if observed, _, err := baseObservationAt(repo, stream); err != nil || observed.Base != want || observed.Unavailable {
+			if observed, _, err := lifecycle.BaseObservationAt(repo, stream); err != nil || observed.Base != want || observed.Unavailable {
 				t.Fatalf("the base observation %+v: %v", observed, err)
 			}
-			must(t, f.s.baseWaitPass(ctx, repo))
-			if state, err := repo.Workflow(stream, baseWaitSubject); err != nil || state.Value != "available" || state.Version != 2 {
+			intakefixture.Must(t, f.s.baseWaitPass(ctx, repo))
+			if state, err := repo.Workflow(stream, lifecycle.BaseWaitSubject); err != nil || state.Value != "available" || state.Version != 2 {
 				t.Fatalf("the base wait after its next pass %+v: %v", state, err)
 			}
 			if parkedBaseEntries(t, repo, stream) != 0 {
 				t.Fatal("the released park stayed in the inbox")
 			}
-			if changed, err := dependentBaseChanged(ctx, cfg, repo, stream); err != nil || !changed {
+			if changed, err := lifecycle.DependentBaseChanged(ctx, cfg, repo, stream); err != nil || !changed {
 				t.Fatalf("no drift rebase is due onto upstream: %v %v", changed, err)
 			}
 
 			h.Workstream, h.ID = stream, "building"
-			_, err = repo.SetFeatureState(ctx, h, BuildingState, "Units are recorded")
-			must(t, err)
+			_, err = repo.SetFeatureState(ctx, h, intakefixture.BuildingState, "Units are recorded")
+			intakefixture.Must(t, err)
 			d := drifter{&foreman{masons: newMasonController(f.s, repo)}}
 			op := requestDrift(t, d, stream)
 			if result := settleOperation(t, f.s, repo, stream, op, d); result.Outcome != "succeeded" {
 				t.Fatalf("the drift rebase %+v", result)
 			}
-			tip, _, err := g.Branch(ctx, featureBranch(stream))
-			must(t, err)
+			tip, _, err := g.Branch(ctx, intake.FeatureBranch(stream))
+			intakefixture.Must(t, err)
 			if parentOf(t, f, tip) != upstream || fileAt(t, f, tip, "dependent.go") != "dependent\n" || fileAt(t, f, tip, "base.go") != "base\n" {
 				t.Fatalf("the feature branch is at %s, not its own commit replayed onto %s", tip, upstream)
 			}
@@ -122,27 +117,24 @@ func TestParkedWorkstreamMovesOntoUpstreamOnceItsAbandonedBaseIsIntegrated(t *te
 	}
 }
 
-// Moving onto upstream is answered over the API, and refused for a
-// workstream that is not parked on its base.
 func TestBaseUpstreamRefusesAWorkstreamThatIsNotParked(t *testing.T) {
 	t.Parallel()
 	opts, _ := conversationFixture(t, "base-upstream-")
 	_, c := start(t, opts)
-	_, err := c.BaseUpstream(context.Background(), stream, quiet)
-	assertCode(t, err, Conflict)
+	_, err := c.BaseUpstream(context.Background(), fixturekit.Stream, fixturekit.Quiet)
+	fixturekit.AssertCode(t, err, api.Conflict)
 }
 
-// parkedBaseEntries counts the inbox entries of the workstream's parked base.
 func parkedBaseEntries(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) int {
 	t.Helper()
 	statuses, err := repo.Statuses()
-	must(t, err)
+	intakefixture.Must(t, err)
 	n := 0
 	for _, w := range statuses {
 		if w.Workstream != stream {
 			continue
 		}
-		if _, open, err := baseEntry(repo, w); err != nil {
+		if _, open, err := service.TestBaseEntry(repo, w); err != nil {
 			t.Fatal(err)
 		} else if open {
 			n++
@@ -151,21 +143,20 @@ func parkedBaseEntries(t *testing.T, repo *trace.Repository, stream config.Works
 	return n
 }
 
-// parkedBaseEntry returns the inbox entry of the workstream's parked base.
-func parkedBaseEntry(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) InboxEntry {
+func parkedBaseEntry(t *testing.T, repo *trace.Repository, stream config.WorkstreamID) api.InboxEntry {
 	t.Helper()
 	statuses, err := repo.Statuses()
-	must(t, err)
+	intakefixture.Must(t, err)
 	for _, w := range statuses {
 		if w.Workstream != stream {
 			continue
 		}
-		e, open, err := baseEntry(repo, w)
-		must(t, err)
+		e, open, err := service.TestBaseEntry(repo, w)
+		intakefixture.Must(t, err)
 		if open {
 			return e
 		}
 	}
 	t.Fatal("no inbox entry for the parked base")
-	return InboxEntry{}
+	return api.InboxEntry{}
 }

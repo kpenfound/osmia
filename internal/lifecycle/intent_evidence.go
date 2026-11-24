@@ -18,19 +18,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The bounds of the intent evidence of dependency and workstream exits. Every
-// section has its own byte bound, so the evidence of an exit stays well inside
-// the room the router leaves in Jev's 72 KiB request; what a bound cuts is
-// counted and reported in the section itself. An entry stays under the
-// router's own 4 KiB entry bound, so the router never cuts one silently.
 const (
-	// evidenceIntentBytes bounds the sealed intent text.
-	evidenceIntentBytes = 3 << 10
-	// evidenceLineBytes bounds one line of a section.
-	evidenceLineBytes = 600
-	// evidenceEntryBytes bounds the lines packed into one entry.
-	evidenceEntryBytes = 3 << 10
-	// The section bounds are over all the entries of the section.
+	evidenceIntentBytes       = 3 << 10
+	evidenceLineBytes         = 600
+	evidenceEntryBytes        = 3 << 10
 	evidenceAcceptanceBytes   = 10 << 10
 	evidenceContractBytes     = 6 << 10
 	evidenceReliantBytes      = 6 << 10
@@ -50,8 +41,6 @@ var (
 	fenceLine     = regexp.MustCompile("^ {0,3}(```|~~~)")
 )
 
-// oneLine returns text as one line without fenced code, cut to limit bytes at a
-// rune boundary, and whether it was cut.
 func oneLine(text string, limit int) (string, bool) {
 	text = backtickFence.ReplaceAllString(text, "[code omitted]")
 	text = tildeFence.ReplaceAllString(text, "[code omitted]")
@@ -66,15 +55,10 @@ func oneLine(text string, limit int) (string, bool) {
 	return text[:cut] + " […cut]", true
 }
 
-// sectionCount is what a packed section holds against what the records hold.
 type sectionCount struct {
 	Total, Shown, Shortened int
 }
 
-// packSection packs the lines of one section of the records into entries of
-// the given kind. The first line of the entries says how many lines the records
-// hold; when the section's bound or a line's bound cut anything, the last line
-// of the section says how much. It reports what it counted.
 func packSection(kind, id, title string, lines []string, limit int) ([]router.Entry, sectionCount) {
 	count := sectionCount{Total: len(lines)}
 	var entries []router.Entry
@@ -122,13 +106,10 @@ func packSection(kind, id, title string, lines []string, limit int) ([]router.En
 	return entries, count
 }
 
-// missingEntry says that the records hold nothing for a part of the evidence.
 func missingEntry(kind, id, text string) router.Entry {
 	return router.Entry{Kind: kind, ID: id, Text: "missing from the records: " + text}
 }
 
-// markdownSection returns the text under the heading with the given title, up
-// to the next heading of the same or a higher level, ignoring fenced code.
 func markdownSection(content, title string) (string, bool) {
 	var (
 		level int
@@ -160,8 +141,6 @@ func markdownSection(content, title string) (string, bool) {
 	return strings.TrimSpace(strings.Join(out, "\n")), found
 }
 
-// specIntent returns the intent a spec states: its Intent section or, when it
-// has none, the text before its acceptance criteria. It says which it found.
 func specIntent(content string) (string, bool) {
 	if text, found := markdownSection(content, "Intent"); found && text != "" {
 		return text, true
@@ -180,22 +159,16 @@ func specIntent(content string) (string, bool) {
 	return strings.TrimSpace(strings.Join(head, "\n")), false
 }
 
-// sealedSpec is what the records hold of a workstream's sealed spec and plan.
 type sealedSpec struct {
 	Stream         config.WorkstreamID
 	Seal, Revision int
 	Intent         string
-	// IntentSection says Intent is the spec's Intent section, and not the text
-	// before its acceptance criteria.
-	IntentSection bool
-	Criteria      []plan.Criterion
-	Plan          *plan.Plan
-	// Missing says, in words, what the records lack.
-	Missing []string
+	IntentSection  bool
+	Criteria       []plan.Criterion
+	Plan           *plan.Plan
+	Missing        []string
 }
 
-// readSealedSpec reads the sealed spec and plan the workstream's latest seal
-// names. What it cannot find is listed in Missing, and is no error.
 func readSealedSpec(repo *trace.Repository, stream config.WorkstreamID) (sealedSpec, error) {
 	out := sealedSpec{Stream: stream}
 	latest, _, found, err := seal.Latest(repo, stream)
@@ -233,8 +206,6 @@ func readSealedSpec(repo *trace.Repository, stream config.WorkstreamID) (sealedS
 	return out, nil
 }
 
-// intentText is the sealed intent as the text of the exit's Evidence.Intent,
-// bounded, with what the records lack said in its place.
 func (sp sealedSpec) intentText(what string) (string, bool) {
 	if sp.Intent == "" {
 		reason := "its spec states none"
@@ -251,7 +222,6 @@ func (sp sealedSpec) intentText(what string) (string, bool) {
 	return fmt.Sprintf("Sealed intent of %s (from %s; spec revision %d, seal %d): %s", what, from, sp.Revision, sp.Seal, text), cut
 }
 
-// acceptance returns the sealed acceptance outcomes as bounded entries.
 func (sp sealedSpec) acceptance(kind, what string) ([]router.Entry, sectionCount) {
 	if len(sp.Criteria) == 0 {
 		if sp.Revision == 0 || len(sp.Missing) > 0 {
@@ -266,10 +236,6 @@ func (sp sealedSpec) acceptance(kind, what string) ([]router.Entry, sectionCount
 	return packSection(kind, string(sp.Stream), "acceptance outcomes of "+what, lines, evidenceAcceptanceBytes)
 }
 
-// dependencyIntent returns the intent evidence of a dependency exit: the text
-// of Evidence.Intent, the records and the counts, all read from the records of
-// the dependent and the upstream. A record that is missing is said so in the
-// evidence; nothing here fails the exit.
 func (s *Controller) dependencyIntent(repo *trace.Repository, stream config.WorkstreamID, c dependencyCase) (string, []router.Entry, map[string]any) {
 	facts := map[string]any{}
 	dependent := fmt.Sprintf("the dependent workstream %s", stream)
@@ -326,18 +292,11 @@ func (s *Controller) dependencyIntent(repo *trace.Repository, stream config.Work
 	return intent, entries, facts
 }
 
-// oneLineError is an error as a bounded line.
 func oneLineError(err error) string {
 	text, _ := oneLine(err.Error(), 200)
 	return text
 }
 
-// reliantUnits returns the units of the dependent's sealed plan that rely on
-// the upstream, as entries, with the number of units the plan holds and the
-// count of the relying units. A unit relies on the upstream when it serves a
-// contract section of the dependent's slice or its text names the upstream
-// workstream or a contract; on a same-repo base every unit relies on it, since
-// the dependent's branch is built on the base's branch.
 func reliantUnits(spec sealedSpec, c dependencyCase, contracts []trace.Contract, criteria []int) ([]router.Entry, int, sectionCount) {
 	const kind = "relying units"
 	if spec.Plan == nil {
@@ -384,9 +343,6 @@ func reliantUnits(spec sealedSpec, c dependencyCase, contracts []trace.Contract,
 	return entries, total, count
 }
 
-// upstreamEvidence returns the upstream's planned deliverables and the entry
-// for its final outcome, and adds their counts to facts. An upstream whose
-// records cannot be read, or that has no plan or no outcome, is said so.
 func (s *Controller) upstreamEvidence(repo *trace.Repository, c dependencyCase, facts map[string]any) ([]router.Entry, router.Entry) {
 	const deliverableKind, outcomeKind = "upstream planned deliverables", "upstream final outcome"
 	id := string(c.Upstream)
@@ -443,8 +399,6 @@ func (s *Controller) upstreamEvidence(repo *trace.Repository, c dependencyCase, 
 	return deliverables, s.upstreamOutcome(up, c, facts)
 }
 
-// latestPlanUnits returns the units of the workstream's latest recorded plan,
-// sealed or not, or nil when none is recorded.
 func latestPlanUnits(repo *trace.Repository, stream config.WorkstreamID) []plan.Unit {
 	docs, err := trace.Read[trace.Document](repo, stream)
 	if err != nil {
@@ -466,8 +420,6 @@ func latestPlanUnits(repo *trace.Repository, stream config.WorkstreamID) []plan.
 	return p.Units
 }
 
-// upstreamOutcome is the entry for how the upstream ended, from its workflow,
-// its delivery record and its final reviews.
 func (s *Controller) upstreamOutcome(up *trace.Repository, c dependencyCase, facts map[string]any) router.Entry {
 	const kind = "upstream final outcome"
 	id := string(c.Upstream)
@@ -516,28 +468,15 @@ func (s *Controller) upstreamOutcome(up *trace.Repository, c dependencyCase, fac
 	return entries[0]
 }
 
-// workstreamIntent returns the intent evidence of a proposal to move a
-// workstream: the sealed intent as the text of Evidence.Intent, the sealed
-// acceptance outcomes, the findings of the latest final review that read the
-// workstream, blocking ones first, and the earlier moves, with the counts. The
-// findings are the latest review's because they say what stands between the
-// workstream and its approved outcomes now; earlier reviews' findings were
-// answered by the revisions after them.
 func workstreamIntent(repo *trace.Repository, stream config.WorkstreamID) (string, []router.Entry, map[string]any, error) {
 	return workstreamSummary(repo, stream, false)
 }
 
-// workstreamIntentOrMissing is workstreamIntent for an exit that must route
-// whatever the records hold: a part of the summary that cannot be read is said
-// so in its place, and the rest of the summary stays.
 func workstreamIntentOrMissing(repo *trace.Repository, stream config.WorkstreamID) (string, []router.Entry, map[string]any) {
 	intent, entries, facts, _ := workstreamSummary(repo, stream, true)
 	return intent, entries, facts
 }
 
-// workstreamSummary builds the summary workstreamIntent describes. When
-// tolerant is false a record that cannot be read is an error; when it is true
-// the summary says which part of the records could not be read.
 func workstreamSummary(repo *trace.Repository, stream config.WorkstreamID, tolerant bool) (string, []router.Entry, map[string]any, error) {
 	facts := map[string]any{}
 	what := fmt.Sprintf("workstream %s", stream)
@@ -553,8 +492,6 @@ func workstreamSummary(repo *trace.Repository, stream config.WorkstreamID, toler
 	entries, count := spec.acceptance("sealed acceptance", what)
 	facts["acceptance_outcomes"], facts["acceptance_shown"] = count.Total, count.Shown
 	if tolerant && len(spec.Criteria) > 0 && len(spec.Missing) > 0 {
-		// The acceptance outcomes were read, so they do not say what else the
-		// records lack.
 		entries = append(entries, missingEntry("sealed plan", string(stream), strings.Join(spec.Missing, "; ")))
 	}
 
@@ -620,11 +557,6 @@ func workstreamSummary(repo *trace.Repository, stream config.WorkstreamID, toler
 	return intent, entries, facts, nil
 }
 
-// waitIntent returns the intent evidence of the exit from a wait on c, when the
-// wait is on one upstream workstream or base: the dependency summary of
-// dependencyIntent. A wait that has no single upstream to summarise gets the
-// workstream summary instead. Nothing here fails the exit: what the records
-// lack is said in the evidence.
 func (s *Controller) waitIntent(repo *trace.Repository, stream config.WorkstreamID, c *dependencyCase) (string, []router.Entry, map[string]any) {
 	if c == nil {
 		return workstreamIntentOrMissing(repo, stream)
@@ -632,9 +564,6 @@ func (s *Controller) waitIntent(repo *trace.Repository, stream config.Workstream
 	return s.dependencyIntent(repo, stream, *c)
 }
 
-// withIntentEvidence adds the intent evidence to an exit's own evidence: the
-// intent text when the exit has none, the entries after the exit's own, and the
-// counts under keys the exit's own facts do not use.
 func withIntentEvidence(own router.Evidence, intent string, entries []router.Entry, facts map[string]any) router.Evidence {
 	if own.Intent == "" {
 		own.Intent = intent

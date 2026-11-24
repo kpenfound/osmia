@@ -10,60 +10,62 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/runtime"
+	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// projectSliceRefreshFixture settles the real drafts, then joins the
-// controllers so tests can drive the refresh and approval boundaries.
-func projectSliceRefreshFixture(t *testing.T) (*crossRepoRatifyFixture, config.WorkgroupID, [2]PacketResponse) {
+func projectSliceRefreshFixture(t *testing.T) (*crossRepoRatifyFixture, config.WorkgroupID, [2]api.PacketResponse) {
 	t.Helper()
 	f := newCrossRepoRatifyFixture(t)
 	t.Cleanup(func() { f.stop(t) })
-	id, api := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
-	if api != nil {
-		t.Fatal(api)
+	id, apiFault := f.s.DraftWorkgroup(context.Background(), []config.WorkstreamID{f.stream1, f.stream2})
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	packets := f.awaitDecisionPackets(t)
 	_, projects := f.s.runtimes()
 	for _, p := range projects {
-		must(t, f.s.halt(p))
+		intakefixture.Must(t, f.s.halt(p))
 	}
 	return f, id, packets
 }
 func reviseRefreshMember(t *testing.T, f *crossRepoRatifyFixture, member config.WorkstreamID, document, content string) {
 	t.Helper()
-	_, _, repo, api := f.s.conversationTrace(string(member))
-	if api != nil {
-		t.Fatal(api)
+	_, _, repo, apiFault := f.s.conversationTrace(string(member))
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
-	pin, err := latestPin(repo, member)
-	must(t, err)
+	pin, err := intake.LatestPin(repo, member)
+	intakefixture.Must(t, err)
 	revision := pin.Spec
 	if document == plan.PlanDocument {
 		revision = pin.Plan
 	}
 	doc, err := trace.Get[trace.Document](repo, member, document, revision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	doc.Revision++
 	doc.Content = content
 	doc.Cause = "member-revision"
-	must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
-	must(t, (&debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
+	intakefixture.Must(t, repo.RecordDocuments(context.Background(), []trace.Document{doc}))
+	intakefixture.Must(t, (&intake.Debate{S: f.s.intake().DebateDependencies(), Repository: repo}).PresentPacket(context.Background(), member, true))
 }
 func runRefresh(t *testing.T, f *crossRepoRatifyFixture) {
 	t.Helper()
 	for _, project := range []config.ProjectID{f.project, f.project2} {
-		must(t, f.s.projectSpecRefreshPass(context.Background(), mustRepo(t, f.s, project)))
+		intakefixture.Must(t, f.s.projectSpecRefreshPass(context.Background(), mustRepo(t, f.s, project)))
 	}
 }
 func refreshDocument(t *testing.T, f *crossRepoRatifyFixture, id config.WorkgroupID) trace.Document {
 	t.Helper()
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer wt.Close()
 	return projectSpecDocument(t, wt)
 }
@@ -78,10 +80,9 @@ func TestProjectSpecRefreshPreservesDesignAndBindsOwnerRead(t *testing.T) {
 	}
 	reviseRefreshMember(t, f, f.stream2, plan.SpecDocument, crossSpec2+"\nUploads show progress.\n")
 	reviseRefreshMember(t, f, f.stream2, plan.PlanDocument, crossPlan2+"\n")
-	// Ratify never repairs a behind slice, and a missing project pin is refused.
 	for _, revision := range []int{0, packets[0].ProjectSpecRevision} {
 		_, err := f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, revision)
-		if !failed(err, Conflict) || !containsMessage(err, projectSpecCatchingUp) {
+		if !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, intake.ProjectSpecCatchingUp) {
 			t.Fatalf("behind slice / missing revision: %v", err)
 		}
 		f.assertApprovalRefused(t, id, old)
@@ -96,7 +97,7 @@ func TestProjectSpecRefreshPreservesDesignAndBindsOwnerRead(t *testing.T) {
 		t.Fatal("repeated refresh appended a revision")
 	}
 	packet, err := f.c.Packet(ctx, f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if packet.ProjectSpecRevision != fresh.Revision {
 		t.Fatalf("packet revision %d != %d", packet.ProjectSpecRevision, fresh.Revision)
 	}
@@ -112,40 +113,40 @@ func TestProjectSpecRefreshPreservesDesignAndBindsOwnerRead(t *testing.T) {
 		t.Fatalf("refresh changed design or missed member text: %+v", packet.ProjectSpec)
 	}
 	wt, err := trace.OpenWorkgroupAuthority(f.s.current().Root, id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	history, err := trace.Get[trace.Document](wt, "", trace.ProjectSpecsDocument, old.Revision)
-	must(t, err)
-	must(t, wt.Close())
+	intakefixture.Must(t, err)
+	intakefixture.Must(t, wt.Close())
 	if !reflect.DeepEqual(history, old) {
 		t.Fatal("refresh changed history")
 	}
 	_, err = f.c.Ratify(ctx, f.stream1, packets[0].Packet.Revision.Spec, packets[0].Packet.Revision.Plan, packets[0].ProjectSpecRevision)
-	if !failed(err, Conflict) || !containsMessage(err, projectSpecCatchingUp) {
+	if !intakefixture.Failed(err, api.Conflict) || !containsMessage(err, intake.ProjectSpecCatchingUp) {
 		t.Fatalf("stale other-member read: %v", err)
 	}
 	f.assertApprovalRefused(t, id, fresh)
 	_, err = f.c.Ratify(ctx, f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	repo := mustRepo(t, f.s, f.project)
 	approved, found, err := repo.GroupApprovalOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found || approved.ProjectSpecRevision != fresh.Revision || !reflect.DeepEqual(approved.ProjectSpec, *packet.ProjectSpec) {
 		t.Fatalf("approval did not pin displayed revision: %+v", approved)
 	}
 	effective, _, _, err := repo.ProjectSpecOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	reviseRefreshMember(t, f, f.stream2, plan.SpecDocument, crossSpec2+"\nAnother edit.\n")
 	runRefresh(t, f)
 	if got := refreshDocument(t, f, id); !reflect.DeepEqual(got, fresh) {
 		t.Fatal("approved project spec refreshed")
 	}
 	after, _, _, err := repo.ProjectSpecOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(after, effective) {
 		t.Fatal("approved-revision read changed")
 	}
 	decision, _, err := repo.GroupApprovalOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !reflect.DeepEqual(decision, approved) {
 		t.Fatal("refresh changed approval")
 	}
@@ -165,21 +166,20 @@ func TestProjectSpecRefreshDefersHeldMembersAndTrace(t *testing.T) {
 			unlock := func() {}
 			switch hold {
 			case "locked":
-				// Another holder takes the trace: members give back what they kept.
-				must(t, mustRepo(t, f.s, f.project).ReleaseWorkgroupTraces())
-				must(t, mustRepo(t, f.s, f.project2).ReleaseWorkgroupTraces())
+				intakefixture.Must(t, mustRepo(t, f.s, f.project).ReleaseWorkgroupTraces())
+				intakefixture.Must(t, mustRepo(t, f.s, f.project2).ReleaseWorkgroupTraces())
 				directory, err := f.s.current().Root.WorkgroupTrace(id)
-				must(t, err)
+				intakefixture.Must(t, err)
 				lock, err := os.OpenFile(filepath.Join(directory, "osmia.lock"), os.O_RDWR, 0600)
-				must(t, err)
-				must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
-				unlock = func() { must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)) }
+				intakefixture.Must(t, err)
+				intakefixture.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB))
+				unlock = func() { intakefixture.Must(t, syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)) }
 				defer lock.Close()
 			case "joining":
-				_, err := trace.CreateWorkgroup(ctx, mustRepo(t, f.s, f.project2), []config.WorkstreamID{f.stream2}, f.s.now(), ownerActor, "joining")
-				must(t, err)
+				_, err := trace.CreateWorkgroup(ctx, mustRepo(t, f.s, f.project2), []config.WorkstreamID{f.stream2}, f.s.now(), intake.OwnerActor, "joining")
+				intakefixture.Must(t, err)
 			case "retired":
-				must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: id, ArchivedAt: f.s.now()}))
+				intakefixture.Must(t, f.s.store.SetArchived(runtime.Archive{Project: f.project2, Workstream: f.stream2, Workgroup: id, ArchivedAt: f.s.now()}))
 			case "canceled":
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -192,7 +192,7 @@ func TestProjectSpecRefreshDefersHeldMembersAndTrace(t *testing.T) {
 						t.Fatalf("cancellation: %v", err)
 					}
 				} else {
-					must(t, err)
+					intakefixture.Must(t, err)
 				}
 			}
 			unlock()
@@ -213,19 +213,18 @@ func TestProjectSpecRefreshSerializesWithValidatedRatification(t *testing.T) {
 		}
 		injected = true
 		packet, err := f.c.Packet(context.Background(), f.stream1)
-		must(t, err)
+		intakefixture.Must(t, err)
 		if packet.ProjectSpecRevision != packets[0].ProjectSpecRevision {
 			t.Fatal("packet read changed while ratification held the approval lock")
 		}
 		reviseRefreshMember(t, f, f.stream2, plan.SpecDocument, crossSpec2+"\nProgress.\n")
-		// A refresh attempting to enter between validation and recording defers.
 		runRefresh(t, f)
 		return nil
 	}
 	defer func() { f.s.clearBoundary() }()
 	p := packets[0]
 	_, err := f.c.Ratify(context.Background(), f.stream1, p.Packet.Revision.Spec, p.Packet.Revision.Plan, p.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !injected {
 		t.Fatal("validation boundary not reached")
 	}
@@ -234,7 +233,7 @@ func TestProjectSpecRefreshSerializesWithValidatedRatification(t *testing.T) {
 		t.Fatal("racing refresh changed validated spec")
 	}
 	approval, found, err := mustRepo(t, f.s, f.project).GroupApprovalOf(f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found || approval.ProjectSpecRevision != p.ProjectSpecRevision || !reflect.DeepEqual(approval.ProjectSpec, *p.ProjectSpec) {
 		t.Fatalf("approval disagrees with validated revision: %+v", approval)
 	}
@@ -250,28 +249,28 @@ func TestRecoverMemberApprovalsMatchesRefreshedSlices(t *testing.T) {
 	reviseRefreshMember(t, f, f.stream2, plan.SpecDocument, crossSpec2+"\nProgress.\n")
 	runRefresh(t, f)
 	for _, member := range []config.WorkstreamID{f.stream1, f.stream2} {
-		o, api := f.s.shedAction(string(member), InShedState, SketchedState)
-		if api != nil {
-			t.Fatal(api)
+		o, apiFault := f.s.shedAction(string(member), intake.InShedState, intake.SketchedState)
+		if apiFault != nil {
+			t.Fatal(apiFault)
 		}
-		_, api = f.s.ratifyMember(context.Background(), o, o.Pin)
-		if api != nil {
-			t.Fatal(api)
+		_, apiFault = f.s.ratifyMember(context.Background(), o, o.Pin)
+		if apiFault != nil {
+			t.Fatal(apiFault)
 		}
 	}
 	wt, g, err := f.s.approvalTrace(context.Background(), mustRepo(t, f.s, f.project), id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer wt.Close()
 	approval, found, err := f.s.recoverMemberApprovals(context.Background(), wt, g)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found || approval.ProjectSpecRevision != 2 {
 		t.Fatalf("refreshed approval not recovered: %+v, found=%v", approval, found)
 	}
 	for _, member := range approval.Members {
 		repo, err := f.s.approvalMemberRepository(context.Background(), member.Project)
-		must(t, err)
-		matches, err := sliceMatchesPin(approval.ProjectSpec, repo, member.Workstream, shed.Pin{Spec: member.Spec, Plan: member.Plan})
-		must(t, err)
+		intakefixture.Must(t, err)
+		matches, err := intake.SliceMatchesPin(approval.ProjectSpec, repo, member.Workstream, shed.Pin{Spec: member.Spec, Plan: member.Plan})
+		intakefixture.Must(t, err)
 		if !matches {
 			t.Fatal("recovery accepted mismatched slice")
 		}
@@ -289,10 +288,10 @@ func TestProjectSpecRefreshRetriesInterruptedAppend(t *testing.T) {
 		}
 		return nil
 	}
-	leader := leastWorkstream([]config.WorkstreamID{f.stream1, f.stream2})
-	_, _, repo, api := f.s.conversationTrace(string(leader))
-	if api != nil {
-		t.Fatal(api)
+	leader := lifecycle.LeastWorkstream([]config.WorkstreamID{f.stream1, f.stream2})
+	_, _, repo, apiFault := f.s.conversationTrace(string(leader))
+	if apiFault != nil {
+		t.Fatal(apiFault)
 	}
 	err := f.s.projectSpecRefreshPass(context.Background(), repo)
 	if !errors.Is(err, interrupted) {
@@ -313,33 +312,33 @@ func TestProjectSpecPacketRetainsApprovalWithoutExplicitRevisionPin(t *testing.T
 	f, id, packets := projectSliceRefreshFixture(t)
 	repo := mustRepo(t, f.s, f.project)
 	wt, g, err := f.s.approvalTrace(context.Background(), repo, id)
-	must(t, err)
+	intakefixture.Must(t, err)
 	defer wt.Close()
 	decision := trace.GroupApproval{Workgroup: id, ProjectSpec: *packets[0].ProjectSpec}
 	for i, member := range []config.WorkstreamID{f.stream1, f.stream2} {
 		p := packets[i]
 		record, err := shed.EncodeRatification(shed.Ratify(p.Packet.Round, p.Packet.Revision, nil))
-		must(t, err)
+		intakefixture.Must(t, err)
 		decision.Members = append(decision.Members, trace.GroupMemberApproval{Project: p.Project, Workstream: member, Spec: p.Packet.Revision.Spec, Plan: p.Packet.Revision.Plan, Round: p.Packet.Round, Record: record})
 	}
-	must(t, trace.RecordGroupApproval(context.Background(), wt, g.Members[0], decision, f.s.now(), ownerActor))
+	intakefixture.Must(t, trace.RecordGroupApproval(context.Background(), wt, g.Members[0], decision, f.s.now(), intake.OwnerActor))
 	recorded, approvalDoc, found, err := trace.ReadGroupApproval(wt, g.Members[0])
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found {
 		t.Fatal("approval was not recorded")
 	}
 	later := decision.ProjectSpec
 	later.Behavior = "A later unapproved draft."
-	must(t, trace.RecordProjectSpec(context.Background(), wt, g, later, f.s.now(), ownerActor, "later-draft"))
+	intakefixture.Must(t, trace.RecordProjectSpec(context.Background(), wt, g, later, f.s.now(), intake.OwnerActor, "later-draft"))
 	packet, err := f.c.Packet(context.Background(), f.stream1)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if packet.ProjectSpecRevision != packets[0].ProjectSpecRevision || !reflect.DeepEqual(*packet.ProjectSpec, decision.ProjectSpec) {
 		t.Fatalf("packet lost immutable approval's recorded revision: %+v", packet)
 	}
 	_, err = f.c.Ratify(context.Background(), f.stream1, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan, packet.ProjectSpecRevision)
-	must(t, err)
+	intakefixture.Must(t, err)
 	after, afterDoc, found, err := trace.ReadGroupApproval(wt, g.Members[0])
-	must(t, err)
+	intakefixture.Must(t, err)
 	if !found || !reflect.DeepEqual(after, recorded) || !reflect.DeepEqual(afterDoc, approvalDoc) {
 		t.Fatal("retry changed existing approval")
 	}

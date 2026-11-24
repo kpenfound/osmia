@@ -19,8 +19,6 @@ import (
 func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 	t.Parallel()
 	var created map[string]any
-	// server stands in for the real GitHub REST API: a remote system whose
-	// real responses and rate limits this fake does not reproduce.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("Accept") != "application/vnd.github+json" {
 			t.Errorf("headers %v", r.Header)
@@ -69,8 +67,6 @@ func TestGitHubFindsAndCreatesPullRequestsWithTheToken(t *testing.T) {
 }
 
 func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
-	// server stands in for the real GitHub REST API, the same remote
-	// boundary noted above.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Error("missing service credentials")
@@ -109,8 +105,6 @@ func TestGitHubSameRepositoryCreateAndRetarget(t *testing.T) {
 
 func TestGitHubErrorsKeepGitHubsExplanation(t *testing.T) {
 	t.Parallel()
-	// server stands in for the real GitHub REST API, the same remote
-	// boundary noted above.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/acme/permissions/pulls":
@@ -159,7 +153,6 @@ func TestCredentialed(t *testing.T) {
 	}
 }
 
-// ghRecord is one decoded GitHub activity log line.
 type ghRecord struct {
 	Activity   string `json:"activity"`
 	Access     string `json:"access"`
@@ -174,9 +167,6 @@ type ghRecord struct {
 	Level      string `json:"level"`
 }
 
-// decodeGHRecords parses every line of buf as one JSON object, failing the
-// test if any line does not parse: every line a logger writes must be valid
-// JSON with a level and a message.
 func decodeGHRecords(t *testing.T, buf *bytes.Buffer) []ghRecord {
 	t.Helper()
 	var records []ghRecord
@@ -196,10 +186,6 @@ func decodeGHRecords(t *testing.T, buf *bytes.Buffer) []ghRecord {
 	return records
 }
 
-// TestGitHubLogsOneRecordPerRequest shows one GitHub activity record for
-// each of Find, Create and Update, on both success and failure, with the
-// action, method, path, repository, status and the marker that tells them
-// apart from any other kind of record.
 func TestGitHubLogsOneRecordPerRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -232,7 +218,6 @@ func TestGitHubLogsOneRecordPerRequest(t *testing.T) {
 	if _, err := g.Find(ctx, "acme/missing", "owner/widgets", "osmia/w"); err == nil {
 		t.Fatal("expected a 404")
 	}
-	// A transport failure: no response arrives at all.
 	broken := GitHub{BaseURL: "http://127.0.0.1:1", Token: "secret", HTTP: server.Client()}
 	if _, err := broken.Find(ctx, "acme/widgets", "owner/widgets", "osmia/w"); err == nil {
 		t.Fatal("expected a transport failure")
@@ -273,17 +258,12 @@ func TestGitHubLogsOneRecordPerRequest(t *testing.T) {
 	}
 }
 
-// alwaysFailingWriter never writes successfully, standing in for a broken
-// log destination.
 type alwaysFailingWriter struct{}
 
 func (alwaysFailingWriter) Write([]byte) (int, error) { return 0, errBrokenWriter }
 
 var errBrokenWriter = errors.New("broken log writer")
 
-// TestGitHubActionSucceedsEvenWhenTheLogWriterFails shows that a failing log
-// destination never changes the result of the GitHub action it would have
-// logged.
 func TestGitHubActionSucceedsEvenWhenTheLogWriterFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `[{"number":7,"html_url":"u","state":"open","head":{"ref":"osmia/w","sha":"abc","repo":{"full_name":"owner/widgets"}},"base":{"ref":"main"}}]`)
@@ -297,11 +277,6 @@ func TestGitHubActionSucceedsEvenWhenTheLogWriterFails(t *testing.T) {
 	}
 }
 
-// TestGitHubLogNeverCarriesSecretsOrPullRequestBodies shows that creating and
-// updating a pull request with a title and body, while every known secret
-// environment variable holds a sentinel value, logs neither those sentinels
-// nor the title or body text: the GitHub activity record carries only the
-// action, method, path, status and outcome, never the request it sent.
 func TestGitHubLogNeverCarriesSecretsOrPullRequestBodies(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "sentinel-github-token")
 	t.Setenv("TS_AUTHKEY", "sentinel-ts-authkey")
@@ -335,13 +310,6 @@ func TestGitHubLogNeverCarriesSecretsOrPullRequestBodies(t *testing.T) {
 	}
 }
 
-// TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation shows Ready reading
-// the draft pull request's GraphQL node ID over REST, running the
-// markPullRequestReadyForReview mutation against that ID (the only way to
-// clear draft status, since the REST pull update endpoint has no field for
-// it), and then reading the pull request again for the returned result. A
-// pull request that is not a draft is returned unchanged with no mutation
-// call at all.
 func TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation(t *testing.T) {
 	t.Parallel()
 	var gets, mutations int
@@ -378,8 +346,6 @@ func TestGitHubReadyReadsTheNodeIDThenRunsTheReadyMutation(t *testing.T) {
 	if gets != 2 || mutations != 1 {
 		t.Fatalf("gets %d mutations %d, want 2 and 1", gets, mutations)
 	}
-	// A pull request already ready for review is returned as read, with no
-	// mutation call: Ready never reopens or otherwise changes it.
 	pr, err = g.Ready(context.Background(), "acme/widgets", 11)
 	if err != nil || pr.Draft {
 		t.Fatalf("ready again %+v: %v", pr, err)
@@ -393,8 +359,6 @@ func TestGitHubCloseWithCommentCommentsOnceAndClosesOnlyAnOpenPullRequest(t *tes
 	t.Parallel()
 	state, comments := "open", []string{}
 	var posts, patches int
-	// server stands in for the real GitHub REST API, whose responses and rate
-	// limits this fake does not reproduce.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pull := fmt.Sprintf(`{"number": 7, "html_url": "https://github.com/acme/widgets/pull/7", "state": %q, "title": "T", "head": {"ref": "osmia/w", "sha": "abc", "repo": {"full_name": "acme/widgets"}}, "base": {"ref": "main"}}`, state)
 		switch {
@@ -435,14 +399,11 @@ func TestGitHubCloseWithCommentCommentsOnceAndClosesOnlyAnOpenPullRequest(t *tes
 	ctx := context.Background()
 	var _ LandedClient = g
 
-	// A comment already on the pull request, as a lost response leaves it, is
-	// not posted again.
 	comments = append(comments, "landed abc")
 	pr, err := g.CloseWithComment(ctx, "acme/widgets", 7, "landed abc")
 	if err != nil || pr.State != "closed" || posts != 0 || patches != 1 {
 		t.Fatalf("closed %+v: %v after %d comments and %d closes", pr, err, posts, patches)
 	}
-	// A pull request that is already closed is left alone.
 	if _, err := g.CloseWithComment(ctx, "acme/widgets", 7, "landed abc"); err != nil || posts != 0 || patches != 1 {
 		t.Fatalf("a closed pull request was written: %v after %d comments and %d closes", err, posts, patches)
 	}

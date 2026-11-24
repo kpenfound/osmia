@@ -61,9 +61,6 @@ func TestProviderLimitsFallbackPauseOverrideResetAndRestart(t *testing.T) {
 	}
 }
 
-// Every backend's sandbox kit comes through the machine's one Docker account,
-// so Docker Hub's pull rate limit pauses every sbx role, fallbacks or not, and
-// no other role, until it resets or the owner clears it.
 func TestTheRegistryLimitPausesEverySbxRoleUntilItResets(t *testing.T) {
 	in := fixture(t)
 	defaultProfile := in.Config.Profiles["default"]

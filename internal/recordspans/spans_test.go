@@ -15,14 +15,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// Every workstream state interval is one span: the first covers the time from
-// creation, each starts where the one before ended, owner-gate waits included,
-// and each takes the recorded times of its transitions.
 func TestWorkstreamStatesAreOneSpanEachWithNoGap(t *testing.T) {
 	h := newHarness(t)
 	h.feature("t1", "handed", minute(1), owner, "the owner handed it in")
 	h.feature("t2", "sketched", minute(10), service, "sketch drafted")
-	// The workstream waits at the owner's gate in sketched.
 	h.feature("t3", "ratified", minute(70), owner, "the owner ratified the sketch")
 	h.feature("t4", "building", minute(71), service, "building")
 	h.feature("t5", "delivered", minute(190), service, "delivered")
@@ -61,8 +57,6 @@ func TestWorkstreamStatesAreOneSpanEachWithNoGap(t *testing.T) {
 	}
 }
 
-// A unit state span carries a bounded cause and the state the unit moved to, so
-// each way back to the mason is told apart.
 func TestUnitStateSpansCarryTheCauseAndNextState(t *testing.T) {
 	h := newHarness(t)
 	h.unit("u1-1", "u1", "ready", minute(1), service, "dependencies merged")
@@ -112,8 +106,6 @@ func TestUnitStateSpansCarryTheCauseAndNextState(t *testing.T) {
 	}
 }
 
-// Whatever states the factory records, a unit's cause is one of the listed
-// words, never text from the reason.
 func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
 	chief := trace.Actor{Kind: "agent", ID: trace.ChiefOfStaff}
 	rebase := func(from, to string) trace.Transition {
@@ -161,9 +153,6 @@ func TestUnitCauseIsFromTheBoundedVocabulary(t *testing.T) {
 	}
 }
 
-// A turn span is an invocation of the role's agent under the pinned GenAI
-// conventions, with the identities, outcome, slot wait and, only when the
-// backend reported it, the cost.
 func TestTurnSpansFollowTheGenAIConventions(t *testing.T) {
 	h := newHarness(t)
 	h.turn("t1", minute(1), minute(3), func(_ *trace.TurnRequest, r *trace.TurnResponse) {
@@ -248,7 +237,6 @@ func pinnedGenAIKey(key string) bool {
 	return false
 }
 
-// A turn stopped on purpose is cancelled, with the stop's own enumerated cause.
 func TestStoppedTurnIsCancelledWithTheStopCause(t *testing.T) {
 	h := newHarness(t)
 	h.turn("t1", minute(1), minute(2), func(_ *trace.TurnRequest, r *trace.TurnResponse) {
@@ -261,9 +249,6 @@ func TestStoppedTurnIsCancelledWithTheStopCause(t *testing.T) {
 	}
 }
 
-// Unit, final-review and session check runs each send one span with their
-// outcome and recorded times; the covered count rides along when the selection
-// holds one, and a record without it still reads.
 func TestCheckRunSpansCarryOutcomeAndCoveredCount(t *testing.T) {
 	h := newHarness(t)
 	covered, seven := 12, 7
@@ -303,8 +288,6 @@ func TestCheckRunSpansCarryOutcomeAndCoveredCount(t *testing.T) {
 	}
 }
 
-// A check run record written before selections held a covered count decodes, and
-// its span has no count.
 func TestCheckRunRecordWithoutCoveredCountStillReads(t *testing.T) {
 	h := newHarness(t)
 	old := `{"unit":"u1","run":1,"status":"passed","selection":{"mode":"selected","links":["dag://a"],"candidates":3,"listed":9},"started_at":"2026-09-15T12:05:00Z","finished_at":"2026-09-15T12:09:00Z"}`
@@ -322,9 +305,6 @@ func TestCheckRunRecordWithoutCoveredCountStillReads(t *testing.T) {
 	}
 }
 
-// The root span starts at the workstream's recorded creation and is sent when it
-// is archived or removed, with the span of its last state ending there; every
-// span of the workstream shares the root's trace.
 func TestRootSpanCoversTheWorkstreamLifeAndIsSentOnEnd(t *testing.T) {
 	for _, how := range []string{Archived, Removed} {
 		t.Run(how, func(t *testing.T) {
@@ -360,8 +340,6 @@ func TestRootSpanCoversTheWorkstreamLifeAndIsSentOnEnd(t *testing.T) {
 	}
 }
 
-// A workstream that has not been archived or removed sends no root span, and an
-// archive without a time sends nothing at all.
 func TestEndedWithoutATimeOrSinkSendsNothing(t *testing.T) {
 	h := newHarness(t)
 	h.feature("t1", "handed", minute(1), owner, "handed")
@@ -373,8 +351,6 @@ func TestEndedWithoutATimeOrSinkSendsNothing(t *testing.T) {
 	}
 }
 
-// An interval open when the trace is closed and opened again closes with the
-// start the trace recorded and the IDs it would have had without the restart.
 func TestIntervalOpenAcrossARestartKeepsItsStartAndIDs(t *testing.T) {
 	run := func(restart bool) tracetest.SpanStubs {
 		h := newHarness(t)
@@ -414,8 +390,6 @@ func TestIntervalOpenAcrossARestartKeepsItsStartAndIDs(t *testing.T) {
 	}
 }
 
-// Spans never take their times from when they are sent: a span of an interval
-// recorded long ago keeps its recorded times.
 func TestSpanTimesAreRecordedTimes(t *testing.T) {
 	h := newHarness(t)
 	h.feature("t1", "handed", minute(1), owner, "handed")
@@ -427,7 +401,6 @@ func TestSpanTimesAreRecordedTimes(t *testing.T) {
 	}
 }
 
-// A panicking span observer cannot fail a commit.
 func TestObserverPanicNeverFailsACommit(t *testing.T) {
 	h := newHarness(t)
 	h.repo.ObserveSpans(func(trace.CommitDetail) { panic("observer failed") })

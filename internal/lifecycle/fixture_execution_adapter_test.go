@@ -8,30 +8,11 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/service"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
-var unitBranch = execution.UnitBranch
-
-const verdictTool = execution.VerdictTool
-const verdictOutcome = execution.VerdictOutcome
-
-var landingDocument = execution.LandingDocument
-var rebaseDocument = execution.RebaseDocument
-var rebaseIDs = execution.RebaseIDs
-var resolveTurnID = execution.ResolveTurnID
-var decodeRebase = execution.DecodeRebase
-
-const doneTool = execution.DoneTool
-const masonDone = execution.MasonDone
-
-type masonReports = execution.MasonReports
-type UnitCheckSelection = execution.UnitCheckSelection
-
-var checkSelectionDocument = execution.CheckSelectionDocument
-
-type building = execution.Building
 type masons struct {
 	s          *Service
 	cfg        *config.Config
@@ -67,18 +48,18 @@ func (r rebaser) driver() execution.Rebaser { return execution.NewRebaser(r.fore
 
 type unitWorkspaces struct {
 	execution.UnitWorkspaces
-	streamWorkspaces streamWorkspaces
+	streamWorkspaces intake.StreamWorkspaces
 }
 
 func newUnitWorkspaces(cfg *config.Config, repo *trace.Repository) unitWorkspaces {
-	return unitWorkspaces{execution.NewUnitWorkspaces(cfg, repo), streamWorkspaces{Cfg: cfg, Repository: repo, Directory: unitsDirectory}}
+	return unitWorkspaces{execution.NewUnitWorkspaces(cfg, repo), intake.StreamWorkspaces{Cfg: cfg, Repository: repo, Directory: intake.UnitsDirectory}}
 }
 func (u unitWorkspaces) driver() execution.UnitWorkspaces { return u.UnitWorkspaces }
 func (m *masons) Pass(ctx context.Context) error          { return m.driver().Pass(ctx) }
-func (m *masons) read(stream config.WorkstreamID) (building, bool, error) {
+func (m *masons) read(stream config.WorkstreamID) (execution.Building, bool, error) {
 	return m.driver().Read(stream)
 }
-func (m *masons) start(ctx context.Context, b building, unit string) (started, blocked bool, err error) {
+func (m *masons) start(ctx context.Context, b execution.Building, unit string) (started, blocked bool, err error) {
 	return m.driver().Start(ctx, b, unit)
 }
 
@@ -106,7 +87,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	return r.driver().One(ctx, stream, unit, state, paused)
 }
 func (f *foreman) Pass(ctx context.Context) error { return f.driver().Pass(ctx) }
-func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int) (trace.Document, UnitReviewResult, bool, error) {
+func (f *foreman) approval(stream config.WorkstreamID, unit string, revision int) (trace.Document, service.UnitReviewResult, bool, error) {
 	return f.driver().Approval(stream, unit, revision)
 }
 
@@ -116,7 +97,7 @@ func (f *foreman) Inspect(ctx context.Context, op coreadapter.Operation) (coread
 func (f *foreman) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return f.driver().Apply(ctx, op)
 }
-func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in landInput, result UnitReviewResult) (string, error) {
+func (f *foreman) current(ctx context.Context, stream config.WorkstreamID, in service.TestLandInput, result service.UnitReviewResult) (string, error) {
 	return f.driver().Current(ctx, stream, in, result)
 }
 
@@ -126,13 +107,9 @@ func (r rebaser) Inspect(ctx context.Context, op coreadapter.Operation) (coreada
 func (r rebaser) Apply(ctx context.Context, op coreadapter.Operation) (coreadapter.OperationResult, error) {
 	return r.driver().Apply(ctx, op)
 }
-func (m *masons) finish(ctx context.Context, b building, unit string) (moved, blocked bool, err error) {
+func (m *masons) finish(ctx context.Context, b execution.Building, unit string) (moved, blocked bool, err error) {
 	return m.driver().Finish(ctx, b, unit)
 }
-func (m *masons) prepareUnitReview(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, UnitReviewIdentity, error) {
+func (m *masons) prepareUnitReview(ctx context.Context, stream config.WorkstreamID, unit string) (coreadapter.ReviewRequest, service.UnitReviewIdentity, error) {
 	return m.driver().PrepareUnitReview(ctx, stream, unit)
 }
-
-type streamWorkspaces = intake.StreamWorkspaces
-
-const UnitChecking = execution.UnitChecking

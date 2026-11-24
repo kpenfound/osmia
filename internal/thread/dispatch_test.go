@@ -51,7 +51,6 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 		},
 	}
 	first, second := turnOp(t, "first"), turnOp(t, "second")
-	// A runner that fails before claiming leaves the intent pending.
 	broken := d
 	broken.Runner.MaxRetries = -1
 	if _, err := broken.Apply(ctx, first); err == nil || calls != 0 {
@@ -77,7 +76,6 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 	if again, err := d.Apply(ctx, first); err != nil || calls != 1 || string(again.Data) != string(result.Data) {
 		t.Fatalf("completed turn ran again: %v", err)
 	}
-	// A captured backend failure is a terminal domain result, not a retry.
 	observe(t, d, second, coreadapter.EffectAbsent)
 	result, err = d.Apply(ctx, second)
 	if err != nil || result.Outcome != "failed" || calls != 2 {
@@ -121,10 +119,6 @@ func TestDispatcherRejectsInvalidOperations(t *testing.T) {
 	}
 }
 
-// Relay runs once a turn completes, given its thread identity and the
-// completed queued turn, and runs again on an already-completed turn so a
-// transient failure gets the same retry an incomplete turn gets; a failure
-// fails Apply the same way any other reconciliation failure does.
 func TestDispatcherRelayRunsOnCompletionAndRetriesAfterAFailure(t *testing.T) {
 	ctx := context.Background()
 	repo, _, _ := setup(t)
@@ -166,8 +160,6 @@ func TestDispatcherRelayRunsOnCompletionAndRetriesAfterAFailure(t *testing.T) {
 	if seen.Request.TurnID != "first" || seen.Response == nil || seen.Response.Result.FinalResponse != "done" {
 		t.Fatalf("relay saw: %+v", seen)
 	}
-	// Relay keeps running for an already-completed turn: a caller relies on
-	// it being idempotent, not on Apply calling it only once ever.
 	if _, err := d.Apply(ctx, op); err != nil || calls != 3 {
 		t.Fatalf("relay did not run again for a completed turn: calls=%d err=%v", calls, err)
 	}
@@ -198,7 +190,6 @@ func TestDispatcherRecoversCapturedAndReservedTurns(t *testing.T) {
 	if err := repo.CaptureTurn(ctx, "token", trace.TurnResponse{Header: h, AgentID: "agent", ThreadID: req.ThreadID, TurnID: "first", RequestID: req.ID, RequestRevision: 1, Result: result}); err != nil {
 		t.Fatal(err)
 	}
-	// The service stopped after recording cost but before completion.
 	q.Attempts = []trace.TurnAttempt{a}
 	if err := runner.costs(ctx, "mason", q); err != nil {
 		t.Fatal(err)
@@ -224,7 +215,6 @@ func TestDispatcherRecoversCapturedAndReservedTurns(t *testing.T) {
 		t.Fatalf("duplicate or missing cost: %+v %v", costs, err)
 	}
 
-	// A reservation without a captured result may still be running.
 	if _, err := repo.ClaimTurn(ctx, stream, "agent", "token2", "/owned2", at); err != nil {
 		t.Fatal(err)
 	}

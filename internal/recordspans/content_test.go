@@ -15,10 +15,6 @@ import (
 
 const marker = "MARKER-7f3a9c"
 
-// No prompt, reply, title, transition reason, check output or other recorded
-// text reaches a span: every span the trace sends is searched, in its name,
-// attributes, events, status and resource, for strings seeded into every kind of
-// record.
 func TestNoContentReachesAnySpan(t *testing.T) {
 	h := newHarness(t)
 	h.feature("t1", "handed", minute(1), owner, "reason "+marker)
@@ -51,8 +47,6 @@ func TestNoContentReachesAnySpan(t *testing.T) {
 	Recorder{Sink: h.sink}.Ended(h.repo, stream, minute(500), Archived)
 
 	spans := h.spans()
-	// Three workstream states, the root, three unit states, three turns and three
-	// check runs: the search covers a span of every kind.
 	if len(spans) != 13 {
 		t.Fatalf("%d spans were sent, want 13: %v", len(spans), spans)
 	}
@@ -63,7 +57,6 @@ func TestNoContentReachesAnySpan(t *testing.T) {
 	}
 }
 
-// markerIn names the part of s that holds the marker, or "".
 func markerIn(s tracetest.SpanStub) string {
 	has := func(text string) bool { return strings.Contains(strings.ToLower(text), strings.ToLower(marker)) }
 	values := func(kvs []attribute.KeyValue) bool {

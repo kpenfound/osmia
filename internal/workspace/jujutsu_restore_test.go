@@ -13,7 +13,6 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 )
 
-// visibleHeads returns the commits the repository shows as heads.
 func visibleHeads(t *testing.T, j *Jujutsu) []string {
 	t.Helper()
 	out, err := j.run(context.Background(), j.repository(), nil, "--ignore-working-copy", "log", "--no-graph", "--revisions", "visible_heads()", "--template", `commit_id ++ "\n"`)
@@ -23,7 +22,6 @@ func visibleHeads(t *testing.T, j *Jujutsu) []string {
 	return strings.Fields(out)
 }
 
-// readFile returns the file's content, or "" when it is missing.
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -36,11 +34,6 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-// Recover restores the repository to the checkpoint an interrupted attempt
-// left: the commits and workspaces the attempt made are gone, the branches
-// the attempt moved in the clone stay, and each workspace whose branch moved
-// is on it again, with the files it held before the attempt, none lost. The
-// checkpoint is dropped, so a second Recover restores nothing.
 func TestJujutsuRecoverRestoresTheCheckpointAnInterruptedAttemptLeft(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -58,9 +51,6 @@ func TestJujutsuRecoverRestoresTheCheckpointAnInterruptedAttemptLeft(t *testing.
 		t.Fatal(err)
 	}
 
-	// The interrupted attempt: the unit's snapshot moves its branch, a
-	// conflicting rebase leaves a commit of Jujutsu's own, a landing moves
-	// the feature branch and its workspace, and a workspace is made.
 	snapshot, err := j.Snapshot(ctx, unit, base)
 	if err != nil {
 		t.Fatal(err)
@@ -114,11 +104,6 @@ func TestJujutsuRecoverRestoresTheCheckpointAnInterruptedAttemptLeft(t *testing.
 	}
 }
 
-// A replay the attempt went on with goes back to where the checkpoint found
-// it, holding the resolution the workspace held then, and going on with it
-// again makes the same branch the interrupted attempt moved to. The
-// checkpoint's snapshot of the resolved files leaves the replay reporting
-// the stop and the paths it stopped with.
 func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -174,8 +159,6 @@ func TestJujutsuRecoverTakesAReplayBackToItsCheckpoint(t *testing.T) {
 	}
 }
 
-// A settled checkpoint restores nothing, and a repository not made yet
-// records none.
 func TestJujutsuSettledCheckpointRestoresNothing(t *testing.T) {
 	t.Parallel()
 	f, j := newJujutsuFixture(t)
@@ -209,7 +192,6 @@ func TestJujutsuSettledCheckpointRestoresNothing(t *testing.T) {
 	}
 }
 
-// Git keeps no state of its own to restore: its checkpoints record nothing.
 func TestGitCheckpointsRecordNothing(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -225,8 +207,6 @@ func TestGitCheckpointsRecordNothing(t *testing.T) {
 	}
 }
 
-// crashCheckpoint leaves the checkpoint a process killed inside LocalStep
-// would leave, so these fixtures can exercise Recover's clone-wide semantics.
 func crashCheckpoint(ctx context.Context, j *Jujutsu, operation string, at time.Time) error {
 	ctx, unlock, err := lockClone(ctx, j.Clone)
 	if err != nil {

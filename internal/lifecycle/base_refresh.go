@@ -94,10 +94,6 @@ func (b *BaseRefresher) Pass(ctx context.Context) error {
 		if state.Value == AbandonedState {
 			continue
 		}
-		// Finished, beyond abandoned, means delivered with the current pull
-		// request durably recorded as merged or closed (spec#4). A delivered
-		// workstream with no pull request of its own, or whose outcome isn't
-		// recorded yet, is not finished and keeps its refreshes (spec#11).
 		if state.Value == DeliveredState {
 			finished, err := ownPullRequestFinished(b.Repository, stream)
 			if err != nil {
@@ -280,7 +276,7 @@ func (b *BaseRefresher) Apply(ctx context.Context, op coreadapter.Operation) (co
 
 // CheckOwnPullRequest looks up a delivered workstream's own pull request
 // once, before resolveBase's upstream fetch and the parent's PR lookup, and
-// durably records a merged or closed outcome (spec#5). done is true only
+// durably records a merged or closed outcome. done is true only
 // when it recorded the outcome; the caller then ends the run without
 // calling resolveBase. An open PR, an outcome already recorded for the
 // Current PR, a recorded integration outside own-only observation,
@@ -333,8 +329,6 @@ func (b *BaseRefresher) CheckOwnPullRequest(ctx context.Context, in BaseRefreshI
 		if !finished {
 			return coreadapter.OperationResult{}, false, nil
 		}
-		// A restart here, before the outcome is durably recorded, leaves
-		// nothing recorded; the next attempt looks the pull request up again.
 		if err := b.S.Step("own-pr-outcome-found"); err != nil {
 			return coreadapter.OperationResult{}, false, err
 		}
@@ -347,7 +341,7 @@ func (b *BaseRefresher) CheckOwnPullRequest(ctx context.Context, in BaseRefreshI
 // CompleteOwnPullRequestOutcome records, in one commit, the own-PR outcome
 // Document and the base-refresh's completing "checked" transition, so a
 // restart between the lookup and this commit re-looks-up the pull request
-// and still yields one recorded outcome (charter#2).
+// and still yields one recorded outcome.
 func (b *BaseRefresher) CompleteOwnPullRequestOutcome(ctx context.Context, in BaseRefreshInput, op coreadapter.Operation, pr int, outcome string, mergeCommit ...string) (coreadapter.OperationResult, error) {
 	at := b.S.Now()
 	doc, ok, err := ownPullRequestOutcomeDocumentFor(b.Repository, in.Workstream, at, op.ID, pr, outcome, mergeCommit...)

@@ -33,11 +33,8 @@ var (
 	review  = trace.Actor{Kind: "service", ID: "reviewer"}
 )
 
-// minute is the recorded time n minutes after the workstream was created.
 func minute(n int) time.Time { return created.Add(time.Duration(n) * time.Minute) }
 
-// harness is a workstream's trace with a span observer on an in-memory
-// exporter.
 type harness struct {
 	t        *testing.T
 	root     config.Root
@@ -81,8 +78,6 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// restart closes the trace and opens it again with the observer attached, as a
-// service restart does.
 func (h *harness) restart() {
 	h.t.Helper()
 	if err := h.repo.Close(); err != nil {
@@ -101,7 +96,6 @@ func header(schema, id string, at time.Time, actor trace.Actor, unit string) tra
 	return trace.Header{Schema: "osmia.trace." + schema, Version: trace.Version, ID: id, Revision: 1, Project: project, Workstream: stream, Unit: unit, At: at, Actor: actor, Cause: "cause-" + id, Depth: 1}
 }
 
-// feature moves the workstream to state at recorded time at.
 func (h *harness) feature(id, to string, at time.Time, actor trace.Actor, reason string) {
 	h.t.Helper()
 	if _, err := h.repo.SetFeatureState(context.Background(), header("transition", id, at, actor, ""), to, reason); err != nil {
@@ -109,7 +103,6 @@ func (h *harness) feature(id, to string, at time.Time, actor trace.Actor, reason
 	}
 }
 
-// unit moves unit to state to at recorded time at.
 func (h *harness) unit(id, unit, to string, at time.Time, actor trace.Actor, reason string) {
 	h.t.Helper()
 	subject := trace.UnitSubject(unit)
@@ -124,7 +117,6 @@ func (h *harness) unit(id, unit, to string, at time.Time, actor trace.Actor, rea
 	}
 }
 
-// spans flushes the sink and returns what the exporter received.
 func (h *harness) spans() tracetest.SpanStubs {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -135,7 +127,6 @@ func (h *harness) spans() tracetest.SpanStubs {
 	return h.exporter.GetSpans()
 }
 
-// named returns the exported spans called name, in the order they were sent.
 func named(spans tracetest.SpanStubs, name string) tracetest.SpanStubs {
 	var out tracetest.SpanStubs
 	for _, s := range spans {
@@ -155,7 +146,6 @@ func value(s tracetest.SpanStub, key string) (attribute.Value, bool) {
 	return attribute.Value{}, false
 }
 
-// str returns the string attribute key of s, or "" when it has none.
 func str(s tracetest.SpanStub, key string) string {
 	v, _ := value(s, key)
 	return v.String()
@@ -173,8 +163,6 @@ func (h *harness) document(id, path string, at time.Time, actor trace.Actor, uni
 	}
 }
 
-// thread creates the mason's thread and runs one turn through enqueue, claim
-// and capture, returning the recorded response.
 func (h *harness) turn(id string, enqueued, claimed time.Time, mutate func(*trace.TurnRequest, *trace.TurnResponse)) trace.TurnResponse {
 	h.t.Helper()
 	ctx := context.Background()

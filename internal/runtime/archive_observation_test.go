@@ -19,8 +19,6 @@ func TestArchiveObservedMergePreservesConcurrentCleanupAcrossRestart(t *testing.
 	}
 	must(t, store.RecordArchivePullRequestMerge(pid, w1, p, ""))
 	must(t, store.RecordArchivePullRequestMerge(pid, w1, p, "merge"))
-	// Cleanup read its snapshot before the observation. Its metadata write must
-	// preserve the concrete merge while advancing authorized cleanup progress.
 	a.CleanupStartedAt = at.Add(time.Minute)
 	a.CleanedAt = at.Add(2 * time.Minute)
 	must(t, store.UpdateArchive(a))

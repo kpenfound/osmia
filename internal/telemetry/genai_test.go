@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Turn spans use the keys, operation and name form of one pinned version of the
-// GenAI conventions.
 func TestGenAIConventionsArePinnedToOneVersion(t *testing.T) {
 	if !strings.HasSuffix(GenAISchemaURL, "/"+GenAIConventionsVersion) {
 		t.Fatalf("schema URL %s does not match version %s", GenAISchemaURL, GenAIConventionsVersion)

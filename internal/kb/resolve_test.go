@@ -89,9 +89,6 @@ func TestResolvePaths(t *testing.T) {
 	}
 }
 
-// A pattern matches a path under it, covering every descendant of a matched
-// directory, with the same ** and glob rules ResolvePaths and MatchPathPattern
-// both use.
 func TestMatchPathPatternCoversDirectoriesAndGlobs(t *testing.T) {
 	for _, c := range []struct {
 		pattern, path string
@@ -122,7 +119,6 @@ func TestResolveEntitiesAcceptsRawPathGlobs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %#v\nwant %#v", got, want)
 	}
-	// An entity name wins over a pattern reading of the same text.
 	named := Map{Version: Version, Entities: []Entity{{ID: "web", Name: "web", Aliases: []string{"web/*"}, Paths: []string{"site"}}}}
 	if fp := named.ResolveEntities([]string{"web/*"}); !reflect.DeepEqual(fp.Paths, []string{"site"}) || !reflect.DeepEqual(fp.Entities, []string{"web"}) {
 		t.Fatalf("alias: %#v", fp)

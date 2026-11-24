@@ -16,7 +16,6 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// testClock is a clock several turns read at once.
 type testClock struct {
 	mu sync.Mutex
 	at time.Time
@@ -25,7 +24,6 @@ type testClock struct {
 func (c *testClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.at }
 func (c *testClock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.at = c.at.Add(d) }
 
-// queueOn accepts turn id on a new thread of agent with role.
 func queueOn(t *testing.T, r *trace.Repository, agent, role, id string) {
 	t.Helper()
 	h := trace.Header{Schema: "osmia.trace.agent", Version: 1, Revision: 1, ID: agent, Project: project, Workstream: stream, At: timestamp, Actor: trace.Actor{Kind: "owner", ID: "local"}, Cause: "message", Depth: 3}
@@ -38,7 +36,6 @@ func queueOn(t *testing.T, r *trace.Repository, agent, role, id string) {
 	}
 }
 
-// dispatch publishes the turn operation of each agent's turn.
 func dispatch(t *testing.T, r *trace.Repository, turns map[string]string) {
 	t.Helper()
 	var events []trace.Event
@@ -56,14 +53,11 @@ func dispatch(t *testing.T, r *trace.Repository, turns map[string]string) {
 	}
 }
 
-// controller reconciles turn operations through a dispatcher over turns,
-// each beside the pass.
 func controller(t *testing.T, r *trace.Repository, clock *testClock, turns coreadapter.Turns) *reconcile.Controller {
 	t.Helper()
 	return controllerWith(t, r, clock, turns, nil)
 }
 
-// controllerWith is controller whose passes start with schedule.
 func controllerWith(t *testing.T, r *trace.Repository, clock *testClock, turns coreadapter.Turns, schedule func(context.Context) error) *reconcile.Controller {
 	t.Helper()
 	sessions := t.TempDir()
@@ -79,8 +73,6 @@ func controllerWith(t *testing.T, r *trace.Repository, clock *testClock, turns c
 	return c
 }
 
-// acknowledged returns the turn operations acknowledged with a result, by
-// agent, and fails if one recorded more than one result.
 func acknowledged(t *testing.T, r *trace.Repository) map[string]string {
 	t.Helper()
 	records, err := r.Operations(stream)
@@ -109,8 +101,6 @@ func acknowledged(t *testing.T, r *trace.Repository) map[string]string {
 	return out
 }
 
-// Turns of two threads dispatched together run at the same time: each
-// session waits until the other has started.
 func TestTurnsOfTwoThreadsRunAtOnce(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
@@ -151,9 +141,6 @@ func TestTurnsOfTwoThreadsRunAtOnce(t *testing.T) {
 	}
 }
 
-// A restart after a turn was claimed without a captured result, or after its
-// result was captured but not completed, completes the turn once without
-// running its session again.
 func TestInterruptedConcurrentTurnsCompleteOnce(t *testing.T) {
 	for _, captured := range []bool{false, true} {
 		t.Run(map[bool]string{false: "claimed", true: "captured"}[captured], func(t *testing.T) {
@@ -207,8 +194,6 @@ func TestInterruptedConcurrentTurnsCompleteOnce(t *testing.T) {
 			}
 			want := "idle"
 			if !captured {
-				// A reservation may still be running, so the controller waits
-				// until the service's startup recovery settles it.
 				pass()
 				if got := acknowledged(t, repo); len(got) != 0 {
 					t.Fatalf("a reserved turn completed: %v", got)
@@ -239,8 +224,6 @@ func TestInterruptedConcurrentTurnsCompleteOnce(t *testing.T) {
 	}
 }
 
-// A turn captures and completes its result, and its operation records and
-// acknowledges that result, while a scheduling hook remains held.
 func TestTurnCompletesWhileScheduleHeld(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")

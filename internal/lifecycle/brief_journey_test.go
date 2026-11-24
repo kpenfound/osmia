@@ -10,6 +10,8 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/delivery"
+	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -21,8 +23,6 @@ const (
 	briefBlock     = "\nBefore you ship:\n- " + briefShipFirst + "\n- " + briefShipNext + "\n"
 )
 
-// requireNoProblems fails the test with the calls the service refused to the
-// fake chief of staff that a plan expected it to accept.
 func (j *briefJourney) requireNoProblems(t *testing.T) {
 	t.Helper()
 	if problems := j.chief.problems(); len(problems) > 0 {
@@ -30,12 +30,6 @@ func (j *briefJourney) requireNoProblems(t *testing.T) {
 	}
 }
 
-// The delivery entry of a reviewed final review is absent from the inbox
-// while the chief of staff's turn for its notice has not recorded the brief,
-// and present once it has, with the brief in the presentation and its items
-// in the drafted description. The owner's approval publishes that same
-// description with the same Before you ship block, and a brief called for
-// after the approval is refused.
 func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
@@ -46,7 +40,6 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 	j.run(t)
 	j.awaitStarts(t, 1)
 
-	// The chief's turn for the notice is running with no brief recorded.
 	if entries := j.entries(t, stream); len(entries) != 0 {
 		t.Fatalf("the delivery entry is listed while the brief is pending: %+v", entries)
 	}
@@ -58,7 +51,6 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 		t.Fatalf("the draft carries a block before any brief:\n%s", waiting.Draft)
 	}
 
-	// The chief records the brief: the entry appears, with no fallback.
 	j.chief.release()
 	entry := j.awaitEntry(t, stream)
 	if strings.Contains(entry.Question, api.NoBriefRecorded) {
@@ -83,14 +75,12 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 		}
 	}
 
-	// The owner approves what the presentation shows.
 	approved, err := j.approvePresented(p)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if approved.Description != p.Draft || !strings.Contains(approved.Description, briefBlock) {
 		t.Fatalf("the approved description:\n%s", approved.Description)
 	}
 
-	// After the approval, the brief for that review is closed.
 	refused := j.ask(t, stream, "after-approval", recordBrief(p, "", "Changed my mind.", "Run a migration"))
 	if len(refused) != 1 || !strings.Contains(refused[0], `"recorded":false`) || !strings.Contains(refused[0], "already approved") {
 		t.Fatalf("a brief after the approval: %q", refused)
@@ -107,9 +97,6 @@ func TestDeliveryBriefHoldsTheEntryAndItsItemsReachThePublishedBody(t *testing.T
 	}
 }
 
-// When the chief of staff's turn for the notice ends without a brief, the
-// entry appears with the fallback; a brief recorded later for the same review
-// replaces it.
 func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
@@ -121,7 +108,6 @@ func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 		t.Fatalf("the delivery entry is listed while the chief's turn runs: %+v", entries)
 	}
 
-	// The turn ends and recorded nothing.
 	j.chief.release()
 	entry := j.awaitEntry(t, stream)
 	if !strings.Contains(entry.Question, api.NoBriefRecorded) {
@@ -135,7 +121,6 @@ func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 		t.Fatalf("the fallback draft carries a block:\n%s", p.Draft)
 	}
 
-	// The chief may still record the brief for that review before approval.
 	recorded := j.ask(t, stream, "late", recordBrief(p, "", briefText, briefShipFirst))
 	if len(recorded) != 1 || !strings.Contains(recorded[0], `"recorded":true`) {
 		t.Fatalf("a late brief: %q", recorded)
@@ -150,10 +135,6 @@ func TestDeliveryEntryFallsBackWhenTheChiefRecordsNoBrief(t *testing.T) {
 	}
 }
 
-// After the workstream is sent back to building, reassembled and given a new
-// final review, the earlier brief is not current: the entry waits again, a
-// delayed call naming the earlier review is refused and releases nothing,
-// and the earlier items never reach the new description.
 func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
@@ -169,8 +150,6 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	j.requireNoProblems(t)
 	j.halt(t)
 
-	// The owner sends it back; the repaired branch is reviewed again. The
-	// chief's turn for the new notice first repeats its call for review 1.
 	second := j.reassemble(t, map[string]string{"internal/trace/resume.go": "package trace\n// Resume from the last acknowledged chunk.\n"})
 	if second.Review != 2 || second.Commit == first.Report.Commit {
 		t.Fatalf("the new final review %+v after %+v", second, first.Report)
@@ -200,8 +179,6 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the delayed call released the entry: %+v", entries)
 	}
 
-	// The turn ends without a brief for the new review: the fallback, with no
-	// earlier items.
 	j.chief.release()
 	entry := j.awaitEntry(t, stream)
 	if !strings.Contains(entry.Question, api.NoBriefRecorded) {
@@ -212,8 +189,6 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the fallback of the new review: %+v\n%s", fallback.Brief, fallback.Draft)
 	}
 
-	// A brief for the new review replaces the fallback; only its items enter
-	// the new description, which the owner approves and publishes.
 	const current = "Confirm the new chunk size is deployed"
 	recorded := j.ask(t, stream, "new-brief", recordBrief(fallback, "", "Second brief.", current))
 	if len(recorded) != 1 || !strings.Contains(recorded[0], `"recorded":true`) {
@@ -224,7 +199,7 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 		t.Fatalf("the new presentation: %+v\n%s", p.Brief, p.Draft)
 	}
 	approved, err := j.approvePresented(p)
-	must(t, err)
+	intakefixture.Must(t, err)
 	j.halt(t)
 	body := j.publish(t)
 	if body != approved.Description || !strings.Contains(body, "- "+current+"\n") || strings.Contains(body, earlier) || strings.Contains(body, "Old item") {
@@ -235,10 +210,6 @@ func TestReassembledWorkstreamNeedsANewBriefAndKeepsNoEarlierItems(t *testing.T)
 	}
 }
 
-// An approval carrying the hash read before a brief with items was recorded
-// is refused with the draft-changed conflict. A brief without items leaves
-// the description as it was, and a workstream with no Before you ship items
-// publishes that description unchanged.
 func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *testing.T) {
 	t.Parallel()
 	j := newBriefJourney(t, "")
@@ -250,7 +221,6 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 		t.Fatalf("the presentation the owner read: %+v\n%s", read.Brief, read.Draft)
 	}
 
-	// A brief with items lands after the owner read the presentation.
 	recorded := j.ask(t, stream, "with-items", recordBrief(read, "", briefText, briefShipFirst))
 	if len(recorded) != 1 || !strings.Contains(recorded[0], `"recorded":true`) {
 		t.Fatalf("the brief with items: %q", recorded)
@@ -268,8 +238,6 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 		t.Fatalf("the refused approval was recorded: %+v", after.Approval)
 	}
 
-	// The brief is replaced by one without items: the description is the one
-	// the owner read, byte for byte.
 	replaced := j.ask(t, stream, "without-items", recordBrief(read, "", briefText))
 	if len(replaced) != 1 || !strings.Contains(replaced[0], `"recorded":true`) {
 		t.Fatalf("the brief without items: %q", replaced)
@@ -279,7 +247,7 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 		t.Fatalf("a brief without items changed the presentation: %+v\n%s\nwas:\n%s", unchanged.Brief, unchanged.Draft, read.Draft)
 	}
 	approved, err := j.approvePresented(read)
-	must(t, err)
+	intakefixture.Must(t, err)
 	if approved.Description != read.Draft {
 		t.Fatalf("the approved description:\n%s", approved.Description)
 	}
@@ -290,8 +258,6 @@ func TestApprovalOfAnEarlierReadIsRefusedAndTheBodyWithoutItemsIsUnchanged(t *te
 	}
 }
 
-// With a chief of staff shared by a workgroup, each member has a brief of its
-// own, and each member's description carries only its own items.
 func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -301,8 +267,8 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	j.host(t)
 	j.s.setSole(&activeProject{repository: repository})
 	second := j.secondMember(t, "group-second")
-	_, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{first, second}, demoStart, ownerActor, "fixture")
-	must(t, err)
+	_, err := trace.CreateWorkgroup(ctx, repository, []config.WorkstreamID{first, second}, fixturekit.DemoStart, intake.OwnerActor, "fixture")
+	intakefixture.Must(t, err)
 	j.assemble(t, first, "internal/trace", "first-resume", "first-dedupe")
 	j.assemble(t, second, "internal/trace", "second-resume", "second-dedupe")
 	j.run(t)
@@ -330,7 +296,7 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 			t.Fatalf("%s's description does not carry its own items alone:\n%s", member, p.Draft)
 		}
 		approved, err := j.approvePresented(p)
-		must(t, err)
+		intakefixture.Must(t, err)
 		bodies[member] = approved.Description
 	}
 	if bodies[first] == bodies[second] {
@@ -343,10 +309,8 @@ func TestSharedChiefBriefsEachMemberWithItsOwnItems(t *testing.T) {
 	}
 }
 
-// secondMember records a second workstream of the project's plan, built on
-// the same base as the first. The trace must be open.
 func (j *briefJourney) secondMember(t *testing.T, key string) config.WorkstreamID {
 	t.Helper()
-	base := strings.TrimSpace(demoGit(t, j.clone, "-C", j.clone, "rev-parse", "HEAD"))
-	return recordBuild(t, j.shedFixture, j.repository, key, validPlan, config.WorkspacesGit, base)
+	base := strings.TrimSpace(fixturekit.DemoGit(t, j.clone, "-C", j.clone, "rev-parse", "HEAD"))
+	return recordBuild(t, j.shedFixture, j.repository, key, intakefixture.ValidPlan, config.WorkspacesGit, base)
 }

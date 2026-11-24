@@ -9,9 +9,6 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// ID derivation domains. Every ID is the leading bytes of the SHA-256 of its
-// domain followed by each key part, each part prefixed with its length so no
-// two part lists share an encoding.
 const (
 	domainTrace        = "osmia.trace.workstream"
 	domainSpan         = "osmia.span.workstream"
@@ -33,7 +30,6 @@ func derive(size int, domain string, parts ...string) []byte {
 		write(p)
 	}
 	sum := h.Sum(nil)[:size]
-	// An all-zero ID is invalid in OpenTelemetry.
 	allZero := true
 	for _, b := range sum {
 		allZero = allZero && b == 0

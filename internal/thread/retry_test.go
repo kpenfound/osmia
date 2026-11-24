@@ -13,14 +13,11 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// chain is a fallback chain default -> backup -> last, where last crosses to
-// another backend.
 var chain = map[string]coreadapter.Profile{
 	"default": {Name: "backup", Backend: "fake", Model: "smaller"},
 	"backup":  {Name: "last", Backend: "other", Model: "other"},
 }
 
-// crashed is a started session that failed with an infrastructure failure.
 func crashed(p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 	return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: p.Profile.Backend, ID: "crashed"}, FinalResponse: "partial", Usage: coreadapter.Usage{Turns: 1, CostUSD: .1, CostKnown: true}, ExitCode: 1}, nil
 }
@@ -145,8 +142,6 @@ func TestExhaustedFallbackChainFailsTheTurnOnce(t *testing.T) {
 		t.Fatalf("response %+v", q.Response)
 	}
 
-	// Reconciliation after a restart completes from the durable record and
-	// never repeats an attempt.
 	repo.Close()
 	repo, err = trace.Open(root, p)
 	if err != nil {
@@ -252,9 +247,6 @@ func TestStartupFailureKeepsBackendDiagnosticWithoutSession(t *testing.T) {
 	}
 }
 
-// A registry limit holds every backend's sandbox, so the turn tries no
-// fallback profile: another create would only be another request against the
-// limit. The limit is recorded for the service to pause the sbx roles.
 func TestARegistryLimitTriesNoFallback(t *testing.T) {
 	repo, _, _ := setup(t)
 	queue(t, repo, "first")
@@ -269,7 +261,6 @@ func TestARegistryLimitTriesNoFallback(t *testing.T) {
 			return coreadapter.SessionResult{IsError: true, ErrorSubtype: "registry_rate_limit", Limit: &coreadapter.ProviderLimit{Status: "blocked", Kind: coreadapter.RegistryLimitKind, ResetsAt: timestamp.Add(time.Hour)}}, errors.New("create sandbox: rate limited")
 		}),
 	}
-	// The turn fails, and its error is the sandbox's.
 	q, _ := runner.RunNext(context.Background(), stream, "agent", coreadapter.PreparedTurn{SessionDirectory: "/owned"})
 	if len(q.Attempts) == 0 {
 		t.Fatal("no attempt was recorded")

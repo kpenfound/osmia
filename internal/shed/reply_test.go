@@ -12,7 +12,6 @@ import (
 	"github.com/kpenfound/osmia/internal/shed"
 )
 
-// Charter objections block; engineering advice retains its provenance.
 func TestDissentRecordMarksWhatBlocks(t *testing.T) {
 	r := shed.Record{Version: shed.Version, Round: 1, Member: alice, Revision: one}
 	for k, kind := range shed.Kinds {
@@ -85,14 +84,11 @@ func TestReplyRoundTripsAndRefusesInvalidContent(t *testing.T) {
 			t.Errorf("%s: parsed", name)
 		}
 	}
-	// No member's record takes the reply's file.
 	if _, err := shed.Encode(record(1, "reply", one, 0)); err == nil {
 		t.Fatal("a member named reply was encoded")
 	}
 }
 
-// The architect's replies sit beside the members' records without being read
-// as one, and are read back by round.
 func TestRepliesAreKeptApartFromTheMembersRecords(t *testing.T) {
 	f := setup(t)
 	member, err := shed.Encode(record(1, alice, one, 1))
@@ -118,7 +114,6 @@ func TestRepliesAreKeptApartFromTheMembersRecords(t *testing.T) {
 	if got, err := shed.Replies(f.repo, stream); err != nil || !reflect.DeepEqual(got, []shed.Reply{first, second}) {
 		t.Fatalf("replies %+v %v", got, err)
 	}
-	// A reply that records another round than its path names is refused.
 	write(shed.Reply{Version: shed.Version, Round: 4, Revision: one}, shed.ReplyPath(3), 1)
 	if _, err := shed.Replies(f.repo, stream); err == nil || !strings.Contains(err.Error(), "shed/round-3/reply.json") {
 		t.Fatalf("misplaced reply: %v", err)
