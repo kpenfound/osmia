@@ -320,6 +320,13 @@ func TestTheOwnerConcludesAndExtendsAClimbAndTheChiefSteersAndConcludesIt(t *tes
 	if total := budget.Total(); len(budget.Extensions) != 1 || total.Attempts != 2 || total.CostUSD != 1.5 {
 		t.Fatalf("budget %+v", budget)
 	}
+	read, apiErr := c.s.climbProgress(string(stream))
+	if apiErr != nil {
+		t.Fatal(apiErr)
+	}
+	if got := read.Progress.Budgets; got.Attempts.Max != 5 || got.CostUSD.Max != 0 || got.WallClockSeconds.Max != 0 {
+		t.Fatalf("the progress read shows %+v after the owner added two attempts to a limit of three", got)
+	}
 	if notices := c.chiefNotices(t, stream, trace.ProgressKind); !slices.ContainsFunc(notices, func(b string) bool { return strings.Contains(b, "extended the climb's budget") }) {
 		t.Fatalf("the chief was not told of the extension: %v", notices)
 	}

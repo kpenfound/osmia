@@ -339,10 +339,10 @@ func climbProgressText(repository *trace.Repository, stream config.WorkstreamID,
 		if err != nil {
 			return "", err
 		}
-		total := budget.Total()
-		fmt.Fprintf(&b, "\nAttempts: %d of %d allowed.", len(attempts), spec.Stop.MaxAttempts+total.Attempts)
-		if d, ok := spec.WallClock(); ok {
-			fmt.Fprintf(&b, " Time: %s of %s.", now.Sub(approval.StartedAt()).Round(time.Minute), d+total.WallClock)
+		limits := spec.Stop.Limits(budget.Total())
+		fmt.Fprintf(&b, "\nAttempts: %d of %d allowed.", len(attempts), limits.Attempts)
+		if limits.WallClock > 0 {
+			fmt.Fprintf(&b, " Time: %s of %s.", now.Sub(approval.StartedAt()).Round(time.Minute), limits.WallClock)
 		}
 		fmt.Fprintln(&b)
 	}

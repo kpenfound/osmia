@@ -183,7 +183,10 @@ type ProgressInput struct {
 	SpecRevision int
 	// CostUSD is the known spend of the workstream so far.
 	CostUSD float64
-	Now     time.Time
+	// Extension is what the owner's budget extensions add to the climb spec's
+	// hard limits, as climb.ReadBudget records them.
+	Extension Totals
+	Now       time.Time
 }
 
 // BuildProgress reads the climb's progress. It is plain arithmetic over what
@@ -268,16 +271,13 @@ func (p Progress) orient(score float64) float64 {
 
 func (in ProgressInput) budgets(sinceImprovement int) Budgets {
 	stop := in.Spec.Stop
-	b := Budgets{
-		Attempts:         Meter{Used: float64(len(in.Attempts)), Max: float64(stop.MaxAttempts)},
-		CostUSD:          Meter{Used: in.CostUSD, Max: stop.MaxCostUSD},
+	limits := stop.Limits(in.Extension)
+	return Budgets{
+		Attempts:         Meter{Used: float64(len(in.Attempts)), Max: float64(limits.Attempts)},
+		CostUSD:          Meter{Used: in.CostUSD, Max: limits.CostUSD},
+		WallClockSeconds: Meter{Used: in.elapsed().Seconds(), Max: limits.WallClock.Seconds()},
 		SinceImprovement: Meter{Used: float64(sinceImprovement), Max: float64(stop.Plateau)},
 	}
-	if limit, ok := in.Spec.WallClock(); ok {
-		b.WallClockSeconds.Max = limit.Seconds()
-	}
-	b.WallClockSeconds.Used = in.elapsed().Seconds()
-	return b
 }
 
 func (in ProgressInput) elapsed() time.Duration {

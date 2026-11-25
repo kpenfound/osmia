@@ -379,6 +379,19 @@ func TestApprovedClimbSpecAmendmentIsResealedAndAppliedWithoutUnits(t *testing.T
 	fixturekit.Must(t, err)
 	defer repository.Close()
 
+	unitMoves := func() int {
+		transitions, err := trace.Read[trace.Transition](repository, stream)
+		fixturekit.Must(t, err)
+		var n int
+		for _, tr := range transitions {
+			if strings.HasPrefix(tr.Subject, "unit-") {
+				n++
+			}
+		}
+		return n
+	}
+	unitMovesBefore := unitMoves()
+
 	amended := strings.Replace(validClimbSpec, `"min_improvement": 5`, `"min_improvement": 8`, 1)
 	sealed, sealDoc, found, err := seal.Latest(repository, stream)
 	fixturekit.Must(t, err)
@@ -434,11 +447,7 @@ func TestApprovedClimbSpecAmendmentIsResealedAndAppliedWithoutUnits(t *testing.T
 	if len(applications) != 1 || applications[0].Applied == nil || len(applications[0].Applied.Held) != 0 {
 		t.Fatalf("applied %+v", applications)
 	}
-	transitions, err := trace.Read[trace.Transition](repository, stream)
-	fixturekit.Must(t, err)
-	for _, tr := range transitions {
-		if strings.HasPrefix(tr.Subject, "unit-") {
-			t.Fatalf("an amendment of a climb spec moved the unit state %+v", tr)
-		}
+	if got := unitMoves(); got != unitMovesBefore {
+		t.Fatalf("an amendment of a climb spec moved the unit state: %d unit transitions before it, %d after", unitMovesBefore, got)
 	}
 }

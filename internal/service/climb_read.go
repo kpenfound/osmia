@@ -99,6 +99,11 @@ func readClimbProgress(repository *trace.Repository, cfg *config.Config, stream 
 			retired = inner.Value == climb.InnerCalibrating
 		}
 	}
+	budget, err := climb.ReadBudget(repository, stream)
+	if err != nil {
+		return climb.Progress{}, err
+	}
+	in.Extension = budget.Total()
 	if calibration, _, found, err := climb.ReadCalibration(repository, stream); err != nil {
 		return climb.Progress{}, err
 	} else if found && !retired {

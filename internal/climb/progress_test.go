@@ -146,3 +146,74 @@ func TestProgressReadsTheBaselineAndNoiseFromTheCalibrationRecord(t *testing.T) 
 		t.Fatalf("progress %+v", p)
 	}
 }
+
+func TestBudgetMetersShowTheLimitsTheStopRulesEnforceAfterAnExtension(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newAttemptStore(t)
+	spec := progressSpec(Lower)
+	spec.Stop = StopRules{MaxAttempts: 3, MaxCostUSD: 10, MaxWallClock: "2h"}
+	for _, e := range []Extension{{Attempts: 2, CostUSD: 4}, {Attempts: 1, WallClock: "30m"}} {
+		doc, _, err := BudgetDocument(repo, fixturekit.Stream, e, fixturekit.DemoStart)
+		fixturekit.Must(t, err)
+		fixturekit.Must(t, repo.RecordDocuments(ctx, []trace.Document{doc}))
+	}
+	budget, err := ReadBudget(repo, fixturekit.Stream)
+	fixturekit.Must(t, err)
+
+	attempts := func(n int) []Attempt {
+		out := make([]Attempt, n)
+		for i := range out {
+			out[i] = Attempt{Number: i + 1, Outcome: OutcomeDiscarded, Cause: CauseNoImprovement, Best: 100, StartedAt: fixturekit.DemoStart, FinishedAt: fixturekit.DemoStart}
+		}
+		return out
+	}
+	progress := BuildProgress(ProgressInput{Spec: spec, Attempts: attempts(1), Extension: budget.Total(), Now: fixturekit.DemoStart})
+	b := progress.Budgets
+	if b.Attempts.Max != 6 || b.CostUSD.Max != 14 || b.WallClockSeconds.Max != (150*time.Minute).Seconds() {
+		t.Fatalf("the meters show %+v, want 6 attempts, $14 and 2h30m", b)
+	}
+
+	stop := func(in StopInput) []string {
+		in.Rules, in.Direction, in.Baseline, in.Extension = spec.Stop, Lower, 100, budget.Total()
+		in.Started, in.Now = fixturekit.DemoStart, fixturekit.DemoStart
+		return Rules(EvaluateStops(in))
+	}
+	limit := int(b.Attempts.Max)
+	if got := stop(StopInput{Attempts: attempts(limit - 1)}); len(got) != 0 {
+		t.Fatalf("the stop rules fired before the %d attempts the meter shows: %v", limit, got)
+	}
+	if got := stop(StopInput{Attempts: attempts(limit)}); len(got) != 1 || got[0] != RuleAttempts {
+		t.Fatalf("the stop rules did not fire at the %d attempts the meter shows: %v", limit, got)
+	}
+	cost := b.CostUSD.Max
+	if got := stop(StopInput{Attempts: attempts(1), Spent: cost - 0.01}); len(got) != 0 {
+		t.Fatalf("the stop rules fired below the $%.2f the meter shows: %v", cost, got)
+	}
+	if got := stop(StopInput{Attempts: attempts(1), Spent: cost}); len(got) != 1 || got[0] != RuleCost {
+		t.Fatalf("the stop rules did not fire at the $%.2f the meter shows: %v", cost, got)
+	}
+	wall := time.Duration(b.WallClockSeconds.Max * float64(time.Second))
+	late := func(elapsed time.Duration) []string {
+		in := StopInput{Attempts: attempts(1)}
+		in.Rules, in.Direction, in.Baseline, in.Extension = spec.Stop, Lower, 100, budget.Total()
+		in.Started, in.Now = fixturekit.DemoStart, fixturekit.DemoStart.Add(elapsed)
+		return Rules(EvaluateStops(in))
+	}
+	if got := late(wall - time.Second); len(got) != 0 {
+		t.Fatalf("the stop rules fired before the %s the meter shows: %v", wall, got)
+	}
+	if got := late(wall); len(got) != 1 || got[0] != RuleWallClock {
+		t.Fatalf("the stop rules did not fire at the %s the meter shows: %v", wall, got)
+	}
+}
+
+func TestAnExtensionDoesNotCreateALimitTheClimbSpecDoesNotSet(t *testing.T) {
+	t.Parallel()
+	spec := progressSpec(Lower)
+	spec.Stop = StopRules{MaxAttempts: 3}
+	b := BuildProgress(ProgressInput{Spec: spec, Extension: Totals{Attempts: 2, CostUSD: 5, WallClock: time.Hour}, Now: fixturekit.DemoStart}).Budgets
+	if b.Attempts.Max != 5 || b.CostUSD.Max != 0 || b.WallClockSeconds.Max != 0 {
+		t.Fatalf("the meters show %+v", b)
+	}
+}

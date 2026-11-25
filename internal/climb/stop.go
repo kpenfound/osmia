@@ -15,6 +15,35 @@ const (
 	RuleTarget    = "target"
 )
 
+// Limits are the attempt, cost and wall-clock limits the stop rules enforce:
+// the climb spec's hard rules plus what the owner's budget extensions add. A
+// zero limit means the climb spec sets none, and an extension does not create
+// one.
+type Limits struct {
+	Attempts  int
+	CostUSD   float64
+	WallClock time.Duration
+}
+
+// Limits returns the hard limits with the owner's budget extensions applied.
+// The stop rules and the climb panel's budget meters both read them from here,
+// so what the panel shows is what the climb loop enforces.
+func (r StopRules) Limits(ext Totals) Limits {
+	var l Limits
+	if r.MaxAttempts > 0 {
+		l.Attempts = r.MaxAttempts + ext.Attempts
+	}
+	if r.MaxCostUSD > 0 {
+		l.CostUSD = r.MaxCostUSD + ext.CostUSD
+	}
+	if r.MaxWallClock != "" {
+		if d, err := time.ParseDuration(r.MaxWallClock); err == nil && d > 0 {
+			l.WallClock = d + ext.WallClock
+		}
+	}
+	return l
+}
+
 // Firing is a stop rule that holds. A hard rule cannot be continued past
 // without an owner budget extension; a soft one may be continued by Jev at its
 // bar.
@@ -67,20 +96,15 @@ func EvaluateStops(in StopInput) []Firing {
 		return nil
 	}
 	last := in.Attempts[n-1].Number
-	if limit := in.Rules.MaxAttempts + in.Extension.Attempts; in.Rules.MaxAttempts > 0 && n >= limit {
-		out = append(out, Firing{Rule: RuleAttempts, Hard: true, Reason: fmt.Sprintf("%d attempts were recorded, reaching the limit of %d", n, limit)})
+	limits := in.Rules.Limits(in.Extension)
+	if limits.Attempts > 0 && n >= limits.Attempts {
+		out = append(out, Firing{Rule: RuleAttempts, Hard: true, Reason: fmt.Sprintf("%d attempts were recorded, reaching the limit of %d", n, limits.Attempts)})
 	}
-	if in.Rules.MaxCostUSD > 0 {
-		if limit := in.Rules.MaxCostUSD + in.Extension.CostUSD; in.Spent >= limit {
-			out = append(out, Firing{Rule: RuleCost, Hard: true, Reason: fmt.Sprintf("the climb spent $%.2f, reaching the limit of $%.2f", in.Spent, limit)})
-		}
+	if limits.CostUSD > 0 && in.Spent >= limits.CostUSD {
+		out = append(out, Firing{Rule: RuleCost, Hard: true, Reason: fmt.Sprintf("the climb spent $%.2f, reaching the limit of $%.2f", in.Spent, limits.CostUSD)})
 	}
-	if in.Rules.MaxWallClock != "" {
-		if d, err := time.ParseDuration(in.Rules.MaxWallClock); err == nil && !in.Started.IsZero() {
-			if limit := d + in.Extension.WallClock; in.Now.Sub(in.Started) >= limit {
-				out = append(out, Firing{Rule: RuleWallClock, Hard: true, Reason: fmt.Sprintf("the climb ran %s, reaching the limit of %s", in.Now.Sub(in.Started).Round(time.Second), limit)})
-			}
-		}
+	if limits.WallClock > 0 && !in.Started.IsZero() && in.Now.Sub(in.Started) >= limits.WallClock {
+		out = append(out, Firing{Rule: RuleWallClock, Hard: true, Reason: fmt.Sprintf("the climb ran %s, reaching the limit of %s", in.Now.Sub(in.Started).Round(time.Second), limits.WallClock)})
 	}
 	best, keptAt := Best(in.Baseline, InEpoch(in.Attempts, in.Epoch))
 	if in.Rules.Plateau > 0 {
