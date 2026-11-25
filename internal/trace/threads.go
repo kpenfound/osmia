@@ -424,7 +424,7 @@ func (r *Repository) Threads(stream config.WorkstreamID) ([]Thread, error) {
 
 func (r *Repository) snapshot(t Thread) Thread {
 	for _, q := range t.Turns {
-		if q.Request.TurnID == t.Active && q.Response == nil && q.Claim.ServiceSession != r.session {
+		if q.Request.TurnID == t.Active && q.Response == nil && q.Claim.ServiceSession != r.session && !r.turnHeld(q.Request.TurnID) {
 			t.Status = "interrupted"
 		}
 	}

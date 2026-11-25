@@ -513,3 +513,71 @@ func TestNoSpansAreTrackedWhileTelemetryIsOff(t *testing.T) {
 		t.Fatalf("dispatched %v", got)
 	}
 }
+
+func TestSlotSpansOfTurnsOnAClientCarryTheClientIdentity(t *testing.T) {
+	spans := newRig(t)
+	rec := spans.recorder()
+	defer rec.Close()
+	r := newPlaceRig(t, big())
+	r.pool = &Shared{Spans: rec}
+	r.rebuild()
+	r.setLocal(0)
+	a := r.connect("nCLIENTA1", 1)
+	r.agent(stream, "resumed", "mason")
+	r.agent(stream, "busy", "mason")
+	first := r.queue(stream, "resumed", "one")
+	r.pass()
+	r.finish(stream, "resumed", first, a.ID)
+	busy := r.queue(stream, "busy", "one")
+	r.pass()
+	second := r.queue(stream, "resumed", "two")
+	r.pass()
+	if r.isDispatched("resumed", second) {
+		t.Fatal("the resumed turn started while its client was full")
+	}
+	r.finish(stream, "busy", busy, a.ID)
+	r.pass()
+	if r.where(second) != a.ID {
+		t.Fatalf("the resumed turn runs on %q", r.where(second))
+	}
+
+	waits := spans.spans("osmia.slot.wait")
+	if len(waits) != 1 {
+		t.Fatalf("%d wait spans, want the resumed turn's wait for its client", len(waits))
+	}
+	if got := attrs(waits[0]); got[telemetry.KeyClient] != a.ID || got[telemetry.KeyWaitReason] != slotspans.ReasonClient || got["osmia.outcome"] != slotspans.Granted {
+		t.Fatalf("wait span attributes %v", got)
+	}
+	held := spans.spans("osmia.slot.held")
+	if len(held) < 2 {
+		t.Fatalf("%d held spans, want one for each turn that ended on the client", len(held))
+	}
+	for _, h := range held {
+		if got := attrs(h); got[telemetry.KeyClient] != a.ID {
+			t.Fatalf("held span attributes %v", got)
+		}
+	}
+}
+
+func TestSlotSpansOfALocalOnlyFactoryCarryNoClientUnlessPlacementNamesOne(t *testing.T) {
+	spans := newRig(t)
+	rec := spans.recorder()
+	defer rec.Close()
+	f, repo := setup(t, "mason1")
+	defer repo.Close()
+	f.queue(t, repo, "mason1", "one")
+	limits := &config.Capacity{Masons: 1, Reviewers: 1, Committee: 1, PerWorkstream: 5}
+	s, err := New(repo, Options{Now: spans.clock.Now, Capacity: limits, Shared: &Shared{Spans: rec}})
+	must(t, err)
+	must(t, s.Pass(context.Background()))
+	spans.clock.Advance(time.Minute)
+	finish(t, repo, stream, "mason1", "one", spans.clock.Now())
+	must(t, s.Pass(context.Background()))
+	held := spans.spans("osmia.slot.held")
+	if len(held) != 1 {
+		t.Fatalf("%d held spans", len(held))
+	}
+	if _, ok := attrs(held[0])[telemetry.KeyClient]; ok {
+		t.Fatalf("a turn no client was chosen for carries a client: %v", attrs(held[0]))
+	}
+}

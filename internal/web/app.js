@@ -30,9 +30,11 @@
   // server-side rule never flags one as blocked from elapsed time alone
   // either (activity.go, ActivityEntry.reported) and "git" is left out here
   // to match. archive_cleanup and recovery do report progress through their
-  // phases, so a stall in either still shows as blocked.
+  // phases, so a stall in either still shows as blocked. So does a turn on a
+  // client (client_turn), whose phase and progress arrive in the client's
+  // heartbeats.
   const activityStallMs = 30000;
-  const activityStallTrackedKinds = new Set(['archive_cleanup', 'recovery']);
+  const activityStallTrackedKinds = new Set(['archive_cleanup', 'recovery', 'client_turn']);
 
   // An edit of a configuration file on disk is not announced, so the page
   // reads /config again this often while it is visible and live.
@@ -58,6 +60,8 @@
 
   const waitReasons = {
     capacity: 'every slot is taken',
+    client: 'its client has no free slot',
+    'no-client': 'no connected client can run its profile',
     priority: 'higher-priority work starts first',
     'workstream-cap': 'the workstream holds its share',
   };
@@ -1289,8 +1293,87 @@
           : el('ul', { class: 'waiting' }, ...r.waiting.map((w) => el('li', { 'data-field': 'waiting' },
             el('span', { class: 'id' }, w.workstream),
             ' ', w.unit ? 'unit ' + w.unit : w.review ? 'final review ' + w.review : w.preview ? 'preview' : w.session ? 'session' : 'agent ' + w.agent,
-            ': ', waitReasons[w.reason] || w.reason))))),
-      el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' worker slots. Check slots are shared separately across the factory.'));
+            ': ', waitReasons[w.reason] || w.reason, w.client ? el('span', { class: 'meta' }, ' (waiting for ', el('span', { class: 'id', 'data-field': 'waiting-client' }, w.client), ')') : null))))),
+      el('p', { class: 'meta', 'data-field': 'per-workstream' }, 'Each workstream may hold ' + capacity.per_workstream + ' worker slots. Check slots are shared separately across the factory.'),
+      renderClients(capacity.clients || []));
+  }
+
+  // The profile lists a client has open stay open while the page reads the
+  // status again, which rebuilds the popover.
+  const openClientProfiles = new Set();
+
+  function clientSlots(c) {
+    return typeof c.slots === 'number' ? c.used + ' / ' + c.slots + ' slots' : c.used + ' active, no local limit';
+  }
+
+  function clientProblem(problem) {
+    return el('li', { 'data-field': 'problem' },
+      el('span', {}, problem.check + (problem.detail ? ': ' + problem.detail : '')),
+      problem.fix ? el('div', { class: 'meta', 'data-field': 'fix' }, 'Fix: ', el('code', {}, problem.fix)) : null);
+  }
+
+  function clientProfiles(c) {
+    const can = c.profiles.filter((p) => p.runnable);
+    const cannot = c.profiles.filter((p) => !p.runnable);
+    let summary = 'Not reported yet';
+    if (c.reported) {
+      summary = c.profiles.length === 0 ? 'No profiles configured' : can.length + ' can run' + (cannot.length > 0 ? ', ' + cannot.length + ' cannot' : '');
+    }
+    const details = el('details', { 'data-field': 'profiles', 'data-client': c.id },
+      el('summary', {}, summary),
+      can.length > 0 ? el('p', { class: 'meta', 'data-field': 'can-run' }, 'Can run ', ...can.flatMap((p, i) => [i > 0 ? ' ' : '', el('code', {}, p.profile)])) : null,
+      ...cannot.map((p) => el('div', { class: 'cannot', 'data-field': 'cannot-run', 'data-profile': p.profile },
+        el('div', {}, el('code', {}, p.profile), ' cannot run here'),
+        (p.problems || []).length > 0 ? el('ul', {}, ...p.problems.map(clientProblem)) : null)));
+    details.open = openClientProfiles.has(c.id) || c.idle === 'no-profile';
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        openClientProfiles.add(c.id);
+      } else {
+        openClientProfiles.delete(c.id);
+      }
+    });
+    return details;
+  }
+
+  function clientState(c) {
+    const parts = [];
+    if (c.lease) {
+      const late = c.lease.health === 'late';
+      parts.push(el('span', { class: 'state', 'data-field': 'lease', 'data-health': c.lease.health },
+        late ? 'Lease late, ends ' + when(c.lease.ends_at) : 'Lease healthy'));
+    }
+    if (c.draining) {
+      parts.push(el('span', { class: 'state', 'data-field': 'draining', 'data-health': 'late' }, 'Draining'));
+    }
+    return parts.length > 0 ? metaRow(...parts) : null;
+  }
+
+  function renderClient(c) {
+    return el('div', { class: 'client', 'data-client': c.id, 'data-local': String(Boolean(c.local)), 'data-draining': String(c.draining), 'data-idle': c.idle || '' },
+      el('div', { class: 'line' },
+        el('strong', { 'data-field': 'name' }, c.local ? 'Local client' : c.name),
+        el('span', { 'data-field': 'slots' }, clientSlots(c))),
+      c.local ? el('div', { class: 'meta', 'data-field': 'identity' }, 'The server\'s own machine') : el('div', { class: 'meta' }, el('span', { class: 'id', 'data-field': 'identity', translate: 'no' }, c.id)),
+      clientState(c),
+      c.idle_reason ? el('p', { class: 'idle', 'data-field': 'idle' }, c.idle_reason) : null,
+      clientProfiles(c),
+      c.skipped.length > 0 ? el('ul', { class: 'skips' }, ...c.skipped.map((k) => el('li', { class: 'meta', 'data-field': 'skipped' },
+        'Skips fallback ', el('code', {}, k.profile), ' for ' + k.role + ', main profile ', el('code', {}, k.main)))) : null,
+      c.turns.length > 0 ? el('ul', { class: 'client-turns' }, ...c.turns.map((t) => el('li', { 'data-field': 'turn', 'data-turn': t.turn },
+        metaRow(el('span', { class: 'id' }, t.turn), t.role, t.workstream ? el('span', { class: 'id' }, t.workstream) : null, t.unit ? 'unit ' + t.unit : null)))) : null,
+      c.failures.length > 0 ? el('ul', { class: 'client-failures' }, ...c.failures.map((f) => el('li', { 'data-field': 'failure', 'data-turn': f.turn },
+        metaRow(el('span', { class: 'state', 'data-health': 'failed' }, 'Failed'), f.role, el('span', { class: 'id' }, f.turn), f.profile),
+        el('div', { class: 'meta', 'data-field': 'failure-text' }, f.failure)))) : null);
+  }
+
+  function renderClients(clients) {
+    if (clients.length === 0) {
+      return null;
+    }
+    return el('section', { class: 'clients', 'data-field': 'clients', 'aria-label': 'Clients' },
+      el('h4', {}, 'Clients'),
+      ...clients.map(renderClient));
   }
 
   function isMultiMember(w) {

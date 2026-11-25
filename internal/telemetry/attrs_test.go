@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestAllowListedAttributes(t *testing.T) {
 	for name, a := range map[string]Attr{
 		"role": Role("mason"), "backend": Backend("claude"), "model": Model("claude-sonnet-5-5"), "profile": Profile("default"),
 		"project": Project("p_00000000000000000000000000000001"), "workstream": Workstream(streamA), "unit": Unit("u1"),
-		"record": Record("rec-1"), "pool": Pool("masons"), "roles": PoolRoles([]string{"mason", "reviewer"}),
+		"record": Record("rec-1"), "client": Client("nSTABLE123CNTRL"), "pool": Pool("masons"), "roles": PoolRoles([]string{"mason", "reviewer"}),
 		"limit": PoolLimit(4), "unbounded": PoolUnbounded(), "outcome": Outcome("completed"), "cause": Cause("review_bounce"),
 		"state": State("implementing"), "next": NextState("reviewing"), "reason": WaitReason("pool_full"), "kind": CheckKind("final"),
 		"scope": PauseScope("factory"), "source": PauseSource("owner"), "covered": Covered(3), "wait": SlotWait(1500 * time.Millisecond),
@@ -77,9 +78,24 @@ func TestAttributesOutsideTheAllowListAreRefused(t *testing.T) {
 		"unsafe punctuation":      Model("model;drop table"),
 		"quoted":                  Profile(`"quoted"`),
 		"wait reason with spaces": WaitReason("pool is full"),
+		"client name with spaces": Client("my laptop"),
+		"empty client":            Client(""),
 	} {
 		if a.Valid() || a.Key() != "" {
 			t.Fatalf("%s was accepted as %q", name, a.Key())
 		}
+	}
+}
+
+func TestTheClientIdentityIsAnAllowListedAttribute(t *testing.T) {
+	if !slices.Contains(AttributeKeys(), KeyClient) || KeyClient != "osmia.client.id" {
+		t.Fatalf("the client identity key %q is not on the allow list %v", KeyClient, AttributeKeys())
+	}
+	a := Client("nSTABLE123CNTRL")
+	if !a.Valid() || a.Key() != KeyClient || a.Value().AsString() != "nSTABLE123CNTRL" {
+		t.Fatalf("client attribute %q = %v", a.Key(), a.Value())
+	}
+	if !Client("local").Valid() {
+		t.Fatal("the local client's identity is refused")
 	}
 }

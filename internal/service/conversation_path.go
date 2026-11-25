@@ -522,5 +522,16 @@ func (p *conversationPath) publish(ctx context.Context, repository *trace.Reposi
 			return err
 		}
 	}
-	return scheduler.Dispatch(ctx, repository, c, p.s.now())
+	if p.s.placement == nil {
+		return scheduler.Dispatch(ctx, repository, c, p.s.now())
+	}
+	turn := scheduler.PlacementTurn(c, resumableRole)
+	if p.s.placement.Take(turn).Client == "" {
+		return nil
+	}
+	err := scheduler.Dispatch(ctx, repository, c, p.s.now())
+	if err != nil {
+		p.s.placement.Release(turn.ID)
+	}
+	return err
 }

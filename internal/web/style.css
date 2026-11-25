@@ -1833,7 +1833,8 @@ li.meta-row {
 .id,
 .decision,
 .pause,
-.role {
+.role,
+.client {
   overflow-wrap: anywhere;
 }
 
@@ -1871,6 +1872,7 @@ li.meta-row {
 
 .pause,
 .role,
+.client,
 .activity-entry {
   min-width: 0;
   padding: 0.5rem 0.75rem;
@@ -1898,6 +1900,110 @@ li.meta-row {
 
 .waiting li {
   padding: 0.15rem 0;
+}
+
+/* Clients sit under the role pools in the capacity popover. Each is a block
+   of its own, not a card: the surface step marks it, the lease and
+   draining words carry a shape beside their colour, and the profile lists
+   stay folded until the owner opens them or the client can run nothing. */
+
+#capacity-popover {
+  width: min(30rem, calc(100vw - 1rem));
+}
+
+.clients {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.clients > h4 {
+  margin-top: 0.5rem;
+}
+
+.client {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.client [data-field="slots"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.client .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--fs-small);
+  color: var(--live);
+}
+
+.client .state::before,
+.client-failures .state::before {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  content: "";
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.client .state[data-health="late"] {
+  color: var(--waiting);
+}
+
+.client .state[data-health="late"]::before {
+  background: transparent;
+  border: 2px solid currentcolor;
+}
+
+.client .state[data-health="failed"] {
+  color: var(--failed);
+}
+
+.client .state[data-health="failed"]::before {
+  border-radius: 0.1rem;
+}
+
+.client .idle {
+  margin: 0;
+  padding-left: 0.5rem;
+  color: var(--waiting);
+  border-left: 2px solid var(--waiting);
+}
+
+.client[data-idle="no-profile"] .idle {
+  color: var(--failed);
+  border-left-color: var(--failed);
+}
+
+.client details > summary {
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+.client details > summary:hover {
+  color: var(--text);
+}
+
+.client details > :not(summary) {
+  margin: 0.25rem 0 0 1rem;
+}
+
+.client .cannot ul {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.client-turns,
+.client-failures,
+.skips {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.client-failures li > .meta {
+  color: var(--failed);
 }
 
 .control {

@@ -113,6 +113,9 @@ func (r Recorder) turn(d trace.CommitDetail, turn trace.FinishedTurn) {
 	if unit := turn.Request.Unit; unit != "" {
 		attrs = append(attrs, telemetry.Unit(unit))
 	}
+	if res.Client != "" {
+		attrs = append(attrs, telemetry.Client(res.Client))
+	}
 	if cause != "" {
 		attrs = append(attrs, telemetry.Cause(cause))
 	}

@@ -12,6 +12,7 @@ import (
 // and Response hold zero values of the JSON body types; Request is nil for an
 // endpoint that reads no body. Status is the success status, 200 when zero.
 // Stream marks the text/event-stream endpoint, whose Response is one event.
+// RequestType and ResponseType name the media type of a body that is not JSON.
 type Route struct {
 	Method   string
 	Path     string
@@ -21,11 +22,31 @@ type Route struct {
 	Status   int
 	Stream   bool
 	Binary   bool
+
+	RequestType  string
+	ResponseType string
 }
 
 // Routes lists every endpoint Service.handle serves under api.Prefix.
 var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/images/{workstream}/{image}", Summary: "Read a live PNG or JPEG attachment with nosniff", Response: "", Binary: true},
+	{Method: http.MethodGet, Path: api.Prefix + "/git/{project}/info/refs", Summary: "Tailnet listener only: advertise a registered project's clone for git fetch and clone over smart HTTP (query service=git-upload-pack); service=git-receive-pack is refused", Response: "", ResponseType: api.GitAdvertisementType},
+	{Method: http.MethodPost, Path: api.Prefix + "/git/{project}/git-upload-pack", Summary: "Tailnet listener only: serve a git fetch or clone of a registered project's clone, including any commit it holds that no branch points at; the request is not JSON, it carries Content-Type " + api.GitUploadPackRequestType, Response: "", RequestType: api.GitUploadPackRequestType, ResponseType: api.GitUploadPackResultType},
+	{Method: http.MethodPost, Path: api.Prefix + "/git/{project}/git-receive-pack", Summary: "Always refused as forbidden: the git route is read-only and takes no push", Response: api.ErrorResponse{}, Status: http.StatusForbidden},
+	{Method: http.MethodGet, Path: api.Prefix + "/turns/{turn}/view", Summary: "Tailnet listener only: download the archive of a turn's view built from trace documents; the request carries the turn's bearer token", Response: "", ResponseType: api.ViewArchiveType},
+	{Method: http.MethodPut, Path: api.Prefix + "/turns/{turn}/view", Summary: "Tailnet listener only: upload a turn's finished view as an archive, which is unpacked into a staging directory and handed to the turn; refused when any entry escapes the view root. The request is not JSON, it carries Content-Type " + api.ViewArchiveType + " and the turn's bearer token. The answer is accepted, already_recorded or superseded", Response: api.ViewUploadResponse{}, RequestType: api.ViewArchiveType},
+	{Method: http.MethodPost, Path: api.Prefix + "/turns/{turn}/mcp", Summary: "Tailnet listener only: relay a remote turn's MCP request (a client's local listener forwards each tool call its sandbox makes) to the turn's own MCP endpoint on the service, which handles and audits it. Only a request that carries the turn's bearer token is relayed; any other is refused. Paths below /mcp are relayed as they are", Response: "", RequestType: "application/json", ResponseType: "application/json"},
+	{Method: http.MethodGet, Path: api.Prefix + "/turns/{turn}/mcp", Summary: "Tailnet listener only: relay a remote turn's MCP event stream to the turn's own MCP endpoint, for the turn's bearer token alone", Response: "", ResponseType: "text/event-stream"},
+	{Method: http.MethodDelete, Path: api.Prefix + "/turns/{turn}/mcp", Summary: "Tailnet listener only: relay the end of a remote turn's MCP session to the turn's own MCP endpoint, for the turn's bearer token alone", Response: "", ResponseType: "application/json"},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/connect", Summary: "Tailnet listener only: connect an osmia client and receive its lease and the profile handout. The client is identified by its tailnet node. Refused with client_version_mismatch, naming both versions, when the client speaks another protocol version, and with client_connected while the node's earlier connection holds a lease unless the request names that lease, which reconnects it and reattaches its running turns by ID", Request: api.ClientConnectRequest{}, Response: api.ClientConnectResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/heartbeat", Summary: "Tailnet listener only: keep a client's lease alive and report each running turn's progress; the lease ends about 2 minutes after the server last hears from the client", Request: api.HeartbeatRequest{}, Response: api.HeartbeatResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/capabilities", Summary: "Tailnet listener only: report which profiles of the handout the client can and cannot run, with the fix for each missing item", Request: api.CapabilityReport{}, Response: api.CapabilityResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/drain", Summary: "Tailnet listener only: mark the client draining, so it is offered no new turns and keeps its lease while its running turns finish", Request: api.DrainRequest{}, Response: api.DrainResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/leave", Summary: "Tailnet listener only: end the client's lease at once", Request: api.LeaveRequest{}, Response: api.LeaveResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/poll", Summary: "Tailnet listener only: long-poll for messages from the server (profile handouts, turn offers, cancels and requests to carry out a view or skill operation), acknowledging those already handled; answers with none when the wait ends first", Request: api.PollRequest{}, Response: api.PollResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/turns/{turn}/claim", Summary: "Tailnet listener only: take or decline an offered turn; gone means the offer was withdrawn and the turn must not run", Request: api.ClaimRequest{}, Response: api.ClaimResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/turns/{turn}/result", Summary: "Tailnet listener only: return a turn's result with the session files the server reads after it; the answer is definitive: accepted, already_recorded or superseded", Request: api.TurnResult{}, Response: api.TurnResultResponse{}},
+	{Method: http.MethodPost, Path: api.Prefix + "/clients/{lease}/requests/{request}/reply", Summary: "Tailnet listener only: reply to a request the server made on the client's own connection to carry out a view or skill operation", Request: api.ServerReply{}, Response: api.ServerReplyResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/engine/status", Summary: "Report Dagger engine mode, reachability, versions and cache size", Response: api.EngineStatus{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/restart", Summary: "Restart the managed Dagger engine when no checks or Dagger turns are active", Response: api.MutationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/prune", Summary: "Prune the managed Dagger engine cache when idle", Response: api.MutationResponse{}},

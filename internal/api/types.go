@@ -729,6 +729,9 @@ type FailureStreak struct {
 	Consecutive int       `json:"consecutive"`
 	LastFailure string    `json:"last_failure"`
 	LastAt      time.Time `json:"last_at"`
+	// Clients names the clients the failed attempts ran on, in order of first
+	// failure.
+	Clients []string `json:"clients,omitempty"`
 }
 
 // DailyBudgetStatus is the known spend of the service host's current local
@@ -749,6 +752,112 @@ type DailyBudgetStatus struct {
 type CapacityStatus struct {
 	PerWorkstream int            `json:"per_workstream" description:"Maximum concurrent worker turns per workstream; check slots are independent."`
 	Roles         []RoleCapacity `json:"roles" description:"Factory-wide mason, reviewer, committee, architect, checks and chief slot pools, in that order."`
+	Clients       []ClientStatus `json:"clients" description:"The local client and every connected client, in the order new turns rotate through them. Each client's slots are a second bound next to the role pools."`
+}
+
+// The reasons a client takes no new turn now, the values of
+// ClientStatus.Idle.
+const (
+	// ClientIdleDraining: the client is draining.
+	ClientIdleDraining = "draining"
+	// ClientIdleNoSlots: the local client is set to no slots, or a client
+	// declared none.
+	ClientIdleNoSlots = "no-slots"
+	// ClientIdleFull: every slot of the client is taken.
+	ClientIdleFull = "full"
+	// ClientIdleNoReport: the client has not reported what it can run yet.
+	ClientIdleNoReport = "no-report"
+	// ClientIdleNoProfile: the client can run no profile.
+	ClientIdleNoProfile = "no-profile"
+)
+
+// The health of a client's lease, the values of ClientLease.Health.
+const (
+	// LeaseHealthy: the client was heard from recently.
+	LeaseHealthy = "healthy"
+	// LeaseLate: heartbeats are missing but the grace window has not passed.
+	LeaseLate = "late"
+)
+
+// ClientStatus is one client as the owner sees it: the local client, which is
+// the server's own machine, or a connected client identified by its tailnet
+// node. Turns lists the turns running on it, Profiles what it can and cannot
+// run with the fix for each missing item, Skipped the fallback profiles it
+// skips, and Failures the latest turns that failed on it. A client that takes
+// no new turn says why in Idle and IdleReason.
+type ClientStatus struct {
+	ID    string `json:"id" description:"The client's identity: its tailnet node's stable ID, or local for the server's own machine."`
+	Name  string `json:"name" description:"The tailnet node's name, or local for the server's own machine."`
+	Local bool   `json:"local,omitempty" description:"True for the built-in local client."`
+	Slots *int   `json:"slots,omitempty" description:"The client's slot count. Absent when unbounded is true."`
+	// Unbounded is true for a local client with no slot setting, which adds no cap beyond the role limits.
+	Unbounded bool `json:"unbounded,omitempty" description:"True for the local client when capacity.local_slots is unset: it adds no cap beyond the role limits."`
+	Used      int  `json:"used" description:"Slots the client's turns and offers take."`
+	// Lease is absent for the local client, which holds no lease.
+	Lease    *ClientLease `json:"lease,omitempty" description:"The client's lease. Absent for the local client."`
+	Draining bool         `json:"draining" description:"True while the client is draining: it takes no new turns."`
+	Idle     string       `json:"idle,omitempty" enum:"draining,no-slots,full,no-report,no-profile" description:"Why the client takes no new turn now. Absent when it takes one."`
+	// IdleReason says Idle in words, with the fix when there is one.
+	IdleReason string `json:"idle_reason,omitempty" description:"Idle in plain words, with the fix when there is one."`
+	// Reported is false until a connected client sends its capability report.
+	Reported bool `json:"reported" description:"True once the client has reported what it can run; the local client runs every profile."`
+	// ReportCurrent is false when the report checked an older profile handout than the server holds now.
+	ReportCurrent bool                  `json:"report_current" description:"False when the client's report checked an older profile handout than the server holds now."`
+	Profiles      []ClientProfileStatus `json:"profiles" description:"Each configured profile the client can or cannot run."`
+	Skipped       []ClientSkip          `json:"skipped" description:"Fallback profiles the client skips because it cannot run them."`
+	Turns         []ClientTurn          `json:"turns" description:"The turns running on the client."`
+	Failures      []ClientFailure       `json:"failures" description:"The latest turns that failed on the client, newest first."`
+}
+
+// ClientLease is the health of a connected client's lease.
+type ClientLease struct {
+	Health      string    `json:"health" enum:"healthy,late" description:"healthy when heartbeats arrive; late when they are missing but the grace window has not passed."`
+	ConnectedAt time.Time `json:"connected_at"`
+	LastSeen    time.Time `json:"last_seen" description:"When the server last heard from the client."`
+	EndsAt      time.Time `json:"ends_at" description:"When the lease ends unless the client is heard from."`
+}
+
+// ClientProfileStatus is whether a client can run one profile and, when it
+// cannot, what it lacks and the fix.
+type ClientProfileStatus struct {
+	Profile  string           `json:"profile"`
+	Runnable bool             `json:"runnable"`
+	Problems []ProfileProblem `json:"problems,omitempty"`
+}
+
+// ClientSkip is a fallback profile a client skips: Profile follows Main in
+// Role's chain and the client cannot run it.
+type ClientSkip struct {
+	Role    string `json:"role"`
+	Main    string `json:"main" description:"The role's main profile, which the client can run."`
+	Profile string `json:"profile" description:"The fallback profile the client skips."`
+}
+
+// ClientTurn is a turn running on a client.
+type ClientTurn struct {
+	Turn       string              `json:"turn"`
+	Project    config.ProjectID    `json:"project,omitempty"`
+	Workstream config.WorkstreamID `json:"workstream,omitempty"`
+	Unit       string              `json:"unit,omitempty"`
+	Role       string              `json:"role,omitempty"`
+	Agent      string              `json:"agent,omitempty"`
+	Profile    string              `json:"profile,omitempty"`
+	StartedAt  *time.Time          `json:"started_at,omitempty"`
+}
+
+// ClientFailure is a turn that failed on a client. Class is infrastructure
+// for a failure of the machine or its setup, such as a missing provider
+// login, and behavioural for one of the agent's work.
+type ClientFailure struct {
+	Turn       string              `json:"turn"`
+	Project    config.ProjectID    `json:"project,omitempty"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	Unit       string              `json:"unit,omitempty"`
+	Role       string              `json:"role"`
+	Profile    string              `json:"profile"`
+	Failure    string              `json:"failure"`
+	Class      string              `json:"class,omitempty" enum:"infrastructure,behavioural"`
+	At         time.Time           `json:"at"`
 }
 
 // RoleCapacity is one pool's slots: Used includes turns, workflow reservations
@@ -777,8 +886,12 @@ const UnboundedNote = "No factory-wide limit: this pool runs at most one turn pe
 // For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.
 // Reason is capacity when every slot of the pool is taken, priority when
 // higher-priority workstreams start a unit first, and workstream-cap when the
-// workstream holds capacity.per_workstream agent turns.
+// workstream holds capacity.per_workstream agent turns. A queued turn whose
+// role has room waits with reason client when the client it can run on has no
+// free slot, which for a turn that resumes a session is the client holding it,
+// and with reason no-client when no connected client can run its profile.
 type SlotWait struct {
+	Client     string              `json:"client,omitempty" description:"The client a resumed turn waits for a slot of: the one that holds its saved session."`
 	Project    config.ProjectID    `json:"project,omitempty" description:"Project of a waiting check run."`
 	Workstream config.WorkstreamID `json:"workstream"`
 	Unit       string              `json:"unit,omitempty"`
@@ -1012,6 +1125,8 @@ type SessionPushResponse struct {
 
 // AgentStatus is one claimed or parked turn from the durable thread snapshot.
 type AgentStatus struct {
+	// Client is the client the turn runs on: local, or a tailnet node's stable ID.
+	Client     string    `json:"client,omitempty"`
 	Role       string    `json:"role"`
 	Unit       string    `json:"unit"`
 	State      string    `json:"state"`

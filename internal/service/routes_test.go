@@ -19,6 +19,9 @@ import (
 var routeSamples = strings.NewReplacer(
 	"{workstream}", string(fixturekit.Stream),
 	"{project}", string(fixturekit.Project),
+	"{turn}", "turn-1",
+	"{lease}", "lease-1",
+	"{request}", "request-1",
 	"{number}", "1",
 	"{unit}", "u1",
 	"{image}", "image-unknown",

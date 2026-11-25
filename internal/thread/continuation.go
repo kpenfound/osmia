@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -51,6 +52,21 @@ func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (pr
 	return profile, session, boundary, stopped, clean
 }
 
+// Resumes reports whether q, the next turn of t, would resume the thread's
+// saved session, and the client that holds that session. A turn resumes when
+// the thread's last session ended cleanly or at a stop, is valid and was
+// started by the same backend as q's main profile. resumable is the Runner's
+// ResumableRoles. Whether the backend still accepts the session is only known
+// when the turn runs; a turn that cannot resume replays its log wherever it
+// runs.
+func Resumes(t trace.Thread, q trace.QueuedTurn, resumable func(string) bool) (client string, ok bool) {
+	previous, session, _, stopped, clean := source(t, q.Sequence, resumable)
+	if !(stopped || clean) || !coreadapter.ValidSession(session) || previous.Backend != q.Request.Profile.Backend {
+		return "", false
+	}
+	return t.SessionClient()
+}
+
 func failed(result coreadapter.SessionResult, runErr error) bool {
 	return runErr != nil || result.Cancelled || result.IsError || result.TimedOut || result.ExitCode != 0 || result.Signal != 0
 }
@@ -73,6 +89,17 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		result = coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: r.Now(), Cancelled: true, ErrorSubtype: "stopped"}
 		return result, stop, nil
 	}
+	var placed Placed
+	if r.Place != nil {
+		var err error
+		if placed, err = r.Place(run, t, *q); err != nil {
+			result = coreadapter.SessionResult{SessionDirectory: q.Claim.SessionDirectory, StartedAt: r.Now(), Cancelled: errors.Is(err, context.Canceled), IsError: true, ErrorSubtype: "unplaced"}
+			return result, err, nil
+		}
+		if placed.Release != nil {
+			defer placed.Release()
+		}
+	}
 	if workspace != nil {
 		copy := *workspace
 		copy.Lease = nil
@@ -86,6 +113,20 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	attempts, tried := 1, map[string]bool{prepared.Profile.Name: true}
 	forceReplay := false
 	reason, retry := "no compatible completed session", ""
+	if held, ok := t.SessionClient(); ok && placed.Client != "" && held != placed.Client && coreadapter.ValidSession(session) {
+		forceReplay, reason = true, "the thread's session is on client "+held+" and the turn runs on "+placed.Client+"; replay the owned log"
+	}
+	skipped := map[string]bool{}
+	skip := func(profile string) {
+		if skipped[profile] {
+			return
+		}
+		skipped[profile] = true
+		event := trace.ClientEvent{Kind: trace.ClientSkipped, Turn: q.Request.TurnID, Thread: q.Request.ThreadID, Client: placed.Client, What: profile, At: r.Now().UTC()}
+		if _, err := r.Store.RecordClientEvent(context.WithoutCancel(ctx), q.Request.Workstream, q.Request.Unit, len(skipped), event); err != nil {
+			ghlog.Logger(ctx).Warn("cannot record a skipped fallback profile", "turn", q.Request.TurnID, "profile", profile, "error", err.Error())
+		}
+	}
 	healthy := stoppedSource || cleanSource
 	fallbackAllowed := r.ResumableRoles != nil && r.ResumableRoles(t.Identity.Role)
 	for {
@@ -145,12 +186,7 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		var decision coreadapter.RetryDecision
 		limited := result.Limit != nil && result.Limit.Blocking()
 		if stop == nil && (failed(result, runErr) || limited) {
-			fallback := r.Fallbacks[prepared.Profile.Name]
-			if limited {
-				for fallback.Name != "" && fallback.Backend == prepared.Profile.Backend {
-					fallback = r.Fallbacks[fallback.Name]
-				}
-			}
+			fallback := r.fallback(prepared.Profile, limited, placed, skip)
 			registry := limited && result.Limit.Kind == coreadapter.RegistryLimitKind
 			if registry {
 				fallback = coreadapter.Profile{}
@@ -199,12 +235,7 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 			retry = fmt.Sprintf("retry %d of %d on profile %s after an infrastructure failure: %s", attempts-1, r.MaxRetries, prepared.Profile.Name, decision.Reason)
 			continue
 		}
-		fallback := r.Fallbacks[prepared.Profile.Name]
-		if limited {
-			for fallback.Name != "" && fallback.Backend == prepared.Profile.Backend {
-				fallback = r.Fallbacks[fallback.Name]
-			}
-		}
+		fallback := r.fallback(prepared.Profile, limited, placed, skip)
 		if fallback.Name == "" || fallback.Backend == "" {
 			return result, runErr, fmt.Errorf("invalid fallback profile")
 		}
@@ -213,4 +244,21 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		attempts, tried[fallback.Name] = 1, true
 	}
 	return result, runErr, nil
+}
+
+func (r Runner) fallback(profile coreadapter.Profile, limited bool, placed Placed, skip func(string)) coreadapter.Profile {
+	fallback := r.Fallbacks[profile.Name]
+	seen := map[string]bool{profile.Name: true}
+	for fallback.Name != "" && !seen[fallback.Name] {
+		seen[fallback.Name] = true
+		switch {
+		case limited && fallback.Backend == profile.Backend:
+		case placed.Runs != nil && !placed.Runs(fallback.Name):
+			skip(fallback.Name)
+		default:
+			return fallback
+		}
+		fallback = r.Fallbacks[fallback.Name]
+	}
+	return coreadapter.Profile{}
 }

@@ -30,6 +30,7 @@ import (
 const usage = `Usage: osmia <command> [--root PATH]
        osmia --version
   serve [--detach]
+  client --server URL --slots N [--dir PATH]  run sessions on this machine for a server; foreground only
   stop
   doctor [--json]
   engine status|restart|prune [--json]
@@ -98,6 +99,7 @@ Client commands also accept --socket PATH (relative to root).
 config validate reads only the top-level file: --config PATH, else the file --root resolves to.
 project settings works offline on the root's store and refuses while the service runs; use the Settings page then.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
+client runs in the foreground only, takes flags only and reads no config file; see osmia client --help.
 `
 
 type options struct {
@@ -248,6 +250,9 @@ func versionLine(b wire.Identity) string {
 // diagnostics to stderr, and returns a documented exit code. Client execution
 // never loads configuration or opens runtime files.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "client" {
+		return runClient(ctx, args[1:], stdout, stderr)
+	}
 	o, err := parse(args)
 	invalid := func() int { fmt.Fprintln(stderr, "invalid arguments; use osmia --help"); return 2 }
 	if err != nil {
@@ -1901,14 +1906,101 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 			} else if wait.Session {
 				what = "session"
 			}
-			fmt.Fprintf(w, "    Waiting: %s %s (%s)\n", wait.Workstream, what, wait.Reason)
+			fmt.Fprintf(w, "    Waiting: %s %s (%s)\n", wait.Workstream, what, waitReason(wait))
+		}
+	}
+	showClients(w, c.Clients)
+}
+
+func waitReason(w wire.SlotWait) string {
+	if w.Client != "" {
+		return w.Reason + " " + w.Client
+	}
+	return w.Reason
+}
+
+func showClients(w io.Writer, clients []wire.ClientStatus) {
+	if len(clients) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Clients:")
+	for _, c := range clients {
+		name := c.Name
+		if !c.Local && c.ID != c.Name {
+			name += " (" + c.ID + ")"
+		}
+		if c.Slots != nil {
+			fmt.Fprintf(w, "  %s: %d of %d slot(s) in use", name, c.Used, *c.Slots)
+		} else {
+			fmt.Fprintf(w, "  %s: %d in use, no slot limit", name, c.Used)
+		}
+		if c.Lease != nil {
+			fmt.Fprintf(w, ", lease %s until %s", c.Lease.Health, c.Lease.EndsAt.UTC().Format(time.RFC3339))
+		}
+		if c.Draining {
+			fmt.Fprint(w, ", draining")
+		}
+		fmt.Fprintln(w)
+		if c.IdleReason != "" {
+			fmt.Fprintf(w, "    Takes no new turn: %s\n", c.IdleReason)
+		}
+		for _, t := range c.Turns {
+			what := "turn " + t.Turn
+			if t.Role != "" {
+				what = t.Role + " " + what
+			}
+			if t.Workstream != "" {
+				what += " of " + string(t.Workstream)
+			}
+			if t.Unit != "" {
+				what += " unit " + t.Unit
+			}
+			fmt.Fprintf(w, "    Running: %s\n", what)
+		}
+		if !c.Reported {
+			fmt.Fprintln(w, "    Profiles: not reported yet")
+		}
+		var can []string
+		for _, p := range c.Profiles {
+			if p.Runnable {
+				can = append(can, p.Profile)
+			}
+		}
+		if len(can) > 0 {
+			fmt.Fprintf(w, "    Can run: %s\n", strings.Join(can, ", "))
+		}
+		for _, p := range c.Profiles {
+			if p.Runnable {
+				continue
+			}
+			fmt.Fprintf(w, "    Cannot run: %s\n", p.Profile)
+			for _, problem := range p.Problems {
+				fmt.Fprintf(w, "      Missing: %s", problem.Check)
+				if problem.Detail != "" {
+					fmt.Fprintf(w, " (%s)", problem.Detail)
+				}
+				if problem.Fix != "" {
+					fmt.Fprintf(w, "; fix: %s", problem.Fix)
+				}
+				fmt.Fprintln(w)
+			}
+		}
+		for _, skip := range c.Skipped {
+			fmt.Fprintf(w, "    Skips fallback: %s for role %s (main profile %s)\n", skip.Profile, skip.Role, skip.Main)
+		}
+		for _, f := range c.Failures {
+			fmt.Fprintf(w, "    Failed: %s turn %s of %s on profile %s at %s: %s\n", f.Role, f.Turn, f.Workstream, f.Profile, f.At.UTC().Format(time.RFC3339), f.Failure)
 		}
 	}
 }
 
 func showFailureStreaks(w io.Writer, streaks []wire.FailureStreak) {
 	for _, f := range streaks {
-		fmt.Fprintf(w, "Infrastructure failures: %s on profile %s failed %d time(s) in a row; last at %s: %s\n", f.Role, f.Profile, f.Consecutive, f.LastAt.Format(time.RFC3339), f.LastFailure)
+		on := ""
+		if len(f.Clients) > 0 {
+			on = " on client " + strings.Join(f.Clients, ", ")
+		}
+		fmt.Fprintf(w, "Infrastructure failures: %s on profile %s%s failed %d time(s) in a row; last at %s: %s\n", f.Role, f.Profile, on, f.Consecutive, f.LastAt.Format(time.RFC3339), f.LastFailure)
 	}
 }
 

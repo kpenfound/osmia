@@ -71,6 +71,7 @@ type Repository struct {
 	groupTraces            map[config.WorkgroupID]*Repository
 	groupTracesClosed      bool
 	parent                 *Repository
+	held                   atomic.Pointer[func(string) bool]
 	workstreamsMu          sync.Mutex
 	workstreams            map[config.WorkstreamID]*Repository
 	snapshotMu             sync.RWMutex

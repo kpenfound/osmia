@@ -297,6 +297,9 @@ committee = 3
 checks = 2
 chief = 3
 per_workstream = 2
+# Model sessions the server's own machine runs at once, whatever their role.
+# Unset adds no cap beyond the role limits; 0 runs no session here.
+# local_slots = 4
 
 [shed]
 max_rounds = 3
@@ -411,7 +414,7 @@ See [dictation](running.md#dictation) for use in conversation composers.
 
 Tailnet membership is the boundary: there is no in-app authentication
 ([tailnet listener](running.md#tailnet-listener)). All capacity and shed values
-must be positive integers. `events.window` is a positive Go duration: how long
+must be positive integers, except `capacity.local_slots`, which may be 0. `events.window` is a positive Go duration: how long
 an undelivered event of a workstream waits before the service delivers it, with
 every other ready event, as one chief-of-staff turn. `events.progress_window`
 is how long an event of routine progress waits instead: a unit starting,
@@ -444,6 +447,31 @@ still ignore owner pauses; provider limits and abandonment still stop them.
 Chief slots are independent of the mason, reviewer, committee, checks and
 per-workstream limits. Reloading applies a changed limit to new admissions while
 running turns finish.
+
+`capacity.local_slots` is the number of model sessions the server's own machine,
+the built-in local client, runs at once, for any role: masons, reviewers,
+committee members, architects, the chief of staff and design sessions alike. A
+turn starts only when its role has room under the `capacity.*` limits above
+and the client it is placed on has a free slot, so these limits stay ceilings
+across the local client and every [client](running.md) that connects. Unset,
+the local client adds no cap of its own and the factory dispatches exactly as
+it does without clients. `0` runs no session on the server's machine, which
+makes the server a pure control plane: the service still runs Dagger checks,
+captures, deliveries and pull-request watching itself, and turns wait for a
+connected client that can take them. The setting applies on reload to turns
+that have not started. A client declares its own slot count with `--slots`, and
+has no profile settings: it takes the server's profiles when it connects. See
+[client machines](running.md#client-machines) for setting one up.
+
+New turns go round robin over the local client and the connected, non-draining
+clients that have a free slot and can run the turn's main profile; each client
+has one place in the rotation however many slots it has. A turn held back by
+a `capacity.*` limit does not move the rotation. A turn that resumes a thread's
+saved session waits for the client that holds the session, without holding a
+role slot, and takes that client's next free slot before any new turn. When
+that client's lease has ended, it is draining, or it is the local client with
+`local_slots = 0`, the turn is placed round robin and the thread replays its own
+log.
 
 `capacity.checks` must be positive, defaults to 2 and limits service Dagger check
 runs across all projects and workstreams, including unit and session
@@ -528,6 +556,18 @@ comes from `config.toml` and applies on reload. The `chief` entry is
 `capacity.chief`: its used count is the background chief-of-staff turns holding
 a slot and its waiting entries are the queued ones, oldest first. An unbounded pool is not zero
 capacity and has no setting to raise.
+
+The capacity view also lists `clients`: the local client first, then each
+connected `osmia client` in the order new turns rotate through them. Each entry
+gives the client's identity (the tailnet node's stable ID, or `local`), its name,
+`slots` and `used` (no `slots`, and `unbounded` true, for a local client with no
+`capacity.local_slots`), its `lease` health (`healthy` or `late`, with when it
+ends) when it is a connected client, whether it is `draining`, why it takes no
+new turn (`idle` and `idle_reason`), which `profiles` it can and cannot run with
+the fix for each missing item, the fallback profiles it `skipped`, the `turns`
+running on it and the turns that `failures` it ran. A turn waiting for a client's
+slot is listed under its role with reason `client` and the client's identity, or
+`no-client` when no connected client can run its profile.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that

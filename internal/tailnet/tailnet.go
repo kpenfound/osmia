@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/redact"
+	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
@@ -84,6 +85,44 @@ func JoinTailscale(logger *slog.Logger) Join {
 		}
 		return tsnetListener{Listener: listener, server: server}, nil
 	}
+}
+
+// Node is the tailnet node behind a connection: its stable ID, which names it
+// across renames and address changes, and its name for display.
+type Node struct {
+	ID   string
+	Name string
+}
+
+// Identifier names the tailnet node a connection came from. The listener a
+// tsnet node provides implements it.
+type Identifier interface {
+	WhoIs(ctx context.Context, remoteAddr string) (Node, error)
+}
+
+type whoIsClient interface {
+	WhoIs(context.Context, string) (*apitype.WhoIsResponse, error)
+}
+
+func whoIs(ctx context.Context, client whoIsClient, remoteAddr string) (Node, error) {
+	who, err := client.WhoIs(ctx, remoteAddr)
+	if err != nil {
+		return Node{}, err
+	}
+	if who == nil || who.Node == nil || who.Node.StableID == "" {
+		return Node{}, errors.New("the tailnet does not know the caller's node")
+	}
+	name := strings.TrimSuffix(who.Node.Name, ".")
+	short, _, _ := strings.Cut(name, ".")
+	return Node{ID: string(who.Node.StableID), Name: short}, nil
+}
+
+func (l tsnetListener) WhoIs(ctx context.Context, remoteAddr string) (Node, error) {
+	client, err := l.server.LocalClient()
+	if err != nil {
+		return Node{}, err
+	}
+	return whoIs(ctx, client, remoteAddr)
 }
 
 type tsnetListener struct {
@@ -234,12 +273,30 @@ func ArrivedOn(r *http.Request) ListenerKind {
 // browser on another site's behalf. The Host header must be an IP address,
 // the configured hostname or one of the node's names, which refuses DNS
 // rebinding, and a request that is not a read must carry a JSON content type.
+// Two routes carry their own content type instead: the git fetch request and
+// the upload of a finished view. Neither is a type a cross-site form can send
+// without a preflight, which the service never grants.
 func Allowed(r *http.Request, hostname string, names func(context.Context) []string) bool {
 	host := strings.ToLower(strings.TrimSuffix(requestHost(r), "."))
 	if _, err := netip.ParseAddr(host); err != nil && host != hostname && !containsFold(names(r.Context()), host) {
 		return false
 	}
-	return jsonOrRead(r)
+	return jsonOrRead(r) || ownContentType(r)
+}
+
+func ownContentType(r *http.Request) bool {
+	var want string
+	_, isView := api.ViewRoute(r.URL.Path)
+	switch {
+	case r.Method == http.MethodPost && api.GitFetchPath(r.URL.Path):
+		want = api.GitUploadPackRequestType
+	case r.Method == http.MethodPut && isView:
+		want = api.ViewArchiveType
+	default:
+		return false
+	}
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && media == want
 }
 
 func containsFold(names []string, host string) bool {

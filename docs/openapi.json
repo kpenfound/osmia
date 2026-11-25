@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Osmia local API",
-    "description": "The Osmia service serves this API over its Unix socket and, when configured,\non a loopback address (listen.web) and on the tailnet (listen.tailnet). There is\nno authentication: the socket, the loopback interface and tailnet membership are\nthe boundaries. On the web and tailnet listeners, requests must carry a Host\nnaming the listener, and requests other than GET and HEAD must send\nContent-Type: application/json.\n\nRequest bodies are one JSON object with known, unique fields. Every failure\nreturns an error object with a code and a message.",
+    "description": "The Osmia service serves this API over its Unix socket and, when configured,\non a loopback address (listen.web) and on the tailnet (listen.tailnet). There is\nno authentication: the socket, the loopback interface and tailnet membership are\nthe boundaries. On the web and tailnet listeners, requests must carry a Host\nnaming the listener, and requests other than GET and HEAD must send\nContent-Type: application/json. Two routes on the tailnet listener send their\nown content type instead: the git fetch request and the upload of a finished\nview. The service grants no cross-site preflight for them.\n\nRequest bodies are one JSON object with known, unique fields. Every failure\nreturns an error object with a code and a message.",
     "version": "1"
   },
   "servers": [
@@ -592,6 +592,447 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChecksChoiceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/connect": {
+      "post": {
+        "summary": "Tailnet listener only: connect an osmia client and receive its lease and the profile handout. The client is identified by its tailnet node. Refused with client_version_mismatch, naming both versions, when the client speaks another protocol version, and with client_connected while the node's earlier connection holds a lease unless the request names that lease, which reconnects it and reattaches its running turns by ID",
+        "operationId": "postClientsConnect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientConnectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConnectResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/capabilities": {
+      "post": {
+        "summary": "Tailnet listener only: report which profiles of the handout the client can and cannot run, with the fix for each missing item",
+        "operationId": "postClientsByLeaseCapabilities",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/drain": {
+      "post": {
+        "summary": "Tailnet listener only: mark the client draining, so it is offered no new turns and keeps its lease while its running turns finish",
+        "operationId": "postClientsByLeaseDrain",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/heartbeat": {
+      "post": {
+        "summary": "Tailnet listener only: keep a client's lease alive and report each running turn's progress; the lease ends about 2 minutes after the server last hears from the client",
+        "operationId": "postClientsByLeaseHeartbeat",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/leave": {
+      "post": {
+        "summary": "Tailnet listener only: end the client's lease at once",
+        "operationId": "postClientsByLeaseLeave",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/poll": {
+      "post": {
+        "summary": "Tailnet listener only: long-poll for messages from the server (profile handouts, turn offers, cancels and requests to carry out a view or skill operation), acknowledging those already handled; answers with none when the wait ends first",
+        "operationId": "postClientsByLeasePoll",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PollRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/requests/{request}/reply": {
+      "post": {
+        "summary": "Tailnet listener only: reply to a request the server made on the client's own connection to carry out a view or skill operation",
+        "operationId": "postClientsByLeaseRequestsByRequestReply",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          },
+          {
+            "name": "request",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerReply"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerReplyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/turns/{turn}/claim": {
+      "post": {
+        "summary": "Tailnet listener only: take or decline an offered turn; gone means the offer was withdrawn and the turn must not run",
+        "operationId": "postClientsByLeaseTurnsByTurnClaim",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clients/{lease}/turns/{turn}/result": {
+      "post": {
+        "summary": "Tailnet listener only: return a turn's result with the session files the server reads after it; the answer is definitive: accepted, already_recorded or superseded",
+        "operationId": "postClientsByLeaseTurnsByTurnResult",
+        "parameters": [
+          {
+            "name": "lease",
+            "in": "path",
+            "description": "",
+            "required": true,
+            "schema": {
+              "description": "",
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TurnResult"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnResultResponse"
                 }
               }
             }
@@ -1555,6 +1996,125 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FeedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/git-receive-pack": {
+      "post": {
+        "summary": "Always refused as forbidden: the git route is read-only and takes no push",
+        "operationId": "postGitByProjectGitReceivePack",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/git-upload-pack": {
+      "post": {
+        "summary": "Tailnet listener only: serve a git fetch or clone of a registered project's clone, including any commit it holds that no branch points at; the request is not JSON, it carries Content-Type application/x-git-upload-pack-request",
+        "operationId": "postGitByProjectGitUploadPack",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-git-upload-pack-request": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-git-upload-pack-result": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/info/refs": {
+      "get": {
+        "summary": "Tailnet listener only: advertise a registered project's clone for git fetch and clone over smart HTTP (query service=git-upload-pack); service=git-receive-pack is refused",
+        "operationId": "getGitByProjectInfoRefs",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-git-upload-pack-advertisement": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -3832,6 +4392,209 @@
         }
       }
     },
+    "/v1/turns/{turn}/mcp": {
+      "get": {
+        "summary": "Tailnet listener only: relay a remote turn's MCP event stream to the turn's own MCP endpoint, for the turn's bearer token alone",
+        "operationId": "getTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Tailnet listener only: relay a remote turn's MCP request (a client's local listener forwards each tool call its sandbox makes) to the turn's own MCP endpoint on the service, which handles and audits it. Only a request that carries the turn's bearer token is relayed; any other is refused. Paths below /mcp are relayed as they are",
+        "operationId": "postTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Tailnet listener only: relay the end of a remote turn's MCP session to the turn's own MCP endpoint, for the turn's bearer token alone",
+        "operationId": "deleteTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/turns/{turn}/view": {
+      "get": {
+        "summary": "Tailnet listener only: download the archive of a turn's view built from trace documents; the request carries the turn's bearer token",
+        "operationId": "getTurnsByTurnView",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-osmia-view": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Tailnet listener only: upload a turn's finished view as an archive, which is unpacked into a staging directory and handed to the turn; refused when any entry escapes the view root. The request is not JSON, it carries Content-Type application/x-osmia-view and the turn's bearer token. The answer is accepted, already_recorded or superseded",
+        "operationId": "putTurnsByTurnView",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-osmia-view": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ViewUploadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/workgroups/{id}/conversation": {
       "post": {
         "summary": "Durably enqueue an owner message to a single-member or multi-member workgroup without a member-address note",
@@ -4018,6 +4781,9 @@
         "properties": {
           "attempt": {
             "type": "integer"
+          },
+          "client": {
+            "type": "string"
           },
           "elapsed": {
             "format": "int64",
@@ -4227,8 +4993,43 @@
         },
         "type": "object"
       },
+      "CapabilityReport": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileCapability"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CapabilityResponse": {
+        "properties": {
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "CapacityStatus": {
         "properties": {
+          "clients": {
+            "description": "The local client and every connected client, in the order new turns rotate through them. Each client's slots are a second bound next to the role pools.",
+            "items": {
+              "$ref": "#/components/schemas/ClientStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "per_workstream": {
             "description": "Maximum concurrent worker turns per workstream; check slots are independent.",
             "type": "integer"
@@ -4573,6 +5374,30 @@
         },
         "type": "object"
       },
+      "ClaimRequest": {
+        "properties": {
+          "accept": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClaimResponse": {
+        "properties": {
+          "answer": {
+            "enum": [
+              "taken",
+              "gone",
+              "released"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ClearPriorityRequest": {
         "properties": {
           "project": {
@@ -4592,6 +5417,308 @@
       "ClearProviderLimitRequest": {
         "properties": {
           "backend": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientConnectRequest": {
+        "properties": {
+          "draining": {
+            "type": "boolean"
+          },
+          "lease": {
+            "type": "string"
+          },
+          "running": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "slots": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClientConnectResponse": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ClientIdentity"
+          },
+          "grace_seconds": {
+            "type": "integer"
+          },
+          "heartbeat_seconds": {
+            "type": "integer"
+          },
+          "lease": {
+            "type": "string"
+          },
+          "poll_seconds": {
+            "type": "integer"
+          },
+          "profiles": {
+            "$ref": "#/components/schemas/ProfileHandout"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnReattach"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClientFailure": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "infrastructure",
+              "behavioural"
+            ],
+            "type": "string"
+          },
+          "failure": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientIdentity": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientLease": {
+        "properties": {
+          "connected_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ends_at": {
+            "description": "When the lease ends unless the client is heard from.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "health": {
+            "description": "healthy when heartbeats arrive; late when they are missing but the grace window has not passed.",
+            "enum": [
+              "healthy",
+              "late"
+            ],
+            "type": "string"
+          },
+          "last_seen": {
+            "description": "When the server last heard from the client.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientProfileStatus": {
+        "properties": {
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileProblem"
+            },
+            "type": "array"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClientSkip": {
+        "properties": {
+          "main": {
+            "description": "The role's main profile, which the client can run.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "The fallback profile the client skips.",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientStatus": {
+        "properties": {
+          "draining": {
+            "description": "True while the client is draining: it takes no new turns.",
+            "type": "boolean"
+          },
+          "failures": {
+            "description": "The latest turns that failed on the client, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ClientFailure"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "The client's identity: its tailnet node's stable ID, or local for the server's own machine.",
+            "type": "string"
+          },
+          "idle": {
+            "description": "Why the client takes no new turn now. Absent when it takes one.",
+            "enum": [
+              "draining",
+              "no-slots",
+              "full",
+              "no-report",
+              "no-profile"
+            ],
+            "type": "string"
+          },
+          "idle_reason": {
+            "description": "Idle in plain words, with the fix when there is one.",
+            "type": "string"
+          },
+          "lease": {
+            "$ref": "#/components/schemas/ClientLease",
+            "description": "The client's lease. Absent for the local client."
+          },
+          "local": {
+            "description": "True for the built-in local client.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The tailnet node's name, or local for the server's own machine.",
+            "type": "string"
+          },
+          "profiles": {
+            "description": "Each configured profile the client can or cannot run.",
+            "items": {
+              "$ref": "#/components/schemas/ClientProfileStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "report_current": {
+            "description": "False when the client's report checked an older profile handout than the server holds now.",
+            "type": "boolean"
+          },
+          "reported": {
+            "description": "True once the client has reported what it can run; the local client runs every profile.",
+            "type": "boolean"
+          },
+          "skipped": {
+            "description": "Fallback profiles the client skips because it cannot run them.",
+            "items": {
+              "$ref": "#/components/schemas/ClientSkip"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "slots": {
+            "description": "The client's slot count. Absent when unbounded is true.",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "turns": {
+            "description": "The turns running on the client.",
+            "items": {
+              "$ref": "#/components/schemas/ClientTurn"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "unbounded": {
+            "description": "True for the local client when capacity.local_slots is unset: it adds no cap beyond the role limits.",
+            "type": "boolean"
+          },
+          "used": {
+            "description": "Slots the client's turns and offers take.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClientTurn": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },
@@ -4830,6 +5957,12 @@
           },
           "committee": {
             "type": "integer"
+          },
+          "local_slots": {
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "masons": {
             "type": "integer"
@@ -5423,6 +6556,9 @@
       "CoreadapterCandidate": {
         "type": "object"
       },
+      "CoreadapterCapabilities": {
+        "type": "object"
+      },
       "CoreadapterCard": {
         "properties": {
           "happened": {
@@ -5433,6 +6569,32 @@
           },
           "needs_you": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreadapterExecutionSettings": {
+        "type": "object"
+      },
+      "CoreadapterProfile": {
+        "type": "object"
+      },
+      "CoreadapterSessionResult": {
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "records": {
+            "type": "integer"
+          },
+          "refusal": {
+            "type": "string"
+          },
+          "tool_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
           }
         },
         "type": "object"
@@ -5497,6 +6659,17 @@
             ]
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DaggerRequirement": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "version": {
             "type": "string"
           }
         },
@@ -6110,6 +7283,14 @@
         },
         "type": "object"
       },
+      "DrainResponse": {
+        "properties": {
+          "draining": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "DriftCoverage": {
         "properties": {
           "drift": {
@@ -6238,6 +7419,12 @@
       },
       "FailureStreak": {
         "properties": {
+          "clients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "consecutive": {
             "type": "integer"
           },
@@ -7003,6 +8190,34 @@
         },
         "type": "object"
       },
+      "HeartbeatRequest": {
+        "properties": {
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnProgress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "HeartbeatResponse": {
+        "properties": {
+          "draining": {
+            "type": "boolean"
+          },
+          "lost": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "Identity": {
         "properties": {
           "commit": {
@@ -7195,6 +8410,14 @@
         },
         "type": "object"
       },
+      "LeaveResponse": {
+        "properties": {
+          "ended": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "MemorySetup": {
         "properties": {
           "files": {
@@ -7238,6 +8461,36 @@
           },
           "workstream": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Message": {
+        "properties": {
+          "cancel": {
+            "$ref": "#/components/schemas/TurnCancel"
+          },
+          "kind": {
+            "enum": [
+              "profiles",
+              "offer",
+              "cancel",
+              "request"
+            ],
+            "type": "string"
+          },
+          "offer": {
+            "$ref": "#/components/schemas/TurnOffer"
+          },
+          "profiles": {
+            "$ref": "#/components/schemas/ProfileHandout"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ServerRequest"
+          },
+          "seq": {
+            "format": "int64",
+            "type": "integer"
           }
         },
         "type": "object"
@@ -7352,12 +8605,121 @@
         },
         "type": "object"
       },
+      "PollRequest": {
+        "properties": {
+          "ack": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "wait_seconds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PollResponse": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProfileCapability": {
+        "properties": {
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileProblem"
+            },
+            "type": "array"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ProfileHandout": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileSpec"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/RoleRequirement"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ProfileProblem": {
+        "properties": {
+          "check": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ProfileRequest": {
         "properties": {
           "profile": {
             "type": "string"
           },
           "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProfileSpec": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "effort": {
+            "type": "string"
+          },
+          "fallback": {
+            "type": "string"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timeout": {
             "type": "string"
           }
         },
@@ -8158,6 +9520,68 @@
         },
         "type": "object"
       },
+      "RoleRequirement": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "chain": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cpus": {
+            "type": "integer"
+          },
+          "dagger": {
+            "$ref": "#/components/schemas/DaggerRequirement"
+          },
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "events_profile": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "memory": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sandbox": {
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "RuntimeArchive": {
         "properties": {
           "actor": {
@@ -8413,6 +9837,38 @@
         },
         "type": "object"
       },
+      "ServerReply": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "result": {}
+        },
+        "type": "object"
+      },
+      "ServerReplyResponse": {
+        "properties": {
+          "answered": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ServerRequest": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "params": {},
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "SessionChangesResponse": {
         "properties": {
           "changes": {
@@ -8548,6 +10004,18 @@
             "type": "string"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SessionFile": {
+        "properties": {
+          "data": {
+            "format": "base64",
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           }
         },
@@ -8815,6 +10283,10 @@
       "SlotWait": {
         "properties": {
           "agent": {
+            "type": "string"
+          },
+          "client": {
+            "description": "The client a resumed turn waits for a slot of: the one that holds its saved session.",
             "type": "string"
           },
           "preview": {
@@ -9619,6 +11091,183 @@
         },
         "type": "object"
       },
+      "TurnCancel": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TurnOffer": {
+        "properties": {
+          "allowed_outcomes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CoreadapterCapabilities"
+          },
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/CoreadapterExecutionSettings"
+          },
+          "fallbacks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "history": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "resume_id": {
+            "type": "string"
+          },
+          "return_view": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string"
+          },
+          "runs_dagger": {
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/CoreadapterProfile"
+          },
+          "system_prompt": {
+            "type": "string"
+          },
+          "thread": {
+            "type": "string"
+          },
+          "tool_endpoint": {
+            "type": "string"
+          },
+          "tool_token": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "view": {
+            "$ref": "#/components/schemas/TurnView"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TurnProgress": {
+        "properties": {
+          "phase": {
+            "type": "string"
+          },
+          "progress": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TurnReattach": {
+        "properties": {
+          "answer": {
+            "enum": [
+              "reattached",
+              "lost"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TurnResult": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/CoreadapterSessionResult"
+          },
+          "session_files": {
+            "items": {
+              "$ref": "#/components/schemas/SessionFile"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "TurnResultResponse": {
+        "properties": {
+          "answer": {
+            "enum": [
+              "accepted",
+              "already_recorded",
+              "superseded"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TurnView": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "git",
+              "archive"
+            ],
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "UnitDispatch": {
         "properties": {
           "blocked": {
@@ -9922,6 +11571,19 @@
             "type": "integer"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ViewUploadResponse": {
+        "properties": {
+          "answer": {
+            "enum": [
+              "accepted",
+              "already_recorded",
+              "superseded"
+            ],
             "type": "string"
           }
         },

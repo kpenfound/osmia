@@ -23,6 +23,7 @@ var (
 	KeyWorkstream    = Key("workstream", "id")
 	KeyUnit          = Key("unit", "id")
 	KeyRecord        = Key("record", "id")
+	KeyClient        = Key("client", "id")
 	KeyPool          = Key("pool", "id")
 	KeyPoolRoles     = Key("pool", "roles")
 	KeyPoolLimit     = Key("pool", "limit")
@@ -71,7 +72,7 @@ const (
 
 var allowed = map[string]kind{
 	KeyRole: kindID, KeyBackend: kindID, KeyModel: kindID, KeyProfile: kindID,
-	KeyProject: kindID, KeyWorkstream: kindID, KeyUnit: kindID, KeyRecord: kindID,
+	KeyProject: kindID, KeyWorkstream: kindID, KeyUnit: kindID, KeyRecord: kindID, KeyClient: kindID,
 	KeyPool: kindID, KeyPoolRoles: kindIDs, KeyPoolLimit: kindInt, KeyPoolUnbounded: kindBool,
 	KeyOutcome: kindToken, KeyCause: kindToken, KeyState: kindToken, KeyNextState: kindToken,
 	KeyWaitReason: kindToken, KeyKind: kindToken, KeyPauseScope: kindToken, KeyPauseSource: kindToken,
@@ -187,6 +188,10 @@ func Unit(id string) Attr { return String(KeyUnit, id) }
 
 // Record is the ID of the trace record a span was derived from.
 func Record(id string) Attr { return String(KeyRecord, id) }
+
+// Client is the identity of the client a turn ran on or a slot belongs to: the
+// tailnet node's stable ID, or local for the server's own machine.
+func Client(id string) Attr { return String(KeyClient, id) }
 
 // Pool is the identity of a capacity pool; a pool shared across projects has
 // one identity.

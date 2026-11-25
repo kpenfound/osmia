@@ -61,7 +61,7 @@ type previewOperation struct {
 	Result      *previewResult        `json:"result,omitempty"`
 }
 
-func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) coreadapter.Tool {
+func (c *runtimeControls) preview(cfg *config.Config, repo *trace.Repository, scope coreadapter.Scope, view isolation.View, now func() time.Time) coreadapter.Tool {
 	var mu sync.Mutex
 	tool := coreadapter.Tool{Name: "preview", Effect: coreadapter.ToolMemory,
 		Description: "Ask the service to capture a static screenshot of built code. Set workstream to the member to show (required for a shared chief). Defaults to its feature-branch head, or set unit for its recorded candidate. Use inspect_code at the member's committed feature head or unit candidate to find the Service call and port in its Dagger configuration and module source. Supply call as the dagger call argument list returning that Service, and port as its exposed HTTP port. Only module arguments and paths within the exported source are allowed; CLI options, providers, environment names and host-writing or interactive steps are refused. path defaults to /; timeout defaults to 5m and must be from 1m to 30m; viewport is desktop (default) or phone, full_page defaults to false. Returns an image_id to refer to in your reply and a copy under images/ in this read-only view. Limitations do not fail your turn. Recovered results from an interrupted turn are in previews/results.json; read them before requesting another capture.",
@@ -309,7 +309,7 @@ func (s *Service) withPreviewSlot(ctx context.Context, run CheckSlotRun, timeout
 	return capture(ctx)
 }
 
-func reconcilePreviewImage(ctx context.Context, repo, target *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, op previewOperation, image trace.Image, now func() time.Time) (previewResult, error) {
+func reconcilePreviewImage(ctx context.Context, repo, target *trace.Repository, scope coreadapter.Scope, view isolation.View, op previewOperation, image trace.Image, now func() time.Time) (previewResult, error) {
 	own := config.WorkstreamID(scope.Workstream)
 	members, err := repo.WorkgroupMembers(own)
 	if err != nil {
@@ -321,25 +321,17 @@ func reconcilePreviewImage(ctx context.Context, repo, target *trace.Repository, 
 			return previewResult{}, err
 		}
 	}
-	root, err := os.OpenRoot(view.Workspace().Directory)
-	if err != nil {
-		return previewResult{}, err
-	}
-	defer root.Close()
-	if err := root.MkdirAll("images", 0700); err != nil {
-		return previewResult{}, err
-	}
 	path := "images/" + image.ID + ".png"
-	old, readErr := root.ReadFile(path)
+	old, readErr := view.Read(path)
 	if !bytes.Equal(old, image.Data) || readErr != nil {
-		if err := root.WriteFile(path, image.Data, 0600); err != nil {
+		if err := view.Put(path, image.Data); err != nil {
 			return previewResult{}, err
 		}
 	}
 	return previewResult{ImageID: image.ID, Workstream: op.Workstream, Commit: op.Commit, Path: filepath.ToSlash(path)}, nil
 }
 
-func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *runtimeControls, repo *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) error {
+func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *runtimeControls, repo *trace.Repository, scope coreadapter.Scope, view isolation.View, now func() time.Time) error {
 	docs, err := trace.Read[trace.Document](repo, config.WorkstreamID(scope.Workstream))
 	if err != nil {
 		return err
@@ -376,15 +368,7 @@ func restorePreviewImages(ctx context.Context, cfg *config.Config, controls *run
 	}
 	if len(recovered) > 0 {
 		data, _ := json.Marshal(recovered)
-		root, err := os.OpenRoot(view.Workspace().Directory)
-		if err != nil {
-			return err
-		}
-		defer root.Close()
-		if err := root.MkdirAll("previews", 0700); err != nil {
-			return err
-		}
-		return root.WriteFile("previews/results.json", data, 0600)
+		return view.Put("previews/results.json", data)
 	}
 	return nil
 }

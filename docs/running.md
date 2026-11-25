@@ -67,6 +67,35 @@ browser checks as on the web listener apply; the `Host` header must be an IP
 address, the configured hostname, or a name the node holds on the tailnet,
 such as its MagicDNS name.
 
+Two routes on the tailnet listener, and only there, carry a body that is not
+JSON, and each is accepted only with its own content type: the git fetch
+request `POST /v1/git/<project>/git-upload-pack` with
+`application/x-git-upload-pack-request`, and the upload of a finished view
+`PUT /v1/turns/<turn>/view` with `application/x-osmia-view`. Every other
+request other than `GET` and `HEAD` still needs `Content-Type:
+application/json`, the `Host` check applies to these two routes too, and the
+service grants no cross-site preflight for them.
+
+The git route, `/v1/git/<project>/`, is read-only. A git client fetches and
+clones a registered project's clone through it, including a commit that no
+branch points at, and the service refuses `git push` without changing any ref.
+It serves nothing but registered projects' clones. The view routes,
+`/v1/turns/<turn>/view`, download a view built from trace documents and take a
+finished view as an archive of its files, modes, empty directories and
+symlinks. The turn's bearer token, the one its tool endpoint requires, must
+accompany them. The service unpacks an upload into a staging directory under
+`<root>/transfers` and refuses an archive with an entry that escapes the view
+root, through an absolute path, a `..` segment or a symlink pointing outside
+it.
+
+A turn that runs on a client has its tool calls relayed at
+`/v1/turns/<turn>/mcp`: the service forwards each call, as it arrives, to the
+turn's own MCP endpoint, which handles and audits it as for a turn run on the
+service's own machine. Only a request that carries the turn's bearer token is
+relayed, and the relay ends with the turn. The same token authorises the
+turn's view routes. A turn's session files, its view and its result come back
+to the service only for the client the turn was offered to.
+
 The tailnet never takes the service down. A node that cannot join at startup,
 whether for a missing auth key, a pending login, an unreachable control server
 or an unusable state directory, leaves `osmia serve` running, and the service
@@ -117,6 +146,126 @@ and make owner decisions, with no login of Osmia's own. Restrict who reaches
 the node with tailnet access rules. Use the full HTTPS address from
 `osmia status` when available. Plain HTTP on port 80 also remains served
 inside the tailnet's encrypted transport.
+
+## Client machines
+
+The service's own machine is the built-in *local client*. Any other machine on
+your tailnet can run model sessions for the service too, by running
+`osmia client`. The service stays the control plane: it keeps the trace,
+scheduling, every git write, capture, delivery, its own Dagger check runs and all
+telemetry, and a client only runs sessions. With no client connected and
+[`capacity.local_slots`](configuration.md#top-level-configtoml) unset, nothing differs from a
+service that has none.
+
+### Set up a client machine
+
+A client runs on Linux or macOS. Do these once per machine; none of it touches
+the server's configuration.
+
+1. **Join the tailnet.** The machine must be signed in to the same tailnet as
+   the server, and the server must listen on it (`listen.tailnet`, see
+   [Reach Osmia from your phone](#reach-osmia-from-your-phone)). Tailnet
+   membership is the only trust: there is no tag, no enrollment and no approval
+   step, and the server never refuses a client for who it is. Any machine your
+   tailnet's access rules let reach the server can connect, and then receives the
+   source of the projects it runs turns for, so restrict who reaches the server
+   with those rules. One client runs per node; a second connection from a node is
+   refused while the first holds a lease.
+2. **Install the same Osmia release** as the server. The protocol is versioned,
+   and a server refuses a client of another protocol version, saying which
+   versions differ. The machine also needs `git`.
+3. **Install what the profiles need.** The server hands the client its profiles
+   when it connects: for each, the backend program (`claude`, `codex`,
+   `opencode`), `sbx` or the container engine for the role's sandbox, `dagger`
+   for a mason in an sbx sandbox, and the skills the role names. The client runs
+   the checks [`osmia doctor`](cli.md#doctor) runs and logs which profiles it can
+   and cannot run, each with its fix. `osmia status` on the server shows the same
+   per client. A client that can run nothing stays connected and takes no
+   turns, so install what is missing and the client picks it up when it next
+   checks, which it does on every reload of the server's configuration.
+4. **Log in to the model provider on this machine.** The server never sends a
+   provider key, the Dagger Cloud token or any other secret to a client. Each
+   machine uses its own login, set the way the server's is
+   ([Docker Sandboxes](configuration.md#docker-sandboxes-sbx)):
+
+   ```sh
+   sbx login
+   sbx secret set anthropic      # use the provider your profiles need
+   ```
+
+   A login cannot be checked in advance. A missing one shows up as a failed turn,
+   which `osmia status` lists under the client it ran on.
+5. **Say where Dagger runs on this machine**, for masons that run Dagger. The
+   server's own engine setting is never sent. With a Dagger Cloud compute token in
+   `DAGGER_CLOUD_TOKEN`, the machine's masons run on Dagger Cloud. Otherwise point
+   the Dagger CLI at an engine with `_EXPERIMENTAL_DAGGER_RUNNER_HOST`, such as
+   `docker-container://dagger-engine-v0.20.5` for an engine on this machine. With
+   neither, a turn that needs Dagger fails with a message saying so.
+6. **Start the client**, giving the server's tailnet API and how many turns the
+   machine runs at once, whatever the role:
+
+   ```sh
+   osmia client --server https://osmia-1.example.ts.net --slots 8
+   ```
+
+   `--server` is the address `osmia status` prints for the tailnet listener, or
+   `http://osmia` where the node answers on port 80. `--dir` moves the directory
+   where the client keeps its cached clones, its session directories and any view
+   or result the server has not yet answered for. It takes no config file and has
+   no profile settings of its own, so it cannot drift from the server.
+
+### Keep a client running
+
+`osmia client` runs in the foreground only. There is no `--detach` and asking for
+a background mode is an error, and Osmia ships no systemd unit, launchd plist or
+other service file for it. Keep it running with the machine's own tools: a
+systemd user unit that runs it in the foreground, a launchd agent, or `tmux`.
+It logs its own operation to stderr only, as text, for whatever supervises it,
+and it writes no trace and exports no telemetry. Give a supervisor the same
+environment the login and Dagger steps above need: the `PATH` that finds
+`osmia`, `git`, `sbx` or the container engine, the backend programs and
+`dagger`, and the Dagger variables.
+
+### Placement
+
+New turns go round robin over the local client and every connected client that is
+not draining, has a free slot and can run the turn's main profile. Each client
+has one place in the rotation however many slots it has, so a larger client
+fills up later and is not picked more often. A turn that resumes a thread's
+saved session, whether a follow-up, a bounce-back or any other resume, goes back
+to the client that holds the session and waits for a slot there, without holding
+a role slot; the next free slot on that client goes to such a turn before any new
+one. If that client's lease has ended, it is draining or it is the local client
+set to `capacity.local_slots = 0`, the turn is placed round robin and the thread
+replays its own log. The global `capacity.*` limits stay ceilings across every
+client, and each client's `--slots` is a second bound. On a client that cannot
+run one of a role's fallback profiles, the fallback is skipped and status says so.
+`capacity.local_slots = 0` makes the server a pure control plane: it runs checks,
+captures and deliveries, and every session runs on a client.
+
+### Stop a client
+
+The first Ctrl+C, or SIGTERM, drains the client. It takes no new turns, keeps
+its connection and heartbeats, lists the turns still running and exits once their
+results and views are sent. The server marks it draining at once and uses none
+of its free slots, and a turn that resumes a session on it is placed elsewhere
+instead of waiting for the drain. A second Ctrl+C cancels the running sessions
+and still sends each mason's files, so the service's recovery of interrupted
+turns picks the work up; a third stops waiting for the server.
+
+### When the connection drops or the server restarts
+
+A client keeps its sessions running for the lease's grace window of about two
+minutes and reattaches each by turn ID when the server is back; each turn then
+finishes and is recorded once. After the window the client cancels its sessions,
+keeps each mason's view and any result it has not delivered in its directory, and
+sends them again until the server answers that it accepted them, already had
+them or no longer wants them. The server waits a bounded time after a lease ends
+for the returned view, then recovers the interrupted turn through the existing
+path from those files, or without them when none arrive. A view or result that
+arrives after recovery began is not captured and does not overwrite later work;
+the server answers it superseded and records that it arrived. Losing a client
+adds no owner gate.
 
 ## Web page
 

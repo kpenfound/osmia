@@ -138,6 +138,12 @@ const TranscriptionFailed = api.TranscriptionFailed
 
 const TooLarge = api.TooLarge
 
+const VersionMismatch = api.VersionMismatch
+
+const ClientConnected = api.ClientConnected
+
+const LeaseEnded = api.LeaseEnded
+
 type TranscribeRequest = api.TranscribeRequest
 
 type TranscribeResponse = api.TranscribeResponse
@@ -259,6 +265,8 @@ type DailyBudgetStatus = api.DailyBudgetStatus
 type CapacityStatus = api.CapacityStatus
 
 type RoleCapacity = api.RoleCapacity
+
+type ClientStatus = api.ClientStatus
 
 type SlotWait = api.SlotWait
 

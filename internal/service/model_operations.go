@@ -77,6 +77,9 @@ func (s *Service) reserveModelOperation(repository *trace.Repository, op coreada
 	if role == committeeRole {
 		agent = committeeAgent(1)
 	}
+	if s.placement != nil && !s.placement.Room(cfg.Roles[role].Profile) {
+		return nil, false
+	}
 	release, admitted, err := s.pool.TryReserve(repository, stream, role, agent, &limits)
 	if err != nil {
 		s.log().Error("model operation capacity", "project", repository.Project(), "workstream", stream, "operation", op.ID, "error", err)

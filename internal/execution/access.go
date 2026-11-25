@@ -30,7 +30,8 @@ func (u unitWorkspaces) Selection(ctx context.Context, scope coreadapter.Scope, 
 }
 
 func (u unitWorkspaces) Record(ctx context.Context, scope coreadapter.Scope, w workspace.Worktree) error {
-	return u.record(ctx, scope, w)
+	_, err := u.record(ctx, scope, w)
+	return err
 }
 
 func (u unitWorkspaces) Capture(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView, result coreadapter.SessionResult) error {

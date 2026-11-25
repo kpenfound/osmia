@@ -16,7 +16,17 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
+func (s *Service) holdsTurn(turn string) bool {
+	return s.clients != nil && s.clients.Held(turn)
+}
+
 func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repository *trace.Repository) error {
+	if s.clients != nil {
+		repository.HoldTurns(s.holdsTurn)
+		if err := s.clients.HoldFromTrace(repository.Project(), repository); err != nil {
+			return err
+		}
+	}
 	streams, err := repository.Workstreams()
 	if err != nil {
 		return err
@@ -38,6 +48,9 @@ func (s *Service) recoverSessions(ctx context.Context, cfg *config.Config, repos
 func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, th trace.Thread) error {
 	for _, q := range th.Turns {
 		if !q.CompletedAt.IsZero() || q.Response != nil {
+			continue
+		}
+		if s.holdsTurn(q.Request.TurnID) {
 			continue
 		}
 		if q.Claim != nil {

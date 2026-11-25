@@ -312,15 +312,31 @@ func (r *run) toolchain(ctx context.Context, cfg *config.Config) {
 	}
 	slices.Sort(agents)
 	for _, a := range agents {
-		r.tool(ctx, a, Fail, "install "+a+" or change the profiles that name agent = \""+a+"\"; turns on those profiles fail", "--version")
+		r.agentTool(ctx, a, "install "+a+" or change the profiles that name agent = \""+a+"\"; turns on those profiles fail")
 	}
 	if sandboxes["container"] {
-		r.tool(ctx, agent.ContainerEngine, Fail, "install and start "+agent.ContainerEngine+"; roles with sandbox = \"container\" run their turns in it", "version", "--format", "{{.Server.Version}}")
+		r.containerTool(ctx, "install and start "+agent.ContainerEngine+"; roles with sandbox = \"container\" run their turns in it")
 	}
 	if sandboxes["sbx"] {
-		r.tool(ctx, agent.SandboxCLI, Fail, "install Docker Sandboxes; roles with sandbox = \"sbx\" run their turns in it", "version")
+		r.sbxTool(ctx, "install Docker Sandboxes; roles with sandbox = \"sbx\" run their turns in it")
 	}
-	r.tool(ctx, "dagger", Warn, "install dagger; the service runs each candidate's checks with dagger check before review", "version")
+	r.daggerTool(ctx, Warn, "install dagger; the service runs each candidate's checks with dagger check before review")
+}
+
+func (r *run) agentTool(ctx context.Context, name, remedy string) {
+	r.tool(ctx, name, Fail, remedy, "--version")
+}
+
+func (r *run) containerTool(ctx context.Context, remedy string) {
+	r.tool(ctx, agent.ContainerEngine, Fail, remedy, "version", "--format", "{{.Server.Version}}")
+}
+
+func (r *run) sbxTool(ctx context.Context, remedy string) {
+	r.tool(ctx, agent.SandboxCLI, Fail, remedy, "version")
+}
+
+func (r *run) daggerTool(ctx context.Context, status Status, remedy string) {
+	r.tool(ctx, "dagger", status, remedy, "version")
 }
 
 func (r *run) tool(ctx context.Context, name string, status Status, remedy string, args ...string) {
@@ -618,6 +634,7 @@ func (r *run) state(cfg *config.Config, projects []config.Project) {
 
 func command(ctx context.Context, path string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && len(exit.Stderr) > 0 {

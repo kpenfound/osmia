@@ -179,3 +179,39 @@ func bridgeGateway(ctx context.Context, engine string) (string, error) {
 	}
 	return gateway, nil
 }
+
+// ListenMCP opens the listener a turn run in mode reaches its tools by and
+// returns it with the host and port the turn dials. A host turn dials the
+// loopback address itself, an sbx turn the name its sandbox proxy resolves to
+// the host, and a container turn on Linux the bridge gateway of containerEngine,
+// where a container reaches the host. A client's local MCP listener for a
+// remote turn is opened where the service would open the turn's own.
+func ListenMCP(ctx context.Context, mode, containerEngine string) (net.Listener, string, error) {
+	address, via := "127.0.0.1:0", ""
+	switch mode {
+	case agent.SandboxSbx:
+		via = ContainerHost
+	case agent.SandboxContainer:
+		via = ContainerHost
+		if hostOS == "linux" {
+			gateway, err := bridgeGateway(ctx, containerEngine)
+			if err != nil {
+				return nil, "", err
+			}
+			address = net.JoinHostPort(gateway, "0")
+		}
+	}
+	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", address)
+	if err != nil {
+		return nil, "", err
+	}
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		return nil, "", errors.Join(err, listener.Close())
+	}
+	host := listener.Addr().String()
+	if via != "" {
+		host = net.JoinHostPort(via, port)
+	}
+	return listener, host, nil
+}

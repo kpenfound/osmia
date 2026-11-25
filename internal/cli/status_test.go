@@ -170,6 +170,10 @@ func TestStatusJSONHoldsEveryWorkstreamProfilesCapacityAndWorkspaces(t *testing.
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
 	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "chief", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
+	if got := all.Status.Capacity; got == nil || len(got.Clients) != 1 || !got.Clients[0].Local || got.Clients[0].ID != "local" {
+		t.Fatalf("status --json capacity clients: %+v", got)
+	}
+	capacity.Clients = all.Status.Capacity.Clients
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
@@ -596,6 +600,47 @@ func TestStatusPrintsCapacity(t *testing.T) {
 		"    Waiting: " + quiet + " session (capacity)\n" +
 		"  chief: 3 of 3 slot(s) in use, 1 waiting\n" +
 		"    Waiting: " + stream + " turn turn-1 of chief (capacity)\n"; out.String() != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
+func TestStatusPrintsEachClientWithItsSlotsLeaseProfilesSkipsTurnsAndFailures(t *testing.T) {
+	two := 2
+	ends := time.Date(2026, 11, 25, 9, 2, 0, 0, time.UTC)
+	at := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	showCapacity(&out, &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(1), Waiting: []wire.SlotWait{
+		{Workstream: stream, Agent: "mason-parser", Turn: "mason-parser-2", Reason: "client", Client: "nNODE1"}}}},
+		Clients: []wire.ClientStatus{
+			{ID: "local", Name: "local", Local: true, Unbounded: true, Used: 1, Reported: true, ReportCurrent: true,
+				Profiles: []wire.ClientProfileStatus{{Profile: "default", Runnable: true}},
+				Turns:    []wire.ClientTurn{{Turn: "t-local", Workstream: stream, Role: "mason", Unit: "parser"}}},
+			{ID: "nNODE1", Name: "laptop", Slots: &two, Used: 1, Draining: true, Idle: wire.ClientIdleDraining, IdleReason: "It is draining.", Reported: true, ReportCurrent: true,
+				Lease: &wire.ClientLease{Health: wire.LeaseLate, EndsAt: ends},
+				Profiles: []wire.ClientProfileStatus{{Profile: "default", Runnable: true},
+					{Profile: "backup", Problems: []wire.ProfileProblem{{Check: "codex --version", Detail: "not found", Fix: "install the codex CLI"}}}},
+				Skipped:  []wire.ClientSkip{{Role: "mason", Main: "default", Profile: "backup"}},
+				Failures: []wire.ClientFailure{{Turn: "t-failed", Workstream: stream, Role: "mason", Profile: "default", Failure: "not logged in", At: at}}},
+			{ID: "nNODE2", Name: "desktop", Slots: &two, Idle: wire.ClientIdleNoReport, IdleReason: "It has not reported what it can run yet.", Lease: &wire.ClientLease{Health: wire.LeaseHealthy, EndsAt: ends}},
+		}})
+	want := "Capacity (per workstream 2):\n" +
+		"  mason: 0 of 1 slot(s) in use, 1 waiting\n" +
+		"    Waiting: " + stream + " turn mason-parser-2 of mason-parser (client nNODE1)\n" +
+		"Clients:\n" +
+		"  local: 1 in use, no slot limit\n" +
+		"    Running: mason turn t-local of " + stream + " unit parser\n" +
+		"    Can run: default\n" +
+		"  laptop (nNODE1): 1 of 2 slot(s) in use, lease late until 2026-11-25T09:02:00Z, draining\n" +
+		"    Takes no new turn: It is draining.\n" +
+		"    Can run: default\n" +
+		"    Cannot run: backup\n" +
+		"      Missing: codex --version (not found); fix: install the codex CLI\n" +
+		"    Skips fallback: backup for role mason (main profile default)\n" +
+		"    Failed: mason turn t-failed of " + stream + " on profile default at 2026-11-25T09:00:00Z: not logged in\n" +
+		"  desktop (nNODE2): 0 of 2 slot(s) in use, lease healthy until 2026-11-25T09:02:00Z\n" +
+		"    Takes no new turn: It has not reported what it can run yet.\n" +
+		"    Profiles: not reported yet\n"
+	if out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }

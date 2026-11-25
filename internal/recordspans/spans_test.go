@@ -236,6 +236,22 @@ func pinnedGenAIKey(key string) bool {
 	return false
 }
 
+func TestATurnOnAClientCarriesTheClientIdentityAndALocalOneThatNamesNoClientDoesNot(t *testing.T) {
+	h := newHarness(t)
+	h.turn("remote", minute(1), minute(2), func(_ *trace.TurnRequest, r *trace.TurnResponse) { r.Result.Client = "nREMOTE1CNTRL" })
+	h.turn("unplaced", minute(5), minute(6), nil)
+	turns := named(h.spans(), "invoke_agent mason")
+	if len(turns) != 2 {
+		t.Fatalf("%d turn spans: %v", len(turns), h.spans())
+	}
+	if got := str(turns[0], telemetry.KeyClient); got != "nREMOTE1CNTRL" {
+		t.Errorf("the remote turn's client attribute %q: %s", got, describe(turns[0]))
+	}
+	if _, ok := value(turns[1], telemetry.KeyClient); ok {
+		t.Errorf("a turn that records no client carries one: %s", describe(turns[1]))
+	}
+}
+
 func TestStoppedTurnIsCancelledWithTheStopCause(t *testing.T) {
 	h := newHarness(t)
 	h.turn("t1", minute(1), minute(2), func(_ *trace.TurnRequest, r *trace.TurnResponse) {

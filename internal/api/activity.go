@@ -18,6 +18,10 @@ const (
 	ActivityCheck     ActivityKind = "check"
 	ActivityAgentTurn ActivityKind = "turn"
 	ActivityRecovery  ActivityKind = "recovery"
+	// ActivityClientTurn is a turn running on a client other than the
+	// service's own machine. Its progress comes from the client's heartbeats,
+	// so stall detection applies to it.
+	ActivityClientTurn ActivityKind = "client_turn"
 )
 
 // ActivityEntry is one backend operation the activity record holds: either

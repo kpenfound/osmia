@@ -20,7 +20,9 @@ on a loopback address (listen.web) and on the tailnet (listen.tailnet). There is
 no authentication: the socket, the loopback interface and tailnet membership are
 the boundaries. On the web and tailnet listeners, requests must carry a Host
 naming the listener, and requests other than GET and HEAD must send
-Content-Type: application/json.
+Content-Type: application/json. Two routes on the tailnet listener send their
+own content type instead: the git fetch request and the upload of a finished
+view. The service grants no cross-site preflight for them.
 
 Request bodies are one JSON object with known, unique fields. Every failure
 returns an error object with a code and a message.`
@@ -65,6 +67,7 @@ var parameters = map[string]string{
 	"workstream": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
 	"project":    "Project ID.",
 	"image":      "Recorded image ID.",
+	"turn":       "Turn ID.",
 	"number":     "Inbox entry number.",
 	"unit":       "Unit ID from the workstream's plan.",
 	"amendment":  "Amendment number within the workstream.",
@@ -108,6 +111,9 @@ func Spec() ([]byte, error) {
 		if route.Request != nil && route.Method != http.MethodDelete {
 			oc.AddReqStructure(route.Request)
 		}
+		if route.RequestType != "" {
+			oc.AddReqStructure("", openapi.WithContentType(route.RequestType))
+		}
 		status := route.Status
 		if status == 0 {
 			status = http.StatusOK
@@ -116,6 +122,8 @@ func Spec() ([]byte, error) {
 			oc.SetDescription("Exact stored image bytes; X-Content-Type-Options: nosniff and Cache-Control: no-store. Only live PNG and JPEG attachments are served.")
 			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("image/png"))
 			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("image/jpeg"))
+		} else if route.ResponseType != "" {
+			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType(route.ResponseType))
 		} else if route.Stream {
 			oc.SetDescription(streamDescription)
 			oc.AddRespStructure(route.Response, openapi.WithHTTPStatus(status), openapi.WithContentType("text/event-stream"))

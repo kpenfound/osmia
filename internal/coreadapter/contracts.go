@@ -192,6 +192,12 @@ type Usage struct {
 	CostKnown bool
 	Turns     int
 }
+
+// LocalClient is the identity of the built-in client: the server's own
+// machine, which runs sessions in this process. Every other client is
+// identified by its tailnet node.
+const LocalClient = "local"
+
 type SessionResult struct {
 	Session                         BackendSession
 	SessionDirectory, FinalResponse string
@@ -209,6 +215,9 @@ type SessionResult struct {
 	// Refusal is the latest reason the service refused a report the turn's
 	// agent made, kept when the turn ended without an accepted one.
 	Refusal string `json:"refusal,omitempty"`
+	// Client is the client that ran the session, LocalClient for the server's
+	// own machine. The service sets it from the placement it made.
+	Client string `json:"client,omitempty"`
 }
 type ProviderLimit struct {
 	Status, Kind string

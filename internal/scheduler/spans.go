@@ -20,17 +20,21 @@ type flight struct {
 	turn       string
 	role       string
 	unit       string
+	client     string
 	start      time.Time
 }
 
-func flightOf(c Candidate, start time.Time) flight {
-	return flight{workstream: c.Workstream, agent: c.Thread.Identity.ID, turn: c.Turn.Request.TurnID, role: c.Thread.Identity.Role, unit: c.Turn.Request.Unit, start: start}
+func flightOf(c Candidate, start time.Time, client string) flight {
+	return flight{workstream: c.Workstream, agent: c.Thread.Identity.ID, turn: c.Turn.Request.TurnID, role: c.Thread.Identity.Role, unit: c.Turn.Request.Unit, client: client, start: start}
 }
 
 func (l loaded) flight(stream config.WorkstreamID, t trace.Thread, q trace.QueuedTurn) flight {
 	f := flight{workstream: stream, agent: t.Identity.ID, turn: q.Request.TurnID, role: t.Identity.Role, unit: q.Request.Unit, start: l.dispatchedAt[turnKey{stream, t.Identity.ID, q.Request.TurnID}]}
 	if f.start.IsZero() && q.Claim != nil {
 		f.start = q.Claim.At
+	}
+	if l.client != nil {
+		f.client = l.client(q.Request.TurnID)
 	}
 	return f
 }
@@ -69,7 +73,7 @@ func (p *Shared) spans() *slotspans.Recorder {
 }
 
 func (f flight) interval(project config.ProjectID) slotspans.Interval {
-	return slotspans.Interval{Kind: slotspans.Held, Source: slotspans.SourceTurn, Pool: telemetry.PoolID(f.role), Role: f.role, Project: project, Workstream: f.workstream, Unit: f.unit, Agent: f.agent, Work: turnWork(f.agent, f.turn), Start: f.start}
+	return slotspans.Interval{Kind: slotspans.Held, Source: slotspans.SourceTurn, Pool: telemetry.PoolID(f.role), Role: f.role, Project: project, Workstream: f.workstream, Unit: f.unit, Agent: f.agent, Client: f.client, Work: turnWork(f.agent, f.turn), Start: f.start}
 }
 
 func (p *Shared) syncHolds(project config.ProjectID, flights map[turnKey]flight, limits func(string) (int, bool), at time.Time) {
@@ -126,12 +130,12 @@ func (s *Scheduler) waitInterval(c Candidate) slotspans.Interval {
 		Unit: c.Turn.Request.Unit, Agent: c.Thread.Identity.ID, Work: turnWork(c.Thread.Identity.ID, c.Turn.Request.TurnID)}
 }
 
-func (s *Scheduler) refused(rec *slotspans.Recorder, c Candidate, reason string) {
+func (s *Scheduler) refused(rec *slotspans.Recorder, c Candidate, reason, client string) {
 	if rec == nil {
 		return
 	}
 	iv := s.waitInterval(c)
-	iv.Start, iv.Reason = s.options.Now(), reason
+	iv.Start, iv.Reason, iv.Client = s.options.Now(), reason, client
 	iv.Bound(s.limits(c.Thread.Identity.Role))
 	rec.Begin(iv)
 }

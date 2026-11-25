@@ -86,6 +86,10 @@ See
 | Durable threads | Queued turns, owned logs, continuation and replay | [thread](../internal/thread) |
 | Execution boundary | Scoped file views, tool grants (including the `Web` permission), environment, sandbox verification | [isolation](../internal/isolation), [coreadapter](../internal/coreadapter) |
 | Target workspaces | Service-owned Git and Jujutsu operations | [workspace](../internal/workspace) |
+| Clients: protocol and placement | The registry of connected clients, their leases, the profile handout and capability reports, the server-to-client request channel, and round-robin and sticky placement over the local client and every connected client | [fleet](../internal/fleet) |
+| Clients: file transport | The read-only git route over registered projects' clones, and the view archives served and taken with a safe unpack | [filetransport](../internal/filetransport) |
+| Clients: turn dispatch | Offering a turn to a client, the relay of its tool calls, carrying out view and skill operations on the client's files, capture of a returned view, reattach, lease loss, late returns and idempotent answers | [clientturns](../internal/clientturns) |
+| Client process | `osmia client`: capability checks, cached clones, views, the local MCP listener, sessions, heartbeats, drain and the delivery of results and views the server has not yet answered for | [fleet/client](../internal/fleet/client), [cli](../internal/cli) |
 | Interfaces | Local client and browser page | [cli](../internal/cli), [web](../internal/web) |
 | Jev judgments | Judgment identity, records, reuse, acceptance and costs, over agentcore's Jev client with its retries and cool-down | [jev](../internal/jev) |
 | Transition routing | Exits, hard prerequisites, the `decide-transition` table, the route journal, per-target effects and the worker that keeps Jev off the scheduling path | [router](../internal/router) |
@@ -105,6 +109,67 @@ replaced by it and the entry removed.
 | The Docker bridge gateway address, for reaching host MCP servers from a container. agentcore computes it internally and does not export it | `bridgeGateway` in [internal/coreadapter/mcp.go](../internal/coreadapter/mcp.go) |
 | Git replay that survives a restart. The pinned `vcs/git` replayer keeps no record of the branch's pre-replay tip or the replay boundary, and drops its state when it finishes | `replayRecord` with `loadReplayRecord`, `saveReplayRecord`, `ensureAttached` and `replayFinishedButNotSettled` in [internal/workspace/git.go](../internal/workspace/git.go) |
 | Deterministic Jujutsu replay. The pinned `vcs/jj` replayer duplicates commits with random change IDs and wall-clock times, so replaying one range twice does not reproduce the same commit | `ReplayIn`, `ReplayInFrom`, `ContinueReplay` and `Replaying` on `Jujutsu` in [internal/workspace/jujutsu.go](../internal/workspace/jujutsu.go) |
+| Checking, from the service, that a saved model session can still be resumed on a client. The pinned `agent.Runner` can only look at a session directory on the machine it runs on, and the session directory of a remote turn stays on its client | The service asks nothing of a remote client before a resumed turn. The client resumes with its own runner, and a session it cannot resume fails the attempt before any work, which the thread's existing replay fallback answers ([internal/clientturns](../internal/clientturns)) |
+| Listing, from the service, what a session left in its directory after a turn. The pinned runner reports the session ID, usage and outcome of a run, and nothing about the files beside them | A remote client returns the session files the service reads after a turn in its turn result (`api.TurnResult.SessionFiles`), and the service keeps them in the turn's own session directory ([internal/clientturns](../internal/clientturns)) |
+
+## Clients
+
+Model sessions run on clients, and the service is the control plane. The
+service's own machine is the built-in local client, which runs sessions in
+process through the same interface a remote client uses; any other machine on
+the tailnet runs `osmia client`. [design §8.5](design.md#85-clients-and-placement)
+defines the behaviour; this section locates the code and the split.
+
+**What each side owns.** The service keeps the trace, scheduling, every git
+write, capture, delivery, the service's Dagger check runs, pull-request
+watching and all telemetry. It also handles, authorises and audits every tool
+call of every turn. A client owns a turn's files (its view and its prepared
+skills), its session directory, the session process and the machine's own
+provider login and Dagger setting. A client has no trace store, no telemetry and
+no configuration beyond its flags, and it never writes to a git store.
+
+**How a turn reaches a client.** `isolation.Turns` prepares a turn the same way
+for every client: grants, the tools it may call and the view its role needs.
+Placement, in [fleet](../internal/fleet), chooses the client when the
+scheduler admits the turn, and `isolation.Turns` hands a turn placed on a remote
+client to [clientturns](../internal/clientturns), which offers it over the
+client's own connection. Everything the client needs to build its view travels in the offer:
+a project's starting commit and selected paths, which the client fetches through
+the read-only git route in [filetransport](../internal/filetransport), or an
+archive for a view built from trace documents. The tool calls the session makes
+return through the client's local MCP listener to the relay on the tailnet API,
+which forwards them under the turn's bearer token to the endpoint the service
+hosted for the turn. A tool that acts on the turn's view or skills reaches the
+client as a request on the client's connection and runs on the client's own
+files. The client sends back the result, with what the service reads from a
+session directory, and the finished view, which the service captures through the
+path a local turn uses.
+
+**Connection, lease and reattach.** A client connects out and polls for
+messages, so the service never needs its address. Its lease is kept by
+heartbeats that carry each running turn's progress into the activity registry.
+The service records each remote turn's client in a small file under the root's
+transfers directory, which is how it holds a turn for a client to reattach after
+a restart and hosts its tools again from the recorded grants. That hold ends at
+a fixed deadline only for a turn whose client has not reattached; a reattached
+turn lives as long as its client's lease. A view the service accepted stays in
+the views directory, and a held turn rebuilt after a restart takes it back, so
+a result sent afterwards completes the turn. When a lease ends
+the service waits a bounded time for the client's view, then runs the existing
+recovery of an interrupted turn. A return for a turn whose recovery has begun is
+answered superseded and recorded, and a return sent twice is answered already
+recorded.
+
+**Placement and capacity.** The `capacity.*` ceilings are checked first, then
+the chosen client's slot count. New turns rotate over the clients; a turn that
+resumes a saved session goes back to the client the trace records as holding it.
+Status, the capacity view and the web page read the same registry and
+placement, so each client appears with its slots, lease, draining state and the
+turns running on it.
+
+The pinned agentcore runner runs the session on the client exactly as it does
+on the service; what it cannot do for a remote turn is listed under
+[agentcore gaps](#agentcore-gaps).
 
 ## Decisions and side effects
 
@@ -240,7 +305,7 @@ this page only locates the code.
 
 ## Agent boundary
 
-The service selects a workspace and copies only approved files into a private
+The boundary is the same wherever the session runs: a client builds the same view the service would build and runs the session in the role's configured sandbox mode. The service never sends it a credential, and no client holds a version control tool for the agent. The service selects a workspace and copies only approved files into a private
 turn view. It chooses the role's tools and environment and checks the prepared
 execution policy before the agent runs. Agents receive no VCS tool or delivery
 credential. Writable output is captured by service code before the turn view is

@@ -38,6 +38,12 @@ type Runner struct {
 	// never changes whether CheckResume is asked, or what a CheckResume that
 	// answers for itself says. Nil means neither applies to any role.
 	ResumableRoles func(string) bool
+	// Place chooses where a claimed turn runs, before it starts, and may wait for
+	// a client slot. A turn whose thread's saved session is on another client
+	// replays its log instead of resuming, and fallback profiles the client
+	// cannot run are skipped. Nil runs every turn where Turns puts it, with
+	// every profile.
+	Place func(context.Context, trace.Thread, trace.QueuedTurn) (Placed, error)
 	// Jev classifies clean mason responses first; a fallback, which is every
 	// judgment while Jev is unconfigured, leaves them to the code rules. It
 	// must not be nil.
@@ -47,6 +53,18 @@ type Runner struct {
 	// inside turn execution, before the agent session starts, so it may ask
 	// Jev. Nil adds nothing.
 	Advise func(context.Context, trace.TurnRequest, coreadapter.Scope) string
+}
+
+// Placed is where a claimed turn runs.
+type Placed struct {
+	// Client is the ID of the client the turn runs on.
+	Client string
+	// Runs reports whether that client can run a profile. Nil means every
+	// profile.
+	Runs func(profile string) bool
+	// Release gives back the client slot the turn took, when the turn ends. Nil
+	// gives back nothing.
+	Release func()
 }
 
 // RunNext retries infrastructure failures within the turn, as execute
@@ -96,6 +114,11 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if persistErr != nil && result.StartedAt.IsZero() {
 		return q, errors.Join(runErr, persistErr)
 	}
+	return r.settle(ctx, stream, agent, t, q, prepared.Scope, result, runErr, persistErr, advice)
+}
+
+func (r Runner) settle(ctx context.Context, stream config.WorkstreamID, agent string, t trace.Thread, q trace.QueuedTurn, scope coreadapter.Scope, result coreadapter.SessionResult, runErr, persistErr error, advice string) (trace.QueuedTurn, error) {
+	req := q.Request
 	h := req.Header
 	h.Project = r.Store.Project()
 	h.Schema, h.ID, h.At, h.Actor = "osmia.trace.turn-response", trace.EventID(req.ID, "response"), r.Now(), trace.Actor{Kind: "service", ID: "thread-runner"}
@@ -113,7 +136,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	if t.Identity.Role == "mason" {
 		response.Classification = trace.ClassifyMasonTurn(result, response.Failure)
 		if response.Classification != nil {
-			r.judgeClassification(ctx, req, prepared.Scope, &response)
+			r.judgeClassification(ctx, req, scope, &response)
 		}
 	}
 	q.Response = &response
@@ -121,7 +144,7 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return q, errors.Join(runErr, persistErr)
 	}
 	cleanup := context.WithoutCancel(ctx)
-	err = func() error {
+	err := func() error {
 		if err := r.Store.CaptureTurn(cleanup, q.Claim.Token, response); err != nil {
 			return err
 		}
@@ -133,4 +156,56 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 		return r.Store.CompleteTurn(cleanup, stream, agent, req.TurnID, q.Claim.Token, completed)
 	}()
 	return q, errors.Join(runErr, err)
+}
+
+// Adopt completes a turn that a previous service session started on a client
+// and that the client reattached after the restart, with the result the
+// client returned. The turn becomes this session's, its attempt takes the
+// result, and the turn's response is recorded as for an uninterrupted turn. It
+// does not retry: a failed result is recorded as a failed turn.
+func (r Runner) Adopt(ctx context.Context, stream config.WorkstreamID, agent, turn string, result coreadapter.SessionResult, runErr error) (trace.QueuedTurn, error) {
+	if r.Store == nil || r.Now == nil {
+		return trace.QueuedTurn{}, fmt.Errorf("thread runner requires store and clock")
+	}
+	q, err := r.Store.ReclaimTurn(ctx, stream, agent, turn)
+	if err != nil {
+		return q, err
+	}
+	t, err := r.Store.Thread(stream, agent)
+	if err != nil {
+		return q, err
+	}
+	req := q.Request
+	scope := coreadapter.Scope{Project: string(r.Store.Project()), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
+	if result.StartedAt.IsZero() {
+		result.StartedAt = q.Claim.At
+	}
+	result.SessionDirectory = q.Claim.SessionDirectory
+	if errors.Is(runErr, context.Canceled) {
+		result.Cancelled = true
+	}
+	if !coreadapter.ValidSession(result.Session) {
+		result.Session = coreadapter.BackendSession{}
+		if runErr == nil {
+			runErr = fmt.Errorf("the client returned no valid session reference")
+		}
+	}
+	if n := len(q.Attempts); n > 0 {
+		a := q.Attempts[n-1]
+		if a.Result == nil {
+			captured := result
+			a.Result = &captured
+			if failed(result, runErr) {
+				a.FailureClass, a.Failure = coreadapter.Infrastructure, "the session failed on its client"
+				if runErr != nil {
+					a.Failure = runErr.Error()
+				}
+			}
+			if err := r.Store.RecordAttempt(ctx, stream, agent, turn, q.Claim.Token, a); err != nil {
+				return q, err
+			}
+			q.Attempts[n-1] = a
+		}
+	}
+	return r.settle(ctx, stream, agent, t, q, scope, result, runErr, nil, "")
 }
