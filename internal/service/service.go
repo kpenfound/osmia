@@ -190,6 +190,7 @@ type Service struct {
 	pool                  *scheduler.Shared
 	gitOperations         gitOperationPool
 	checkSlots            *checkSlotPool
+	chief                 *chiefSlotPool
 	committeeAdmissions   sync.Map
 	modelOperationStreams sync.Map
 	spends                daySpends
@@ -306,6 +307,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: api.EventActivity}) }
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
+	s.chief = newChiefSlotPool(cfg.Capacity.Chief, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
 	s.slots.Interrupt(telemetry.PoolID(checksRole))
 	s.jev = &jev.Judge{Config: func() config.Jev { return s.current().Jev }, Provider: opts.JevProvider, Getenv: func(name string) string {
 		value := os.Getenv(name)

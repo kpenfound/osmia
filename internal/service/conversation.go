@@ -187,7 +187,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	}
 	entry := conversation(q)[0]
 	if th, err := target.Thread(q.Request.Workstream, q.Request.AgentID); err == nil {
-		entry.QueuedReason = queuedReason(th, q)
+		entry.QueuedReason = s.queuedReason(th, q)
 	}
 	return entry, nil
 }

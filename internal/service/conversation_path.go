@@ -113,7 +113,10 @@ func (p *conversationPath) scan(ctx context.Context, targets map[config.Workgrou
 			p.s.log().Warn("conversation queue scan failed; will retry", "project", string(p.repository.Project()), "error", err.Error())
 			continue
 		}
-		if err := t.controller.Pass(ctx); err != nil {
+		t.gate.begin()
+		err := t.controller.Pass(ctx)
+		t.gate.end()
+		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -126,6 +129,7 @@ func (p *conversationPath) scan(ctx context.Context, targets map[config.Workgrou
 type conversationTarget struct {
 	repository *trace.Repository
 	controller *reconcile.Controller
+	gate       *chiefGate
 	close      func()
 }
 
@@ -144,6 +148,7 @@ func (p *conversationPath) run(ctx context.Context) (err error) {
 		if err != nil {
 			cancel()
 		}
+		defer p.s.chief.drop(p)
 		for _, t := range targets {
 			t.controller.Drain()
 		}
@@ -200,13 +205,14 @@ func (p *conversationPath) target(repository *trace.Repository, closeTarget func
 	if repository != p.repository {
 		options.Workstreams = func() ([]config.WorkstreamID, error) { return p.streams(repository) }
 	}
+	gate := s.chief.gate(p, repository.Project())
 	hold := options.Hold
 	options.Hold = func(stream config.WorkstreamID, op coreadapter.Operation) bool {
-		return (hold != nil && hold(stream, op)) || p.holds(repository, stream, op)
+		return (hold != nil && hold(stream, op)) || p.holds(gate, repository, stream, op)
 	}
 	options.Concurrent = func(coreadapter.Operation) bool { return true }
 	options.Class = func(coreadapter.Operation) trace.OperationClass { return trace.ConversationOperation }
-	options.Limit = nil
+	options.Limit = gate.limit
 	controller, err := reconcile.New(repository, options)
 	if err != nil {
 		return nil, err
@@ -219,7 +225,7 @@ func (p *conversationPath) target(repository *trace.Repository, closeTarget func
 	}
 	p.controllers = append(p.controllers, controller)
 	p.mu.Unlock()
-	return &conversationTarget{repository: repository, controller: controller, close: closeTarget}, nil
+	return &conversationTarget{repository: repository, controller: controller, gate: gate, close: closeTarget}, nil
 }
 
 type conversationAdapter struct{ pipeline *pipeline }
@@ -325,7 +331,7 @@ func pendingConversation(records []trace.OperationRecord, th trace.Thread, befor
 	return len(pending) > 0
 }
 
-func (p *conversationPath) holds(repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
+func (p *conversationPath) holds(gate *chiefGate, repository *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) bool {
 	if !conversationOperation(op) || (repository != p.repository && !p.leads(repository)) {
 		return true
 	}
@@ -361,7 +367,10 @@ func (p *conversationPath) holds(repository *trace.Repository, stream config.Wor
 				return true
 			}
 			held, err := p.s.holds(repository.Project(), repository, scheduler.Candidate{Project: repository.Project(), Workstream: stream, Thread: th, Turn: q})
-			return err != nil || held
+			if err != nil || held {
+				return true
+			}
+			return gate.hold(stream, th, q)
 		}
 		if q.CompletedAt.IsZero() {
 			return true

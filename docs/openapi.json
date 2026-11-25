@@ -4825,6 +4825,9 @@
           "checks": {
             "type": "integer"
           },
+          "chief": {
+            "type": "integer"
+          },
           "committee": {
             "type": "integer"
           },
