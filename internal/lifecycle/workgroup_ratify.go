@@ -358,6 +358,13 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 			}
 		} else if input.Turn == "" {
 			return ProjectSpecDraftInput{}, false, fmt.Errorf("project spec drafting has no recorded member revisions")
+		} else if stopped, err := projectSpecDraftStopped(wt, host, input.Turn); err != nil {
+			return ProjectSpecDraftInput{}, false, err
+		} else if stopped {
+			input.Turn = fmt.Sprintf("project-spec-draft-%d", state.Version+1)
+			if err := s.recordProjectSpecDraftRequest(ctx, wt, host, state, input, revision+1, ProjectSpecDraftActor, "project-spec-draft", "the service stopped during the architect's draft; the architect is asked again with the same pinned input"); err != nil {
+				return ProjectSpecDraftInput{}, false, err
+			}
 		}
 	} else {
 		next, err := s.SnapshotProjectSpecDraft(members, spec)
@@ -397,6 +404,22 @@ func (s *Controller) PrepareProjectSpecDraft(ctx context.Context, wt *trace.Repo
 		}
 	}
 	return input, true, nil
+}
+
+func projectSpecDraftStopped(wt *trace.Repository, host config.WorkstreamID, turn string) (bool, error) {
+	t, err := wt.Thread(host, architectAgent)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, q := range t.Turns {
+		if q.Request.TurnID == turn {
+			return q.Response != nil && q.Status() == "interrupted" && q.Response.Result.Cancelled && q.Response.Stop == nil, nil
+		}
+	}
+	return false, nil
 }
 
 // ReportProjectSpecDraftFailure tells the chief of staff, through the
@@ -635,6 +658,10 @@ func (s *Controller) RequestProjectSpecDraft(ctx context.Context, wt *trace.Repo
 	case input.Problems != "":
 		reason = "the previous draft was refused; the architect is asked again with its problems"
 	}
+	return s.recordProjectSpecDraftRequest(ctx, wt, host, state, input, revision, by, cause, reason)
+}
+
+func (s *Controller) recordProjectSpecDraftRequest(ctx context.Context, wt *trace.Repository, host config.WorkstreamID, state trace.WorkflowState, input ProjectSpecDraftInput, revision int, by trace.Actor, cause, reason string) error {
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: input.Turn, Revision: 1, Project: wt.Project(), Workstream: host, At: s.Now(), Actor: by, Cause: cause}, Subject: ProjectSpecDraftSubject, From: state.Value, To: "drafting", Reason: reason}}
 	data, err := json.Marshal(input)
 	if err != nil {
