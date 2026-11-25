@@ -121,6 +121,10 @@ type Loop struct {
 	Repository *trace.Repository
 	// Spec returns the sealed climb spec and the revision that was sealed.
 	Spec func(stream config.WorkstreamID) (Spec, int, error)
+	// SpecAt returns an earlier recorded revision of the climb spec, which the
+	// loop compares with the sealed one to tell whether an amendment changed
+	// what the owner's approval rests on.
+	SpecAt SpecReader
 	// Branch names the climb branch.
 	Branch func(stream config.WorkstreamID) string
 	// Host returns the machinery of the workstream.
@@ -149,14 +153,26 @@ const NoCandidateStall = 3
 const maxSteps = 64
 
 type cycle struct {
-	stream     config.WorkstreamID
-	spec       Spec
-	approval   ApprovalRecord
-	host       Host
-	runner     Runner
-	branch     string
+	stream   config.WorkstreamID
+	spec     Spec
+	revision int
+	approval ApprovalRecord
+	host     Host
+	runner   Runner
+	branch   string
+	// concluding is set for a climb that is concluding. stale is set when an
+	// amendment changed a field the approval's calibration depends on: the
+	// approval no longer describes what the sealed climb spec measures, so no
+	// attempt starts and none is measured until the climb is calibrated and
+	// approved again.
 	concluding bool
+	stale      SpecChange
 }
+
+// ErrApprovalStale refuses to measure or start an attempt under an approval
+// that was made under an older climb spec revision after a change of a field
+// the calibration depends on.
+var ErrApprovalStale = errors.New("the owner's approval was made under an older climb spec revision, and the amendment since changed what the calibration depends on")
 
 // Reconcile moves the climb as far as it can without waiting: it finishes the
 // open attempt from the phase the trace records, evaluates the stop rules after
@@ -192,7 +208,7 @@ func (l *Loop) Reconcile(ctx context.Context, stream config.WorkstreamID) error 
 }
 
 func (l *Loop) begin(stream config.WorkstreamID, concluding bool) (*cycle, error) {
-	spec, _, err := l.Spec(stream)
+	spec, revision, err := l.Spec(stream)
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +227,36 @@ func (l *Loop) begin(stream config.WorkstreamID, concluding bool) (*cycle, error
 	if err != nil {
 		return nil, err
 	}
-	return &cycle{stream: stream, spec: spec, approval: approval, host: host, runner: runner, branch: l.Branch(stream), concluding: concluding}, nil
+	c := &cycle{stream: stream, spec: spec, revision: revision, approval: approval, host: host, runner: runner, branch: l.Branch(stream), concluding: concluding}
+	if !concluding {
+		if c.stale, err = Drift(l.SpecAt, stream, approval.SpecRevision, spec, revision); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
+}
+
+// refresh reads the sealed climb spec again, so that an amendment approved
+// while a long step was running, such as a measurement, is seen before the next
+// phase or the next attempt rather than after the pass.
+func (l *Loop) refresh(c *cycle) error {
+	spec, revision, err := l.Spec(c.stream)
+	if err != nil || revision == c.revision {
+		return err
+	}
+	c.spec, c.revision = spec, revision
+	if c.concluding {
+		return nil
+	}
+	c.stale, err = Drift(l.SpecAt, c.stream, c.approval.SpecRevision, spec, revision)
+	return err
 }
 
 func (l *Loop) step(ctx context.Context, c *cycle) (bool, error) {
 	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := l.refresh(c); err != nil {
 		return false, err
 	}
 	open, found, err := OpenAttempt(l.Repository, c.stream)
@@ -225,7 +266,7 @@ func (l *Loop) step(ctx context.Context, c *cycle) (bool, error) {
 	if found {
 		return l.advance(ctx, c, open)
 	}
-	if c.concluding {
+	if c.concluding || c.stale.Recalibrates() {
 		return false, nil
 	}
 	return l.next(ctx, c)
@@ -265,12 +306,12 @@ func (l *Loop) stops(ctx context.Context, c *cycle, attempts []Attempt) (bool, e
 	}
 	var spent float64
 	if l.Spent != nil {
-		if spent, err = l.Spent(c.stream, c.approval.At); err != nil {
+		if spent, err = l.Spent(c.stream, c.approval.StartedAt()); err != nil {
 			return false, err
 		}
 	}
-	in := StopInput{Rules: c.spec.Stop, Direction: c.spec.Metric.Direction, Baseline: c.approval.Baseline, Attempts: attempts, Extension: budget.Total(),
-		Spent: spent, Started: c.approval.At, Now: l.now()}
+	in := StopInput{Rules: c.spec.Stop, Direction: c.spec.Metric.Direction, Baseline: c.approval.Baseline, Attempts: attempts, Epoch: c.approval.EpochNumber(), Extension: budget.Total(),
+		Spent: spent, Started: c.approval.StartedAt(), Now: l.now()}
 	for _, rec := range continued {
 		in.Continued = append(in.Continued, rec)
 	}
@@ -307,9 +348,12 @@ func (l *Loop) start(ctx context.Context, c *cycle, attempts []Attempt) error {
 	if err != nil {
 		return err
 	}
-	best, _ := Best(c.approval.Baseline, attempts)
-	j := Journal{Number: n, Parent: tip, Best: best, Unit: AttemptUnit(n), Phase: PhaseStarted, Steering: len(steering.Notes), StartedAt: l.now()}
-	run := Running{Attempt: n, Phase: kinds.PhaseMason, StartedAt: j.StartedAt, ClimbStartedAt: c.approval.At}
+	if c.stale.Recalibrates() {
+		return ErrApprovalStale
+	}
+	best, _ := Best(c.approval.Baseline, InEpoch(attempts, c.approval.EpochNumber()))
+	j := Journal{Number: n, Parent: tip, Best: best, Unit: AttemptUnit(n), Phase: PhaseStarted, Steering: len(steering.Notes), StartedAt: l.now(), SpecRevision: c.revision, Epoch: c.approval.EpochNumber()}
+	run := Running{Attempt: n, Phase: kinds.PhaseMason, StartedAt: j.StartedAt, ClimbStartedAt: c.approval.StartedAt()}
 	reason := fmt.Sprintf("attempt %d starts from the current best %s, whose primary score is %v; its mason works in a workspace built from it", n, tip, best)
 	if err := l.move(ctx, c, &j, "", run, reason, nil); err != nil {
 		return err
@@ -350,8 +394,13 @@ func (l *Loop) move(ctx context.Context, c *cycle, j *Journal, from Phase, run R
 }
 
 func (l *Loop) advance(ctx context.Context, c *cycle, j Journal) (bool, error) {
-	if c.concluding && j.Phase != PhasePromoting && j.Phase != PhasePromoted && j.Phase != PhaseRecorded {
-		return l.discard(ctx, c, j, Decision{Cause: CauseConcluded, Reason: "the climb was concluded while the attempt was in flight"})
+	if j.Phase != PhasePromoting && j.Phase != PhasePromoted && j.Phase != PhaseRecorded {
+		switch {
+		case c.concluding:
+			return l.discard(ctx, c, j, Decision{Cause: CauseConcluded, Reason: "the climb was concluded while the attempt was in flight"})
+		case c.stale.Recalibrates():
+			return l.discard(ctx, c, j, Decision{Cause: CauseAmended, Reason: fmt.Sprintf("an approved amendment changed %s while the attempt was in flight, so its score could not be compared with the best of the climb spec revision %d it started under", c.stale.Words(), j.SpecRevision)})
+		}
 	}
 	switch j.Phase {
 	case PhaseStarted:
@@ -464,7 +513,7 @@ func (l *Loop) brief(c *cycle, j Journal) (Brief, error) {
 }
 
 func (l *Loop) running(c *cycle, j Journal, phase string, run int) Running {
-	r := Running{Attempt: j.Number, Hypothesis: j.Hypothesis, Phase: phase, StartedAt: j.StartedAt, ClimbStartedAt: c.approval.At}
+	r := Running{Attempt: j.Number, Hypothesis: j.Hypothesis, Phase: phase, StartedAt: j.StartedAt, ClimbStartedAt: c.approval.StartedAt()}
 	if phase == kinds.PhaseMeasuring {
 		r.Run, r.Runs = run, c.spec.Repeats
 	}
@@ -472,6 +521,9 @@ func (l *Loop) running(c *cycle, j Journal, phase string, run int) Running {
 }
 
 func (l *Loop) measure(ctx context.Context, c *cycle, j Journal) (bool, error) {
+	if c.stale.Recalibrates() {
+		return false, ErrApprovalStale
+	}
 	if stale, err := l.stale(ctx, c, j); err != nil || stale {
 		if err != nil {
 			return false, err
@@ -667,7 +719,7 @@ func (l *Loop) discard(ctx context.Context, c *cycle, j Journal, d Decision) (bo
 func (l *Loop) attempt(c *cycle, j Journal, outcome Outcome, d Decision) Attempt {
 	a := Attempt{Number: j.Number, Parent: j.Parent, Best: j.Best, Candidate: j.Candidate, Branch: j.Branch,
 		Hypothesis: j.Hypothesis, ChangeSummary: j.ChangeSummary, Expected: j.Expected, Diff: j.Diff, Outcome: outcome,
-		Guardrails: j.Guardrails, StartedAt: j.StartedAt, FinishedAt: l.now()}
+		Guardrails: j.Guardrails, StartedAt: j.StartedAt, FinishedAt: l.now(), SpecRevision: j.SpecRevision, Epoch: j.Epoch}
 	if j.Measurement != nil {
 		dec := d
 		if j.Decision != nil {
@@ -698,7 +750,7 @@ func (l *Loop) record(ctx context.Context, c *cycle, j Journal, from Phase, a At
 	if a.Outcome == OutcomeDiscarded {
 		reason = fmt.Sprintf("attempt %d is discarded (%s): %s", j.Number, a.Cause, a.Reason)
 	}
-	idle := Running{ClimbStartedAt: c.approval.At}
+	idle := Running{ClimbStartedAt: c.approval.StartedAt()}
 	if err := l.move(ctx, c, &j, from, idle, reason, events, docs...); err != nil {
 		return false, err
 	}
@@ -718,7 +770,7 @@ func (l *Loop) cleanup(ctx context.Context, c *cycle, j Journal) (bool, error) {
 	}
 	j.Phase = PhaseCleaned
 	reason := fmt.Sprintf("the workspace of attempt %d is dropped; its branch %s stays", j.Number, j.Branch)
-	if err := l.move(ctx, c, &j, PhaseRecorded, Running{ClimbStartedAt: c.approval.At}, reason, nil); err != nil {
+	if err := l.move(ctx, c, &j, PhaseRecorded, Running{ClimbStartedAt: c.approval.StartedAt()}, reason, nil); err != nil {
 		return false, err
 	}
 	return true, l.hook("climb:cleaned")

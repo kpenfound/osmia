@@ -3271,6 +3271,7 @@
     'protected-path': 'protected path',
     'no-candidate': 'no candidate',
     'review-rejected': 'review rejected',
+    amended: 'climb spec amended',
   };
 
   // climbOutcome says in words how an attempt ended.
@@ -3408,6 +3409,7 @@
     hi += margin;
     const y = (v) => pad.top + (1 - (orient(v) - lo) / (hi - lo)) * inner.h;
 
+    const first = points.length > 0 ? points[0].attempt : 1;
     const times = points.map((pt) => new Date(pt.at).getTime());
     let t0 = Math.min(...times);
     let t1 = Math.max(...times);
@@ -3419,7 +3421,7 @@
       if (setting.x === 'time') {
         return pad.left + ((new Date(pt.at).getTime() - t0) / (t1 - t0)) * inner.w * 0.94 + inner.w * 0.03;
       }
-      return pad.left + (pt.attempt / (points.length + 0.5)) * inner.w;
+      return pad.left + ((pt.attempt - first + 1) / (points.length + 0.5)) * inner.w;
     };
     const right = pad.left + inner.w;
 
@@ -3500,8 +3502,11 @@
         });
         return button;
       }));
+    const earlier = p.earlier_attempts
+      ? el('p', { class: 'meta', 'data-field': 'climb-boundary' }, p.earlier_attempts + (p.earlier_attempts === 1 ? ' earlier attempt is' : ' earlier attempts are') + ' not drawn: ' + (p.earlier_attempts === 1 ? 'it ran' : 'they ran') + ' before the evaluator was calibrated again under climb spec revision ' + p.spec_revision + ', against another baseline, so their scores are not comparable with these. The attempt table lists them above the revision boundary.')
+      : null;
     return el('div', { class: 'climb-chart-block' }, el('div', { class: 'climb-chart-head' }, el('h4', {}, 'Score'), toggle),
-      climbChart(id, p, setting, setting.open), climbLegend());
+      earlier, climbChart(id, p, setting, setting.open), climbLegend());
   }
 
   function climbDiffSection(a) {
@@ -3566,7 +3571,14 @@
     }
     return el('div', { class: 'climb-table-box' }, el('table', { class: 'climb-table', 'data-field': 'climb-attempts' },
       el('thead', {}, el('tr', {}, ...['Attempt', 'Outcome', 'Score', 'Change', 'Hypothesis', 'Records'].map((h) => el('th', { scope: 'col' }, h)))),
-      el('tbody', {}, ...attempts.flatMap((a) => climbAttemptRow(id, a, setting)))));
+      el('tbody', {}, ...attempts.flatMap((a, i) => {
+        const rows = climbAttemptRow(id, a, setting);
+        if (i > 0 && (a.epoch || 1) !== (attempts[i - 1].epoch || 1)) {
+          rows.unshift(el('tr', { class: 'climb-boundary', 'data-boundary': a.epoch || 1 },
+            el('td', { colspan: '6', 'data-field': 'revision-boundary' }, 'Calibrated again under climb spec revision ' + (a.spec_revision || '?') + ': the scores above were measured against another baseline and are not comparable with the scores below.')));
+        }
+        return rows;
+      }))));
   }
 
   // openClimbAttempt opens an attempt in the table, at one of its records when

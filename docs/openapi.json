@@ -1042,7 +1042,7 @@
     },
     "/v1/climb/{workstream}/approval": {
       "post": {
-        "summary": "Approve a Hill Climb workstream's calibrated evaluator: the owner's explicit decision on the evaluator approval card snapshots the approved copy of the protected paths and freezes them, and only then may climbing begin; Jev never decides it. Refused as a conflict when the climb is not waiting for the approval or the request pins an evaluator commit other than the calibrated one",
+        "summary": "Approve a Hill Climb workstream's calibrated evaluator: the owner's explicit decision on the evaluator approval card snapshots the approved copy of the protected paths and freezes them, and only then may climbing begin; Jev never decides it. Refused as a conflict when the climb is not waiting for the approval or the request pins an evaluator commit or climb spec revision other than the calibrated ones, such as the card an approved amendment retired",
         "operationId": "postClimbByWorkstreamApproval",
         "parameters": [
           {
@@ -6009,6 +6009,10 @@
           "decision": {
             "description": "approve is the one decision the card offers.",
             "type": "string"
+          },
+          "spec_revision": {
+            "description": "The climb spec revision the evaluator was calibrated under, as the card showed it. An amendment that changes a field the calibration depends on retires the card, and a retired card's answer is refused.",
+            "type": "integer"
           }
         },
         "type": "object"
@@ -6044,6 +6048,9 @@
               "array",
               "null"
             ]
+          },
+          "spec_revision": {
+            "type": "integer"
           },
           "workstream": {
             "type": "string"
@@ -6087,6 +6094,9 @@
           "diff": {
             "$ref": "#/components/schemas/ClimbDiffSummary"
           },
+          "epoch": {
+            "type": "integer"
+          },
           "expected_effect": {
             "type": "string"
           },
@@ -6126,6 +6136,9 @@
           },
           "scores": {
             "$ref": "#/components/schemas/ClimbScores"
+          },
+          "spec_revision": {
+            "type": "integer"
           },
           "started_at": {
             "format": "date-time",
@@ -6434,6 +6447,12 @@
           "direction": {
             "type": "string"
           },
+          "earlier_attempts": {
+            "type": "integer"
+          },
+          "epoch": {
+            "type": "integer"
+          },
           "evaluator": {
             "type": "string"
           },
@@ -6474,6 +6493,9 @@
               "type": "number"
             },
             "type": "array"
+          },
+          "spec_revision": {
+            "type": "integer"
           },
           "summary": {
             "type": "string"

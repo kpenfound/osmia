@@ -26,17 +26,24 @@ type Brief struct {
 	// Protected lists the frozen paths an attempt must not touch.
 	Protected []string
 	Log       []Attempt
-	Steering  []Note
+	// Earlier counts the attempts recorded before the climb was calibrated
+	// again after an amendment. Their scores were measured against another
+	// baseline, so the log does not list them.
+	Earlier  int
+	Steering []Note
 	// Delivered is how many of the steering notes earlier attempts carried;
 	// the others are new to this attempt.
 	Delivered int
 	Rejection *Rejection
 }
 
-// BriefOf assembles the brief of attempt n from the records.
-func BriefOf(n int, parent string, spec Spec, approval ApprovalRecord, attempts []Attempt, steering Steering, carried int) Brief {
+// BriefOf assembles the brief of attempt n from the records. Only the
+// attempts of the approval's epoch are the log and the best: an earlier
+// attempt was measured against another baseline.
+func BriefOf(n int, parent string, spec Spec, approval ApprovalRecord, all []Attempt, steering Steering, carried int) Brief {
+	attempts := InEpoch(all, approval.EpochNumber())
 	b := Brief{Number: n, Parent: parent, Spec: spec, Baseline: approval.Baseline, Units: approval.Units, Noise: approval.Noise, Protected: approval.Protected,
-		Log: attempts, Steering: steering.Notes, Delivered: carried}
+		Log: attempts, Earlier: len(all) - len(attempts), Steering: steering.Notes, Delivered: carried}
 	b.Best, _ = Best(approval.Baseline, attempts)
 	if len(attempts) > 0 {
 		if last := attempts[len(attempts)-1]; last.Cause == CauseRejected && strings.TrimSpace(last.ReviewNotes) != "" {
@@ -86,6 +93,9 @@ func (b Brief) Render() string {
 	}
 	line("")
 	line("## Attempt log")
+	if b.Earlier > 0 {
+		line("%d earlier %s ran before the climb spec changed and the evaluator was calibrated again. Their scores were measured against another baseline, so they are not listed and say nothing about the current best.", b.Earlier, map[bool]string{true: "attempt", false: "attempts"}[b.Earlier == 1])
+	}
 	if len(b.Log) == 0 {
 		line("No attempt has been recorded yet.")
 	}

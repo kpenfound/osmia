@@ -59,6 +59,9 @@ type evaluatorEngine struct {
 	mu    sync.Mutex
 	calls []evaluatorCall
 	reply func(n int) checks.CallResult
+	// gate, when set, runs before the nth call is answered and recorded; an
+	// error fails the call, which is not recorded.
+	gate func(ctx context.Context, n int) error
 }
 
 func newEvaluatorEngine(walls ...float64) *evaluatorEngine {
@@ -73,9 +76,17 @@ func newEvaluatorEngine(walls ...float64) *evaluatorEngine {
 	return e
 }
 
-func (e *evaluatorEngine) Call(_ context.Context, dir, function, run string) (checks.CallResult, error) {
+func (e *evaluatorEngine) Call(ctx context.Context, dir, function, run string) (checks.CallResult, error) {
+	e.mu.Lock()
+	gate, next := e.gate, len(e.calls)+1
+	e.mu.Unlock()
+	if gate != nil {
+		if err := gate(ctx, next); err != nil {
+			return checks.CallResult{}, err
+		}
+	}
 	call := evaluatorCall{dir: dir, function: function, run: run, files: map[string]string{}}
-	for _, name := range []string{"dagger.toml", ".dagger/bench/main.go", "testdata/corpus/a.txt"} {
+	for _, name := range []string{"dagger.toml", ".dagger/bench/main.go", "testdata/corpus/a.txt", "testdata/extra/a.txt"} {
 		if data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name))); err == nil {
 			call.files[name] = string(data)
 		}
@@ -316,6 +327,20 @@ func (c *climbFixture) card(t *testing.T) (api.InboxEntry, bool) {
 	return api.InboxEntry{}, false
 }
 
+// approvalOf is the owner's answer to an evaluator approval card: its pins are
+// the answer body.
+func approvalOf(card api.InboxEntry) api.ClimbApprovalRequest {
+	req := api.ClimbApprovalRequest{Decision: "approve"}
+	req.Commit, _ = card.Answer.Body["commit"].(string)
+	switch v := card.Answer.Body["spec_revision"].(type) {
+	case int:
+		req.SpecRevision = v
+	case float64:
+		req.SpecRevision = int(v)
+	}
+	return req
+}
+
 func (c *climbFixture) chiefNotices(t *testing.T, stream config.WorkstreamID, kind string) []string {
 	t.Helper()
 	outbox, err := c.repository().Outbox(stream)
@@ -417,10 +442,10 @@ func TestTheEvaluatorUnitRunsAsANormalUnitAndLandsAsTheFirstCommitThenTheOwnerAp
 	if _, ok, err := climb.ReadApproval(c.repository(), stream); err != nil || ok {
 		t.Fatalf("an approval is recorded before the owner approved: %v %v", ok, err)
 	}
-	if _, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "approve", Commit: "stale"}); !intakefixture.Failed(err, api.Conflict) {
+	if _, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "approve", Commit: "stale", SpecRevision: 1}); !intakefixture.Failed(err, api.Conflict) {
 		t.Fatalf("approving another commit: %v", err)
 	}
-	if _, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "decline", Commit: evaluator}); !intakefixture.Failed(err, api.Validation) {
+	if _, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "decline", Commit: evaluator, SpecRevision: 1}); !intakefixture.Failed(err, api.Validation) {
 		t.Fatalf("a decision the card does not offer: %v", err)
 	}
 
@@ -436,7 +461,7 @@ func TestTheEvaluatorUnitRunsAsANormalUnitAndLandsAsTheFirstCommitThenTheOwnerAp
 		t.Fatal("the card did not survive the restart")
 	}
 
-	out, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator})
+	out, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator, SpecRevision: 1})
 	fixturekit.Must(t, err)
 	if out.Commit != evaluator || out.Baseline != 101 || out.Noise != 3 || !slices.Contains(out.Protected, "testdata/corpus") {
 		t.Fatalf("approval %+v", out)
@@ -546,7 +571,7 @@ func TestACalibrationThatFindsTheMetricBrokenOrNoisyHoldsTheClimb(t *testing.T) 
 			if tc.engine.count() != calls || c.inner(t, stream) != tc.state {
 				t.Fatalf("a restart of a held climb: %s after %d calls, was %d", c.inner(t, stream), tc.engine.count(), calls)
 			}
-			if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: "any"}); !intakefixture.Failed(err, api.Conflict) {
+			if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: "any", SpecRevision: 1}); !intakefixture.Failed(err, api.Conflict) {
 				t.Fatalf("approving a held climb: %v", err)
 			}
 		})
@@ -594,7 +619,7 @@ func TestJevNeverApprovesTheEvaluatorEvenWhenItDecidesOwnerGatesAndIsConfident(t
 		}
 	}
 
-	out, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: card.Answer.Body["commit"].(string)})
+	out, err := c.c.ApproveClimb(context.Background(), stream, approvalOf(card))
 	fixturekit.Must(t, err)
 	if c.inner(t, stream) != climb.InnerClimbing || out.Workstream != stream {
 		t.Fatalf("after the owner's approval: %s %+v", c.inner(t, stream), out)

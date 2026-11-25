@@ -133,6 +133,7 @@ func (s *Service) climbMachine(repository *trace.Repository) *climb.Machine {
 			spec, sealed, err := intake.SealedClimbSpec(repository, cfg, stream)
 			return spec, sealed.Revision.Spec, err
 		},
+		SpecAt:   climbSpecReader(repository, cfg),
 		Settings: cfg.HillClimb,
 		Workspace: func(stream config.WorkstreamID) (climb.Workspace, error) {
 			return intake.FeatureWorkspaces(cfg, repository).Of(stream)
@@ -150,6 +151,9 @@ func (s *Service) climbMachine(repository *trace.Repository) *climb.Machine {
 				}}, nil
 		},
 		Root: filepath.Join(root, "export"),
+		Publish: func(kind api.EventKind, stream config.WorkstreamID) {
+			s.hub.Publish(api.Event{Kind: kind, Project: repository.Project(), Workstream: stream})
+		},
 		Now:  s.now,
 		Step: s.step,
 	}
@@ -172,7 +176,7 @@ func (s *Service) approveClimb(ctx context.Context, raw string, req api.ClimbApp
 	} else if kind != kindreg.HillClimb {
 		return api.ClimbApprovalResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("workstream %s is not a %s workstream, so it has no evaluator to approve", stream, kindreg.HillClimb)}
 	}
-	rec, err := s.climbMachine(repository).Approve(ctx, stream, req.Commit, intake.OwnerActor)
+	rec, err := s.climbMachine(repository).Approve(ctx, stream, req.Commit, req.SpecRevision, intake.OwnerActor)
 	switch {
 	case errors.Is(err, climb.ErrNotAwaiting), errors.Is(err, climb.ErrStaleApproval):
 		return api.ClimbApprovalResponse{}, &APIError{Code: Conflict, Message: err.Error() + "; read the inbox again"}
@@ -180,5 +184,5 @@ func (s *Service) approveClimb(ctx context.Context, raw string, req api.ClimbApp
 		return api.ClimbApprovalResponse{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the approval of workstream %s: %v", stream, err)}
 	}
 	s.kickClimb(repository)
-	return api.ClimbApprovalResponse{Project: project, Workstream: stream, Evaluator: rec.Evaluator, Commit: rec.Commit, Baseline: rec.Baseline, Noise: rec.Noise, Protected: slices.Clone(rec.Protected), At: rec.At}, nil
+	return api.ClimbApprovalResponse{Project: project, Workstream: stream, Evaluator: rec.Evaluator, Commit: rec.Commit, SpecRevision: rec.SpecRevision, Baseline: rec.Baseline, Noise: rec.Noise, Protected: slices.Clone(rec.Protected), At: rec.At}, nil
 }

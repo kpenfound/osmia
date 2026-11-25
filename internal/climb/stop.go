@@ -28,10 +28,13 @@ type Firing struct {
 type StopInput struct {
 	Rules     StopRules
 	Direction Direction
-	// Baseline is the calibrated score the climb started from, and Attempts
-	// the recorded attempts in order.
+	// Baseline is the calibrated score of the current epoch, and Attempts the
+	// recorded attempts in order. The budgets count every attempt, since each
+	// one cost what it cost; the best, the plateau and the target read only
+	// the attempts of Epoch, the ones measured against Baseline.
 	Baseline float64
 	Attempts []Attempt
+	Epoch    int
 	// Extension is what the owner's budget extensions add to the hard rules.
 	Extension Totals
 	// Continued lists the attempts after which a climb.stop exit let the climb
@@ -79,9 +82,9 @@ func EvaluateStops(in StopInput) []Firing {
 			}
 		}
 	}
-	best, keptAt := Best(in.Baseline, in.Attempts)
+	best, keptAt := Best(in.Baseline, InEpoch(in.Attempts, in.Epoch))
 	if in.Rules.Plateau > 0 {
-		from := keptAt
+		from := max(keptAt, lastBefore(in.Attempts, in.Epoch))
 		for _, c := range in.Continued {
 			if c.Attempt <= last && slices.Contains(c.Rules, RulePlateau) {
 				from = max(from, c.Attempt)
@@ -98,6 +101,18 @@ func EvaluateStops(in StopInput) []Firing {
 		}
 	}
 	return out
+}
+
+// lastBefore returns the number of the last attempt that ran before the epoch
+// began, which is zero when none did.
+func lastBefore(attempts []Attempt, epoch int) int {
+	last := 0
+	for _, a := range attempts {
+		if a.EpochNumber() < max(epoch, 1) {
+			last = max(last, a.Number)
+		}
+	}
+	return last
 }
 
 // Hard reports whether any firing rule is a hard one.

@@ -79,12 +79,27 @@ type CalibrationRecord struct {
 	// that diff. The diff is empty when the evaluator unit was skipped.
 	Base string `json:"base"`
 	Diff string `json:"diff,omitempty"`
+	// EvaluatorCommit is the commit the evaluator landed on, which a
+	// calibration after an amendment still reads the evaluator diff to. It is
+	// Commit for the first calibration.
+	EvaluatorCommit string `json:"evaluator_commit,omitempty"`
 	// Protected lists the paths the owner's approval will freeze.
 	Protected []string `json:"protected"`
 	// SpecRevision is the revision of the sealed climb spec calibrated.
-	SpecRevision int         `json:"spec_revision"`
-	Calibration  Calibration `json:"calibration"`
-	At           time.Time   `json:"at"`
+	SpecRevision int `json:"spec_revision"`
+	// Recalibrated says this calibration followed an amendment of a field a
+	// calibration depends on, and which.
+	Recalibrated *Recalibration `json:"recalibrated,omitempty"`
+	Calibration  Calibration    `json:"calibration"`
+	At           time.Time      `json:"at"`
+}
+
+// Recalibration records why a climb calibrated again: the climb spec revision
+// the earlier calibration or approval was made under and the fields that
+// changed since.
+type Recalibration struct {
+	From   int      `json:"from_spec_revision"`
+	Fields []string `json:"fields"`
 }
 
 // ApprovalRecord is climb/approval.json: the owner's approval of the
@@ -108,6 +123,31 @@ type ApprovalRecord struct {
 	Approved   ApprovedCopy `json:"approved"`
 	ApprovedBy string       `json:"approved_by"`
 	At         time.Time    `json:"at"`
+	// SpecRevision is the climb spec revision the calibration, and so the
+	// approval, was made under. Epoch numbers the approvals of the climb: the
+	// attempts made under one approval are comparable with each other and with
+	// its baseline, and with nothing before it. Started is when the climb first
+	// began climbing, which the approval after an amendment keeps.
+	SpecRevision int       `json:"spec_revision,omitempty"`
+	Epoch        int       `json:"epoch,omitempty"`
+	Started      time.Time `json:"started,omitempty"`
+}
+
+// StartedAt is when the climb first began climbing, the origin of its
+// wall-clock and cost budgets.
+func (a ApprovalRecord) StartedAt() time.Time {
+	if !a.Started.IsZero() {
+		return a.Started
+	}
+	return a.At
+}
+
+// EpochNumber is the approval's epoch, one for a record that predates epochs.
+func (a ApprovalRecord) EpochNumber() int {
+	if a.Epoch < 1 {
+		return 1
+	}
+	return a.Epoch
 }
 
 func latestDocument(r *trace.Repository, stream config.WorkstreamID, id string) (trace.Document, bool, error) {

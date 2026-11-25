@@ -30,8 +30,18 @@ func ClimbResults(repository *trace.Repository, stream config.WorkstreamID, spec
 		Baseline: rec.Baseline, BaselineCommit: rec.BaselineCommit, Attempts: len(attempts), UpstreamBranch: rec.Target.Branch, UpstreamCommit: rec.Target.Commit,
 		Before: kinds.ClimbFinal{Commit: rec.Pre.Commit, Score: rec.Pre.Score, Valid: rec.Pre.Valid, Reason: rec.Pre.Reason},
 		After:  kinds.ClimbFinal{Commit: rec.Post.Commit, Score: rec.Post.Score, Valid: rec.Post.Valid, Reason: rec.Post.Reason}}
+	epoch := 1
+	if approval, ok, err := climb.ReadApproval(repository, stream); err != nil {
+		return kinds.ClimbResults{}, false, err
+	} else if ok {
+		epoch = approval.EpochNumber()
+	}
 	for _, a := range attempts {
 		if a.Outcome != climb.OutcomeKept || a.Scores == nil {
+			continue
+		}
+		if a.EpochNumber() != epoch {
+			r.Earlier = append(r.Earlier, kinds.ClimbEarlier{Number: a.Number, Commit: a.Commit, Hypothesis: a.Hypothesis, SpecRevision: a.SpecRevision})
 			continue
 		}
 		k := kinds.ClimbKept{Number: a.Number, Commit: a.Commit, Hypothesis: a.Hypothesis, Score: a.Scores.Primary, Change: a.Scores.Primary - a.Best, ChangePercent: a.ChangePct}

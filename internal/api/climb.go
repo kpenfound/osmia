@@ -12,12 +12,14 @@ import (
 const InboxClimbApproval = "climb-approval"
 
 // ClimbApprovalRequest is the owner's decision on the evaluator approval card.
-// Commit pins the evaluator commit the card showed, which is the card's answer
-// body; an approval of a commit the climb branch no longer holds is refused as
-// a conflict.
+// Commit and SpecRevision pin the evaluator commit and the climb spec revision
+// the card showed, which are the card's answer body; an approval of a commit
+// the climb branch no longer holds, or of a card an amendment of the climb spec
+// has retired, is refused as a conflict.
 type ClimbApprovalRequest struct {
-	Decision string `json:"decision" description:"approve is the one decision the card offers."`
-	Commit   string `json:"commit" description:"The evaluator commit the card showed."`
+	Decision     string `json:"decision" description:"approve is the one decision the card offers."`
+	Commit       string `json:"commit" description:"The evaluator commit the card showed."`
+	SpecRevision int    `json:"spec_revision" description:"The climb spec revision the evaluator was calibrated under, as the card showed it. An amendment that changes a field the calibration depends on retires the card, and a retired card's answer is refused."`
 }
 
 // ClimbApprovalResponse reports an approved evaluator: the protected paths are
@@ -28,10 +30,13 @@ type ClimbApprovalResponse struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 	Evaluator  string              `json:"evaluator"`
 	Commit     string              `json:"commit"`
-	Baseline   float64             `json:"baseline"`
-	Noise      float64             `json:"noise"`
-	Protected  []string            `json:"protected"`
-	At         time.Time           `json:"at"`
+	// SpecRevision is the climb spec revision the approved calibration was
+	// made under.
+	SpecRevision int       `json:"spec_revision"`
+	Baseline     float64   `json:"baseline"`
+	Noise        float64   `json:"noise"`
+	Protected    []string  `json:"protected"`
+	At           time.Time `json:"at"`
 }
 
 // ClimbConcludeRequest is the owner's decision to conclude a Hill Climb

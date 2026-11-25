@@ -225,6 +225,8 @@ type loopRig struct {
 	engine   *loopEngine
 	slots    *fakeSlots
 	spec     Spec
+	revision int
+	specs    map[int]Spec
 	loop     *Loop
 	crashAt  string
 	crashed  bool
@@ -246,7 +248,7 @@ func newLoopRig(t *testing.T, mutate func(*Spec)) *loopRig {
 	}
 	slots := &fakeSlots{}
 	engine := &loopEngine{outputs: map[string]string{}}
-	r := &loopRig{t: t, repo: repo, host: newFakeHost(t), engine: engine, slots: slots, spec: spec, now: fixturekit.DemoStart.Add(time.Hour)}
+	r := &loopRig{t: t, repo: repo, host: newFakeHost(t), engine: engine, slots: slots, spec: spec, revision: 1, specs: map[int]Spec{1: spec}, now: fixturekit.DemoStart.Add(time.Hour)}
 	r.approve()
 	r.loop = r.newLoop()
 	return r
@@ -260,7 +262,7 @@ func (r *loopRig) approve() {
 	fixturekit.Must(r.t, r.host.Export(ctx, "base0001", dir))
 	approved, err := Snapshot(dir, protected)
 	fixturekit.Must(r.t, err)
-	r.approval = ApprovalRecord{Evaluator: r.spec.Evaluator, Commit: "base0001", Baseline: 100, Units: map[string]string{"wall_ms": "ms", "peak_rss_mb": "MB"}, Noise: 1, Protected: protected, Approved: approved, ApprovedBy: "owner", At: fixturekit.DemoStart}
+	r.approval = ApprovalRecord{Evaluator: r.spec.Evaluator, Commit: "base0001", Baseline: 100, Units: map[string]string{"wall_ms": "ms", "peak_rss_mb": "MB"}, Noise: 1, Protected: protected, Approved: approved, ApprovedBy: "owner", At: fixturekit.DemoStart, SpecRevision: 1, Epoch: 1}
 	h := func(id string) trace.Header {
 		return trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: id, Revision: 1, Project: r.repo.Project(), Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: fixturekit.OwnerActor, Cause: "fixture"}
 	}
@@ -276,7 +278,8 @@ func (r *loopRig) approve() {
 func (r *loopRig) newLoop() *Loop {
 	return &Loop{
 		Repository: r.repo,
-		Spec:       func(config.WorkstreamID) (Spec, int, error) { return r.spec, 1, nil },
+		Spec:       func(config.WorkstreamID) (Spec, int, error) { return r.spec, r.revision, nil },
+		SpecAt:     func(_ config.WorkstreamID, revision int) (Spec, error) { return r.specs[revision], nil },
 		Branch:     func(stream config.WorkstreamID) string { return "osmia/" + string(stream) },
 		Host:       func(config.WorkstreamID) (Host, error) { return r.host, nil },
 		Runner: func(_ config.WorkstreamID, source Source) (Runner, error) {

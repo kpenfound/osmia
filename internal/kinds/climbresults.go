@@ -29,6 +29,17 @@ type ClimbKept struct {
 	ChangePercent *float64
 }
 
+// ClimbEarlier is an attempt the climb kept before an amendment changed what
+// the evaluator measures and the climb was calibrated again. Its commit is on
+// the branch, but its score was measured against another baseline and is not
+// compared with the final.
+type ClimbEarlier struct {
+	Number       int
+	Commit       string
+	Hypothesis   string
+	SpecRevision int
+}
+
 // ClimbResults is what a Hill Climb workstream's pull-request section is
 // written from: the baseline, the final before and after the one conclusion
 // rebase, and the kept attempts.
@@ -44,6 +55,8 @@ type ClimbResults struct {
 	// Attempts counts every recorded attempt.
 	Attempts int
 	Kept     []ClimbKept
+	// Earlier lists the attempts kept under an earlier calibration.
+	Earlier []ClimbEarlier
 	// Before is the final on the climb branch before the rebase, and After the
 	// final measured again on the rebased commit.
 	Before ClimbFinal
@@ -55,7 +68,7 @@ type ClimbResults struct {
 
 // EvaluatorOnly says the climb kept no attempt, so its branch holds only the
 // evaluator.
-func (r ClimbResults) EvaluatorOnly() bool { return len(r.Kept) == 0 }
+func (r ClimbResults) EvaluatorOnly() bool { return len(r.Kept) == 0 && len(r.Earlier) == 0 }
 
 func short(commit string) string {
 	if len(commit) > 10 {
@@ -136,7 +149,7 @@ func climbSection(r *ClimbResults) string {
 		better = "lower"
 	}
 	fmt.Fprintf(&b, "Metric `%s`, %s is better; an attempt is kept when it beats the best by at least %s. %d %s recorded, %d kept.\n\n",
-		r.Metric, better, withUnit(r.MinImprovement, r.Unit), r.Attempts, plural(r.Attempts, "attempt", "attempts"), len(r.Kept))
+		r.Metric, better, withUnit(r.MinImprovement, r.Unit), r.Attempts, plural(r.Attempts, "attempt", "attempts"), len(r.Kept)+len(r.Earlier))
 	b.WriteString("| Measured | Commit | Score | Change from baseline |\n|---|---|---|---|\n")
 	fmt.Fprintf(&b, "| Baseline | `%s` | %s | |\n", short(r.BaselineCommit), withUnit(r.Baseline, r.Unit))
 	score, change := finalCell(r.Before, r.Baseline, r.Unit)
@@ -150,6 +163,17 @@ func climbSection(r *ClimbResults) string {
 	b.WriteString(".\n\n")
 	if r.EvaluatorOnly() {
 		b.WriteString("The climb kept no attempt, so this pull request holds only the evaluator and the files it reads.\n")
+		return b.String()
+	}
+	if len(r.Earlier) > 0 {
+		b.WriteString("Kept under an earlier calibration, before an amendment of the climb spec changed what the evaluator measures. They are on the branch, and their scores are not comparable with the table above:\n\n| Attempt | Commit | Hypothesis | Climb spec revision |\n|---|---|---|---|\n")
+		for _, k := range r.Earlier {
+			fmt.Fprintf(&b, "| %d | `%s` | %s | %d |\n", k.Number, short(k.Commit), escapeCell(k.Hypothesis), max(k.SpecRevision, 1))
+		}
+		b.WriteString("\n")
+	}
+	if len(r.Kept) == 0 {
+		b.WriteString("The climb kept no attempt after its last calibration.\n")
 		return b.String()
 	}
 	b.WriteString("Kept attempts:\n\n| Attempt | Commit | Hypothesis | Score | Delta |\n|---|---|---|---|---|\n")

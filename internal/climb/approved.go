@@ -33,6 +33,8 @@ type ApprovedFile struct {
 type ApprovedCopy struct {
 	Paths []string       `json:"paths"`
 	Files []ApprovedFile `json:"files"`
+	// SpecRevision is the climb spec revision the copy was frozen under.
+	SpecRevision int `json:"spec_revision,omitempty"`
 }
 
 // Snapshot copies the files under paths in dir. A path that does not exist

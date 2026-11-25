@@ -143,7 +143,7 @@ func TestAClimbRunsAttemptsOnOneMasonThreadAndLandsTheKeptOneAsASquashedCommit(t
 	if _, err := climb.Steer(context.Background(), c.repository(), stream, "prefer caching over parallelism", "chief", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator}); err != nil {
+	if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: evaluator, SpecRevision: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c.awaitClimb(t, stream, climb.InnerConcluding)
@@ -246,7 +246,7 @@ func TestARestartDuringAClimbKeepsOneRecordPerAttemptAndTheSameThread(t *testing
 	c.diagnose(t, stream)
 	c.awaitInner(t, stream, climb.InnerAwaitingApproval)
 	card, _ := c.card(t)
-	if _, err := c.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: card.Answer.Body["commit"].(string)}); err != nil {
+	if _, err := c.c.ApproveClimb(context.Background(), stream, approvalOf(card)); err != nil {
 		t.Fatal(err)
 	}
 	c.awaitAttempts(t, stream, 1)
@@ -304,7 +304,7 @@ func TestTheOwnerConcludesAndExtendsAClimbAndTheChiefSteersAndConcludesIt(t *tes
 	}
 	card, _ := c.card(t)
 	c.engineHold(t)
-	if _, err := c.c.ApproveClimb(ctx, stream, api.ClimbApprovalRequest{Decision: "approve", Commit: card.Answer.Body["commit"].(string)}); err != nil {
+	if _, err := c.c.ApproveClimb(ctx, stream, approvalOf(card)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.c.ExtendClimb(ctx, stream, api.ClimbExtendRequest{}); !intakefixture.Failed(err, api.Validation) {

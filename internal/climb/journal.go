@@ -90,6 +90,10 @@ type Journal struct {
 	// Steering counts the steering notes the attempt's bundle carried.
 	Steering  int       `json:"steering"`
 	StartedAt time.Time `json:"started_at"`
+	// SpecRevision and Epoch are the climb spec revision and the approval
+	// epoch the attempt started under.
+	SpecRevision int `json:"spec_revision,omitempty"`
+	Epoch        int `json:"epoch,omitempty"`
 
 	Hypothesis    string `json:"hypothesis,omitempty"`
 	ChangeSummary string `json:"change_summary,omitempty"`

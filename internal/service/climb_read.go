@@ -82,10 +82,27 @@ func readClimbProgress(repository *trace.Repository, cfg *config.Config, stream 
 	if in.Attempts, err = climb.ReadAttempts(repository, stream); err != nil {
 		return climb.Progress{}, err
 	}
+	inner, err := climb.ReadInner(repository, stream)
+	if err != nil {
+		return climb.Progress{}, err
+	}
+	approval, approved, err := climb.ReadApproval(repository, stream)
+	if err != nil {
+		return climb.Progress{}, err
+	}
+	in.Epoch = 1
+	retired := false
+	if approved {
+		in.Epoch = approval.EpochNumber()
+		if inner.Value != climb.InnerClimbing && inner.Value != climb.InnerConcluding {
+			in.Epoch++
+			retired = inner.Value == climb.InnerCalibrating
+		}
+	}
 	if calibration, _, found, err := climb.ReadCalibration(repository, stream); err != nil {
 		return climb.Progress{}, err
-	} else if found {
-		in.Calibration = &calibration.Calibration
+	} else if found && !retired {
+		in.Calibration, in.SpecRevision = &calibration.Calibration, calibration.SpecRevision
 	}
 	if running, found, err := climb.ReadRunning(repository, stream); err != nil {
 		return climb.Progress{}, err

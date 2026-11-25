@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,9 +50,13 @@ type climbPage struct {
 
 func openClimbPage(t *testing.T, direction string) *climbPage {
 	t.Helper()
+	return openClimbPageWith(t, climbFixture(t, "climb_progress_"+direction), climbFixture(t, "climb_attempts_"+direction))
+}
+
+func openClimbPageWith(t *testing.T, progress, attempts string) *climbPage {
+	t.Helper()
 	api := newFakeAPI(1)
-	progress := climbFixture(t, "climb_progress_"+direction)
-	api.setClimb(progress, climbFixture(t, "climb_attempts_"+direction), summaryOf(t, progress), sparkOf(t, progress))
+	api.setClimb(progress, attempts, summaryOf(t, progress), sparkOf(t, progress))
 	server := httptest.NewServer(api.handler())
 	t.Cleanup(server.Close)
 	p := openBrowser(t)
@@ -498,5 +503,75 @@ func TestBrowserClimbPanelExplainsAClimbThatHasNotStarted(t *testing.T) {
 	p.eval(`!document.getElementById('problems').hidden`, &problems)
 	if problems {
 		t.Fatal("an unsealed climb raised a problem banner")
+	}
+}
+
+// amendedClimb is the fixture of a climb whose first three attempts ran before
+// an amendment of the climb spec changed what the evaluator measures: the
+// panel's data holds only the attempts of the current calibration, and the log
+// holds every attempt with the climb spec revision and epoch it ran under.
+func amendedClimb(t *testing.T) (progress, attempts string) {
+	t.Helper()
+	read := func(name string) map[string]any {
+		var v map[string]any
+		if err := json.Unmarshal([]byte(climbFixture(t, name)), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	write := func(v map[string]any) string {
+		data, err := json.MarshalIndent(v, "", " ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	p := read("climb_progress_lower")
+	panel := p["progress"].(map[string]any)
+	panel["points"] = panel["points"].([]any)[3:]
+	panel["epoch"], panel["earlier_attempts"], panel["spec_revision"] = 2, 3, 2
+	a := read("climb_attempts_lower")
+	for i, attempt := range a["attempts"].([]any) {
+		epoch := 1
+		if i >= 3 {
+			epoch = 2
+		}
+		attempt.(map[string]any)["epoch"], attempt.(map[string]any)["spec_revision"] = epoch, epoch
+	}
+	return write(p), write(a)
+}
+
+func TestBrowserClimbPanelMarksTheRevisionBoundaryAndDrawsOnlyTheCurrentCalibration(t *testing.T) {
+	t.Parallel()
+	progress, attempts := amendedClimb(t)
+	p := openClimbPageWith(t, progress, attempts)
+	var shown struct {
+		Note     string
+		Boundary []string
+		After    string
+		Dots     []string
+		InFrame  bool
+	}
+	p.eval(`(() => {
+  const panel = document.getElementById('climb-panel');
+  const boundary = [...panel.querySelectorAll('tr.climb-boundary')];
+  const dots = [...panel.querySelectorAll('svg.climb-chart g.dot[data-attempt]')];
+  const xs = dots.map((d) => Number(/translate\(([-0-9.]+)/.exec(d.getAttribute('transform'))[1]));
+  return {
+    note: (panel.querySelector('[data-field=climb-boundary]')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    boundary: boundary.map((r) => r.textContent.replace(/\s+/g, ' ').trim()),
+    after: boundary[0]?.nextElementSibling?.dataset.attempt ?? '',
+    dots: dots.map((d) => d.dataset.attempt),
+    inFrame: xs.length > 0 && xs.every((x) => x >= 56 && x <= 624),
+  };
+ })()`, &shown)
+	if !strings.Contains(shown.Note, "3 earlier attempts are not drawn") || !strings.Contains(shown.Note, "revision 2") {
+		t.Fatalf("the chart note %q", shown.Note)
+	}
+	if len(shown.Boundary) != 1 || !strings.Contains(shown.Boundary[0], "climb spec revision 2") || !strings.Contains(shown.Boundary[0], "not comparable") || shown.After != "4" {
+		t.Fatalf("the revision boundary %v before attempt %q", shown.Boundary, shown.After)
+	}
+	if strings.Join(shown.Dots, ",") != "4,5,6" || !shown.InFrame {
+		t.Fatalf("the chart draws attempts %v, all inside its frame: %v", shown.Dots, shown.InFrame)
 	}
 }

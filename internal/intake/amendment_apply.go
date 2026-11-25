@@ -11,6 +11,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -418,9 +419,15 @@ func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) 
 }
 
 // applyClimb applies a resealed amendment of a climb spec. A climb has no unit
-// to rework or notify, so applying records that the climb reads the amended
-// climb spec from its next step on, and invalidates the final review that read
-// the sealed one.
+// to rework or notify, so applying compares the climb spec the amendment
+// replaced with the amended one and records which changed fields the climb's
+// calibration depends on, and invalidates the final review that read the
+// sealed one. A change of a field the calibration depends on is carried out by
+// the climb's inner machine and loop, which read the climb spec revision every
+// calibration, approval and attempt was made under: the open attempt is ended
+// with its one terminal record, the open approval card is retired, and the
+// climb calibrates again before the owner approves again. A change of the goal,
+// the stop rules or the budgets applies in place and moves nothing.
 func (a AmendmentDebate) applyClimb(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState, app amendment.Application, doc trace.Document) error {
 	cause := "amendment-" + req.ID + "-" + AmendmentResealed
 	at := a.S.Now()
@@ -440,6 +447,17 @@ func (a AmendmentDebate) applyClimb(ctx context.Context, stream config.Workstrea
 		applied.FinalReview = report.Review
 		events = append(events, trace.Notice(id, "final-review", fmt.Sprintf("Final review %d read seal %d, climb spec revision %d, which amendment %s replaced: its report no longer authorises delivery. Final review runs again once the climb concludes.", report.Review, report.Seal, report.Spec, req.ID)))
 	}
+	cfg := a.S.About(a.Repository)
+	replaced, _, err := climb.SealedSpec(a.Repository, stream, app.From.Spec, ClimbDefaults(cfg))
+	if err != nil {
+		return err
+	}
+	amended, _, err := climb.SealedSpec(a.Repository, stream, app.To.Spec, ClimbDefaults(cfg))
+	if err != nil {
+		return err
+	}
+	change := climb.Compare(replaced, amended)
+	applied.Climb = &amendment.ClimbEffect{Recalibrate: change.Calibration, InPlace: change.InPlace}
 	app.Applied = &applied
 	content, err := json.MarshalIndent(app, "", "  ")
 	if err != nil {
@@ -448,6 +466,12 @@ func (a AmendmentDebate) applyClimb(ctx context.Context, stream config.Workstrea
 	docs := []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.ID, Revision: doc.Revision + 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: AmendmentActor, Cause: cause},
 		Path: doc.Path, Content: string(content) + "\n"}}
 	reason := fmt.Sprintf("approved amendment %s is applied to seal %d: the climb reads climb spec revision %d from its next step on", req.ID, app.To.Seal, app.To.Spec)
+	switch {
+	case change.Recalibrates():
+		reason += fmt.Sprintf("; it changes %s, which the calibration depends on, so an attempt in flight ends with its one terminal record, the open evaluator approval card is retired, the evaluator is calibrated again on the current best commit and the owner approves it again before an attempt starts", change.Words())
+	case !change.None():
+		reason += fmt.Sprintf("; it changes %s, which applies in place: the climb keeps its calibration, approval and best", strings.Join(change.InPlace, ", "))
+	}
 	if applied.FinalReview > 0 {
 		reason += fmt.Sprintf("; final review %d is invalidated", applied.FinalReview)
 	}

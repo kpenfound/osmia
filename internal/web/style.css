@@ -3362,6 +3362,13 @@ details.footnote > :not(summary) {
   background: var(--surface-sunken);
 }
 
+.climb-table .climb-boundary > td {
+  background: var(--surface-sunken);
+  border-top: 2px solid var(--line);
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+}
+
 .outcome[data-class="kept"] {
   color: var(--live);
 }

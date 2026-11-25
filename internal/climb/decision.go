@@ -30,6 +30,10 @@ const (
 	// CauseConcluded is an attempt still in flight when the climb was
 	// concluded.
 	CauseConcluded Cause = "concluded"
+	// CauseAmended is an attempt still in flight when an approved amendment
+	// changed a field the calibration depends on: its score would be compared
+	// with a best measured under another climb spec.
+	CauseAmended Cause = "amended"
 )
 
 // Limit bounds a secondary metric. A nil bound is not checked, and a bound a

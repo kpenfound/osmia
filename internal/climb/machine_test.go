@@ -73,6 +73,7 @@ type machineRig struct {
 	engine   *fakeEngine
 	slots    *fakeSlots
 	revision int
+	specs    map[int]Spec
 	machine  *Machine
 	steps    []string
 }
@@ -105,11 +106,12 @@ func newMachineRig(t *testing.T, evaluatorPresent bool, replies ...string) *mach
 	clone := &fakeClone{files: files, branches: map[string]string{branch: "base0001"}, base: "base0001"}
 	slots := &fakeSlots{}
 	engine := &fakeEngine{slots: slots}
-	r := &machineRig{t: t, repo: repo, clone: clone, engine: engine, slots: slots, revision: 1}
+	r := &machineRig{t: t, repo: repo, clone: clone, engine: engine, slots: slots, revision: 1, specs: map[int]Spec{1: climbSpec()}}
 	r.reply(replies...)
 	r.machine = &Machine{
 		Repository: repo,
-		Spec:       func(config.WorkstreamID) (Spec, int, error) { return climbSpec(), r.revision, nil },
+		Spec:       func(config.WorkstreamID) (Spec, int, error) { return r.specs[r.revision], r.revision, nil },
+		SpecAt:     func(_ config.WorkstreamID, revision int) (Spec, error) { return r.specs[revision], nil },
 		Settings:   func() kinds.HillClimbSettings { return kinds.HillClimbSettings{CalibrationRuns: 3, Repeats: 1} },
 		Workspace:  func(config.WorkstreamID) (Workspace, error) { return clone, nil },
 		Branch:     func(stream config.WorkstreamID) string { return "osmia/" + string(stream) },
@@ -121,6 +123,16 @@ func newMachineRig(t *testing.T, evaluatorPresent bool, replies ...string) *mach
 		Step: func(name string) error { r.steps = append(r.steps, name); return nil },
 	}
 	return r
+}
+
+// amend seals the next revision of the climb spec: the current one with
+// change applied.
+func (r *machineRig) amend(change func(*Spec)) {
+	r.t.Helper()
+	next := r.specs[r.revision]
+	change(&next)
+	r.revision++
+	r.specs[r.revision] = next
 }
 
 func (r *machineRig) reply(replies ...string) {
@@ -315,7 +327,7 @@ func TestAFailedOrInvalidRunHoldsTheClimbAsABrokenMetric(t *testing.T) {
 			if r.inner() != InnerHeldBroken || r.calls() != held || len(r.notices(trace.NoticeKind)) != 1 {
 				t.Fatalf("a held climb ran again: %d calls, %d notices", r.calls(), len(r.notices(trace.NoticeKind)))
 			}
-			if _, err := r.machine.Approve(context.Background(), fixturekit.Stream, "base0001", trace.Actor{Kind: "owner", ID: "local"}); !errors.Is(err, ErrNotAwaiting) {
+			if _, err := r.machine.Approve(context.Background(), fixturekit.Stream, "base0001", 1, trace.Actor{Kind: "owner", ID: "local"}); !errors.Is(err, ErrNotAwaiting) {
 				t.Fatalf("approving a held climb: %v", err)
 			}
 		})
@@ -346,7 +358,7 @@ func TestOnlyAnApprovalPinningTheCalibratedCommitStartsClimbing(t *testing.T) {
 	r := newMachineRig(t, true, scored(100), scored(101), scored(100))
 	owner := trace.Actor{Kind: "owner", ID: "local"}
 	ctx := context.Background()
-	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", owner); !errors.Is(err, ErrNotAwaiting) {
+	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", 1, owner); !errors.Is(err, ErrNotAwaiting) {
 		t.Fatalf("approving before calibration: %v", err)
 	}
 	r.reconcile()
@@ -361,11 +373,11 @@ func TestOnlyAnApprovalPinningTheCalibratedCommitStartsClimbing(t *testing.T) {
 	if r.inner() != InnerAwaitingApproval {
 		t.Fatalf("a pass moved an unapproved climb to %q", r.inner())
 	}
-	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "other", owner); !errors.Is(err, ErrStaleApproval) {
+	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "other", 1, owner); !errors.Is(err, ErrStaleApproval) {
 		t.Fatalf("approving another commit: %v", err)
 	}
 	r.clone.land("moved002", "")
-	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", owner); !errors.Is(err, ErrStaleApproval) {
+	if _, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", 1, owner); !errors.Is(err, ErrStaleApproval) {
 		t.Fatalf("approving after the branch moved: %v", err)
 	}
 	if r.inner() != InnerAwaitingApproval {
@@ -375,7 +387,7 @@ func TestOnlyAnApprovalPinningTheCalibratedCommitStartsClimbing(t *testing.T) {
 
 	// The attempt-free tree the owner approved is what is frozen, whatever the
 	// working tree holds later.
-	approved, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", owner)
+	approved, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", 1, owner)
 	fixturekit.Must(t, err)
 	if r.inner() != InnerClimbing {
 		t.Fatalf("inner state %q after approval", r.inner())
@@ -395,7 +407,7 @@ func TestOnlyAnApprovalPinningTheCalibratedCommitStartsClimbing(t *testing.T) {
 	if files["dagger.toml"] != evalToml || files["fixtures/input.txt"] != "input\n" || files[".dagger/eval/main.go"] == "" || files["src/work.go"] != "" {
 		t.Fatalf("the frozen files %v", files)
 	}
-	again, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", owner)
+	again, err := r.machine.Approve(ctx, fixturekit.Stream, "base0001", 1, owner)
 	fixturekit.Must(t, err)
 	if again.Commit != rec.Commit || r.inner() != InnerClimbing {
 		t.Fatalf("a second approval: %+v %q", again, r.inner())
@@ -445,7 +457,7 @@ func TestARestartInEachInnerStateRepeatsNoRecordedSideEffect(t *testing.T) {
 	if r.inner() != InnerAwaitingApproval || r.calls() != 3 {
 		t.Fatalf("a restart while awaiting approval ran calibration again: %q after %d calls", r.inner(), r.calls())
 	}
-	if _, err := r.machine.Approve(context.Background(), fixturekit.Stream, "eval0001", trace.Actor{Kind: "owner", ID: "local"}); err != nil {
+	if _, err := r.machine.Approve(context.Background(), fixturekit.Stream, "eval0001", 1, trace.Actor{Kind: "owner", ID: "local"}); err != nil {
 		t.Fatal(err)
 	}
 	fresh()
@@ -491,7 +503,7 @@ func TestAHeldClimbCalibratesAgainWhenItsClimbSpecChanges(t *testing.T) {
 	if r.inner() != InnerHeldNoisy || r.calls() != 0 {
 		t.Fatalf("an unchanged climb spec calibrated again: %q after %d calls", r.inner(), r.calls())
 	}
-	r.revision = 2
+	r.amend(func(s *Spec) { s.Metric.MinImprovement = 25 })
 	r.reconcile()
 	r.reconcile()
 	if r.inner() != InnerAwaitingApproval || r.calls() != 3 {

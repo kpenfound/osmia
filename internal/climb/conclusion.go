@@ -283,10 +283,14 @@ func (c *Concluder) pin(ctx context.Context, stream config.WorkstreamID, state t
 		Baseline: approval.Baseline, BaselineCommit: approval.Commit, Unit: approval.Units[spec.Metric.Name], Attempts: len(attempts)}
 	rec.Pre = Final{Commit: tip, MeasuredOn: approval.Commit, Valid: true, Score: approval.Baseline, Metrics: approval.Metrics, Units: approval.Units}
 	for _, a := range attempts {
+		if a.Outcome == OutcomeKept && a.Scores != nil {
+			rec.Kept = append(rec.Kept, a.Number)
+		}
+	}
+	for _, a := range InEpoch(attempts, approval.EpochNumber()) {
 		if a.Outcome != OutcomeKept || a.Scores == nil {
 			continue
 		}
-		rec.Kept = append(rec.Kept, a.Number)
 		rec.Pre.Attempt, rec.Pre.MeasuredOn = a.Number, a.Candidate
 		rec.Pre.Score, rec.Pre.Metrics = a.Scores.Primary, a.Scores.Metrics
 	}

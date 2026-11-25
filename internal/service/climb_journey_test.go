@@ -88,7 +88,7 @@ func (j *climbJourney) approve(t *testing.T, stream config.WorkstreamID) {
 	if !open {
 		t.Fatal("no approval card")
 	}
-	if _, err := j.c.ApproveClimb(context.Background(), stream, api.ClimbApprovalRequest{Decision: "approve", Commit: card.Answer.Body["commit"].(string)}); err != nil {
+	if _, err := j.c.ApproveClimb(context.Background(), stream, approvalOf(card)); err != nil {
 		t.Fatal(err)
 	}
 }

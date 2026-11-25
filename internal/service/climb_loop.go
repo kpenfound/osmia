@@ -41,6 +41,7 @@ func (s *Service) climbLoop(repository *trace.Repository) *climb.Loop {
 			spec, sealed, err := intake.SealedClimbSpec(repository, cfg, stream)
 			return spec, sealed.Revision.Spec, err
 		},
+		SpecAt: climbSpecReader(repository, cfg),
 		Branch: intake.FeatureBranch,
 		Host: func(stream config.WorkstreamID) (climb.Host, error) {
 			return s.execution().ClimbHost(repository, stream)
@@ -109,11 +110,11 @@ func (s *Service) raiseClimbStop(ctx context.Context, repository *trace.Reposito
 	for _, a := range attempts[max(0, len(attempts)-5):] {
 		records = append(records, router.Entry{Kind: "attempt", ID: climb.AttemptUnit(a.Number), Text: fmt.Sprintf("attempt %d %s", a.Number, strings.TrimSpace(fmt.Sprintf("%s %s %s", a.Outcome, a.Cause, oneLineText(a.Hypothesis))))})
 	}
-	baseline := 0.0
+	baseline, epoch := 0.0, 1
 	if approval, ok, err := climb.ReadApproval(repository, req.Stream); err == nil && ok {
-		baseline = approval.Baseline
+		baseline, epoch = approval.Baseline, approval.EpochNumber()
 	}
-	best, _ := climb.Best(baseline, attempts)
+	best, _ := climb.Best(baseline, climb.InEpoch(attempts, epoch))
 	kind := "plateau"
 	if hard {
 		kind = "budget"
@@ -327,7 +328,7 @@ func climbProgressText(repository *trace.Repository, stream config.WorkstreamID,
 	}
 	fmt.Fprintf(&b, "\n%d attempts recorded, %d kept.\n", len(attempts), kept)
 	if approved {
-		best, _ := climb.Best(approval.Baseline, attempts)
+		best, _ := climb.Best(approval.Baseline, climb.InEpoch(attempts, approval.EpochNumber()))
 		change := best - approval.Baseline
 		line := fmt.Sprintf("%s: baseline %v, best %v (%+v)", spec.Metric.Name, approval.Baseline, best, change)
 		if approval.Baseline != 0 {
@@ -341,7 +342,7 @@ func climbProgressText(repository *trace.Repository, stream config.WorkstreamID,
 		total := budget.Total()
 		fmt.Fprintf(&b, "\nAttempts: %d of %d allowed.", len(attempts), spec.Stop.MaxAttempts+total.Attempts)
 		if d, ok := spec.WallClock(); ok {
-			fmt.Fprintf(&b, " Time: %s of %s.", now.Sub(approval.At).Round(time.Minute), d+total.WallClock)
+			fmt.Fprintf(&b, " Time: %s of %s.", now.Sub(approval.StartedAt()).Round(time.Minute), d+total.WallClock)
 		}
 		fmt.Fprintln(&b)
 	}
@@ -355,6 +356,15 @@ func climbProgressText(repository *trace.Repository, stream config.WorkstreamID,
 		fmt.Fprintf(&b, "\nAttempt %d is running: %s. Hypothesis: %s\n", run.Attempt, phase, oneLineText(run.Hypothesis))
 	}
 	return b.String(), nil
+}
+
+// climbSpecReader reads an earlier revision of a workstream's climb spec,
+// which the inner machine and the loop compare with the sealed one.
+func climbSpecReader(repository *trace.Repository, cfg *config.Config) climb.SpecReader {
+	return func(stream config.WorkstreamID, revision int) (climb.Spec, error) {
+		spec, _, err := climb.SealedSpec(repository, stream, revision, intake.ClimbDefaults(cfg))
+		return spec, err
+	}
 }
 
 func climbSpecOf(repository *trace.Repository, stream config.WorkstreamID) (climb.Spec, int, error) {

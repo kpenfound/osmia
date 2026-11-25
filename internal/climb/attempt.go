@@ -81,6 +81,36 @@ type Attempt struct {
 	Measurement *Measurement `json:"measurement,omitempty"`
 	StartedAt   time.Time    `json:"started_at"`
 	FinishedAt  time.Time    `json:"finished_at"`
+	// SpecRevision is the climb spec revision the attempt was made under.
+	// Epoch numbers the owner approval whose baseline, units and frozen
+	// protected paths the attempt ran against: a score is comparable only with
+	// the scores of its own epoch, because an amendment of the metric or of
+	// what the evaluator measures starts a new one.
+	SpecRevision int `json:"spec_revision,omitempty"`
+	Epoch        int `json:"epoch,omitempty"`
+}
+
+// EpochNumber is the epoch the attempt ran in, one for a record that predates
+// epochs.
+func (a Attempt) EpochNumber() int {
+	if a.Epoch < 1 {
+		return 1
+	}
+	return a.Epoch
+}
+
+// InEpoch returns the attempts that ran in the given epoch, in order. A
+// score of one of them is comparable with the others and with that epoch's
+// baseline; no other attempt's is.
+func InEpoch(attempts []Attempt, epoch int) []Attempt {
+	epoch = max(epoch, 1)
+	var out []Attempt
+	for _, a := range attempts {
+		if a.EpochNumber() == epoch {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Guardrails records whether the guardrail checks passed.

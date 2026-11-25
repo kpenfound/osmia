@@ -152,10 +152,19 @@ type Progress struct {
 	ChangePercent *float64 `json:"change_percent,omitempty"`
 	Target        *float64 `json:"target,omitempty"`
 	// NoiseBand is the run-to-run spread calibration measured.
-	NoiseBand *float64 `json:"noise_band,omitempty"`
-	Budgets   Budgets  `json:"budgets"`
+	NoiseBand *float64     `json:"noise_band,omitempty"`
+	Budgets   Budgets      `json:"budgets"`
 	Running   *RunningView `json:"running,omitempty"`
-	Points    []Point `json:"points"`
+	// Epoch numbers the calibration the baseline, the best and Points belong
+	// to, and SpecRevision is the climb spec revision it was made under. An
+	// amendment of a field the calibration depends on starts a new epoch with
+	// a new baseline: the Earlier attempts before it ran against another
+	// measurement, so their scores are neither drawn in Points nor compared
+	// with the best.
+	Epoch        int     `json:"epoch"`
+	SpecRevision int     `json:"spec_revision,omitempty"`
+	Earlier      int     `json:"earlier_attempts,omitempty"`
+	Points       []Point `json:"points"`
 	// Summary is the one line the list and osmia status show, and Spark the
 	// points of the sparkline, oriented so that a rising line improves.
 	Summary string    `json:"summary"`
@@ -168,6 +177,10 @@ type ProgressInput struct {
 	Calibration *Calibration
 	Running     *Running
 	Attempts    []Attempt
+	// Epoch is the calibration epoch the climb stands in, and SpecRevision the
+	// climb spec revision that calibration was made under.
+	Epoch        int
+	SpecRevision int
 	// CostUSD is the known spend of the workstream so far.
 	CostUSD float64
 	Now     time.Time
@@ -180,15 +193,18 @@ func BuildProgress(in ProgressInput) Progress {
 	p := Progress{
 		Goal: spec.Goal, Evaluator: spec.Evaluator, Metric: spec.Metric.Name, Direction: spec.Metric.Direction,
 		MinImprovement: spec.Metric.MinImprovement, Repeats: spec.Repeats, Target: spec.Stop.Target, Points: []Point{},
+		Epoch: max(in.Epoch, 1), SpecRevision: in.SpecRevision,
 	}
+	current := InEpoch(in.Attempts, in.Epoch)
+	p.Earlier = len(in.Attempts) - len(current)
 	if in.Calibration != nil && (in.Calibration.Verdict == Calibrated || in.Calibration.Verdict == "") {
 		c := in.Calibration
 		baseline, spread := c.Baseline, c.Spread
 		p.Baseline, p.NoiseBand = &baseline, &spread
 		p.Unit = c.Units[spec.Metric.Name]
 	}
-	if p.Baseline == nil && len(in.Attempts) > 0 {
-		first := in.Attempts[0].Best
+	if p.Baseline == nil && len(current) > 0 {
+		first := current[0].Best
 		p.Baseline = &first
 	}
 	best := p.Baseline
@@ -197,7 +213,7 @@ func BuildProgress(in ProgressInput) Progress {
 	if p.Baseline != nil {
 		spark = append(spark, p.orient(*p.Baseline))
 	}
-	for _, a := range in.Attempts {
+	for _, a := range current {
 		before := a.Best
 		pt := Point{Attempt: a.Number, At: a.FinishedAt, Cause: a.Cause, Y: before, Class: ClassFailed}
 		if a.Scores != nil {
