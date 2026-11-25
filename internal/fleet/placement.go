@@ -518,6 +518,18 @@ func (p *Placement) Locate(turn string) (Identity, bool) {
 	return Identity{ID: t.client}, true
 }
 
+// PlacedOn returns the ID of the client a turn was placed on, Local for the
+// server's own machine. It reports false for a turn that holds no placement.
+func (p *Placement) PlacedOn(turn string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	t, ok := p.turns[turn]
+	if !ok {
+		return "", false
+	}
+	return t.client, true
+}
+
 // Places lists the local client and every connected client with the slots the
 // turns placed on them take, and why one takes no new turn, ordered the way the
 // rotation visits them.
@@ -551,6 +563,8 @@ func (p *Placement) Places() []Place {
 			place.Idle = IdleNoReport
 		case !slices.ContainsFunc(c.Capabilities.Profiles, func(pc api.ProfileCapability) bool { return pc.Runnable }):
 			place.Idle = IdleNoProfile
+		case c.Slots <= 0:
+			place.Idle = IdleNoSlots
 		case len(turns) >= c.Slots:
 			place.Idle = IdleFull
 		}

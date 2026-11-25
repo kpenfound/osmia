@@ -235,7 +235,7 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			}
 		}
 
-		agents, err := agentStatuses(active.repository, w.Workstream, time.Now())
+		agents, err := agentStatusesOn(active.repository, w.Workstream, time.Now(), s.placedClient)
 		if err == nil {
 			err = s.step("status-agents")
 		}
@@ -310,6 +310,10 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 }
 
 func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now time.Time) ([]AgentStatus, error) {
+	return agentStatusesOn(repository, stream, now, nil)
+}
+
+func agentStatusesOn(repository *trace.Repository, stream config.WorkstreamID, now time.Time, placed func(turn string) string) ([]AgentStatus, error) {
 	threads, err := repository.Threads(stream)
 	if err != nil {
 		return nil, err
@@ -353,6 +357,12 @@ func agentStatuses(repository *trace.Repository, stream config.WorkstreamID, now
 			if n := len(turn.Attempts); n > 0 {
 				a := turn.Attempts[n-1]
 				entry.Profile, entry.Attempt, entry.Path = a.Profile.Name, a.Number, a.Path
+			}
+			switch {
+			case turn.Response != nil:
+				entry.Client = turn.Response.Result.Client
+			case placed != nil:
+				entry.Client = placed(turn.Request.TurnID)
 			}
 			agents = append(agents, entry)
 		}
@@ -437,7 +447,11 @@ func (s *Service) failureStreaks() ([]FailureStreak, error) {
 			continue
 		}
 		streak := streaks[key]
-		streaks[key] = FailureStreak{Role: a.role, Profile: a.Profile.Name, Consecutive: streak.Consecutive + 1, LastFailure: a.Failure, LastAt: a.At}
+		clients := streak.Clients
+		if a.Result != nil && a.Result.Client != "" && !slices.Contains(clients, a.Result.Client) {
+			clients = append(slices.Clone(clients), a.Result.Client)
+		}
+		streaks[key] = FailureStreak{Role: a.role, Profile: a.Profile.Name, Consecutive: streak.Consecutive + 1, LastFailure: a.Failure, LastAt: a.At, Clients: clients}
 	}
 	var out []FailureStreak
 	for _, key := range slices.SortedFunc(maps.Keys(streaks), func(a, b [2]string) int { return strings.Compare(a[0]+"\x00"+a[1], b[0]+"\x00"+b[1]) }) {

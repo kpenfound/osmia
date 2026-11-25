@@ -75,6 +75,11 @@ const (
 const (
 	ReasonCapacity      = "capacity"
 	ReasonWorkstreamCap = "workstream-cap"
+	// ReasonClient: the role has room but the client the turn waits for has
+	// no free slot.
+	ReasonClient = "client"
+	// ReasonNoClient: no connected client can take the turn.
+	ReasonNoClient = "no-client"
 )
 
 // Interval is one held or wait interval of a pool, open until its owner ends it.
@@ -90,6 +95,10 @@ type Interval struct {
 	Unit       string              `json:"unit,omitempty"`
 	// Agent is the thread of a turn or the runner thread a reservation covers.
 	Agent string `json:"agent,omitempty"`
+	// Client is the client whose slot the interval covers: the tailnet node's
+	// stable ID, or local for the server's own machine. It is empty for work
+	// no client runs and for a wait that no client is chosen for yet.
+	Client string `json:"client,omitempty"`
 	// Work names the work within its pool and source, so one piece of work has
 	// one open interval of a kind.
 	Work  string    `json:"work"`
@@ -493,6 +502,9 @@ func (r *Recorder) send(iv Interval, end time.Time, outcome string) {
 	}
 	if iv.Unit != "" {
 		attrs = append(attrs, telemetry.Unit(iv.Unit))
+	}
+	if iv.Client != "" {
+		attrs = append(attrs, telemetry.Client(iv.Client))
 	}
 	switch {
 	case iv.Unbounded:

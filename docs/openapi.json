@@ -4782,6 +4782,9 @@
           "attempt": {
             "type": "integer"
           },
+          "client": {
+            "type": "string"
+          },
           "elapsed": {
             "format": "int64",
             "type": "integer"
@@ -5017,6 +5020,16 @@
       },
       "CapacityStatus": {
         "properties": {
+          "clients": {
+            "description": "The local client and every connected client, in the order new turns rotate through them. Each client's slots are a second bound next to the role pools.",
+            "items": {
+              "$ref": "#/components/schemas/ClientStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "per_workstream": {
             "description": "Maximum concurrent worker turns per workstream; check slots are independent.",
             "type": "integer"
@@ -5467,12 +5480,245 @@
         },
         "type": "object"
       },
+      "ClientFailure": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "infrastructure",
+              "behavioural"
+            ],
+            "type": "string"
+          },
+          "failure": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ClientIdentity": {
         "properties": {
           "id": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientLease": {
+        "properties": {
+          "connected_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ends_at": {
+            "description": "When the lease ends unless the client is heard from.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "health": {
+            "description": "healthy when heartbeats arrive; late when they are missing but the grace window has not passed.",
+            "enum": [
+              "healthy",
+              "late"
+            ],
+            "type": "string"
+          },
+          "last_seen": {
+            "description": "When the server last heard from the client.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientProfileStatus": {
+        "properties": {
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileProblem"
+            },
+            "type": "array"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClientSkip": {
+        "properties": {
+          "main": {
+            "description": "The role's main profile, which the client can run.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "The fallback profile the client skips.",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClientStatus": {
+        "properties": {
+          "draining": {
+            "description": "True while the client is draining: it takes no new turns.",
+            "type": "boolean"
+          },
+          "failures": {
+            "description": "The latest turns that failed on the client, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ClientFailure"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "The client's identity: its tailnet node's stable ID, or local for the server's own machine.",
+            "type": "string"
+          },
+          "idle": {
+            "description": "Why the client takes no new turn now. Absent when it takes one.",
+            "enum": [
+              "draining",
+              "no-slots",
+              "full",
+              "no-report",
+              "no-profile"
+            ],
+            "type": "string"
+          },
+          "idle_reason": {
+            "description": "Idle in plain words, with the fix when there is one.",
+            "type": "string"
+          },
+          "lease": {
+            "$ref": "#/components/schemas/ClientLease",
+            "description": "The client's lease. Absent for the local client."
+          },
+          "local": {
+            "description": "True for the built-in local client.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The tailnet node's name, or local for the server's own machine.",
+            "type": "string"
+          },
+          "profiles": {
+            "description": "Each configured profile the client can or cannot run.",
+            "items": {
+              "$ref": "#/components/schemas/ClientProfileStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "report_current": {
+            "description": "False when the client's report checked an older profile handout than the server holds now.",
+            "type": "boolean"
+          },
+          "reported": {
+            "description": "True once the client has reported what it can run; the local client runs every profile.",
+            "type": "boolean"
+          },
+          "skipped": {
+            "description": "Fallback profiles the client skips because it cannot run them.",
+            "items": {
+              "$ref": "#/components/schemas/ClientSkip"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "slots": {
+            "description": "The client's slot count. Absent when unbounded is true.",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "turns": {
+            "description": "The turns running on the client.",
+            "items": {
+              "$ref": "#/components/schemas/ClientTurn"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "unbounded": {
+            "description": "True for the local client when capacity.local_slots is unset: it adds no cap beyond the role limits.",
+            "type": "boolean"
+          },
+          "used": {
+            "description": "Slots the client's turns and offers take.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClientTurn": {
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "turn": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "workstream": {
             "type": "string"
           }
         },
@@ -7173,6 +7419,12 @@
       },
       "FailureStreak": {
         "properties": {
+          "clients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "consecutive": {
             "type": "integer"
           },
@@ -10031,6 +10283,10 @@
       "SlotWait": {
         "properties": {
           "agent": {
+            "type": "string"
+          },
+          "client": {
+            "description": "The client a resumed turn waits for a slot of: the one that holds its saved session.",
             "type": "string"
           },
           "preview": {

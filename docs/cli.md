@@ -307,10 +307,22 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   limit; at most one turn per workstream)` for the architect, which
   no configuration setting limits, each followed by `Waiting: <workstream> turn <turn> of <agent>
   (<reason>)` or `Waiting: <workstream> unit <unit> (<reason>)` for the work
-  waiting for a slot), each
+  waiting for a slot; a turn waiting for the client that holds its saved session
+  names it, `(client <client>)`, and one that no connected client can run says
+  `no-client`), then `Clients:` with the local client and each connected client:
+  `<name> (<tailnet node ID>): <used> of <slots> slot(s) in use`, `, lease healthy` or
+  `, lease late` with when the lease ends, and `, draining`, each followed by
+  `Takes no new turn: <reason>` when it takes none (draining, no slots, every slot
+  taken, no report yet, or can run no profile, which lists what is missing and
+  the fix), `Running:` for each turn on it, `Can run:` and `Cannot run:` for its
+  profiles with the `Missing:` item and its fix, `Skips fallback:` for each
+  fallback profile it cannot run, and `Failed:` for the latest turns that failed
+  on it, such as a turn that failed for want of a provider login; the local
+  client reads `no slot limit` until `capacity.local_slots` sets one), each
   role and profile whose latest turn attempts failed with infrastructure
   failures (`Infrastructure failures: <role> on profile <profile> failed <n>
-  time(s) in a row; last at <time>: <failure>`), the
+  time(s) in a row; last at <time>: <failure>`, naming the clients the failed
+  attempts ran on as `on client <client>`), the
   workspace backend new workstreams get
   (`Workspaces: setting=<setting> new_workstreams=<backend> jj=<version>`,
   `none` when `workspaces = "jujutsu"` finds no supported `jj`, which a

@@ -327,7 +327,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		if reason := s.refusal(used, c); reason != "" {
 			waiting = append(waiting, Wait{Candidate: c, Reason: reason})
 			touched[s.waitInterval(c).Key()] = true
-			s.refused(spans, c, reason)
+			s.refused(spans, c, reason, "")
 			continue
 		}
 		if s.options.Admit != nil {
@@ -342,6 +342,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			}
 		}
 		var taken *fleet.Turn
+		client := ""
 		if s.options.Placement != nil {
 			id := c.Turn.Request.TurnID
 			ft := places.turns[turnOf(c)]
@@ -353,10 +354,10 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 				s.options.Placement.Owe(string(c.Project), places.owed)
 				waiting = append(waiting, Wait{c, choice.Reason, choice.Pinned})
 				touched[s.waitInterval(c).Key()] = true
-				spans.End(s.waitInterval(c), s.options.Now(), slotspans.Blocked)
+				s.refused(spans, c, choice.Reason, choice.Pinned)
 				continue
 			}
-			taken = &ft
+			taken, client = &ft, choice.Client
 		}
 		at := s.options.Now()
 		if err := s.dispatch(ctx, c, at); err != nil {
@@ -369,7 +370,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 		spans.End(s.waitInterval(c), at, slotspans.Granted)
 		used.add(c.Project, c.Workstream, role)
 		r.own.add(c.Project, c.Workstream, role)
-		r.own.addTurn(flightOf(c, at))
+		r.own.addTurn(flightOf(c, at, client))
 		r.served[rotationKey(c.Project, c.Workstream, role)] = at
 	}
 	s.endGoneWaits(spans, r.loaded, touched)
@@ -425,6 +426,12 @@ func (s *Scheduler) read() (reading, error) {
 	if err != nil {
 		return reading{}, err
 	}
+	if s.options.Placement != nil {
+		l.client = func(turn string) string {
+			client, _ := s.options.Placement.PlacedOn(turn)
+			return client
+		}
+	}
 	own := newUsage()
 	s.options.Shared.count(l, own)
 	used := newUsage()
@@ -455,6 +462,8 @@ type loaded struct {
 	dispatched   map[turnKey]bool
 	dispatchedAt map[turnKey]time.Time
 	served       map[rotation]time.Time
+	// client names the client a turn was placed on, when placement knows.
+	client func(turn string) string
 }
 
 func load(repository *trace.Repository) (loaded, error) {

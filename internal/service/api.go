@@ -266,6 +266,8 @@ type CapacityStatus = api.CapacityStatus
 
 type RoleCapacity = api.RoleCapacity
 
+type ClientStatus = api.ClientStatus
+
 type SlotWait = api.SlotWait
 
 type ProviderUsageStatus = api.ProviderUsageStatus

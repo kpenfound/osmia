@@ -555,6 +555,18 @@ comes from `config.toml` and applies on reload. The `chief` entry is
 a slot and its waiting entries are the queued ones, oldest first. An unbounded pool is not zero
 capacity and has no setting to raise.
 
+The capacity view also lists `clients`: the local client first, then each
+connected `osmia client` in the order new turns rotate through them. Each entry
+gives the client's identity (the tailnet node's stable ID, or `local`), its name,
+`slots` and `used` (no `slots`, and `unbounded` true, for a local client with no
+`capacity.local_slots`), its `lease` health (`healthy` or `late`, with when it
+ends) when it is a connected client, whether it is `draining`, why it takes no
+new turn (`idle` and `idle_reason`), which `profiles` it can and cannot run with
+the fix for each missing item, the fallback profiles it `skipped`, the `turns`
+running on it and the turns that `failures` it ran. A turn waiting for a client's
+slot is listed under its role with reason `client` and the client's identity, or
+`no-client` when no connected client can run its profile.
+
 `capacity.committee` is the size of each workstream's committee, not a pool
 shared across workstreams: a workstream that
 enters the shed for debate gets that many committee

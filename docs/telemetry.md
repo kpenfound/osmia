@@ -85,6 +85,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.project.id`, `osmia.workstream.id` | IDs | everything about a workstream |
 | `osmia.unit.id` | unit ID | unit state, turns of a unit, unit check runs, slot spans of a unit's work |
 | `osmia.record.id` | the trace record the span came from | turns, check runs, `osmia.loop_guard.trip` |
+| `osmia.client.id` | the client that ran the turn or whose slot the interval covers: the tailnet node's stable ID of an `osmia client`, or `local` for the server's own machine. A wait span carries it only when the turn waits for one client, as a resumed turn waits for the client holding its session | turns, slot spans of turns |
 | `osmia.state`, `osmia.next_state` | state names; on a route span `osmia.next_state` is the state the subject is in once the exit is decided (a held subject stays where it is) | `osmia.workstream.state`, `osmia.unit.state`, `osmia.transition.route` |
 | `osmia.decided_by` | see [routing values](#routing-values): `code`, `jev`, `fallback`, `owner`, `jev_gate`, `reviewer` | `osmia.workstream.state`, `osmia.unit.state`, only when the transition router chose the transition that ended the state |
 | `osmia.default_state` | the state the default would have entered | the same spans, and `osmia.transition.route` |
@@ -104,7 +105,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.pool.roles` | the roles the pool serves | slot spans, `osmia.pool.limit` |
 | `osmia.pool.limit` | the pool's limit at the span's start (slot spans) or throughout (pool limit spans) | bounded pools |
 | `osmia.pool.unbounded` | `true` | pools with no factory-wide limit (`architect`) |
-| `osmia.wait_reason` | `capacity`, `workstream-cap` | `osmia.slot.wait` |
+| `osmia.wait_reason` | `capacity`, `workstream-cap`, `client`, `no-client` | `osmia.slot.wait` |
 | `osmia.pause.scope` | `factory`, `role`, `project`, `workstream` | `osmia.pause`, `osmia.loop_guard.trip` |
 | `osmia.pause.source` | `owner`, `daily-budget`, `provider-usage-limit`, `loop-guard` | `osmia.pause`, `osmia.loop_guard.trip` |
 
@@ -278,8 +279,15 @@ A span for a trigger, outcome or band outside these lists is not sent.
 | `osmia.transition.route` | `followed`, `departed`, `held`, `fallback` (see [route spans](#route-spans)) |
 | `osmia.service.uptime` | `shutdown`, `interrupted` |
 
+Slot spans cover client slots as well as the role pools. A turn holds a slot
+of the client it runs on for as long as it holds its role slot, and a turn
+that has room under its role limit but no free slot on a client waits with
+reason `client`, or `no-client` when no connected client can run its profile.
+The server emits every one of these spans, for a turn on a remote client too:
+the client sends no telemetry, and the spans come from data the server holds.
+
 A **wait** span starts at the first refusal by capacity (or by the
-per-workstream cap), not when the work was queued, and not while a pause holds
+per-workstream cap, or by the clients), not when the work was queued, and not while a pause holds
 it back. It ends `granted` when the work gets its slot, `canceled` or
 `removed` when the work goes away, and `blocked` when it stops waiting for
 capacity for another reason, such as a pause. `completed` closes a workflow
