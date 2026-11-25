@@ -14,6 +14,7 @@ import (
 	"github.com/kpenfound/osmia/internal/charter"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -211,7 +212,19 @@ type Files struct {
 	// Repository returns the open trace of an active project. Files never
 	// closes it.
 	Repository func(config.ProjectID) (*trace.Repository, error)
+	// Unplanned returns the unit a workstream of a kind with no sealed plan
+	// builds, from the sealed document of its spec slot. It is called only for
+	// such a workstream.
+	Unplanned func(spec trace.Document, unit string) (plan.Unit, error)
 }
+
+// UnplannedDocument and UnplannedPath name the one-unit plan a workstream of a
+// kind with no sealed plan builds from; the bundle renders it where a plan
+// would be.
+const (
+	UnplannedDocument = "unit-source"
+	UnplannedPath     = "unit-source.json"
+)
 
 var _ Provider = Files{}
 

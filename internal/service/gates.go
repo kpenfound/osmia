@@ -120,6 +120,9 @@ func (w *gateWorker) scan(ctx context.Context) {
 }
 
 func (w *gateWorker) handle(ctx context.Context, g intake.Gate) {
+	if g.Kind.OwnerOnly() {
+		return
+	}
 	log := w.s.log().With("project", string(g.Project), "workstream", string(g.Stream), "gate", string(g.Kind), "subject", g.Key)
 	repository := w.active.repository
 	decision, err := g.Decision()

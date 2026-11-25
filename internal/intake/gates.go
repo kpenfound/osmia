@@ -869,6 +869,7 @@ func (s *Controller) ReachedGates(ctx context.Context, p *Project) ([]Gate, erro
 	if !s.ownerJudged() {
 		out = slices.DeleteFunc(out, func(g Gate) bool { return g.Kind.Owner() })
 	}
+	out = slices.DeleteFunc(out, func(g Gate) bool { return g.Kind.OwnerOnly() })
 	return out, nil
 }
 

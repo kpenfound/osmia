@@ -901,6 +901,20 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/climb/"); ok && r.Method == http.MethodPost {
+		if id, ok := strings.CutSuffix(rest, "/approval"); ok {
+			var v api.ClimbApprovalRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.approveClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/recovery/"); ok && r.Method == http.MethodPost {
 		var v RecoveryRequest
 		if !decode(w, r, &v) {

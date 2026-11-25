@@ -17,11 +17,7 @@ func assignmentHeld(r *trace.Repository, stream config.WorkstreamID, unit, role 
 	if err != nil || !found {
 		return false, err
 	}
-	doc, err := sealedPlan(r, stream, current.Revision.Plan)
-	if err != nil {
-		return false, err
-	}
-	graph, err := plan.Parse([]byte(doc.Content))
+	graph, err := intake.SealedPlanOf(r, stream, current)
 	if err != nil {
 		return false, err
 	}

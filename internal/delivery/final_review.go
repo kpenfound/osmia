@@ -219,6 +219,9 @@ func (a *FinalReviewer) Pass(ctx context.Context) error {
 // sealed plan has merged, and does nothing while any has not, while work
 // remains unresolved, or while a move to building holds it for a revision.
 func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID) error {
+	if planned, err := a.Repository.Planned(stream); err != nil || !planned {
+		return err
+	}
 	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
 	if err != nil || !found {
 		return err

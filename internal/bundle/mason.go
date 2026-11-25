@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -125,25 +126,43 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	if hash := seal.SpecHash(spec.Content); hash != s.SpecHash {
 		return Mason{}, fmt.Errorf("%w: %s revision %d hashes to %s, seal %d records %s", ErrStaleSpec, plan.SpecPath, spec.Revision, hash, s.Seal, s.SpecHash)
 	}
-	planDoc, err := revision(repo, stream, plan.PlanDocument, s.Revision.Plan)
-	if err != nil {
-		return Mason{}, err
-	}
-	p, err := plan.Parse([]byte(planDoc.Content))
-	if err != nil {
-		return Mason{}, fmt.Errorf("%s revision %d: %w", plan.PlanPath, planDoc.Revision, err)
-	}
-	u, ok := p.Unit(unit)
+	var planDoc trace.Document
+	var u plan.Unit
 	var added *followup.Unit
-	if !ok {
-		item, found, err := followup.Find(repo, stream, unit)
+	if planned, err := repo.Planned(stream); err != nil {
+		return Mason{}, err
+	} else if !planned {
+		if f.Unplanned == nil {
+			return Mason{}, fmt.Errorf("workstream %s has no sealed plan and no source of its units", stream)
+		}
+		if u, err = f.Unplanned(spec, unit); err != nil {
+			return Mason{}, err
+		}
+		data, err := json.MarshalIndent(plan.Plan{Version: plan.Version, Units: []plan.Unit{u}}, "", "  ")
 		if err != nil {
 			return Mason{}, err
 		}
-		if !found {
-			return Mason{}, fmt.Errorf("unit %q is not in %s revision %d", unit, plan.PlanPath, planDoc.Revision)
+		planDoc = trace.Document{Header: trace.Header{ID: UnplannedDocument, Revision: s.Revision.Plan}, Path: UnplannedPath, Content: string(data) + "\n"}
+	} else {
+		if planDoc, err = revision(repo, stream, plan.PlanDocument, s.Revision.Plan); err != nil {
+			return Mason{}, err
 		}
-		u, added = item.Unit, &item
+		p, err := plan.Parse([]byte(planDoc.Content))
+		if err != nil {
+			return Mason{}, fmt.Errorf("%s revision %d: %w", plan.PlanPath, planDoc.Revision, err)
+		}
+		var ok bool
+		u, ok = p.Unit(unit)
+		if !ok {
+			item, found, err := followup.Find(repo, stream, unit)
+			if err != nil {
+				return Mason{}, err
+			}
+			if !found {
+				return Mason{}, fmt.Errorf("unit %q is not in %s revision %d", unit, plan.PlanPath, planDoc.Revision)
+			}
+			u, added = item.Unit, &item
+		}
 	}
 	parsed := plan.ParseSpec(spec.Content)
 	m := Mason{

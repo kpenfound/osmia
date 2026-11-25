@@ -45,6 +45,19 @@ const (
 	KindCancellation        DecisionKind = "cancellation"
 )
 
+// KindClimbApproval names the owner's approval of a Hill Climb workstream's
+// calibrated evaluator. It is not a decision kind: Jev never decides it, so it
+// has no judgment task, no threshold and no place in Kinds. Code that routes an
+// owner gate to Jev asks OwnerOnly first.
+const KindClimbApproval DecisionKind = "climb-evaluator-approval"
+
+var ownerOnly = map[DecisionKind]bool{KindClimbApproval: true}
+
+// OwnerOnly reports whether only the owner's explicit decision settles a gate
+// of the kind. Jev is never asked about one, and no result of Jev, however
+// confident or binding, settles it.
+func (k DecisionKind) OwnerOnly() bool { return ownerOnly[k] }
+
 type kindSpec struct {
 	version      int
 	instructions string
@@ -442,6 +455,9 @@ func lockOccurrence(repo *trace.Repository, stream config.WorkstreamID, kind Dec
 func (j *Judge) Decide(ctx context.Context, repo *trace.Repository, req DecisionRequest) Result {
 	fallback := func(reason Reason, detail string) Result {
 		return Result{Status: FallbackOnly, Reason: reason, Detail: detail}
+	}
+	if req.Kind.OwnerOnly() {
+		return fallback(ReasonRejected, fmt.Sprintf("%s is the owner's alone to decide; Jev is never asked", req.Kind))
 	}
 	if reason := ValidOccurrence(req.Kind, req.Occurrence); reason != "" {
 		return fallback(ReasonRejected, reason)

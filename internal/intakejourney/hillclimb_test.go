@@ -204,7 +204,7 @@ func TestHillClimbIsDraftedDebatedOnceRatifiedAndSealedWithoutAPlan(t *testing.T
 	transitions, err := trace.Read[trace.Transition](f.Repository(), stream)
 	fixturekit.Must(t, err)
 	for _, tr := range transitions {
-		if strings.HasPrefix(tr.Subject, "unit-") {
+		if strings.HasPrefix(tr.Subject, "unit-") && tr.Cause == ops[0].Operation.ID {
 			t.Fatalf("a hill-climb build recorded the unit transition %+v", tr)
 		}
 	}

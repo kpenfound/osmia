@@ -293,6 +293,9 @@ func (s *Controller) OpenDecisions(ctx context.Context, repository *trace.Reposi
 			return nil, err
 		}
 	}
+	if err := add(s.ClimbApprovalEntry(repository, w)); err != nil {
+		return nil, err
+	}
 	if w.State == AssembledState || w.State == DeliveredState {
 		if err := add(s.DeliveryCard(ctx, repository, w.Workstream)); err != nil {
 			return nil, err

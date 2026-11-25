@@ -529,6 +529,14 @@ func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req a
 	return v, err
 }
 
+// ApproveClimb records the owner's approval of a Hill Climb workstream's
+// calibrated evaluator, as the evaluator approval card's answer does.
+func (c *Client) ApproveClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbApprovalRequest) (api.ClimbApprovalResponse, error) {
+	var v api.ClimbApprovalResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/approval", req, &v)
+	return v, err
+}
+
 // Recovery approves the recovery move a recovery card pins.
 func (c *Client) Recovery(ctx context.Context, id config.WorkstreamID, req api.RecoveryRequest) (api.RecoveryResponse, error) {
 	var v api.RecoveryResponse

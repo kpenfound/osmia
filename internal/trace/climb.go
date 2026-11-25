@@ -22,3 +22,30 @@ func climbAttemptPath(parts []string) bool {
 	n, ok := strings.CutSuffix(parts[2], ".json")
 	return ok && shedRound.MatchString("round-"+n)
 }
+
+// ClimbSubject is the workflow subject of a Hill Climb workstream's inner
+// state while it is building.
+const ClimbSubject = "climb"
+
+// The workstream documents of the climb's inner machine before climbing:
+// what the evaluator step decided, what calibration measured and what the
+// owner approved.
+const (
+	ClimbEvaluatorPath   = "climb/evaluator.json"
+	ClimbEvaluatorID     = "climb-evaluator"
+	ClimbCalibrationPath = "climb/calibration.json"
+	ClimbCalibrationID   = "climb-calibration"
+	ClimbApprovalPath    = "climb/approval.json"
+	ClimbApprovalID      = "climb-approval"
+)
+
+func climbRecordPath(parts []string) bool {
+	if len(parts) != 2 || parts[0] != "climb" {
+		return false
+	}
+	switch parts[1] {
+	case "evaluator.json", "calibration.json", "approval.json":
+		return true
+	}
+	return false
+}

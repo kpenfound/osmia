@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -29,11 +30,7 @@ func SealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 	if !found {
 		return plan.Unit{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
-	graph, err := SealedPlan(repository, stream, latest.Revision.Plan)
-	if err != nil {
-		return plan.Unit{}, err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
+	p, err := sealedPlanOf(repository, stream, latest)
 	if err != nil {
 		return plan.Unit{}, err
 	}
@@ -49,4 +46,27 @@ func SealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 		return added.Unit, nil
 	}
 	return unit, nil
+}
+
+// sealedPlanOf returns the plan of the workstream's latest seal. A kind with
+// a plan reads its sealed plan.json. A kind without one, Hill Climb, has the
+// one unit its evaluator step runs, made from the sealed climb spec.
+func sealedPlanOf(repository *trace.Repository, stream config.WorkstreamID, latest seal.Seal) (plan.Plan, error) {
+	if planned, err := repository.Planned(stream); err != nil {
+		return plan.Plan{}, err
+	} else if !planned {
+		p, _, err := climb.SealedEvaluatorPlan(repository, stream, latest.Revision.Spec)
+		return p, err
+	}
+	graph, err := SealedPlan(repository, stream, latest.Revision.Plan)
+	if err != nil {
+		return plan.Plan{}, err
+	}
+	return plan.Parse([]byte(graph.Content))
+}
+
+// SealedPlanOf is sealedPlanOf for the code that reads the sealed plan of a
+// workstream of any kind.
+func SealedPlanOf(repository *trace.Repository, stream config.WorkstreamID, latest seal.Seal) (plan.Plan, error) {
+	return sealedPlanOf(repository, stream, latest)
 }

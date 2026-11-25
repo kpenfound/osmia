@@ -1040,6 +1040,55 @@
         }
       }
     },
+    "/v1/climb/{workstream}/approval": {
+      "post": {
+        "summary": "Approve a Hill Climb workstream's calibrated evaluator: the owner's explicit decision on the evaluator approval card snapshots the approved copy of the protected paths and freezes them, and only then may climbing begin; Jev never decides it. Refused as a conflict when the climb is not waiting for the approval or the request pins an evaluator commit other than the calibrated one",
+        "operationId": "postClimbByWorkstreamApproval",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClimbApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbApprovalResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config": {
       "get": {
         "summary": "Show the loaded configuration, its disk drift and diagnostics",
@@ -5717,6 +5766,57 @@
           },
           "unit": {
             "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbApprovalRequest": {
+        "properties": {
+          "commit": {
+            "description": "The evaluator commit the card showed.",
+            "type": "string"
+          },
+          "decision": {
+            "description": "approve is the one decision the card offers.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbApprovalResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "baseline": {
+            "format": "double",
+            "type": "number"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "evaluator": {
+            "type": "string"
+          },
+          "noise": {
+            "format": "double",
+            "type": "number"
+          },
+          "project": {
+            "type": "string"
+          },
+          "protected": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "workstream": {
             "type": "string"
