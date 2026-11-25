@@ -38,6 +38,12 @@ type Runner struct {
 	// never changes whether CheckResume is asked, or what a CheckResume that
 	// answers for itself says. Nil means neither applies to any role.
 	ResumableRoles func(string) bool
+	// Place chooses where a claimed turn runs, before it starts, and may wait for
+	// a client slot. A turn whose thread's saved session is on another client
+	// replays its log instead of resuming, and fallback profiles the client
+	// cannot run are skipped. Nil runs every turn where Turns puts it, with
+	// every profile.
+	Place func(context.Context, trace.Thread, trace.QueuedTurn) (Placed, error)
 	// Jev classifies clean mason responses first; a fallback, which is every
 	// judgment while Jev is unconfigured, leaves them to the code rules. It
 	// must not be nil.
@@ -47,6 +53,18 @@ type Runner struct {
 	// inside turn execution, before the agent session starts, so it may ask
 	// Jev. Nil adds nothing.
 	Advise func(context.Context, trace.TurnRequest, coreadapter.Scope) string
+}
+
+// Placed is where a claimed turn runs.
+type Placed struct {
+	// Client is the ID of the client the turn runs on.
+	Client string
+	// Runs reports whether that client can run a profile. Nil means every
+	// profile.
+	Runs func(profile string) bool
+	// Release gives back the client slot the turn took, when the turn ends. Nil
+	// gives back nothing.
+	Release func()
 }
 
 // RunNext retries infrastructure failures within the turn, as execute

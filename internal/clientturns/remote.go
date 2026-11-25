@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
@@ -51,7 +52,7 @@ func (c *remote) offer(t isolation.ClientTurn, token string) api.TurnOffer {
 	execution := p.Execution
 	execution.DaggerCloudTokenEnv = ""
 	offer := api.TurnOffer{Turn: scope.Turn, Project: scope.Project, Workstream: scope.Workstream, Unit: scope.Unit, Thread: scope.Thread, Role: scope.Role,
-		Profile: p.Profile.Name, Fallbacks: t.Fallbacks, Settings: p.Profile, SystemPrompt: p.SystemPrompt, Prompt: p.Prompt, History: p.History,
+		Profile: p.Profile.Name, Fallbacks: c.runnable(t.Fallbacks), Settings: p.Profile, SystemPrompt: p.SystemPrompt, Prompt: p.Prompt, History: p.History,
 		AllowedOutcomes: p.AllowedOutcomes, Capabilities: t.Capabilities, Execution: execution, RunsDagger: t.RunsDagger, Environment: t.Environment,
 		ToolToken: token, ReturnView: t.ReturnView, View: api.TurnView{Kind: api.ViewArchive}}
 	if p.Resume != nil {
@@ -64,6 +65,16 @@ func (c *remote) offer(t isolation.ClientTurn, token string) api.TurnOffer {
 		offer.View = api.TurnView{Kind: api.ViewGit, Project: t.Start.Project, Commit: t.Start.Commit, Paths: t.Start.Paths}
 	}
 	return offer
+}
+
+// runnable keeps the profiles the node's client reported it can run: the
+// client is not offered a fallback profile it cannot run.
+func (c *remote) runnable(profiles []string) []string {
+	client, ok := c.d.Fleet.Client(c.node.ID)
+	if !ok || client.Capabilities == nil {
+		return profiles
+	}
+	return slices.DeleteFunc(slices.Clone(profiles), func(name string) bool { return !client.CanRun(name) })
 }
 
 // Run offers the turn to the node's client and waits for it to end.

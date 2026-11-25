@@ -11,7 +11,10 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/tailnet"
+	"github.com/kpenfound/osmia/internal/thread"
+	"github.com/kpenfound/osmia/internal/trace"
 )
 
 // fleetSweep is how often the service ends the leases that ran out.
@@ -194,3 +197,18 @@ func (s *Service) recoverExpiredHolds(ctx context.Context) {
 		}
 	}
 }
+
+func (s *Service) placeTurn(repository *trace.Repository) func(context.Context, trace.Thread, trace.QueuedTurn) (thread.Placed, error) {
+	return func(ctx context.Context, t trace.Thread, q trace.QueuedTurn) (thread.Placed, error) {
+		c := scheduler.Candidate{Project: repository.Project(), Workstream: q.Request.Workstream, Thread: t, Turn: q}
+		placed, err := s.placement.Begin(ctx, scheduler.PlacementTurn(c, resumableRole))
+		if err != nil {
+			return thread.Placed{}, err
+		}
+		return thread.Placed{Client: placed.Client, Runs: placed.Runs, Release: placed.Release}, nil
+	}
+}
+
+// ClientPlaces lists the local client and every connected client with the turns
+// placed on them, the way placement counts their slots.
+func (s *Service) ClientPlaces() []fleet.Place { return s.placement.Places() }

@@ -315,6 +315,31 @@ per_workstream = 3
 		t.Fatal("unknown profile accepted")
 	}
 }
+func TestLocalSlotsAreUnsetByDefaultAndMayBeZero(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra string
+		want  *int
+	}{
+		"unset": {"", nil},
+		"zero":  {"[capacity]\nlocal_slots = 0\n", new(0)},
+		"three": {"[capacity]\nlocal_slots = 3\n", new(3)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := load(fixture(t, topConfig+tc.extra, projectConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := c.Capacity.LocalSlots
+			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
+				t.Fatalf("local slots %v, want %v", got, tc.want)
+			}
+			if c.Capacity.Masons != 4 || c.Capacity.PerWorkstream != 2 {
+				t.Fatalf("role limits changed: %+v", c.Capacity)
+			}
+		})
+	}
+}
+
 func TestInvalid(t *testing.T) {
 	cases := []struct{ name, top, project, want string }{
 		{"syntax", "version = [", "", "config.toml:"},
@@ -335,6 +360,8 @@ func TestInvalid(t *testing.T) {
 		{"negative chief", topConfig + "[capacity]\nchief = -1\n", "", "capacity.chief"},
 		{"zero committee", topConfig + "[capacity]\ncommittee = 0\n", "", "capacity.committee"},
 		{"zero wip", topConfig + "[capacity]\nper_workstream = 0\n", "", "capacity.per_workstream"},
+		{"negative local slots", topConfig + "[capacity]\nlocal_slots = -1\n", "", "capacity.local_slots"},
+		{"local slots wrong type", topConfig + "[capacity]\nlocal_slots = 'all'\n", "", "config.toml:"},
 		{"negative rounds", topConfig + "[shed]\nmax_rounds = -1\n", "", "shed.max_rounds"},
 		{"zero bounces", topConfig + "[shed]\nmax_bounces = 0\n", "", "shed.max_bounces"},
 		{"zero clean turns", topConfig + "[mason]\nmax_clean_turns = 0\n", "", "mason.max_clean_turns"},

@@ -777,7 +777,10 @@ const UnboundedNote = "No factory-wide limit: this pool runs at most one turn pe
 // For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.
 // Reason is capacity when every slot of the pool is taken, priority when
 // higher-priority workstreams start a unit first, and workstream-cap when the
-// workstream holds capacity.per_workstream agent turns.
+// workstream holds capacity.per_workstream agent turns. A queued turn whose
+// role has room waits with reason client when the client it can run on has no
+// free slot, which for a turn that resumes a session is the client holding it,
+// and with reason no-client when no connected client can run its profile.
 type SlotWait struct {
 	Project    config.ProjectID    `json:"project,omitempty" description:"Project of a waiting check run."`
 	Workstream config.WorkstreamID `json:"workstream"`

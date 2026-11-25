@@ -255,7 +255,10 @@ func Enforce(opts Options, e Enforcement) Options {
 				service.clients.Bind(r.Project(), clientturns.Binding{Repository: r, Runner: runner, Capture: turns.Capture})
 			}
 		}
-		runner.ResumableRoles = func(role string) bool { return role == sessionRole }
+		runner.ResumableRoles = resumableRole
+		if service := controls.service.Load(); service != nil && service.placement != nil {
+			runner.Place = service.placeTurn(r)
+		}
 		return thread.Dispatcher{Runner: runner,
 			Prepare: func(_ context.Context, in thread.TurnInput) (coreadapter.PreparedTurn, error) {
 				directory := filepath.Join(root, "threads", project, string(in.Workstream), in.Agent, in.Turn)

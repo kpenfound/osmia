@@ -5712,6 +5712,12 @@
           "committee": {
             "type": "integer"
           },
+          "local_slots": {
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "masons": {
             "type": "integer"
           },

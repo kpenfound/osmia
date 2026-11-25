@@ -109,6 +109,10 @@ const (
 	// ClientLate records that a view or result arrived for a turn whose
 	// recovery had already begun, and was not used.
 	ClientLate = "late"
+	// ClientSkipped records that a fallback profile of the turn's chain was
+	// skipped because the client the turn runs on cannot run it. What names
+	// the profile.
+	ClientSkipped = "skipped"
 )
 
 // ClientEvent is the content of a document recording where a turn ran and

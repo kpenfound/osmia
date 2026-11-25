@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -55,6 +56,16 @@ type Options struct {
 	// Shared is the pool of role slots this scheduler shares with the
 	// schedulers of other projects. Nil keeps the slots to this trace.
 	Shared *Shared
+	// Placement places each dispatched turn on a client. A turn starts only
+	// when its role has room under Capacity and a client has a free slot: it
+	// checks the role limit first, so a turn it holds back does not move the
+	// rotation. A turn that resumes a thread's saved session waits for the
+	// client that holds it, owed that client's next free slot before any new
+	// turn. Nil places nothing, and every turn runs where its runner puts it.
+	Placement *fleet.Placement
+	// Resumable is the thread runner's ResumableRoles, which tells what a turn
+	// resumes. Nil is none.
+	Resumable func(role string) bool
 }
 
 // Shared is one pool of role slots that the schedulers of several projects,
@@ -250,6 +261,13 @@ func New(repository *trace.Repository, options Options) (*Scheduler, error) {
 // Holds holds, that finds no free slot or that Admit declines is not
 // dispatched and leaves its workstream's place in the rotation unchanged.
 //
+// With a Placement, a candidate that clears the role limits, the dispatch gate
+// and Admit also needs a client: the pass places it with the placement, which
+// takes a slot of the client it picks, and dispatches it there. A candidate that
+// resumes a client's session waits for that client without a role slot, and is
+// owed the client's next free slot before any new candidate. A candidate no
+// client can take stays queued and leaves the placement's rotation unchanged.
+//
 // With a shared pool, the pass publishes its project's turns in flight and
 // the queued turns it found no free slot for once it has dispatched, whether
 // or not it fails part way.
@@ -269,13 +287,34 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 	}
 	touched := map[string]bool{}
 	candidates, used, order := r.candidates, r.used, s.order(r.served)
+	places := s.places(candidates)
+	holds := map[turnKey]bool{}
+	holdOf := func(c Candidate) (bool, error) {
+		key := turnKey{c.Workstream, c.Thread.Identity.ID, c.Turn.Request.TurnID}
+		if v, ok := holds[key]; ok || s.options.Holds == nil {
+			return v, nil
+		}
+		v, err := s.options.Holds(c)
+		holds[key] = v
+		return v, err
+	}
+	if s.options.Placement != nil {
+		if err := s.screen(places, candidates, used, holdOf); err != nil {
+			return err
+		}
+		defer func() { s.options.Placement.Owe(string(s.repository.Project()), places.owed) }()
+	}
 	for len(candidates) > 0 {
 		slices.SortStableFunc(candidates, order)
 		c := candidates[0]
 		candidates = candidates[1:]
 		role := c.Thread.Identity.Role
+		if _, pinned := places.pinned[turnOf(c)]; pinned {
+			delete(places.owed, c.Turn.Request.TurnID)
+			s.options.Placement.Owe(string(c.Project), places.owed)
+		}
 		if s.options.Holds != nil {
-			held, err := s.options.Holds(c)
+			held, err := holdOf(c)
 			if err != nil {
 				return err
 			}
@@ -286,7 +325,7 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 			}
 		}
 		if reason := s.refusal(used, c); reason != "" {
-			waiting = append(waiting, Wait{c, reason})
+			waiting = append(waiting, Wait{Candidate: c, Reason: reason})
 			touched[s.waitInterval(c).Key()] = true
 			s.refused(spans, c, reason)
 			continue
@@ -302,8 +341,28 @@ func (s *Scheduler) Pass(ctx context.Context) error {
 				continue
 			}
 		}
+		var taken *fleet.Turn
+		if s.options.Placement != nil {
+			id := c.Turn.Request.TurnID
+			ft := places.turns[turnOf(c)]
+			choice := s.options.Placement.Take(ft)
+			if choice.Client == "" {
+				if choice.Pinned != "" {
+					places.owed[id] = choice.Pinned
+				}
+				s.options.Placement.Owe(string(c.Project), places.owed)
+				waiting = append(waiting, Wait{c, choice.Reason, choice.Pinned})
+				touched[s.waitInterval(c).Key()] = true
+				spans.End(s.waitInterval(c), s.options.Now(), slotspans.Blocked)
+				continue
+			}
+			taken = &ft
+		}
 		at := s.options.Now()
 		if err := s.dispatch(ctx, c, at); err != nil {
+			if taken != nil {
+				s.options.Placement.Release(taken.ID)
+			}
 			return fmt.Errorf("workstream %s: %w", c.Workstream, err)
 		}
 		touched[s.waitInterval(c).Key()] = true
@@ -324,12 +383,22 @@ const (
 	WaitCapacity = "capacity"
 	// WaitWorkstreamCap: the workstream runs capacity.per_workstream turns.
 	WaitWorkstreamCap = "workstream-cap"
+	// WaitClient: the role has room, but the client the turn waits for has no
+	// free slot, or no client with one can run its profile. A resumed turn waits
+	// for the client that holds its session.
+	WaitClient = fleet.WaitClient
+	// WaitNoClient: no connected, non-draining client can run the turn's main
+	// profile, so the turn is not dispatched.
+	WaitNoClient = fleet.WaitNoClient
 )
 
 // Wait is a queued turn a pass found no free slot for, and why.
 type Wait struct {
 	Candidate
 	Reason string
+	// Client is the client a resumed turn waits for a slot of, and empty for
+	// any other wait.
+	Client string
 }
 
 // Slots is the slot accounting of a shared pool, as its projects' passes

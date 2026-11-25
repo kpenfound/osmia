@@ -221,6 +221,7 @@ type Service struct {
 	transfers             *filetransport.Registry
 	fleet                 *fleet.Registry
 	clients               *clientturns.Dispatcher
+	placement             *fleet.Placement
 	socketInfo            os.FileInfo
 	server                *http.Server
 	lifetime              context.Context
@@ -330,6 +331,10 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	s.activity = activity.New(s.now)
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: api.EventActivity}) }
 	s.clients = clientturns.New(clientturns.Dispatcher{Fleet: s.fleet, Transfers: s.transfers, Activity: s.activity, Directory: transfers, Views: filepath.Join(root.String(), "views"), Now: s.now})
+	s.placement = &fleet.Placement{Registry: s.fleet, LocalSlots: s.localSlots}
+	s.clients.SetChooser(func(_ context.Context, scope coreadapter.Scope, _ coreadapter.Profile) (fleet.Identity, bool) {
+		return s.placement.Locate(scope.Turn)
+	})
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
 	s.chief = newChiefSlotPool(cfg.Capacity.Chief, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)
@@ -850,8 +855,18 @@ func (s *Service) open(cfg *config.Config) (*activeProject, error) {
 func (s *Service) dispatcher(cfg *config.Config, repository *trace.Repository) (*scheduler.Scheduler, error) {
 	limits := cfg.Capacity
 	limits.PerWorkstream = cfg.Project.Capacity.PerWorkstream
-	return scheduler.New(repository, scheduler.Options{Now: s.options.Reconciliation.Now, Holds: s.dispatchHolds(cfg, repository), Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool})
+	return scheduler.New(repository, scheduler.Options{Now: s.options.Reconciliation.Now, Holds: s.dispatchHolds(cfg, repository), Admit: s.admit(cfg, repository), Capacity: &limits, Priorities: s.priorities, Shared: s.pool, Placement: s.placement, Resumable: resumableRole})
 }
+
+func (s *Service) localSlots() (int, bool) {
+	cfg := s.current()
+	if cfg == nil || cfg.Capacity.LocalSlots == nil {
+		return 0, false
+	}
+	return *cfg.Capacity.LocalSlots, true
+}
+
+func resumableRole(role string) bool { return role == sessionRole }
 
 func (s *Service) dispatchHolds(cfg *config.Config, repository *trace.Repository) func(scheduler.Candidate) (bool, error) {
 	project := cfg.Project.ID
