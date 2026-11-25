@@ -16,12 +16,14 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
 	"github.com/kpenfound/osmia/internal/scheduler"
@@ -219,8 +221,12 @@ func (a *FinalReviewer) Pass(ctx context.Context) error {
 // sealed plan has merged, and does nothing while any has not, while work
 // remains unresolved, or while a move to building holds it for a revision.
 func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID) error {
-	if planned, err := a.Repository.Planned(stream); err != nil || !planned {
+	planned, err := a.Repository.Planned(stream)
+	if err != nil {
 		return err
+	}
+	if !planned {
+		return a.assembleClimb(ctx, stream)
 	}
 	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
 	if err != nil || !found {
@@ -263,6 +269,55 @@ func (a *FinalReviewer) Assemble(ctx context.Context, stream config.WorkstreamID
 		Target: intake.TargetAssembled, Description: "Assemble the workstream: every unit of the sealed plan has merged.",
 		Events: []trace.Event{intake.FeatureProgress(id, BuildingState, AssembledState, reason)},
 	}.Exit())
+}
+
+// assembleClimb moves a building Hill Climb workstream to assembled once its
+// conclusion has recorded both finals: the climb branch was rebased once onto
+// the pinned upstream commit and measured again on the rebased commit. It does
+// nothing before that, while work remains unresolved, or while a move to
+// building holds it for a revision.
+func (a *FinalReviewer) assembleClimb(ctx context.Context, stream config.WorkstreamID) error {
+	rec, found, err := climb.ReadConclusion(a.Repository, stream)
+	if err != nil || !found || !rec.Concluded() {
+		return err
+	}
+	if pending, err := a.S.UnresolvedWork(a.Repository, stream); err != nil || pending {
+		return err
+	}
+	if held, err := a.S.ReopenHeld(a.Repository, stream); err != nil || held {
+		return err
+	}
+	transitions, err := trace.Read[trace.Transition](a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	feature, err := a.Repository.RawWorkflow(stream, trace.FeatureSubject)
+	if err != nil || feature.Value != BuildingState {
+		return err
+	}
+	reason := fmt.Sprintf("the climb of %s concluded with %d attempts recorded and %d kept: its branch was rebased once onto %s/%s at %s and measured again, so the branch is read against the sealed climb spec next", featureBranch(stream), rec.Attempts, len(rec.Kept), rec.Target.Remote, rec.Target.Branch, rec.Target.Commit)
+	id := AssemblyID(transitions)
+	return intake.Raise(ctx, a.S.Router, intake.DefaultMove{
+		Repo: a.Repository, Stream: stream, Subject: trace.FeatureSubject, State: feature,
+		Trigger: intake.TriggerUnitsMerged, Cause: id, ID: id, HeaderCause: trace.ClimbConclusionID, Reason: reason, Actor: foremanActor,
+		Target: intake.TargetAssembled, Description: "Assemble the workstream: the climb concluded and its branch was rebased once and measured again.",
+		Events: []trace.Event{intake.FeatureProgress(id, BuildingState, AssembledState, reason)},
+	}.Exit())
+}
+
+// unitsLanded reports whether the workstream's sealed units have all landed.
+// A kind with no plan has no unit whose landing assembly or delivery waits
+// for.
+func (a *FinalReviewer) unitsLanded(stream config.WorkstreamID) (bool, bool, error) {
+	planned, err := a.Repository.Planned(stream)
+	if err != nil || !planned {
+		return true, true, err
+	}
+	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
+	if err != nil || !found {
+		return false, found, err
+	}
+	return AllMerged(b), true, nil
 }
 
 // AssemblyID returns the ID of the workstream's next assembly given its
@@ -361,11 +416,11 @@ func ReportInput(r FinalReport) FinalReviewInput {
 }
 
 func (a *FinalReviewer) holdsForWork(stream config.WorkstreamID) (bool, error) {
-	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
+	landed, found, err := a.unitsLanded(stream)
 	if err != nil || !found {
 		return true, err
 	}
-	if !AllMerged(b) {
+	if !landed {
 		return true, nil
 	}
 	return a.S.UnresolvedWork(a.Repository, stream)
@@ -493,7 +548,7 @@ func DecodeFinalReview(op coreadapter.Operation) (FinalReviewInput, error) {
 	if in.Maintenance != (op.Action == deliveryReviewAction) {
 		return in, errors.New("final review action differs from delivery maintenance intent")
 	}
-	if in.Review < 1 || in.Commit == "" || in.Seal < 1 || in.Spec < 1 || in.Plan < 1 || in.Charter < 1 {
+	if in.Review < 1 || in.Commit == "" || in.Seal < 1 || in.Spec < 1 || in.Plan < 0 || in.Charter < 1 {
 		return in, errors.New("final review operation requires a positive review number, a commit and the seal, spec, plan and charter revisions")
 	}
 	return in, nil
@@ -670,6 +725,20 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
+	planned, err := a.Repository.Planned(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	if planned && in.Plan < 1 {
+		return fail(fmt.Sprintf("final review %d records no plan revision, which a workstream built from a plan needs", in.Review))
+	}
+	adopted := false
+	if !rebased && !planned {
+		if rebase, adopted, err = a.adoptConcludedRebase(ctx, landing, stream, in, op, report.Branch); err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		rebased = adopted
+	}
 
 	if now.Move != in.Move {
 		return fail(fmt.Sprintf("the workstream was moved since the review was asked for; move %d asks for a fresh review", now.Move))
@@ -699,12 +768,14 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 	}
 
 	report.Upstream = &rebase.Upstream
-	reason, err := landing.MoveFeatureRebase(ctx, g, stream, rebase, now.Commit)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
-	if reason != "" {
-		return fail(reason)
+	if !adopted {
+		reason, err := landing.MoveFeatureRebase(ctx, g, stream, rebase, now.Commit)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		if reason != "" {
+			return fail(reason)
+		}
 	}
 	report.Commit = rebase.Commit
 	if !in.Maintenance {
@@ -721,6 +792,24 @@ func (a *FinalReviewer) Apply(ctx context.Context, op coreadapter.Operation) (co
 		return coreadapter.OperationResult{}, err
 	}
 	return a.Read(ctx, cfg, stream, in, report, checks)
+}
+
+// adoptConcludedRebase makes the one rebase a concluded Hill Climb workstream
+// made the rebase of final review k, when the branch the review was asked for
+// is the rebased commit it measured. The climb branch is rebased once, when
+// concluding pins its upstream commit, so a review never rebases it again, even
+// when upstream has moved since.
+func (a *FinalReviewer) adoptConcludedRebase(ctx context.Context, landing *execution.Foreman, stream config.WorkstreamID, in FinalReviewInput, op coreadapter.Operation, branch string) (FinalRebase, bool, error) {
+	rec, found, err := climb.ReadConclusion(a.Repository, stream)
+	if err != nil || !found || !rec.Concluded() || rec.Rebased != in.Commit {
+		return FinalRebase{}, false, err
+	}
+	rebase := FinalRebase{Review: in.Review, Operation: op.ID, Branch: branch, Before: rec.Before, Commit: rec.Rebased,
+		Upstream: seal.Base{Workstream: rec.Target.Workstream, Remote: rec.Target.Remote, Branch: rec.Target.Branch, Commit: rec.Target.Commit}}
+	if err := landing.RecordFeatureRebase(ctx, stream, rebase); err != nil {
+		return FinalRebase{}, false, err
+	}
+	return rebase, true, nil
 }
 
 func (a *FinalReviewer) Rebase(stream config.WorkstreamID, k int) (FinalRebase, bool, error) {
@@ -907,8 +996,22 @@ func (a *FinalReviewer) Enqueue(ctx context.Context, cfg *config.Config, stream 
 	}
 	turn := FinalTurnID(in.Review, member, attempt)
 	transition, _ := FinalReviewIDs(in.Review)
+	systemPrompt, prompt := FinalSystemPrompt(cfg.Project), FinalPrompt(report, checks, notes, coverage, previous)
+	if planned, err := a.Repository.Planned(stream); err != nil {
+		return err
+	} else if !planned {
+		spec, _, err := a.Documents(stream, report)
+		if err != nil {
+			return err
+		}
+		results, err := kindSection(a.Repository, stream, spec.Content)
+		if err != nil {
+			return err
+		}
+		systemPrompt, prompt = ClimbFinalSystemPrompt(cfg.Project), ClimbFinalPrompt(report, checks, notes, previous, results)
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: transition, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: FinalSystemPrompt(cfg.Project), Prompt: FinalPrompt(report, checks, notes, coverage, previous)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt, Prompt: prompt}
 	_, err = a.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -983,6 +1086,9 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 // SealedCriteria returns the criteria of the review's sealed spec revision,
 // cited as spec#<n>, with their text.
 func (a *FinalReviewer) SealedCriteria(stream config.WorkstreamID, report FinalReport) ([]FinalCriterion, error) {
+	if planned, err := a.Repository.Planned(stream); err != nil || !planned {
+		return []FinalCriterion{}, err
+	}
 	spec, _, err := a.Documents(stream, report)
 	if err != nil {
 		return nil, err
@@ -1001,8 +1107,8 @@ func (a *FinalReviewer) SealedCriteria(stream config.WorkstreamID, report FinalR
 // merged units that serve it, or a gap when none does.
 func (a *FinalReviewer) Coverage(stream config.WorkstreamID, report FinalReport) ([]FinalCriterion, error) {
 	criteria, err := a.SealedCriteria(stream, report)
-	if err != nil {
-		return nil, err
+	if err != nil || len(criteria) == 0 {
+		return criteria, err
 	}
 	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
 	if err != nil {
@@ -1099,6 +1205,16 @@ func (a *FinalReviewer) Documents(stream config.WorkstreamID, report FinalReport
 			graph = doc
 		}
 	}
+	planned, err := a.Repository.Planned(stream)
+	if err != nil {
+		return spec, graph, err
+	}
+	if !planned {
+		if spec.Revision == 0 {
+			return spec, graph, fmt.Errorf("workstream %s does not record climb spec revision %d", stream, report.Spec)
+		}
+		return spec, graph, nil
+	}
 	if spec.Revision == 0 || graph.Revision == 0 {
 		return spec, graph, fmt.Errorf("workstream %s does not record spec revision %d and plan revision %d", stream, report.Spec, report.Plan)
 	}
@@ -1157,6 +1273,22 @@ func (a *FinalReviewer) Stage(ctx context.Context, cfg *config.Config, stream co
 	}
 	files := map[string]string{plan.SpecPath: spec.Content, plan.PlanPath: graph.Content, "charter.md": project[i].Content}
 	paths := []string{"branch", plan.SpecPath, plan.PlanPath, "charter.md"}
+	if planned, err := a.Repository.Planned(stream); err != nil {
+		return nil, err
+	} else if !planned {
+		delete(files, plan.PlanPath)
+		delete(files, plan.SpecPath)
+		files[kinds.ClimbSpecPath] = spec.Content
+		paths = []string{"branch", kinds.ClimbSpecPath, "charter.md"}
+		results, err := a.climbEvidence(stream)
+		if err != nil {
+			return nil, err
+		}
+		for name, content := range results {
+			files[name] = content
+		}
+		paths = append(paths, "climb")
+	}
 	contextBundle, err := a.S.ContextFor(a.Repository).Assemble(ctx, cfg.Project.ID, bundle.Scope{Workstream: stream, Role: committeeRole})
 	if err != nil {
 		return nil, err
@@ -1656,11 +1788,11 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 	} else if stale {
 		return report, fmt.Sprintf("final review %d is stale: its upstream base changed; a new final review is required", report.Review), nil
 	}
-	b, found, err := a.S.Execution().Units(a.Repository).ReadSealed(stream)
+	landed, found, err := a.unitsLanded(stream)
 	if err != nil {
 		return report, "", err
 	}
-	if !found || !AllMerged(b) {
+	if !found || !landed {
 		return report, "final-review follow-up units have not all landed", nil
 	}
 	return report, "", nil

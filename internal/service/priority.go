@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -127,7 +128,7 @@ func checkPriority(repository *trace.Repository, project config.ProjectID, order
 		if err != nil {
 			return nil, "", err
 		}
-		if state.Value == DeliveredState || state.Value == AbandonedState {
+		if intake.Finished(state.Value) {
 			return nil, fmt.Sprintf("workstream %s is %s; only active workstreams have a priority", id, state.Value), nil
 		}
 		out = append(out, id)

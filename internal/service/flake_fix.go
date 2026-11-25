@@ -469,7 +469,7 @@ func (s *Service) flakeFixFinished(repository *trace.Repository, workstream conf
 	if err != nil {
 		return false, err
 	}
-	return state.Value == DeliveredState || state.Value == AbandonedState, nil
+	return intake.Finished(state.Value), nil
 }
 
 func (s *Service) closeFlakeFix(ctx context.Context, repository *trace.Repository, workstream config.WorkstreamID) {

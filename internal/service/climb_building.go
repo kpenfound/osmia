@@ -113,6 +113,10 @@ func (w *climbWorker) scan(ctx context.Context) {
 			}
 			if err := w.s.climbLoop(repository).Reconcile(ctx, stream); err != nil && ctx.Err() == nil {
 				w.s.log().Warn("cannot move the climbing loop", "project", string(w.active.id), "workstream", string(stream), "error", err.Error())
+				return
+			}
+			if err := w.s.climbConcluder(repository).Reconcile(ctx, stream); err != nil && ctx.Err() == nil {
+				w.s.log().Warn("cannot conclude the climb", "project", string(w.active.id), "workstream", string(stream), "error", err.Error())
 			}
 		}()
 	}

@@ -60,6 +60,9 @@ type Loop struct {
 // PullRequest is what a kind's pull-request section is written from.
 type PullRequest struct {
 	Workstream string
+	// Climb holds a Hill Climb workstream's results, and is nil for any other
+	// kind.
+	Climb *ClimbResults
 }
 
 // Units counts a workstream's units by state.

@@ -44,6 +44,10 @@ func (s *Service) approveDelivery(ctx context.Context, raw string, req DeliveryD
 	return s.delivery().ApproveDelivery(ctx, raw, req)
 }
 
+func (s *Service) declineDelivery(ctx context.Context, raw string, req DeliveryDecline) (DeliveryDeclined, *APIError) {
+	return s.delivery().DeclineDelivery(ctx, raw, req)
+}
+
 func (s *Service) approveAndLand(ctx context.Context, raw string, req DeliveryLandDecision) (DeliveryLandResponse, *APIError) {
 	return s.delivery().ApproveAndLand(ctx, raw, req)
 }

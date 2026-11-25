@@ -529,6 +529,14 @@ func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req a
 	return v, err
 }
 
+// DeclineDelivery declines the evaluator-only pull request of a Hill Climb
+// workstream that kept no attempt, which ends it as concluded, no improvement.
+func (c *Client) DeclineDelivery(ctx context.Context, id config.WorkstreamID, decision api.DeliveryDecline) (api.DeliveryDeclined, error) {
+	var v api.DeliveryDeclined
+	err := c.Do(ctx, "POST", api.Prefix+"/delivery/"+url.PathEscape(string(id))+"/decline", decision, &v)
+	return v, err
+}
+
 // ApproveClimb records the owner's approval of a Hill Climb workstream's
 // calibrated evaluator, as the evaluator approval card's answer does.
 func (c *Client) ApproveClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbApprovalRequest) (api.ClimbApprovalResponse, error) {

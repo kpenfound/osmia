@@ -874,6 +874,19 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if id, ok := strings.CutSuffix(id, "/decline"); ok {
+			var v DeliveryDecline
+			if r.Method != http.MethodPost {
+				fail(w, Unsupported)
+			} else if !decode(w, r, &v) {
+				return
+			} else if out, api := s.declineDelivery(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		if id, ok := strings.CutSuffix(id, "/merged"); ok {
 			if r.Method != http.MethodPost {
 				fail(w, Unsupported)

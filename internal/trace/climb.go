@@ -43,6 +43,15 @@ const (
 	ClimbApprovalID      = "climb-approval"
 )
 
+// The workstream document and workflow subject of the climb's conclusion: the
+// upstream commit the branch is rebased onto, the rebase, and the finals
+// measured before and after it.
+const (
+	ClimbConclusionPath    = "climb/conclusion.json"
+	ClimbConclusionID      = "climb-conclusion"
+	ClimbConclusionSubject = "climb-conclusion"
+)
+
 // The workstream documents of the climbing loop: what the running attempt is
 // doing, the steering notes the chief of staff left, the budget extensions the
 // owner granted, and one journal and one stop record per attempt.
@@ -83,7 +92,7 @@ func numbered(name, suffix string) bool {
 func climbRecordPath(parts []string) bool {
 	if len(parts) == 2 && parts[0] == "climb" {
 		switch parts[1] {
-		case "evaluator.json", "calibration.json", "approval.json", "running.json", "steering.json", "budget.json":
+		case "evaluator.json", "calibration.json", "approval.json", "running.json", "steering.json", "budget.json", "conclusion.json":
 			return true
 		}
 		return false

@@ -45,7 +45,7 @@ func (s *Service) reconcileFactoryPolicy(ctx context.Context, r *trace.Repositor
 		if err != nil {
 			return err
 		}
-		if st.Value == "" || st.Value == DeliveredState || st.Value == AbandonedState {
+		if st.Value == "" || intake.Finished(st.Value) {
 			continue
 		}
 		if err := recordFactoryPolicy(ctx, r, stream, s.now(), st.Value != HandedState); err != nil {

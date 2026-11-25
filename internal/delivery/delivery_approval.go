@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/issues"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -165,6 +166,24 @@ func (s *Controller) DraftDelivery(cfg *config.Config, repository *trace.Reposit
 	return title, body, err
 }
 
+// specSummary is the short prose a pull request opens with: the first
+// paragraph of a spec, or the goal of a climb spec.
+func (s *Controller) specSummary(repository *trace.Repository, stream config.WorkstreamID, spec trace.Document) (string, error) {
+	planned, err := repository.Planned(stream)
+	if err != nil || planned {
+		return SpecSummary(spec.Content), err
+	}
+	parsed, err := climb.Parse([]byte(spec.Content), climb.Defaults{})
+	if err != nil {
+		return "", fmt.Errorf("the sealed climb spec does not parse: %w", err)
+	}
+	text := strings.Join(strings.Fields(parsed.Goal), " ")
+	if runes := []rune(text); len(runes) > SpecSummaryBound {
+		text = string(runes[:SpecSummaryBound-1]) + "…"
+	}
+	return text, nil
+}
+
 func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Repository, stream config.WorkstreamID, report FinalReport) (title, body string, opensAsDraft bool, err error) {
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
@@ -186,7 +205,10 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 	if err != nil {
 		return "", "", false, err
 	}
-	summary := SpecSummary(spec.Content)
+	summary, err := s.specSummary(repository, stream, spec)
+	if err != nil {
+		return "", "", false, err
+	}
 	if summary == "" {
 		summary = title
 	}
@@ -197,6 +219,11 @@ func (s *Controller) draftDelivery(cfg *config.Config, repository *trace.Reposit
 	body = summary + "\n"
 	if ref := ClosingReference(handed, targetRepo); ref != "" {
 		body += "\n" + ref + "\n"
+	}
+	if section, err := kindSection(repository, stream, spec.Content); err != nil {
+		return "", "", false, err
+	} else if section != "" {
+		body += "\n" + section + "\n"
 	}
 	if references, err := s.PendingMergeOrderReferences(repository, stream); err != nil {
 		return "", "", false, err

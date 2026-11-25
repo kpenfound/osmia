@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -104,7 +105,7 @@ func terminalInResolvedWorkgroup(repo *trace.Repository, stream config.Workstrea
 	if err != nil {
 		return false, err
 	}
-	return state.Value == AbandonedState || state.Value == DeliveredState, nil
+	return intake.Finished(state.Value), nil
 }
 
 // IncomingMergeEdges returns the incoming hard_block and merge_order edges

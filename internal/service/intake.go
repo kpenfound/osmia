@@ -16,6 +16,8 @@ import (
 
 const AbandonedState = intake.AbandonedState
 
+const ConcludedState = intake.ConcludedState
+
 const DeliveredState = intake.DeliveredState
 
 const abandonTransition = intake.AbandonTransition

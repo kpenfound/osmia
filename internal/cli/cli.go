@@ -68,6 +68,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--accept] [--json]
   land <workstream-id> [--accept] [--json]  approve and land on the base branch
+  decline <workstream-id> [--json]  decline the evaluator-only pull request of a Hill Climb that kept no attempt
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   feed <workstream-id|workgroup-id> [--json]
@@ -298,7 +299,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
-	case "land":
+	case "land", "decline":
 		valid = len(a) == 1
 	case "conversation", "feed":
 		valid = len(a) == 1
@@ -391,7 +392,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "land" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "land" || cmd == "decline" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -1045,6 +1046,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, approved)
 		}
 		fmt.Fprintf(stdout, "Approved marking final review %d at %s ready for review with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
+		return 0
+	}
+	if cmd == "decline" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		presentation, err := c.Delivery(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		declined, err := c.DeclineDelivery(ctx, id, wire.DeliveryDecline{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit})
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, declined)
+		}
+		fmt.Fprintf(stdout, "Declined the pull request of final review %d at %s: %s ended as %s, no improvement\n", declined.Review, declined.Commit, id, declined.State)
+		if declined.PullRequest > 0 && declined.PullRequestClosed {
+			fmt.Fprintf(stdout, "Closed pull request #%d with a comment\n", declined.PullRequest)
+		} else if declined.PullRequest > 0 {
+			fmt.Fprintf(stdout, "Pull request #%d is still open; close it yourself\n", declined.PullRequest)
+		}
 		return 0
 	}
 	if cmd == "land" {

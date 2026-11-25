@@ -807,6 +807,18 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   merge-order dependency that has not merged fail with `conflict` (exit 5)
   and push nothing. `delivery` shows `Landing:` when the project offers it, and
   `Jev recommends:` when Jev recommended a route.
+- `decline <workstream-id>` declines the pull request of a `hill-climb`
+  workstream that kept no attempt, which holds only the evaluator and the files
+  it reads. `delivery` offers it for that workstream beside `approve`, and the
+  inbox card lists `decline` among its options. The service closes the draft
+  pull request with a comment and ends the workstream as `concluded`, no
+  improvement. That state is terminal and is not an abandonment: the workstream
+  archives like a delivered one, and nothing is cancelled. Declining pins the
+  final review you read, so a report that changed fails with `conflict` (exit 5);
+  read `delivery` again. A workstream of another kind, and a climb that kept an
+  attempt, fail with `conflict` too: a climb that kept an attempt is delivered
+  with `approve`, and a workstream you do not want is abandoned. Declining twice
+  is the same decision.
 - `merged <workstream-id>` records an assembled workstream delivered because
   you merged its feature branch into upstream yourself, outside the factory.
   The service fetches the project's base branch and checks that it already

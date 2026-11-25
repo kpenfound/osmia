@@ -124,6 +124,8 @@ const architectAgent = intake.ArchitectAgent
 const unitsDirectory = intake.UnitsDirectory
 const RatifiedState = intake.RatifiedState
 const AbandonedState = intake.AbandonedState
+
+const ConcludedState = intake.ConcludedState
 const driftRejected = intake.DriftRejected
 const SealAction = intake.SealAction
 

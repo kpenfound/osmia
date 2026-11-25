@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -125,7 +126,7 @@ func (c *ArchiveCleanup) Prepare(ctx context.Context, a runtime.Archive) (eligib
 			return false, "", err
 		}
 		a.Title, a.State = metadata.Title, metadata.State
-		if a.State != DeliveredState && a.State != AbandonedState {
+		if !intake.Finished(a.State) {
 			return false, "", fmt.Errorf("archived workstream is not terminal")
 		}
 		if err := c.S.Store().UpdateArchive(a); err != nil {

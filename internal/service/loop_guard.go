@@ -60,7 +60,7 @@ func (g loopGuard) Pass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if feature.Value == "" || feature.Value == DeliveredState || feature.Value == AbandonedState {
+		if feature.Value == "" || intake.Finished(feature.Value) {
 			continue
 		}
 		since, what, err := lastProgress(g.repository, stream)

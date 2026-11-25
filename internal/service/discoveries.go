@@ -130,7 +130,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		if err != nil {
 			return nil, err
 		}
-		if st.Value == DeliveredState || st.Value == AbandonedState {
+		if intake.Finished(st.Value) {
 			return priorityRefusal("terminal workstreams accept no discovered work")
 		}
 		docs, err := trace.Read[trace.Document](target, stream)

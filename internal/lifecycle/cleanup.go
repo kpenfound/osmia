@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -114,7 +115,7 @@ func (c *WorkspaceCleanup) Clean(ctx context.Context, stream config.WorkstreamID
 		return err
 	}
 	state := states[trace.FeatureSubject].Value
-	finished := state == DeliveredState || state == AbandonedState
+	finished := intake.Finished(state)
 	if state == DeliveredState {
 		waiting, err := EdgeWaitDisplay(c.Repository, stream)
 		if err != nil {

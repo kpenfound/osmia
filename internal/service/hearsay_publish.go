@@ -539,7 +539,7 @@ func (st *publishStream) coreState() string {
 	switch state := st.status.State; state {
 	case intake.AbandonedState:
 		return coreAbandoned
-	case intake.DeliveredState:
+	case intake.DeliveredState, intake.ConcludedState:
 		return coreCompleted
 	default:
 		if len(st.status.Gates) > 0 {

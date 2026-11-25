@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
 	"github.com/kpenfound/osmia/internal/followup"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -120,7 +121,7 @@ func loadTraceWalk(repository *trace.Repository, stream config.WorkstreamID) (*t
 }
 
 func (w *traceWalk) terminal() bool {
-	return w.feature == AbandonedState || w.feature == DeliveredState
+	return intake.Finished(w.feature)
 }
 
 func (w *traceWalk) state(progress, producing, done int) string {

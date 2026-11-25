@@ -1564,6 +1564,55 @@
         }
       }
     },
+    "/v1/delivery/{workstream}/decline": {
+      "post": {
+        "summary": "Decline the pull request that holds only the evaluator of a Hill Climb workstream that kept no attempt: the workstream ends as concluded, no improvement, a terminal state that is not an abandonment and that archives like a delivered workstream, and the draft pull request is closed with a comment. The request pins the final review the owner read; refused as a conflict for a workstream that is not an assembled Hill Climb that kept no attempt, or when the final report changed",
+        "operationId": "postDeliveryByWorkstreamDecline",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryDecline"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDeclined"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/delivery/{workstream}/land": {
       "post": {
         "summary": "Approve and land: record the owner's approval and land an assembled workstream of a project whose delivery is \"jev\" by a fast-forward of its base branch to the pushed commit, through the same service entry point as a confident Jev delivery-route pick; it works with Jev unconfigured, and a held move, a refused push (the draft is marked ready, with no further card) and an unknown push outcome are reported in the response and settled without another card; refused as a conflict, with nothing pushed, for a project that delivers by pull request, a stale presentation, unaccepted blocking findings, checks that did not pass on the pushed commit, or a dependency still waiting to merge",
@@ -7682,6 +7731,53 @@
         },
         "type": "object"
       },
+      "DeliveryDecline": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the pull request is declined.",
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryDeclined": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "pull_request_closed": {
+            "type": "boolean"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "concluded"
+            ],
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryLandDecision": {
         "properties": {
           "accept_blocking": {
@@ -9097,6 +9193,10 @@
           },
           "blocked": {
             "type": "string"
+          },
+          "decline": {
+            "$ref": "#/components/schemas/InboxAnswer",
+            "description": "The answer that declines the evaluator-only pull request of a Hill Climb workstream that kept no attempt, which ends the workstream as concluded, no improvement. Present only on that delivery entry, beside the Mark ready answer."
           },
           "jev": {
             "$ref": "#/components/schemas/InboxJev",

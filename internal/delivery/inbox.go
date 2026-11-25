@@ -167,6 +167,13 @@ func (s *Controller) DeliveryEntry(ctx context.Context, repository *trace.Reposi
 		e.Question += fmt.Sprintf(" Approve and land moves %s of %s to the checked commit instead.", cfg.Project.BaseBranch, cfg.Project.Upstream)
 		e.Blocked = "Marking the pull request ready for review, or landing it on " + cfg.Project.BaseBranch + "."
 	}
+	if offered, err := OffersDecline(repository, stream); err != nil {
+		return InboxEntry{}, false, err
+	} else if offered {
+		e.Options = append(e.Options, "decline")
+		e.Decline = &InboxAnswer{Method: http.MethodPost, Path: e.Answer.Path + "/decline", Body: map[string]any{"review": p.Report.Review, "review_revision": p.ReviewRevision, "commit": p.Report.Commit}}
+		e.Question += " The climb kept no attempt, so this pull request holds only the evaluator; declining it ends the workstream as concluded, no improvement."
+	}
 	if p.Recommendation != "" {
 		e.Recommendation = fmt.Sprintf("Jev recommends %s.", routeLabel(p.Recommendation))
 	}

@@ -170,6 +170,14 @@ func newClimbFixture(t *testing.T, engine *evaluatorEngine, evaluatorPresent boo
 
 func newClimbFixtureWith(t *testing.T, engine *evaluatorEngine, evaluatorPresent bool, jevProvider *gateJev, spec string) *climbFixture {
 	t.Helper()
+	return newClimbFixtureHosted(t, engine, evaluatorPresent, jevProvider, spec, nil)
+}
+
+// newClimbFixtureHosted is newClimbFixtureWith with a fake pull request host
+// the service opens and marks ready the climb's pull request on, when pulls is
+// set.
+func newClimbFixtureHosted(t *testing.T, engine *evaluatorEngine, evaluatorPresent bool, jevProvider *gateJev, spec string, pulls *fixturekit.FakePulls) *climbFixture {
+	t.Helper()
 	extra := intakefixture.MasonRoles + "[kinds.hill-climb]\nskills = [\"" + climbBuildingSkill + "\"]\n"
 	if jevProvider != nil {
 		extra += gateJevConfig(gateKey(t, true))
@@ -181,6 +189,9 @@ func newClimbFixtureWith(t *testing.T, engine *evaluatorEngine, evaluatorPresent
 		opts.Threads, opts.controls = enforced.Threads, enforced.controls
 		opts.Threads = intakefixture.ConfigureMasonThreads(t, opts.Config.Root, config.WorkspacesGit, intakefixture.MasonCapacity(1), opts.Threads)
 		opts.reviewChecks = engine
+		if pulls != nil {
+			opts.PullRequests, opts.FinalChecksWait = pulls, fixturekit.NoPostPushWait()
+		}
 		scanned(opts)
 		if jevProvider != nil {
 			opts.JevProvider = jevProvider.Factory()

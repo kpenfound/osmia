@@ -1265,6 +1265,11 @@ type InboxEntry struct {
 	// present only on a delivery entry of a project that lands, whose Options
 	// then also hold "land".
 	Land *InboxAnswer `json:"land,omitempty" description:"The answer that approves a delivery entry and lands the workstream. Present only on a delivery entry of a project whose delivery is jev, beside the Mark ready answer."`
+	// Decline is the answer that declines the pull request of a Hill Climb
+	// workstream that kept no attempt, so that it ends as concluded, no
+	// improvement. It is present only on that delivery entry, whose Options then
+	// also hold "decline".
+	Decline *InboxAnswer `json:"decline,omitempty" description:"The answer that declines the evaluator-only pull request of a Hill Climb workstream that kept no attempt, which ends the workstream as concluded, no improvement. Present only on that delivery entry, beside the Mark ready answer."`
 	// Jev is what Jev decided about the entry when the decision came to the
 	// owner after all: an answer below the threshold, a deferral, or a pick
 	// the service refused. Recommendation then says it in words.
