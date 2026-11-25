@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/amendment"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -710,7 +711,7 @@ func (s *Controller) CreateChangeFollowup(ctx context.Context, wt *trace.Reposit
 		if err != nil {
 			return false, err
 		}
-		if err := repo.CreateWorkstreamOn(ctx, id, backend.Backend, s.Now(), ownerActor); err != nil {
+		if err := repo.CreateWorkstreamKind(ctx, id, backend.Backend, kinds.Feature, s.Now(), ownerActor); err != nil {
 			return false, err
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/issues"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -82,9 +83,27 @@ func (s *Controller) HandInAs(ctx context.Context, req HandInRequest, origin *Ha
 		return HandInResponse{}, api
 	}
 	req.Project = projects[0]
+	kind, err := kinds.Normalize(req.Kind)
+	if err != nil {
+		return HandInResponse{}, &APIError{Code: Validation, Message: err.Error()}
+	}
+	req.Kind = kind
+	if api := checkHandInKind(kind, len(projects), req.Base); api != nil {
+		return HandInResponse{}, api
+	}
 	cfg := s.Current()
+	baseProject := req.Project
 	if len(projects) > 1 {
-		if _, api := s.SelectionBase(projects, req.Base); api != nil {
+		selected, api := s.SelectionBase(projects, req.Base)
+		if api != nil {
+			return HandInResponse{}, api
+		}
+		if req.Base != "" {
+			baseProject = selected
+		}
+	}
+	if req.Base != "" {
+		if api := s.CheckBaseKind(baseProject, req.Base); api != nil {
 			return HandInResponse{}, api
 		}
 	}
@@ -188,6 +207,13 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		if err != nil {
 			return h.Failed("reading project selection of")
 		}
+		stored, err := repository.Kind(stream)
+		if err != nil {
+			return h.Failed("reading the kind of")
+		}
+		if stored != req.Kind {
+			return HandInResponse{}, false, &APIError{Code: Conflict, Message: fmt.Sprintf("the hand-in key already names a %s workstream; use a new key to hand in a %s one", stored, req.Kind)}
+		}
 	}
 	projects := req.Projects
 	if projects == nil {
@@ -259,7 +285,7 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 			if checkErr != nil {
 				return HandInResponse{}, false, &APIError{Code: Unavailable, Message: fmt.Sprintf("workstream %s cannot start: %v", stream, checkErr)}
 			}
-			err = repository.CreateWorkstreamOn(ctx, stream, backend.Backend, now, h.actor())
+			err = repository.CreateWorkstreamKind(ctx, stream, backend.Backend, req.Kind, now, h.actor())
 		}
 		if err != nil {
 			return h.Failed("creating")
@@ -312,6 +338,21 @@ func (h HandIn) Record(ctx context.Context, content *string) (HandInResponse, bo
 		return h.Failed("recording the handed state of")
 	}
 	return HandInResponse{Project: req.Project, Workstream: stream, State: state.Value, Source: h.Source, SkipDebate: req.SkipDebate}, true, nil
+}
+
+// checkHandInKind checks a hand-in against the flags of its kind, refusing with
+// a plain reason.
+func checkHandInKind(name string, projects int, base config.WorkstreamID) *APIError {
+	kind, _ := kinds.Lookup(name)
+	if err := kind.CheckBrief(projects, false); err != nil {
+		return &APIError{Code: Validation, Message: err.Error()}
+	}
+	if base != "" {
+		if err := kind.CheckDependencies(); err != nil {
+			return &APIError{Code: Validation, Message: err.Error()}
+		}
+	}
+	return nil
 }
 
 // HandInSource returns the recorded source of the request's input and the

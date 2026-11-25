@@ -312,6 +312,23 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/climb/"); ok {
+			if id, read, found := strings.Cut(path, "/"); found && read == "attempts" {
+				if out, api := s.climbAttempts(id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			} else if found && read == "progress" {
+				if out, api := s.climbProgress(id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			}
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/status/"); ok {
 			if out, api := s.workstreamStatus(id); api != nil {
 				failWith(w, api)
@@ -857,6 +874,19 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if id, ok := strings.CutSuffix(id, "/decline"); ok {
+			var v DeliveryDecline
+			if r.Method != http.MethodPost {
+				fail(w, Unsupported)
+			} else if !decode(w, r, &v) {
+				return
+			} else if out, api := s.declineDelivery(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 		if id, ok := strings.CutSuffix(id, "/merged"); ok {
 			if r.Method != http.MethodPost {
 				fail(w, Unsupported)
@@ -900,6 +930,44 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			respond(w, 200, out)
 		}
 		return
+	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, Prefix+"/climb/"); ok && r.Method == http.MethodPost {
+		if id, ok := strings.CutSuffix(rest, "/approval"); ok {
+			var v api.ClimbApprovalRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.approveClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if id, ok := strings.CutSuffix(rest, "/conclude"); ok {
+			var v api.ClimbConcludeRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.concludeClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if id, ok := strings.CutSuffix(rest, "/extend"); ok {
+			var v api.ClimbExtendRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.extendClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/recovery/"); ok && r.Method == http.MethodPost {
 		var v RecoveryRequest

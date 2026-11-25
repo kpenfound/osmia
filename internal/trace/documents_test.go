@@ -751,3 +751,22 @@ func TestEditDraftOnlyBeforeRatification(t *testing.T) {
 		}
 	})
 }
+
+func TestRecordDocumentsRecordsAClimbSpecInTheSpecSlot(t *testing.T) {
+	r, _, _ := create(t)
+	s := mustScoped(t, r, streamID)
+	ctx := context.Background()
+	docs := []Document{streamDocument("spec", "climb-spec.json", "{\"version\":1}\n", 1), streamDocument("amendment_1_spec", "amendments/1/climb-spec.json", "{\"version\":1}\n", 1)}
+	if err := r.RecordDocuments(ctx, docs); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileOf(t, s, streamFile("climb-spec.json")); got != "{\"version\":1}\n" {
+		t.Fatalf("climb-spec.json: %q", got)
+	}
+	if got := fileOf(t, s, streamFile("amendments/1/climb-spec.json")); got != "{\"version\":1}\n" {
+		t.Fatalf("amendments/1/climb-spec.json: %q", got)
+	}
+	if err := r.RecordDocuments(ctx, []Document{streamDocument("spec", "other-spec.json", "{}\n", 2)}); err == nil {
+		t.Fatal("an unsupported spec path was recorded")
+	}
+}

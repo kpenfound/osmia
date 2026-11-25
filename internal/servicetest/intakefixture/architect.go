@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
@@ -41,7 +42,7 @@ func (f *ArchitectScenario) Script(turn string, files map[string]string, check f
 		if check != nil {
 			err = check(ctx, req, verified, tools)
 		}
-		for _, path := range []string{plan.SpecPath, plan.PlanPath, "decline.txt"} {
+		for _, path := range []string{plan.SpecPath, plan.PlanPath, kinds.ClimbSpecPath, "decline.txt"} {
 			content, ok := files[path]
 			if !ok {
 				continue

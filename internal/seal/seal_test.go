@@ -89,6 +89,8 @@ func TestInvalidSealsAreRefused(t *testing.T) {
 		"sealing":   {func(s *Seal) { s.Seal = 0 }, "requires the sealing and the round"},
 		"round":     {func(s *Seal) { s.Round = 0 }, "requires the sealing and the round"},
 		"revision":  {func(s *Seal) { s.Revision.Plan = 0 }, "requires the revisions it seals"},
+		"no spec":   {func(s *Seal) { s.Revision.Spec = 0 }, "requires the revisions it seals"},
+		"kind":      {func(s *Seal) { s.Kind = "mystery" }, `kind "mystery" is not one this build registers`},
 		"hash":      {func(s *Seal) { s.SpecHash = "abc" }, "requires the hash of the spec"},
 		"base":      {func(s *Seal) { s.Base.Commit = "" }, "requires the upstream remote, branch and commit"},
 		"branch":    {func(s *Seal) { s.Branch = "" }, "requires the feature branch and its workspace"},
@@ -153,5 +155,56 @@ func TestTakeResolvesEveryUnitAndNamesWhatItCannot(t *testing.T) {
 	}
 	if !slices.Equal(unresolved, []string{"dedupe: docs", "dedupe: nowhere"}) {
 		t.Fatalf("unresolved %v", unresolved)
+	}
+}
+
+func hillClimb() Seal {
+	s := valid()
+	s.Kind = "hill-climb"
+	s.Revision = shed.Pin{Spec: 2}
+	s.Footprints = nil
+	return s
+}
+
+func TestFeatureSealRecordsNoKindAndStillRequiresBothRevisions(t *testing.T) {
+	t.Parallel()
+	data, err := Encode(valid())
+	if err != nil || strings.Contains(string(data), `"kind"`) {
+		t.Fatalf("a feature seal records no kind: %s %v", data, err)
+	}
+	if KindName("feature") != "" || KindName("hill-climb") != "hill-climb" {
+		t.Fatalf("kind names: %q %q", KindName("feature"), KindName("hill-climb"))
+	}
+	for _, change := range []func(*Seal){func(s *Seal) { s.Revision.Plan = 0 }, func(s *Seal) { s.Kind = "feature"; s.Revision.Plan = 0 }} {
+		s := valid()
+		change(&s)
+		if _, err := Encode(s); err == nil || !strings.Contains(err.Error(), "requires the revisions it seals") {
+			t.Fatalf("a feature seal without a plan revision: %v", err)
+		}
+	}
+}
+
+func TestHillClimbSealHasASpecRevisionAndNoPlan(t *testing.T) {
+	t.Parallel()
+	data, err := Encode(hillClimb())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"kind": "hill-climb"`) || !strings.Contains(string(data), `"footprints": []`) {
+		t.Fatalf("encoded:\n%s", data)
+	}
+	parsed, err := Parse(data)
+	if err != nil || parsed.Kind != "hill-climb" || parsed.Revision != (shed.Pin{Spec: 2}) {
+		t.Fatalf("parsed %+v %v", parsed, err)
+	}
+	withPlan := hillClimb()
+	withPlan.Revision.Plan = 1
+	if _, err := Encode(withPlan); err == nil || !strings.Contains(err.Error(), "hill-climb seal has no plan revision") {
+		t.Fatalf("a hill-climb seal with a plan revision: %v", err)
+	}
+	noSpec := hillClimb()
+	noSpec.Revision.Spec = 0
+	if _, err := Encode(noSpec); err == nil || !strings.Contains(err.Error(), "requires the revisions it seals") {
+		t.Fatalf("a hill-climb seal without a spec revision: %v", err)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/intake"
+	kindregistry "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/readview"
 	"github.com/kpenfound/osmia/internal/telemetry"
@@ -189,6 +190,10 @@ func (s *Service) projectStatuses(active *activeProject) ([]workstreamActivity, 
 			continue
 		}
 		view := WorkstreamStatusView(active.id, mode, w, design)
+		if view.WorkKind == kindregistry.HillClimb {
+			cfg, _ := s.runtimeOf(active.id)
+			view.Progress = climbProgressView(active.repository, cfg, w.Workstream, time.Now())
+		}
 		if held := s.intake().HeldGates(active.repository, w); len(held) > 0 {
 			view.Gates = slices.DeleteFunc(view.Gates, func(g trace.OwnerGate) bool {
 				return slices.ContainsFunc(held, func(h trace.OwnerGate) bool { return h.Kind == g.Kind && h.Reference == g.Reference })
@@ -531,6 +536,9 @@ func WorkstreamStatusView(project config.ProjectID, mode bundle.Mode, w trace.Wo
 	}
 	out := WorkstreamStatus{Workstream: w.Workstream, Project: project, Workspaces: w.Workspaces, Kind: kind, Profile: w.Profile, Base: w.Base, Branch: w.Branch, Title: w.Title,
 		Units: []UnitStatus{}, Advisories: []OverlapAdvisory{}, OpenQuestions: w.OpenQuestions, Gates: append([]trace.OwnerGate{}, w.Gates...), ContextMode: mode}
+	if w.WorkKind != "" && w.WorkKind != trace.FeatureKind {
+		out.WorkKind = w.WorkKind
+	}
 	if w.State != "" {
 		state := w.State
 		out.State = &state

@@ -401,7 +401,7 @@ func (s *Service) discoverySubject(ctx context.Context, repository *trace.Reposi
 		return decisionSubject{}, "", err
 	}
 	switch {
-	case feature.Value == DeliveredState || feature.Value == AbandonedState:
+	case intake.Finished(feature.Value):
 		return decisionSubject{}, "terminal workstreams accept no discovered work", nil
 	case d.HandedToOwner != "":
 		return decisionSubject{}, fmt.Sprintf("Jev's decision on discovery %s could not be carried out; the owner decides it", id), nil

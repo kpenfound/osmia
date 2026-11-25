@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -74,7 +75,7 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 			return ArchiveResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 	}
-	if state.Value != DeliveredState && state.Value != AbandonedState {
+	if !intake.Finished(state.Value) {
 		current := state.Value
 		if current == "" {
 			current = "handed"
@@ -126,7 +127,7 @@ func (s *Controller) archive(raw string, req archiveRequest) (ArchiveResponse, *
 		if snapshot.Workgroup != a.Workgroup {
 			return trace.ErrConflict
 		}
-		if snapshot.Feature.Value != DeliveredState && snapshot.Feature.Value != AbandonedState {
+		if !intake.Finished(snapshot.Feature.Value) {
 			return trace.ErrFeatureState
 		}
 		if snapshot.Feature.Value != a.State {

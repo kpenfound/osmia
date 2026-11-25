@@ -31,6 +31,7 @@ const (
 	TriggerSealFailed        = "ws.seal_failed"
 	TriggerRatified          = "ws.ratified"
 	TriggerAbandon           = "ws.abandon"
+	TriggerDeclined          = "ws.declined"
 	TriggerDeliveryApproved  = "ws.delivery_approved"
 	TriggerReadyOnHost       = "ws.ready_on_host"
 	TriggerMergeRecorded     = "ws.merge_recorded"

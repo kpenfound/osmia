@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
@@ -619,12 +620,18 @@ func (m *masons) ReadSealed(stream config.WorkstreamID) (building, bool, error) 
 	if err != nil || !found {
 		return building{}, false, err
 	}
-	graph, err := sealedPlan(m.repository, stream, latest.Revision.Plan)
-	if err != nil {
+	var p plan.Plan
+	if planned, err := m.repository.Planned(stream); err != nil {
 		return building{}, false, err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
+	} else if planned {
+		graph, err := sealedPlan(m.repository, stream, latest.Revision.Plan)
+		if err != nil {
+			return building{}, false, err
+		}
+		if p, err = plan.Parse([]byte(graph.Content)); err != nil {
+			return building{}, false, err
+		}
+	} else if p, _, err = climb.SealedEvaluatorPlan(m.repository, stream, latest.Revision.Spec); err != nil {
 		return building{}, false, err
 	}
 	added, err := followup.Read(m.repository, stream)
@@ -700,7 +707,7 @@ func dependencyOrder(p plan.Plan) []plan.Unit {
 }
 
 func (m *masons) Bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
-	files := bundle.Files{Provider: m.s.ContextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }}
+	files := bundle.Files{Provider: m.s.ContextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Unplanned: unplannedUnit}
 	return files.Mason(ctx, m.repository.Project(), stream, unit)
 }
 

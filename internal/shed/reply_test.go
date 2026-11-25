@@ -62,7 +62,7 @@ func TestReplyRoundTripsAndRefusesInvalidContent(t *testing.T) {
 	for name, mutate := range map[string]func(*shed.Reply){
 		"version":        func(r *shed.Reply) { r.Version = 2 },
 		"round":          func(r *shed.Reply) { r.Round = 0 },
-		"revision":       func(r *shed.Reply) { r.Revision = shed.Pin{Spec: 1} },
+		"revision":       func(r *shed.Reply) { r.Revision = shed.Pin{Spec: 1, Plan: -1} },
 		"redraft":        func(r *shed.Reply) { r.Redraft = &shed.Pin{Spec: 1, Plan: 1} },
 		"empty answer":   func(r *shed.Reply) { r.Answers[0].Answer = " " },
 		"no objection":   func(r *shed.Reply) { r.Answers[0].Objection = "" },

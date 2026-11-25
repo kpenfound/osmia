@@ -333,14 +333,16 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   diagnostic explains), then each
   workstream with its state, open question count, context mode and workspace
   backend (`workspaces=git` or `workspaces=jujutsu`), its latest
-  drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
+  drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, a
+  `hill-climb` workstream's one-line climb summary (`Progress: 14 attempts ·
+  attempt 15 measuring · best −18.4%`), and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. The overview leaves archived workstreams out;
   `osmia status <workstream-id>` still shows an archived one. Open owner gates
   appear under the workstream even before a status is written. Write the charter with
   `osmia edit charter`; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts and owner gates, its latest drift rebase with its reason and one
+  facts, the same `Progress:` line for a `hill-climb` workstream and owner gates, its latest drift rebase with its reason and one
   `Moved:` line for each of its upstream moved events, then `Units:` with one line per unit of the sealed plan or follow-up and its state
   and the latest available card (headline, happened and any owner action) beneath it; the service fits a mason's card rather than refusing its report, so a unit whose mason gave a card that did not fit shows the shortened card, or none
   once the workstream is building, and for a landed unit its commit on the
@@ -805,6 +807,18 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   merge-order dependency that has not merged fail with `conflict` (exit 5)
   and push nothing. `delivery` shows `Landing:` when the project offers it, and
   `Jev recommends:` when Jev recommended a route.
+- `decline <workstream-id>` declines the pull request of a `hill-climb`
+  workstream that kept no attempt, which holds only the evaluator and the files
+  it reads. `delivery` offers it for that workstream beside `approve`, and the
+  inbox card lists `decline` among its options. The service closes the draft
+  pull request with a comment and ends the workstream as `concluded`, no
+  improvement. That state is terminal and is not an abandonment: the workstream
+  archives like a delivered one, and nothing is cancelled. Declining pins the
+  final review you read, so a report that changed fails with `conflict` (exit 5);
+  read `delivery` again. A workstream of another kind, and a climb that kept an
+  attempt, fail with `conflict` too: a climb that kept an attempt is delivered
+  with `approve`, and a workstream you do not want is abandoned. Declining twice
+  is the same decision.
 - `merged <workstream-id>` records an assembled workstream delivered because
   you merged its feature branch into upstream yourself, outside the factory.
   The service fetches the project's base branch and checks that it already
@@ -985,7 +999,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
     changes the project registry or the top-level file. A project that is not on
     the registry is refused. A command line that is not one of the
     three forms, or a project ID that is malformed, exits 2.
-- `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
+- `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--kind KIND] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
@@ -1021,6 +1035,15 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   the one shared chief thread. Allocation and join recover without duplicate
   members. `--base` must name a workstream in a selected project and applies
   only to that project's member.
+
+  `--kind` names the workstream kind and defaults to `feature`. The service
+  records the kind once, in the commit that creates the workstream; the API
+  field is `kind` on the hand-in request. A kind the service does not register
+  fails with `validation` (exit 4) and a reason that lists the registered kinds,
+  and so does a hand-in that breaks the kind's limits, such as several projects
+  or a `--base` for a kind that has none. Handing in again under the same key
+  with another kind fails with `conflict`. A recorded kind never changes. See
+  [Workstream kinds](design.md#56-workstream-kinds).
 
   With `--skip-debate` the hand-in skips debate, for small work: once the
   architect's draft is

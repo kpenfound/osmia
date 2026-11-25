@@ -71,6 +71,19 @@ type Applied struct {
 	Held        []string `json:"held"`
 	Followups   []string `json:"followups"`
 	FinalReview int      `json:"final_review,omitempty"`
+	// Climb is what applying an amendment of a climb spec did to the climb's
+	// calibration. It is set only for a Hill Climb workstream.
+	Climb *ClimbEffect `json:"climb,omitempty"`
+}
+
+// ClimbEffect classifies the fields an amendment of a climb spec changed.
+// Recalibrate lists the changed fields the climb's calibration depends on: the
+// climb returns to calibrating on the current best commit and the owner
+// approves the recalibrated evaluator again. InPlace lists the changed fields
+// that apply without that, such as the goal, the stop rules and the budgets.
+type ClimbEffect struct {
+	Recalibrate []string `json:"recalibrate,omitempty"`
+	InPlace     []string `json:"in_place,omitempty"`
 }
 
 // Classify sorts an amendment's affected units into rework, notify, added

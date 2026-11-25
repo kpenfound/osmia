@@ -1,0 +1,134 @@
+{
+ "workstream": "w_000",
+ "attempts": [
+  {
+   "number": 1,
+   "parent": "c00",
+   "best": 1000.0,
+   "hypothesis": "Batch the writes",
+   "change_summary": "Changes batch the writes",
+   "expected_effect": "Improves throughput",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go",
+     "internal/parse/cache.go"
+    ],
+    "summary": "2 file changed"
+   },
+   "outcome": "kept",
+   "started_at": "2026-01-01T09:00:00Z",
+   "finished_at": "2026-01-01T09:05:00Z",
+   "scores": {
+    "primary": 1080.0,
+    "runs": [
+     1080.0
+    ]
+   },
+   "change": 80.0,
+   "change_percent": 8.0,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 1080.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r1",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"throughput\": {\"value\": 1080.0, \"unit\": \"ops/s\", \"direction\": \"higher\"}}}",
+      "started_at": "2026-01-01T09:00:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand01",
+   "commit": "c01"
+  },
+  {
+   "number": 2,
+   "parent": "c01",
+   "best": 1080.0,
+   "hypothesis": "Double the buffer size",
+   "change_summary": "Changes double the buffer size",
+   "expected_effect": "Improves throughput",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go"
+    ],
+    "summary": "1 file changed"
+   },
+   "outcome": "discarded",
+   "started_at": "2026-01-01T09:05:00Z",
+   "finished_at": "2026-01-01T09:10:00Z",
+   "scores": {
+    "primary": 1300.0,
+    "runs": [
+     1300.0
+    ]
+   },
+   "change": 220.0,
+   "change_percent": 20.37037037037037,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 1300.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r2",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"throughput\": {\"value\": 1300.0, \"unit\": \"ops/s\", \"direction\": \"higher\"}}}",
+      "started_at": "2026-01-01T09:05:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand02",
+   "cause": "limit-violated",
+   "branch": "osmia/climb/attempt-2"
+  },
+  {
+   "number": 3,
+   "parent": "c01",
+   "best": 1080.0,
+   "hypothesis": "Reuse connections",
+   "change_summary": "Changes reuse connections",
+   "expected_effect": "Improves throughput",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go",
+     "internal/parse/cache.go"
+    ],
+    "summary": "2 file changed"
+   },
+   "outcome": "kept",
+   "started_at": "2026-01-01T09:10:00Z",
+   "finished_at": "2026-01-01T09:16:00Z",
+   "scores": {
+    "primary": 1190.0,
+    "runs": [
+     1190.0
+    ]
+   },
+   "change": 110.0,
+   "change_percent": 10.185185185185185,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 1190.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r3",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"throughput\": {\"value\": 1190.0, \"unit\": \"ops/s\", \"direction\": \"higher\"}}}",
+      "started_at": "2026-01-01T09:10:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand03",
+   "commit": "c03"
+  }
+ ]
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -641,7 +642,8 @@ func (d Drifter) Eligible(stream config.WorkstreamID) (string, error) {
 	return "", nil
 }
 
-// Building returns why the workstream cannot rebase its feature branch.
+// Building returns why the workstream cannot rebase its feature branch,
+// which includes a building workstream whose kind takes no upstream drift.
 func (d Drifter) Building(stream config.WorkstreamID) (string, error) {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -658,6 +660,25 @@ func (d Drifter) Building(stream config.WorkstreamID) (string, error) {
 	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
 		return fmt.Sprintf("the workstream is %s, not building, assembled or delivered with a pull request", featureState(feature.Value)), nil
+	}
+	if feature.Value == BuildingState {
+		return d.buildingDrift(stream)
+	}
+	return "", nil
+}
+
+// buildingDrift returns why the workstream's kind takes no upstream drift
+// while it is building: the kind's flags forbid it, or this build does not
+// register the kind.
+func (d Drifter) buildingDrift(stream config.WorkstreamID) (string, error) {
+	kind, stored, ok, err := intake.WorkstreamKind(d.repository, stream)
+	switch {
+	case err != nil:
+		return "", err
+	case !ok:
+		return fmt.Sprintf("the workstream's kind %q is not one this build runs", stored), nil
+	case !kind.Flags.UpstreamDrift:
+		return fmt.Sprintf("the %s kind takes no upstream drift while building", kind.Name), nil
 	}
 	return "", nil
 }

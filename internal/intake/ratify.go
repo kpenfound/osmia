@@ -168,12 +168,15 @@ func (s *Controller) Ratify(ctx context.Context, raw string, req RatifyRequest) 
 // workstream that belongs to a cross-repo workgroup needs the owner's group
 // approval, which Jev does not give.
 func (s *Controller) RatifyBy(ctx context.Context, raw string, req RatifyRequest, d Deciding) (RatifyResponse, *APIError) {
-	if req.Spec < 1 || req.Plan < 1 {
+	if req.Spec < 1 || req.Plan < 1 && !(req.Plan == 0 && s.planless(raw)) {
 		return RatifyResponse{}, &APIError{Code: Validation, Message: "ratify the revisions of the spec and the plan the packet named"}
 	}
 	_, stream, repo, api := s.DesignMemberTrace(raw)
 	if api != nil {
 		return RatifyResponse{}, api
+	}
+	if kind, err := StreamKind(repo, stream); err == nil && !kind.Documents.Planned() && req.Plan != 0 {
+		return RatifyResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("a %s workstream ratifies its climb spec revision alone and has no plan revision", kind.Name)}
 	}
 	id, err := repo.CrossRepoWorkgroupOf(stream)
 	if err != nil {
@@ -476,8 +479,12 @@ func (s *Controller) Refusals(ctx context.Context, o *ShedOwner, asked shed.Pin,
 	if err != nil {
 		return nil, err
 	}
+	noun := "the plan"
+	if kind, err := StreamKind(o.Repository, o.Stream); err == nil && !kind.Documents.Planned() {
+		noun = "the climb spec"
+	}
 	for _, p := range problems {
-		out = append(out, "the plan is not valid: "+p)
+		out = append(out, noun+" is not valid: "+p)
 	}
 	return out, nil
 }
@@ -491,6 +498,17 @@ func (s *Controller) PlanProblems(ctx context.Context, o *ShedOwner) ([]string, 
 	if err != nil {
 		return nil, err
 	}
+	kind, err := StreamKind(o.Repository, o.Stream)
+	if err != nil {
+		return nil, err
+	}
+	if !kind.Documents.Planned() {
+		doc, drafted := latest[kind.Documents.Drafted[0]]
+		if !drafted {
+			return nil, errors.New("the workstream has no recorded climb spec")
+		}
+		return ClimbProblems(doc.Content, s.Current()), nil
+	}
 	spec, drafted := latest[plan.SpecDocument]
 	graph, planned := latest[plan.PlanDocument]
 	if !drafted || !planned {
@@ -498,4 +516,14 @@ func (s *Controller) PlanProblems(ctx context.Context, o *ShedOwner) ([]string, 
 	}
 	s.ReseedEntities(ctx, o.Repository)
 	return dr.Validate(spec, graph)
+}
+
+// planless reports whether the workstream's kind ratifies no plan.
+func (s *Controller) planless(raw string) bool {
+	_, stream, repo, api := s.DesignMemberTrace(raw)
+	if api != nil {
+		return false
+	}
+	kind, err := StreamKind(repo, stream)
+	return err == nil && !kind.Documents.Planned()
 }

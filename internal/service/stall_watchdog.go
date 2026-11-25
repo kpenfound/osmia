@@ -203,7 +203,7 @@ func (w stallWatch) workstream(ctx context.Context, p *stallPass, status trace.W
 	if err != nil {
 		return err
 	}
-	if feature.Value == "" || feature.Value == DeliveredState || feature.Value == AbandonedState {
+	if feature.Value == "" || intake.Finished(feature.Value) {
 		return nil
 	}
 	r, err := w.read(ctx, p, status, feature)

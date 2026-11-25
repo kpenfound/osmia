@@ -44,6 +44,10 @@ type DeliveryLandDecision = api.DeliveryLandDecision
 
 type DeliveryLandResponse = api.DeliveryLandResponse
 
+type DeliveryDecline = api.DeliveryDecline
+
+type DeliveryDeclined = api.DeliveryDeclined
+
 type UnitDispatch = api.UnitDispatch
 
 type CharterEdit = api.CharterEdit

@@ -237,3 +237,27 @@ type DeliveryLandResponse struct {
 	Reason   string           `json:"reason,omitempty" description:"Why the workstream did not land, when it did not."`
 	Commit   string           `json:"commit,omitempty" description:"The signed commit the landing moves the base branch to."`
 }
+
+// DeliveryDecline is the owner's decision to decline the pull request that
+// holds only the evaluator of a Hill Climb workstream that kept no attempt. The
+// review identity pins what the owner read, as a DeliveryDecision does.
+type DeliveryDecline struct {
+	Review         int    `json:"review"`
+	ReviewRevision int    `json:"review_revision"`
+	Commit         string `json:"commit"`
+	Note           string `json:"note,omitempty" description:"Why the pull request is declined."`
+}
+
+// DeliveryDeclined reports a declined evaluator-only pull request: the
+// workstream ended as concluded, no improvement, which is terminal and is not
+// an abandonment. PullRequest is the draft pull request the climb opened, and
+// PullRequestClosed says whether the service closed it with a comment.
+type DeliveryDeclined struct {
+	Project           config.ProjectID    `json:"project"`
+	Workstream        config.WorkstreamID `json:"workstream"`
+	State             string              `json:"state" enum:"concluded"`
+	Review            int                 `json:"review"`
+	Commit            string              `json:"commit"`
+	PullRequest       int                 `json:"pull_request,omitempty"`
+	PullRequestClosed bool                `json:"pull_request_closed"`
+}

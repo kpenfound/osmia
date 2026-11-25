@@ -10,7 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
-	"github.com/kpenfound/osmia/internal/plan"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -139,11 +139,7 @@ func assignmentContext(r *trace.Repository, scope coreadapter.Scope) (string, er
 	if err != nil {
 		return "", err
 	}
-	graph, err := sealedPlan(r, stream, current.Revision.Plan)
-	if err != nil {
-		return "", err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
+	p, err := intake.SealedPlanOf(r, stream, current)
 	if err != nil {
 		return "", err
 	}

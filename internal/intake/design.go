@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -66,11 +67,27 @@ const DesignClosedValue = "started"
 // DesignBriefRecord is one revision of a design session's drafted brief. A
 // nil Projects means the agent never set the list; an empty one is a recorded
 // choice of no existing project. NewProject is the project the brief asks
-// Start to create, if any.
+// Start to create, if any. Kind is the workstream kind the design agent chose;
+// a brief that never set one hands in as Feature.
 type DesignBriefRecord struct {
 	Content    string             `json:"content"`
 	Projects   []config.ProjectID `json:"projects"`
 	NewProject *api.NewProject    `json:"new_project,omitempty"`
+	Kind       string             `json:"kind,omitempty"`
+}
+
+func briefKind(b DesignBriefRecord) kinds.Kind {
+	kind, _ := kinds.Lookup(b.BriefKind())
+	return kind
+}
+
+// BriefKind is the workstream kind a brief hands in as: the one it set, or
+// Feature when it never set one.
+func (b DesignBriefRecord) BriefKind() string {
+	if b.Kind == "" {
+		return kinds.Feature
+	}
+	return b.Kind
 }
 
 type designMode struct {
@@ -150,7 +167,7 @@ func DesignBriefView(repository *trace.Repository, view DesignView) (DesignView,
 	if err != nil {
 		return view, err
 	}
-	view.BriefRevision, view.Brief, view.Projects, view.NewProject = revision, brief.Content, brief.Projects, brief.NewProject
+	view.BriefRevision, view.Brief, view.Projects, view.NewProject, view.Kind = revision, brief.Content, brief.Projects, brief.NewProject, brief.BriefKind()
 	view.Title, _, err = LatestDesignTitle(repository, view.Workstream)
 	return view, err
 }
@@ -433,6 +450,9 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"because a public repo is published the moment it is created; set public only after that confirmation. A new project may " +
 	"stand alone or sit alongside existing projects. You create nothing and hold no credential: the repo is created by the " +
 	"service when the owner presses Start, never by you.\n\n" +
+	"Choose the workstream kind of the work with draft_brief kind, from the kinds listed under Workstream kinds below, and say in your reply which kind you chose and why. " +
+	"Omitting kind keeps the current kind, and a brief that never sets one is handed in as feature. The kind is fixed once the owner presses Start, and the architect never chooses it. " +
+	"Respect each kind's limits when you draft: draft_brief refuses a brief that breaks them.\n\n" +
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
 	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes; only its " +
 	"latest call is used. The owner starts the workgroup once satisfied; you never start it yourself, and nothing you say " +
@@ -449,6 +469,9 @@ func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.R
 	}
 	var b strings.Builder
 	b.WriteString(DesignRolePrompt)
+	b.WriteString("\n\n## Workstream kinds\n")
+	b.WriteString(kinds.Catalog())
+	fmt.Fprintf(&b, "Current kind of the brief: %s\n", brief.BriefKind())
 	if brief.NewProject != nil {
 		fmt.Fprintf(&b, "\n\n## New project in the current brief\nName: %s\nRepo: %s\nVisibility: %s\nDescription: %s\n\nCharter:\n%s\n",
 			brief.NewProject.Name, brief.NewProject.Repo, brief.NewProject.Visibility, brief.NewProject.Description, brief.NewProject.Charter)
@@ -564,16 +587,22 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 // drafted: decisions, intent and tradeoffs, and rejected options, as one
 // piece of markdown. A later call replaces the one startDesignWorkgroup
 // reads; nothing before the latest call is used.
+func kindSchema() string {
+	enum, _ := json.Marshal(kinds.Names())
+	return `{"type":"string","enum":` + string(enum) + `}`
+}
+
 func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftBriefToolName, Effect: coreadapter.ToolMemory,
-		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner. new_project is an optional new project for the owner to create at Start: name (display name), repo (the GitHub repository name), visibility (private by default; public only after the owner confirms it), description and charter (its first charter). Omitting new_project keeps the current one, a new object replaces it and null removes it. A brief needs at least one existing project or a new project.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}},"new_project":{"type":["object","null"],"properties":{"name":{"type":"string"},"repo":{"type":"string"},"visibility":{"type":"string"},"description":{"type":"string"},"charter":{"type":"string"}},"required":["name","repo","charter"],"additionalProperties":false}},"required":["content"],"additionalProperties":false}`),
+		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. kind is an optional workstream kind from the registry (" + strings.Join(kinds.Names(), ", ") + "); omitting it keeps the current kind, and a brief that never sets one is handed in as feature. A kind may limit the brief, for example to one project, and the call is refused with the reason when the brief breaks a limit. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner. new_project is an optional new project for the owner to create at Start: name (display name), repo (the GitHub repository name), visibility (private by default; public only after the owner confirms it), description and charter (its first charter). Omitting new_project keeps the current one, a new object replaces it and null removes it. A brief needs at least one existing project or a new project.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"kind":` + kindSchema() + `,"projects":{"type":"array","items":{"type":"string"}},"new_project":{"type":["object","null"],"properties":{"name":{"type":"string"},"repo":{"type":"string"},"visibility":{"type":"string"},"description":{"type":"string"},"charter":{"type":"string"}},"required":["name","repo","charter"],"additionalProperties":false}},"required":["content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := repository.ActiveTurn(scope); err != nil {
 				return nil, err
 			}
 			var in struct {
 				Content    string          `json:"content"`
+				Kind       string          `json:"kind"`
 				Projects   json.RawMessage `json:"projects"`
 				NewProject json.RawMessage `json:"new_project"`
 			}
@@ -622,6 +651,16 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 					}
 					brief.NewProject = &normal
 				}
+			}
+			if in.Kind != "" {
+				kind, err := kinds.Normalize(in.Kind)
+				if err != nil {
+					return RefuseReport("%s", err.Error())
+				}
+				brief.Kind = kind
+			}
+			if err := briefKind(brief).CheckBrief(len(brief.Projects), brief.NewProject != nil); err != nil {
+				return RefuseReport("%s", err.Error())
 			}
 			if len(brief.Projects) > 0 || brief.NewProject == nil {
 				if apiErr := s.ValidateProjects(ctx, brief.Projects); apiErr != nil {
@@ -933,6 +972,13 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 				brief.Projects = append(brief.Projects, member.Repo)
 			}
 		}
+		kind, err := kinds.Normalize(brief.Kind)
+		if err != nil {
+			return DesignStartResponse{}, &APIError{Code: Validation, Message: err.Error()}
+		}
+		if err := briefKind(DesignBriefRecord{Kind: kind}).CheckBrief(len(brief.Projects), brief.NewProject != nil); err != nil {
+			return DesignStartResponse{}, &APIError{Code: Validation, Message: err.Error()}
+		}
 		if len(brief.Projects) > 0 || brief.NewProject == nil {
 			if api := s.ValidateProjects(ctx, brief.Projects); api != nil {
 				return DesignStartResponse{}, api
@@ -956,7 +1002,7 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 		handed := trace.Document{Header: OwnerHeader(HandedDocument, project, stream, DesignStartTransition, now), Path: DesignBriefPath,
 			Content: strings.TrimRight(brief.Content, "\n") + "\n" + DesignTranscriptHeading + transcript, Source: "design:" + string(stream)}
 		handed.Schema = "osmia.trace.document"
-		intent = DesignStartIntent{BriefRevision: latest, Projects: brief.Projects, Handed: handed}
+		intent = DesignStartIntent{BriefRevision: latest, Kind: kind, Projects: brief.Projects, Handed: handed}
 		if brief.NewProject != nil {
 			pinned := *brief.NewProject
 			intent.NewProject, intent.Creation = &pinned, creation

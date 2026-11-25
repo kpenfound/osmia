@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/router"
@@ -348,6 +349,13 @@ func (d *Debate) Step(ctx context.Context, stream config.WorkstreamID) error {
 	}
 	configured := d.S.Current().Shed.MaxRounds
 	limit := shed.Limit(configured, requests, redrafts)
+	fixed, err := d.FixedRounds(stream)
+	if err != nil {
+		return err
+	}
+	if fixed > 0 {
+		configured, limit = fixed, fixed
+	}
 	if kind == "concluded" {
 		if slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n }) {
 			if d.S.Options.Architect == nil {
@@ -554,6 +562,10 @@ func (d *Debate) Header(id string, stream config.WorkstreamID, cause string, at 
 
 // LatestPin returns the latest recorded revisions of the spec and the plan.
 func LatestPin(repository *trace.Repository, stream config.WorkstreamID) (shed.Pin, error) {
+	kind, err := StreamKind(repository, stream)
+	if err != nil {
+		return shed.Pin{}, err
+	}
 	docs, err := trace.Read[trace.Document](repository, stream)
 	if err != nil {
 		return shed.Pin{}, err
@@ -567,8 +579,8 @@ func LatestPin(repository *trace.Repository, stream config.WorkstreamID) (shed.P
 			pin.Plan = doc.Revision
 		}
 	}
-	if pin.Spec == 0 || pin.Plan == 0 {
-		return pin, fmt.Errorf("workstream %s has no recorded spec and plan", stream)
+	if pin.Spec == 0 || kind.Documents.Planned() && pin.Plan == 0 {
+		return pin, fmt.Errorf("workstream %s has no recorded %s", stream, DraftNoun(kind))
 	}
 	return pin, nil
 }
@@ -727,7 +739,7 @@ func DecodeShed(op coreadapter.Operation, action string) (RoundInput, error) {
 	if err := dec.Decode(&in); err != nil {
 		return in, fmt.Errorf("invalid %s operation input: %w", action, err)
 	}
-	if in.Round < 1 || in.Spec < 1 || in.Plan < 1 {
+	if in.Round < 1 || in.Spec < 1 || in.Plan < 0 {
 		return in, fmt.Errorf("%s operation requires a positive round and pinned revisions", action)
 	}
 	if in.Resume < 0 {
@@ -1107,8 +1119,16 @@ func (d *Debate) Enqueue(ctx context.Context, cfg *config.Config, stream config.
 	}
 	answers := Received(t, in.MemberChain(t, asked), asked)
 	turn := in.MemberPrefix(member) + strconv.Itoa(attempt)
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return err
+	}
+	systemPrompt, prompt := AmendmentCommitteeSystemPrompt(cfg.Project, in), AmendmentCommitteePrompt(in, standing, answers)
+	if !kind.Documents.Planned() {
+		systemPrompt, prompt = ClimbCommitteeSystemPrompt(cfg.Project), ClimbCommitteePrompt(in, standing, answers)
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.Repository.Project(), Workstream: stream, At: d.S.Now(), Actor: ShedActor, Cause: operation, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: AmendmentCommitteeSystemPrompt(cfg.Project, in) + "\n\n" + MemberPerspective(cfg, member), Prompt: AmendmentCommitteePrompt(in, standing, answers)}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt + "\n\n" + MemberPerspective(cfg, member), Prompt: prompt}
 	_, err = d.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -1253,9 +1273,15 @@ func (d *Debate) Tools(scope coreadapter.Scope, in RoundInput) ([]coreadapter.To
 	if err != nil {
 		return nil, err
 	}
-	graph, err := plan.Parse([]byte(planDoc.Content))
+	kind, err := StreamKind(d.Repository, stream)
 	if err != nil {
 		return nil, err
+	}
+	var graph plan.Plan
+	if kind.Documents.Planned() {
+		if graph, err = plan.Parse([]byte(planDoc.Content)); err != nil {
+			return nil, err
+		}
 	}
 	earlier, err := d.EarlierRound(stream, in)
 	if err != nil {
@@ -1270,7 +1296,7 @@ func (d *Debate) Tools(scope coreadapter.Scope, in RoundInput) ([]coreadapter.To
 		return nil, err
 	}
 	file := d.Contributions(stream, origin)
-	contribute, err := shed.Tools(shed.Turn{Repository: d.Repository, Stream: stream, Spec: plan.ParseSpec(specDoc.Content), Plan: graph, Earlier: earlier, Now: d.S.Now,
+	contribute, err := shed.Tools(shed.Turn{Repository: d.Repository, Stream: stream, Spec: plan.ParseSpec(specDoc.Content), Plan: graph, Climb: !kind.Documents.Planned(), Earlier: earlier, Now: d.S.Now,
 		Record: sofar,
 		Save: func(r shed.Record) error {
 			data, err := shed.Encode(r)
@@ -1293,13 +1319,17 @@ func (d *Debate) Tools(scope coreadapter.Scope, in RoundInput) ([]coreadapter.To
 
 // Pinned returns the revisions of spec.md and plan.json the round is pinned to.
 func (d *Debate) Pinned(stream config.WorkstreamID, in RoundInput) (spec, graph trace.Document, err error) {
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return spec, graph, err
+	}
 	docs, err := trace.Read[trace.Document](d.Repository, stream)
 	if err != nil {
 		return spec, graph, err
 	}
 	for _, doc := range docs {
 		if in.Amendment != "" {
-			if doc.Path == "amendments/"+in.Amendment+"/spec.md" && doc.Revision == in.Spec {
+			if doc.Path == "amendments/"+in.Amendment+"/"+kind.Documents.SpecPath && doc.Revision == in.Spec {
 				spec = doc
 			}
 			if doc.Path == "amendments/"+in.Amendment+"/plan.json" && doc.Revision == in.Plan {
@@ -1308,13 +1338,13 @@ func (d *Debate) Pinned(stream config.WorkstreamID, in RoundInput) (spec, graph 
 			continue
 		}
 		switch {
-		case doc.ID == plan.SpecDocument && doc.Revision == in.Spec:
+		case doc.ID == kind.Documents.Drafted[0] && doc.Revision == in.Spec:
 			spec = doc
-		case doc.ID == plan.PlanDocument && doc.Revision == in.Plan:
+		case kind.Documents.Planned() && doc.ID == plan.PlanDocument && doc.Revision == in.Plan:
 			graph = doc
 		}
 	}
-	if spec.Revision == 0 || graph.Revision == 0 {
+	if spec.Revision == 0 || kind.Documents.Planned() && graph.Revision == 0 {
 		return spec, graph, fmt.Errorf("workstream %s does not record %s", stream, in.Pin())
 	}
 	return spec, graph, nil
@@ -1335,6 +1365,11 @@ func (d *Debate) SelectView(ctx context.Context, scope coreadapter.Scope, in Rou
 	if err != nil {
 		return isolation.Selection{}, err
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	settings = cfg.WithKindSkills(settings, kind.Name, kinds.TurnMetricRound)
 	if err := os.MkdirAll(filepath.Join(cfg.Root.String(), "views"), 0700); err != nil {
 		return isolation.Selection{}, err
 	}
@@ -1372,8 +1407,16 @@ func (d *Debate) Stage(ctx context.Context, clone string, stream config.Workstre
 	if err != nil {
 		return nil, err
 	}
-	files := map[string]string{plan.SpecPath: specDoc.Content, plan.PlanPath: planDoc.Content, "charter.md": charter.Content, "context.md": b.Brief()}
-	paths := []string{"repo", plan.SpecPath, plan.PlanPath, "charter.md", "context.md"}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]string{kind.Documents.SpecPath: specDoc.Content, "charter.md": charter.Content, "context.md": b.Brief()}
+	paths := []string{"repo", kind.Documents.SpecPath, "charter.md", "context.md"}
+	if kind.Documents.Planned() {
+		files[plan.PlanPath] = planDoc.Content
+		paths = append(paths, plan.PlanPath)
+	}
 	docs, err := trace.Read[trace.Document](d.Repository, stream)
 	if err != nil {
 		return nil, err
@@ -1512,8 +1555,12 @@ func (d *Debate) routeConcluded(ctx context.Context, stream config.WorkstreamID,
 	if err != nil {
 		return err
 	}
+	fixed, err := d.FixedRounds(stream)
+	if err != nil {
+		return err
+	}
 	canRound := n < limit && d.S.Options.Committee != nil
-	canRedraft := d.S.Options.Architect != nil && !slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n })
+	canRedraft := d.S.Options.Architect != nil && fixed == 0 && !slices.ContainsFunc(redrafts, func(r shed.Redraft) bool { return r.Round == n })
 	x := d.concludedExit(stream, owner, n, open, canRound, canRedraft)
 	if rec, err := router.Lookup(d.Repository, stream, x); err != nil || rec != nil && rec.Finished() {
 		return err

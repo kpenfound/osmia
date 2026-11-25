@@ -1040,6 +1040,233 @@
         }
       }
     },
+    "/v1/climb/{workstream}/approval": {
+      "post": {
+        "summary": "Approve a Hill Climb workstream's calibrated evaluator: the owner's explicit decision on the evaluator approval card snapshots the approved copy of the protected paths and freezes them, and only then may climbing begin; Jev never decides it. Refused as a conflict when the climb is not waiting for the approval or the request pins an evaluator commit or climb spec revision other than the calibrated ones, such as the card an approved amendment retired",
+        "operationId": "postClimbByWorkstreamApproval",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClimbApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbApprovalResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/climb/{workstream}/attempts": {
+      "get": {
+        "summary": "Read a Hill Climb workstream's attempt log: every recorded attempt in order, with its parent, hypothesis, scores, outcome, diff summary and measurement output; refused for a workstream of another kind",
+        "operationId": "getClimbByWorkstreamAttempts",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbAttemptsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/climb/{workstream}/conclude": {
+      "post": {
+        "summary": "Conclude a climbing Hill Climb workstream now, as the owner's pinned decision: no attempt starts again, an attempt in flight is discarded, and the branch goes on to its rebase and delivery. Refused as a conflict when the climb is not climbing",
+        "operationId": "postClimbByWorkstreamConclude",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClimbConcludeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbConcludeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/climb/{workstream}/extend": {
+      "post": {
+        "summary": "Extend a climbing Hill Climb workstream's budget as a pinned owner move: more attempts, cost or wall-clock time. It is how a climb goes on past a hard stop rule. Refused when the extension adds nothing or the climb is not climbing",
+        "operationId": "postClimbByWorkstreamExtend",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClimbExtendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbExtendResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/climb/{workstream}/progress": {
+      "get": {
+        "summary": "Read a Hill Climb workstream's progress: goal and metric, baseline and best, target, noise band, budget meters, the attempt in flight, the chart points and the one-line summary; refused for a workstream of another kind",
+        "operationId": "getClimbByWorkstreamProgress",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbProgressResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config": {
       "get": {
         "summary": "Show the loaded configuration, its disk drift and diagnostics",
@@ -1330,6 +1557,55 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DeliveryApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/delivery/{workstream}/decline": {
+      "post": {
+        "summary": "Decline the pull request that holds only the evaluator of a Hill Climb workstream that kept no attempt: the workstream ends as concluded, no improvement, a terminal state that is not an abandonment and that archives like a delivered workstream, and the draft pull request is closed with a comment. The request pins the final review the owner read; refused as a conflict for a workstream that is not an assembled Hill Climb that kept no attempt, or when the final report changed",
+        "operationId": "postDeliveryByWorkstreamDecline",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryDecline"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryDeclined"
                 }
               }
             }
@@ -5724,6 +6000,616 @@
         },
         "type": "object"
       },
+      "ClimbApprovalRequest": {
+        "properties": {
+          "commit": {
+            "description": "The evaluator commit the card showed.",
+            "type": "string"
+          },
+          "decision": {
+            "description": "approve is the one decision the card offers.",
+            "type": "string"
+          },
+          "spec_revision": {
+            "description": "The climb spec revision the evaluator was calibrated under, as the card showed it. An amendment that changes a field the calibration depends on retires the card, and a retired card's answer is refused.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbApprovalResponse": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "baseline": {
+            "format": "double",
+            "type": "number"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "evaluator": {
+            "type": "string"
+          },
+          "noise": {
+            "format": "double",
+            "type": "number"
+          },
+          "project": {
+            "type": "string"
+          },
+          "protected": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "spec_revision": {
+            "type": "integer"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbAttempt": {
+        "properties": {
+          "best": {
+            "format": "double",
+            "type": "number"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "change": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_percent": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_summary": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/ClimbDiffSummary"
+          },
+          "epoch": {
+            "type": "integer"
+          },
+          "expected_effect": {
+            "type": "string"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "guardrails": {
+            "$ref": "#/components/schemas/ClimbGuardrails"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "improvement": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "measurement": {
+            "$ref": "#/components/schemas/ClimbMeasurement"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "review_notes": {
+            "type": "string"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/ClimbScores"
+          },
+          "spec_revision": {
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbAttemptsResponse": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbAttempt"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbBudgets": {
+        "properties": {
+          "attempts": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "cost_usd": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "since_improvement": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "wall_clock_seconds": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbConcludeRequest": {
+        "properties": {
+          "note": {
+            "description": "Why the climb is concluded, which the chief of staff reads.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbConcludeResponse": {
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbDiffSummary": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbExtendRequest": {
+        "properties": {
+          "attempts": {
+            "description": "Further attempts the climb may make.",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Further dollars the climb may spend.",
+            "format": "double",
+            "type": "number"
+          },
+          "note": {
+            "description": "Why the budget is extended.",
+            "type": "string"
+          },
+          "wall_clock": {
+            "description": "Further time the climb may run, as a duration such as 2h.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbExtendResponse": {
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "extension": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "wall_clock": {
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbGuardrails": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "green": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMeasurement": {
+        "properties": {
+          "failed_run": {
+            "type": "integer"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "repeats": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbRun"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "scores": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "spread": {
+            "format": "double",
+            "type": "number"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMeter": {
+        "properties": {
+          "max": {
+            "format": "double",
+            "type": "number"
+          },
+          "used": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMetric": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbOutput": {
+        "properties": {
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClimbMetric"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "integer"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbPoint": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "best": {
+            "format": "double",
+            "type": "number"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "scored": {
+            "type": "boolean"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbProgress": {
+        "properties": {
+          "baseline": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "best": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "best_attempt": {
+            "type": "integer"
+          },
+          "budgets": {
+            "$ref": "#/components/schemas/ClimbBudgets"
+          },
+          "change": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_percent": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "direction": {
+            "type": "string"
+          },
+          "earlier_attempts": {
+            "type": "integer"
+          },
+          "epoch": {
+            "type": "integer"
+          },
+          "evaluator": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "min_improvement": {
+            "format": "double",
+            "type": "number"
+          },
+          "noise_band": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbPoint"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "repeats": {
+            "type": "integer"
+          },
+          "running": {
+            "$ref": "#/components/schemas/ClimbRunningView"
+          },
+          "spark": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "spec_revision": {
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbProgressResponse": {
+        "properties": {
+          "progress": {
+            "$ref": "#/components/schemas/ClimbProgress"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbRun": {
+        "properties": {
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "parsed": {
+            "$ref": "#/components/schemas/ClimbOutput"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "trace_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbRunningView": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "run": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "words": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbScores": {
+        "properties": {
+          "metrics": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "primary": {
+            "format": "double",
+            "type": "number"
+          },
+          "runs": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "CommitLanding": {
         "properties": {
           "criteria": {
@@ -5869,6 +6755,13 @@
           },
           "jev": {
             "$ref": "#/components/schemas/ConfigJev"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "object"
           },
           "listen": {
             "$ref": "#/components/schemas/ConfigListen"
@@ -6860,6 +7753,53 @@
         },
         "type": "object"
       },
+      "DeliveryDecline": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "note": {
+            "description": "Why the pull request is declined.",
+            "type": "string"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "review_revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DeliveryDeclined": {
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "pull_request": {
+            "type": "integer"
+          },
+          "pull_request_closed": {
+            "type": "boolean"
+          },
+          "review": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "concluded"
+            ],
+            "type": "string"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DeliveryLandDecision": {
         "properties": {
           "accept_blocking": {
@@ -7212,6 +8152,9 @@
           },
           "created_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
             "type": "string"
           },
           "new_project": {
@@ -8114,6 +9057,9 @@
           "key": {
             "type": "string"
           },
+          "kind": {
+            "type": "string"
+          },
           "path": {
             "type": "string"
           },
@@ -8269,6 +9215,10 @@
           },
           "blocked": {
             "type": "string"
+          },
+          "decline": {
+            "$ref": "#/components/schemas/InboxAnswer",
+            "description": "The answer that declines the evaluator-only pull request of a Hill Climb workstream that kept no attempt, which ends the workstream as concluded, no improvement. Present only on that delivery entry, beside the Mark ready answer."
           },
           "jev": {
             "$ref": "#/components/schemas/InboxJev",
@@ -8720,6 +9670,24 @@
             "type": "string"
           },
           "timeout": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProgressView": {
+        "properties": {
+          "panel": {
+            "type": "string"
+          },
+          "spark": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "summary": {
             "type": "string"
           }
         },
@@ -11849,6 +12817,9 @@
           "profile": {
             "type": "string"
           },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressView"
+          },
           "project": {
             "type": "string"
           },
@@ -11885,6 +12856,9 @@
             ]
           },
           "wait": {
+            "type": "string"
+          },
+          "work_kind": {
             "type": "string"
           },
           "workgroup": {

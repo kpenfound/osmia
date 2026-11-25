@@ -426,3 +426,19 @@ func TestDeliveryRouteIsKeyedByWorkstreamReviewAndCommitAndOffersDefer(t *testin
 		t.Fatalf("deferred = %+v", deferred)
 	}
 }
+
+func TestJevIsNeverAskedAboutTheClimbEvaluatorApproval(t *testing.T) {
+	f := newFixture(t)
+	settings := testSettings()
+	p := &jevtest.Provider{Results: []jevtest.Result{pick("approve", 0.999, "decline")}}
+	if !jev.KindClimbApproval.OwnerOnly() || jev.KindRatification.OwnerOnly() || jev.KindDeliveryApproval.OwnerOnly() {
+		t.Fatal("only the climb evaluator approval is the owner's alone")
+	}
+	res := judge(&settings, p, "key").Decide(context.Background(), f.repo, decisionRequest(jev.KindClimbApproval, "climb:evaluator", "state", "approve", "decline"))
+	if res.Status == jev.Binding || res.Status == jev.Nonbinding || res.Pick != "" || res.Reason != jev.ReasonRejected || len(p.Requests()) != 0 {
+		t.Fatalf("a confident approval of the owner's own card: %+v after %d requests", res, len(p.Requests()))
+	}
+	if records := f.judgmentRecords(t); len(records) != 0 {
+		t.Fatalf("a judgment was recorded: %+v", records)
+	}
+}

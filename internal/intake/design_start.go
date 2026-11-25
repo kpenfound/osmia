@@ -8,6 +8,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -61,14 +62,17 @@ func (s *Controller) RequestHandoffTitle(ctx context.Context, r *trace.Repositor
 	return err
 }
 
-// DesignStartIntent binds the owner-started text, revision and ordered list
-// before any handed input, owner decision or member allocation is recorded.
+// DesignStartIntent binds the owner-started text, revision, workstream kind
+// and ordered list before any handed input, owner decision or member
+// allocation is recorded. Kind is empty only in an intent recorded before
+// kinds existed, and reads as Feature.
 // Projects holds the existing projects of the pinned brief. NewProject is the
 // project that brief asks the start to create, and Creation is the identity of
 // that creation: the ID the new project will have, recorded before anything is
 // written on GitHub.
 type DesignStartIntent struct {
 	BriefRevision int                `json:"brief_revision"`
+	Kind          string             `json:"kind,omitempty"`
 	Projects      []config.ProjectID `json:"projects"`
 	NewProject    *api.NewProject    `json:"new_project,omitempty"`
 	Creation      config.ProjectID   `json:"creation,omitempty"`
@@ -92,6 +96,15 @@ func (i DesignStartIntent) MemberHanded(handed trace.Document, member config.Pro
 		handed.Content = NewProjectHandedLine + "\n\n" + handed.Content
 	}
 	return handed
+}
+
+// StartKind is the workstream kind the start records on every member: the
+// kind the intent pinned, Feature for an intent that pinned none.
+func (i DesignStartIntent) StartKind() string {
+	if i.Kind == "" {
+		return kinds.Feature
+	}
+	return i.Kind
 }
 
 func DesignStartIntentOf(r *trace.Repository, stream config.WorkstreamID) (DesignStartIntent, bool, error) {
@@ -124,8 +137,9 @@ func (s *Controller) PreparePinnedDesignStart(ctx context.Context, r *trace.Repo
 		}
 		found = true
 	}
+	kind := intent.StartKind()
 	if !found {
-		if err := r.Append(ctx, intent.Handed); err != nil {
+		if err := r.AppendWithKind(ctx, intent.Handed, kind); err != nil {
 			return err
 		}
 		if err := s.Step("design-brief-handed"); err != nil {
@@ -283,6 +297,19 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	if !found {
 		return nil
 	}
+	kind := intent.StartKind()
+	if !hasIntent {
+		if kind, err = r.Kind(stream); err != nil {
+			return err
+		}
+	}
+	registered, ok := kinds.Lookup(kind)
+	if !ok {
+		return fmt.Errorf("design start %s: kind %q is not registered by this build", stream, kind)
+	}
+	if err := registered.CheckBrief(len(selected.Members), hasIntent && intent.NewProject != nil); err != nil {
+		return fmt.Errorf("design start %s: %w", stream, err)
+	}
 
 	d := &Drafter{S: s.DrafterDependencies(), Repository: r}
 	handed, err := d.Handed(stream)
@@ -356,7 +383,7 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 		if !copied {
 			doc := memberHanded
 			doc.Project, doc.Workstream = member.Repo, member.Workstream
-			if err := repo.Append(ctx, doc); err != nil {
+			if err := repo.AppendWithKind(ctx, doc, kind); err != nil {
 				return err
 			}
 		}

@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	kindregistry "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/lifecycle"
 	"github.com/kpenfound/osmia/internal/questions"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
@@ -54,13 +55,30 @@ func CoreEnforcement(root config.Root) Enforcement {
 	}
 }
 
-var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), ProjectContextTool)}
+var chiefGrant = coreadapter.Capabilities{Web: true, Tools: append(append([]string{"file_read", factoryContextTool, discoveryTool, readRemoteFileTool, checks.TraceToolName, status.ToolName, "notify", "capacity", "inspect_code", "preview", briefToolName, checksTool, delivery.ChecksChoiceToolName, prioritiseTool, pauseTool, resumeTool, requestChangeTool, decideChangeTool, decideAmendmentTool, intake.DecideCharterTool, resolveContestedTool, resolveObjectionTool, decideTool, flakeFixToolName, triageTool, moveUnitTool, climbSteerTool, climbConcludeTool, moveWorkstreamTool, handBackDriftTool, dropDependencyTool, retryChangeTool, followUpTool, draftBriefToolName, designReadRepoToolName, designTitleToolName}, questions.ChiefTools...), ProjectContextTool)}
 
 var ChiefOrdinaryTools = slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
 	return name == draftBriefToolName || name == designReadRepoToolName || name == designTitleToolName
 })
 
 var chiefOrdinaryNarrow = coreadapter.Capabilities{Tools: ChiefOrdinaryTools, Web: true}
+
+// ChiefOrdinaryToolsOf lists the tools an ordinary chief-of-staff turn holds
+// for a workstream of the named kind: every ordinary tool except the ones only
+// another kind adds. A kind this build does not register holds none of the
+// kind tools.
+func ChiefOrdinaryToolsOf(kind string) []string {
+	own := map[string]bool{}
+	if k, ok := kindregistry.Lookup(kind); ok {
+		for _, name := range k.ChiefTools {
+			own[name] = true
+		}
+	}
+	others := kindregistry.ChiefToolNames()
+	return slices.DeleteFunc(slices.Clone(ChiefOrdinaryTools), func(name string) bool {
+		return slices.Contains(others, name) && !own[name]
+	})
+}
 
 var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoToolName, designTitleToolName}
 
@@ -71,13 +89,42 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 	if err != nil {
 		return nil, err
 	}
+	kindTools, kindErr := controls.kindChiefTools(r, scope, now)
+	if kindErr != nil {
+		return nil, kindErr
+	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
 	for i, t := range chief {
 		if t.Name == questions.RouteAmendmentTool {
 			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
 		}
 	}
-	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), ProjectContext(r, scope))), err
+	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), append(kindTools, ProjectContext(r, scope))...)), err
+}
+
+// kindChiefTools builds the chief-of-staff tools the workstream's kind adds.
+// A workstream whose kind this build does not register gets none.
+func (c *runtimeControls) kindChiefTools(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
+	stream, err := config.ParseWorkstreamID(scope.Workstream)
+	if err != nil {
+		return nil, err
+	}
+	kind, _, ok, err := intake.WorkstreamKind(r, stream)
+	if err != nil || !ok {
+		return nil, err
+	}
+	builders := map[string]func() coreadapter.Tool{
+		moveUnitTool:      func() coreadapter.Tool { return c.moveUnit(r, scope) },
+		climbSteerTool:    func() coreadapter.Tool { return c.climbSteer(r, scope, now) },
+		climbConcludeTool: func() coreadapter.Tool { return c.climbConclude(r, scope) },
+	}
+	var tools []coreadapter.Tool
+	for _, name := range kind.ChiefTools {
+		if build, found := builders[name]; found {
+			tools = append(tools, build())
+		}
+	}
+	return tools, nil
 }
 
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, execution.DoneTool}, WriteFiles: true, Execute: true}
@@ -136,6 +183,11 @@ func Enforce(opts Options, e Enforcement) Options {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
 				settings := cfg.RoleExecution(scope.Role)
+				if scope.Unit != "" && scope.Thread != driftMasonAgent && scope.Thread != driftReviewerAgent {
+					if kind, err := r.Kind(config.WorkstreamID(scope.Workstream)); err == nil {
+						settings = cfg.WithUnitKindSkills(settings, kind, scope.Role, scope.Unit)
+					}
+				}
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					return drifts.Selection(ctx, scope, settings)
 				}
@@ -171,8 +223,12 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return isolation.Selection{}, err
 					}
+					stored, err := r.Kind(stream)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
 					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings,
-						Narrow: &chiefOrdinaryNarrow}, nil
+						Narrow: &coreadapter.Capabilities{Tools: ChiefOrdinaryToolsOf(stored), Web: true}}, nil
 				}
 				return isolation.Selection{}, errors.New("view selection denied")
 			},
@@ -191,6 +247,10 @@ func Enforce(opts Options, e Enforcement) Options {
 						return nil, err
 					}
 					return append(ask, verdicts.Tool(scope), recordDiscovery(r, scope, now), factoryContext(r, scope), diff), nil
+				}
+				if scope.Role == masonRole && scope.Thread == execution.ClimbMasonAgent {
+					ask, err := questions.Tools(r, execution.ClimbMasonAgent, scope, now)
+					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), reports.AttemptTool(r, scope)), err
 				}
 				if scope.Role == masonRole {
 					ask, err := questions.Tools(r, masonAgent(scope.Unit), scope, now)

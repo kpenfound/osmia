@@ -24,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -44,7 +45,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project settings <project-id> clear NAME... [--json]  record a new revision without those settings
   project memory <project-id>
   project rebase <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
+  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--kind KIND] [--skip-debate] [--json]
   edit charter <project-id> [--from FILE]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
@@ -67,6 +68,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   trace <workstream-id> [unit <id>|criterion <spec#n>|commit <sha>] [--json]
   approve <workstream-id> [description-file] [--accept] [--json]
   land <workstream-id> [--accept] [--json]  approve and land on the base branch
+  decline <workstream-id> [--json]  decline the evaluator-only pull request of a Hill Climb that kept no attempt
   send <workstream-id> <message> [--json]
   conversation <workstream-id> [--json]
   feed <workstream-id|workgroup-id> [--json]
@@ -106,7 +108,7 @@ type options struct {
 	root, socket, reason, project, base             string
 	upstream, fork, clone, baseBranch               string
 	repo, description, charterFile, id              string
-	profile, title, from, config                    string
+	profile, title, from, config, kind              string
 	json, hard, reasonSet, help, target, accept     bool
 	skipDebate, version, detach, public, creating   bool
 	projectSpecRevision, specRevision, planRevision int
@@ -128,7 +130,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--kind", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -175,6 +177,8 @@ func parse(args []string) (o options, err error) {
 				o.with = append(o.with, value)
 			case "--base":
 				o.base = value
+			case "--kind":
+				o.kind = value
 			case "--project":
 				o.project = value
 			case "--profile":
@@ -295,7 +299,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 1 || len(a) == 3 && (a[1] == "unit" || a[1] == "criterion" || a[1] == "commit")
 	case "approve":
 		valid = len(a) == 1 || len(a) == 2
-	case "land":
+	case "land", "decline":
 		valid = len(a) == 1
 	case "conversation", "feed":
 		valid = len(a) == 1
@@ -345,7 +349,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || o.kind != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
 		return invalid()
 	}
 	if cmd == "config" && len(a) == 1 {
@@ -388,7 +392,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	c := service.NewClient(socket)
 	defer c.Close()
 	fail := func(err error) int {
-		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "land" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
+		return report(stderr, err, cmd == "engine" || cmd == "project" || cmd == "handin" || cmd == "abandon" || cmd == "upstream" || cmd == "checks" || cmd == "recover" || cmd == "archive" || cmd == "unarchive" || cmd == "shed" || cmd == "ratify" || cmd == "packet" || cmd == "amendment" || cmd == "delivery" || cmd == "merged" || cmd == "rebase" || cmd == "approve" || cmd == "land" || cmd == "decline" || cmd == "send" || cmd == "conversation" || cmd == "feed" || cmd == "inbox" || cmd == "answer" || cmd == "charter" || cmd == "move" || cmd == "trace" || cmd == "reload" || cmd == "session" || cmd == "design" || cmd == "status" && len(a) == 1)
 	}
 	if cmd == "engine" {
 		if a[0] == "status" {
@@ -582,7 +586,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "cannot generate a hand-in key")
 			return 1
 		}
-		req := wire.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		req := wire.HandInRequest{Project: id, Key: key, Kind: o.kind, SkipDebate: o.skipDebate}
 		if len(o.with) > 0 {
 			req.Projects = []config.ProjectID{id}
 			for _, raw := range o.with {
@@ -895,7 +899,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
+		fmt.Fprintf(stdout, "Workstream %s ratified: %s\n%s\n", result.Workstream, shed.Pin{Spec: result.Spec, Plan: result.Plan}, result.Detail)
 		if o.projectSpecRevision > 0 {
 			fmt.Fprintf(stdout, "Workgroup spec revision %d approved.\n", o.projectSpecRevision)
 		}
@@ -1042,6 +1046,30 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return output(stdout, stderr, approved)
 		}
 		fmt.Fprintf(stdout, "Approved marking final review %d at %s ready for review with description %s\n", approved.Review, approved.Commit, approved.DescriptionHash)
+		return 0
+	}
+	if cmd == "decline" {
+		id, err := config.ParseWorkstreamID(a[0])
+		if err != nil {
+			return invalid()
+		}
+		presentation, err := c.Delivery(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		declined, err := c.DeclineDelivery(ctx, id, wire.DeliveryDecline{Review: presentation.Report.Review, ReviewRevision: presentation.ReviewRevision, Commit: presentation.Report.Commit})
+		if err != nil {
+			return fail(err)
+		}
+		if o.json {
+			return output(stdout, stderr, declined)
+		}
+		fmt.Fprintf(stdout, "Declined the pull request of final review %d at %s: %s ended as %s, no improvement\n", declined.Review, declined.Commit, id, declined.State)
+		if declined.PullRequest > 0 && declined.PullRequestClosed {
+			fmt.Fprintf(stdout, "Closed pull request #%d with a comment\n", declined.PullRequest)
+		} else if declined.PullRequest > 0 {
+			fmt.Fprintf(stdout, "Pull request #%d is still open; close it yourself\n", declined.PullRequest)
+		}
 		return 0
 	}
 	if cmd == "land" {
@@ -1663,7 +1691,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 }
 
 func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse) {
-	fmt.Fprintf(w, "Packet revision %d of workstream %s: spec.md revision %d and plan.json revision %d\n", packet.Revision, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	fmt.Fprintf(w, "Packet revision %d of workstream %s: %s\n", packet.Revision, id, packet.Packet.Revision)
 	fmt.Fprintf(w, "%s\n%s\n", packet.Packet.Conclusion, packet.Packet.Recommendation)
 	for _, entry := range packet.Packet.Dissent {
 		content, _ := json.MarshalIndent(entry, "", "  ")
@@ -2025,6 +2053,9 @@ func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 		}
 		listed++
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
+		if line := progressLine(st); line != "" {
+			fmt.Fprintf(w, "    Progress: %s\n", line)
+		}
 		for _, gate := range st.Gates {
 			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
 			if gate.Reason != "" {
@@ -2055,6 +2086,9 @@ func drift(d *wire.DriftStatus) string {
 
 func showStatus(w io.Writer, st wire.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
+	if line := progressLine(st); line != "" {
+		fmt.Fprintf(w, "Progress: %s\n", line)
+	}
 	for _, gate := range st.Gates {
 		fmt.Fprintf(w, "Gate: %s %s\n", gate.Kind, gate.Reference)
 		if gate.Reason != "" {
@@ -2338,6 +2372,13 @@ func facts(st wire.WorkstreamStatus) string {
 		}
 	}
 	return out
+}
+
+func progressLine(st wire.WorkstreamStatus) string {
+	if st.Progress == nil {
+		return ""
+	}
+	return st.Progress.Summary
 }
 
 func attention(s string) string {

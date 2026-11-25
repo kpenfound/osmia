@@ -260,33 +260,45 @@ func (b *Builder) Apply(ctx context.Context, op coreadapter.Operation) (coreadap
 	if !found || latest.Seal != in.Seal {
 		return fail("it is not the latest seal of the workstream")
 	}
-	graph, err := SealedPlan(b.Repository, stream, latest.Revision.Plan)
+	kind, err := StreamKind(b.Repository, stream)
 	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
-	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
-		return fail("the sealed plan does not parse: " + err.Error())
+		return fail(err.Error())
 	}
 	at := b.S.Now()
 	var txs []trace.Transaction
-	var ready, planned []string
-	for _, u := range p.Units {
-		subject := trace.UnitSubject(u.ID)
-		reason := fmt.Sprintf("unit %s is in the plan of seal %d", u.ID, in.Seal)
-		if len(u.DependsOn) > 0 {
-			reason += fmt.Sprintf(" and waits for %s to merge", strings.Join(u.DependsOn, ", "))
+	var reason string
+	if kind.Documents.Planned() {
+		graph, err := SealedPlan(b.Repository, stream, latest.Revision.Plan)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
 		}
-		txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: b.Header(subject+"-"+UnitPlanned, stream, op.ID, at), Subject: subject, To: UnitPlanned, Reason: reason}})
-		if len(u.DependsOn) > 0 {
-			planned = append(planned, fmt.Sprintf("%s (waiting for %s)", u.ID, strings.Join(u.DependsOn, ", ")))
-			continue
+		p, err := plan.Parse([]byte(graph.Content))
+		if err != nil {
+			return fail("the sealed plan does not parse: " + err.Error())
 		}
-		txs = append(txs, trace.Transaction{ExpectedVersion: 1,
-			Transition: trace.Transition{Header: b.Header(subject+"-"+UnitReady, stream, op.ID, at), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("unit %s is ready: it depends on no unit", u.ID)}})
-		ready = append(ready, u.ID)
+		var ready, planned []string
+		for _, u := range p.Units {
+			subject := trace.UnitSubject(u.ID)
+			reason := fmt.Sprintf("unit %s is in the plan of seal %d", u.ID, in.Seal)
+			if len(u.DependsOn) > 0 {
+				reason += fmt.Sprintf(" and waits for %s to merge", strings.Join(u.DependsOn, ", "))
+			}
+			txs = append(txs, trace.Transaction{Transition: trace.Transition{Header: b.Header(subject+"-"+UnitPlanned, stream, op.ID, at), Subject: subject, To: UnitPlanned, Reason: reason}})
+			if len(u.DependsOn) > 0 {
+				planned = append(planned, fmt.Sprintf("%s (waiting for %s)", u.ID, strings.Join(u.DependsOn, ", ")))
+				continue
+			}
+			txs = append(txs, trace.Transaction{ExpectedVersion: 1,
+				Transition: trace.Transition{Header: b.Header(subject+"-"+UnitReady, stream, op.ID, at), Subject: subject, From: UnitPlanned, To: UnitReady, Reason: fmt.Sprintf("unit %s is ready: it depends on no unit", u.ID)}})
+			ready = append(ready, u.ID)
+		}
+		reason = fmt.Sprintf("seal %d is recorded; the states of the %s of its plan are recorded: ready %s; planned %s", in.Seal, Units(len(p.Units)), List(ready), List(planned))
+	} else {
+		if _, _, err := SealedClimbSpec(b.Repository, b.S.About(b.Repository), stream); err != nil {
+			return fail("the sealed climb spec does not parse: " + err.Error())
+		}
+		reason = fmt.Sprintf("seal %d is recorded; a %s workstream has no plan and no units, so it moves to building and its climb starts from the sealed climb spec", in.Seal, kind.Name)
 	}
-	reason := fmt.Sprintf("seal %d is recorded; the states of the %s of its plan are recorded: ready %s; planned %s", in.Seal, Units(len(p.Units)), List(ready), List(planned))
 	h := b.Header(BuildingState, stream, op.ID, at)
 	from := RatifiedState
 	group, err := b.Repository.CrossRepoWorkgroupOf(stream)

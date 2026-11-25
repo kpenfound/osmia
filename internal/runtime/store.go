@@ -599,7 +599,7 @@ func validate(st State) error {
 				return fmt.Errorf("archive merge reference does not match its publication")
 			}
 		}
-		if a.Resolved && a.State != "delivered" && a.State != "abandoned" {
+		if a.Resolved && a.State != "delivered" && a.State != "abandoned" && a.State != "concluded" {
 			return fmt.Errorf("resolved archive must be terminal")
 		}
 		if !a.CleanupStartedAt.IsZero() && a.Title == "" {

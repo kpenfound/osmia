@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -508,17 +509,29 @@ func (d *Debate) RecordedReply(stream config.WorkstreamID, in RoundInput) (*shed
 // redraft.
 func (d *Debate) Redraft(stream config.WorkstreamID, attempt string) (map[string]string, []string, error) {
 	dr := d.Drafter()
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return nil, nil, err
+	}
 	latest, err := dr.Latest(stream)
 	if err != nil {
 		return nil, nil, err
 	}
-	specDoc, planDoc := latest[plan.SpecDocument], latest[plan.PlanDocument]
-	files := map[string]string{}
-	var problems []string
-	for _, doc := range []struct {
+	specDoc, planDoc := latest[kind.Documents.Drafted[0]], trace.Document{}
+	delivered := []struct {
 		Path   string
 		Latest *trace.Document
-	}{{plan.SpecPath, &specDoc}, {plan.PlanPath, &planDoc}} {
+	}{{kind.Documents.SpecPath, &specDoc}}
+	if kind.Documents.Planned() {
+		planDoc = latest[plan.PlanDocument]
+		delivered = append(delivered, struct {
+			Path   string
+			Latest *trace.Document
+		}{plan.PlanPath, &planDoc})
+	}
+	files := map[string]string{}
+	var problems []string
+	for _, doc := range delivered {
 		data, err := os.ReadFile(filepath.Join(dr.TurnDirectory(stream, attempt), "output", doc.Path))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -530,7 +543,9 @@ func (d *Debate) Redraft(stream config.WorkstreamID, attempt string) (map[string
 			files[doc.Path], doc.Latest.Content = string(data), string(data)
 		}
 	}
-	if len(problems) == 0 && len(files) > 0 {
+	if len(problems) == 0 && len(files) > 0 && !kind.Documents.Planned() {
+		problems = dr.climbProblems(context.Background(), specDoc.Content)
+	} else if len(problems) == 0 && len(files) > 0 {
 		if problems, err = dr.Validate(specDoc, planDoc); err != nil {
 			return nil, nil, err
 		}
@@ -609,11 +624,15 @@ func (d *Debate) RecordReply(ctx context.Context, operation string, stream confi
 	header := func(id string, revision int) trace.Header {
 		return trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: d.Repository.Project(), Workstream: stream, At: at, Actor: ArchitectActor, Cause: operation, Depth: 1}
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	var docs []trace.Document
-	redraft := shed.Pin{Spec: latest[plan.SpecDocument].Revision, Plan: latest[plan.PlanDocument].Revision}
-	if content, ok := files[plan.SpecPath]; ok {
+	redraft := shed.Pin{Spec: latest[kind.Documents.Drafted[0]].Revision, Plan: latest[plan.PlanDocument].Revision}
+	if content, ok := files[kind.Documents.SpecPath]; ok {
 		redraft.Spec++
-		docs = append(docs, trace.Document{Header: header(plan.SpecDocument, redraft.Spec), Path: plan.SpecPath, Content: content})
+		docs = append(docs, trace.Document{Header: header(kind.Documents.Drafted[0], redraft.Spec), Path: kind.Documents.SpecPath, Content: content})
 	}
 	if content, ok := files[plan.PlanPath]; ok {
 		redraft.Plan++
@@ -735,7 +754,15 @@ func (d *Debate) EnqueueReply(ctx context.Context, cfg *config.Config, stream co
 			return err
 		}
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return err
+	}
+	systemPrompt := ArchitectSystemPrompt(cfg.Project)
 	prompt := ReplyPrompt(in, latest, open, problems)
+	if !kind.Documents.Planned() {
+		systemPrompt, prompt = ClimbSystemPrompt(cfg.Project), ClimbReplyPrompt(in, latest, open, problems)
+	}
 	if in.Redraft {
 		asked, err := d.Asked(stream, in.Round)
 		if err != nil {
@@ -748,7 +775,7 @@ func (d *Debate) EnqueueReply(ctx context.Context, cfg *config.Config, stream co
 	}
 	turn := in.TurnID(len(turns) + 1)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.Repository.Project(), Workstream: stream, At: d.S.Now(), Actor: ShedActor, Cause: operation, Depth: 1},
-		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ArchitectSystemPrompt(cfg.Project), Prompt: prompt}
+		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt, Prompt: prompt}
 	_, err = d.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -844,7 +871,11 @@ func (d *Debate) ReplyPath(stream config.WorkstreamID, in RoundInput) *isolation
 			if err != nil {
 				return nil, err
 			}
-			return append(append(tools, d.Drafter().DraftTool(scope, attempt, d.Judge)), ask...), nil
+			kind, err := StreamKind(d.Repository, stream)
+			if err != nil {
+				return nil, err
+			}
+			return append(append(tools, d.Drafter().DraftToolFor(kind, scope, attempt, d.Judge)), ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -867,6 +898,11 @@ func (d *Debate) SelectReplyView(ctx context.Context, scope coreadapter.Scope, i
 	if err != nil {
 		return isolation.Selection{}, err
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	settings = cfg.WithKindSkills(settings, kind.Name, kinds.TurnArchitect)
 	if err := os.MkdirAll(filepath.Join(cfg.Root.String(), "views"), 0700); err != nil {
 		return isolation.Selection{}, err
 	}
@@ -899,8 +935,16 @@ func (d *Debate) StageReply(ctx context.Context, stream config.WorkstreamID, in 
 	if err != nil {
 		return nil, err
 	}
-	files := map[string]string{plan.SpecPath: latest[plan.SpecDocument].Content, plan.PlanPath: latest[plan.PlanDocument].Content, "charter.md": charter.Content, "context.md": b.Brief()}
-	paths := []string{plan.SpecPath, plan.PlanPath, "charter.md", "context.md"}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]string{"charter.md": charter.Content, "context.md": b.Brief()}
+	paths := DraftPaths(kind)
+	for _, f := range DraftFiles(kind) {
+		files[f.Path] = latest[f.ID].Content
+	}
+	paths = append(paths, "charter.md", "context.md")
 	for _, doc := range latest {
 		if directory, _, _ := strings.Cut(doc.Path, "/"); directory == "handed" || directory == "shed" {
 			files[doc.Path] = doc.Content

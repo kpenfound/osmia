@@ -306,6 +306,9 @@ func (s *Controller) ShedRedraft(ctx context.Context, raw string, req ShedRedraf
 	if note == "" {
 		return ShedResponse{}, &APIError{Code: Validation, Message: "a redraft requires a note saying what to change"}
 	}
+	if api := o.refuseFixedRounds("a redraft that is debated again"); api != nil {
+		return ShedResponse{}, api
+	}
 	if o.Skipped {
 		return ShedResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("the owner skipped debate on workstream %s; no redraft is asked for and debated", o.Stream)}
 	}
@@ -403,6 +406,9 @@ func (s *Controller) ShedMore(ctx context.Context, raw string, req ShedMoreReque
 	if api != nil {
 		return ShedResponse{}, api
 	}
+	if api := o.refuseFixedRounds("further rounds"); api != nil {
+		return ShedResponse{}, api
+	}
 	limit := s.Current().Shed.MaxRounds
 	if req.Rounds < 1 || req.Rounds > limit {
 		return ShedResponse{}, &APIError{Code: Validation, Message: fmt.Sprintf("ask for between 1 and shed.max_rounds (%d) further rounds", limit)}
@@ -431,4 +437,18 @@ func Rounds(n int) string {
 		return "1 more round"
 	}
 	return strconv.Itoa(n) + " more rounds"
+}
+
+// refuseFixedRounds refuses an owner request the workstream's kind does not
+// allow because it fixes the number of committee rounds. what names the
+// request.
+func (o *ShedOwner) refuseFixedRounds(what string) *APIError {
+	kind, err := StreamKind(o.Repository, o.Stream)
+	if err != nil {
+		return &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s; check the trace repository", o.Stream)}
+	}
+	if kind.Rounds == 0 {
+		return nil
+	}
+	return &APIError{Code: Conflict, Message: fmt.Sprintf("a %s workstream's climb spec gets exactly %d committee round; %s is not asked for. Ratify it, dispose of what blocks it, or change it after ratification through an amendment", kind.Name, kind.Rounds, what)}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -14,6 +15,9 @@ var MasonActor = trace.Actor{Kind: "service", ID: "mason"}
 // MasonAgent returns the agent and thread ID of a unit's mason: mason-<unit>,
 // or mason_<hash> for a unit whose subject is hashed.
 func MasonAgent(unit string) string {
+	if _, ok := climb.AttemptNumber(unit); ok {
+		return climb.MasonAgent
+	}
 	return "mason" + strings.TrimPrefix(trace.UnitSubject(unit), "unit")
 }
 

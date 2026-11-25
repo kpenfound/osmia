@@ -182,9 +182,12 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // question, answer, owner decision or delivery outcome is recorded for it.
 // Reading the workstream never changes it.
 type WorkstreamStatus struct {
-	Workstream    config.WorkstreamID
-	Workspaces    string
-	Kind          string
+	Workstream config.WorkstreamID
+	Workspaces string
+	Kind       string
+	// WorkKind is the workstream kind of a workstream that is not a session:
+	// the kind it records, or FeatureKind when it records none.
+	WorkKind      string
 	Profile       string
 	Base          string
 	Branch        string
@@ -275,7 +278,13 @@ func (r *Repository) Statuses() ([]WorkstreamStatus, error) {
 		if manifest.Kind == SessionKind {
 			state = SessionState(view.states[SessionSubject].Value)
 		}
-		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, Kind: manifest.Kind, Profile: manifest.Profile, Base: manifest.Base, Branch: manifest.Branch, Title: manifest.Title,
+		sessionKind, workKind := "", manifest.Kind
+		if manifest.Kind == SessionKind {
+			sessionKind, workKind = SessionKind, ""
+		} else if workKind == "" {
+			workKind = FeatureKind
+		}
+		out = append(out, WorkstreamStatus{Workstream: stream, Workspaces: workspaces, Kind: sessionKind, WorkKind: workKind, Profile: manifest.Profile, Base: manifest.Base, Branch: manifest.Branch, Title: manifest.Title,
 			State: state, Subjects: effective, OpenQuestions: open, Gates: ownerGates(records, stream, view), Status: latestStatus(records, stream), CreatedAt: createdAt, LastActivity: lastActivity})
 	}
 	return out, nil

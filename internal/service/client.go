@@ -529,6 +529,37 @@ func (c *Client) ChecksChoice(ctx context.Context, id config.WorkstreamID, req a
 	return v, err
 }
 
+// DeclineDelivery declines the evaluator-only pull request of a Hill Climb
+// workstream that kept no attempt, which ends it as concluded, no improvement.
+func (c *Client) DeclineDelivery(ctx context.Context, id config.WorkstreamID, decision api.DeliveryDecline) (api.DeliveryDeclined, error) {
+	var v api.DeliveryDeclined
+	err := c.Do(ctx, "POST", api.Prefix+"/delivery/"+url.PathEscape(string(id))+"/decline", decision, &v)
+	return v, err
+}
+
+// ApproveClimb records the owner's approval of a Hill Climb workstream's
+// calibrated evaluator, as the evaluator approval card's answer does.
+func (c *Client) ApproveClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbApprovalRequest) (api.ClimbApprovalResponse, error) {
+	var v api.ClimbApprovalResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/approval", req, &v)
+	return v, err
+}
+
+// ConcludeClimb concludes a Hill Climb workstream now, as the owner's
+// conclude-now control does.
+func (c *Client) ConcludeClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbConcludeRequest) (api.ClimbConcludeResponse, error) {
+	var v api.ClimbConcludeResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/conclude", req, &v)
+	return v, err
+}
+
+// ExtendClimb extends a Hill Climb workstream's budget as a pinned owner move.
+func (c *Client) ExtendClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbExtendRequest) (api.ClimbExtendResponse, error) {
+	var v api.ClimbExtendResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/extend", req, &v)
+	return v, err
+}
+
 // Recovery approves the recovery move a recovery card pins.
 func (c *Client) Recovery(ctx context.Context, id config.WorkstreamID, req api.RecoveryRequest) (api.RecoveryResponse, error) {
 	var v api.RecoveryResponse

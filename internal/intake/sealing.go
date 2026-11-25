@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/agentcore/vcs"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kb"
@@ -236,7 +237,7 @@ func DecodeSeal(op coreadapter.Operation) (SealInput, error) {
 	if err := dec.Decode(&in); err != nil {
 		return in, fmt.Errorf("invalid seal operation input: %w", err)
 	}
-	if in.Seal < 1 || in.Round < 1 || in.Spec < 1 || in.Plan < 1 || in.Ratification < 1 {
+	if in.Seal < 1 || in.Round < 1 || in.Spec < 1 || in.Plan < 0 || in.Ratification < 1 {
 		return in, errors.New("seal operation requires positive sealing, round, revision and record numbers")
 	}
 	return in, nil
@@ -356,24 +357,37 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		}
 		return fail(fmt.Sprintf("the owner's latest ratification is of %s in round %d, not of %s in round %d", latest.Revision, latest.Round, in.Pin(), in.Round))
 	}
+	kind, err := StreamKind(z.Repository, stream)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if err := seal.Revisions(kind, in.Pin()); err != nil {
+		return fail(fmt.Sprintf("the ratification of %s is not a %s seal: %s", in.Pin(), kind.Name, err))
+	}
 	spec, graph, err := z.Documents(stream, in.Pin())
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	p, err := plan.Parse([]byte(graph.Content))
-	if err != nil {
-		return fail("the ratified plan does not parse: " + err.Error())
-	}
-	if z.S.Reseed != nil {
-		z.S.Reseed(ctx, z.Repository)
-	}
-	entities, err := kb.Load(z.Repository)
-	if err != nil {
-		return coreadapter.OperationResult{}, err
-	}
-	footprints, unresolved := seal.Take(p, entities)
-	if len(unresolved) > 0 {
-		return fail("the plan's footprints name what the entity map does not resolve: " + strings.Join(unresolved, ", "))
+	footprints := []seal.Footprint{}
+	if kind.Documents.Planned() {
+		p, err := plan.Parse([]byte(graph.Content))
+		if err != nil {
+			return fail("the ratified plan does not parse: " + err.Error())
+		}
+		if z.S.Reseed != nil {
+			z.S.Reseed(ctx, z.Repository)
+		}
+		entities, err := kb.Load(z.Repository)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		var unresolved []string
+		footprints, unresolved = seal.Take(p, entities)
+		if len(unresolved) > 0 {
+			return fail("the plan's footprints name what the entity map does not resolve: " + strings.Join(unresolved, ", "))
+		}
+	} else if _, problems := climb.Check([]byte(spec.Content), ClimbDefaults(z.S.About(z.Repository))); len(problems) > 0 {
+		return fail("the ratified climb spec does not validate: " + strings.Join(problems, "; "))
 	}
 	g, err := z.Git(stream)
 	if err != nil {
@@ -404,7 +418,7 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 		return coreadapter.OperationResult{}, err
 	}
 	selected.Commit = base
-	record := seal.Seal{Version: seal.Version, Seal: in.Seal, Round: in.Round, Revision: in.Pin(), SpecHash: seal.SpecHash(spec.Content),
+	record := seal.Seal{Version: seal.Version, Kind: seal.KindName(kind.Name), Seal: in.Seal, Round: in.Round, Revision: in.Pin(), SpecHash: seal.SpecHash(spec.Content),
 		Base: selected, Branch: branch, Workspace: ws.Directory(), Footprints: footprints}
 	if gone, err := Abandoned(z.Repository, stream); err != nil || gone {
 		if err != nil {
@@ -418,8 +432,12 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	if err := z.S.Step("seal-recorded"); err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	reason := fmt.Sprintf("sealed %s at %s of %s/%s (%s); feature branch %s is checked out in %s; the footprints of %s are recorded",
-		in.Pin(), base, remote, selected.Branch, record.SpecHash, branch, ws.Directory(), Units(len(footprints)))
+	recordedFootprints := fmt.Sprintf("the footprints of %s are recorded", Units(len(footprints)))
+	if !kind.Documents.Planned() {
+		recordedFootprints = "a " + kind.Name + " seal has no plan and so no footprints"
+	}
+	reason := fmt.Sprintf("sealed %s at %s of %s/%s (%s); feature branch %s is checked out in %s; %s",
+		in.Pin(), base, remote, selected.Branch, record.SpecHash, branch, ws.Directory(), recordedFootprints)
 	to := RatifiedState
 	group, err := z.Repository.GroupApprovalRequired(stream)
 	if err != nil {
@@ -451,15 +469,27 @@ func (z *Sealer) Apply(ctx context.Context, op coreadapter.Operation) (coreadapt
 	return fail(fmt.Sprintf("the workstream is %s, not in the shed", FeatureState(moved.Value)))
 }
 
-// Documents returns the ratified revisions of the spec and the plan.
+// Documents returns the ratified revisions of the spec and the plan. A kind
+// without a plan has the document of its spec slot alone, and the plan
+// returned is empty.
 func (z *Sealer) Documents(stream config.WorkstreamID, pin shed.Pin) (spec, graph trace.Document, err error) {
+	kind, err := StreamKind(z.Repository, stream)
+	if err != nil {
+		return trace.Document{}, trace.Document{}, err
+	}
 	docs, err := trace.Read[trace.Document](z.Repository, stream)
 	if err != nil {
 		return trace.Document{}, trace.Document{}, err
 	}
-	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == plan.SpecDocument && d.Revision == pin.Spec })
+	i := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == kind.Documents.Drafted[0] && d.Revision == pin.Spec })
+	if i < 0 {
+		return trace.Document{}, trace.Document{}, fmt.Errorf("workstream %s has no recorded %s", stream, pin)
+	}
+	if !kind.Documents.Planned() {
+		return docs[i], trace.Document{}, nil
+	}
 	j := slices.IndexFunc(docs, func(d trace.Document) bool { return d.ID == plan.PlanDocument && d.Revision == pin.Plan })
-	if i < 0 || j < 0 {
+	if j < 0 {
 		return trace.Document{}, trace.Document{}, fmt.Errorf("workstream %s has no recorded %s", stream, pin)
 	}
 	return docs[i], docs[j], nil

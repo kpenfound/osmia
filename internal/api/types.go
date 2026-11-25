@@ -265,11 +265,15 @@ type CharterState struct {
 // Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
 // workstream. Base belongs to a selected project and applies only to its member.
+// Kind is the workstream kind, which defaults to "feature" and is recorded once,
+// in the commit that creates the workstream; a kind the service does not
+// register is refused.
 // SkipDebate skips every member's debate; ratification still belongs to the owner.
 type HandInRequest struct {
 	Base       config.WorkstreamID `json:"base,omitempty"`
 	Project    config.ProjectID    `json:"project,omitempty"`
 	Projects   []config.ProjectID  `json:"projects,omitempty"`
+	Kind       string              `json:"kind,omitempty"`
 	Key        string              `json:"key"`
 	Path       string              `json:"path,omitempty"`
 	URL        string              `json:"url,omitempty"`
@@ -330,6 +334,9 @@ type DesignView struct {
 	BriefRevision int                 `json:"brief_revision"`
 	Brief         string              `json:"brief"`
 	Projects      []config.ProjectID  `json:"projects"`
+	// Kind is the workstream kind the latest brief sets, "feature" when the
+	// brief never set one.
+	Kind string `json:"kind"`
 	// Title is the latest title the design session's agent set; it is omitted
 	// for a session that has none.
 	Title string `json:"title,omitempty"`
@@ -967,7 +974,15 @@ type WorkstreamStatus struct {
 	Base          string            `json:"base,omitempty"`
 	Branch        string            `json:"branch,omitempty"`
 	Title         string            `json:"title,omitempty"`
-	State         *string           `json:"state"`
+	State *string `json:"state"`
+	// WorkKind is the registered kind of a workstream that is not a feature,
+	// such as hill-climb. It is omitted for a feature workstream, a session
+	// and a design session.
+	WorkKind string `json:"work_kind,omitempty"`
+	// Progress is the kind's reading of how far the workstream has got, for a
+	// kind whose progress is not its units. It is omitted for a feature
+	// workstream, which shows its units.
+	Progress      *ProgressView     `json:"progress,omitempty"`
 	Units         []UnitStatus      `json:"units"`
 	Advisories    []OverlapAdvisory `json:"advisories"`
 	OpenQuestions int               `json:"open_questions"`
@@ -997,6 +1012,17 @@ type WorkstreamStatus struct {
 	// OpenTelemetry identity, derived from the workstream ID alone.
 	TelemetryTraceID    string `json:"telemetry_trace_id" description:"OpenTelemetry trace ID of every span Osmia sends about the workstream, as 32 lowercase hexadecimal characters. It depends only on the workstream ID, so it is present whether or not telemetry export is configured and is the same after a restart. It is not the durable trace record store read through /v1/trace."`
 	TelemetryRootSpanID string `json:"telemetry_root_span_id" description:"Span ID of the workstream's osmia.workstream root span, the parent of its state, turn and check spans, as 16 lowercase hexadecimal characters. With telemetry_trace_id it names a span context an API client can link to."`
+}
+
+// ProgressView is a kind's one-line progress summary and the sparkline the
+// workstream list draws beside it. Panel names the web panel that shows the
+// workstream's progress in place of its units. Spark holds the points of the
+// sparkline, oriented so that a rising line is always an improvement, and is
+// empty until there are two.
+type ProgressView struct {
+	Panel   string    `json:"panel"`
+	Summary string    `json:"summary"`
+	Spark   []float64 `json:"spark,omitempty"`
 }
 
 // WorkgroupView presents recorded membership and the workstream graph. It
@@ -1239,6 +1265,11 @@ type InboxEntry struct {
 	// present only on a delivery entry of a project that lands, whose Options
 	// then also hold "land".
 	Land *InboxAnswer `json:"land,omitempty" description:"The answer that approves a delivery entry and lands the workstream. Present only on a delivery entry of a project whose delivery is jev, beside the Mark ready answer."`
+	// Decline is the answer that declines the pull request of a Hill Climb
+	// workstream that kept no attempt, so that it ends as concluded, no
+	// improvement. It is present only on that delivery entry, whose Options then
+	// also hold "decline".
+	Decline *InboxAnswer `json:"decline,omitempty" description:"The answer that declines the evaluator-only pull request of a Hill Climb workstream that kept no attempt, which ends the workstream as concluded, no improvement. Present only on that delivery entry, beside the Mark ready answer."`
 	// Jev is what Jev decided about the entry when the decision came to the
 	// owner after all: an answer below the threshold, a deferral, or a pick
 	// the service refused. Recommendation then says it in words.
@@ -1656,7 +1687,28 @@ const (
 	// EventCapacity announces a change to the role slots in use or the turns
 	// waiting for one, as the projects' schedulers publish them.
 	EventCapacity EventKind = "capacity"
+	// EventClimbAttemptStarted announces that a Hill Climb workstream began an
+	// attempt.
+	EventClimbAttemptStarted EventKind = "climb.attempt-started"
+	// EventClimbPhase announces that the running attempt moved to another
+	// phase: the mason working, the guardrails, a measurement run or the
+	// review.
+	EventClimbPhase EventKind = "climb.phase"
+	// EventClimbAttemptRecorded announces that an attempt's terminal record,
+	// climb/attempts/<n>.json, was written.
+	EventClimbAttemptRecorded EventKind = "climb.attempt-recorded"
+	// EventClimbKept announces that an attempt was kept and became the best.
+	EventClimbKept EventKind = "climb.kept"
+	// EventClimbPlateau announces that the climb reached its plateau rule.
+	EventClimbPlateau EventKind = "climb.plateau"
+	// EventClimbStop announces that a stop rule fired and the climb waits at
+	// its climb.stop exit.
+	EventClimbStop EventKind = "climb.stop"
 )
+
+// ClimbEventKinds lists the event kinds a Hill Climb workstream publishes, in
+// the order an attempt raises them.
+var ClimbEventKinds = []EventKind{EventClimbAttemptStarted, EventClimbPhase, EventClimbAttemptRecorded, EventClimbKept, EventClimbPlateau, EventClimbStop}
 
 // Event is one notification of the client event stream. It names what
 // changed, never its new state, which the read endpoints report. Image

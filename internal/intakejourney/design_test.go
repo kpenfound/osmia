@@ -58,7 +58,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 	if !design {
 		t.Fatal("a freshly opened design session should be a design workstream")
 	}
-	if kind, err := repository.Kind(stream); err != nil || kind != "" {
+	if kind, err := repository.Kind(stream); err != nil || kind != trace.FeatureKind {
 		t.Fatalf("design session kind: %q %v", kind, err)
 	}
 	if state, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || state.Value != "" {
@@ -692,7 +692,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)
-		want := slices.Clone(service.ChiefOrdinaryTools)
+		want := service.ChiefOrdinaryToolsOf("feature")
 		slices.Sort(want)
 		if err != nil || !slices.Equal(names, want) {
 			problem("ordinary chief tools: %v %v, want %v", names, err, want)

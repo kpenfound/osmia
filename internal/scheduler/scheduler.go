@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/fleet"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/slotspans"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -490,6 +491,9 @@ func loadSnapshot(repository *trace.Repository, all []config.WorkstreamID) (load
 		threads, err := repository.Threads(stream)
 		if err != nil {
 			return loaded{}, fmt.Errorf("workstream %s: %w", stream, err)
+		}
+		if _, known := kinds.Lookup(kind); !known {
+			threads = slices.DeleteFunc(threads, func(t trace.Thread) bool { return t.Identity.Role != trace.ChiefOfStaff })
 		}
 		records, err := repository.Operations(stream)
 		if err != nil {

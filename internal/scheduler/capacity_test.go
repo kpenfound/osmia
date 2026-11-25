@@ -318,3 +318,25 @@ func TestPassPublishesTheTurnsItLeftWithoutASlot(t *testing.T) {
 		t.Fatalf("waiting %v, want %v", got, want)
 	}
 }
+
+func TestWorkstreamOfAnUnregisteredKindRunsOnlyItsChiefOfStaff(t *testing.T) {
+	ctx := context.Background()
+	f, repo := setup(t, "mason1")
+	defer repo.Close()
+	waiting := config.WorkstreamID("w_00000000000000000000000000000009")
+	must(t, repo.CreateWorkstreamKind(ctx, waiting, "", "mystery", f.clock.Now(), owner))
+	f.thread(t, repo, waiting, "mason9", "mason")
+	f.queueOn(t, repo, waiting, trace.ChiefOfStaff, "notice")
+	f.queueOn(t, repo, waiting, "mason9", "one")
+	f.queue(t, repo, "mason1", "one")
+	limits := &config.Capacity{Masons: 2, Reviewers: 1, Committee: 1, PerWorkstream: 2}
+	s, err := New(repo, Options{Now: f.clock.Now, Capacity: limits})
+	must(t, err)
+	must(t, s.Pass(ctx))
+	if got := dispatched(t, repo, waiting); !slices.Equal(got, []string{"chief_of_staff/notice"}) {
+		t.Fatalf("turns dispatched on the workstream of an unregistered kind: %v", got)
+	}
+	if got := dispatched(t, repo); !slices.Equal(got, []string{"mason1/one"}) {
+		t.Fatalf("turns dispatched on a feature workstream: %v", got)
+	}
+}

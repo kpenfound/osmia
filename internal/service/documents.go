@@ -60,6 +60,12 @@ func (s *Service) documentRequest(w http.ResponseWriter, r *http.Request) bool {
 				fail(w, Validation)
 				return true
 			}
+			if in.Base != "" {
+				if api := intake.CheckDependencyKinds(repo, stream, in.Base); api != nil {
+					failWith(w, api)
+					return true
+				}
+			}
 			out, err = repo.SetWorkstreamBase(r.Context(), stream, in.Base, in.Revision, s.now())
 		default:
 			fail(w, Unsupported)

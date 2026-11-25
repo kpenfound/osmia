@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -28,7 +29,7 @@ func (s *Controller) ArchiveLifecycle(repo *trace.Repository, a *runtime.Archive
 	if err != nil {
 		return err
 	}
-	if feature.Value != DeliveredState && feature.Value != AbandonedState {
+	if !intake.Finished(feature.Value) {
 		return fmt.Errorf("archived member %s is not terminal; cleanup remains held", a.Workstream)
 	}
 	if a.State != "" && a.State != feature.Value {

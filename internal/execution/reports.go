@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -36,6 +37,16 @@ type MasonReport struct {
 type doneReport struct {
 	MasonReport
 	OwnerAction string `json:"owner_action,omitempty"`
+	// Attempt is what a climb attempt's mason reports beside its outcome.
+	Attempt *AttemptReport `json:"attempt,omitempty"`
+}
+
+// AttemptReport is what the mason of a climb attempt reports with done: the
+// idea it tried, what it changed and the effect it expects.
+type AttemptReport struct {
+	Hypothesis string `json:"hypothesis"`
+	Change     string `json:"change"`
+	Expected   string `json:"expected_effect"`
 }
 
 const (
@@ -84,6 +95,7 @@ type reportedDone struct {
 	Report      MasonReport
 	Card        *coreadapter.Card
 	OwnerAction string
+	Attempt     *AttemptReport
 }
 
 func TurnKey(scope coreadapter.Scope) string {
@@ -181,6 +193,59 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 	return done
 }
 
+// AttemptTool is the done tool of a climb attempt's mason: it records the
+// hypothesis, the change and the expected effect while the attempt is waiting
+// for its mason.
+func (r *masonReports) AttemptTool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
+		Description: "Report this attempt's change ready to be measured. Give the hypothesis you tested, the change you made and the effect you expect it to have on the metric. The service records the report, takes your workspace as the attempt's candidate, runs the protected-path gate and the guardrail checks, measures it with the approved evaluator and lets Go decide whether it is kept; you never judge whether a score improved. End your turn as soon as this returns.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"hypothesis":{"type":"string"},"change":{"type":"string"},"expected_effect":{"type":"string"}},"required":["hypothesis","change","expected_effect"],"additionalProperties":false}`)}
+	done.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var input AttemptReport
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&input); err != nil {
+			return nil, fmt.Errorf("tool input: %w", err)
+		}
+		if err := d.Decode(new(any)); err != io.EOF {
+			return nil, errors.New("tool input must be one object")
+		}
+		n, ok := climb.AttemptNumber(scope.Unit)
+		if !ok {
+			return r.refuse(TurnKey(scope), fmt.Sprintf("%s is not an attempt of a climb", scope.Unit))
+		}
+		stream := config.WorkstreamID(scope.Workstream)
+		state, err := repository.Workflow(stream, trace.ClimbAttemptSubject(n))
+		if err != nil {
+			return nil, err
+		}
+		if state.Value != string(climb.PhaseStarted) {
+			return r.refuse(TurnKey(scope), fmt.Sprintf("attempt %d is %s, not waiting for its mason", n, state.Value))
+		}
+		for name, value := range map[string]string{"hypothesis": input.Hypothesis, "change": input.Change, "expected_effect": input.Expected} {
+			if strings.TrimSpace(value) == "" {
+				return r.refuse(TurnKey(scope), name+" is required: say what you tried, what you changed and the effect you expect")
+			}
+		}
+		outcome := fmt.Sprintf("Hypothesis: %s\nChange: %s\nExpected effect: %s", strings.TrimSpace(input.Hypothesis), strings.TrimSpace(input.Change), strings.TrimSpace(input.Expected))
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		key := TurnKey(scope)
+		if _, ok := r.accepted[key]; ok {
+			return refuseReport("this turn already reported its attempt; end the turn")
+		}
+		if r.accepted == nil {
+			r.accepted = map[string]reportedDone{}
+		}
+		r.accepted[key] = reportedDone{Report: MasonReport{Outcome: outcome}, Attempt: &input}
+		return json.Marshal(struct {
+			Recorded bool   `json:"recorded"`
+			Next     string `json:"next"`
+		}{true, "End your turn now. The service takes your workspace as the attempt's candidate and measures it."})
+	}
+	return done
+}
+
 func (r *masonReports) DriftTool(scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
 		Description: "Report your resolution done, once no conflicted file carries a conflict marker. Give the outcome: what you resolved and how. The service checks the files and goes on with the rebase; end your turn as soon as this returns.",
@@ -244,7 +309,7 @@ func (t *reportingTurns) Run(ctx context.Context, prepared coreadapter.PreparedT
 		result.Refusal = refusal
 	}
 	if ok {
-		data, encodeErr := json.Marshal(doneReport{MasonReport: report.Report, OwnerAction: report.OwnerAction})
+		data, encodeErr := json.Marshal(doneReport{MasonReport: report.Report, OwnerAction: report.OwnerAction, Attempt: report.Attempt})
 		if encodeErr != nil {
 			return result, errors.Join(err, encodeErr)
 		}

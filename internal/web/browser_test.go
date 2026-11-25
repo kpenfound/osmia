@@ -222,6 +222,8 @@ type fakeAPI struct {
 	feeds           map[string][]string
 	state           string
 	units           string
+	climb           map[string]string
+	climbExtra      string
 	charter         string
 	events          chan string
 
@@ -273,6 +275,9 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if units == "" {
 		units = "[]"
 	}
+	f.mu.Lock()
+	extra := f.climbExtra
+	f.mu.Unlock()
 	var workstreams strings.Builder
 	for i := 0; i < f.workstreams; i++ {
 		if i > 0 {
@@ -280,8 +285,8 @@ func (f *fakeAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(&workstreams, `{"workstream":"w_%03d","project":"p_fake","workspaces":"git","state":%s,`+
 			`"display_state":%s,"workgroup":{"id":"g_%03d","members":["w_%03d"],"edges":[]},`+
-			`"units":%s,"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
-			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, quote(state), quote(state), i, i, units, i)
+			`"units":%s%s,"advisories":[],"open_questions":0,"gates":[],"context_mode":"file","drift":null,`+
+			`"status":{"goal":"Workstream %d","attention":"","note":"","agents":[],"revision":1,"updated_at":"2026-01-01T00:00:00Z"},"agents":[]}`, i, quote(state), quote(state), i, i, units, extra, i)
 	}
 	writeJSON(w, `{"workstreams":[`+workstreams.String()+`],"profiles":{},"daily_budget":null,"capacity":null,`+
 		`"provider_usage":null,"diagnostics":[],"workspaces":{"setting":"git","backend":"git"}}`)
@@ -329,7 +334,11 @@ func (f *fakeAPI) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case kind := <-f.events:
-			fmt.Fprintf(w, "event: %s\ndata: {}\n\n", kind)
+			data := "{}"
+			if strings.HasPrefix(kind, "climb.") {
+				data = `{"workstream":"w_000"}`
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", kind, data)
 			flusher.Flush()
 		}
 	}
@@ -380,6 +389,7 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/v1/charter", f.handleCharter)
 	mux.HandleFunc("/v1/feed/", f.handleFeed)
 	mux.HandleFunc("/v1/events", f.handleEvents)
+	mux.HandleFunc("/v1/climb/", f.handleClimb)
 	mux.HandleFunc("/v1/contested/", func(w http.ResponseWriter, r *http.Request) { f.contested.serve(w, r, `{}`) })
 	mux.HandleFunc("/v1/ratify/", func(w http.ResponseWriter, r *http.Request) {
 		f.ratify.serve(w, r, `{"detail":"the owner ratified the packet."}`)

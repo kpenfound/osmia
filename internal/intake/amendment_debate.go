@@ -15,6 +15,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/thread"
@@ -346,7 +347,11 @@ func (a AmendmentDebate) RoundNumber(ctx context.Context, op coreadapter.Operati
 	}
 	records := RoundRecords(all, n)
 	if len(records) == 0 {
-		in := RoundInput{Round: n, Spec: 1, Plan: 1, Amendment: id}
+		pin, err := a.amendmentPin(stream)
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		in := RoundInput{Round: n, Spec: pin.Spec, Plan: pin.Plan, Amendment: id}
 		cfg := a.S.About(a.Repository)
 		records = make([]shed.Record, len(members))
 		failures := make([]error, len(members))
@@ -563,7 +568,11 @@ func (a AmendmentDebate) Reply(ctx context.Context, op coreadapter.Operation, st
 		}
 		return *result, nil
 	}
-	reply := shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: turn}
+	pin, err := a.amendmentPin(stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
+	reply := shed.Reply{Version: shed.Version, Round: n, Revision: pin, Turn: turn}
 	if answered != nil {
 		reply = *answered
 	}
@@ -645,8 +654,17 @@ func (a AmendmentDebate) ReplyTurns(stream config.WorkstreamID, id string, n int
 			if err != nil {
 				return isolation.Selection{}, err
 			}
+			kind, err := StreamKind(a.Repository, stream)
+			if err != nil {
+				return isolation.Selection{}, err
+			}
+			settings = cfg.WithKindSkills(settings, kind.Name, kinds.TurnArchitect)
+			pin, err := a.amendmentPin(stream)
+			if err != nil {
+				return isolation.Selection{}, err
+			}
 			workspace := filepath.Join(a.Drafter().TurnDirectory(stream, scope.Turn), "workspace")
-			paths, err := a.Stage(ctx, cfg.Project.Clone, stream, RoundInput{Round: n, Spec: 1, Plan: 1, Amendment: id}, workspace)
+			paths, err := a.Stage(ctx, cfg.Project.Clone, stream, RoundInput{Round: n, Spec: pin.Spec, Plan: pin.Plan, Amendment: id}, workspace)
 			if err != nil {
 				return isolation.Selection{}, err
 			}
@@ -659,8 +677,12 @@ func (a AmendmentDebate) ReplyTurns(stream config.WorkstreamID, id string, n int
 			for i, e := range open {
 				standing[i] = e.Dissent
 			}
+			pin, err := a.amendmentPin(stream)
+			if err != nil {
+				return nil, err
+			}
 			file := filepath.Join(a.Drafter().TurnDirectory(stream, scope.Turn), "output", "reply.json")
-			return shed.ReplyTools(shed.ReplyTurn{Reply: shed.Reply{Version: shed.Version, Round: n, Revision: shed.Pin{Spec: 1, Plan: 1}, Turn: scope.Turn}, Standing: standing, Save: func(r shed.Reply) error {
+			return shed.ReplyTools(shed.ReplyTurn{Reply: shed.Reply{Version: shed.Version, Round: n, Revision: pin, Turn: scope.Turn}, Standing: standing, Save: func(r shed.Reply) error {
 				data, err := shed.EncodeReply(r)
 				if err != nil {
 					return err
@@ -682,11 +704,15 @@ func (a AmendmentDebate) Present(ctx context.Context, stream config.WorkstreamID
 	if err != nil {
 		return err
 	}
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return err
+	}
 	var spec, graph, affected, reply string
 	packetRevision := 1
 	for _, doc := range docs {
 		switch doc.Path {
-		case "amendments/" + req.ID + "/spec.md":
+		case "amendments/" + req.ID + "/" + kind.Documents.SpecPath:
 			spec = doc.Content
 		case "amendments/" + req.ID + "/plan.json":
 			graph = doc.Content
@@ -751,4 +777,18 @@ func AmendmentRecommendation(entries []shed.Entry, records []shed.Record, anothe
 		return fmt.Sprintf("approve: nothing blocks; advice remains on the record from %s", shed.Objections(len(entries)))
 	}
 	return "approve: no objection stands"
+}
+
+// amendmentPin is the pin of an amendment's round and reply: the amendment's
+// proposed documents are recorded as the first revision of each, and a kind
+// without a plan has no plan revision.
+func (a AmendmentDebate) amendmentPin(stream config.WorkstreamID) (shed.Pin, error) {
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return shed.Pin{}, err
+	}
+	if kind.Documents.Planned() {
+		return shed.Pin{Spec: 1, Plan: 1}, nil
+	}
+	return shed.Pin{Spec: 1}, nil
 }

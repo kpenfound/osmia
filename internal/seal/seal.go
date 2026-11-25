@@ -16,6 +16,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -33,10 +34,14 @@ const (
 // Seal is the content of seal.json.
 type Seal struct {
 	Version int `json:"version"`
+	// Kind is the workstream kind the seal was taken for. A Feature seal
+	// records none.
+	Kind string `json:"kind,omitempty"`
 	// Seal numbers the sealing that recorded it.
 	Seal int `json:"seal"`
 	// Round is the round the owner ratified in, and Revision the revisions
-	// of spec.md and plan.json they ratified.
+	// of the documents they ratified: spec.md and plan.json for a kind with a
+	// plan, and the spec slot alone, with plan revision 0, for one without.
 	Round    int      `json:"round"`
 	Revision shed.Pin `json:"revision"`
 	// SpecHash is the hash of the ratified spec revision's content.
@@ -91,14 +96,41 @@ func Take(p plan.Plan, m kb.Map) (footprints []Footprint, unresolved []string) {
 	return footprints, unresolved
 }
 
+// KindName is the kind a seal records for a workstream of the named kind:
+// none for Feature, so a Feature seal reads as it always has.
+func KindName(name string) string {
+	if name == kinds.Feature {
+		return ""
+	}
+	return name
+}
+
+// Revisions is the check of a seal's revisions the sealed kind supplies: the
+// kind says which documents it ratifies, and a seal needs a positive revision
+// of each and none of any other.
+func Revisions(k kinds.Kind, pin shed.Pin) error {
+	switch {
+	case pin.Spec < 1:
+		return errors.New("a seal requires the revisions it seals")
+	case k.Documents.Planned() && pin.Plan < 1:
+		return errors.New("a seal requires the revisions it seals")
+	case !k.Documents.Planned() && pin.Plan != 0:
+		return fmt.Errorf("a %s seal has no plan revision", k.Name)
+	}
+	return nil
+}
+
 func (s Seal) check() error {
+	kind, registered := kinds.Lookup(s.Kind)
 	switch {
 	case s.Version != Version:
 		return fmt.Errorf("unsupported seal version %d", s.Version)
+	case !registered:
+		return fmt.Errorf("a seal of kind %q is not one this build registers", s.Kind)
 	case s.Seal < 1 || s.Round < 1:
 		return errors.New("a seal requires the sealing and the round that recorded it")
-	case s.Revision.Spec < 1 || s.Revision.Plan < 1:
-		return errors.New("a seal requires the revisions it seals")
+	case Revisions(kind, s.Revision) != nil:
+		return Revisions(kind, s.Revision)
 	case !strings.HasPrefix(s.SpecHash, "sha256:") || len(s.SpecHash) != len("sha256:")+sha256.Size*2:
 		return errors.New("a seal requires the hash of the spec")
 	case s.Base.Remote == "" || s.Base.Branch == "" || s.Base.Commit == "":

@@ -18,6 +18,9 @@ func unitStates(repository *trace.Repository, stream config.WorkstreamID, states
 	if err != nil || !found {
 		return nil, err
 	}
+	if planned, err := repository.Planned(stream); err != nil || !planned {
+		return nil, err
+	}
 	graph, err := sealedPlan(repository, stream, latest.Revision.Plan)
 	if err != nil {
 		return nil, err

@@ -137,7 +137,7 @@ func TestRecordRoundTripsAndRefusesInvalidContent(t *testing.T) {
 		"round":             func(r *shed.Record) { r.Round = 0 },
 		"member":            func(r *shed.Record) { r.Member = "../escape" },
 		"spec revision":     func(r *shed.Record) { r.Revision.Spec = 0 },
-		"plan revision":     func(r *shed.Record) { r.Revision.Plan = 0 },
+		"plan revision":     func(r *shed.Record) { r.Revision.Plan = -1 },
 		"objection id":      func(r *shed.Record) { r.Objections[0].ID = "other" },
 		"objection kind":    func(r *shed.Record) { r.Objections[0].Kind = "taste" },
 		"objection part":    func(r *shed.Record) { r.Objections[0].Part = " " },
@@ -513,5 +513,68 @@ func TestRecordsReadsTheLatestRevisionOfEveryShedFile(t *testing.T) {
 	f.documents(t, stream, document(stream, shed.DocumentID(3, bob), shed.Path(3, bob), "{}\n", 2))
 	if _, err := shed.Records(f.repo, stream); err == nil {
 		t.Fatal("invalid record read")
+	}
+}
+
+func TestAClimbSpecRoundObjectsToTheMetric(t *testing.T) {
+	f := setup(t)
+	var saved shed.Record
+	turn := f.turn(t, 1, alice, nil, &saved)
+	turn.Climb, turn.Record.Revision = true, shed.Pin{Spec: 2}
+	object := tools(t, turn)[shed.ObjectTool]
+	for _, tc := range []struct {
+		name   string
+		in     input
+		reason string
+	}{
+		{"a feature kind", input{"fit", "climb#metric", "x", []string{"climb#metric"}}, "kind \"fit\" is not one of metric, charter or charter_conflict"},
+		{"a criterion part", input{"metric", "spec#1", "x", []string{"climb#metric"}}, `part "spec#1" is not one of climb#goal`},
+		{"a part the climb spec lacks", input{"metric", "climb#timing", "x", []string{"climb#metric"}}, `part "climb#timing" is not one of climb#goal`},
+		{"a criterion citation", input{"metric", "climb#metric", "x", []string{"spec#1"}}, "a climb spec has no criteria and no units"},
+		{"a unit citation", input{"metric", "climb#metric", "x", []string{"plan#resume"}}, "a climb spec has no criteria and no units"},
+		{"a part citation the climb spec lacks", input{"metric", "climb#metric", "x", []string{"climb#nowhere"}}, "the climb spec has no such part"},
+		{"a charter objection without a charter citation", input{"charter", "climb#metric", "x", []string{"climb#metric"}}, "must cite the charter rule"},
+	} {
+		if recorded, reason := call(t, object, tc.in); recorded || !strings.Contains(reason, tc.reason) {
+			t.Errorf("%s: recorded %v, reason %q, want %q", tc.name, recorded, reason, tc.reason)
+		}
+	}
+	for i, in := range []input{
+		{"metric", "climb#metric", "The run time can be gamed by caching the result.", []string{"climb#metric", "climb#guardrails"}},
+		{"metric", "climb#protected", "The corpus is not protected.", []string{"climb#protected", "kb/entities.json#internal.store"}},
+		{"metric", "spec", "Too noisy.", []string{"climb#stop"}},
+		{"charter", "climb#goal", "The goal breaks a rule.", []string{"charter#1"}},
+	} {
+		if recorded, id := call(t, object, in); !recorded || id != fmt.Sprintf("agent_committee_1-r1-%d", i+1) {
+			t.Fatalf("objection %d: recorded %v %q", i+1, recorded, id)
+		}
+	}
+	if saved.Revision != (shed.Pin{Spec: 2}) {
+		t.Fatalf("saved %+v", saved)
+	}
+	if _, err := shed.Encode(saved); err != nil {
+		t.Fatalf("what the tools keep is not a valid record: %v", err)
+	}
+	for _, o := range saved.Objections[:3] {
+		if (shed.Dissent{Objection: o}).Blocking() {
+			t.Fatalf("a metric objection blocks: %+v", o)
+		}
+	}
+	if !(shed.Dissent{Objection: saved.Objections[3]}).Blocking() {
+		t.Fatal("a charter objection is a veto in a climb round too")
+	}
+}
+
+func TestAPlanlessPinNamesTheClimbSpec(t *testing.T) {
+	if got := (shed.Pin{Spec: 3}).String(); got != "climb spec revision 3" {
+		t.Fatalf("pin: %q", got)
+	}
+	if got := two.String(); got != "spec.md revision 2 and plan.json revision 1" {
+		t.Fatalf("pin: %q", got)
+	}
+	r := record(1, alice, shed.Pin{Spec: 1}, 1)
+	r.Objections[0].Kind, r.Objections[0].Part = shed.Metric, "climb#metric"
+	if _, err := shed.Encode(r); err != nil {
+		t.Fatalf("a climb spec round's record: %v", err)
 	}
 }

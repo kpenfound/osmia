@@ -445,6 +445,8 @@ func TestInvalid(t *testing.T) {
 		{"transcribe unknown key", topConfig + "[transcribe]\ntimeout = '5s'\n", "", "transcribe.timeout"},
 		{"transcribe wrong type", topConfig + "[transcribe]\nurl = 1\n", "", "config.toml:"},
 		{"pause override", topConfig + "[pause]\n", "", "runtime overrides belong in runtime.json"},
+		{"unregistered kind table", topConfig + "[kinds.mystery]\n", "", "kinds.mystery: unknown configuration key"},
+		{"kind without settings takes no key", topConfig + "[kinds.feature]\nskills = ['x']\n", "", "kinds.feature.skills: unknown configuration key"},
 		{"priority override", topConfig + "[priority]\n", "", "runtime overrides belong in runtime.json"},
 		{"notify unknown key", topConfig + "[notify]\nemail = 'owner@example.com'\n", "", "notify.email: unknown configuration key"},
 		{"webhook relative", topConfig + "[notify]\nwebhook = '/hooks/osmia'\n", "", "notify.webhook: must be an absolute http or https URL"},
@@ -1052,5 +1054,21 @@ func TestRetiredKeysFailAsUnknownConfigurationKeys(t *testing.T) {
 				t.Fatalf("the error describes the key as retired: %q", err)
 			}
 		})
+	}
+}
+
+// A [kinds.<kind>] table belongs to a registered kind, and a kind that has no
+// settings accepts the empty table.
+func TestKindsTable(t *testing.T) {
+	c, err := load(fixture(t, topConfig+"[kinds.feature]\n", projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Kinds["feature"]; !ok || len(c.KindSkills("feature")) != 0 || len(c.KindSkills("mystery")) != 0 {
+		t.Fatalf("kinds: %+v", c.Kinds)
+	}
+	c, err = load(fixture(t, topConfig, projectConfig))
+	if err != nil || len(c.Kinds) != 0 {
+		t.Fatalf("default kinds: %+v %v", c, err)
 	}
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kinds"
 )
 
 var ErrConflict = errors.New("trace revision or identity conflict")
@@ -633,9 +634,11 @@ func (r *Repository) openAll() (*Repository, error) {
 	return r, errors.Join(errs...)
 }
 
-// SessionKind is the Kind a session workstream's manifest records. An
-// ordinary workstream's Kind is empty.
+// SessionKind is the Kind a session workstream's manifest records.
 const SessionKind = "session"
+
+// FeatureKind is the workstream kind a stored empty kind reads as.
+const FeatureKind = kinds.Feature
 
 type manifestRecord struct {
 	Header
@@ -705,14 +708,20 @@ func validWorkspaces(backend string) bool {
 }
 
 func validSessionFields(stream config.WorkstreamID, m manifestRecord) error {
-	if stream == "" || m.Kind == "" {
+	if stream == "" {
 		if m.Kind != "" || m.Profile != "" || m.Base != "" || m.Branch != "" || m.Title != "" {
 			return fmt.Errorf("only a session workstream may record kind, profile, base, branch or title")
 		}
 		return nil
 	}
 	if m.Kind != SessionKind {
-		return fmt.Errorf("unknown workstream kind %q", m.Kind)
+		if m.Profile != "" || m.Base != "" || m.Branch != "" || m.Title != "" {
+			return fmt.Errorf("only a session workstream may record profile, base, branch or title")
+		}
+		if m.Kind != "" && !key(m.Kind) {
+			return fmt.Errorf("invalid workstream kind %q", m.Kind)
+		}
+		return nil
 	}
 	if !key(m.Profile) || !present(m.Base) || !present(m.Branch) {
 		return fmt.Errorf("a session requires a profile, base commit and branch")
@@ -747,8 +756,10 @@ func (r *Repository) workspaces(stream config.WorkstreamID) (string, error) {
 	return m.Workspaces, nil
 }
 
-// Kind returns a workstream's kind: SessionKind for a session, or "" for an
-// ordinary workstream.
+// Kind returns a workstream's kind: SessionKind for a session, otherwise the
+// workstream kind it was created with. A stored empty kind is FeatureKind. A
+// kind this build does not register is returned as stored; the kinds package
+// decides what it means.
 func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 	if err := config.CheckWorkstreamIDs(stream); err != nil {
 		return "", err
@@ -763,7 +774,53 @@ func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if m.Kind == "" {
+		return FeatureKind, nil
+	}
 	return m.Kind, nil
+}
+
+// Planned reports whether the workstream's kind is built as units from a
+// sealed plan. A workstream whose kind this build does not register is
+// reported as planned, so that nothing treats it as a kind it is not.
+func (r *Repository) Planned(stream config.WorkstreamID) (bool, error) {
+	stored, err := r.Kind(stream)
+	if err != nil {
+		return false, err
+	}
+	kind, ok := kinds.Lookup(stored)
+	return !ok || kind.Documents.Planned(), nil
+}
+
+// RecordedKind returns the kind a workstream's manifest records, empty when
+// it records none.
+func (r *Repository) RecordedKind(stream config.WorkstreamID) (string, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return "", err
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, err := r.workstreamManifest(stream)
+	return m.Kind, err
+}
+
+// CreatedAt returns when a workstream's trace was created.
+func (r *Repository) CreatedAt(stream config.WorkstreamID) (time.Time, error) {
+	if err := config.CheckWorkstreamIDs(stream); err != nil {
+		return time.Time{}, err
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return time.Time{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, err := r.workstreamManifest(stream)
+	return m.Header.At, err
 }
 
 func (r *Repository) workstreamManifest(stream config.WorkstreamID) (manifestRecord, error) {
@@ -785,13 +842,24 @@ func (r *Repository) CreateWorkstream(ctx context.Context, id config.WorkstreamI
 // workstream committed; EnsureChiefOfStaff creates the missing thread. An
 // existing workstream is refused with ErrConflict.
 func (r *Repository) CreateWorkstreamOn(ctx context.Context, id config.WorkstreamID, workspaces string, at time.Time, actor Actor) error {
+	return r.CreateWorkstreamKind(ctx, id, workspaces, "", at, actor)
+}
+
+// CreateWorkstreamKind is CreateWorkstreamOn that records the workstream's
+// kind in the commit that creates it. An empty kind records none and reads as
+// FeatureKind. SessionKind is refused: CreateSessionWorkstream creates
+// sessions.
+func (r *Repository) CreateWorkstreamKind(ctx context.Context, id config.WorkstreamID, workspaces, kind string, at time.Time, actor Actor) error {
+	if kind == SessionKind || kind != "" && !key(kind) {
+		return fmt.Errorf("invalid workstream kind %q", kind)
+	}
 	if r.stream != "" {
 		return fmt.Errorf("a workstream trace instance creates no workstreams of its own")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := createWorkstreamTrace(ctx, r.root, r.project, id, manifestRecord{Workspaces: workspaces}, "workstream-create", "Create workstream trace", at, actor); err != nil {
+	if err := createWorkstreamTrace(ctx, r.root, r.project, id, manifestRecord{Workspaces: workspaces, Kind: kind}, "workstream-create", "Create workstream trace", at, actor); err != nil {
 		return err
 	}
 	s, err := r.scoped(id)
@@ -1044,6 +1112,57 @@ func (r *Repository) append(ctx context.Context, v Record) error {
 		return err
 	}
 	return r.publish(ctx, change{records: []Record{v}, message: fmt.Sprintf("Record %s %s revision %d", kind(v), v.header().ID, v.header().Revision)})
+}
+
+// ErrKindRecorded is returned when a workstream already records a different
+// kind than the one a caller sets: a workstream's kind is set once.
+var ErrKindRecorded = fmt.Errorf("%w: the workstream's kind is already recorded", ErrConflict)
+
+// AppendWithKind records one revision of a workstream and the workstream's
+// kind in the same commit. A workstream that records no kind, or records the
+// same one, has it set; a workstream that records another kind is refused
+// with ErrKindRecorded and nothing is written.
+func (r *Repository) AppendWithKind(ctx context.Context, v Record, workKind string) error {
+	stream := v.header().Workstream
+	if stream == "" || workKind == "" || workKind == SessionKind || !key(workKind) {
+		return fmt.Errorf("a workstream record and a workstream kind are required")
+	}
+	r, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, err := r.workstreamManifest(stream)
+	if err != nil {
+		return err
+	}
+	if m.Kind == SessionKind || m.Kind != "" && m.Kind != workKind {
+		return fmt.Errorf("%w: %q, not %q", ErrKindRecorded, m.Kind, workKind)
+	}
+	if m.Kind == workKind {
+		return r.append(ctx, v)
+	}
+	if err := validate(v); err != nil {
+		return err
+	}
+	if v.header().Project != r.project {
+		return fmt.Errorf("record belongs to a different project")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := r.checkRevisions(ctx, []Record{v}); err != nil {
+		return err
+	}
+	m.Kind = workKind
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	c := change{records: []Record{v}, message: fmt.Sprintf("Record %s %s revision %d and workstream kind %s", kind(v), v.header().ID, v.header().Revision, workKind)}
+	c.setFile("workstreams/"+string(stream)+"/workstream.json", append(data, '\n'))
+	return r.publish(ctx, c)
 }
 
 func (r *Repository) checkRevisions(ctx context.Context, records []Record) error {
