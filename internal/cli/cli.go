@@ -24,6 +24,7 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/service"
+	"github.com/kpenfound/osmia/internal/shed"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
@@ -897,7 +898,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if o.json {
 			return output(stdout, stderr, result)
 		}
-		fmt.Fprintf(stdout, "Workstream %s ratified: spec.md revision %d and plan.json revision %d\n%s\n", result.Workstream, result.Spec, result.Plan, result.Detail)
+		fmt.Fprintf(stdout, "Workstream %s ratified: %s\n%s\n", result.Workstream, shed.Pin{Spec: result.Spec, Plan: result.Plan}, result.Detail)
 		if o.projectSpecRevision > 0 {
 			fmt.Fprintf(stdout, "Workgroup spec revision %d approved.\n", o.projectSpecRevision)
 		}
@@ -1665,7 +1666,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 }
 
 func showPacket(w io.Writer, id config.WorkstreamID, packet wire.PacketResponse) {
-	fmt.Fprintf(w, "Packet revision %d of workstream %s: spec.md revision %d and plan.json revision %d\n", packet.Revision, id, packet.Packet.Revision.Spec, packet.Packet.Revision.Plan)
+	fmt.Fprintf(w, "Packet revision %d of workstream %s: %s\n", packet.Revision, id, packet.Packet.Revision)
 	fmt.Fprintf(w, "%s\n%s\n", packet.Packet.Conclusion, packet.Packet.Recommendation)
 	for _, entry := range packet.Packet.Dissent {
 		content, _ := json.MarshalIndent(entry, "", "  ")

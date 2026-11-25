@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
-	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kinds"
 )
 
 var ErrConflict = errors.New("trace revision or identity conflict")
@@ -778,6 +778,18 @@ func (r *Repository) Kind(stream config.WorkstreamID) (string, error) {
 		return FeatureKind, nil
 	}
 	return m.Kind, nil
+}
+
+// Planned reports whether the workstream's kind is built as units from a
+// sealed plan. A workstream whose kind this build does not register is
+// reported as planned, so that nothing treats it as a kind it is not.
+func (r *Repository) Planned(stream config.WorkstreamID) (bool, error) {
+	stored, err := r.Kind(stream)
+	if err != nil {
+		return false, err
+	}
+	kind, ok := kinds.Lookup(stored)
+	return !ok || kind.Documents.Planned(), nil
 }
 
 // RecordedKind returns the kind a workstream's manifest records, empty when

@@ -38,7 +38,7 @@ func (r Redraft) check() error {
 		return fmt.Errorf("unsupported shed redraft version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("a request for a redraft requires the round debate concluded at")
-	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
+	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("a request for a redraft requires the revision it was made against")
 	case strings.TrimSpace(r.Note) == "":
 		return errors.New("a request for a redraft requires the owner's note")
@@ -113,7 +113,7 @@ func (p Packet) check() error {
 		return fmt.Errorf("unsupported ratification packet version %d", p.Version)
 	case p.Round < 1:
 		return errors.New("a ratification packet requires the round it is presented after")
-	case p.Revision.Spec < 1 || p.Revision.Plan < 1:
+	case p.Revision.Spec < 1 || p.Revision.Plan < 0:
 		return errors.New("a ratification packet requires the revisions it presents")
 	case strings.TrimSpace(p.Conclusion) == "":
 		return errors.New("a ratification packet requires why debate ended")
@@ -275,7 +275,7 @@ func (r Ratification) check() error {
 		return fmt.Errorf("unsupported ratification version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("a ratification requires the round it was given in")
-	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
+	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("a ratification requires the revisions it approves")
 	}
 	if !trace.ValidDecider(r.DecidedBy, r.Judgment) || r.DecidedBy == trace.DecidedByChief {

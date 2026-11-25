@@ -56,7 +56,7 @@ func (r Reply) check() error {
 		return fmt.Errorf("unsupported shed reply version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("shed reply requires a positive round")
-	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
+	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("shed reply requires the revision the round debated")
 	case r.Redraft != nil && !r.Redraft.After(r.Revision):
 		return errors.New("a redraft is a later revision than the one the round debated")

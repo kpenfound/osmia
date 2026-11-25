@@ -12,11 +12,13 @@ import (
 	"strings"
 
 	"github.com/kpenfound/osmia/internal/amendment"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/envelope"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/shed"
@@ -148,11 +150,15 @@ func ReadAmendment(repository *trace.Repository, stream config.WorkstreamID, id 
 	if err != nil {
 		return AmendmentCase{}, false, err
 	}
+	kind, err := StreamKind(repository, stream)
+	if err != nil {
+		return AmendmentCase{}, false, err
+	}
 	for _, d := range docs {
 		switch {
 		case d.Path == AmendmentPacketPath(id) && d.Revision > c.Packet.Revision:
 			c.Packet = d
-		case d.Path == "amendments/"+id+"/"+plan.SpecPath && d.Revision > c.Spec.Revision:
+		case d.Path == "amendments/"+id+"/"+kind.Documents.SpecPath && d.Revision > c.Spec.Revision:
 			c.Spec = d
 		case d.Path == "amendments/"+id+"/"+plan.PlanPath && d.Revision > c.Plan.Revision:
 			c.Plan = d
@@ -567,6 +573,13 @@ func (a AmendmentDebate) Reseal(ctx context.Context, stream config.WorkstreamID,
 	if !matching {
 		return unapplied(fmt.Sprintf("the sealed spec or plan changed since the decision on seal.json revision %d; revision %d is in force", d.SealRevision, sealDoc.Revision))
 	}
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	if !kind.Documents.Planned() {
+		return a.resealClimb(ctx, stream, req, state, d, cause, current, sealDoc, unapplied)
+	}
 	docs, err := trace.Read[trace.Document](a.Repository, stream)
 	if err != nil {
 		return err
@@ -859,6 +872,79 @@ func (a AmendmentDebate) ResumeUnit(ctx context.Context, stream config.Workstrea
 	h := a.AmendmentHeader(resumed, stream, req.Unit, cause)
 	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: h, Subject: subject, From: UnitWaiting, To: stage, Reason: reason}, Events: []trace.Event{trace.Notice(resumed, "unit", reason)}}
 	if _, err := a.Repository.Transact(ctx, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
+		return err
+	}
+	return nil
+}
+
+// resealClimb versions an approved amendment of a climb spec: it records the
+// approved climb spec as the next revision of the spec slot, the seal that
+// names it and the amendment's application, which moves no unit because the
+// kind has none. The seal keeps its base, branch and workspace.
+func (a AmendmentDebate) resealClimb(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState, d AmendmentDecision, cause string, current seal.Seal, sealDoc trace.Document, unapplied func(string) error) error {
+	docs, err := trace.Read[trace.Document](a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	var sealedSpec, draftSpec, affectedDoc trace.Document
+	latestSpec := 0
+	for _, doc := range docs {
+		switch {
+		case doc.ID == kinds.ClimbSpecID:
+			latestSpec = max(latestSpec, doc.Revision)
+			if doc.Revision == current.Revision.Spec {
+				sealedSpec = doc
+			}
+		case doc.Path == "amendments/"+req.ID+"/"+kinds.ClimbSpecPath && doc.Revision == d.Spec:
+			draftSpec = doc
+		case doc.Path == "amendments/"+req.ID+"/affected.json" && doc.Revision >= affectedDoc.Revision:
+			affectedDoc = doc
+		}
+	}
+	if sealedSpec.ID == "" || draftSpec.ID == "" {
+		return fmt.Errorf("amendment %s: the sealed or proposed climb spec revision is missing", req.ID)
+	}
+	if draftSpec.Content == sealedSpec.Content {
+		return unapplied("the approved revision does not change the sealed climb spec")
+	}
+	if _, problems := climb.Check([]byte(draftSpec.Content), ClimbDefaults(a.S.About(a.Repository))); len(problems) > 0 {
+		return unapplied("the approved climb spec does not validate: " + strings.Join(problems, "; "))
+	}
+	at := a.S.Now()
+	document := func(id, path string, revision int, content string) trace.Document {
+		return trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: id, Revision: revision, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: AmendmentActor, Cause: cause}, Path: path, Content: content}
+	}
+	next := current
+	next.Revision.Spec, next.SpecHash, next.Seal = latestSpec+1, seal.SpecHash(draftSpec.Content), current.Seal+1
+	content, err := seal.Encode(next)
+	if err != nil {
+		return err
+	}
+	application := amendment.Application{Amendment: req.ID, Citations: req.Citations, Change: req.Change, Reason: req.Reason, Note: d.Note,
+		From:     amendment.Pin{Seal: current.Seal, SealRevision: sealDoc.Revision, Spec: current.Revision.Spec},
+		To:       amendment.Pin{Seal: next.Seal, SealRevision: sealDoc.Revision + 1, Spec: next.Revision.Spec},
+		Criteria: []string{}, Rework: []string{}, Notify: []string{}, Added: []string{}, Removed: []string{}}
+	if d.Actor == trace.ChiefOfStaff {
+		application.Actor = d.Actor
+	}
+	applied, err := json.MarshalIndent(application, "", "  ")
+	if err != nil {
+		return err
+	}
+	recorded := []trace.Document{
+		document(kinds.ClimbSpecID, kinds.ClimbSpecPath, next.Revision.Spec, draftSpec.Content),
+		document(seal.DocumentID, seal.Path, sealDoc.Revision+1, string(content)),
+		document(amendment.DocumentID(req.ID), amendment.Path(req.ID), 1, string(applied)+"\n"),
+	}
+	feature, err := a.Repository.Workflow(stream, trace.FeatureSubject)
+	if err != nil {
+		return err
+	}
+	id := "amendment-" + req.ID + "-" + AmendmentResealed
+	reason := fmt.Sprintf("approved amendment %s versions %s revision %d; seal %d is recorded on the same base %s; the workstream stays %s and no code is edited", req.ID, kinds.ClimbSpecPath, next.Revision.Spec, next.Seal, current.Base.Commit, feature.Value)
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: a.AmendmentHeader(id, stream, req.Unit, cause), Subject: AmendmentSubject(req.ID), From: AmendmentApproved, To: AmendmentResealed, Reason: reason},
+		Events: []trace.Event{trace.Notice(id, "amendment", reason)}}
+	if _, err := a.Repository.RecordDocumentsWith(ctx, recorded, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
 		return err
 	}
 	return nil

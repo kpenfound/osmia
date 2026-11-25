@@ -128,7 +128,7 @@ func TestGateFilesRequireTheirContentAndRoundTrip(t *testing.T) {
 	for name, broken := range map[string]func(*shed.Packet){
 		"no version":        func(p *shed.Packet) { p.Version = 0 },
 		"no round":          func(p *shed.Packet) { p.Round = 0 },
-		"no revision":       func(p *shed.Packet) { p.Revision = shed.Pin{Spec: 1} },
+		"no revision":       func(p *shed.Packet) { p.Revision = shed.Pin{Spec: 1, Plan: -1} },
 		"no conclusion":     func(p *shed.Packet) { p.Conclusion = " " },
 		"no recommendation": func(p *shed.Packet) { p.Recommendation = "" },
 	} {

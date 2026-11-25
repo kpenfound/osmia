@@ -60,7 +60,7 @@ func (c ChiefDecisions) check() error {
 		return fmt.Errorf("unsupported chief of staff decisions version %d", c.Version)
 	case c.Round < 1:
 		return errors.New("chief of staff decisions require a positive round")
-	case c.Revision.Spec < 1 || c.Revision.Plan < 1:
+	case c.Revision.Spec < 1 || c.Revision.Plan < 0:
 		return errors.New("chief of staff decisions require the revision they were made against")
 	}
 	seen := map[string]bool{}

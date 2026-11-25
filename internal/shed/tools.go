@@ -38,6 +38,12 @@ const CitationForms = "charter#<n> or <project>/charter#<n> (a member charter ru
 // PartForms lists the parts an objection may concern.
 const PartForms = "spec#<n> (an acceptance criterion), plan#<unit> (a unit), spec (the spec as a whole) or plan (the plan as a whole)"
 
+// ClimbPartForms lists the parts an objection to a climb spec may concern.
+const ClimbPartForms = "climb#goal, climb#evaluator, climb#metric, climb#guardrails, climb#protected, climb#stop (a part of the climb spec) or spec (the climb spec as a whole)"
+
+// ClimbCitationForms lists what an objection to a climb spec may cite.
+const ClimbCitationForms = "climb#<part> (a part of the climb spec), charter#<n> or <project>/charter#<n> (a member charter rule), or " + EntityCitation + "<entity> (an entity of the entity map)"
+
 // Turn is one member's turn of a round: what its tools validate against and
 // where they keep what the member contributed.
 type Turn struct {
@@ -50,6 +56,9 @@ type Turn struct {
 	// Spec and Plan are the pinned revisions the member reads.
 	Spec plan.Spec
 	Plan plan.Plan
+	// Climb says the round debates a climb spec, which has no criteria and no
+	// units: objections concern its parts and are of the climb kinds.
+	Climb bool
 	// Earlier holds the workstream's records of earlier rounds.
 	Earlier []Record
 	Now     func() time.Time
@@ -84,8 +93,12 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 		return nil, err
 	}
 	var mu sync.Mutex
-	kinds := make([]string, len(Kinds))
-	for i, k := range Kinds {
+	objectionKinds := Kinds
+	if t.Climb {
+		objectionKinds = ClimbKinds
+	}
+	kinds := make([]string, len(objectionKinds))
+	for i, k := range objectionKinds {
 		kinds[i] = string(k)
 	}
 	schema, err := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "part", "argument", "citations"},
@@ -94,10 +107,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	object := coreadapter.Tool{Name: ObjectTool, Effect: coreadapter.ToolMemory, InputSchema: schema,
-		Description: "Object to one part of the spec or the plan. kind: charter_conflict (two member charters conflict; cite both rules; only the owner resolves it), charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
-			"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
-			"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."}
+	object := coreadapter.Tool{Name: ObjectTool, Effect: coreadapter.ToolMemory, InputSchema: schema, Description: t.objectDescription()}
 	object.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Kind      Kind     `json:"kind"`
@@ -152,8 +162,21 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 	return []coreadapter.Tool{object, concede}, nil
 }
 
+func (t Turn) objectDescription() string {
+	if t.Climb {
+		return "Object to one part of the climb spec. kind: metric (the metric can be gamed, is too noisy to climb on, or the protected paths leave out something the evaluator or its fixtures depend on; advice), charter (the part violates a charter rule; a veto) or charter_conflict (two member charters conflict; cite both rules; only the owner resolves it). " +
+			"part: " + ClimbPartForms + ". argument: why. citations: at least one of " + ClimbCitationForms + "; each must exist, and a charter objection must cite the charter rule."
+	}
+	return "Object to one part of the spec or the plan. kind: charter_conflict (two member charters conflict; cite both rules; only the owner resolves it), charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
+		"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
+		"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."
+}
+
 func (t Turn) checkObjection(ctx context.Context, o Objection) error {
-	if !slices.Contains(Kinds, o.Kind) {
+	if t.Climb && !slices.Contains(ClimbKinds, o.Kind) {
+		return invalid("kind %q is not one of metric, charter or charter_conflict", o.Kind)
+	}
+	if !t.Climb && !slices.Contains(Kinds, o.Kind) {
 		return invalid("kind %q is not one of charter, charter_conflict, fit, size or acceptance", o.Kind)
 	}
 	if strings.TrimSpace(o.Argument) == "" {
@@ -182,6 +205,12 @@ func (t Turn) checkObjection(ctx context.Context, o Objection) error {
 }
 
 func (t Turn) checkPart(kind Kind, part string) error {
+	if t.Climb {
+		if part == WholeSpec || climbPart(part) {
+			return nil
+		}
+		return invalid("part %q is not one of %s", part, ClimbPartForms)
+	}
 	_, criterion := plan.ParseCitation(part)
 	unit := strings.HasPrefix(part, planCitation)
 	switch {
@@ -198,6 +227,11 @@ func (t Turn) checkPart(kind Kind, part string) error {
 		return nil
 	}
 	return invalid("part %q is not one of %s", part, PartForms)
+}
+
+func climbPart(reference string) bool {
+	name, ok := strings.CutPrefix(reference, ClimbCitation)
+	return ok && slices.Contains(ClimbParts, name)
 }
 
 func (t Turn) pinned(reference string) error {
@@ -221,6 +255,13 @@ func (t Turn) pinned(reference string) error {
 func (t Turn) Resolve(ctx context.Context, citation string) error {
 	_, criterion := plan.ParseCitation(citation)
 	switch {
+	case t.Climb && strings.HasPrefix(citation, ClimbCitation):
+		if !climbPart(citation) {
+			return invalid("citation %q does not resolve: the climb spec has no such part; the parts are %s", citation, strings.Join(ClimbParts, ", "))
+		}
+		return nil
+	case t.Climb && (criterion || strings.HasPrefix(citation, planCitation)):
+		return invalid("citation %q does not resolve: a climb spec has no criteria and no units; cite %s", citation, ClimbCitationForms)
 	case criterion || strings.HasPrefix(citation, planCitation):
 		if err := t.pinned(citation); err != nil {
 			return invalid("citation %q does not resolve: %s", citation, err.(*Invalid).Reason)

@@ -39,10 +39,25 @@ const (
 	// Acceptance says a unit's task is unclear or its acceptance cannot be
 	// verified from the unit's work.
 	Acceptance Kind = "acceptance"
+	// Metric says the climb spec's metric can be gamed, is too noisy to climb
+	// on or leaves a path unprotected. It is advice to the owner, and only a
+	// climb spec's round has it.
+	Metric Kind = "metric"
 )
 
-// Kinds lists the objection kinds in the order prompts and schemas give them.
+// Kinds lists the objection kinds of a spec and plan in the order prompts and
+// schemas give them.
 var Kinds = []Kind{Charter, Fit, Size, Acceptance, CharterConflict}
+
+// ClimbKinds lists the objection kinds of a climb spec's round.
+var ClimbKinds = []Kind{Metric, Charter, CharterConflict}
+
+// ClimbParts lists the parts of a climb spec an objection may concern, besides
+// the climb spec as a whole.
+var ClimbParts = []string{"goal", "evaluator", "metric", "guardrails", "protected", "stop"}
+
+// ClimbCitation prefixes the citation of a part of the climb spec.
+const ClimbCitation = "climb#"
 
 // Pin is the revision of spec.md and of plan.json a round runs against.
 type Pin struct {
@@ -55,6 +70,9 @@ type Pin struct {
 func (p Pin) After(q Pin) bool { return p != q && p.Spec >= q.Spec && p.Plan >= q.Plan }
 
 func (p Pin) String() string {
+	if p.Plan == 0 {
+		return fmt.Sprintf("climb spec revision %d", p.Spec)
+	}
 	return fmt.Sprintf("spec.md revision %d and plan.json revision %d", p.Spec, p.Plan)
 }
 
@@ -120,7 +138,7 @@ func (r Record) check() error {
 		return errors.New("shed record requires a positive round")
 	case !memberPattern.MatchString(r.Member) || reserved(r.Member):
 		return fmt.Errorf("invalid shed member %q", r.Member)
-	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
+	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("shed record requires the revision it was made against")
 	case r.Owned() && (len(r.Concessions) > 0 || r.Failure != "" || r.Turn != ""):
 		return errors.New("the owner's record holds objections alone: the owner runs no turn")
@@ -135,7 +153,7 @@ func (r Record) check() error {
 			}
 			continue
 		}
-		if !slices.Contains(Kinds, o.Kind) || strings.TrimSpace(o.Part) == "" || strings.TrimSpace(o.Argument) == "" || len(o.Citations) == 0 {
+		if !slices.Contains(Kinds, o.Kind) && !slices.Contains(ClimbKinds, o.Kind) || strings.TrimSpace(o.Part) == "" || strings.TrimSpace(o.Argument) == "" || len(o.Citations) == 0 {
 			return fmt.Errorf("objection %s requires a kind, a part, an argument and a citation", o.ID)
 		}
 	}

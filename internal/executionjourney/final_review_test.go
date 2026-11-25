@@ -278,7 +278,9 @@ func TestFinalReviewRunsOnceAcrossARepeatedApplyAndARestart(t *testing.T) {
 	if _, reason, err := live.FinalGate(ctx, a.stream); err != nil || reason != "" {
 		t.Fatalf("the report after a restart does not authorise: %q %v", reason, err)
 	}
-	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord { return journey.FinalOperations(t, f.Repository(), a.stream) }); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &r.result) {
+	if ops := fixturekit.AwaitAcknowledged(t, func(t *testing.T) []trace.OperationRecord {
+		return journey.FinalOperations(t, f.Repository(), a.stream)
+	}); len(ops) != 1 || !reflect.DeepEqual(ops[0].Result, &r.result) {
 		t.Fatalf("final review operations after a restart %+v", ops)
 	}
 	f.Stop(t)

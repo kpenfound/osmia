@@ -736,6 +736,58 @@ func (c *Config) KindSkills(name string) []string {
 	return kind.Settings.Skills(c.Kinds[kind.Name])
 }
 
+// HillClimb returns the `[kinds.hill-climb]` settings with their defaults. A
+// table that does not parse is refused when the configuration loads, so a
+// loaded configuration always parses.
+func (c *Config) HillClimb() kinds.HillClimbSettings {
+	s, _ := kinds.ParseHillClimb(c.Kinds[kinds.HillClimb])
+	return s
+}
+
+// KindTurnSkills returns the skills a turn of a workstream of the kind loads
+// beyond its role's: the kind's configured skills on the turns the kind lists,
+// and none on any other turn.
+func (c *Config) KindTurnSkills(name string, turn kinds.Turn) []string {
+	kind, ok := kinds.Lookup(name)
+	if !ok || !kind.LoadsSkillsOn(turn) {
+		return nil
+	}
+	return c.KindSkills(kind.Name)
+}
+
+// WithUnitKindSkills is WithKindSkills for the turn of a unit's mason or
+// reviewer: the kind's skills load on the evaluator unit's turns, as the
+// kind lists them, and on no other unit's.
+func (c *Config) WithUnitKindSkills(settings coreadapter.ExecutionSettings, name, role, unit string) coreadapter.ExecutionSettings {
+	if unit != kinds.EvaluatorUnit {
+		return settings
+	}
+	switch role {
+	case "mason":
+		return c.WithKindSkills(settings, name, kinds.TurnEvaluatorMason)
+	case "reviewer":
+		return c.WithKindSkills(settings, name, kinds.TurnEvaluatorReviewer)
+	}
+	return settings
+}
+
+// WithKindSkills returns settings with the kind's skills for the turn added to
+// the role's own. Settings are returned as they are for a turn that loads none.
+func (c *Config) WithKindSkills(settings coreadapter.ExecutionSettings, name string, turn kinds.Turn) coreadapter.ExecutionSettings {
+	extra := c.KindTurnSkills(name, turn)
+	if len(extra) == 0 {
+		return settings
+	}
+	merged := slices.Clone(settings.Skills)
+	for _, ref := range extra {
+		if !slices.Contains(merged, ref) {
+			merged = append(merged, ref)
+		}
+	}
+	settings.Skills = merged
+	return settings
+}
+
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {

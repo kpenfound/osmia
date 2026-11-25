@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kinds"
 )
 
 const Version = 1
@@ -362,7 +363,7 @@ func documentPath(p string, stream bool) error {
 	if !stream && (memoryPath(parts) || hearsayPostedPath(parts) || hearsayKeptPath(parts) || p == "charter.md" || p == "kb/entities.json" || p == "kb/sources.json" || p == WorkgroupsPath || p == WorkgroupResolutionsPath || flakePath(parts) || p == ProjectSpecsPath || p == ProjectAmendmentsPath || (len(parts) == 2 && parts[0] == "notices" && strings.HasSuffix(parts[1], ".json") && key(strings.TrimSuffix(parts[1], ".json"))) || (len(parts) == 2 && (parts[0] == "kb" || parts[0] == "notes") && strings.HasSuffix(parts[1], ".md"))) {
 		return nil
 	}
-	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == "edge-waivers.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || clientEventPath(parts) || judgmentPath(parts) || routePath(parts) || recoveryPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts) || climbAttemptPath(parts)) {
+	if stream && ((p == "owner/projects.json" || p == "base.json" || p == "base-observation.json" || p == "own-pull-request-outcome.json" || p == "edge-observation.json" || p == "edge-waivers.json" || p == AssumptionsPath) || p == "spec.md" || p == "plan.json" || p == kinds.ClimbSpecPath || p == "seal.json" || (len(parts) == 2 && parts[0] == "handed") || amendmentDraftPath(parts) || amendmentRoundPath(parts) || shedPath(parts) || unitPath(parts) || finalPath(parts) || driftPath(parts) || toolPath(parts) || clientEventPath(parts) || judgmentPath(parts) || routePath(parts) || recoveryPath(parts) || sealingPath(parts) || charterProposalPath(parts) || adaptiveDocumentPath(parts) || sessionEntryPath(parts) || sessionCheckPath(parts) || workstreamMovePath(parts) || climbAttemptPath(parts)) {
 		return nil
 	}
 	return fmt.Errorf("unsupported document path %q", p)
@@ -399,7 +400,7 @@ func sessionCheckPath(parts []string) bool {
 }
 
 func amendmentDraftPath(parts []string) bool {
-	return len(parts) == 3 && parts[0] == "amendments" && shedRound.MatchString("round-"+parts[1]) && (parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == "affected.json")
+	return len(parts) == 3 && parts[0] == "amendments" && shedRound.MatchString("round-"+parts[1]) && (parts[2] == "spec.md" || parts[2] == "plan.json" || parts[2] == kinds.ClimbSpecPath || parts[2] == "affected.json")
 }
 
 func amendmentRoundPath(parts []string) bool {

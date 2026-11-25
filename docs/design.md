@@ -418,6 +418,31 @@ Every kind shares the outer states of §5.1: handed, sketched, in-shed, ratified
 
 The kind is chosen at hand-in and fixed after it, so a new kind adds no migration: workstreams that record an older kind, or none, keep reading as they did.
 
+**What a kind says about its documents.** The registry entry says which document sits in a workstream's spec slot, where it is recorded, whether the kind has a plan beside it and how many committee rounds it gets. Seal and build admission ask the kind rather than assuming a spec and a plan. A seal of a kind with a plan records positive revisions of both and is admitted into `building` by recording each unit of the sealed plan, exactly as before. A seal of a kind without a plan records the spec-slot revision alone, with plan revision 0, and records `kind` in `seal.json`; a Feature seal records no `kind`, so it is unchanged. The service refuses to seal a plan revision for a kind without one and a missing plan revision for a kind with one.
+
+### 5.7 Hill Climb
+
+`hill-climb` is the second kind: it improves one measured number by repeated attempts, in one existing project. Its flags are all off: it has no units and no plan, cannot join a multi-project workgroup, takes no upstream drift while building, cannot be a base or have dependency edges, and cannot target a brand-new project. `draft_brief` refuses a `hill-climb` brief of more than one project or with a `new_project`, with a reason the design agent can act on, and Start checks the same again. A workgroup of this kind has exactly one member.
+
+**The climb spec.** For this kind the architect drafts one document, `climb-spec.json`, in place of a spec and a plan. It is recorded in the spec slot of the ratification, so every shed record, the ratification packet and the seal pin it as `climb spec revision <n>` with no plan revision. It is a JSON object with these fields, and a draft that misses a required one or carries an invalid value is refused with every problem listed:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | `1`. |
+| `goal` | Required. Prose. |
+| `evaluator` | Required. The name of the function in the dev module, the module that `dagger.toml` marks `main = true`, that measures one run. Each climb may create its own. |
+| `metric` | Required. `name` is the primary metric as the evaluator reports it, `direction` is `higher` or `lower`, and `min_improvement` is the absolute improvement above zero, in the metric's units, an attempt must reach over the best to be kept. |
+| `repeats` | Optional. The measurements per attempt, k. It defaults to `[kinds.hill-climb] repeats`, and that to 1. |
+| `guardrails` | Optional. `checks` lists project checks that must still pass. `limits` bounds secondary metrics: each names the metric, the `direction` the evaluator reports it with and a `min` or a `max`. The primary metric is never limited. |
+| `protected` | Optional. `fixtures` declares the files the evaluator reads and `add` names further paths to freeze. The protected paths are always the dev module, `dagger.toml`, `dagger.lock`, the fixtures and the additions. |
+| `stop` | `max_attempts` is required and a hard limit. `max_cost_usd` and `max_wall_clock` are optional hard limits. `plateau`, the attempts without improvement, and `target`, a score that ends the climb, are optional and soft. |
+
+**One metric round.** The shed gives a climb spec exactly one committee round, which looks only at the metric: whether it can be gamed, whether it is too noisy to climb on and whether a path the measurement depends on is missing from the protected paths. A committee member's objections are of kind `metric`, which is advice to the owner, or `charter`, a veto, and concern a part of the climb spec as `climb#goal`, `climb#evaluator`, `climb#metric`, `climb#guardrails`, `climb#protected` or `climb#stop`. The architect answers once, and the owner ratifies the revision the packet names. The owner cannot ask for further rounds or for a redraft that is debated again, and `--skip-debate` goes straight to ratification. A change after ratification is an amendment: the architect revises the climb spec, one metric round debates it, the owner decides it, and approving it versions the climb spec and the seal on the same base. An amendment to a climb spec changes approved intent, so the chief of staff does not decide it.
+
+**Seal and admission.** A ratified climb spec is sealed, which creates the climb branch, and the workstream moves to `building` without a plan and with no unit states. The building loop reads the sealed climb spec through the seal's spec-slot revision. A Feature workstream without a ratified plan is still refused by its seal.
+
+**Settings and skills.** `[kinds.hill-climb]` configures `skills`, the calibration run count, the default repeats and the measurement timeout, as [configuration](configuration.md#workstream-kind-settings) describes. The configured skills load on the architect's turns that draft, answer for or amend the climb spec, on the committee's turns of the metric round and on the evaluator unit's mason and reviewer turns, and on no other turn. The intended entry is the skills project's `hill-climb-evaluator` skill; Osmia names it in configuration and here and never bundles it.
+
 ---
 
 ## 6. The chief of staff and questions

@@ -342,7 +342,22 @@ sources = ["api", "operation", "github"]
 refresh = "24h"
 
 # [kinds.<kind>] holds the settings a workstream kind owns; see "Workstream
-# kind settings". The registered kind `feature` has none.
+# kind settings". The registered kind `feature` has none, and `hill-climb`
+# has the four keys below.
+[kinds.hill-climb]
+# Skills loaded only on the turns that write or judge the evaluator: the
+# architect's climb-spec turns, the climb spec's metric round and the evaluator
+# unit's mason and reviewer. The intended entry is the skills project's
+# `hill-climb-evaluator` skill; Osmia refers to it by reference and never
+# bundles it. Empty loads none.
+skills = []
+# How many times calibration runs the evaluator to establish the baseline and
+# the run-to-run spread (2 to 25).
+calibration_runs = 3
+# The repeats k of a climb spec that sets none (1 to 25).
+repeats = 1
+# The limit on one run of the evaluator, from 1m to 24h.
+measurement_timeout = "15m"
 
 [transcribe]
 # The full OpenAI-compatible transcription endpoint recorded audio is posted
@@ -1172,6 +1187,34 @@ for settings, never for adding a kind. The kind `feature` has no settings: an
 empty `[kinds.feature]` table is accepted and any key in it is refused. A table
 for a kind the build does not register fails to load with `unknown configuration
 key`. See [Workstream kinds](design.md#56-workstream-kinds).
+
+The kind `hill-climb` has these keys, each optional:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `skills` | none | Skill references, as in [Role skills](#role-skills), that the kind loads on the turns listed below and on no other. |
+| `calibration_runs` | `3` | How many times calibration runs the evaluator on the evaluator commit, from 2 to 25. The baseline and the run-to-run spread come from these runs. |
+| `repeats` | `1` | The number of measurements per attempt, k, for a climb spec that sets none, from 1 to 25. A climb spec's own `repeats` wins. |
+| `measurement_timeout` | `15m` | The limit on one run of the evaluator, a duration from `1m` to `24h`. |
+
+The skills load on these turns: the architect's turns that draft, answer for or
+amend the climb spec, the committee's turns in the climb spec's metric round, and
+the mason and reviewer turns of the evaluator unit. They are added to the skills
+of the turn's own role. They never load on a climbing attempt's turns, on the
+chief of staff, on a final review, on a Feature workstream or on any other turn.
+The intended entry is the `hill-climb-evaluator` skill of the skills project, the
+one definition of what an evaluator must be that the service's parser also
+accepts:
+
+```toml
+[kinds.hill-climb]
+skills = ["https://github.com/kpenfound/skills#hill-climb-evaluator"]
+```
+
+Osmia refers to the skill by that reference only. It does not bundle, copy or
+pin the skill's content, so renaming or removing the skill means changing this
+setting and the [Workstream kinds](design.md#56-workstream-kinds) section
+together.
 
 ### Role skills
 

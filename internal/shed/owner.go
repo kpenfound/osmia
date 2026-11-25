@@ -111,7 +111,7 @@ func (r Rulings) check() error {
 		return fmt.Errorf("unsupported shed rulings version %d", r.Version)
 	case r.Round < 1:
 		return errors.New("shed rulings require a positive round")
-	case r.Revision.Spec < 1 || r.Revision.Plan < 1:
+	case r.Revision.Spec < 1 || r.Revision.Plan < 0:
 		return errors.New("shed rulings require the revision they were made against")
 	}
 	seen := map[string]bool{}

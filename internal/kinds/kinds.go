@@ -42,7 +42,13 @@ type Documents struct {
 	Drafted  []string
 	Debated  []string
 	Ratified []string
+	// SpecPath is the workstream path of the document in the spec slot.
+	SpecPath string
 }
+
+// Planned reports whether the kind ratifies a plan beside its spec, so that
+// its seal and its ratification pin a plan revision.
+func (d Documents) Planned() bool { return slices.Contains(d.Ratified, "plan") }
 
 // Loop describes the inner machine a kind runs while a workstream is
 // building.
@@ -80,7 +86,12 @@ type Kind struct {
 	Flags   Flags
 
 	Documents Documents
-	Loop      Loop
+	// Rounds is the number of committee rounds the kind's document gets. Zero
+	// leaves the rounds to shed.max_rounds and the owner's requests.
+	Rounds int
+	Loop   Loop
+	// SkillTurns lists the turns on which the kind's configured skills load.
+	SkillTurns []Turn
 
 	// PullRequestSection returns the kind's section of the pull-request body,
 	// or the empty string for none.
@@ -98,7 +109,7 @@ var feature = Kind{
 	Name:      Feature,
 	UseWhen:   "the work is a change to the project's code, docs or configuration that is specified, planned and built as units, in one project or across several.",
 	Flags:     Flags{Units: true, MultiProject: true, UpstreamDrift: true, Dependencies: true, NewProject: true},
-	Documents: Documents{Drafted: []string{"spec", "plan"}, Debated: []string{"spec", "plan"}, Ratified: []string{"spec", "plan"}},
+	Documents: Documents{Drafted: []string{"spec", "plan"}, Debated: []string{"spec", "plan"}, Ratified: []string{"spec", "plan"}, SpecPath: "spec.md"},
 	Loop:      Loop{Name: "units", States: unitStates},
 	PullRequestSection: func(PullRequest) string {
 		return ""
@@ -130,7 +141,7 @@ func unitsSummary(units Units) string {
 	return fmt.Sprintf("%d %s: %s", total, noun, strings.Join(parts, ", "))
 }
 
-var registered = []Kind{feature}
+var registered = []Kind{feature, hillClimb}
 
 // All lists the registered kinds in registration order.
 func All() []Kind { return slices.Clone(registered) }
@@ -256,3 +267,7 @@ func Catalog() string {
 	}
 	return b.String()
 }
+
+// LoadsSkillsOn reports whether the kind's configured skills load on the
+// turn. A kind loads them on the turns it lists and on no other.
+func (k Kind) LoadsSkillsOn(turn Turn) bool { return slices.Contains(k.SkillTurns, turn) }

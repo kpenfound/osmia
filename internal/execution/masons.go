@@ -619,6 +619,9 @@ func (m *masons) ReadSealed(stream config.WorkstreamID) (building, bool, error) 
 	if err != nil || !found {
 		return building{}, false, err
 	}
+	if planned, err := m.repository.Planned(stream); err != nil || !planned {
+		return building{}, false, err
+	}
 	graph, err := sealedPlan(m.repository, stream, latest.Revision.Plan)
 	if err != nil {
 		return building{}, false, err

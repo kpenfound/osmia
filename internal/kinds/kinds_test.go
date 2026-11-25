@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestRegistryListsFeatureOnly(t *testing.T) {
-	if got := Names(); !slices.Equal(got, []string{"feature"}) {
+func TestRegistryListsFeatureAndHillClimb(t *testing.T) {
+	if got := Names(); !slices.Equal(got, []string{"feature", "hill-climb"}) {
 		t.Fatalf("registered kinds: %v", got)
 	}
 }
@@ -102,7 +102,7 @@ func TestCatalogListsEachKindWithUseWhenAndLimits(t *testing.T) {
 			t.Fatalf("catalog lacks %s: %s", k.Name, catalog)
 		}
 	}
-	if !strings.Contains(catalog, "Limits: none.") {
+	if !strings.Contains(catalog, "- feature: use when") || !strings.Contains(catalog, "Limits: none.") {
 		t.Fatalf("catalog: %s", catalog)
 	}
 	saved := registered

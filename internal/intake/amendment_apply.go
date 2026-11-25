@@ -106,6 +106,13 @@ func (a AmendmentDebate) ApplyAmendment(ctx context.Context, stream config.Works
 	if doc.Revision == 0 {
 		return fmt.Errorf("resealed amendment %s has no %s", req.ID, amendment.Path(req.ID))
 	}
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	if !kind.Documents.Planned() {
+		return a.applyClimb(ctx, stream, req, state, app, doc)
+	}
 	b, found, err := a.S.BuildState(a.Repository, stream)
 	if err != nil || !found {
 		return err
@@ -408,4 +415,46 @@ func AmendedMasonPrompt(app amendment.Application, m bundle.Mason, rework bool) 
 		what = strings.ReplaceAll(what, "The owner", "The chief of staff")
 	}
 	return fmt.Sprintf("%s When the task is done and its acceptance holds, call done with the outcome of your work, then end your turn.\n\n%s", what, m.Render())
+}
+
+// applyClimb applies a resealed amendment of a climb spec. A climb has no unit
+// to rework or notify, so applying records that the climb reads the amended
+// climb spec from its next step on, and invalidates the final review that read
+// the sealed one.
+func (a AmendmentDebate) applyClimb(ctx context.Context, stream config.WorkstreamID, req trace.Amendment, state trace.WorkflowState, app amendment.Application, doc trace.Document) error {
+	cause := "amendment-" + req.ID + "-" + AmendmentResealed
+	at := a.S.Now()
+	header := func(id string) trace.Header {
+		h := a.AmendmentHeader(id, stream, req.Unit, cause)
+		h.At = at
+		return h
+	}
+	id := "amendment-" + req.ID + "-" + AmendmentApplied
+	applied := amendment.Applied{Held: []string{}, Followups: []string{}}
+	events := []trace.Event{}
+	report, reported, err := a.S.LatestFinalReport(a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	if reported && report.Seal == app.From.Seal && report.Spec == app.From.Spec {
+		applied.FinalReview = report.Review
+		events = append(events, trace.Notice(id, "final-review", fmt.Sprintf("Final review %d read seal %d, climb spec revision %d, which amendment %s replaced: its report no longer authorises delivery. Final review runs again once the climb concludes.", report.Review, report.Seal, report.Spec, req.ID)))
+	}
+	app.Applied = &applied
+	content, err := json.MarshalIndent(app, "", "  ")
+	if err != nil {
+		return err
+	}
+	docs := []trace.Document{{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.ID, Revision: doc.Revision + 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: AmendmentActor, Cause: cause},
+		Path: doc.Path, Content: string(content) + "\n"}}
+	reason := fmt.Sprintf("approved amendment %s is applied to seal %d: the climb reads climb spec revision %d from its next step on", req.ID, app.To.Seal, app.To.Spec)
+	if applied.FinalReview > 0 {
+		reason += fmt.Sprintf("; final review %d is invalidated", applied.FinalReview)
+	}
+	events = append([]trace.Event{trace.Notice(id, "amendment", reason)}, events...)
+	tx := trace.Transaction{ExpectedVersion: state.Version, Transition: trace.Transition{Header: header(id), Subject: AmendmentSubject(req.ID), From: AmendmentResealed, To: AmendmentApplied, Reason: reason}, Events: events}
+	if _, err := a.Repository.RecordDocumentsWith(ctx, docs, tx); err != nil && !errors.Is(err, trace.ErrConflict) {
+		return err
+	}
+	return a.S.Step("amendment-applied")
 }

@@ -182,12 +182,12 @@ func latestStatus(records []Record, stream config.WorkstreamID) *Status {
 // question, answer, owner decision or delivery outcome is recorded for it.
 // Reading the workstream never changes it.
 type WorkstreamStatus struct {
-	Workstream    config.WorkstreamID
-	Workspaces    string
-	Kind          string
+	Workstream config.WorkstreamID
+	Workspaces string
+	Kind       string
 	// WorkKind is the workstream kind of a workstream that is not a session:
 	// the kind it records, or FeatureKind when it records none.
-	WorkKind string
+	WorkKind      string
 	Profile       string
 	Base          string
 	Branch        string

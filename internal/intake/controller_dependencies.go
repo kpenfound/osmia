@@ -98,6 +98,7 @@ func (c *Controller) SealerDependencies() *SealerDependencies {
 
 // BuilderDependencies contains the boundaries used by the builder controller.
 type BuilderDependencies struct {
+	About                func(repository *trace.Repository) *config.Config
 	ChangeHeld           func(repo *trace.Repository, stream config.WorkstreamID) (bool, error)
 	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
 	Now                  func() time.Time
@@ -106,6 +107,7 @@ type BuilderDependencies struct {
 
 func (c *Controller) BuilderDependencies() *BuilderDependencies {
 	return &BuilderDependencies{
+		About:                c.About,
 		ChangeHeld:           c.ChangeHeld,
 		ChangeRepositoryHeld: c.ChangeRepositoryHeld,
 		Now:                  c.Now,

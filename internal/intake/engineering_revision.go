@@ -21,6 +21,9 @@ func (s *Controller) EngineeringRevision(r *trace.Repository, stream config.Work
 	if strings.TrimSpace(note) == "" {
 		return refuse("an engineering decision requires its reasoning against approved intent")
 	}
+	if kind, err := StreamKind(r, stream); err == nil && !kind.Documents.Planned() {
+		return refuse(fmt.Sprintf("a change to a %s workstream's climb spec changes approved intent and requires an owner decision", kind.Name))
+	}
 	rounds, err := s.FinalRoundsWithBlocking(r, stream)
 	if err != nil {
 		return &APIError{Code: Internal, Message: err.Error()}

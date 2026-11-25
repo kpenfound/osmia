@@ -16,10 +16,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/kpenfound/osmia/internal/bundle"
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/kb"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/router"
@@ -763,6 +765,10 @@ func (d *Drafter) Enqueue(ctx context.Context, cfg *config.Config, stream config
 	if err != nil {
 		return err
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return err
+	}
 	previous, drafted := "", false
 	if n > 1 {
 		last, err := d.Previous(stream, n-1)
@@ -774,13 +780,19 @@ func (d *Drafter) Enqueue(ctx context.Context, cfg *config.Config, stream config
 		if err != nil {
 			return err
 		}
-		_, spec := latest[plan.SpecDocument]
-		_, graph := latest[plan.PlanDocument]
-		drafted = spec || graph
+		for _, f := range DraftFiles(kind) {
+			if _, ok := latest[f.ID]; ok {
+				drafted = true
+			}
+		}
 	}
 	turn := DraftTurnID(n, attempt)
+	systemPrompt, prompt := ArchitectSystemPrompt(cfg.Project), ArchitectPrompt(handed.Path, n, previous, drafted, in.Note, answers)
+	if !kind.Documents.Planned() {
+		systemPrompt, prompt = ClimbSystemPrompt(cfg.Project), ClimbPrompt(handed.Path, n, previous, drafted, in.Note, answers)
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.Repository.Project(), Workstream: stream, At: d.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1},
-		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ArchitectSystemPrompt(cfg.Project), Prompt: ArchitectPrompt(handed.Path, n, previous, drafted, in.Note, answers)}
+		AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt, Prompt: prompt}
 	_, err = d.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -880,7 +892,11 @@ func (d *Drafter) Turns(stream config.WorkstreamID) *isolation.Turns {
 			if _, amending := AmendmentTurnID(origin); amending {
 				judge = (&AmendmentDrafter{d}).Judge
 			}
-			return append([]coreadapter.Tool{d.S.FactoryContext(d.Repository, scope), d.S.RemoteFileTool(d.Repository, scope, d.S.Now), d.S.InspectCode(d.S.About(d.Repository), d.Repository, scope, d.S.Now), d.DraftTool(scope, origin, judge)}, ask...), nil
+			kind, err := StreamKind(d.Repository, stream)
+			if err != nil {
+				return nil, err
+			}
+			return append([]coreadapter.Tool{d.S.FactoryContext(d.Repository, scope), d.S.RemoteFileTool(d.Repository, scope, d.S.Now), d.S.InspectCode(d.S.About(d.Repository), d.Repository, scope, d.S.Now), d.DraftToolFor(kind, scope, origin, judge)}, ask...), nil
 		},
 		Hosts:  hosts,
 		Engine: engine,
@@ -940,10 +956,20 @@ var DraftNext = map[string]string{
 
 // Judge is the draftJudge of a workstream's own draft: both files must be
 // delivered within the attempt and pass validation.
-func (d *Drafter) Judge(_ context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
-	files, problems, err := d.Delivered(stream, attempt)
+func (d *Drafter) Judge(ctx context.Context, stream config.WorkstreamID, attempt string) (string, []string, error) {
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return DraftInvalid, nil, err
+	}
+	files, problems, err := d.DeliveredFor(kind, stream, attempt)
 	if err != nil || len(problems) > 0 {
 		return DraftInvalid, problems, err
+	}
+	if !kind.Documents.Planned() {
+		if problems := d.climbProblems(ctx, files[kind.Documents.SpecPath]); len(problems) > 0 {
+			return DraftInvalid, problems, nil
+		}
+		return DraftValid, nil, nil
 	}
 	problems, err = d.Validate(trace.Document{Header: trace.Header{Workstream: stream}, Content: files[plan.SpecPath]}, trace.Document{Content: files[plan.PlanPath]})
 	if err != nil {
@@ -962,8 +988,17 @@ func (d *Drafter) Judge(_ context.Context, stream config.WorkstreamID, attempt s
 // question adds to what the turn that asked it delivered. It returns judge's
 // verdict on the attempt's draft as it stands after the delivery.
 func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge DraftJudge) coreadapter.Tool {
-	return coreadapter.Tool{Name: DraftTool, Description: "Deliver spec.md, plan.json, or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":["spec.md","plan.json","decline.txt"]},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
+	feature, _ := kinds.Lookup(kinds.Feature)
+	return d.DraftToolFor(feature, scope, attempt, judge)
+}
+
+// DraftToolFor is DraftTool for the files the given kind's architect delivers.
+func (d *Drafter) DraftToolFor(kind kinds.Kind, scope coreadapter.Scope, attempt string, judge DraftJudge) coreadapter.Tool {
+	paths := DraftPaths(kind)
+	names := strings.Join(paths, " or ")
+	enum, _ := json.Marshal(append(slices.Clone(paths), "decline.txt"))
+	return coreadapter.Tool{Name: DraftTool, Description: "Deliver " + strings.Join(paths, ", ") + ", or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":` + string(enum) + `},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }
 			dec := json.NewDecoder(bytes.NewReader(raw))
@@ -971,8 +1006,8 @@ func (d *Drafter) DraftTool(scope coreadapter.Scope, attempt string, judge Draft
 			if err := dec.Decode(&input); err != nil {
 				return nil, err
 			}
-			if _, amending := AmendmentTurnID(attempt); input.Path != plan.SpecPath && input.Path != plan.PlanPath && !(input.Path == "decline.txt" && amending) {
-				return nil, fmt.Errorf("path must be %s or %s", plan.SpecPath, plan.PlanPath)
+			if _, amending := AmendmentTurnID(attempt); !slices.Contains(paths, input.Path) && !(input.Path == "decline.txt" && amending) {
+				return nil, fmt.Errorf("path must be %s", names)
 			}
 			if len(input.Content) > MaxHandedBytes {
 				return nil, fmt.Errorf("%s is larger than %d bytes", input.Path, MaxHandedBytes)
@@ -1010,6 +1045,11 @@ func (d *Drafter) SelectView(ctx context.Context, scope coreadapter.Scope) (isol
 	if err != nil {
 		return isolation.Selection{}, err
 	}
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	settings = cfg.WithKindSkills(settings, kind.Name, kinds.TurnArchitect)
 	if err := os.MkdirAll(filepath.Join(cfg.Root.String(), "views"), 0700); err != nil {
 		return isolation.Selection{}, err
 	}
@@ -1095,10 +1135,16 @@ func (d *Drafter) Stage(ctx context.Context, stream config.WorkstreamID, turn, w
 // Delivered reads the files the turn delivered. A file that is missing or
 // not UTF-8 text is a problem with the draft, not a storage error.
 func (d *Drafter) Delivered(stream config.WorkstreamID, turn string) (map[string]string, []string, error) {
+	feature, _ := kinds.Lookup(kinds.Feature)
+	return d.DeliveredFor(feature, stream, turn)
+}
+
+// DeliveredFor is Delivered for the files the given kind's architect delivers.
+func (d *Drafter) DeliveredFor(kind kinds.Kind, stream config.WorkstreamID, turn string) (map[string]string, []string, error) {
 	directory := filepath.Join(d.TurnDirectory(stream, turn), "output")
 	files := map[string]string{}
 	var problems []string
-	for _, path := range []string{plan.SpecPath, plan.PlanPath} {
+	for _, path := range DraftPaths(kind) {
 		data, err := os.ReadFile(filepath.Join(directory, path))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -1119,26 +1165,31 @@ func (d *Drafter) Delivered(stream config.WorkstreamID, turn string) (map[string
 // validates the recorded draft: a valid one moves the workstream to sketched,
 // an invalid one is recorded with its problems.
 func (d *Drafter) Record(ctx context.Context, operation string, stream config.WorkstreamID, n int, attempt string) (coreadapter.OperationResult, error) {
+	kind, err := StreamKind(d.Repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	latest, err := d.Latest(stream)
 	if err != nil {
 		return coreadapter.OperationResult{}, err
 	}
-	ingested := latest[plan.SpecDocument].Cause == operation || latest[plan.PlanDocument].Cause == operation
+	draftFiles := DraftFiles(kind)
+	ingested := slices.ContainsFunc(draftFiles, func(f DraftFile) bool { return latest[f.ID].Cause == operation })
 	var problems []string
 	if !ingested {
-		files, undelivered, err := d.Delivered(stream, attempt)
+		files, undelivered, err := d.DeliveredFor(kind, stream, attempt)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
 		}
 		problems = undelivered
 		at := d.S.Now()
 		var records []trace.Document
-		for _, doc := range []struct{ Id, Path string }{{plan.SpecDocument, plan.SpecPath}, {plan.PlanDocument, plan.PlanPath}} {
+		for _, doc := range draftFiles {
 			content, ok := files[doc.Path]
 			if !ok {
 				continue
 			}
-			records = append(records, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.Id, Revision: latest[doc.Id].Revision + 1, Project: d.Repository.Project(), Workstream: stream, At: at, Actor: ArchitectActor, Cause: operation, Depth: 1}, Path: doc.Path, Content: content})
+			records = append(records, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: doc.ID, Revision: latest[doc.ID].Revision + 1, Project: d.Repository.Project(), Workstream: stream, At: at, Actor: ArchitectActor, Cause: operation, Depth: 1}, Path: doc.Path, Content: content})
 		}
 		if len(records) > 0 {
 			if err := d.Repository.RecordDocuments(ctx, records); err != nil {
@@ -1149,18 +1200,20 @@ func (d *Drafter) Record(ctx context.Context, operation string, stream config.Wo
 			}
 		}
 	}
-	specDoc, planDoc := latest[plan.SpecDocument], latest[plan.PlanDocument]
+	specDoc, planDoc := latest[draftFiles[0].ID], trace.Document{}
+	if kind.Documents.Planned() {
+		planDoc = latest[plan.PlanDocument]
+	}
 	if ingested {
-		for _, doc := range []struct {
-			Path string
-			Doc  trace.Document
-		}{{plan.SpecPath, specDoc}, {plan.PlanPath, planDoc}} {
-			if doc.Doc.Cause != operation {
-				problems = append(problems, doc.Path+" was not delivered")
+		for _, f := range draftFiles {
+			if latest[f.ID].Cause != operation {
+				problems = append(problems, f.Path+" was not delivered")
 			}
 		}
 	}
-	if len(problems) == 0 {
+	if len(problems) == 0 && !kind.Documents.Planned() {
+		problems = d.climbProblems(ctx, specDoc.Content)
+	} else if len(problems) == 0 {
 		found, err := d.Validate(specDoc, planDoc)
 		if err != nil {
 			return coreadapter.OperationResult{}, err
@@ -1168,7 +1221,14 @@ func (d *Drafter) Record(ctx context.Context, operation string, stream config.Wo
 		problems = append(found, plan.CheckAcceptanceProblems(specDoc.Content, planDoc.Content, "", "")...)
 	}
 	if len(problems) > 0 {
-		return d.Terminal(ctx, operation, stream, n, "invalid", fmt.Sprintf("draft %d of the spec and plan is invalid:\n- %s", n, strings.Join(problems, "\n- ")))
+		return d.Terminal(ctx, operation, stream, n, "invalid", fmt.Sprintf("draft %d of the %s is invalid:\n- %s", n, DraftNoun(kind), strings.Join(problems, "\n- ")))
+	}
+	if !kind.Documents.Planned() {
+		spec, err := climb.Parse([]byte(specDoc.Content), ClimbDefaults(d.S.About(d.Repository)))
+		if err != nil {
+			return coreadapter.OperationResult{}, err
+		}
+		return d.sketched(ctx, operation, stream, n, specDoc, ClimbSketchReason(n, specDoc, spec))
 	}
 	return d.Sketch(ctx, operation, stream, n, specDoc, planDoc)
 }
@@ -1199,8 +1259,14 @@ func (d *Drafter) Sketch(ctx context.Context, operation string, stream config.Wo
 		return coreadapter.OperationResult{}, err
 	}
 	reason := fmt.Sprintf("the architect's draft %d passed validation: %s revision %d with %d acceptance criteria and %s revision %d with %d units", n, specDoc.Path, specDoc.Revision, len(spec.Criteria), planDoc.Path, planDoc.Revision, len(graph.Units))
+	return d.sketched(ctx, operation, stream, n, specDoc, reason)
+}
+
+// sketched moves the workstream from handed to sketched for a valid draft,
+// stamped with the time of the draft's spec-slot document.
+func (d *Drafter) sketched(ctx context.Context, operation string, stream config.WorkstreamID, n int, specDoc trace.Document, reason string) (coreadapter.OperationResult, error) {
 	h := d.Header(SketchedState, stream, operation, specDoc.At)
-	_, err = d.Repository.MoveFeatureState(ctx, h, HandedState, SketchedState, reason)
+	_, err := d.Repository.MoveFeatureState(ctx, h, HandedState, SketchedState, reason)
 	if errors.Is(err, trace.ErrConflict) {
 		feature, readErr := d.Repository.Workflow(stream, trace.FeatureSubject)
 		if readErr != nil {

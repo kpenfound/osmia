@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -111,6 +114,36 @@ type DemoEngine struct {
 	Resume   func(previous, next coreadapter.Profile, session coreadapter.BackendSession) error
 	Runs     []string
 	Checks   int
+	// Skills are the directories the engine's prepared skills live in. An
+	// engine without any prepares none, and runs no turn that is given skills.
+	Skills []string
+}
+
+// SkillDirs returns the directories the engine's prepared skills live in.
+func (e *DemoEngine) SkillDirs() []string {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	return slices.Clone(e.Skills)
+}
+
+type demoSkills struct{ dirs []string }
+
+// Prepare gives each skill reference a directory under the first skill
+// directory, without fetching anything.
+func (p demoSkills) Prepare(_ context.Context, refs []string) ([]string, error) {
+	out := make([]string, len(refs))
+	for i, ref := range refs {
+		out[i] = filepath.Join(p.dirs[0], "skill-"+strconv.Itoa(i)+"-"+strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+				return r
+			}
+			return '-'
+		}, strings.ToLower(ref)))
+		if err := os.MkdirAll(out[i], 0o700); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (e *DemoEngine) CheckResume(_ context.Context, previous, next coreadapter.Profile, session coreadapter.BackendSession) error {
@@ -127,7 +160,11 @@ func (e *DemoEngine) Enforcer(s coreadapter.ExecutionSettings) (agent.Enforcer, 
 }
 
 func (e *DemoEngine) Verify(req agent.Request) (*agent.Turn, error) {
-	return (&agent.Runner{}).Verify(req)
+	runner := &agent.Runner{}
+	if dirs := e.SkillDirs(); len(dirs) > 0 {
+		runner.Skills, runner.SkillMountDirs = demoSkills{dirs: dirs}, dirs
+	}
+	return runner.Verify(req)
 }
 
 func (e *DemoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result, error) {

@@ -161,6 +161,11 @@ func Enforce(opts Options, e Enforcement) Options {
 					return isolation.Selection{}, errors.New("view selection denied")
 				}
 				settings := cfg.RoleExecution(scope.Role)
+				if scope.Unit != "" && scope.Thread != driftMasonAgent && scope.Thread != driftReviewerAgent {
+					if kind, err := r.Kind(config.WorkstreamID(scope.Workstream)); err == nil {
+						settings = cfg.WithUnitKindSkills(settings, kind, scope.Role, scope.Unit)
+					}
+				}
 				if scope.Role == masonRole && scope.Thread == driftMasonAgent {
 					return drifts.Selection(ctx, scope, settings)
 				}

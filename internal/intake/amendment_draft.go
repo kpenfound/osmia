@@ -15,6 +15,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -380,6 +381,17 @@ func (a *AmendmentDrafter) Enqueue(ctx context.Context, cfg *config.Config, stre
 		return err
 	}
 	turn := fmt.Sprintf("amend-%s-%d", id, attempt)
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return err
+	}
+	if !kind.Documents.Planned() {
+		prompt := fmt.Sprintf("Draft amendment %s to the ratified climb spec. Read request.json, draft/%s, charter.md and context.md. Deliver the changed %s with %s, in the same JSON shape and under the same validation as the original: the owner has approved the evaluator and the protected paths of the climb spec as it stands, so say in your reply what the change alters and keep every field the request does not touch. To decline, deliver decline.txt with your reason. Do not edit code.", id, kinds.ClimbSpecPath, kinds.ClimbSpecPath, DraftTool) + Answered("amendment", answers)
+		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1},
+			AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ClimbSystemPrompt(cfg.Project), Prompt: prompt}
+		_, err = a.Repository.EnqueueTurn(ctx, req)
+		return err
+	}
 	prompt := fmt.Sprintf("Draft amendment %s. Read request.json, draft/spec.md, draft/plan.json, charter.md and context.md. Deliver only the changed spec.md and/or plan.json with %s; unchanged documents will be carried forward. To decline, deliver decline.txt with your reason. For engineering revisions preserve spec.md byte-for-byte: update only the execution plan within approved intent. Keep assignments outcome-focused with explicit neighboring ownership. Constraints hold only the owner's hard limits; put file-level pointers in guidance. Footprints schedule work and need no revision for a mason to change code outside them. Incorporate necessary discoveries by assigning them to an existing unit or adding a coherent unit; preserve started identities and keep merged units identical. Do not edit code. Every dependency must name an existing unit, the graph must be acyclic, and every footprint must resolve against the entity map.", id, DraftTool) + AcceptanceDraftInstructions + Answered("amendment", answers)
 	system := fmt.Sprintf("You are the architect of the %s project (%s). Draft a revision to the sealed spec and plan for the amendment request. Read only your scoped files, deliver through %s, and do not edit implementation code or use version control.", cfg.Project.Name, cfg.Project.Upstream, DraftTool)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1}, AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: prompt}
@@ -465,13 +477,17 @@ type AmendmentRevision struct {
 
 // Revision reads and validates what the amendment attempt turn delivered.
 func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.WorkstreamID, turn string) (AmendmentRevision, error) {
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return AmendmentRevision{}, err
+	}
 	latest, err := a.Latest(stream)
 	if err != nil {
 		return AmendmentRevision{}, err
 	}
-	oldSpec, oldPlan := latest[plan.SpecDocument].Content, latest[plan.PlanDocument].Content
-	if oldSpec == "" || oldPlan == "" {
-		return AmendmentRevision{}, errors.New("sealed spec or plan is missing")
+	oldSpec, oldPlan := latest[kind.Documents.Drafted[0]].Content, latest[plan.PlanDocument].Content
+	if oldSpec == "" || kind.Documents.Planned() && oldPlan == "" {
+		return AmendmentRevision{}, fmt.Errorf("sealed %s is missing", DraftNoun(kind))
 	}
 	directory := filepath.Join(a.TurnDirectory(stream, turn), "output")
 	read := func(name string) (string, bool, error) {
@@ -498,9 +514,19 @@ func (a *AmendmentDrafter) Revision(ctx context.Context, stream config.Workstrea
 		}
 		return AmendmentRevision{Declined: true, Reason: reason}, nil
 	}
-	spec, hasSpec, err := read(plan.SpecPath)
+	spec, hasSpec, err := read(kind.Documents.SpecPath)
 	if err != nil {
 		return readFailure(err)
+	}
+	if !kind.Documents.Planned() {
+		if !hasSpec {
+			return AmendmentRevision{Problems: []string{"no revised document was delivered"}}, nil
+		}
+		problems := a.climbProblems(ctx, spec)
+		if len(problems) == 0 && spec == oldSpec {
+			problems = []string{"revision makes no change"}
+		}
+		return AmendmentRevision{OldSpec: oldSpec, Spec: spec, Problems: problems}, nil
 	}
 	graph, hasPlan, err := read(plan.PlanPath)
 	if err != nil {
@@ -573,8 +599,15 @@ func (a *AmendmentDrafter) Record(ctx context.Context, operation string, stream 
 	if len(r.Problems) > 0 {
 		return a.Finish(ctx, operation, stream, request.ID, "invalid", strings.Join(r.Problems, "; "), nil)
 	}
+	kind, err := StreamKind(a.Repository, stream)
+	if err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	spec, graph := r.Spec, r.Graph
-	affected := AffectedRevision(r.OldSpec, spec, r.Before, r.After)
+	affected := AmendmentAffected{Criteria: []string{}, Units: []string{}}
+	if kind.Documents.Planned() {
+		affected = AffectedRevision(r.OldSpec, spec, r.Before, r.After)
+	}
 	data, err := json.MarshalIndent(affected, "", "  ")
 	if err != nil {
 		return coreadapter.OperationResult{}, err
@@ -582,7 +615,12 @@ func (a *AmendmentDrafter) Record(ctx context.Context, operation string, stream 
 	prefix := "amendments/" + request.ID + "/"
 	at := a.S.Now()
 	var docs []trace.Document
-	for _, item := range []struct{ Id, Path, Content string }{{"amendment_" + request.ID + "_spec", prefix + plan.SpecPath, spec}, {"amendment_" + request.ID + "_plan", prefix + plan.PlanPath, graph}, {"amendment_" + request.ID + "_affected", prefix + "affected.json", string(data) + "\n"}} {
+	items := []struct{ Id, Path, Content string }{{"amendment_" + request.ID + "_spec", prefix + kind.Documents.SpecPath, spec}}
+	if kind.Documents.Planned() {
+		items = append(items, struct{ Id, Path, Content string }{"amendment_" + request.ID + "_plan", prefix + plan.PlanPath, graph})
+	}
+	items = append(items, struct{ Id, Path, Content string }{"amendment_" + request.ID + "_affected", prefix + "affected.json", string(data) + "\n"})
+	for _, item := range items {
 		docs = append(docs, trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: item.Id, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: at, Actor: ArchitectActor, Cause: operation, Depth: 1}, Path: item.Path, Content: item.Content})
 	}
 	return a.Finish(ctx, operation, stream, request.ID, "proposed", "the architect proposed a validated amendment revision", docs)
