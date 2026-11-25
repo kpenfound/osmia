@@ -1884,7 +1884,11 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 		if r.Limit == nil {
 			fmt.Fprintf(w, "  %s: %d in use, unbounded (no factory-wide limit; at most one turn per workstream)\n", r.Role, r.Used)
 		} else {
-			fmt.Fprintf(w, "  %s: %d of %d slot(s) in use\n", r.Role, r.Used, *r.Limit)
+			fmt.Fprintf(w, "  %s: %d of %d slot(s) in use", r.Role, r.Used, *r.Limit)
+			if len(r.Waiting) > 0 {
+				fmt.Fprintf(w, ", %d waiting", len(r.Waiting))
+			}
+			fmt.Fprintln(w)
 		}
 		for _, wait := range r.Waiting {
 			what := "unit " + wait.Unit

@@ -60,7 +60,17 @@ func (s *Service) capacityStatus(list []WorkstreamStatus) *CapacityStatus {
 		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Unit: w.Unit, Review: w.Review, Session: w.Session, Preview: w.Preview, Reason: DeferCapacity})
 	}
 	out.Roles = append(out.Roles, role)
+	out.Roles = append(out.Roles, s.chiefCapacity(limits.Chief))
 	return out
+}
+
+func (s *Service) chiefCapacity(limit int) RoleCapacity {
+	chief := s.ChiefSlots()
+	role := RoleCapacity{Role: chiefRole, Limit: &limit, Used: chief.Used, Waiting: []SlotWait{}}
+	for _, w := range chief.Waiting {
+		role.Waiting = append(role.Waiting, SlotWait{Project: w.Project, Workstream: w.Workstream, Agent: w.Agent, Turn: w.Turn, Reason: DeferCapacity})
+	}
+	return role
 }
 
 func unboundedCapacity(role string) RoleCapacity {
@@ -187,7 +197,7 @@ func providerSpend(costs []trace.Cost) (ProviderSpend, error) {
 }
 
 func (c *runtimeControls) capacity(repo *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role and check slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks) is its configured factory-wide limit: it comes from config.toml and applies on reload. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: "capacity", Effect: coreadapter.ToolRead, Description: "Read factory-wide role, check and chief slot limits, usage, waiting work, and pauses. A numeric limit on a pool (mason, reviewer, committee, checks, chief) is its configured factory-wide limit: it comes from config.toml and applies on reload. The chief pool (capacity.chief) bounds the background chief-of-staff turns running at once across every workstream and project: used counts the background turns holding a slot and waiting lists the queued ones in admission order; turns the owner starts take no chief slot. A pool with no limit field and unbounded true (architect) is not bounded factory-wide: it runs at most one turn per workstream, no configuration setting controls it, and there is nothing to raise. Never read it as zero slots. Its used and waiting entries still show its turns.", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &input); err != nil {
 			return nil, err

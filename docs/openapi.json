@@ -4234,7 +4234,7 @@
             "type": "integer"
           },
           "roles": {
-            "description": "Factory-wide mason, reviewer, committee, architect and checks slot pools, in that order.",
+            "description": "Factory-wide mason, reviewer, committee, architect, checks and chief slot pools, in that order.",
             "items": {
               "$ref": "#/components/schemas/RoleCapacity"
             },
@@ -4823,6 +4823,9 @@
       "ConfigCapacity": {
         "properties": {
           "checks": {
+            "type": "integer"
+          },
+          "chief": {
             "type": "integer"
           },
           "committee": {
@@ -8102,7 +8105,7 @@
       "RoleCapacity": {
         "properties": {
           "limit": {
-            "description": "Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0.",
+            "description": "Configured factory-wide slot limit from config.toml. Present only for bounded pools (mason, reviewer, committee, checks, chief). Absent when unbounded is true: that pool has no factory-wide limit, which is not a limit of 0.",
             "type": [
               "null",
               "integer"
@@ -8113,7 +8116,7 @@
             "type": "string"
           },
           "role": {
-            "description": "Slot pool: mason, reviewer, committee, architect or checks. The checks pool uses capacity.checks (default 2) across all projects and workstreams.",
+            "description": "Slot pool: mason, reviewer, committee, architect, checks or chief. The checks pool uses capacity.checks (default 2) across all projects and workstreams. The chief pool uses capacity.chief (default 3) across all projects and workstreams and holds background chief-of-staff turns only; turns the owner starts take no chief slot.",
             "type": "string"
           },
           "scope": {
@@ -8129,7 +8132,7 @@
             "type": "integer"
           },
           "waiting": {
-            "description": "Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session.",
+            "description": "Work waiting for a slot. Check runs identify their project, workstream and unit, final review or session. Background chief turns identify their project, workstream, agent and turn, oldest first.",
             "items": {
               "$ref": "#/components/schemas/SlotWait"
             },

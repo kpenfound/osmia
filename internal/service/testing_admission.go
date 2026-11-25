@@ -48,7 +48,7 @@ func (a TestAccess) ConversationHolds(project config.ProjectID, repo *trace.Repo
 	_, projects := a.s.runtimes()
 	for _, p := range projects {
 		if p.id == project {
-			return p.conversations.holds(repo, stream, op)
+			return p.conversations.holds(nil, repo, stream, op)
 		}
 	}
 	panic("fixture project missing")

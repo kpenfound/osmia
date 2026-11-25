@@ -71,6 +71,7 @@ type Listen struct {
 }
 type Capacity struct {
 	Checks        int `toml:"checks" json:"checks"`
+	Chief         int `toml:"chief" json:"chief"`
 	Masons        int `toml:"masons" json:"masons"`
 	Reviewers     int `toml:"reviewers" json:"reviewers"`
 	Committee     int `toml:"committee" json:"committee"`
@@ -356,7 +357,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry(), ErrorReports: defaultErrorReports()}
+	c := &Config{Listen: Listen{TailnetHTTPS: true}, Capacity: Capacity{Masons: 4, Reviewers: 2, Committee: 3, PerWorkstream: 2, Checks: 2, Chief: 3}, Shed: Shed{3, 3}, Committee: Committee{Perspectives: slices.Clone(CommitteePerspectives)}, Mason: Mason{3}, Loop: Loop{MaxSessions: 30, StallAfter: "45m"}, Events: Events{Window: "5s"}, Skills: Skills{skills.DefaultRefresh}, Workspaces: WorkspacesAuto, Jev: defaultJev(), Transcribe: defaultTranscribe(), Telemetry: defaultTelemetry(), ErrorReports: defaultErrorReports()}
 	c.Dagger.Engine = string(DaggerEngineAuto)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -401,7 +402,7 @@ func LoadTopLevel(options Options) (*Config, error) {
 		field string
 		n     int
 	}{
-		{"capacity.checks", c.Capacity.Checks}, {"capacity.masons", c.Capacity.Masons}, {"capacity.reviewers", c.Capacity.Reviewers},
+		{"capacity.checks", c.Capacity.Checks}, {"capacity.chief", c.Capacity.Chief}, {"capacity.masons", c.Capacity.Masons}, {"capacity.reviewers", c.Capacity.Reviewers},
 		{"capacity.committee", c.Capacity.Committee}, {"capacity.per_workstream", c.Capacity.PerWorkstream},
 		{"shed.max_rounds", c.Shed.MaxRounds}, {"shed.max_bounces", c.Shed.MaxBounces},
 		{"mason.max_clean_turns", c.Mason.MaxCleanTurns},
@@ -728,7 +729,7 @@ func knownKey(key toml.Key, project bool) bool {
 		}
 		return slices.Contains([]string{"profile", "events_profile", "sandbox", "image", "cpus", "memory", "skills"}, key[2])
 	}
-	return slices.Contains([]string{"version", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
+	return slices.Contains([]string{"version", "workspaces", "listen", "listen.socket", "listen.web", "listen.tailnet", "listen.tailnet_https", "capacity", "capacity.checks", "capacity.chief", "capacity.masons", "capacity.reviewers", "capacity.committee", "capacity.per_workstream", "budget", "budget.per_session", "budget.per_unit", "budget.per_day", "profiles", "roles", "shed", "shed.max_rounds", "shed.max_bounces", "committee", "committee.perspectives", "committee.profiles", "mason", "mason.max_clean_turns", "loop", "loop.max_sessions", "loop.stall_after", "events", "events.window", "events.progress_window", "notify", "notify.webhook", "error_reports", "error_reports.enabled", "error_reports.repository", "error_reports.labels", "error_reports.max_issues_per_hour", "error_reports.max_issues_per_day", "error_reports.max_comments_per_day", "error_reports.sources", "skills", "skills.refresh", "jev", "jev.url", "jev.model", "jev.api_key_env", "jev.timeout", "jev.check_threshold", "jev.decision_threshold", "jev.owner_threshold", "jev.check_fallback_picks", "transcribe", "transcribe.url", "transcribe.model", "transcribe.api_key_env", "telemetry", "telemetry.endpoint", "telemetry.protocol", "telemetry.insecure", "telemetry.headers_env", "projects", "projects.repo_owner", "projects.clone_dir"}, path)
 }
 
 func unsupportedKey(key toml.Key) string {

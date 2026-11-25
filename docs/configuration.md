@@ -295,6 +295,7 @@ masons = 4
 reviewers = 2
 committee = 3
 checks = 2
+chief = 3
 per_workstream = 2
 
 [shed]
@@ -421,6 +422,29 @@ The notice that asks the chief of staff to title work started from a design is n
 for the next turn. A workstream cap may exceed global mason capacity:
 the global pool still limits concurrent execution.
 
+`capacity.chief` must be positive, defaults to 3 and limits how many background
+chief-of-staff turns run at once across every workstream and project. Event,
+follow-up, check-back, contest, amendment and answer-delivery turns of a
+workstream's chief and of a shared workgroup chief each take a slot while they
+run; every exit releases it, including a turn that ends `waiting`. Turns you
+start take no slot and never wait for one: your messages and replies, and
+design and session conversations. With every slot held, a background turn stays
+queued in its thread, in order, with the reason "waiting for a chief slot", and
+masons, reviewers, checks, other projects and your own turns keep running. A
+freed slot goes to the oldest eligible waiting turn across the factory: one
+that is the oldest unfinished turn of its thread and that nothing else holds.
+A turn held by a provider limit, abandonment or thread order does not block
+younger turns, and a later arrival does not pass an older eligible waiter. One
+exception follows your message: when you message a workstream whose oldest
+unfinished turn is a background turn waiting for a slot, that turn runs at once
+without a slot and your turn follows it, so the limit can be exceeded by one
+turn for each workstream you are messaging. Notice waves and turns resumed after
+a restart stay capped, and a restart begins with no slots held. Chief turns
+still ignore owner pauses; provider limits and abandonment still stop them.
+Chief slots are independent of the mason, reviewer, committee, checks and
+per-workstream limits. Reloading applies a changed limit to new admissions while
+running turns finish.
+
 `capacity.checks` must be positive, defaults to 2 and limits service Dagger check
 runs across all projects and workstreams, including unit and session
 runs. A run waits cancellably for a free slot in arrival order before selecting
@@ -499,8 +523,10 @@ The architect pool has no factory-wide limit and no
 `capacity.*` key: each runs at most one turn per workstream. The capacity view
 (the status API's `capacity` and the chief of staff's `capacity` tool) shows
 them as unbounded, with no numeric `limit`, and a note saying so; only the
-mason, reviewer, committee and checks pools report a numeric `limit`, which
-comes from `config.toml` and applies on reload. An unbounded pool is not zero
+mason, reviewer, committee, checks and chief pools report a numeric `limit`, which
+comes from `config.toml` and applies on reload. The `chief` entry is
+`capacity.chief`: its used count is the background chief-of-staff turns holding
+a slot and its waiting entries are the queued ones, oldest first. An unbounded pool is not zero
 capacity and has no setting to raise.
 
 `capacity.committee` is the size of each workstream's committee, not a pool
