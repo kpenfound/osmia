@@ -82,7 +82,7 @@ func (s *Controller) Inbox(ctx context.Context) (InboxResponse, *APIError) {
 // CrossRepoWorkgroupIDs returns, in encounter order, the distinct
 // fully joined cross-repo workgroup IDs repository's workstreams point to.
 func (s *Controller) CrossRepoWorkgroupIDs(ctx context.Context, repository *trace.Repository) ([]config.WorkgroupID, error) {
-	streams, err := NonSessionWorkstreams(repository)
+	streams, err := ObservedWorkstreams(repository)
 	if err != nil {
 		return nil, err
 	}

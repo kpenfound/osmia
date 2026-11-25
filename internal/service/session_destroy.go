@@ -58,7 +58,7 @@ func (s *Service) destroySession(ctx context.Context, raw string, design bool) (
 			return SessionDestroyResponse{}, &APIError{Code: Internal, Message: err.Error()}
 		}
 		allowed := kind == trace.SessionKind && !design
-		if design && kind == "" {
+		if design && kind != trace.SessionKind {
 			allowed, err = isDesignWorkstream(p.repository, id)
 		}
 		if err != nil {

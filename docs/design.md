@@ -378,6 +378,46 @@ You may instead merge an assembled feature's branch into upstream yourself, outs
 
 When Hearsay is enabled, upstream review feedback can later arrive through its GitHub connector. The chief of staff presents it as a notice or question (section 12.4). For a workgroup, an owner-approved amendment can rework an open, unmerged pull request on its existing branch; changed merged work instead gets a follow-up workstream (section 5.4). Other additional code work requires you to hand in a new workstream, referencing the delivered trace and, when appropriate, its branch as the base. Without Hearsay you may hand in that feedback yourself.
 
+### 5.6 Workstream kinds
+
+A workstream has a kind. `feature` is the kind this document describes everywhere else: a ratified spec and plan, built as units. A kind is Go code in the registry of `internal/kinds`, not a plugin or a setting. A stored empty kind reads as `feature`, so no existing workstream is migrated. Exploratory sessions (`session`) and design sessions, which the `design-session` subject marks, are not kinds and are never looked up in the registry.
+
+Every kind shares the outer states of §5.1: handed, sketched, in-shed, ratified, building, assembled and delivered. Only the inner machine that runs while a workstream is `building` belongs to the kind. Delivery, final review, pause, budgets, `move_workstream`, the stall watchdog, the recovery card, archiving and the API state fields therefore work the same way for every kind, with no per-kind top-level state.
+
+**What a kind supplies.** One registry entry holds:
+
+- the documents the architect drafts, the committee debates and the owner ratifies, and the building loop with its inner states;
+- fixed capability flags: has units and a plan, can join a multi-project workgroup, allows upstream drift while building, can be a base or have dependency edges, can target a brand-new project;
+- a pull-request section, a one-line progress summary that reads the kind's progress, and the web panel that draws it;
+- the names of the extra chief-of-staff tools it adds, and the skills and `[kinds.<kind>]` settings table it owns.
+
+`feature` supplies today's behaviour through these hooks: the spec and plan, the units loop, no extra pull-request section, the units progress bar, `move_unit`, and no settings.
+
+**Choosing the kind.** The owner chooses it, explicitly and once, at hand-in. It is never inferred, and the architect never picks it. There is no kind picker in the web interface.
+
+- `osmia handin --kind <kind>` and the hand-in API field `kind` default to `feature`. The service refuses a kind it does not register, with a reason that lists the registered ones, and records the kind in the commit that creates the workstream.
+- In a design session, the design agent chooses the kind through the optional `kind` parameter of `draft_brief`, an enum taken from the registry. Omitting it keeps the brief's current kind, and a brief that never set one hands in as `feature`. The brief panel shows the kind next to the project list. The agent's instructions carry the registry's catalog: each kind's name, a one-line use-when and the drafting-time limits its flags set, and the agent says in its reply which kind it chose.
+- Start pins the kind into the start intent with the brief revision, checks it against the kind's flags again, and records it on every member in the same commit that records the handed brief.
+- A recorded kind never changes: any later attempt to set another kind is refused.
+
+**Flags are consulted, not assumed.** Code that iterates workstreams is one of two things. A shared place reads, accounts or notifies, and takes every workstream that is not a session whatever its kind: the event and question deliverers, the status, inbox and activity reads, and the pass that raises the unrecognised-kind notice. A kind-specific place moves work: drafting, debate, sealing, building, scheduling a turn, landing, drift, delivery and the watchdogs. It lists the workstreams this build runs and consults the kind's flags instead of assuming `feature`: a brief or hand-in the flags forbid is refused with a plain reason, a base or dependency edge on a kind that cannot have one is refused, and upstream drift is not applied to a building workstream of a kind that disallows it.
+
+**One kind per workgroup.** A workgroup holds one kind. A kind that cannot join a multi-project workgroup has exactly one member, and a workgroup of mixed kinds is refused.
+
+**A kind this build does not register.** A workstream whose stored kind is not registered waits: nothing moves on it except its chief of staff's own thread, the chief of staff gets exactly one notice for it however many passes run, and it is never run as `feature`.
+
+**Adding a kind.**
+
+1. Add its entry to the registry in `internal/kinds`: name, one-line use-when, flags, documents, building loop, pull-request section, progress, chief tools and settings. Set only the hooks the kind uses.
+2. Set the flags from what the kind can do. The checks at hand-in, in `draft_brief`, at Start, for bases and dependency edges, for workgroup joins and for drift read them, and the design agent's catalog lists the limits they set.
+3. Implement the kind's inner machine for `building`, and make seal and build admission ask the kind which sealed documents it needs.
+4. Add its `[kinds.<kind>]` table: validate the table in the kind's settings hook, name the skills it loads and the turns that load them, and document the keys in [configuration](configuration.md).
+5. Supply the kind's progress summary and web panel, and its pull-request section.
+6. Add its chief-of-staff tools to the registry entry and the chief's grant.
+7. Document the kind here and in the CLI and OpenAPI documents, and add the kind to the tests that list the registry.
+
+The kind is chosen at hand-in and fixed after it, so a new kind adds no migration: workstreams that record an older kind, or none, keep reading as they did.
+
 ---
 
 ## 6. The chief of staff and questions
@@ -1270,7 +1310,7 @@ One selected project uses ordinary drafting and ratification. Multiple projects 
 
 Every architect spec, plan, amendment or workgroup spec delivery returns the same verdict the service would give all documents delivered in that attempt if the turn ended now: valid, invalid with problems, declined or unchanged. The architect can correct a draft before ending its turn. The committee debates the draft and one owner ratification seals the entire packet. The chosen project set cannot change before ratification; changing it requires abandoning and handing in again. Amend and cancel remain available after ratification.
 
-`--skip-debate` applies to all members and retains ratification. `--base` must name a workstream in a selected project and applies only to that project's member. Each member retains its own final-review acceptance, delivery approval and owner signing. Project pause, capacity and Git permits hold only that project's member, subject to graph edges. From here the lifecycle in §5 runs and the chief presents the packet when ready.
+`--kind <kind>` and the API field `kind` name the workstream kind and default to `feature` (§5.6). `--skip-debate` applies to all members and retains ratification. `--base` must name a workstream in a selected project and applies only to that project's member. Each member retains its own final-review acceptance, delivery approval and owner signing. Project pause, capacity and Git permits hold only that project's member, subject to graph edges. From here the lifecycle in §5 runs and the chief presents the packet when ready.
 
 ### 14.3 First run
 

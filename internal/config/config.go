@@ -5,6 +5,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/skills"
 )
 
@@ -48,6 +50,9 @@ type Config struct {
 	Notify         Notify             `toml:"notify" json:"notify"`
 	ErrorReports   ErrorReports       `toml:"error_reports" json:"error_reports"`
 	Skills         Skills             `toml:"skills" json:"skills"`
+	// Kinds holds each workstream kind's `[kinds.<kind>]` settings table.
+	// The registry names the kinds and each kind validates its own table.
+	Kinds map[string]map[string]any `toml:"kinds" json:"kinds,omitempty"`
 	// ProjectCreation is the [projects] table. Its JSON name differs because
 	// Projects lists the active projects.
 	ProjectCreation ProjectCreation `toml:"projects" json:"project_creation"`
@@ -457,6 +462,9 @@ func LoadTopLevel(options Options) (*Config, error) {
 	if _, _, err := skills.ParseRefresh(c.Skills.Refresh); err != nil {
 		return nil, fieldError(path, "skills.refresh", err.Error())
 	}
+	if err := c.validateKinds(path); err != nil {
+		return nil, err
+	}
 	if c.Notify.Webhook != "" {
 		if err := validateWebhook(c.Notify.Webhook); err != nil {
 			return nil, fieldError(path, "notify.webhook", err.Error())
@@ -698,6 +706,36 @@ func decodeError(path string, err error) error {
 	return &FieldError{Path: path, Reason: "invalid TOML", Err: err}
 }
 
+// validateKinds checks every `[kinds.<kind>]` table against the registered
+// kind that owns it.
+func (c *Config) validateKinds(path string) error {
+	for _, name := range slices.Sorted(maps.Keys(c.Kinds)) {
+		kind, ok := kinds.Lookup(name)
+		if !ok || name == "" {
+			return fieldError(path, "kinds."+name, "unknown workstream kind; registered kinds: "+strings.Join(kinds.Names(), ", "))
+		}
+		if kind.Settings.Validate == nil {
+			if len(c.Kinds[name]) > 0 {
+				return fieldError(path, "kinds."+name, "the "+name+" kind has no settings")
+			}
+			continue
+		}
+		if err := kind.Settings.Validate(c.Kinds[name]); err != nil {
+			return fieldError(path, "kinds."+name, err.Error())
+		}
+	}
+	return nil
+}
+
+// KindSkills returns the skills the kind's `[kinds.<kind>]` table configures.
+func (c *Config) KindSkills(name string) []string {
+	kind, ok := kinds.Lookup(name)
+	if !ok || kind.Settings.Skills == nil {
+		return nil
+	}
+	return kind.Settings.Skills(c.Kinds[kind.Name])
+}
+
 func knownKey(key toml.Key, project bool) bool {
 	path := key.String()
 	if project {
@@ -705,6 +743,13 @@ func knownKey(key toml.Key, project bool) bool {
 			return true
 		}
 		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+	}
+	if key[0] == "kinds" {
+		if len(key) == 1 {
+			return true
+		}
+		kind, ok := kinds.Lookup(key[1])
+		return ok && key[1] != "" && (len(key) == 2 || kind.Settings.Validate != nil)
 	}
 	if key[0] == "dagger" {
 		return len(key) == 1 || len(key) == 2 && slices.Contains([]string{"version", "engine", "cloud_compute_token_env", "cloud_api_token_env", "check_fallback", "organization"}, key[1])

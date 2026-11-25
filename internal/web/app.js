@@ -3777,6 +3777,7 @@
     box.replaceChildren(
       el('p', { 'data-field': 'revision' }, 'Brief revision: ' + design.brief_revision),
       el('p', { class: 'meta', 'data-field': 'home' }, 'Home project: ' + projectName(design.project)),
+      el('p', { class: 'meta', 'data-field': 'kind' }, 'Kind: ' + (design.kind || 'feature')),
       el('ul', { 'data-field': 'projects' }, ...design.projects.map(id =>
         el('li', { 'data-project': id }, projectName(id) + (id === design.project ? ' (home)' : '')))),
       ...(design.new_project ? [renderDraftedNewProject(design.new_project)] : []),

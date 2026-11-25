@@ -341,6 +341,9 @@ sources = ["api", "operation", "github"]
 # "never", "always" or a duration.
 refresh = "24h"
 
+# [kinds.<kind>] holds the settings a workstream kind owns; see "Workstream
+# kind settings". The registered kind `feature` has none.
+
 [transcribe]
 # The full OpenAI-compatible transcription endpoint recorded audio is posted
 # to; empty turns Whisper transcription off.
@@ -1159,6 +1162,16 @@ Where Docker runs natively, bind-mount the engine's socket directory instead,
 for example `-v /run/osmia-dagger:/run/dagger`, and configure
 `engine = "unix:///run/osmia-dagger/engine.sock"`. The account running Osmia
 must be able to open that socket.
+
+### Workstream kind settings
+
+A `[kinds.<kind>]` table holds the settings that one registered workstream kind
+owns, such as the skills it loads. The registry in `internal/kinds` decides
+which kinds exist and what their tables accept; the table is configuration only
+for settings, never for adding a kind. The kind `feature` has no settings: an
+empty `[kinds.feature]` table is accepted and any key in it is refused. A table
+for a kind the build does not register fails to load with `unknown configuration
+key`. See [Workstream kinds](design.md#56-workstream-kinds).
 
 ### Role skills
 

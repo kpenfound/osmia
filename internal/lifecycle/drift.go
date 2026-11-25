@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/agentcore/vcs"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/pulls"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/seal"
@@ -134,6 +135,11 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if allowed, err := f.driftAllowed(stream); err != nil {
+			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
+		} else if !allowed {
+			continue
+		}
 		if reason, err := (Drifter{f}).Building(stream); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		} else if reason != "" {
@@ -157,6 +163,21 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 		requested = append(requested, stream)
 	}
 	return requested, nil
+}
+
+// driftAllowed reports whether the workstream's kind takes upstream drift now:
+// a kind whose flags forbid it takes none while the workstream is building,
+// and a workstream of a kind this build does not register takes none.
+func (f *Foreman) driftAllowed(stream config.WorkstreamID) (bool, error) {
+	kind, _, ok, err := intake.WorkstreamKind(f.repository, stream)
+	if err != nil || !ok {
+		return false, err
+	}
+	if kind.Flags.UpstreamDrift {
+		return true, nil
+	}
+	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
+	return feature.Value != BuildingState, err
 }
 
 // DriftNumber returns the number of the drift rebase a value of the drift

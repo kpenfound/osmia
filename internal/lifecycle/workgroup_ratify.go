@@ -18,6 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -110,6 +111,17 @@ func (s *Controller) DraftWorkgroup(ctx context.Context, members []config.Workst
 			return "", api
 		}
 		resolved = append(resolved, trace.CrossRepoMember{Workstream: m, Project: repo})
+	}
+	stored := make([]string, 0, len(resolved))
+	for _, m := range resolved {
+		kind, err := m.Project.Kind(m.Workstream)
+		if err != nil {
+			return "", &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the kind of workstream %s: %v", m.Workstream, err)}
+		}
+		stored = append(stored, kind)
+	}
+	if err := kinds.CheckWorkgroup(stored); err != nil {
+		return "", &APIError{Code: Validation, Message: err.Error()}
 	}
 	var resuming config.WorkgroupID
 	for _, m := range resolved {

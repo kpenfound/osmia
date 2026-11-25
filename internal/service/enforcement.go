@@ -71,13 +71,38 @@ func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeContro
 	if err != nil {
 		return nil, err
 	}
+	kindTools, kindErr := controls.kindChiefTools(r, scope)
+	if kindErr != nil {
+		return nil, kindErr
+	}
 	chief, err := questions.Tools(r, trace.ChiefOfStaff, scope, now)
 	for i, t := range chief {
 		if t.Name == questions.RouteAmendmentTool {
 			chief[i] = controls.lifecycle().ReopenForRevision(r, scope, t)
 		}
 	}
-	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.moveUnit(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), ProjectContext(r, scope))), err
+	return controls.reportQueued(cfg, r, scope, now, append(append([]coreadapter.Tool{recordDiscovery(r, scope, now), factoryContext(r, scope), remoteFileTool(r, scope, now), controls.cloudTrace(cfg, r, scope, now), set, r.NotifyTool(scope, now), inspectCode(cfg, r, scope, now), controls.capacity(r, scope), controls.deliveryBrief(r, scope), delivery.ChecksToolOf(controls.deliveryController, r, scope), delivery.ChecksChoiceToolOf(controls.deliveryController, r, scope), controls.prioritise(r, scope, now), controls.pauseControl(r, scope, now, false), controls.pauseControl(r, scope, now, true), controls.ChangeControl(r, scope, false), controls.ChangeControl(r, scope, true), controls.decideAmendment(r, scope), controls.decideCharter(r, scope), controls.resolveContested(r, scope), controls.intake().ResolveObjection(r, scope), controls.decide(r, scope), controls.flakeFix(r, scope), controls.triageFinding(r, scope), controls.MoveWorkstream(r, scope), controls.HandBackDrift(r, scope, now), controls.lifecycle().DropDependency(r, scope), controls.lifecycle().RetryChange(r, scope), newFollowUpTool(r, scope, now)}, chief...), append(kindTools, ProjectContext(r, scope))...)), err
+}
+
+// kindChiefTools builds the chief-of-staff tools the workstream's kind adds.
+// A workstream whose kind this build does not register gets none.
+func (c *runtimeControls) kindChiefTools(r *trace.Repository, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
+	stream, err := config.ParseWorkstreamID(scope.Workstream)
+	if err != nil {
+		return nil, err
+	}
+	kind, _, ok, err := intake.WorkstreamKind(r, stream)
+	if err != nil || !ok {
+		return nil, err
+	}
+	builders := map[string]func() coreadapter.Tool{moveUnitTool: func() coreadapter.Tool { return c.moveUnit(r, scope) }}
+	var tools []coreadapter.Tool
+	for _, name := range kind.ChiefTools {
+		if build, found := builders[name]; found {
+			tools = append(tools, build())
+		}
+	}
+	return tools, nil
 }
 
 var masonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, questions.AmendTool, factoryContextTool, discoveryTool, execution.DoneTool}, WriteFiles: true, Execute: true}

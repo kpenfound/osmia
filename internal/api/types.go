@@ -265,11 +265,15 @@ type CharterState struct {
 // Stdin (the input itself) is
 // set. Key identifies the request: a retry with the same key returns the same
 // workstream. Base belongs to a selected project and applies only to its member.
+// Kind is the workstream kind, which defaults to "feature" and is recorded once,
+// in the commit that creates the workstream; a kind the service does not
+// register is refused.
 // SkipDebate skips every member's debate; ratification still belongs to the owner.
 type HandInRequest struct {
 	Base       config.WorkstreamID `json:"base,omitempty"`
 	Project    config.ProjectID    `json:"project,omitempty"`
 	Projects   []config.ProjectID  `json:"projects,omitempty"`
+	Kind       string              `json:"kind,omitempty"`
 	Key        string              `json:"key"`
 	Path       string              `json:"path,omitempty"`
 	URL        string              `json:"url,omitempty"`
@@ -330,6 +334,9 @@ type DesignView struct {
 	BriefRevision int                 `json:"brief_revision"`
 	Brief         string              `json:"brief"`
 	Projects      []config.ProjectID  `json:"projects"`
+	// Kind is the workstream kind the latest brief sets, "feature" when the
+	// brief never set one.
+	Kind string `json:"kind"`
 	// Title is the latest title the design session's agent set; it is omitted
 	// for a session that has none.
 	Title string `json:"title,omitempty"`

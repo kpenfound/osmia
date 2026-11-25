@@ -5870,6 +5870,13 @@
           "jev": {
             "$ref": "#/components/schemas/ConfigJev"
           },
+          "kinds": {
+            "additionalProperties": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
           "listen": {
             "$ref": "#/components/schemas/ConfigListen"
           },
@@ -7214,6 +7221,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "kind": {
+            "type": "string"
+          },
           "new_project": {
             "$ref": "#/components/schemas/NewProject"
           },
@@ -8112,6 +8122,9 @@
             "type": "string"
           },
           "key": {
+            "type": "string"
+          },
+          "kind": {
             "type": "string"
           },
           "path": {

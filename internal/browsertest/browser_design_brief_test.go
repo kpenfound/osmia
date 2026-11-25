@@ -66,6 +66,8 @@ func browserDesignBrief(t *testing.T, conflict bool) {
 	p.SelectDesign(id)
 	p.AwaitText("#design-brief", "Brief revision: 1")
 	p.AwaitText("#design-brief", homeName+" (home)")
+	p.Await("the kind beside the project list", `document.querySelector('#design-brief [data-field=kind]')?.textContent === 'Kind: feature' &&
+  document.querySelector('#design-brief [data-field=kind]').parentElement === document.querySelector('#design-brief [data-field=projects]').parentElement`)
 	p.Await("read-only collapsed brief above Start", `document.querySelector('#design-brief details') && !document.querySelector('#design-brief details').open &&
   document.querySelector('#design-brief strong')?.textContent === 'revision 1' &&
   !document.querySelector('#design-brief input, #design-brief select, #design-brief textarea, #design-brief [contenteditable]') &&

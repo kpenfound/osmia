@@ -58,7 +58,7 @@ func TestOpenDesignCreatesAnInertWorkstreamInItsOwnWorkgroup(t *testing.T) {
 	if !design {
 		t.Fatal("a freshly opened design session should be a design workstream")
 	}
-	if kind, err := repository.Kind(stream); err != nil || kind != "" {
+	if kind, err := repository.Kind(stream); err != nil || kind != trace.FeatureKind {
 		t.Fatalf("design session kind: %q %v", kind, err)
 	}
 	if state, err := repository.Workflow(stream, trace.FeatureSubject); err != nil || state.Value != "" {

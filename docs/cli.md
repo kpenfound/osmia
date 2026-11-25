@@ -985,7 +985,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
     changes the project registry or the top-level file. A project that is not on
     the registry is refused. A command line that is not one of the
     three forms, or a project ID that is malformed, exits 2.
-- `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate]` hands one input to the selected
+- `handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--kind KIND] [--skip-debate]` hands one input to the selected
   projects and creates one member per project in a shared workgroup,
   in state `handed`, with the document as its brief. The input is a file
   (made absolute by the client and read by the service), a GitHub issue URL
@@ -1021,6 +1021,15 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   the one shared chief thread. Allocation and join recover without duplicate
   members. `--base` must name a workstream in a selected project and applies
   only to that project's member.
+
+  `--kind` names the workstream kind and defaults to `feature`. The service
+  records the kind once, in the commit that creates the workstream; the API
+  field is `kind` on the hand-in request. A kind the service does not register
+  fails with `validation` (exit 4) and a reason that lists the registered kinds,
+  and so does a hand-in that breaks the kind's limits, such as several projects
+  or a `--base` for a kind that has none. Handing in again under the same key
+  with another kind fails with `conflict`. A recorded kind never changes. See
+  [Workstream kinds](design.md#56-workstream-kinds).
 
   With `--skip-debate` the hand-in skips debate, for small work: once the
   architect's draft is

@@ -44,7 +44,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   project settings <project-id> clear NAME... [--json]  record a new revision without those settings
   project memory <project-id>
   project rebase <project-id> [--json]
-  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--skip-debate] [--json]
+  handin <project-id> <path|issue-url|-> [--with PROJECT-ID]... [--base WORKSTREAM] [--kind KIND] [--skip-debate] [--json]
   edit charter <project-id> [--from FILE]
   edit spec|plan <workstream-id> [--from FILE]
   abandon <workstream-id> <reason> [--json]
@@ -106,7 +106,7 @@ type options struct {
 	root, socket, reason, project, base             string
 	upstream, fork, clone, baseBranch               string
 	repo, description, charterFile, id              string
-	profile, title, from, config                    string
+	profile, title, from, config, kind              string
 	json, hard, reasonSet, help, target, accept     bool
 	skipDebate, version, detach, public, creating   bool
 	projectSpecRevision, specRevision, planRevision int
@@ -128,7 +128,7 @@ func parse(args []string) (o options, err error) {
 		}
 		seen[key] = true
 		switch key {
-		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
+		case "--with", "--root", "--socket", "--reason", "--upstream", "--fork", "--clone", "--base-branch", "--repo", "--description", "--charter-file", "--id", "--project", "--base", "--kind", "--profile", "--title", "--from", "--config", "--project-spec-revision", "--spec-revision", "--plan-revision":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -175,6 +175,8 @@ func parse(args []string) (o options, err error) {
 				o.with = append(o.with, value)
 			case "--base":
 				o.base = value
+			case "--kind":
+				o.kind = value
 			case "--project":
 				o.project = value
 			case "--profile":
@@ -345,7 +347,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	addingProject := cmd == "project" && len(a) > 0 && a[0] == "add"
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
-	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
+	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || o.kind != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
 		return invalid()
 	}
 	if cmd == "config" && len(a) == 1 {
@@ -582,7 +584,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "cannot generate a hand-in key")
 			return 1
 		}
-		req := wire.HandInRequest{Project: id, Key: key, SkipDebate: o.skipDebate}
+		req := wire.HandInRequest{Project: id, Key: key, Kind: o.kind, SkipDebate: o.skipDebate}
 		if len(o.with) > 0 {
 			req.Projects = []config.ProjectID{id}
 			for _, raw := range o.with {

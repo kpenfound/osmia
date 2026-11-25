@@ -278,3 +278,32 @@ func TestHandInWithSendsOrderedProjects(t *testing.T) {
 		}
 	}
 }
+
+func TestHandInKindFlag(t *testing.T) {
+	a, _ := config.ParseProjectID("p_0123456789abcdef0123456789abcdef")
+	requests := make(chan wire.HandInRequest, 4)
+	root, socket := ratifyServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req wire.HandInRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		requests <- req
+		json.NewEncoder(w).Encode(wire.HandInResponse{Project: a, Workstream: service.HandInWorkstream(a, req.Key), State: "handed", Source: "file:" + req.Path})
+	}))
+	for _, c := range []struct {
+		args []string
+		kind string
+	}{{[]string{"handin", string(a), "brief.md"}, ""}, {[]string{"handin", string(a), "brief.md", "--kind", "feature"}, "feature"}, {[]string{"handin", string(a), "brief.md", "--kind=feature"}, "feature"}} {
+		if code, out, diag := invoke(t, root, append(c.args, "--socket", socket)...); code != 0 || diag != "" {
+			t.Fatalf("%v: %d %s %s", c.args, code, out, diag)
+		}
+		if req := <-requests; req.Kind != c.kind {
+			t.Fatalf("%v sent kind %q", c.args, req.Kind)
+		}
+	}
+	for _, args := range [][]string{{"status", "--kind", "feature"}, {"handin", string(a), "brief.md", "--kind"}, {"handin", string(a), "brief.md", "--kind", ""}, {"handin", string(a), "brief.md", "--kind", "a", "--kind", "b"}} {
+		if code, _, _ := invoke(t, root, append(args, "--socket", socket)...); code != 2 {
+			t.Fatalf("%v: exit %d", args, code)
+		}
+	}
+}
