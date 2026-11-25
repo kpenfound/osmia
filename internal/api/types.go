@@ -1656,7 +1656,28 @@ const (
 	// EventCapacity announces a change to the role slots in use or the turns
 	// waiting for one, as the projects' schedulers publish them.
 	EventCapacity EventKind = "capacity"
+	// EventClimbAttemptStarted announces that a Hill Climb workstream began an
+	// attempt.
+	EventClimbAttemptStarted EventKind = "climb.attempt-started"
+	// EventClimbPhase announces that the running attempt moved to another
+	// phase: the mason working, the guardrails, a measurement run or the
+	// review.
+	EventClimbPhase EventKind = "climb.phase"
+	// EventClimbAttemptRecorded announces that an attempt's terminal record,
+	// climb/attempts/<n>.json, was written.
+	EventClimbAttemptRecorded EventKind = "climb.attempt-recorded"
+	// EventClimbKept announces that an attempt was kept and became the best.
+	EventClimbKept EventKind = "climb.kept"
+	// EventClimbPlateau announces that the climb reached its plateau rule.
+	EventClimbPlateau EventKind = "climb.plateau"
+	// EventClimbStop announces that a stop rule fired and the climb waits at
+	// its climb.stop exit.
+	EventClimbStop EventKind = "climb.stop"
 )
+
+// ClimbEventKinds lists the event kinds a Hill Climb workstream publishes, in
+// the order an attempt raises them.
+var ClimbEventKinds = []EventKind{EventClimbAttemptStarted, EventClimbPhase, EventClimbAttemptRecorded, EventClimbKept, EventClimbPlateau, EventClimbStop}
 
 // Event is one notification of the client event stream. It names what
 // changed, never its new state, which the read endpoints report. Image

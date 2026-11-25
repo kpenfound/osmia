@@ -45,6 +45,7 @@ func TestTraceCommitsAnnounceTheirViews(t *testing.T) {
 		{"chief log", trace.Commit{Paths: []string{prefix + "agents/" + trace.ChiefOfStaff + "/log.jsonl", prefix + "agents/agent_mason/log.jsonl"}}, []api.Event{ws, chat}},
 		{"feature transition", trace.Commit{Paths: []string{prefix + "events.jsonl"}}, []api.Event{ws, inbox}},
 		{"packet", trace.Commit{Paths: []string{prefix + "documents.jsonl"}}, []api.Event{ws, inbox}},
+		{"climb attempt", trace.Commit{Paths: []string{prefix + "documents.jsonl", prefix + "climb/attempts/1.json"}}, []api.Event{ws, inbox, {Kind: api.EventClimbAttemptRecorded, Project: project, Workstream: stream}}},
 		{"cost", trace.Commit{Paths: []string{prefix + "ledger.jsonl"}}, []api.Event{spend, ws}},
 		{"project files", trace.Commit{Paths: []string{"charter.md", "documents.jsonl", "kb/entities.json"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},
 		{"charter", trace.Commit{Paths: []string{"charter.md"}}, []api.Event{{Kind: api.EventConfig, Project: project}}},

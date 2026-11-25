@@ -1363,7 +1363,11 @@ status, archive and member-summary responses expose it as `archived_by`. See
 Every failure returns `{"error": {"code": ..., "message": ...}}`. `GET
 /v1/events` is a `text/event-stream`: each frame names the event's kind and
 carries the event as JSON, and the first event of every stream is `resync`,
-which asks the client to read every view again.
+which asks the client to read every view again. A Hill Climb workstream also
+announces its attempts with `climb.attempt-started`, `climb.phase`,
+`climb.attempt-recorded`, `climb.kept`, `climb.plateau` and `climb.stop`. Each
+names the project and workstream, never the new state. A commit that writes
+`climb/attempts/<n>.json` raises `climb.attempt-recorded`.
 
 `GET /v1/health` reports the API as available whenever it answers at all,
 separately from the backend, which is `ready`, `not_ready` while startup or

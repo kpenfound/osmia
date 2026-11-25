@@ -145,6 +145,8 @@ func (h *Hub) TraceEvents(project config.ProjectID) func(trace.Commit) {
 			switch {
 			case parts[2] == "images" || parts[2] == "image-references":
 				add(api.EventImage, stream)
+			case parts[2] == "climb" && len(parts) > 3 && parts[3] == "attempts":
+				add(api.EventClimbAttemptRecorded, stream)
 			case parts[2] == "questions" || parts[2] == "events.jsonl" || parts[2] == "documents.jsonl":
 				add(api.EventInbox, stream)
 			case parts[2] == "agents" && len(parts) > 3 && parts[3] == trace.ChiefOfStaff:
