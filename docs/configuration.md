@@ -523,8 +523,10 @@ The architect pool has no factory-wide limit and no
 `capacity.*` key: each runs at most one turn per workstream. The capacity view
 (the status API's `capacity` and the chief of staff's `capacity` tool) shows
 them as unbounded, with no numeric `limit`, and a note saying so; only the
-mason, reviewer, committee and checks pools report a numeric `limit`, which
-comes from `config.toml` and applies on reload. An unbounded pool is not zero
+mason, reviewer, committee, checks and chief pools report a numeric `limit`, which
+comes from `config.toml` and applies on reload. The `chief` entry is
+`capacity.chief`: its used count is the background chief-of-staff turns holding
+a slot and its waiting entries are the queued ones, oldest first. An unbounded pool is not zero
 capacity and has no setting to raise.
 
 `capacity.committee` is the size of each workstream's committee, not a pool

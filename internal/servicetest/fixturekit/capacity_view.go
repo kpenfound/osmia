@@ -95,7 +95,7 @@ func CapacityWire(t *testing.T, raw []byte) []map[string]any {
 			t.Fatalf("%s entry has no waiting list: %v", role, r)
 		}
 	}
-	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,checks"; got != want {
+	if got, want := strings.Join(order, ","), "mason,reviewer,committee,architect,checks,chief"; got != want {
 		t.Fatalf("capacity pool order %s, want %s", got, want)
 	}
 	return doc.Capacity.Roles

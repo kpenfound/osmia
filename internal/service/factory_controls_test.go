@@ -68,7 +68,7 @@ func TestChiefControlsAnotherProjectAndRecordsTheTarget(t *testing.T) {
 		Capacity *CapacityStatus `json:"capacity"`
 	}
 	fixturekit.Must(t, json.Unmarshal(out, &capacity))
-	if capacity.Capacity == nil || len(capacity.Capacity.Roles) != 5 {
+	if capacity.Capacity == nil || len(capacity.Capacity.Roles) != 6 {
 		t.Fatalf("capacity: %s", out)
 	}
 }

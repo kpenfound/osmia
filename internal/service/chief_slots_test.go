@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/questions"
@@ -458,4 +459,62 @@ func TestChiefSlotsOnlyBackgroundTurnsNeedASlot(t *testing.T) {
 			t.Errorf("%s: owner-started is %v, want %v", test.name, got, test.owner)
 		}
 	}
+}
+
+func TestChiefSlotsFullPoolIsReportedByTheCapacityToolAndStatus(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newChiefFleet(t, 6, chiefLimitTwo, "")
+	s, c := start(t, f.opts)
+	f.background(t, s, 0, "H1", 1)
+	f.background(t, s, 1, "H2", 2)
+	awaitStarted(t, f.agent, f.key(0, "H1"), f.key(1, "H2"))
+	f.background(t, s, 2, "W1", 3)
+	f.background(t, s, 3, "W2", 4)
+	awaitChiefSlots(t, s, 2, "W1", "W2")
+
+	sent, err := c.Send(ctx, f.streams[4], "Owner message while the pool is full")
+	fixturekit.Must(t, err)
+	awaitStarted(t, f.agent, f.key(4, sent.Turn))
+	repo := f.repo(t, s, 4)
+	scope := coreadapter.Scope{Project: string(f.ids[4]), Workstream: string(f.streams[4]), Thread: trace.ChiefOfStaff, Turn: sent.Turn, Role: trace.ChiefOfStaff}
+	controls := &runtimeControls{}
+	controls.service.Store(s)
+	out, err := controls.capacity(repo, scope).Handle(ctx, json.RawMessage(`{}`))
+	fixturekit.Must(t, err)
+	var status json.RawMessage
+	fixturekit.Must(t, c.Do(ctx, "GET", Prefix+"/status", nil, &status))
+
+	for name, raw := range map[string][]byte{"tool": out, "status": status} {
+		var doc struct {
+			Capacity *CapacityStatus `json:"capacity"`
+		}
+		fixturekit.Must(t, json.Unmarshal(raw, &doc))
+		if doc.Capacity == nil {
+			t.Fatalf("%s reports no capacity: %s", name, raw)
+		}
+		var roles []string
+		for _, r := range doc.Capacity.Roles {
+			roles = append(roles, r.Role)
+		}
+		if !slices.Equal(roles, []string{masonRole, reviewerRole, committeeRole, architectRole, checksRole, chiefRole}) {
+			t.Fatalf("%s pools %v", name, roles)
+		}
+		chief := fixturekit.RoleCapacityEntry(t, doc.Capacity, chiefRole)
+		if fixturekit.LimitOf(t, chief) != 2 || chief.Used != 2 || len(chief.Waiting) != 2 {
+			t.Fatalf("%s chief entry %+v", name, chief)
+		}
+		for i, want := range []struct {
+			stream config.WorkstreamID
+			turn   string
+		}{{f.streams[2], "W1"}, {f.streams[3], "W2"}} {
+			w := chief.Waiting[i]
+			if w.Project != f.ids[i+2] || w.Workstream != want.stream || w.Agent != trace.ChiefOfStaff || w.Turn != want.turn || w.Reason != DeferCapacity {
+				t.Fatalf("%s chief waiting[%d] %+v", name, i, w)
+			}
+		}
+	}
+	f.agent.releaseAll()
+	f.awaitSettled(t, s, 2, "W1")
+	f.awaitSettled(t, s, 3, "W2")
 }

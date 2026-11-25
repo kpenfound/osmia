@@ -1282,7 +1282,7 @@
       ...capacity.roles.map((r) => el('div', { class: 'role', 'data-role': r.role },
         el('div', { class: 'line' },
           el('strong', {}, r.role),
-          el('span', { 'data-field': 'slots' }, boundedPool(r) ? r.used + ' / ' + r.limit + ' slots' : r.used + ' active (unbounded; 1 per workstream)')),
+          el('span', { 'data-field': 'slots' }, boundedPool(r) ? r.used + ' / ' + r.limit + ' slots' + (r.waiting.length > 0 ? ', ' + r.waiting.length + ' queued' : '') : r.used + ' active (unbounded; 1 per workstream)')),
         boundedPool(r) ? null : el('div', { class: 'meta', 'data-field': 'note' }, r.note || 'No factory-wide limit; at most one turn per workstream; no configuration setting.'),
         r.waiting.length === 0
           ? el('div', { class: 'meta' }, 'Nothing waits.')

@@ -93,6 +93,7 @@ func TestStatusCapacityReportsTheSlotsInUseAndWhoWaitsForThem(t *testing.T) {
 		{Role: committeeRole, Used: 0, Limit: fixturekit.Limit(3), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(r.s.CheckSlots().Limit), Waiting: []SlotWait{}},
+		{Role: chiefRole, Limit: fixturekit.Limit(r.s.current().Capacity.Chief), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity\n%+v\nwant\n%+v", got.Capacity, want)
@@ -202,6 +203,7 @@ func TestStatusCapacityWithoutProject(t *testing.T) {
 		{Role: committeeRole, Limit: fixturekit.Limit(s.cfg.Capacity.Committee), Waiting: []SlotWait{}},
 		fixturekit.Unbounded(architectRole, 0, []SlotWait{}),
 		{Role: checksRole, Limit: fixturekit.Limit(s.cfg.Capacity.Checks), Waiting: []SlotWait{}},
+		{Role: chiefRole, Limit: fixturekit.Limit(s.cfg.Capacity.Chief), Waiting: []SlotWait{}},
 	}}
 	if !reflect.DeepEqual(got.Capacity, want) {
 		t.Fatalf("capacity without a project %+v, want %+v", got.Capacity, want)

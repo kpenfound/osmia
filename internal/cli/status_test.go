@@ -128,7 +128,8 @@ func TestStatusOverviewShowsProfilesCapacityAndWorkstreams(t *testing.T) {
 		"Jev: unconfigured model=",
 		"  mason: 0 of 4 slot(s) in use\n  reviewer: 0 of 2 slot(s) in use\n  committee: 0 of 3 slot(s) in use\n" +
 			"  architect: 0 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
-			"  checks: 0 of 2 slot(s) in use\n",
+			"  checks: 0 of 2 slot(s) in use\n" +
+			"  chief: 0 of 3 slot(s) in use\n",
 		"Workspaces: setting=auto new_workstreams=",
 		"Workstreams:\n" +
 			"  " + stream + " state=handed open_questions=0 context_mode=file workspaces=git\n" +
@@ -168,7 +169,7 @@ func TestStatusJSONHoldsEveryWorkstreamProfilesCapacityAndWorkspaces(t *testing.
 		Status        wire.StatusResponse
 	}
 	must(t, json.Unmarshal([]byte(successful(t, root, "status", "--json")), &all))
-	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}}}
+	capacity := &wire.CapacityStatus{PerWorkstream: 2, Roles: []wire.RoleCapacity{{Role: "mason", Limit: fixturekit.Limit(4), Waiting: []wire.SlotWait{}}, {Role: "reviewer", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "committee", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}, fixturekit.Unbounded("architect", 0, []wire.SlotWait{}), {Role: "checks", Limit: fixturekit.Limit(2), Waiting: []wire.SlotWait{}}, {Role: "chief", Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{}}}}
 	if all.Status.ProviderUsage == nil || all.Status.ProviderUsage.Unattributed != nil {
 		t.Fatalf("status --json provider usage: %+v", all.Status.ProviderUsage)
 	}
@@ -579,17 +580,22 @@ func TestStatusPrintsCapacity(t *testing.T) {
 			{Workstream: stream, Review: 3, Reason: "capacity"},
 			{Workstream: quiet, Session: true, Reason: "capacity"},
 		}},
+		{Role: "chief", Used: 3, Limit: fixturekit.Limit(3), Waiting: []wire.SlotWait{
+			{Project: "p_a", Workstream: stream, Agent: "chief", Turn: "turn-1", Reason: "capacity"},
+		}},
 	}})
 	if want := "Capacity (per workstream 2):\n" +
-		"  mason: 1 of 1 slot(s) in use\n" +
+		"  mason: 1 of 1 slot(s) in use, 2 waiting\n" +
 		"    Waiting: " + stream + " turn mason-parser-1 of mason-parser (capacity)\n" +
 		"    Waiting: " + quiet + " unit validator (priority)\n" +
 		"  reviewer: 0 of 2 slot(s) in use\n" +
 		"  architect: 1 in use, unbounded (no factory-wide limit; at most one turn per workstream)\n" +
-		"  checks: 2 of 2 slot(s) in use\n" +
+		"  checks: 2 of 2 slot(s) in use, 3 waiting\n" +
 		"    Waiting: " + stream + " unit parser (capacity)\n" +
 		"    Waiting: " + stream + " final review 3 (capacity)\n" +
-		"    Waiting: " + quiet + " session (capacity)\n"; out.String() != want {
+		"    Waiting: " + quiet + " session (capacity)\n" +
+		"  chief: 3 of 3 slot(s) in use, 1 waiting\n" +
+		"    Waiting: " + stream + " turn turn-1 of chief (capacity)\n"; out.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", out.String(), want)
 	}
 }
