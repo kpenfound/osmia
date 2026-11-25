@@ -213,18 +213,82 @@ func (d *Dispatcher) saveRecord(r turnRecord) error {
 	if d.Directory == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(d.recordPath(r.Turn)), 0o700); err != nil {
-		return err
-	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
-	path := d.recordPath(r.Turn)
-	if err := os.WriteFile(path+".tmp", data, 0o600); err != nil {
+	return writeDurable(d.recordPath(r.Turn), data)
+}
+
+func (d *Dispatcher) resultPath(turn string) string {
+	return filepath.Join(d.Directory, "results", turn+".json")
+}
+
+// saveResult stores a turn's complete result, flushed to disk, so that a
+// result the service answered as accepted survives a restart.
+func (d *Dispatcher) saveResult(turn string, res api.TurnResult) error {
+	if d.Directory == "" {
+		return errors.New("the service has no directory to keep a returned result in")
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
 		return err
 	}
-	return os.Rename(path+".tmp", path)
+	return writeDurable(d.resultPath(turn), data)
+}
+
+func (d *Dispatcher) loadResult(turn string) (api.TurnResult, bool) {
+	if d.Directory == "" || turn == "" || strings.ContainsAny(turn, "/\\") {
+		return api.TurnResult{}, false
+	}
+	data, err := os.ReadFile(d.resultPath(turn))
+	if err != nil {
+		return api.TurnResult{}, false
+	}
+	var res api.TurnResult
+	if json.Unmarshal(data, &res) != nil {
+		return api.TurnResult{}, false
+	}
+	return res, true
+}
+
+// writeDurable writes data to path through a temporary file that is flushed
+// before it replaces path, and flushes the directory entry as well.
+func writeDurable(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path+".tmp", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
+		return err
+	}
+	return syncDirectory(dir)
+}
+
+func syncDirectory(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func (d *Dispatcher) loadRecord(turn string) (turnRecord, bool) {
@@ -380,7 +444,10 @@ func (st *turnState) store(staging string) (string, error) {
 	if err := os.Rename(staging, dir); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(parent, "ready"), []byte(filepath.Base(dir)), 0o600); err != nil {
+	if err := syncDirectory(parent); err != nil {
+		return "", err
+	}
+	if err := writeDurable(filepath.Join(parent, "ready"), []byte(filepath.Base(dir))); err != nil {
 		return "", err
 	}
 	return dir, nil
@@ -399,6 +466,10 @@ func (st *turnState) takeResult(ctx context.Context, res api.TurnResult) (api.Vi
 	if err := st.keepSessionFiles(res.SessionFiles); err != nil {
 		st.mu.Unlock()
 		return "", &api.APIError{Code: api.Malformed, Message: err.Error()}
+	}
+	if err := st.d.saveResult(st.rec.Turn, res); err != nil {
+		st.mu.Unlock()
+		return "", err
 	}
 	st.result, st.resultTaken = &res, true
 	close(st.resultReady)
@@ -623,9 +694,16 @@ func (d *Dispatcher) expiredLocked(st *turnState) bool {
 // HoldFromTrace holds the turns that a previous service session started on a
 // remote client and never captured a result for, so the clients that run them
 // can reattach within the hold window. A turn whose view the previous session
-// accepted keeps that view. It must run before the service recovers its
-// interrupted turns.
+// accepted keeps that view, and one whose result it accepted keeps that
+// result; a turn left with both is recorded as it originally ended. It must
+// run before the service recovers its interrupted turns.
 func (d *Dispatcher) HoldFromTrace(project config.ProjectID, repo *trace.Repository) error {
+	var rebuilt []*turnState
+	defer func() {
+		for _, st := range rebuilt {
+			d.maybeFinish(context.Background(), st)
+		}
+	}()
 	streams, err := repo.Workstreams()
 	if err != nil {
 		return err
@@ -648,10 +726,12 @@ func (d *Dispatcher) HoldFromTrace(project config.ProjectID, repo *trace.Reposit
 				st := newState(d, rec)
 				st.adopted, st.deadline = true, d.Now().Add(d.Hold)
 				d.restoreView(st)
+				d.restoreResult(st)
 				st.startedAt = q.Claim.At
 				d.mu.Lock()
 				d.states[rec.Turn] = st
 				d.mu.Unlock()
+				rebuilt = append(rebuilt, st)
 			}
 		}
 	}
@@ -676,6 +756,19 @@ func (d *Dispatcher) restoreView(st *turnState) {
 	}
 	st.viewDir, st.viewTaken = dir, true
 	close(st.viewReady)
+}
+
+// restoreResult gives a rebuilt turn the result its previous session
+// accepted, which the service stores before it answers a result as accepted.
+// A turn that has its result and its view finishes and records its original
+// outcome once; one that still lacks its view waits for it.
+func (d *Dispatcher) restoreResult(st *turnState) {
+	res, ok := d.loadResult(st.rec.Turn)
+	if !ok {
+		return
+	}
+	st.result, st.resultTaken = &res, true
+	close(st.resultReady)
 }
 
 // Expired is a held turn whose client did not reattach it in time.

@@ -176,12 +176,7 @@ func TestARemoteTurnReattachesAfterARestartAndItsResultIsRecordedOnce(t *testing
 	c.claim(offer, map[string]string{"src/main.go": "x"})
 	put(t, c.view, "src/main.go", "finished after the restart")
 
-	must(t, r.repo.Close())
-	reopened, err := trace.Open(r.root, r.project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	r.start("mason", reopened)
-	must(t, r.d.HoldFromTrace(project, reopened))
+	r.restart()
 	if !r.d.Held("t1") {
 		t.Fatal("a turn running on a remote client is not held after a restart")
 	}
@@ -251,12 +246,7 @@ func TestAReattachedTurnsToolCallsWorkAfterARestartOnTheClientsFiles(t *testing.
 	}
 	put(t, c.view, "src/main.go", "as the session left it")
 
-	must(t, r.repo.Close())
-	reopened, err := trace.Open(r.root, r.project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	r.start("mason", reopened)
-	must(t, r.d.HoldFromTrace(project, reopened))
+	r.restart()
 	if status, _ := r.relay("t1", offer.ToolToken, "note", `{}`); status == 200 {
 		t.Fatal("a held turn's tools answered before its client reattached")
 	}
@@ -318,12 +308,7 @@ func TestAHeldTurnIsReleasedWhenItsClientDoesNotReattachInTime(t *testing.T) {
 	offer := c.nextOffer()
 	c.claim(offer, map[string]string{"src/main.go": "x"})
 
-	must(t, r.repo.Close())
-	reopened, err := trace.Open(r.root, r.project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	r.start("mason", reopened)
-	must(t, r.d.HoldFromTrace(project, reopened))
+	r.restart()
 	if len(r.d.Sweep()) != 0 {
 		t.Fatal("a turn was released inside its window")
 	}
@@ -365,12 +350,7 @@ func startRestarted(t *testing.T, accept bool) (*rig, *fakeClient, api.TurnOffer
 		}
 	}
 
-	must(t, r.repo.Close())
-	reopened, err := trace.Open(r.root, r.project)
-	must(t, err)
-	t.Cleanup(func() { reopened.Close() })
-	r.start("mason", reopened)
-	must(t, r.d.HoldFromTrace(project, reopened))
+	r.restart()
 
 	back := r.client("node-a")
 	back.view = c.view
