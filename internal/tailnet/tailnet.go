@@ -21,6 +21,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/redact"
+	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
@@ -84,6 +85,44 @@ func JoinTailscale(logger *slog.Logger) Join {
 		}
 		return tsnetListener{Listener: listener, server: server}, nil
 	}
+}
+
+// Node is the tailnet node behind a connection: its stable ID, which names it
+// across renames and address changes, and its name for display.
+type Node struct {
+	ID   string
+	Name string
+}
+
+// Identifier names the tailnet node a connection came from. The listener a
+// tsnet node provides implements it.
+type Identifier interface {
+	WhoIs(ctx context.Context, remoteAddr string) (Node, error)
+}
+
+type whoIsClient interface {
+	WhoIs(context.Context, string) (*apitype.WhoIsResponse, error)
+}
+
+func whoIs(ctx context.Context, client whoIsClient, remoteAddr string) (Node, error) {
+	who, err := client.WhoIs(ctx, remoteAddr)
+	if err != nil {
+		return Node{}, err
+	}
+	if who == nil || who.Node == nil || who.Node.StableID == "" {
+		return Node{}, errors.New("the tailnet does not know the caller's node")
+	}
+	name := strings.TrimSuffix(who.Node.Name, ".")
+	short, _, _ := strings.Cut(name, ".")
+	return Node{ID: string(who.Node.StableID), Name: short}, nil
+}
+
+func (l tsnetListener) WhoIs(ctx context.Context, remoteAddr string) (Node, error) {
+	client, err := l.server.LocalClient()
+	if err != nil {
+		return Node{}, err
+	}
+	return whoIs(ctx, client, remoteAddr)
 }
 
 type tsnetListener struct {

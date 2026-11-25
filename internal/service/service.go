@@ -31,6 +31,7 @@ import (
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/eventstream"
 	"github.com/kpenfound/osmia/internal/filetransport"
+	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -128,6 +129,12 @@ type Options struct {
 	// tailnet HTTPS certificate again after a failed request, doubled after
 	// each further failure up to 15 minutes. It defaults to 30 seconds.
 	TailnetHTTPSRetry time.Duration
+	// ClientIdentity names the tailnet node a client protocol request came
+	// from. It defaults to the WhoIs of the service's own tailnet node.
+	ClientIdentity func(*http.Request) (fleet.Identity, error)
+	// Fleet tunes the client leases: the clock, the grace window and the
+	// heartbeat and poll intervals. Its zero value selects the defaults.
+	Fleet fleet.Options
 	// NotifyRetry is how long the service waits before it posts a
 	// Notification the webhook refused again, doubled after each further
 	// failure. It defaults to 30 seconds.
@@ -211,6 +218,7 @@ type Service struct {
 	tailnet               *tailnet.Link
 	tailnetDone           chan struct{}
 	transfers             *filetransport.Registry
+	fleet                 *fleet.Registry
 	socketInfo            os.FileInfo
 	server                *http.Server
 	lifetime              context.Context
@@ -296,7 +304,15 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{transfers: filetransport.NewRegistry(transfers), options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	if opts.Fleet.Now == nil {
+		opts.Fleet.Now = func() time.Time {
+			if opts.Reconciliation.Now != nil {
+				return opts.Reconciliation.Now().UTC()
+			}
+			return time.Now().UTC()
+		}
+	}
+	s := &Service{transfers: filetransport.NewRegistry(transfers), fleet: fleet.NewRegistry(opts.Fleet), options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	s.telemetry = s.startTelemetry(cfg.Telemetry)
 	s.slots = s.startSlotSpans(cfg)
 	s.spans = newFactorySpans(s.telemetry, ledgerPath(root), s.now, logger)
@@ -501,12 +517,14 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}), ReadHeaderTimeout: opts.ReadHeaderTimeout, ReadTimeout: opts.ReadTimeout, WriteTimeout: opts.WriteTimeout,
 		BaseContext: func(net.Listener) context.Context { return s.lifetime }, ConnContext: tailnet.ConnContext}
 	s.spans.begin(poolsOf(cfg.Capacity))
+	s.fleet.SetHandout(fleet.Handout(cfg))
 	s.ready.Store(true)
 	for _, p := range projects {
 		s.launch(p)
 	}
 	s.notifier = newNotifier(s, opts.NotifyRetry, opts.notifyInbox)
 	go s.notifier.run(s.lifetime)
+	s.startFleet(s.lifetime)
 	s.reporter = newErrorReporter(s, capture)
 	s.reporter.configure(cfg)
 	go s.reporter.run(s.lifetime)

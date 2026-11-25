@@ -138,6 +138,12 @@ const TranscriptionFailed = api.TranscriptionFailed
 
 const TooLarge = api.TooLarge
 
+const VersionMismatch = api.VersionMismatch
+
+const ClientConnected = api.ClientConnected
+
+const LeaseEnded = api.LeaseEnded
+
 type TranscribeRequest = api.TranscribeRequest
 
 type TranscribeResponse = api.TranscribeResponse

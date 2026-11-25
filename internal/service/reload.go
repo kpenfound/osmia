@@ -9,6 +9,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
+	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/projectstore"
 	"github.com/kpenfound/osmia/internal/reconcile"
@@ -156,6 +157,7 @@ func (s *Service) reload() (ReloadResponse, *APIError) {
 		events = append(events, Event{Kind: EventSpend})
 	}
 	s.reporter.configure(next)
+	s.fleet.SetHandout(fleet.Handout(next))
 	s.hub.Publish(events...)
 	s.log().Info("reload succeeded", "digest", digest(next), "restart_required", len(restart) > 0)
 	return ReloadResponse{Digest: digest(next), RestartRequired: restart}, nil

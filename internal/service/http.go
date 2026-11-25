@@ -60,6 +60,10 @@ func failWith(w http.ResponseWriter, api *APIError) {
 		status = 404
 	case Forbidden:
 		status = 403
+	case VersionMismatch, ClientConnected:
+		status = 409
+	case LeaseEnded:
+		status = 410
 	case Unsupported:
 		status = 501
 	case Unavailable:
@@ -199,6 +203,9 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.transferRequest(w, r) {
+		return
+	}
+	if s.fleetRequest(w, r) {
 		return
 	}
 	if web.Serve(w, r) {
