@@ -30,9 +30,11 @@
   // server-side rule never flags one as blocked from elapsed time alone
   // either (activity.go, ActivityEntry.reported) and "git" is left out here
   // to match. archive_cleanup and recovery do report progress through their
-  // phases, so a stall in either still shows as blocked.
+  // phases, so a stall in either still shows as blocked. So does a turn on a
+  // client (client_turn), whose phase and progress arrive in the client's
+  // heartbeats.
   const activityStallMs = 30000;
-  const activityStallTrackedKinds = new Set(['archive_cleanup', 'recovery']);
+  const activityStallTrackedKinds = new Set(['archive_cleanup', 'recovery', 'client_turn']);
 
   // An edit of a configuration file on disk is not announced, so the page
   // reads /config again this often while it is visible and live.

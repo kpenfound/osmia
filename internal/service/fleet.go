@@ -10,6 +10,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/fleet"
+	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/tailnet"
 )
 
@@ -164,4 +165,32 @@ func decodeLimit(w http.ResponseWriter, r *http.Request, out any, limit int64) b
 
 func (s *Service) startFleet(ctx context.Context) {
 	go s.fleet.Run(ctx, fleetSweep)
+	go func() {
+		t := time.NewTicker(fleetSweep)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.recoverExpiredHolds(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Service) recoverExpiredHolds(ctx context.Context) {
+	for _, e := range s.clients.Sweep() {
+		cfg, p := s.runtimeOf(e.Project)
+		if p == nil {
+			continue
+		}
+		th, err := p.repository.Thread(e.Workstream, e.Agent)
+		if err == nil {
+			err = s.recoverThread(ctx, cfg, p.repository, e.Workstream, th)
+		}
+		if err != nil {
+			ghlog.Logger(ctx).Warn("cannot recover a turn its client did not reattach", "project", string(e.Project), "turn", e.Turn, "error", err.Error())
+		}
+	}
 }

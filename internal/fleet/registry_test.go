@@ -219,13 +219,15 @@ func TestATurnReattachesByIDWithinTheGraceWindowAndIsLostAfterIt(t *testing.T) {
 func TestAServerThatRestartedAsksTheHookWhetherToReattachATurn(t *testing.T) {
 	t.Parallel()
 	r, _ := newRegistry(t)
-	r.SetHooks(Hooks{Reattach: func(_ context.Context, id Identity, turn string) bool { return id.ID == "n1" && turn == "turn-1" }})
+	r.SetHooks(Hooks{Reattach: func(_ context.Context, id Identity, turn string) (string, bool) {
+		return "token-for-" + turn, id.ID == "n1" && turn == "turn-1"
+	}})
 	n := node("n1")
 	resp, err := r.Connect(context.Background(), n, api.ClientConnectRequest{Version: api.ClientProtocolVersion, Slots: 1, Lease: "lease-of-the-old-server", Running: []string{"turn-1", "turn-2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []api.TurnReattach{{Turn: "turn-1", Answer: api.TurnReattached}, {Turn: "turn-2", Answer: api.TurnLost}}; !slices.Equal(resp.Turns, want) {
+	if want := []api.TurnReattach{{Turn: "turn-1", Answer: api.TurnReattached, Token: "token-for-turn-1"}, {Turn: "turn-2", Answer: api.TurnLost}}; !slices.Equal(resp.Turns, want) {
 		t.Fatalf("answers: %+v", resp.Turns)
 	}
 	if got, _ := r.Client(n.ID); len(got.Held) != 1 || got.Slots != 1 || got.Free() != 0 {

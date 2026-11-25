@@ -52,6 +52,12 @@ func validPath(name string) error {
 	return nil
 }
 
+// CheckPath refuses a path no view operation may name: an absolute path, one
+// with a traversal segment, backslash, colon or NUL, and any that names version
+// control metadata. A view on a client is held to the same rule as the
+// service's own, before the client is asked to touch it.
+func CheckPath(name string) error { return validPath(name) }
+
 func checkPath(root *os.Root, name string, missing bool) error {
 	if err := validPath(name); err != nil {
 		return err

@@ -20,8 +20,12 @@ import (
 // Selection comes from the service's workspace and role bindings. Narrow may
 // remove permissions for a turn; it cannot add to the service's role grant.
 type Selection struct {
-	Workspace   coreadapter.WorkspaceRequest
-	Paths       []string
+	Workspace coreadapter.WorkspaceRequest
+	Paths     []string
+	// Commit is the commit of the project's clone the selected paths are
+	// recorded at, when they are. A remote client builds the view from it, with
+	// its own cached clone; with none the view is sent as an archive.
+	Commit      string
 	Execution   coreadapter.ExecutionSettings
 	Narrow      *coreadapter.Capabilities
 	Environment map[string]string
@@ -47,9 +51,18 @@ type Turns struct {
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
 	// ViewTools supplies handlers that inspect the active turn's isolated files.
-	ViewTools func(context.Context, coreadapter.Scope, *FileView) ([]coreadapter.Tool, error)
+	// The view is the one the turn runs in: the service's view for a local turn,
+	// the client's own for a remote one.
+	ViewTools func(context.Context, coreadapter.Scope, View) ([]coreadapter.Tool, error)
 	Hosts     coreadapter.MCPHosts
 	Engine    coreadapter.Engine
+	// Clients chooses the client each turn runs on. Nil, or a placer that
+	// returns no client, runs the turn on the built-in local client, which runs
+	// sessions with Engine in this process.
+	Clients Placer
+	// Chain returns the fallback profiles that follow a profile, for a client
+	// told which profiles it may fall back to. Nil names none.
+	Chain func(profile string) []string
 	// Capture may snapshot selected output through the service before cleanup.
 	// It runs even on execution errors, but never grants an agent VCS access.
 	Capture func(context.Context, coreadapter.Scope, *FileView, coreadapter.SessionResult) error
@@ -123,11 +136,25 @@ func roleGrant(role string, grant coreadapter.Capabilities) (coreadapter.Capabil
 	return grant, nil
 }
 
+func (r *Turns) client(ctx context.Context, scope coreadapter.Scope, profile coreadapter.Profile) (Client, error) {
+	if r.Clients != nil {
+		client, err := r.Clients(ctx, scope, profile)
+		if client != nil || err != nil {
+			return client, err
+		}
+	}
+	return Local(r.Engine), nil
+}
+
 func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result coreadapter.SessionResult, err error) {
 	result.Session.Backend, result.SessionDirectory = input.Profile.Backend, input.SessionDirectory
+	var placed Client
 	defer func() {
 		if result.Session.ID == "" {
 			result.Session = coreadapter.BackendSession{}
+		}
+		if placed != nil {
+			result.Client = placed.ID()
 		}
 		if err != nil {
 			result.IsError = true
@@ -180,12 +207,20 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if err = coreadapter.PublicEnvironment(env); err != nil {
 		return result, err
 	}
-	cloud, err := coreadapter.DaggerCloudEnvironment(selected.Execution, os.Getenv)
+	client, err := r.client(ctx, input.Scope, input.Profile)
 	if err != nil {
 		return result, err
 	}
-	redact.Register(cloud[coreadapter.DaggerCloudTokenEnvironment])
-	maps.Copy(env, cloud)
+	placed = client
+	remote := client.Remote()
+	if !remote {
+		cloud, err := coreadapter.DaggerCloudEnvironment(selected.Execution, os.Getenv)
+		if err != nil {
+			return result, err
+		}
+		redact.Register(cloud[coreadapter.DaggerCloudTokenEnvironment])
+		maps.Copy(env, cloud)
+	}
 	workspace, err := r.Workspaces.Acquire(ctx, selected.Workspace)
 	if err != nil {
 		return result, err
@@ -197,26 +232,42 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	if workspace.Workspace.Access != selected.Workspace.Access {
 		return result, errors.New("provider workspace access differs from service selection")
 	}
-	views := r.Views
-	if r.PreserveMasonViews && input.Scope.Role == "mason" {
-		views.Directory = filepath.Join(views.Directory, input.Scope.Project, input.Scope.Workstream, input.Scope.Thread, input.Scope.Turn)
-		if err := os.MkdirAll(views.Directory, 0700); err != nil {
+	var view *FileView
+	var start *StartView
+	if remote && selected.Commit != "" {
+		start = &StartView{Project: input.Scope.Project, Commit: selected.Commit, Paths: slices.Clone(selected.Paths)}
+	} else {
+		views := r.Views
+		preserved := r.PreserveMasonViews && input.Scope.Role == "mason" && !remote
+		if preserved {
+			views.Directory = filepath.Join(views.Directory, input.Scope.Project, input.Scope.Workstream, input.Scope.Thread, input.Scope.Turn)
+			if err := os.MkdirAll(views.Directory, 0700); err != nil {
+				return result, err
+			}
+		}
+		view, err = views.CreateFor(ctx, workspace.Workspace, selected.Paths, selected.Execution)
+		if err != nil {
 			return result, err
 		}
+		defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
+		if preserved {
+			if err := os.WriteFile(filepath.Join(views.Directory, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600); err != nil {
+				return result, err
+			}
+		}
 	}
-	view, err := views.CreateFor(ctx, workspace.Workspace, selected.Paths, selected.Execution)
+	turn := ClientTurn{Capabilities: capabilities, Environment: env, View: view, Start: start, ReturnView: capabilities.WriteFiles, RunsDagger: selected.Execution.RunsDagger(),
+		SkillRefs: coreadapter.TurnSkills(selected.Execution, input.Profile.Backend), Pinned: []string{workspace.Workspace.Directory}}
+	if r.Chain != nil {
+		turn.Fallbacks = r.Chain(input.Profile.Name)
+	}
+	files, err := client.Files(ctx, turn)
 	if err != nil {
 		return result, err
 	}
-	defer func() { err = errors.Join(err, view.Release(context.WithoutCancel(ctx))) }()
-	if r.PreserveMasonViews && input.Scope.Role == "mason" {
-		if err := os.WriteFile(filepath.Join(views.Directory, "ready"), []byte(filepath.Base(view.Workspace().Directory)), 0600); err != nil {
-			return result, err
-		}
-	}
-	tools := append(fileTools(view, NewSkillReader(r.Engine, coreadapter.TurnSkills(selected.Execution, input.Profile.Backend))), r.Tools...)
+	tools := append(fileTools(files), r.Tools...)
 	if r.ViewTools != nil {
-		viewTools, toolErr := r.ViewTools(ctx, input.Scope, view)
+		viewTools, toolErr := r.ViewTools(ctx, input.Scope, files.View)
 		if toolErr != nil {
 			return result, toolErr
 		}
@@ -273,19 +324,25 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 	}
 	capabilities.Tools = names
+	turn.Capabilities = capabilities
 	prepared := input
 	prepared.Execution = selected.Execution
-	prepared.Sandbox = coreadapter.SandboxLease{Verified: coreadapter.Isolation{Workspace: view.Workspace(), Capabilities: capabilities, Environment: env,
-		DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}
-	executor := coreadapter.CoreExecutor{Required: prepared.Sandbox.Verified, Runner: r.Engine, Pinned: []string{workspace.Workspace.Directory}}
-	if err = executor.Check(ctx, prepared.Sandbox.Verified, prepared.Execution); err != nil {
-		return result, err
+	hosting := prepared.Execution
+	if remote {
+		hosting = coreadapter.ExecutionSettings{}
+	} else {
+		prepared.Sandbox = coreadapter.SandboxLease{Verified: coreadapter.Isolation{Workspace: view.Workspace(), Capabilities: capabilities, Environment: env,
+			DenyVCS: true, DenyInheritedEnvironment: true, DenyDeliveryCredentials: true}}
+		executor := coreadapter.CoreExecutor{Required: prepared.Sandbox.Verified, Runner: r.Engine, Pinned: turn.Pinned}
+		if err = executor.Check(ctx, prepared.Sandbox.Verified, prepared.Execution); err != nil {
+			return result, err
+		}
 	}
 	if len(approved) != 0 {
 		if r.Hosts == nil {
 			return result, errors.New("service MCP host is required for granted tools")
 		}
-		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved, Execution: prepared.Execution})
+		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved, Execution: hosting})
 		if hostErr != nil {
 			return result, hostErr
 		}
@@ -298,21 +355,49 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 		env[coreadapter.TokenEnvironment] = hosted.Endpoint.Token
 		prepared.MCP = []coreadapter.Endpoint{hosted.Endpoint}
+		turn.Endpoint = hosted.Endpoint
 	}
-	result, err = (&coreadapter.TurnRunner{Executor: executor}).Run(ctx, prepared)
+	if remote {
+		delete(env, coreadapter.TokenEnvironment)
+		prepared.MCP = nil
+		prepared.Execution.DaggerCloudTokenEnv = ""
+		turn.Environment = env
+		turn.Capabilities.Tools = names
+	}
+	turn.Prepared = prepared
+	run, runErr := client.Run(ctx, turn)
+	result, err = run.Result, runErr
+	result.Client = client.ID()
+	if remote {
+		result.SessionDirectory = input.SessionDirectory
+		result.Session.Backend = cmpOr(result.Session.Backend, input.Profile.Backend)
+	}
 	countMu.Lock()
 	if len(counts) != 0 {
 		result.ToolCounts = maps.Clone(counts)
 	}
 	result.Records = records
 	countMu.Unlock()
-	if r.Capture != nil {
-		err = errors.Join(err, r.Capture(context.WithoutCancel(ctx), input.Scope, view, result))
+	if run.View != nil {
+		if r.Capture != nil {
+			err = errors.Join(err, r.Capture(context.WithoutCancel(ctx), input.Scope, run.View, result))
+		}
+		if run.View != view {
+			err = errors.Join(err, run.View.Release(context.WithoutCancel(ctx)))
+		}
 	}
 	return result, err
 }
 
-func fileTools(view *FileView, skills *SkillReader) []coreadapter.Tool {
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func fileTools(files Files) []coreadapter.Tool {
+	view, skills := files.View, files.Skills
 	description := "Read a file in this turn's view, or list a directory's entries; \".\" is the view's root"
 	if skills != nil {
 		description += ". A file or directory inside one of this turn's skill directories is read at its absolute path"

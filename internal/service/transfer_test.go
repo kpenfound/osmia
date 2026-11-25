@@ -52,6 +52,13 @@ func gitClient(t *testing.T, dir string, args ...string) (string, error) {
 
 func newTransferRig(t *testing.T) *transferRig {
 	t.Helper()
+	return newTransferRigWith(t, nil)
+}
+
+// newTransferRigWith is newTransferRig with the service's options adjusted
+// before it starts.
+func newTransferRigWith(t *testing.T, adjust func(*Options)) *transferRig {
+	t.Helper()
 	opts := fixture(t)
 	home := filepath.Dir(opts.Config.Root)
 	clone := filepath.Join(home, "clone")
@@ -71,6 +78,9 @@ func newTransferRig(t *testing.T) *transferRig {
 	}
 	fixturekit.WithListen(t, opts.Config.Root, "tailnet = \"osmia\"\n")
 	withTailnet(t, &opts, "osmia-1")
+	if adjust != nil {
+		adjust(&opts)
+	}
 	s, _ := start(t, opts)
 	return &transferRig{s: s, base: "http://" + s.TailnetAddr(), home: home, clone: clone, started: started, hidden: hidden}
 }

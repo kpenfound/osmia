@@ -18,7 +18,8 @@ func (s *Service) Transfers() *filetransport.Registry { return s.transfers }
 func (s *Service) transferRequest(w http.ResponseWriter, r *http.Request) bool {
 	project, rest, isGit := api.GitRoute(r.URL.Path)
 	turn, isView := api.ViewRoute(r.URL.Path)
-	if !isGit && !isView {
+	relayed, _, isRelay := api.MCPRoute(r.URL.Path)
+	if !isGit && !isView && !isRelay {
 		return false
 	}
 	if tailnet.ArrivedOn(r) != tailnet.TailnetListener {
@@ -26,6 +27,14 @@ func (s *Service) transferRequest(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	switch {
+	case isRelay:
+		if s.clients == nil {
+			fail(w, NotFound)
+			return true
+		}
+		if refusal := s.clients.Relay.Serve(w, r, relayed); refusal != nil {
+			failWith(w, refusal)
+		}
 	case isGit:
 		clone, ok := s.projectClone(project)
 		if !ok {

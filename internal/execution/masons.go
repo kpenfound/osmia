@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpenfound/osmia/internal/bundle"
 	"github.com/kpenfound/osmia/internal/config"
+	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/followup"
 	"github.com/kpenfound/osmia/internal/kb"
 	"github.com/kpenfound/osmia/internal/plan"
@@ -885,6 +886,9 @@ Your view holds the project's files as the feature branch had them when the unit
 func Interruption(q trace.QueuedTurn) string {
 	if q.Response != nil && q.Response.Stop != nil {
 		return "A hard pause stopped your last turn."
+	}
+	if q.Response != nil && q.Response.Result.Client != "" && q.Response.Result.Client != coreadapter.LocalClient {
+		return "The machine running your last turn was lost."
 	}
 	return "The service stopped during your last turn."
 }

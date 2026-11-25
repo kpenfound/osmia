@@ -80,8 +80,9 @@ type Hooks struct {
 	Progress func(Client, api.TurnProgress)
 	// Reattach decides whether the server holds a turn for a client that
 	// reports it still runs it and the registry does not know it, as after a
-	// server restart.
-	Reattach func(context.Context, Identity, string) bool
+	// server restart. When it holds the turn it returns the bearer token the
+	// turn's view upload takes from now on, which the client is told.
+	Reattach func(context.Context, Identity, string) (token string, held bool)
 	// Result takes a turn's returned result and answers it definitively.
 	Result func(context.Context, Client, string, api.TurnResult) (api.ViewAnswer, error)
 	// LeaseEnded receives a client whose lease ended and the turns it held.
@@ -429,11 +430,11 @@ func (r *Registry) Connect(ctx context.Context, ident Identity, req api.ClientCo
 	reattach := r.hooks.Reattach
 	r.mu.Unlock()
 
-	adopted := map[string]bool{}
+	adopted := map[string]string{}
 	if reattach != nil {
 		for _, turn := range unknown {
-			if reattach(ctx, ident, turn) {
-				adopted[turn] = true
+			if token, held := reattach(ctx, ident, turn); held {
+				adopted[turn] = token
 			}
 		}
 	}
@@ -445,14 +446,16 @@ func (r *Registry) Connect(ctx context.Context, ident Identity, req api.ClientCo
 	resp := api.ClientConnectResponse{Version: api.ClientProtocolVersion, Lease: l.id, Client: ident, Resumed: resumed,
 		HeartbeatSeconds: int(r.heartbeat / time.Second), GraceSeconds: int(r.grace / time.Second), PollSeconds: int(r.poll / time.Second), Profiles: r.handout}
 	for _, turn := range req.Running {
-		answer := api.TurnLost
-		if _, ok := l.held[turn]; ok || adopted[turn] {
-			answer = api.TurnReattached
-			if !ok {
+		answer, token := api.TurnLost, ""
+		_, held := l.held[turn]
+		adoptedToken, adoptedTurn := adopted[turn]
+		if held || adoptedTurn {
+			answer, token = api.TurnReattached, adoptedToken
+			if !held {
 				l.held[turn] = &Held{Turn: turn, Since: now, Progress: api.TurnProgress{Turn: turn}}
 			}
 		}
-		resp.Turns = append(resp.Turns, api.TurnReattach{Turn: turn, Answer: answer})
+		resp.Turns = append(resp.Turns, api.TurnReattach{Turn: turn, Answer: answer, Token: token})
 	}
 	return resp, nil
 }

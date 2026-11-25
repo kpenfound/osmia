@@ -208,11 +208,26 @@ func (u unitWorkspaces) selection(ctx context.Context, scope coreadapter.Scope, 
 	if !found {
 		return isolation.Selection{}, fmt.Errorf("unit %s of workstream %s has no workspace", scope.Unit, stream)
 	}
-	if err := u.record(ctx, scope, w); err != nil {
+	revision, err := u.record(ctx, scope, w)
+	if err != nil {
 		return isolation.Selection{}, err
 	}
 	paths, err := u.Paths(w)
-	return isolation.Selection{Paths: paths, Execution: execution, Narrow: &UnitMasonGrant}, err
+	return isolation.Selection{Paths: paths, Commit: u.fetchable(ctx, stream, revision), Execution: execution, Narrow: &UnitMasonGrant}, err
+}
+
+func (u unitWorkspaces) fetchable(ctx context.Context, stream config.WorkstreamID, commit string) string {
+	if commit == "" {
+		return ""
+	}
+	g, err := u.Of(stream)
+	if err != nil {
+		return ""
+	}
+	if known, err := g.Known(ctx, commit); err != nil || !known {
+		return ""
+	}
+	return commit
 }
 
 const recordedName = "recorded"
@@ -221,28 +236,32 @@ func TurnViews(cfg *config.Config, project config.ProjectID, stream config.Works
 	return filepath.Join(cfg.Root.String(), "views", string(project), string(stream), agent, turn)
 }
 
-func (u unitWorkspaces) record(ctx context.Context, scope coreadapter.Scope, w workspace.Worktree) error {
+func (u unitWorkspaces) record(ctx context.Context, scope coreadapter.Scope, w workspace.Worktree) (string, error) {
 	stream := config.WorkstreamID(scope.Workstream)
 	dir := TurnViews(u.Cfg, u.Repository.Project(), stream, scope.Thread, scope.Turn)
 	path := filepath.Join(dir, recordedName)
 	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
-		return err
+		if err != nil {
+			return "", err
+		}
+		recorded, err := os.ReadFile(path)
+		return string(recorded), err
 	}
 	g, err := u.Of(stream)
 	if err != nil {
-		return err
+		return "", err
 	}
 	revision, err := g.Record(ctx, w)
 	if err != nil || revision == "" {
-		return err
+		return "", err
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.WriteFile(path+".tmp", []byte(revision), 0600); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(path+".tmp", path)
+	return revision, os.Rename(path+".tmp", path)
 }
 
 func (u unitWorkspaces) Changed(ctx context.Context, stream config.WorkstreamID, unit, turn string) ([]string, bool, error) {

@@ -79,3 +79,30 @@ const (
 type ViewUploadResponse struct {
 	Answer ViewAnswer `json:"answer" enum:"accepted,already_recorded,superseded"`
 }
+
+// MCPPath is the path of a turn's MCP relay, where a client forwards the tool
+// calls its sandbox makes. The relay passes them to the turn's own MCP
+// endpoint on the service, and only for the turn's bearer token.
+func MCPPath(turn string) string {
+	return Prefix + "/turns/" + turn + "/mcp"
+}
+
+// MCPRoute splits a path under a turn's MCP relay into the turn and the path
+// below the relay, which is empty or begins with a slash.
+func MCPRoute(path string) (turn, rest string, ok bool) {
+	tail, ok := strings.CutPrefix(path, Prefix+"/turns/")
+	if !ok {
+		return "", "", false
+	}
+	turn, below, ok := strings.Cut(tail, "/")
+	if !ok || turn == "" {
+		return "", "", false
+	}
+	if below == "mcp" {
+		return turn, "", true
+	}
+	if rest, found := strings.CutPrefix(below, "mcp/"); found {
+		return turn, "/" + rest, true
+	}
+	return "", "", false
+}

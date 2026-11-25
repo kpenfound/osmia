@@ -4392,6 +4392,122 @@
         }
       }
     },
+    "/v1/turns/{turn}/mcp": {
+      "get": {
+        "summary": "Tailnet listener only: relay a remote turn's MCP event stream to the turn's own MCP endpoint, for the turn's bearer token alone",
+        "operationId": "getTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Tailnet listener only: relay a remote turn's MCP request (a client's local listener forwards each tool call its sandbox makes) to the turn's own MCP endpoint on the service, which handles and audits it. Only a request that carries the turn's bearer token is relayed; any other is refused. Paths below /mcp are relayed as they are",
+        "operationId": "postTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Tailnet listener only: relay the end of a remote turn's MCP session to the turn's own MCP endpoint, for the turn's bearer token alone",
+        "operationId": "deleteTurnsByTurnMcp",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/turns/{turn}/view": {
       "get": {
         "summary": "Tailnet listener only: download the archive of a turn's view built from trace documents; the request carries the turn's bearer token",
@@ -6188,6 +6304,9 @@
       "CoreadapterCandidate": {
         "type": "object"
       },
+      "CoreadapterCapabilities": {
+        "type": "object"
+      },
       "CoreadapterCard": {
         "properties": {
           "happened": {
@@ -6202,8 +6321,17 @@
         },
         "type": "object"
       },
+      "CoreadapterExecutionSettings": {
+        "type": "object"
+      },
+      "CoreadapterProfile": {
+        "type": "object"
+      },
       "CoreadapterSessionResult": {
         "properties": {
+          "client": {
+            "type": "string"
+          },
           "records": {
             "type": "integer"
           },
@@ -10714,11 +10842,32 @@
       },
       "TurnOffer": {
         "properties": {
+          "allowed_outcomes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/CoreadapterCapabilities"
+          },
+          "environment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/CoreadapterExecutionSettings"
+          },
           "fallbacks": {
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "history": {
+            "type": "string"
           },
           "profile": {
             "type": "string"
@@ -10726,10 +10875,28 @@
           "project": {
             "type": "string"
           },
+          "prompt": {
+            "type": "string"
+          },
           "resume_id": {
             "type": "string"
           },
+          "return_view": {
+            "type": "boolean"
+          },
           "role": {
+            "type": "string"
+          },
+          "runs_dagger": {
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/CoreadapterProfile"
+          },
+          "system_prompt": {
+            "type": "string"
+          },
+          "thread": {
             "type": "string"
           },
           "tool_endpoint": {
@@ -10739,6 +10906,9 @@
             "type": "string"
           },
           "turn": {
+            "type": "string"
+          },
+          "unit": {
             "type": "string"
           },
           "view": {
@@ -10774,6 +10944,9 @@
               "reattached",
               "lost"
             ],
+            "type": "string"
+          },
+          "token": {
             "type": "string"
           },
           "turn": {

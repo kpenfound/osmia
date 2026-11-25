@@ -25,6 +25,7 @@ import (
 	corejev "github.com/kpenfound/agentcore/jev"
 	"github.com/kpenfound/osmia/internal/activity"
 	"github.com/kpenfound/osmia/internal/api"
+	"github.com/kpenfound/osmia/internal/clientturns"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
@@ -219,6 +220,7 @@ type Service struct {
 	tailnetDone           chan struct{}
 	transfers             *filetransport.Registry
 	fleet                 *fleet.Registry
+	clients               *clientturns.Dispatcher
 	socketInfo            os.FileInfo
 	server                *http.Server
 	lifetime              context.Context
@@ -327,6 +329,7 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 	}
 	s.activity = activity.New(s.now)
 	s.activity.Notify = func() { s.hub.Publish(Event{Kind: api.EventActivity}) }
+	s.clients = clientturns.New(clientturns.Dispatcher{Fleet: s.fleet, Transfers: s.transfers, Activity: s.activity, Directory: transfers, Views: filepath.Join(root.String(), "views"), Now: s.now})
 	s.pool = &scheduler.Shared{Changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, Spans: s.slots, Limits: s.poolLimit}
 	s.checkSlots = &checkSlotPool{limit: cfg.Capacity.Checks, changed: func() { s.hub.Publish(Event{Kind: EventCapacity}) }, spans: s.slots, now: s.now}
 	s.chief = newChiefSlotPool(cfg.Capacity.Chief, func() { s.hub.Publish(Event{Kind: EventCapacity}) }, s.conversationSignal.wake)

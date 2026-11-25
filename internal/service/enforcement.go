@@ -10,10 +10,12 @@ import (
 
 	"github.com/kpenfound/agentcore/agent"
 	"github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/clientturns"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -211,7 +213,7 @@ func Enforce(opts Options, e Enforcement) Options {
 				}
 				return append(tools, controls.intake().Load().DraftBriefTool(r, scope, now), intake.DesignReadRepoTool(cfg, r, controls.intake(), scope), intake.DesignTitleTool(r, scope, now)), nil
 			},
-			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view *isolation.FileView) ([]coreadapter.Tool, error) {
+			ViewTools: func(ctx context.Context, scope coreadapter.Scope, view isolation.View) ([]coreadapter.Tool, error) {
 				if scope.Role == sessionRole && scope.Project == project {
 					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
 				}
@@ -239,12 +241,19 @@ func Enforce(opts Options, e Enforcement) Options {
 				return units.capture(ctx, scope, view, result)
 			},
 		}
+		if service := controls.service.Load(); service != nil && service.clients != nil {
+			turns.Clients = service.clients.Placer()
+		}
+		turns.Chain = func(profile string) []string { return fleet.Fallbacks(cfg, profile) }
 		turns = memoryTurns(turns, cfg, r)
 		runner := threadRunner(cfg, r, &questions.Turns{Turns: execution.NewVerdictTurns(execution.NewReportingTurns(execution.NewRetriedTurns(turns, units.UnitWorkspaces, r), reports), verdicts), Repository: r}, now)
 		if service := controls.service.Load(); service != nil {
 			runner.OnProviderLimit = service.recordProviderLimit
 			runner.AdmitRole = service.admitRole
 			runner.Jev = service.jev
+			if service.clients != nil {
+				service.clients.Bind(r.Project(), clientturns.Binding{Repository: r, Runner: runner, Capture: turns.Capture})
+			}
 		}
 		runner.ResumableRoles = func(role string) bool { return role == sessionRole }
 		return thread.Dispatcher{Runner: runner,

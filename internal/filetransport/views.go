@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"mime"
 	"net/http"
@@ -29,6 +30,10 @@ type Turn struct {
 	// Token is the bearer token the turn's requests carry, the one its tool
 	// endpoint requires.
 	Token string
+	// TokenSum, instead of Token, is the hex SHA-256 of that token, for a turn
+	// the service no longer holds the token of, such as one that survived a
+	// restart.
+	TokenSum string
 	// Download is a directory the turn's view archive is made from; empty for a
 	// turn whose view the client builds itself.
 	Download string
@@ -43,6 +48,7 @@ type Registry struct {
 	mu      sync.Mutex
 	turns   map[string]registered
 	next    uint64
+	lookup  func(turn string) (Turn, bool)
 }
 
 type registered struct {
@@ -74,15 +80,48 @@ func (g *Registry) Register(turn string, t Turn) (release func()) {
 	}
 }
 
+// SetLookup gives the registry a way to find a turn it holds no registration
+// for, such as a turn that survived a service restart. The turn it returns is
+// authorised by its TokenSum.
+func (g *Registry) SetLookup(f func(turn string) (Turn, bool)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lookup = f
+}
+
 func (g *Registry) authorise(r *http.Request, turn string) (Turn, *api.APIError) {
 	g.mu.Lock()
 	t, ok := g.turns[turn]
+	lookup := g.lookup
 	g.mu.Unlock()
+	if !ok && lookup != nil {
+		var found Turn
+		if found, ok = lookup(turn); ok {
+			t = registered{Turn: found}
+		}
+	}
 	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || !bearer || t.Token == "" || !sameToken(token, t.Token) {
+	if !ok || !bearer || !t.accepts(token) {
 		return Turn{}, &api.APIError{Code: api.Forbidden, Message: "the request does not carry the turn's bearer token"}
 	}
 	return t.Turn, nil
+}
+
+func (t Turn) accepts(token string) bool {
+	switch {
+	case t.Token != "":
+		return sameToken(token, t.Token)
+	case t.TokenSum != "":
+		sum := sha256.Sum256([]byte(token))
+		return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(t.TokenSum)) == 1
+	}
+	return false
+}
+
+// TokenSum is the hex SHA-256 of a turn's bearer token.
+func TokenSum(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func sameToken(got, want string) bool {

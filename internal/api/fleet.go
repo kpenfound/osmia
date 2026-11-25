@@ -74,10 +74,13 @@ const (
 )
 
 // TurnReattach is the answer to one turn a client reported running when it
-// connected.
+// connected. Token is set when the server restarted and issued the turn a new
+// bearer token for its view upload: the one the client held died with the
+// server's process.
 type TurnReattach struct {
 	Turn   string `json:"turn"`
 	Answer string `json:"answer" enum:"reattached,lost"`
+	Token  string `json:"token,omitempty"`
 }
 
 // ClientConnectResponse grants a lease. The client keeps it alive with
@@ -233,19 +236,46 @@ type TurnView struct {
 }
 
 // TurnOffer offers a turn to a client. The client answers with a claim.
-// ToolEndpoint and ToolToken are the turn's own MCP endpoint and bearer
-// token, which the client's local listener forwards calls to.
+//
+// ToolEndpoint is the path, on the server the client connected to, of the
+// turn's MCP relay, and ToolToken the turn's bearer token: the client's local
+// listener forwards each tool call there with that token. The same token
+// authorises the turn's view download and upload.
+//
+// The offer carries what the client needs to run the session besides its
+// view and holds no secret: the profile as the server resolved it, the
+// prompts, the tools and permissions the role is granted, the sandbox
+// settings (with no Dagger Cloud token variable) and the public environment.
+// A client uses its own provider login and its own Dagger setting.
 type TurnOffer struct {
-	Turn         string   `json:"turn"`
-	Project      string   `json:"project,omitempty"`
-	Workstream   string   `json:"workstream,omitempty"`
-	Role         string   `json:"role"`
-	Profile      string   `json:"profile"`
-	Fallbacks    []string `json:"fallbacks,omitempty"`
-	ResumeID     string   `json:"resume_id,omitempty"`
-	ToolEndpoint string   `json:"tool_endpoint"`
-	ToolToken    string   `json:"tool_token"`
-	View         TurnView `json:"view"`
+	Turn       string   `json:"turn"`
+	Project    string   `json:"project,omitempty"`
+	Workstream string   `json:"workstream,omitempty"`
+	Unit       string   `json:"unit,omitempty"`
+	Thread     string   `json:"thread,omitempty"`
+	Role       string   `json:"role"`
+	Profile    string   `json:"profile"`
+	Fallbacks  []string `json:"fallbacks,omitempty"`
+	// Settings is the main profile as the server resolved it for this turn.
+	Settings        coreadapter.Profile           `json:"settings"`
+	ResumeID        string                        `json:"resume_id,omitempty"`
+	SystemPrompt    string                        `json:"system_prompt,omitempty"`
+	Prompt          string                        `json:"prompt,omitempty"`
+	History         string                        `json:"history,omitempty"`
+	AllowedOutcomes []string                      `json:"allowed_outcomes,omitempty"`
+	Capabilities    coreadapter.Capabilities      `json:"capabilities"`
+	Execution       coreadapter.ExecutionSettings `json:"execution"`
+	// RunsDagger is whether the turn's sandbox runs Dagger, which gives its
+	// view the empty Git repository Dagger needs at its root.
+	RunsDagger   bool              `json:"runs_dagger,omitempty"`
+	Environment  map[string]string `json:"environment,omitempty"`
+	ToolEndpoint string            `json:"tool_endpoint"`
+	ToolToken    string            `json:"tool_token"`
+	View         TurnView          `json:"view"`
+	// ReturnView is whether the client uploads the finished view when the turn
+	// ends: a turn that writes files does and the server records its commit
+	// from it.
+	ReturnView bool `json:"return_view,omitempty"`
 }
 
 // TurnCancel asks a client to cancel a turn it runs or was offered.
@@ -278,10 +308,17 @@ type ViewReadParams struct {
 	Path string `json:"path"`
 }
 
+// ViewReadResult is the result of OpViewRead and OpSkillRead: a file's
+// content, or for a directory its entry names, one per line with a trailing
+// slash on each directory.
+type ViewReadResult struct {
+	Data []byte `json:"data"`
+}
+
 // ViewWriteParams are the parameters of OpViewWrite.
 type ViewWriteParams struct {
 	Path    string `json:"path"`
-	Content string `json:"content"`
+	Content []byte `json:"content"`
 }
 
 // ServerReply is a client's reply to a server request: the result, or why it

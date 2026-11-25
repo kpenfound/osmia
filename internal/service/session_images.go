@@ -18,7 +18,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view *isolation.FileView, now func() time.Time) coreadapter.Tool {
+func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view isolation.View, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: "show_image", Description: "Attach a PNG or JPEG from your current worktree to the session chat (at most 5 MiB)", Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -31,7 +31,7 @@ func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view *
 			if err := json.Unmarshal(raw, &in); err != nil {
 				return nil, err
 			}
-			data, err := activeImage(view.Workspace().Directory, in.Path)
+			data, err := viewImage(view, in.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -44,6 +44,26 @@ func showImageTool(repository *trace.Repository, scope coreadapter.Scope, view *
 			}
 			return json.Marshal(imageFeedEntry(v).Image)
 		}}
+}
+
+func viewImage(view isolation.View, name string) ([]byte, error) {
+	if local, ok := view.(*isolation.FileView); ok {
+		return activeImage(local.Workspace().Directory, name)
+	}
+	if name == "" || filepath.IsAbs(name) {
+		return nil, fmt.Errorf("image path must resolve inside the worktree")
+	}
+	data, err := view.Read(name)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > trace.MaxImageBytes {
+		return nil, fmt.Errorf("image must be a regular file of at most 5 MiB")
+	}
+	if err := trace.ValidateImage(http.DetectContentType(data), data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func activeImage(directory, name string) ([]byte, error) {

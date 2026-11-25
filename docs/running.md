@@ -88,6 +88,14 @@ accompany them. The service unpacks an upload into a staging directory under
 root, through an absolute path, a `..` segment or a symlink pointing outside
 it.
 
+A turn that runs on a client has its tool calls relayed at
+`/v1/turns/<turn>/mcp`: the service forwards each call, as it arrives, to the
+turn's own MCP endpoint, which handles and audits it as for a turn run on the
+service's own machine. Only a request that carries the turn's bearer token is
+relayed, and the relay ends with the turn. The same token authorises the
+turn's view routes. A turn's session files, its view and its result come back
+to the service only for the client the turn was offered to.
+
 The tailnet never takes the service down. A node that cannot join at startup,
 whether for a missing auth key, a pending login, an unreachable control server
 or an unusable state directory, leaves `osmia serve` running, and the service

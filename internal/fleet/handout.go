@@ -41,6 +41,15 @@ func Handout(cfg *config.Config) api.ProfileHandout {
 	return h
 }
 
+// Fallbacks returns the profiles that follow profile in its fallback chain,
+// in order.
+func Fallbacks(cfg *config.Config, profile string) []string {
+	if c := chain(cfg, profile); len(c) > 1 {
+		return c[1:]
+	}
+	return nil
+}
+
 func chain(cfg *config.Config, profile string) []string {
 	out := []string{}
 	for name := profile; name != "" && !slices.Contains(out, name); name = cfg.Profiles[name].Fallback {
