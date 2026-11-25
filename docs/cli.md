@@ -333,14 +333,16 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   diagnostic explains), then each
   workstream with its state, open question count, context mode and workspace
   backend (`workspaces=git` or `workspaces=jujutsu`), its latest
-  drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, and the
+  drift rebase (`Drift: rebase <n> <outcome> at <time>`) once it has one, a
+  `hill-climb` workstream's one-line climb summary (`Progress: 14 attempts ·
+  attempt 15 measuring · best −18.4%`), and the
   chief of staff's goal and attention (`Attention: none` when nothing needs
   you), or `no status yet`. The overview leaves archived workstreams out;
   `osmia status <workstream-id>` still shows an archived one. Open owner gates
   appear under the workstream even before a status is written. Write the charter with
   `osmia edit charter`; see [charter](charter.md).
 - `status <workstream-id>` shows one workstream of the active project: the same
-  facts and owner gates, its latest drift rebase with its reason and one
+  facts, the same `Progress:` line for a `hill-climb` workstream and owner gates, its latest drift rebase with its reason and one
   `Moved:` line for each of its upstream moved events, then `Units:` with one line per unit of the sealed plan or follow-up and its state
   and the latest available card (headline, happened and any owner action) beneath it; the service fits a mason's card rather than refusing its report, so a unit whose mason gave a card that did not fit shows the shortened card, or none
   once the workstream is building, and for a landed unit its commit on the

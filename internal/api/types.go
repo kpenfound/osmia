@@ -974,7 +974,15 @@ type WorkstreamStatus struct {
 	Base          string            `json:"base,omitempty"`
 	Branch        string            `json:"branch,omitempty"`
 	Title         string            `json:"title,omitempty"`
-	State         *string           `json:"state"`
+	State *string `json:"state"`
+	// WorkKind is the registered kind of a workstream that is not a feature,
+	// such as hill-climb. It is omitted for a feature workstream, a session
+	// and a design session.
+	WorkKind string `json:"work_kind,omitempty"`
+	// Progress is the kind's reading of how far the workstream has got, for a
+	// kind whose progress is not its units. It is omitted for a feature
+	// workstream, which shows its units.
+	Progress      *ProgressView     `json:"progress,omitempty"`
 	Units         []UnitStatus      `json:"units"`
 	Advisories    []OverlapAdvisory `json:"advisories"`
 	OpenQuestions int               `json:"open_questions"`
@@ -1004,6 +1012,17 @@ type WorkstreamStatus struct {
 	// OpenTelemetry identity, derived from the workstream ID alone.
 	TelemetryTraceID    string `json:"telemetry_trace_id" description:"OpenTelemetry trace ID of every span Osmia sends about the workstream, as 32 lowercase hexadecimal characters. It depends only on the workstream ID, so it is present whether or not telemetry export is configured and is the same after a restart. It is not the durable trace record store read through /v1/trace."`
 	TelemetryRootSpanID string `json:"telemetry_root_span_id" description:"Span ID of the workstream's osmia.workstream root span, the parent of its state, turn and check spans, as 16 lowercase hexadecimal characters. With telemetry_trace_id it names a span context an API client can link to."`
+}
+
+// ProgressView is a kind's one-line progress summary and the sparkline the
+// workstream list draws beside it. Panel names the web panel that shows the
+// workstream's progress in place of its units. Spark holds the points of the
+// sparkline, oriented so that a rising line is always an improvement, and is
+// empty until there are two.
+type ProgressView struct {
+	Panel   string    `json:"panel"`
+	Summary string    `json:"summary"`
+	Spark   []float64 `json:"spark,omitempty"`
 }
 
 // WorkgroupView presents recorded membership and the workstream graph. It

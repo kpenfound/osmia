@@ -118,11 +118,11 @@ func TestFeatureHooksWrapTheUnitsLoop(t *testing.T) {
 	if got := k.PullRequestSection(PullRequest{Workstream: "w"}); got != "" {
 		t.Fatalf("feature pull-request section: %q", got)
 	}
-	p := k.Progress(Units{"merged": 2, "implementing": 1})
+	p := k.Progress(Reading{Units: Units{"merged": 2, "implementing": 1}})
 	if p.Panel != "units" || p.Summary != "3 units: 1 implementing, 2 merged" {
 		t.Fatalf("progress: %+v", p)
 	}
-	if got := k.Progress(nil); got.Panel != "units" || got.Summary != "" {
+	if got := k.Progress(Reading{}); got.Panel != "units" || got.Summary != "" {
 		t.Fatalf("progress of no units: %+v", got)
 	}
 	if !slices.Equal(ChiefToolNames(), []string{"move_unit"}) {

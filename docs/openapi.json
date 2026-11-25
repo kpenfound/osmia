@@ -1089,6 +1089,86 @@
         }
       }
     },
+    "/v1/climb/{workstream}/attempts": {
+      "get": {
+        "summary": "Read a Hill Climb workstream's attempt log: every recorded attempt in order, with its parent, hypothesis, scores, outcome, diff summary and measurement output; refused for a workstream of another kind",
+        "operationId": "getClimbByWorkstreamAttempts",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbAttemptsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/climb/{workstream}/progress": {
+      "get": {
+        "summary": "Read a Hill Climb workstream's progress: goal and metric, baseline and best, target, noise band, budget meters, the attempt in flight, the chart points and the one-line summary; refused for a workstream of another kind",
+        "operationId": "getClimbByWorkstreamProgress",
+        "parameters": [
+          {
+            "name": "workstream",
+            "in": "path",
+            "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+            "required": true,
+            "schema": {
+              "description": "Workstream ID: w_ followed by 32 lowercase hexadecimal digits.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClimbProgressResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config": {
       "get": {
         "summary": "Show the loaded configuration, its disk drift and diagnostics",
@@ -5824,6 +5904,474 @@
         },
         "type": "object"
       },
+      "ClimbAttempt": {
+        "properties": {
+          "best": {
+            "format": "double",
+            "type": "number"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "candidate": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "change": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_percent": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_summary": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "diff": {
+            "$ref": "#/components/schemas/ClimbDiffSummary"
+          },
+          "expected_effect": {
+            "type": "string"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "guardrails": {
+            "$ref": "#/components/schemas/ClimbGuardrails"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "improvement": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "measurement": {
+            "$ref": "#/components/schemas/ClimbMeasurement"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "review_notes": {
+            "type": "string"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/ClimbScores"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbAttemptsResponse": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbAttempt"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbBudgets": {
+        "properties": {
+          "attempts": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "cost_usd": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "since_improvement": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          },
+          "wall_clock_seconds": {
+            "$ref": "#/components/schemas/ClimbMeter"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbDiffSummary": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbGuardrails": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "green": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMeasurement": {
+        "properties": {
+          "failed_run": {
+            "type": "integer"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "repeats": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbRun"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "scores": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "spread": {
+            "format": "double",
+            "type": "number"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMeter": {
+        "properties": {
+          "max": {
+            "format": "double",
+            "type": "number"
+          },
+          "used": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbMetric": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbOutput": {
+        "properties": {
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClimbMetric"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "integer"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbPoint": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "best": {
+            "format": "double",
+            "type": "number"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "scored": {
+            "type": "boolean"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbProgress": {
+        "properties": {
+          "baseline": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "best": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "best_attempt": {
+            "type": "integer"
+          },
+          "budgets": {
+            "$ref": "#/components/schemas/ClimbBudgets"
+          },
+          "change": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "change_percent": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "direction": {
+            "type": "string"
+          },
+          "evaluator": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "min_improvement": {
+            "format": "double",
+            "type": "number"
+          },
+          "noise_band": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/ClimbPoint"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "repeats": {
+            "type": "integer"
+          },
+          "running": {
+            "$ref": "#/components/schemas/ClimbRunningView"
+          },
+          "spark": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbProgressResponse": {
+        "properties": {
+          "progress": {
+            "$ref": "#/components/schemas/ClimbProgress"
+          },
+          "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbRun": {
+        "properties": {
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "parsed": {
+            "$ref": "#/components/schemas/ClimbOutput"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "trace_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbRunningView": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "run": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "words": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ClimbScores": {
+        "properties": {
+          "metrics": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "primary": {
+            "format": "double",
+            "type": "number"
+          },
+          "runs": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "CommitLanding": {
         "properties": {
           "criteria": {
@@ -8833,6 +9381,24 @@
             "type": "string"
           },
           "timeout": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ProgressView": {
+        "properties": {
+          "panel": {
+            "type": "string"
+          },
+          "spark": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "summary": {
             "type": "string"
           }
         },
@@ -11962,6 +12528,9 @@
           "profile": {
             "type": "string"
           },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressView"
+          },
           "project": {
             "type": "string"
           },
@@ -11998,6 +12567,9 @@
             ]
           },
           "wait": {
+            "type": "string"
+          },
+          "work_kind": {
             "type": "string"
           },
           "workgroup": {

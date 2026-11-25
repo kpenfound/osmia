@@ -1,0 +1,112 @@
+{
+ "workstream": "w_000",
+ "progress": {
+  "goal": "Make the parser at least 30% faster on the corpus.",
+  "evaluator": "parse-bench",
+  "metric": "wall_ms",
+  "direction": "lower",
+  "unit": "ms",
+  "min_improvement": 5.0,
+  "repeats": 3,
+  "baseline": 100.0,
+  "best": 85.0,
+  "best_attempt": 4,
+  "change": -15.0,
+  "change_percent": -15.0,
+  "target": 70.0,
+  "noise_band": 2.0,
+  "budgets": {
+   "attempts": {
+    "used": 6,
+    "max": 20
+   },
+   "cost_usd": {
+    "used": 4.25,
+    "max": 15
+   },
+   "wall_clock_seconds": {
+    "used": 1860,
+    "max": 7200
+   },
+   "since_improvement": {
+    "used": 2,
+    "max": 5
+   }
+  },
+  "running": {
+   "attempt": 7,
+   "hypothesis": "Memoise the line index",
+   "phase": "measuring",
+   "words": "measuring 2/3",
+   "run": 2,
+   "runs": 3,
+   "started_at": "2026-01-01T09:31:00Z"
+  },
+  "points": [
+   {
+    "attempt": 1,
+    "class": "kept",
+    "cause": "",
+    "scored": true,
+    "y": 92.0,
+    "best": 92.0,
+    "at": "2026-01-01T09:06:00Z"
+   },
+   {
+    "attempt": 2,
+    "class": "discarded",
+    "cause": "no-improvement",
+    "scored": true,
+    "y": 95.0,
+    "best": 92.0,
+    "at": "2026-01-01T09:11:00Z"
+   },
+   {
+    "attempt": 3,
+    "class": "failed",
+    "cause": "no-candidate",
+    "scored": false,
+    "y": 92.0,
+    "best": 92.0,
+    "at": "2026-01-01T09:15:00Z"
+   },
+   {
+    "attempt": 4,
+    "class": "kept",
+    "cause": "",
+    "scored": true,
+    "y": 85.0,
+    "best": 85.0,
+    "at": "2026-01-01T09:22:00Z"
+   },
+   {
+    "attempt": 5,
+    "class": "discarded",
+    "cause": "review-rejected",
+    "scored": true,
+    "y": 70.0,
+    "best": 85.0,
+    "at": "2026-01-01T09:28:00Z"
+   },
+   {
+    "attempt": 6,
+    "class": "failed",
+    "cause": "invalid-measurement",
+    "scored": false,
+    "y": 85.0,
+    "best": 85.0,
+    "at": "2026-01-01T09:31:00Z"
+   }
+  ],
+  "summary": "6 attempts · attempt 7 measuring 2/3 · best −15.0%",
+  "spark": [
+   -100.0,
+   -92.0,
+   -92.0,
+   -92.0,
+   -85.0,
+   -85.0,
+   -85.0
+  ]
+ }
+}

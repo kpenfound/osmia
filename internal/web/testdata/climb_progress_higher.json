@@ -1,0 +1,82 @@
+{
+ "workstream": "w_000",
+ "progress": {
+  "goal": "Raise throughput to 1500 ops per second.",
+  "evaluator": "parse-bench",
+  "metric": "throughput",
+  "direction": "higher",
+  "unit": "ops/s",
+  "min_improvement": 50.0,
+  "repeats": 3,
+  "baseline": 1000.0,
+  "best": 1190.0,
+  "best_attempt": 3,
+  "change": 190.0,
+  "change_percent": 19.0,
+  "target": 1500.0,
+  "noise_band": 30.0,
+  "budgets": {
+   "attempts": {
+    "used": 3,
+    "max": 20
+   },
+   "cost_usd": {
+    "used": 4.25,
+    "max": 15
+   },
+   "wall_clock_seconds": {
+    "used": 960,
+    "max": 7200
+   },
+   "since_improvement": {
+    "used": 0,
+    "max": 5
+   }
+  },
+  "running": {
+   "attempt": 4,
+   "hypothesis": "Shard the index",
+   "phase": "mason",
+   "words": "mason working",
+   "run": 0,
+   "runs": 3,
+   "started_at": "2026-01-01T09:16:00Z"
+  },
+  "points": [
+   {
+    "attempt": 1,
+    "class": "kept",
+    "cause": "",
+    "scored": true,
+    "y": 1080.0,
+    "best": 1080.0,
+    "at": "2026-01-01T09:05:00Z"
+   },
+   {
+    "attempt": 2,
+    "class": "discarded",
+    "cause": "limit-violated",
+    "scored": true,
+    "y": 1300.0,
+    "best": 1080.0,
+    "at": "2026-01-01T09:10:00Z"
+   },
+   {
+    "attempt": 3,
+    "class": "kept",
+    "cause": "",
+    "scored": true,
+    "y": 1190.0,
+    "best": 1190.0,
+    "at": "2026-01-01T09:16:00Z"
+   }
+  ],
+  "summary": "3 attempts · attempt 4 working · best +19.0%",
+  "spark": [
+   1000.0,
+   1080.0,
+   1080.0,
+   1190.0
+  ]
+ }
+}

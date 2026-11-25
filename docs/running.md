@@ -382,8 +382,27 @@ The member view is laid out like a chat client:
   workstreams are kept in a collapsed Archived group at the bottom. At phone
   widths the list is behind the button at the top left and covers the page
   until you pick a workstream or close it.
+- A `hill-climb` workstream's row also shows its climb summary, such as
+  `14 attempts · attempt 15 measuring · best −18.4%`, with a small sparkline of
+  its best score so far in which a rising line is always an improvement.
 - The main area shows the selected workstream: its goal, state, project and
-  units counted by state, and two tabs for what happened.
+  units counted by state, and two tabs for what happened. A `hill-climb`
+  workstream has no units, so its header shows the same climb summary and the
+  top of the conversation shows the climb panel. The panel holds the goal and
+  metric, the baseline and the best so far in absolute terms and as a percentage,
+  the target and the noise band calibration measured; four budget meters
+  (attempts, cost, time and attempts since the last improvement); the attempt in
+  flight with its hypothesis, its phase (mason working, guardrails, measuring
+  *i*/*k* or reviewing) and how long it has run; a score chart; and a table of
+  every attempt. The chart is drawn in the page with no script or chart library
+  behind it. It colours each attempt by how it ended (kept, measured and
+  discarded, or no score), draws the best so far as a step line, marks the
+  baseline, the target and the noise band, and always puts better at the top,
+  whether the metric improves by rising or by falling. A toggle switches the
+  x axis between the attempt number and wall-clock time, and selecting an
+  attempt's dot opens it in the table. Each row of the table links to the
+  attempt's diff, its branch and its measurement output. The panel redraws as
+  the climb's events arrive, with no reload.
   **Conversation** is the default. It lists, in the order they happened, your
   messages and the chief of staff's answers and actions, images, delivery
   briefs, the outcomes of your commands, and only the latest status the chief
@@ -1322,6 +1341,18 @@ under `/v1`, with its path parameters, request body, response and error shape.
 Open it in any OpenAPI viewer, such as Swagger UI, Redoc or Scalar, or generate
 a client from it. The command line's `--json` output is built from these
 responses; see the [command line](cli.md) for each command's shape.
+
+`GET /v1/climb/{workstream}/attempts` returns a `hill-climb` workstream's
+attempt log: every recorded attempt in order, as stored at
+`climb/attempts/<n>.json`. `GET /v1/climb/{workstream}/progress` returns what
+the climb panel draws: the goal and metric, baseline, best, target and noise
+band, the budget meters, the attempt in flight, one point per attempt for the
+chart, and the one-line `summary` and `spark` points that `GET /v1/status` also
+carries as `progress` on a `hill-climb` workstream (with `work_kind` set to
+`hill-climb`). Both refuse a workstream of another kind. The event stream
+carries `climb.attempt-started`, `climb.phase`, `climb.attempt-recorded`,
+`climb.kept`, `climb.plateau` and `climb.stop`; each names the workstream and
+asks a client to read the climb again.
 
 `GET /v1/workgroups/{id}/feed` returns the shared chief conversation,
 statuses and actions in `entries`, and one current summary per member in

@@ -9,6 +9,10 @@ import (
 // Hill Climb attempt.
 const ClimbAttemptsDir = "climb/attempts"
 
+// ClimbRunningPath is the workstream document that says which Hill Climb
+// attempt is in flight and in which phase.
+const ClimbRunningPath = "climb/running.json"
+
 // ClimbAttemptPath is the workstream document path of attempt n.
 func ClimbAttemptPath(n int) string { return fmt.Sprintf("%s/%d.json", ClimbAttemptsDir, n) }
 
@@ -16,6 +20,9 @@ func ClimbAttemptPath(n int) string { return fmt.Sprintf("%s/%d.json", ClimbAtte
 func ClimbAttemptID(n int) string { return fmt.Sprintf("climb-attempt-%d", n) }
 
 func climbAttemptPath(parts []string) bool {
+	if len(parts) == 2 && parts[0] == "climb" && parts[1] == "running.json" {
+		return true
+	}
 	if len(parts) != 3 || parts[0] != "climb" || parts[1] != "attempts" {
 		return false
 	}

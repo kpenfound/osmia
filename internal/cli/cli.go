@@ -2028,6 +2028,9 @@ func showWorkstreams(w io.Writer, all wire.StatusResponse) {
 		}
 		listed++
 		fmt.Fprintf(w, "  %s %s\n", st.Workstream, facts(st))
+		if line := progressLine(st); line != "" {
+			fmt.Fprintf(w, "    Progress: %s\n", line)
+		}
 		for _, gate := range st.Gates {
 			fmt.Fprintf(w, "    Gate: %s %s\n", gate.Kind, gate.Reference)
 			if gate.Reason != "" {
@@ -2058,6 +2061,9 @@ func drift(d *wire.DriftStatus) string {
 
 func showStatus(w io.Writer, st wire.WorkstreamStatus) {
 	fmt.Fprintf(w, "Workstream: %s %s\n", st.Workstream, facts(st))
+	if line := progressLine(st); line != "" {
+		fmt.Fprintf(w, "Progress: %s\n", line)
+	}
 	for _, gate := range st.Gates {
 		fmt.Fprintf(w, "Gate: %s %s\n", gate.Kind, gate.Reference)
 		if gate.Reason != "" {
@@ -2341,6 +2347,13 @@ func facts(st wire.WorkstreamStatus) string {
 		}
 	}
 	return out
+}
+
+func progressLine(st wire.WorkstreamStatus) string {
+	if st.Progress == nil {
+		return ""
+	}
+	return st.Progress.Summary
 }
 
 func attention(s string) string {

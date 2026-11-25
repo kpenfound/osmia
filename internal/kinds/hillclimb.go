@@ -189,8 +189,8 @@ var hillClimb = Kind{
 	PullRequestSection: func(PullRequest) string {
 		return ""
 	},
-	Progress: func(Units) Progress {
-		return Progress{Panel: "climb"}
+	Progress: func(r Reading) Progress {
+		return Progress{Panel: "climb", Summary: climbSummary(r.Climb), Spark: climbSpark(r.Climb)}
 	},
 	SkillTurns: []Turn{TurnArchitect, TurnMetricRound, TurnEvaluatorMason, TurnEvaluatorReviewer},
 	Settings: Settings{
@@ -206,4 +206,79 @@ var hillClimb = Kind{
 			return s.Skills
 		},
 	},
+}
+
+// Climb phases an attempt in flight can be in.
+const (
+	PhaseMason      = "mason"
+	PhaseGuardrails = "guardrails"
+	PhaseMeasuring  = "measuring"
+	PhaseReviewing  = "reviewing"
+)
+
+// PhaseWords says in words where an attempt in flight is, as the summary line
+// and the climb panel show it.
+func PhaseWords(phase string, run, runs int) string {
+	switch phase {
+	case PhaseMason:
+		return "mason working"
+	case PhaseGuardrails:
+		return "guardrails"
+	case PhaseMeasuring:
+		if runs > 1 {
+			return fmt.Sprintf("measuring %d/%d", max(run, 1), runs)
+		}
+		return "measuring"
+	case PhaseReviewing:
+		return "reviewing"
+	}
+	return phase
+}
+
+// SignedPercent writes a percentage with its sign and one decimal, using the
+// minus sign rather than a hyphen.
+func SignedPercent(pct float64) string {
+	switch {
+	case pct < 0:
+		return fmt.Sprintf("\u2212%.1f%%", -pct)
+	case pct > 0:
+		return fmt.Sprintf("+%.1f%%", pct)
+	}
+	return "0.0%"
+}
+
+// climbSummary is the one line a Hill Climb workstream shows in the workstream
+// list and in osmia status, such as "14 attempts · attempt 15 measuring 2/3 ·
+// best −18.4%". It is empty for a workstream that has no climb to read.
+func climbSummary(c *ClimbReading) string {
+	if c == nil {
+		return ""
+	}
+	noun := "attempts"
+	if c.Attempts == 1 {
+		noun = "attempt"
+	}
+	parts := []string{fmt.Sprintf("%d %s", c.Attempts, noun)}
+	if c.Running > 0 && c.Phase != "" {
+		words := PhaseWords(c.Phase, c.Run, c.Runs)
+		if c.Phase == PhaseMason {
+			words = "working"
+		}
+		parts = append(parts, fmt.Sprintf("attempt %d %s", c.Running, words))
+	}
+	switch {
+	case c.ChangePercent == nil:
+	case *c.ChangePercent == 0:
+		parts = append(parts, "no improvement yet")
+	default:
+		parts = append(parts, "best "+SignedPercent(*c.ChangePercent))
+	}
+	return strings.Join(parts, " \u00b7 ")
+}
+
+func climbSpark(c *ClimbReading) []float64 {
+	if c == nil || len(c.Spark) < 2 {
+		return nil
+	}
+	return slices.Clone(c.Spark)
 }

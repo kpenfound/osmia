@@ -312,6 +312,23 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if path, ok := strings.CutPrefix(r.URL.Path, Prefix+"/climb/"); ok {
+			if id, read, found := strings.Cut(path, "/"); found && read == "attempts" {
+				if out, api := s.climbAttempts(id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			} else if found && read == "progress" {
+				if out, api := s.climbProgress(id); api != nil {
+					failWith(w, api)
+				} else {
+					respond(w, 200, out)
+				}
+				return
+			}
+		}
 		if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/status/"); ok {
 			if out, api := s.workstreamStatus(id); api != nil {
 				failWith(w, api)

@@ -1,0 +1,245 @@
+{
+ "workstream": "w_000",
+ "attempts": [
+  {
+   "number": 1,
+   "parent": "c00",
+   "best": 100.0,
+   "hypothesis": "Cache the parsed workload between runs",
+   "change_summary": "Changes cache the parsed workload between runs",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go",
+     "internal/parse/cache.go"
+    ],
+    "summary": "2 file changed"
+   },
+   "outcome": "kept",
+   "started_at": "2026-01-01T09:00:00Z",
+   "finished_at": "2026-01-01T09:06:00Z",
+   "scores": {
+    "primary": 92.0,
+    "runs": [
+     92.0
+    ]
+   },
+   "change": -8.0,
+   "change_percent": -8.0,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 92.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r1",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"wall_ms\": {\"value\": 92.0, \"unit\": \"ms\", \"direction\": \"lower\"}}}",
+      "started_at": "2026-01-01T09:00:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand01",
+   "commit": "c01"
+  },
+  {
+   "number": 2,
+   "parent": "c01",
+   "best": 92.0,
+   "hypothesis": "Inline the tokenizer fast path",
+   "change_summary": "Changes inline the tokenizer fast path",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go"
+    ],
+    "summary": "1 file changed"
+   },
+   "outcome": "discarded",
+   "started_at": "2026-01-01T09:06:00Z",
+   "finished_at": "2026-01-01T09:11:00Z",
+   "scores": {
+    "primary": 95.0,
+    "runs": [
+     95.0
+    ]
+   },
+   "change": 3.0,
+   "change_percent": 3.260869565217391,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 95.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r2",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"wall_ms\": {\"value\": 95.0, \"unit\": \"ms\", \"direction\": \"lower\"}}}",
+      "started_at": "2026-01-01T09:06:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand02",
+   "cause": "no-improvement",
+   "branch": "osmia/climb/attempt-2"
+  },
+  {
+   "number": 3,
+   "parent": "c01",
+   "best": 92.0,
+   "hypothesis": "Rewrite the scanner without allocations",
+   "change_summary": "Changes rewrite the scanner without allocations",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go",
+     "internal/parse/cache.go"
+    ],
+    "summary": "2 file changed"
+   },
+   "outcome": "discarded",
+   "started_at": "2026-01-01T09:11:00Z",
+   "finished_at": "2026-01-01T09:15:00Z",
+   "reason": "the mason produced no candidate",
+   "candidate": "cand03",
+   "cause": "no-candidate"
+  },
+  {
+   "number": 4,
+   "parent": "c01",
+   "best": 92.0,
+   "hypothesis": "Pool the token buffers",
+   "change_summary": "Changes pool the token buffers",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go"
+    ],
+    "summary": "1 file changed"
+   },
+   "outcome": "kept",
+   "started_at": "2026-01-01T09:15:00Z",
+   "finished_at": "2026-01-01T09:22:00Z",
+   "scores": {
+    "primary": 85.0,
+    "runs": [
+     85.0
+    ]
+   },
+   "change": -7.0,
+   "change_percent": -7.608695652173914,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 85.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r4",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"wall_ms\": {\"value\": 85.0, \"unit\": \"ms\", \"direction\": \"lower\"}}}",
+      "started_at": "2026-01-01T09:15:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand04",
+   "commit": "c04"
+  },
+  {
+   "number": 5,
+   "parent": "c04",
+   "best": 85.0,
+   "hypothesis": "Skip validation for repeated input",
+   "change_summary": "Changes skip validation for repeated input",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go",
+     "internal/parse/cache.go"
+    ],
+    "summary": "2 file changed"
+   },
+   "outcome": "discarded",
+   "started_at": "2026-01-01T09:22:00Z",
+   "finished_at": "2026-01-01T09:28:00Z",
+   "scores": {
+    "primary": 70.0,
+    "runs": [
+     70.0
+    ]
+   },
+   "change": -15.0,
+   "change_percent": -17.647058823529413,
+   "measurement": {
+    "repeats": 1,
+    "valid": true,
+    "score": 70.0,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r5",
+      "status": "scored",
+      "output": "{\"schema\": 1, \"valid\": true, \"reason\": \"ok\", \"metrics\": {\"wall_ms\": {\"value\": 70.0, \"unit\": \"ms\", \"direction\": \"lower\"}}}",
+      "started_at": "2026-01-01T09:22:00Z",
+      "duration_ms": 1200
+     }
+    ]
+   },
+   "candidate": "cand05",
+   "cause": "review-rejected",
+   "branch": "osmia/climb/attempt-5",
+   "review_notes": "The change hard-codes the corpus."
+  },
+  {
+   "number": 6,
+   "parent": "c04",
+   "best": 85.0,
+   "hypothesis": "Parallelise the lexer",
+   "change_summary": "Changes parallelise the lexer",
+   "expected_effect": "Improves wall_ms",
+   "diff": {
+    "files": [
+     "internal/parse/lexer.go"
+    ],
+    "summary": "1 file changed"
+   },
+   "outcome": "discarded",
+   "started_at": "2026-01-01T09:28:00Z",
+   "finished_at": "2026-01-01T09:31:00Z",
+   "reason": "run 2 of 3 was invalid: wrong answer",
+   "candidate": "cand06",
+   "cause": "invalid-measurement",
+   "measurement": {
+    "repeats": 3,
+    "valid": false,
+    "reason": "run 2 of 3 was invalid: wrong answer",
+    "failed_run": 2,
+    "runs": [
+     {
+      "number": 1,
+      "run": "r61",
+      "status": "scored",
+      "output": "{}",
+      "started_at": "2026-01-01T09:00:00Z",
+      "duration_ms": 900
+     },
+     {
+      "number": 2,
+      "run": "r62",
+      "status": "invalid",
+      "reason": "wrong answer",
+      "output": "{\"schema\":1,\"valid\":false,\"reason\":\"wrong answer\",\"metrics\":{}}",
+      "started_at": "2026-01-01T09:00:00Z",
+      "duration_ms": 900
+     }
+    ]
+   },
+   "branch": "osmia/climb/attempt-6"
+  }
+ ]
+}

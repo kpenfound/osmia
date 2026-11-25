@@ -25,3 +25,18 @@ func TestClimbAttemptDocumentPathsAreValidated(t *testing.T) {
 		t.Fatal("a project document at a climb attempt path was accepted")
 	}
 }
+
+func TestClimbCalibrationAndRunningDocumentsAreRecordedAtTheirPaths(t *testing.T) {
+	r, _, _ := create(t)
+	ctx := context.Background()
+	for id, path := range map[string]string{"climb-calibration": ClimbCalibrationPath, "climb-running": ClimbRunningPath} {
+		if err := r.RecordDocuments(ctx, []Document{streamDocument(id, path, "{}\n", 1)}); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+	}
+	for _, path := range []string{"climb/other.json", "climb/calibration", "climb/running.json/x"} {
+		if err := r.RecordDocuments(ctx, []Document{streamDocument("climb-other", path, "x\n", 1)}); err == nil {
+			t.Fatalf("%s accepted", path)
+		}
+	}
+}

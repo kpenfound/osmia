@@ -65,11 +65,41 @@ type PullRequest struct {
 // Units counts a workstream's units by state.
 type Units map[string]int
 
+// ClimbReading is what a Hill Climb workstream's recorded attempts say about
+// how far its climb has got.
+type ClimbReading struct {
+	// Attempts is the number of recorded attempts.
+	Attempts int
+	// Running is the number of the attempt in flight, zero when none is, and
+	// Phase, Run and Runs say where it is: the phase, and for a measurement
+	// the run it is on of the runs it repeats.
+	Running int
+	Phase   string
+	Run     int
+	Runs    int
+	// ChangePercent is the best score's change from the baseline, in percent
+	// and signed in the metric's own direction of travel. It is nil until a
+	// baseline and a best exist.
+	ChangePercent *float64
+	// Spark is the best score after each attempt, oriented so that a rising
+	// line is always an improvement.
+	Spark []float64
+}
+
+// Reading is what a kind reads its progress from: a workstream's unit counts,
+// or its climb.
+type Reading struct {
+	Units Units
+	Climb *ClimbReading
+}
+
 // Progress is a kind's reading of how far a workstream has got. Panel names
-// the web panel that draws it, and Summary is its one line.
+// the web panel that draws it, Summary is its one line and Spark the points
+// of the sparkline the list draws, empty for a kind that has none.
 type Progress struct {
 	Panel   string
 	Summary string
+	Spark   []float64
 }
 
 // Settings is a kind's `[kinds.<kind>]` table. A nil Validate accepts only
@@ -96,8 +126,8 @@ type Kind struct {
 	// PullRequestSection returns the kind's section of the pull-request body,
 	// or the empty string for none.
 	PullRequestSection func(PullRequest) string
-	// Progress reads the kind's progress from a workstream's unit counts.
-	Progress func(Units) Progress
+	// Progress reads the kind's progress from a workstream's reading.
+	Progress func(Reading) Progress
 	// ChiefTools names the tools the kind adds to the chief of staff's.
 	ChiefTools []string
 	Settings   Settings
@@ -114,8 +144,8 @@ var feature = Kind{
 	PullRequestSection: func(PullRequest) string {
 		return ""
 	},
-	Progress: func(units Units) Progress {
-		return Progress{Panel: "units", Summary: unitsSummary(units)}
+	Progress: func(r Reading) Progress {
+		return Progress{Panel: "units", Summary: unitsSummary(r.Units)}
 	},
 	ChiefTools: []string{"move_unit"},
 }

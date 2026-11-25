@@ -123,3 +123,25 @@ func TestSkillsLoadOnlyOnTheListedTurns(t *testing.T) {
 		t.Fatal("feature loads kind skills")
 	}
 }
+
+func TestHillClimbProgressIsTheClimbSummaryAndSparkline(t *testing.T) {
+	k, _ := Lookup(HillClimb)
+	pct := -18.4
+	p := k.Progress(Reading{Climb: &ClimbReading{Attempts: 14, Running: 15, Phase: PhaseMeasuring, ChangePercent: &pct, Spark: []float64{-100, -90, -81.6}}})
+	if p.Panel != "climb" || p.Summary != "14 attempts · attempt 15 measuring · best −18.4%" || len(p.Spark) != 3 {
+		t.Fatalf("progress: %+v", p)
+	}
+	one := k.Progress(Reading{Climb: &ClimbReading{Attempts: 1, Spark: []float64{5}}})
+	if one.Summary != "1 attempt" || one.Spark != nil {
+		t.Fatalf("one attempt: %+v", one)
+	}
+	if got := k.Progress(Reading{Units: Units{"merged": 1}}); got.Panel != "climb" || got.Summary != "" {
+		t.Fatalf("a climb read from units: %+v", got)
+	}
+	if got := SignedPercent(12.34); got != "+12.3%" {
+		t.Fatalf("signed percent %q", got)
+	}
+	if got := PhaseWords(PhaseMeasuring, 2, 3); got != "measuring 2/3" {
+		t.Fatalf("phase words %q", got)
+	}
+}

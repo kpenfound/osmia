@@ -327,6 +327,24 @@ func TestStatusTextListsTheUnitsOfABuildingWorkstream(t *testing.T) {
 	}
 }
 
+func TestStatusPrintsAHillClimbSummaryLineInTheOverviewAndTheDetail(t *testing.T) {
+	st := statusWithoutAttentionOrAgents()
+	st.WorkKind = "hill-climb"
+	st.Progress = &wire.ProgressView{Panel: "climb", Summary: "14 attempts \u00b7 attempt 15 measuring \u00b7 best \u221218.4%"}
+	line := "Progress: 14 attempts \u00b7 attempt 15 measuring \u00b7 best \u221218.4%\n"
+	var one, all strings.Builder
+	showStatus(&one, st)
+	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{st}})
+	if !strings.Contains(one.String(), "\n"+line) || !strings.Contains(all.String(), "\n    "+line) {
+		t.Fatalf("detail:\n%s\noverview:\n%s", one.String(), all.String())
+	}
+	var feature strings.Builder
+	showStatus(&feature, statusWithoutAttentionOrAgents())
+	if strings.Contains(feature.String(), "Progress:") {
+		t.Fatalf("a feature workstream prints a progress line:\n%s", feature.String())
+	}
+}
+
 func TestStatusOverviewShowsTheWorkstreamAndTheDiagnostic(t *testing.T) {
 	var all strings.Builder
 	showWorkstreams(&all, wire.StatusResponse{Workstreams: []wire.WorkstreamStatus{statusWithoutAttentionOrAgents()}, Diagnostics: []wire.Diagnostic{{Field: "workstreams", Code: wire.Internal, Message: "cannot read"}}})

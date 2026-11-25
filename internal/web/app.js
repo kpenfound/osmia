@@ -16,6 +16,12 @@
     spend: ['status'],
     capacity: ['status'],
     activity: ['activity'],
+    'climb.attempt-started': ['climb'],
+    'climb.phase': ['climb'],
+    'climb.attempt-recorded': ['climb'],
+    'climb.kept': ['climb'],
+    'climb.plateau': ['climb'],
+    'climb.stop': ['climb'],
   };
 
   // activityStallMs mirrors the service's ActivityStallThreshold: an
@@ -79,6 +85,10 @@
   // lists.
   const views = { status: null, runtime: null, config: null, inbox: null };
   const failures = {};
+  // climbFailures holds why a climb read failed. A climb that is not sealed yet
+  // has nothing to read, which the panel says itself, so these never reach the
+  // page's list of problems.
+  const climbFailures = {};
   const dirty = new Set();
   let reading = false;
   let retries = 0;
@@ -546,6 +556,12 @@
             if (name === 'status') {
               for (const w of out.workstreams) {
                 const old = previous?.workstreams.find(x => x.workstream === w.workstream);
+                if (w.work_kind === 'hill-climb' && !w.archived && (!old || old.progress?.summary !== w.progress?.summary || old.state !== w.state)) {
+                  for (const read of climbNames(w.workstream)) {
+                    delete climbFailures[read];
+                    dirty.add(read);
+                  }
+                }
                 if (isMultiMember(w) && old && !isMultiMember(old)) {
                   delete views['feed/' + w.workstream];
                   delete failures['feed/' + w.workstream];
@@ -569,8 +585,11 @@
               }
             }
             delete failures[name];
+            delete climbFailures[name];
           } catch (err) {
-            if (!isManagementView(name) || name.endsWith('/' + byId('project-edit').elements.project.value)) {
+            if (name.startsWith('climb/')) {
+              climbFailures[name] = err.message;
+            } else if (!isManagementView(name) || name.endsWith('/' + byId('project-edit').elements.project.value)) {
               failures[name] = err.message;
             }
           }
@@ -692,6 +711,14 @@
     if (name === 'feeds') {
       return [...listedFeeds(), ...streams().filter((w) => isDesignId(w.workstream) && !w.archived)
         .flatMap((w) => ['design/' + w.workstream, 'design/' + w.workstream + '/conversation'])];
+    }
+    if (name === 'climb') {
+      try {
+        const data = JSON.parse(event.data);
+        return data.workstream ? climbNames(data.workstream) : [];
+      } catch {
+        return [];
+      }
     }
     if (name === 'feed') {
       let data = {};
@@ -1674,9 +1701,10 @@
       project: el('span', { 'data-field': 'project' }),
       state: el('span', { class: 'glyph', 'data-field': 'state', role: 'img' }),
       signals: el('span', { class: 'signals' }),
+      progress: el('span', { class: 'sub progress', 'data-field': 'progress', hidden: '' }),
     };
     r.button = el('button', { type: 'button', class: 'row', 'data-select': id },
-      r.state, el('span', { class: 'text' }, r.title, el('span', { class: 'sub meta-row' }, r.kind, r.project)), r.signals);
+      r.state, el('span', { class: 'text' }, r.title, el('span', { class: 'sub meta-row' }, r.kind, r.project), r.progress), r.signals);
     r.button.addEventListener('click', () => select(id));
     r.node = el('li', {}, r.button);
     rows.set(id, r);
@@ -1742,6 +1770,9 @@
       r.button.disabled = !!w.archived;
       r.button.title = w.archived ? 'Permanently archived; history is unavailable.' : '';
       r.button.setAttribute('aria-current', String(ui.view !== 'workgroup' && current !== null && current.workstream === w.workstream));
+      const progress = w.work_kind === 'hill-climb' && w.progress ? w.progress : null;
+      r.progress.hidden = progress === null;
+      r.progress.replaceChildren(...(progress === null ? [] : [sparkline(progress.spark), el('span', { 'data-field': 'summary' }, progress.summary || 'No attempts yet')].filter((node) => node !== null)));
       r.signals.replaceChildren(...[
         paused ? el('span', { class: 'paused', 'data-field': 'paused', title: 'Paused' }, 'paused') : null,
         w.agents && w.agents.length > 0 ? el('span', { class: 'working', 'data-field': 'working', title: w.agents.length + ' running' }) : null,
@@ -3178,6 +3209,424 @@
     return nestTube(units.map((u) => ({ name: u.unit, state: u.state })), { linked: true });
   }
 
+  // The Hill Climb panel. A Hill Climb workstream has no units, so it shows
+  // its climb instead: where it stands, what it has used, the attempt in
+  // flight, the score chart and every attempt. The panel is drawn from two
+  // reads, the climb's progress and its attempt log, which the page reads
+  // again whenever a climb event names the workstream. The chart is inline
+  // SVG built here, with no script or chart library behind it.
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const minus = '−';
+
+  function svg(tag, attrs, ...children) {
+    const node = document.createElementNS(svgNS, tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      node.setAttribute(key, String(value));
+    }
+    for (const child of children) {
+      if (child !== null && child !== undefined && child !== false) {
+        node.append(child);
+      }
+    }
+    return node;
+  }
+
+  // climbNames are the views a Hill Climb workstream's panel is drawn from.
+  function climbNames(id) {
+    return ['climb/' + id + '/progress', 'climb/' + id + '/attempts'];
+  }
+
+  // climbSettings holds, per workstream, what the owner chose on the panel:
+  // the chart's x axis and the attempt opened in the table.
+  const climbSettings = new Map();
+
+  function climbSetting(id) {
+    if (!climbSettings.has(id)) {
+      climbSettings.set(id, { x: 'attempt', open: 0, section: '' });
+    }
+    return climbSettings.get(id);
+  }
+
+  function climbNumber(v) {
+    return v === null || v === undefined ? 'none' : String(Number(Number(v).toPrecision(5)));
+  }
+
+  function climbValue(v, unit) {
+    return climbNumber(v) + (v !== null && v !== undefined && unit ? ' ' + unit : '');
+  }
+
+  function climbSigned(v) {
+    return (v < 0 ? minus : v > 0 ? '+' : '') + climbNumber(Math.abs(v));
+  }
+
+  function climbPercent(pct) {
+    return (pct < 0 ? minus : pct > 0 ? '+' : '') + Math.abs(pct).toFixed(1) + '%';
+  }
+
+  const climbCauses = {
+    'invalid-measurement': 'invalid measurement',
+    'guardrails-failed': 'guardrails failed',
+    'limit-violated': 'limit violated',
+    'no-improvement': 'no improvement',
+    'protected-path': 'protected path',
+    'no-candidate': 'no candidate',
+    'review-rejected': 'review rejected',
+  };
+
+  // climbOutcome says in words how an attempt ended.
+  function climbOutcome(cls, cause) {
+    if (cls === 'kept') return 'kept';
+    return (cls === 'failed' ? 'failed' : 'discarded') + (cause ? ', ' + (climbCauses[cause] || cause) : '');
+  }
+
+  // sparkline draws a score series, oriented so that a rising line improves,
+  // as a small polyline. It is decoration: the summary beside it says the
+  // same in words.
+  function sparkline(points) {
+    if (!points || points.length < 2) return null;
+    const width = 56;
+    const height = 16;
+    const lo = Math.min(...points);
+    const hi = Math.max(...points);
+    const span = hi - lo || 1;
+    const path = points.map((v, i) => (2 + (i / (points.length - 1)) * (width - 4)).toFixed(1) + ',' + (height - 2 - ((v - lo) / span) * (height - 4)).toFixed(1)).join(' ');
+    return svg('svg', { class: 'spark', 'data-field': 'spark', viewBox: '0 0 ' + width + ' ' + height, 'aria-hidden': 'true', focusable: 'false' },
+      svg('polyline', { points: path }));
+  }
+
+  // renderClimbLine is the header's line for a Hill Climb workstream, in
+  // place of the nest tube of units.
+  function renderClimbLine(w) {
+    if (!w.progress) return null;
+    return el('div', { class: 'climb-line', 'data-field': 'climb-summary' },
+      sparkline(w.progress.spark), el('span', { 'data-field': 'summary' }, w.progress.summary || 'No attempts yet'));
+  }
+
+  function climbMeters(p) {
+    const b = p.budgets;
+    const meters = [
+      ['attempts', 'Attempts', b.attempts, (v) => String(v)],
+      ['cost', 'Cost', b.cost_usd, (v) => '$' + v.toFixed(2)],
+      ['time', 'Time', b.wall_clock_seconds, (v) => duration(Math.round(v))],
+      ['stale', 'Since improvement', b.since_improvement, (v) => String(v)],
+    ];
+    return el('div', { class: 'climb-meters', 'data-field': 'climb-budgets' }, ...meters.map(([key, label, meter, show]) => {
+      const limited = meter.max > 0;
+      const used = show(meter.used);
+      return el('div', { class: 'climb-meter', 'data-meter': key },
+        el('span', { class: 'label' }, label),
+        limited ? el('progress', { max: meter.max, value: Math.min(meter.used, meter.max), 'aria-label': label + ': ' + used + ' of ' + show(meter.max) }) : null,
+        el('span', { class: 'value', 'data-field': 'value' }, limited ? used + ' of ' + show(meter.max) : used + ', no limit'));
+    }));
+  }
+
+  function climbHeader(p) {
+    const pair = (label, field, ...value) => el('div', { 'data-field': field }, el('dt', {}, label), el('dd', {}, ...value));
+    const change = p.change === null || p.change === undefined ? null
+      : el('span', { class: 'meta' }, climbSigned(p.change) + (p.unit ? ' ' + p.unit : '') + (p.change_percent === null || p.change_percent === undefined ? '' : ', ' + climbPercent(p.change_percent)));
+    return el('div', { class: 'climb-head', 'data-field': 'climb-header' },
+      el('h3', { 'data-field': 'goal' }, p.goal),
+      el('dl', { class: 'climb-facts' },
+        pair('Metric', 'metric', el('code', {}, p.metric), ' ', el('span', { class: 'meta', 'data-field': 'direction' }, p.direction === 'lower' ? 'lower is better' : 'higher is better')),
+        pair('Baseline to best', 'progress', climbValue(p.baseline, p.unit), ' → ', climbValue(p.best, p.unit), ' ', change),
+        pair('Target', 'target', p.target === null || p.target === undefined ? 'none' : climbValue(p.target, p.unit)),
+        pair('Noise band', 'noise', p.noise_band === null || p.noise_band === undefined ? 'not calibrated' : climbValue(p.noise_band, p.unit)),
+        pair('Smallest improvement kept', 'min-improvement', climbValue(p.min_improvement, p.unit))));
+  }
+
+  function climbRunning(p) {
+    const r = p.running;
+    if (!r) {
+      return el('div', { class: 'climb-running', 'data-field': 'climb-running', 'data-idle': 'true' }, el('p', { class: 'meta' }, 'No attempt is running.'));
+    }
+    const elapsed = el('span', { 'data-field': 'elapsed', 'data-since': r.started_at }, climbElapsed(r.started_at));
+    return el('div', { class: 'climb-running', 'data-field': 'climb-running', 'data-phase': r.phase },
+      el('p', { class: 'climb-now' }, el('strong', { 'data-field': 'attempt' }, 'Attempt ' + r.attempt), ' ', el('span', { class: 'phase', 'data-field': 'phase' }, r.words)),
+      r.hypothesis ? el('p', { class: 'climb-hypothesis', 'data-field': 'hypothesis' }, r.hypothesis) : null,
+      el('p', { class: 'meta' }, 'Elapsed ', elapsed));
+  }
+
+  function climbElapsed(since) {
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000));
+    return Number.isNaN(seconds) ? '' : duration(seconds);
+  }
+
+  let climbTimer = null;
+  function tickClimb() {
+    for (const node of document.querySelectorAll('#climb-panel [data-field=elapsed]')) {
+      node.textContent = climbElapsed(node.dataset.since);
+    }
+    if (!document.querySelector('#climb-panel [data-field=elapsed]')) {
+      clearInterval(climbTimer);
+      climbTimer = null;
+    }
+  }
+
+  // dotShape draws the mark of one attempt, centred on 0,0. The outcome is in
+  // the shape as well as the colour: a kept attempt is a filled dot, a
+  // discarded one a ring and one that never had a score a ring with a cross.
+  function dotShape(cls) {
+    const nodes = [svg('circle', { class: 'dot-body', r: cls === 'kept' ? 5 : 4.5 })];
+    if (cls === 'failed') {
+      nodes.push(svg('path', { class: 'dot-mark', d: 'M-2.5 -2.5L2.5 2.5M2.5 -2.5L-2.5 2.5' }));
+    }
+    return nodes;
+  }
+
+  // climbChart draws the score of every attempt against the attempt number or
+  // the wall-clock time. Better is always up: a metric that improves by
+  // falling is drawn with its axis flipped, so the best-so-far line only ever
+  // climbs.
+  function climbChart(id, p, setting, open) {
+    const width = 640;
+    const height = 280;
+    const pad = { left: 56, right: 16, top: 24, bottom: 34 };
+    const inner = { w: width - pad.left - pad.right, h: height - pad.top - pad.bottom };
+    const lower = p.direction === 'lower';
+    const orient = (v) => (lower ? -v : v);
+    const points = p.points || [];
+    const values = points.flatMap((pt) => [pt.y, pt.best]);
+    for (const v of [p.baseline, p.target]) {
+      if (v !== null && v !== undefined) values.push(v);
+    }
+    if (p.baseline !== null && p.baseline !== undefined && p.noise_band) {
+      values.push(p.baseline - p.noise_band / 2, p.baseline + p.noise_band / 2);
+    }
+    const chart = svg('svg', { class: 'climb-chart', 'data-field': 'climb-chart', 'data-x': setting.x, 'data-better': 'up', viewBox: '0 0 ' + width + ' ' + height, role: 'group', 'aria-label': 'Score of each attempt, better is up' });
+    if (values.length === 0) {
+      chart.append(svg('text', { class: 'chart-note', x: width / 2, y: height / 2, 'text-anchor': 'middle' }, 'No scores yet'));
+      return chart;
+    }
+    let lo = Math.min(...values.map(orient));
+    let hi = Math.max(...values.map(orient));
+    if (hi === lo) {
+      lo -= 1;
+      hi += 1;
+    }
+    const margin = (hi - lo) * 0.08;
+    lo -= margin;
+    hi += margin;
+    const y = (v) => pad.top + (1 - (orient(v) - lo) / (hi - lo)) * inner.h;
+
+    const times = points.map((pt) => new Date(pt.at).getTime());
+    let t0 = Math.min(...times);
+    let t1 = Math.max(...times);
+    if (!(t1 > t0)) {
+      t0 = (Number.isFinite(t0) ? t0 : Date.now()) - 30000;
+      t1 = t0 + 60000;
+    }
+    const x = (pt) => {
+      if (setting.x === 'time') {
+        return pad.left + ((new Date(pt.at).getTime() - t0) / (t1 - t0)) * inner.w * 0.94 + inner.w * 0.03;
+      }
+      return pad.left + (pt.attempt / (points.length + 0.5)) * inner.w;
+    };
+    const right = pad.left + inner.w;
+
+    for (let i = 0; i <= 3; i++) {
+      const o = lo + ((hi - lo) * i) / 3;
+      const v = lower ? -o : o;
+      const gy = pad.top + (1 - i / 3) * inner.h;
+      chart.append(svg('line', { class: 'grid', x1: pad.left, x2: right, y1: gy, y2: gy }),
+        svg('text', { class: 'axis-label', x: pad.left - 6, y: gy + 4, 'text-anchor': 'end' }, climbNumber(v)));
+    }
+    chart.append(svg('text', { class: 'axis-label better', 'data-field': 'better', x: pad.left, y: 12 }, 'Better ↑'));
+
+    if (p.baseline !== null && p.baseline !== undefined && p.noise_band) {
+      const top = y(p.baseline + (lower ? -p.noise_band / 2 : p.noise_band / 2));
+      const bottom = y(p.baseline + (lower ? p.noise_band / 2 : -p.noise_band / 2));
+      chart.append(svg('rect', { class: 'noise-band', 'data-field': 'noise-band', x: pad.left, y: Math.min(top, bottom), width: inner.w, height: Math.max(Math.abs(bottom - top), 1) },
+        svg('title', {}, 'Noise band: the run-to-run spread of calibration around the baseline')));
+    }
+    if (p.baseline !== null && p.baseline !== undefined) {
+      chart.append(svg('line', { class: 'ref baseline', 'data-field': 'baseline-line', x1: pad.left, x2: right, y1: y(p.baseline), y2: y(p.baseline) }, svg('title', {}, 'Baseline ' + climbValue(p.baseline, p.unit))));
+    }
+    if (p.target !== null && p.target !== undefined) {
+      chart.append(svg('line', { class: 'ref target', 'data-field': 'target-line', x1: pad.left, x2: right, y1: y(p.target), y2: y(p.target) }, svg('title', {}, 'Target ' + climbValue(p.target, p.unit))));
+    }
+    if (p.baseline !== null && p.baseline !== undefined) {
+      let d = 'M' + pad.left + ' ' + y(p.baseline).toFixed(1);
+      for (const pt of points) {
+        d += ' H' + x(pt).toFixed(1) + ' V' + y(pt.best).toFixed(1);
+      }
+      d += ' H' + right;
+      chart.append(svg('path', { class: 'best-line', 'data-field': 'best-line', d }));
+    }
+    for (const pt of points) {
+      const score = pt.scored ? climbNumber(pt.y) + (p.unit ? ' ' + p.unit : '') : 'no score';
+      const label = 'Attempt ' + pt.attempt + ', ' + climbOutcome(pt.class, pt.cause) + ', ' + score;
+      const dot = svg('g', { class: 'dot', 'data-attempt': pt.attempt, 'data-class': pt.class, transform: 'translate(' + x(pt).toFixed(1) + ' ' + y(pt.y).toFixed(1) + ')', role: 'button', tabindex: '0', 'aria-label': label, 'aria-pressed': String(open === pt.attempt) },
+        svg('title', {}, label), svg('circle', { class: 'dot-hit', r: 13 }), ...dotShape(pt.class));
+      const choose = () => openClimbAttempt(id, pt.attempt, '');
+      dot.addEventListener('click', choose);
+      dot.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          choose();
+        }
+      });
+      chart.append(dot);
+    }
+    const axis = setting.x === 'time' ? 'Wall-clock time' : 'Attempt';
+    chart.append(svg('text', { class: 'axis-label', 'data-field': 'x-label', x: pad.left + inner.w / 2, y: height - 6, 'text-anchor': 'middle' }, axis));
+    if (setting.x === 'time') {
+      chart.append(svg('text', { class: 'axis-label', x: pad.left, y: height - 20 }, new Date(t0).toLocaleTimeString()),
+        svg('text', { class: 'axis-label', x: right, y: height - 20, 'text-anchor': 'end' }, new Date(t1).toLocaleTimeString()));
+    } else {
+      for (const pt of points) {
+        if (points.length <= 12 || pt.attempt % Math.ceil(points.length / 12) === 0) {
+          chart.append(svg('text', { class: 'axis-label', x: x(pt).toFixed(1), y: height - 20, 'text-anchor': 'middle' }, pt.attempt));
+        }
+      }
+    }
+    return chart;
+  }
+
+  function climbLegend() {
+    const entries = [['kept', 'kept'], ['discarded', 'measured and discarded'], ['failed', 'no score']];
+    return el('ul', { class: 'climb-legend', 'data-field': 'climb-legend', 'aria-label': 'Outcomes' }, ...entries.map(([cls, words]) => {
+      const mark = svg('svg', { viewBox: '-7 -7 14 14', class: 'dot', 'data-class': cls, 'aria-hidden': 'true', focusable: 'false' }, ...dotShape(cls));
+      return el('li', { 'data-class': cls }, mark, el('span', {}, words));
+    }));
+  }
+
+  function climbChartBlock(id, p, setting) {
+    const toggle = el('div', { class: 'climb-axis', role: 'group', 'aria-label': 'Chart x axis' },
+      ...[['attempt', 'Attempt number'], ['time', 'Wall-clock time']].map(([mode, label]) => {
+        const button = el('button', { type: 'button', class: 'quiet', 'data-x': mode, 'aria-pressed': String(setting.x === mode), 'data-focus-key': 'x-' + mode }, label);
+        button.addEventListener('click', () => {
+          setting.x = mode;
+          renderClimbPanel(shown(), true);
+        });
+        return button;
+      }));
+    return el('div', { class: 'climb-chart-block' }, el('div', { class: 'climb-chart-head' }, el('h4', {}, 'Score'), toggle),
+      climbChart(id, p, setting, setting.open), climbLegend());
+  }
+
+  function climbDiffSection(a) {
+    const files = (a.diff && a.diff.files) || [];
+    const target = a.commit || a.candidate;
+    return el('section', { 'data-section': 'diff' }, el('h5', {}, 'Diff'),
+      files.length > 0 ? el('ul', { class: 'climb-files' }, ...files.map((f) => el('li', {}, el('code', {}, f)))) : el('p', { class: 'meta' }, 'No files recorded.'),
+      a.diff && a.diff.summary ? el('p', { class: 'meta' }, a.diff.summary) : null,
+      target ? el('p', { class: 'meta' }, 'Read it with ', el('code', { 'data-field': 'diff-command' }, 'git diff ' + a.parent + ' ' + target)) : null);
+  }
+
+  function climbBranchSection(a) {
+    return el('section', { 'data-section': 'branch' }, el('h5', {}, 'Branch'),
+      a.branch ? el('p', {}, el('code', { 'data-field': 'branch' }, a.branch)) : null,
+      a.commit ? el('p', { class: 'meta' }, 'Landed on the climb branch as ', el('code', { 'data-field': 'commit' }, a.commit)) : null,
+      a.candidate ? el('p', { class: 'meta' }, 'Candidate ', el('code', {}, a.candidate)) : null,
+      !a.branch && !a.commit && !a.candidate ? el('p', { class: 'meta' }, 'No branch was kept.') : null);
+  }
+
+  function climbOutputSection(a) {
+    const runs = (a.measurement && a.measurement.runs) || [];
+    return el('section', { 'data-section': 'output' }, el('h5', {}, 'Measurement output'),
+      a.reason ? el('p', { 'data-field': 'reason' }, a.reason) : null,
+      a.review_notes ? el('p', { 'data-field': 'review-notes' }, 'Reviewer: ' + a.review_notes) : null,
+      runs.length === 0 ? el('p', { class: 'meta' }, 'The attempt was not measured.') : null,
+      ...runs.map((run) => el('div', { class: 'climb-run', 'data-run': run.number },
+        el('p', { class: 'meta' }, 'Run ' + run.number + ': ' + run.status + (run.reason ? ', ' + run.reason : '')),
+        run.output ? el('pre', {}, run.output) : null)));
+  }
+
+  function climbAttemptRow(id, a, setting) {
+    const cls = a.outcome === 'kept' ? 'kept' : a.scores ? 'discarded' : 'failed';
+    const open = setting.open === a.number;
+    const link = (section, label, present) => {
+      if (!present) return null;
+      const button = el('button', { type: 'button', class: 'quiet', 'data-link': section, 'data-focus-key': 'link-' + a.number + '-' + section }, label);
+      button.addEventListener('click', () => openClimbAttempt(id, a.number, section));
+      return button;
+    };
+    const row = el('tr', { 'data-attempt': a.number, 'data-class': cls, 'aria-selected': String(open) },
+      el('td', { class: 'num', 'data-field': 'number' }, String(a.number)),
+      el('td', { 'data-field': 'outcome' }, el('span', { class: 'outcome', 'data-class': cls }, climbOutcome(cls, a.cause))),
+      el('td', { class: 'num', 'data-field': 'score' }, a.scores ? climbNumber(a.scores.primary) : 'none'),
+      el('td', { class: 'num', 'data-field': 'change' }, a.change === null || a.change === undefined ? 'none' : climbSigned(a.change) + (a.change_percent === null || a.change_percent === undefined ? '' : ' (' + climbPercent(a.change_percent) + ')')),
+      el('td', { class: 'hypothesis', 'data-field': 'hypothesis' }, a.hypothesis || ''),
+      el('td', { class: 'links', 'data-field': 'links' },
+        link('diff', 'Diff', (a.diff && a.diff.files && a.diff.files.length > 0) || a.candidate || a.commit),
+        link('branch', 'Branch', a.branch || a.commit || a.candidate),
+        link('output', 'Output', a.measurement || a.reason)));
+    if (!open) return [row];
+    const detail = el('tr', { class: 'detail', 'data-detail': a.number },
+      el('td', { colspan: '6' }, el('div', { class: 'climb-detail', 'data-attempt-detail': a.number },
+        a.change_summary ? el('p', { 'data-field': 'change-summary' }, a.change_summary) : null,
+        a.expected_effect ? el('p', { class: 'meta', 'data-field': 'expected' }, 'Expected: ' + a.expected_effect) : null,
+        climbDiffSection(a), climbBranchSection(a), climbOutputSection(a))));
+    return [row, detail];
+  }
+
+  function climbTable(id, attempts, setting) {
+    if (attempts.length === 0) {
+      return el('p', { class: 'meta', 'data-field': 'climb-empty' }, 'No attempt has been recorded yet.');
+    }
+    return el('div', { class: 'climb-table-box' }, el('table', { class: 'climb-table', 'data-field': 'climb-attempts' },
+      el('thead', {}, el('tr', {}, ...['Attempt', 'Outcome', 'Score', 'Change', 'Hypothesis', 'Records'].map((h) => el('th', { scope: 'col' }, h)))),
+      el('tbody', {}, ...attempts.flatMap((a) => climbAttemptRow(id, a, setting)))));
+  }
+
+  // openClimbAttempt opens an attempt in the table, at one of its records when
+  // a section is named, and brings it into view.
+  function openClimbAttempt(id, n, section) {
+    const setting = climbSetting(id);
+    setting.open = setting.open === n && section === '' ? 0 : n;
+    setting.section = section;
+    renderClimbPanel(shown(), true);
+    const box = byId('climb-panel');
+    const target = section
+      ? box.querySelector('[data-attempt-detail="' + n + '"] [data-section="' + section + '"]')
+      : box.querySelector('tr[data-attempt="' + n + '"]');
+    if (target) {
+      target.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  let shownClimb = '';
+
+  // renderClimbPanel draws the panel of the shown workstream, and leaves it as
+  // it is when nothing it is drawn from changed.
+  function renderClimbPanel(w, force = false) {
+    const box = byId('climb-panel');
+    if (!w || w.work_kind !== 'hill-climb') {
+      if (box.childElementCount > 0) box.replaceChildren();
+      box.hidden = true;
+      shownClimb = '';
+      return;
+    }
+    box.hidden = false;
+    const id = w.workstream;
+    const [progressName, attemptsName] = climbNames(id);
+    const p = views[progressName] ? views[progressName].progress : null;
+    const attempts = views[attemptsName] ? views[attemptsName].attempts : null;
+    const setting = climbSetting(id);
+    const key = JSON.stringify([id, p, attempts, climbFailures[progressName], climbFailures[attemptsName], setting]);
+    if (key === shownClimb && !force) return;
+    shownClimb = key;
+    const focused = box.contains(document.activeElement) ? document.activeElement.dataset.focusKey || null : null;
+    let body;
+    if (!p || !attempts) {
+      body = climbFailures[progressName] || climbFailures[attemptsName]
+        ? stateBlock('error', 'The climb has not started yet.', 'Its numbers appear once the climb spec is sealed and calibration has run.')
+        : stateBlock('loading', 'Reading the climb…');
+    } else {
+      body = el('div', { class: 'climb-body' }, climbHeader(p), climbMeters(p),
+        el('div', { class: 'climb-now-block' }, el('h4', {}, 'Now running'), climbRunning(p)),
+        climbChartBlock(id, p, setting),
+        el('div', { class: 'climb-attempts' }, el('h4', {}, 'Attempts'), climbTable(id, attempts, setting)));
+    }
+    box.replaceChildren(el('section', { class: 'climb-panel', 'data-field': 'climb-panel', 'aria-label': 'Climb' }, body));
+    if (focused) {
+      box.querySelector('[data-focus-key="' + focused + '"]')?.focus();
+    }
+    if (p && p.running && climbTimer === null) {
+      climbTimer = setInterval(tickClimb, 1000);
+    }
+  }
+
   // copyText puts text on the clipboard, falling back to a selected
   // textarea where the clipboard API is unavailable. It resolves to whether
   // the text was copied.
@@ -3254,7 +3703,7 @@
         w.archived ? el('span', { class: 'tag', 'data-field': 'archived' }, w.archived_by === 'chief_of_staff' ? 'archived by chief of staff' : 'archived') : null,
         el('span', { class: 'head-project', 'data-field': 'project' }, repoLabel(w.project)),
         renderIDCopy(w.workstream)),
-      renderUnitCounts(w.units),
+      w.work_kind === 'hill-climb' ? renderClimbLine(w) : renderUnitCounts(w.units),
       el('details', { class: 'head-details' }, el('summary', {}, 'Details'),
         el('p', { class: 'meta', 'data-field': 'workspaces' }, w.workspaces + ' workspaces')),
       isMultiMember(w) ? renderChiefLine(w) : null].filter((node) => node !== null);
@@ -3317,11 +3766,13 @@
     if (w === null) {
       delete byId('workstream-head').dataset.workstream;
       byId('workstream-head').replaceChildren();
+      renderClimbPanel(null);
       place(box, []);
       box.after(inboxResult);
       return;
     }
     renderHead(w);
+    renderClimbPanel(w);
     place(box, [renderWorkstream(w)]);
     const c = card(w.workstream);
     if (ui.tab === 'activity') renderActivityTab(c, w);

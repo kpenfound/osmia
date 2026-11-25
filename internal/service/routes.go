@@ -107,6 +107,8 @@ var Routes = []Route{
 	{Method: http.MethodPost, Path: api.Prefix + "/handin", Summary: "Hand in work to one project or an ordered list of projects", Request: api.HandInRequest{}, Response: api.HandInResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/status", Summary: "List workstreams with capacity, usage and diagnostics", Response: api.StatusResponse{}},
 	{Method: http.MethodGet, Path: api.Prefix + "/status/{workstream}", Summary: "Show one workstream", Response: api.WorkstreamStatus{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/climb/{workstream}/attempts", Summary: "Read a Hill Climb workstream's attempt log: every recorded attempt in order, with its parent, hypothesis, scores, outcome, diff summary and measurement output; refused for a workstream of another kind", Response: ClimbAttemptsResponse{}},
+	{Method: http.MethodGet, Path: api.Prefix + "/climb/{workstream}/progress", Summary: "Read a Hill Climb workstream's progress: goal and metric, baseline and best, target, noise band, budget meters, the attempt in flight, the chart points and the one-line summary; refused for a workstream of another kind", Response: ClimbProgressResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/abandon/{workstream}", Summary: "Abandon an undelivered workstream", Request: api.AbandonRequest{}, Response: api.AbandonResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/rebase/{workstream}", Summary: "Ask for a drift rebase of one workstream", Response: api.WorkstreamRebaseResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/archive/{workstream}", Summary: "Permanently archive a terminal workstream, deleting its trace and retaining its title", Response: api.ArchiveResponse{}},
