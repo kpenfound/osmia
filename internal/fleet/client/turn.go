@@ -49,8 +49,8 @@ func (t *turn) currentPhase() string {
 	return t.phase
 }
 
-// setToken replaces the token the view upload carries, as the server does for
-// a turn that reattaches after it restarted.
+// setToken replaces the token the turn's tool calls and view upload carry, as
+// the server does for a turn that reattaches after it restarted.
 func (t *turn) setToken(token string) {
 	t.mu.Lock()
 	t.token = token
@@ -63,7 +63,7 @@ func (t *turn) uploadToken() string {
 	return t.token
 }
 
-func (t *turn) toolToken() string { return t.offer.ToolToken }
+func (t *turn) toolToken() string { return t.uploadToken() }
 
 func (t *turn) setFiles(f isolation.Files) {
 	t.mu.Lock()

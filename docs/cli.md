@@ -276,7 +276,11 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   the client keeps its sessions running for the lease's grace window of about two
   minutes and reattaches them by turn ID; after that it cancels them and keeps each
   mason's files on disk, trying again until the server answers accepted, already
-  recorded or superseded.
+  recorded or superseded. [Client machines](running.md#client-machines) covers
+  setting a machine up: joining the tailnet, the provider login and Dagger
+  setting each machine keeps for itself, and keeping the client running with the
+  machine's own tools. Placement, resumed turns and the drain are described there
+  and in [configuration](configuration.md#top-level-configtoml).
 - `doctor [--json] [--root PATH]` checks what `serve` needs; see
   [doctor](#doctor).
 - `status` shows health, loaded configuration digest/root, each configuration

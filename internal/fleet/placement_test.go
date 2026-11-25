@@ -22,7 +22,9 @@ func report(t *testing.T, r *Registry, lease string, n Identity, profiles ...api
 	}
 }
 
-func runs(profile string) api.ProfileCapability { return api.ProfileCapability{Profile: profile, Runnable: true} }
+func runs(profile string) api.ProfileCapability {
+	return api.ProfileCapability{Profile: profile, Runnable: true}
+}
 
 func TestBeginUsesTheSlotTheSchedulerTookAndGivesItBackOnRelease(t *testing.T) {
 	t.Parallel()

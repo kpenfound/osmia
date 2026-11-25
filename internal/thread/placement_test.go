@@ -55,7 +55,9 @@ func TestATurnResumesItsSessionOnTheClientThatHoldsItAndReplaysItsLogOnAnother(t
 			var got coreadapter.PreparedTurn
 			runner.Place = placedOn(tc.client, &released)
 			runner.Turns = resumableTurns{
-				check: func(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error { return nil },
+				check: func(context.Context, coreadapter.Profile, coreadapter.Profile, coreadapter.BackendSession) error {
+					return nil
+				},
 				run: func(_ context.Context, p coreadapter.PreparedTurn) (coreadapter.SessionResult, error) {
 					got = p
 					return coreadapter.SessionResult{Session: coreadapter.BackendSession{Backend: "fake", ID: "next"}, FinalResponse: "second final", Client: tc.client}, nil

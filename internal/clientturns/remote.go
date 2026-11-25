@@ -92,7 +92,8 @@ func (c *remote) Run(ctx context.Context, t isolation.ClientTurn) (isolation.Cli
 		token = randomToken()
 	}
 	rec := turnRecord{Turn: scope.Turn, Project: scope.Project, Workstream: scope.Workstream, Unit: scope.Unit, Thread: scope.Thread, Role: scope.Role,
-		Node: c.node.ID, Name: c.node.Name, TokenSum: filetransport.TokenSum(token), ReturnView: t.ReturnView, Directory: t.Prepared.SessionDirectory, At: d.Now().UTC()}
+		Node: c.node.ID, Name: c.node.Name, TokenSum: filetransport.TokenSum(token), ReturnView: t.ReturnView, Directory: t.Prepared.SessionDirectory, At: d.Now().UTC(),
+		Capabilities: t.Capabilities, Skills: len(t.SkillRefs) != 0}
 	if err := d.saveRecord(rec); err != nil {
 		return isolation.ClientRun{}, err
 	}

@@ -67,6 +67,9 @@ type Binding struct {
 	Repository *trace.Repository
 	Runner     thread.Runner
 	Capture    func(context.Context, coreadapter.Scope, *isolation.FileView, coreadapter.SessionResult) error
+	// Rehost hosts a turn's tools again, over the files that reach its client,
+	// for a turn that reattaches after a restart.
+	Rehost func(context.Context, coreadapter.Scope, isolation.Files, coreadapter.Capabilities) (coreadapter.Endpoint, coreadapter.Lease, error)
 }
 
 // Dispatcher dispatches turns to the clients of a fleet.
@@ -192,6 +195,10 @@ type turnRecord struct {
 	ReturnView bool      `json:"return_view,omitempty"`
 	Directory  string    `json:"session_directory,omitempty"`
 	At         time.Time `json:"at"`
+	// Capabilities and Skills are what the turn's tools were granted and whether
+	// it was given skills, which hosting them again after a restart needs.
+	Capabilities coreadapter.Capabilities `json:"capabilities"`
+	Skills       bool                     `json:"skills,omitempty"`
 }
 
 func (r turnRecord) scope() coreadapter.Scope {
@@ -665,7 +672,7 @@ func (d *Dispatcher) Sweep() []Expired {
 	return out
 }
 
-func (d *Dispatcher) reattach(_ context.Context, ident fleet.Identity, turn string) (string, bool) {
+func (d *Dispatcher) reattach(ctx context.Context, ident fleet.Identity, turn string) (string, bool) {
 	st := d.liveState(turn)
 	if st == nil {
 		return "", false
@@ -676,6 +683,20 @@ func (d *Dispatcher) reattach(_ context.Context, ident fleet.Identity, turn stri
 		return "", false
 	}
 	token := randomToken()
+	if b, ok := d.binding(config.ProjectID(st.rec.Project)); ok && b.Rehost != nil && len(st.rec.Capabilities.Tools) != 0 {
+		endpoint, lease, err := d.rehost(b, st, ident)
+		if err != nil {
+			ghlog.Logger(ctx).Warn("cannot host a reattached turn's tools again", "turn", turn, "error", err.Error())
+			return "", false
+		}
+		token = endpoint.Token
+		release, err := d.Relay.Register(turn, endpoint.URL, token)
+		if err != nil {
+			_ = lease.Release(context.WithoutCancel(ctx))
+			return "", false
+		}
+		st.release = append(st.release, release, func() { _ = lease.Release(context.Background()) })
+	}
 	st.rec.TokenSum = filetransport.TokenSum(token)
 	_ = d.saveRecord(st.rec)
 	if st.rec.ReturnView {
@@ -685,4 +706,32 @@ func (d *Dispatcher) reattach(_ context.Context, ident fleet.Identity, turn stri
 		st.activity = d.Activity.Start("client-turn-"+turn, api.ActivityClientTurn, config.ProjectID(st.rec.Project), config.WorkstreamID(st.rec.Workstream), "reattached to "+st.name())
 	}
 	return token, true
+}
+
+// rehost hosts the tools of a reattached turn again over the client's files, for
+// as long as the turn is held.
+func (d *Dispatcher) rehost(b Binding, st *turnState, ident fleet.Identity) (coreadapter.Endpoint, coreadapter.Lease, error) {
+	rec := st.rec
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &remote{d: d, node: ident}
+	files := isolation.Files{View: remoteFiles{ctx: ctx, call: c.call(rec.Turn)}}
+	if rec.Skills {
+		files.Skills = remoteSkills{call: c.call(rec.Turn)}
+	}
+	endpoint, lease, err := b.Rehost(ctx, rec.scope(), files, rec.Capabilities)
+	if err != nil {
+		cancel()
+		return coreadapter.Endpoint{}, nil, err
+	}
+	return endpoint, stopped{lease, cancel}, nil
+}
+
+type stopped struct {
+	coreadapter.Lease
+	cancel context.CancelFunc
+}
+
+func (s stopped) Release(ctx context.Context) error {
+	s.cancel()
+	return s.Lease.Release(ctx)
 }

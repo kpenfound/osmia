@@ -459,7 +459,9 @@ it does without clients. `0` runs no session on the server's machine, which
 makes the server a pure control plane: the service still runs Dagger checks,
 captures, deliveries and pull-request watching itself, and turns wait for a
 connected client that can take them. The setting applies on reload to turns
-that have not started. A client declares its own slot count with `--slots`.
+that have not started. A client declares its own slot count with `--slots`, and
+has no profile settings: it takes the server's profiles when it connects. See
+[client machines](running.md#client-machines) for setting one up.
 
 New turns go round robin over the local client and the connected, non-draining
 clients that have a free slot and can run the turn's main profile; each client

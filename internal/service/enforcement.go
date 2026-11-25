@@ -218,13 +218,15 @@ func Enforce(opts Options, e Enforcement) Options {
 					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
 				}
 				if scope.Role == trace.ChiefOfStaff {
-					tool := controls.preview(cfg, r, scope, view, now)
-					if err := restorePreviewImages(ctx, cfg, controls, r, scope, view, now); err != nil {
-						return nil, err
-					}
-					return []coreadapter.Tool{tool}, nil
+					return []coreadapter.Tool{controls.preview(cfg, r, scope, view, now)}, nil
 				}
 				return nil, nil
+			},
+			Seed: func(ctx context.Context, scope coreadapter.Scope, view isolation.View) error {
+				if scope.Role == trace.ChiefOfStaff {
+					return restorePreviewImages(ctx, cfg, controls, r, scope, view, now)
+				}
+				return nil
 			},
 			Hosts:  e.Hosts,
 			Engine: resumableEngine{e.Engine},
@@ -252,7 +254,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			runner.AdmitRole = service.admitRole
 			runner.Jev = service.jev
 			if service.clients != nil {
-				service.clients.Bind(r.Project(), clientturns.Binding{Repository: r, Runner: runner, Capture: turns.Capture})
+				service.clients.Bind(r.Project(), clientturns.Binding{Repository: r, Runner: runner, Capture: turns.Capture, Rehost: turns.Rehost})
 			}
 		}
 		runner.ResumableRoles = resumableRole

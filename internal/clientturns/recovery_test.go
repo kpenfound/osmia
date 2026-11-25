@@ -2,6 +2,7 @@ package clientturns
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,6 +228,77 @@ func TestARemoteTurnReattachesAfterARestartAndItsResultIsRecordedOnce(t *testing
 	}
 	if holder, ok := thread1(t, r).SessionClient(); !ok || holder != "node-a" {
 		t.Fatalf("session holder after the restart: %q %v", holder, ok)
+	}
+}
+
+func TestAReattachedTurnsToolCallsWorkAfterARestartOnTheClientsFiles(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := newRig(t, "mason")
+	c := r.client("node-a")
+	c.connect(api.ClientConnectRequest{})
+	c.serve()
+	r.place(c.node)
+	r.queue("t1")
+	r.run(ctx, "t1")
+	offer := c.nextOffer()
+	c.claim(offer, map[string]string{"src/main.go": "x"})
+	if status, _ := r.relay("t1", offer.ToolToken, "note", `{}`); status != 200 {
+		t.Fatalf("a call before the restart: %d", status)
+	}
+	put(t, c.view, "src/main.go", "as the session left it")
+
+	must(t, r.repo.Close())
+	reopened, err := trace.Open(r.root, r.project)
+	must(t, err)
+	t.Cleanup(func() { reopened.Close() })
+	r.start("mason", reopened)
+	must(t, r.d.HoldFromTrace(project, reopened))
+	if status, _ := r.relay("t1", offer.ToolToken, "note", `{}`); status == 200 {
+		t.Fatal("a held turn's tools answered before its client reattached")
+	}
+
+	back := r.client("node-a")
+	back.view = c.view
+	resp := back.connect(api.ClientConnectRequest{Running: []string{"t1"}})
+	back.serve()
+	if len(resp.Turns) != 1 || resp.Turns[0].Answer != api.TurnReattached || resp.Turns[0].Token == "" || resp.Turns[0].Token == offer.ToolToken {
+		t.Fatalf("reattach: %+v", resp.Turns)
+	}
+	token := resp.Turns[0].Token
+	before := len(r.audits())
+	if status, body := r.relay("t1", token, "note", `{"after":"restart"}`); status != 200 || !strings.Contains(body, "noted") {
+		t.Fatalf("a tool call after the restart: %d %s", status, body)
+	}
+	if status, body := r.relay("t1", token, "file_read", `{"path":"src/main.go"}`); status != 200 || !strings.Contains(body, "as the session left it") {
+		t.Fatalf("a file read after the restart does not see the client's file: %d %s", status, body)
+	}
+	if status, body := r.relay("t1", token, "file_write", `{"path":"src/new.go","content":"written after the restart"}`); status != 200 {
+		t.Fatalf("a file write after the restart: %d %s", status, body)
+	}
+	if got := read(t, c.view, "src/new.go"); got != "written after the restart" {
+		t.Fatalf("the write is not in the client's view: %q", got)
+	}
+	if status, _ := r.relay("t1", token, "file_read", `{"path":"../outside"}`); status == 200 {
+		t.Fatal("a path outside the view was read after the restart")
+	}
+	for name, bad := range map[string]string{"the token from before the restart": offer.ToolToken, "another turn's token": "token-t2", "no token": ""} {
+		if status, _ := r.relay("t1", bad, "note", `{}`); status != 403 {
+			t.Fatalf("a call with %s was answered %d", name, status)
+		}
+	}
+	if audits := r.audits(); len(audits) != before+4 || !strings.HasPrefix(audits[before], "t1 note ") {
+		t.Fatalf("the calls after the restart were not audited: %v", audits)
+	}
+	if answer, refusal := back.upload("t1", token); refusal != nil || answer != api.ViewAccepted {
+		t.Fatalf("view: %q %v", answer, refusal)
+	}
+	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewAccepted {
+		t.Fatalf("result: %q %v", answer, err)
+	}
+	if status, _ := r.relay("t1", token, "note", `{}`); status != 403 {
+		t.Fatalf("a finished turn's tools answered %d", status)
 	}
 }
 

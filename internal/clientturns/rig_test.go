@@ -83,11 +83,12 @@ type upstream struct {
 	server *httptest.Server
 	mu     sync.Mutex
 	tools  map[string][]coreadapter.Tool
+	tokens map[string]string
 	hits   map[string]int
 }
 
 func newUpstream(t *testing.T) *upstream {
-	u := &upstream{tools: map[string][]coreadapter.Tool{}, hits: map[string]int{}}
+	u := &upstream{tools: map[string][]coreadapter.Tool{}, tokens: map[string]string{}, hits: map[string]int{}}
 	u.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/mcp/"), "/")
 		if len(parts) != 3 || parts[1] != "call" {
@@ -95,7 +96,10 @@ func newUpstream(t *testing.T) *upstream {
 			return
 		}
 		turn, name := parts[0], parts[2]
-		if r.Header.Get("Authorization") != "Bearer token-"+turn {
+		u.mu.Lock()
+		want := u.tokens[turn]
+		u.mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+want {
 			http.Error(w, "refused", http.StatusUnauthorized)
 			return
 		}
@@ -123,9 +127,14 @@ func newUpstream(t *testing.T) *upstream {
 
 func (u *upstream) Host(_ context.Context, req coreadapter.HostRequest) (coreadapter.HostedMCP, error) {
 	u.mu.Lock()
+	token := "token-" + req.Scope.Turn
+	if _, hosted := u.tools[req.Scope.Turn]; hosted {
+		token += "-hosted-again"
+	}
 	u.tools[req.Scope.Turn] = req.Tools
+	u.tokens[req.Scope.Turn] = token
 	u.mu.Unlock()
-	return coreadapter.HostedMCP{Endpoint: coreadapter.Endpoint{URL: u.server.URL + "/mcp/" + req.Scope.Turn, BearerTokenEnvironment: coreadapter.TokenEnvironment, Token: "token-" + req.Scope.Turn},
+	return coreadapter.HostedMCP{Endpoint: coreadapter.Endpoint{URL: u.server.URL + "/mcp/" + req.Scope.Turn, BearerTokenEnvironment: coreadapter.TokenEnvironment, Token: token},
 		Lease: lease(func(context.Context) error { return nil })}, nil
 }
 
@@ -236,7 +245,7 @@ func (r *rig) start(role string, repo *trace.Repository) {
 	}
 	r.turns.Clients = r.d.Placer()
 	r.runner = thread.Runner{Jev: judge(), Store: repo, Now: func() time.Time { return timestamp.Add(time.Second) }, Turns: r.turns}
-	r.d.Bind(project, Binding{Repository: repo, Runner: r.runner, Capture: r.turns.Capture})
+	r.d.Bind(project, Binding{Repository: repo, Runner: r.runner, Capture: r.turns.Capture, Rehost: r.turns.Rehost})
 	repo.HoldTurns(r.d.Held)
 }
 

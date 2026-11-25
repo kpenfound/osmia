@@ -21,8 +21,10 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/questions"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/servicetest/intakefixture"
+	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
@@ -942,5 +944,43 @@ func TestChiefPreviewToolContract(t *testing.T) {
 	}
 	if !slices.Equal(schema.Required, []string{"call", "port"}) {
 		t.Fatalf("required %q", schema.Required)
+	}
+}
+
+// The service seeds the view it hands a chief-of-staff turn with the images and
+// receipts of the thread's earlier previews, so a client that receives the view
+// as its starting files already holds them.
+func TestTheServiceSeedsAChiefsViewWithItsEarlierPreviews(t *testing.T) {
+	p := newPreviewSource(t)
+	var first []previewResult
+	for _, tc := range p.cases() {
+		first = append(first, p.preview(t, tc.raw))
+	}
+	options := p.f.s.options
+	options.controls = p.controls
+	bound, err := Enforce(options, Enforcement{}).Threads(p.repo, p.f.s.cfg)
+	fixturekit.Must(t, err)
+	turns := bound.(thread.Dispatcher).Runner.Turns.(*questions.Turns).Turns.(*verdictTurns).Turns.(*reportingTurns).Turns.(*retriedTurns).Turns.(*isolation.Turns)
+	if turns.Seed == nil {
+		t.Fatal("the service seeds no view")
+	}
+	view := previewView(t)
+	fixturekit.Must(t, turns.Seed(context.Background(), p.scope, view))
+	receipt, err := view.Read("previews/results.json")
+	fixturekit.Must(t, err)
+	for _, result := range first {
+		if !strings.Contains(string(receipt), result.ImageID) {
+			t.Fatalf("the receipt of image %s is missing from the seeded view: %s", result.ImageID, receipt)
+		}
+		if image, err := view.Read(result.Path); err != nil || !bytes.Equal(image, attachmentPNG(t)) {
+			t.Fatalf("image %s is missing from the seeded view: %v", result.Path, err)
+		}
+	}
+	other := previewView(t)
+	other2 := p.scope
+	other2.Role = "mason"
+	fixturekit.Must(t, turns.Seed(context.Background(), other2, other))
+	if _, err := other.Read("previews/results.json"); err == nil {
+		t.Fatal("a turn that is not the chief's was seeded with previews")
 	}
 }

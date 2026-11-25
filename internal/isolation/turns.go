@@ -54,8 +54,13 @@ type Turns struct {
 	// The view is the one the turn runs in: the service's view for a local turn,
 	// the client's own for a remote one.
 	ViewTools func(context.Context, coreadapter.Scope, View) ([]coreadapter.Tool, error)
-	Hosts     coreadapter.MCPHosts
-	Engine    coreadapter.Engine
+	// Seed adds to the view the service builds for a turn the files its role's
+	// tools expect to find there. It runs before the view is handed to the
+	// turn's client, which a remote client receives as its starting files. It
+	// does not run for a view a remote client builds from a commit.
+	Seed   func(context.Context, coreadapter.Scope, View) error
+	Hosts  coreadapter.MCPHosts
+	Engine coreadapter.Engine
 	// Clients chooses the client each turn runs on. Nil, or a placer that
 	// returns no client, runs the turn on the built-in local client, which runs
 	// sessions with Engine in this process.
@@ -256,72 +261,25 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			}
 		}
 	}
+	if view != nil && r.Seed != nil {
+		if err = r.Seed(ctx, input.Scope, view); err != nil {
+			return result, err
+		}
+	}
 	turn := ClientTurn{Capabilities: capabilities, Environment: env, View: view, Start: start, ReturnView: capabilities.WriteFiles, RunsDagger: selected.Execution.RunsDagger(),
 		SkillRefs: coreadapter.TurnSkills(selected.Execution, input.Profile.Backend), Pinned: []string{workspace.Workspace.Directory}}
 	if r.Chain != nil {
 		turn.Fallbacks = r.Chain(input.Profile.Name)
 	}
+	turn.Prepared = input
 	files, err := client.Files(ctx, turn)
 	if err != nil {
 		return result, err
 	}
-	tools := append(fileTools(files), r.Tools...)
-	if r.ViewTools != nil {
-		viewTools, toolErr := r.ViewTools(ctx, input.Scope, files.View)
-		if toolErr != nil {
-			return result, toolErr
-		}
-		tools = append(tools, viewTools...)
-	}
-	if r.Scoped != nil {
-		scoped, scopedErr := r.Scoped(ctx, input.Scope)
-		if scopedErr != nil {
-			return result, scopedErr
-		}
-		tools = append(tools, scoped...)
-	}
-	registry := map[string]coreadapter.Tool{}
-	for _, tool := range tools {
-		if _, exists := registry[tool.Name]; exists {
-			return result, errors.New("duplicate service tool")
-		}
-		registry[tool.Name] = tool
-	}
-	var approved []coreadapter.Tool
-	var names []string
-	var countMu sync.Mutex
-	counts, records := map[string]int{}, 0
-	for _, name := range capabilities.Tools {
-		tool, exists := registry[name]
-		if !exists {
-			return result, fmt.Errorf("granted tool %q is not registered by the service", name)
-		}
-		if coreadapter.ToolPermitted(capabilities, tool) && !slices.Contains(names, name) {
-			original := tool.Handle
-			tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
-				countMu.Lock()
-				counts[name]++
-				if tool.Effect == coreadapter.ToolMemory {
-					records++
-				}
-				countMu.Unlock()
-				var finish func(context.Context, json.RawMessage, error) error
-				if r.Audit != nil {
-					var err error
-					finish, err = r.Audit(ctx, input.Scope, tool, raw)
-					if err != nil {
-						return nil, err
-					}
-				}
-				output, err := original(ctx, raw)
-				if finish != nil {
-					err = errors.Join(err, finish(context.WithoutCancel(ctx), output, err))
-				}
-				return output, err
-			}
-			approved = append(approved, tool)
-			names = append(names, name)
-		}
+	calls := &tally{counts: map[string]int{}}
+	approved, names, err := r.approve(ctx, input.Scope, files, capabilities, calls)
+	if err != nil {
+		return result, err
 	}
 	capabilities.Tools = names
 	turn.Capabilities = capabilities
@@ -339,20 +297,11 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 	}
 	if len(approved) != 0 {
-		if r.Hosts == nil {
-			return result, errors.New("service MCP host is required for granted tools")
-		}
-		hosted, hostErr := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: input.Scope, Capabilities: capabilities, Tools: approved, Execution: hosting})
+		hosted, hostErr := r.host(ctx, input.Scope, capabilities, approved, hosting)
 		if hostErr != nil {
 			return result, hostErr
 		}
-		if hosted.Lease == nil {
-			return result, errors.New("service MCP host returned no lease")
-		}
 		defer func() { err = errors.Join(err, hosted.Lease.Release(context.WithoutCancel(ctx))) }()
-		if hosted.Endpoint.BearerTokenEnvironment != coreadapter.TokenEnvironment {
-			return result, errors.New("MCP host must use the service token environment")
-		}
 		env[coreadapter.TokenEnvironment] = hosted.Endpoint.Token
 		prepared.MCP = []coreadapter.Endpoint{hosted.Endpoint}
 		turn.Endpoint = hosted.Endpoint
@@ -372,12 +321,11 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		result.SessionDirectory = input.SessionDirectory
 		result.Session.Backend = cmpOr(result.Session.Backend, input.Profile.Backend)
 	}
-	countMu.Lock()
-	if len(counts) != 0 {
-		result.ToolCounts = maps.Clone(counts)
+	if counts, records := calls.snapshot(); len(counts) != 0 {
+		result.ToolCounts, result.Records = counts, records
+	} else {
+		result.Records = records
 	}
-	result.Records = records
-	countMu.Unlock()
 	if run.View != nil {
 		if r.Capture != nil {
 			err = errors.Join(err, r.Capture(context.WithoutCancel(ctx), input.Scope, run.View, result))
@@ -387,6 +335,123 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 	}
 	return result, err
+}
+
+// tally counts the calls a turn's tools receive.
+type tally struct {
+	mu      sync.Mutex
+	counts  map[string]int
+	records int
+}
+
+func (t *tally) count(name string, effect coreadapter.ToolEffect) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.counts[name]++
+	if effect == coreadapter.ToolMemory {
+		t.records++
+	}
+}
+
+func (t *tally) snapshot() (map[string]int, int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return maps.Clone(t.counts), t.records
+}
+
+// approve returns the tools a turn's grants name, each wrapped to count and
+// audit its calls, and their names. The tools that act on the turn's view and
+// skills act on files, wherever the turn's session runs.
+func (r *Turns) approve(ctx context.Context, scope coreadapter.Scope, files Files, capabilities coreadapter.Capabilities, calls *tally) ([]coreadapter.Tool, []string, error) {
+	tools := append(fileTools(files), r.Tools...)
+	if r.ViewTools != nil {
+		viewTools, err := r.ViewTools(ctx, scope, files.View)
+		if err != nil {
+			return nil, nil, err
+		}
+		tools = append(tools, viewTools...)
+	}
+	if r.Scoped != nil {
+		scoped, err := r.Scoped(ctx, scope)
+		if err != nil {
+			return nil, nil, err
+		}
+		tools = append(tools, scoped...)
+	}
+	registry := map[string]coreadapter.Tool{}
+	for _, tool := range tools {
+		if _, exists := registry[tool.Name]; exists {
+			return nil, nil, errors.New("duplicate service tool")
+		}
+		registry[tool.Name] = tool
+	}
+	var approved []coreadapter.Tool
+	var names []string
+	for _, name := range capabilities.Tools {
+		tool, exists := registry[name]
+		if !exists {
+			return nil, nil, fmt.Errorf("granted tool %q is not registered by the service", name)
+		}
+		if coreadapter.ToolPermitted(capabilities, tool) && !slices.Contains(names, name) {
+			original := tool.Handle
+			tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+				calls.count(name, tool.Effect)
+				var finish func(context.Context, json.RawMessage, error) error
+				if r.Audit != nil {
+					var err error
+					finish, err = r.Audit(ctx, scope, tool, raw)
+					if err != nil {
+						return nil, err
+					}
+				}
+				output, err := original(ctx, raw)
+				if finish != nil {
+					err = errors.Join(err, finish(context.WithoutCancel(ctx), output, err))
+				}
+				return output, err
+			}
+			approved = append(approved, tool)
+			names = append(names, name)
+		}
+	}
+	return approved, names, nil
+}
+
+func (r *Turns) host(ctx context.Context, scope coreadapter.Scope, capabilities coreadapter.Capabilities, tools []coreadapter.Tool, execution coreadapter.ExecutionSettings) (coreadapter.HostedMCP, error) {
+	if r.Hosts == nil {
+		return coreadapter.HostedMCP{}, errors.New("service MCP host is required for granted tools")
+	}
+	capabilities.Tools = slices.Clone(capabilities.Tools)
+	hosted, err := r.Hosts.Host(ctx, coreadapter.HostRequest{Scope: scope, Capabilities: capabilities, Tools: tools, Execution: execution})
+	if err != nil {
+		return coreadapter.HostedMCP{}, err
+	}
+	if hosted.Lease == nil {
+		return coreadapter.HostedMCP{}, errors.New("service MCP host returned no lease")
+	}
+	if hosted.Endpoint.BearerTokenEnvironment != coreadapter.TokenEnvironment {
+		return coreadapter.HostedMCP{}, errors.Join(errors.New("MCP host must use the service token environment"), hosted.Lease.Release(context.WithoutCancel(ctx)))
+	}
+	return hosted, nil
+}
+
+// Rehost hosts again the tools of a remote turn that an earlier service session
+// started, so the turn's session can keep calling them after the service
+// restarted. The tools are the ones capabilities names, over files that reach
+// the turn's client. The returned lease ends the hosting.
+func (r *Turns) Rehost(ctx context.Context, scope coreadapter.Scope, files Files, capabilities coreadapter.Capabilities) (coreadapter.Endpoint, coreadapter.Lease, error) {
+	approved, _, err := r.approve(ctx, scope, files, capabilities, &tally{counts: map[string]int{}})
+	if err != nil {
+		return coreadapter.Endpoint{}, nil, err
+	}
+	if len(approved) == 0 {
+		return coreadapter.Endpoint{}, nil, errors.New("the turn holds no tools to host")
+	}
+	hosted, err := r.host(ctx, scope, capabilities, approved, coreadapter.ExecutionSettings{})
+	if err != nil {
+		return coreadapter.Endpoint{}, nil, err
+	}
+	return hosted.Endpoint, hosted.Lease, nil
 }
 
 func cmpOr(a, b string) string {

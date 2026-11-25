@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/execution"
+	"github.com/kpenfound/osmia/internal/fleet"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/jev"
 	"github.com/kpenfound/osmia/internal/lifecycle"
@@ -229,7 +230,7 @@ func (a TestAccess) Handle(w http.ResponseWriter, r *http.Request) { a.s.handle(
 
 // NewFixtureForTest composes an idle fixture from local state without launching controllers.
 func NewFixtureForTest(cfg *config.Config, opts Options, store *runtime.Store, repos []*trace.Repository) *Service {
-	s := &Service{cfg: cfg, options: opts, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}}
+	s := &Service{cfg: cfg, options: opts, store: store, checkSlots: &checkSlotPool{limit: cfg.Capacity.Checks}, fleet: fleet.NewRegistry(fleet.Options{})}
 	s.chief = newChiefSlotPool(cfg.Capacity.Chief, nil, s.conversationSignal.wake)
 	for _, r := range repos {
 		s.projects = append(s.projects, &activeProject{id: r.Project(), repository: r})
