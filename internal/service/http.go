@@ -58,6 +58,8 @@ func failWith(w http.ResponseWriter, api *APIError) {
 		status = 409
 	case NotFound:
 		status = 404
+	case Forbidden:
+		status = 403
 	case Unsupported:
 		status = 501
 	case Unavailable:
@@ -194,6 +196,9 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engineHTTP(w, r) {
+		return
+	}
+	if s.transferRequest(w, r) {
 		return
 	}
 	if web.Serve(w, r) {

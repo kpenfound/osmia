@@ -155,6 +155,10 @@ func (r Root) Socket() (string, error)  { return r.managed("osmia.sock") }
 // Tailnet is the embedded Tailscale node's state directory.
 func (r Root) Tailnet() (string, error) { return r.managed("tailnet") }
 
+// Transfers is the directory the views uploaded by clients are unpacked in
+// before the service decides what to do with them.
+func (r Root) Transfers() (string, error) { return r.managed("transfers") }
+
 // Notifications is the ledger of owner notifications sent to notify.webhook.
 func (r Root) Notifications() (string, error) { return r.managed("notifications.json") }
 

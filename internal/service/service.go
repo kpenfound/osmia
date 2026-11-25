@@ -30,6 +30,7 @@ import (
 	"github.com/kpenfound/osmia/internal/delivery"
 	"github.com/kpenfound/osmia/internal/events"
 	"github.com/kpenfound/osmia/internal/eventstream"
+	"github.com/kpenfound/osmia/internal/filetransport"
 	"github.com/kpenfound/osmia/internal/ghlog"
 	"github.com/kpenfound/osmia/internal/hearsay"
 	"github.com/kpenfound/osmia/internal/intake"
@@ -209,6 +210,7 @@ type Service struct {
 	web                   net.Listener
 	tailnet               *tailnet.Link
 	tailnetDone           chan struct{}
+	transfers             *filetransport.Registry
 	socketInfo            os.FileInfo
 	server                *http.Server
 	lifetime              context.Context
@@ -290,7 +292,11 @@ func Start(ctx context.Context, opts Options) (_ *Service, err error) {
 		return nil, err
 	}
 	registerHearsaySecrets(cfg.Hearsay)
-	s := &Service{options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
+	transfers, err := root.Transfers()
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{transfers: filetransport.NewRegistry(transfers), options: opts, lock: lock, failures: make(chan error, 1), done: make(chan struct{}), hub: eventstream.New(), logger: logger}
 	s.telemetry = s.startTelemetry(cfg.Telemetry)
 	s.slots = s.startSlotSpans(cfg)
 	s.spans = newFactorySpans(s.telemetry, ledgerPath(root), s.now, logger)

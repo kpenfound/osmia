@@ -67,6 +67,27 @@ browser checks as on the web listener apply; the `Host` header must be an IP
 address, the configured hostname, or a name the node holds on the tailnet,
 such as its MagicDNS name.
 
+Two routes on the tailnet listener, and only there, carry a body that is not
+JSON, and each is accepted only with its own content type: the git fetch
+request `POST /v1/git/<project>/git-upload-pack` with
+`application/x-git-upload-pack-request`, and the upload of a finished view
+`PUT /v1/turns/<turn>/view` with `application/x-osmia-view`. Every other
+request other than `GET` and `HEAD` still needs `Content-Type:
+application/json`, the `Host` check applies to these two routes too, and the
+service grants no cross-site preflight for them.
+
+The git route, `/v1/git/<project>/`, is read-only. A git client fetches and
+clones a registered project's clone through it, including a commit that no
+branch points at, and the service refuses `git push` without changing any ref.
+It serves nothing but registered projects' clones. The view routes,
+`/v1/turns/<turn>/view`, download a view built from trace documents and take a
+finished view as an archive of its files, modes, empty directories and
+symlinks. The turn's bearer token, the one its tool endpoint requires, must
+accompany them. The service unpacks an upload into a staging directory under
+`<root>/transfers` and refuses an archive with an entry that escapes the view
+root, through an absolute path, a `..` segment or a symlink pointing outside
+it.
+
 The tailnet never takes the service down. A node that cannot join at startup,
 whether for a missing auth key, a pending login, an unreachable control server
 or an unusable state directory, leaves `osmia serve` running, and the service

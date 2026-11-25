@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Osmia local API",
-    "description": "The Osmia service serves this API over its Unix socket and, when configured,\non a loopback address (listen.web) and on the tailnet (listen.tailnet). There is\nno authentication: the socket, the loopback interface and tailnet membership are\nthe boundaries. On the web and tailnet listeners, requests must carry a Host\nnaming the listener, and requests other than GET and HEAD must send\nContent-Type: application/json.\n\nRequest bodies are one JSON object with known, unique fields. Every failure\nreturns an error object with a code and a message.",
+    "description": "The Osmia service serves this API over its Unix socket and, when configured,\non a loopback address (listen.web) and on the tailnet (listen.tailnet). There is\nno authentication: the socket, the loopback interface and tailnet membership are\nthe boundaries. On the web and tailnet listeners, requests must carry a Host\nnaming the listener, and requests other than GET and HEAD must send\nContent-Type: application/json. Two routes on the tailnet listener send their\nown content type instead: the git fetch request and the upload of a finished\nview. The service grants no cross-site preflight for them.\n\nRequest bodies are one JSON object with known, unique fields. Every failure\nreturns an error object with a code and a message.",
     "version": "1"
   },
   "servers": [
@@ -1555,6 +1555,125 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FeedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/git-receive-pack": {
+      "post": {
+        "summary": "Always refused as forbidden: the git route is read-only and takes no push",
+        "operationId": "postGitByProjectGitReceivePack",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/git-upload-pack": {
+      "post": {
+        "summary": "Tailnet listener only: serve a git fetch or clone of a registered project's clone, including any commit it holds that no branch points at; the request is not JSON, it carries Content-Type application/x-git-upload-pack-request",
+        "operationId": "postGitByProjectGitUploadPack",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-git-upload-pack-request": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-git-upload-pack-result": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/git/{project}/info/refs": {
+      "get": {
+        "summary": "Tailnet listener only: advertise a registered project's clone for git fetch and clone over smart HTTP (query service=git-upload-pack); service=git-receive-pack is refused",
+        "operationId": "getGitByProjectInfoRefs",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "path",
+            "description": "Project ID.",
+            "required": true,
+            "schema": {
+              "description": "Project ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-git-upload-pack-advertisement": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -3825,6 +3944,93 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TranscribeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/turns/{turn}/view": {
+      "get": {
+        "summary": "Tailnet listener only: download the archive of a turn's view built from trace documents; the request carries the turn's bearer token",
+        "operationId": "getTurnsByTurnView",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/x-osmia-view": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Tailnet listener only: upload a turn's finished view as an archive, which is unpacked into a staging directory and handed to the turn; refused when any entry escapes the view root. The request is not JSON, it carries Content-Type application/x-osmia-view and the turn's bearer token. The answer is accepted, already_recorded or superseded",
+        "operationId": "putTurnsByTurnView",
+        "parameters": [
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn ID.",
+            "required": true,
+            "schema": {
+              "description": "Turn ID.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-osmia-view": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "The request failed; the error names its code and reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ViewUploadResponse"
                 }
               }
             }
@@ -9922,6 +10128,19 @@
             "type": "integer"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ViewUploadResponse": {
+        "properties": {
+          "answer": {
+            "enum": [
+              "accepted",
+              "already_recorded",
+              "superseded"
+            ],
             "type": "string"
           }
         },

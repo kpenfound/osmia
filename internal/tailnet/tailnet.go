@@ -234,12 +234,30 @@ func ArrivedOn(r *http.Request) ListenerKind {
 // browser on another site's behalf. The Host header must be an IP address,
 // the configured hostname or one of the node's names, which refuses DNS
 // rebinding, and a request that is not a read must carry a JSON content type.
+// Two routes carry their own content type instead: the git fetch request and
+// the upload of a finished view. Neither is a type a cross-site form can send
+// without a preflight, which the service never grants.
 func Allowed(r *http.Request, hostname string, names func(context.Context) []string) bool {
 	host := strings.ToLower(strings.TrimSuffix(requestHost(r), "."))
 	if _, err := netip.ParseAddr(host); err != nil && host != hostname && !containsFold(names(r.Context()), host) {
 		return false
 	}
-	return jsonOrRead(r)
+	return jsonOrRead(r) || ownContentType(r)
+}
+
+func ownContentType(r *http.Request) bool {
+	var want string
+	_, isView := api.ViewRoute(r.URL.Path)
+	switch {
+	case r.Method == http.MethodPost && api.GitFetchPath(r.URL.Path):
+		want = api.GitUploadPackRequestType
+	case r.Method == http.MethodPut && isView:
+		want = api.ViewArchiveType
+	default:
+		return false
+	}
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && media == want
 }
 
 func containsFold(names []string, host string) bool {

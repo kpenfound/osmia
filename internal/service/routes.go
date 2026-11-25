@@ -12,6 +12,7 @@ import (
 // and Response hold zero values of the JSON body types; Request is nil for an
 // endpoint that reads no body. Status is the success status, 200 when zero.
 // Stream marks the text/event-stream endpoint, whose Response is one event.
+// RequestType and ResponseType name the media type of a body that is not JSON.
 type Route struct {
 	Method   string
 	Path     string
@@ -21,11 +22,19 @@ type Route struct {
 	Status   int
 	Stream   bool
 	Binary   bool
+
+	RequestType  string
+	ResponseType string
 }
 
 // Routes lists every endpoint Service.handle serves under api.Prefix.
 var Routes = []Route{
 	{Method: http.MethodGet, Path: api.Prefix + "/images/{workstream}/{image}", Summary: "Read a live PNG or JPEG attachment with nosniff", Response: "", Binary: true},
+	{Method: http.MethodGet, Path: api.Prefix + "/git/{project}/info/refs", Summary: "Tailnet listener only: advertise a registered project's clone for git fetch and clone over smart HTTP (query service=git-upload-pack); service=git-receive-pack is refused", Response: "", ResponseType: api.GitAdvertisementType},
+	{Method: http.MethodPost, Path: api.Prefix + "/git/{project}/git-upload-pack", Summary: "Tailnet listener only: serve a git fetch or clone of a registered project's clone, including any commit it holds that no branch points at; the request is not JSON, it carries Content-Type " + api.GitUploadPackRequestType, Response: "", RequestType: api.GitUploadPackRequestType, ResponseType: api.GitUploadPackResultType},
+	{Method: http.MethodPost, Path: api.Prefix + "/git/{project}/git-receive-pack", Summary: "Always refused as forbidden: the git route is read-only and takes no push", Response: api.ErrorResponse{}, Status: http.StatusForbidden},
+	{Method: http.MethodGet, Path: api.Prefix + "/turns/{turn}/view", Summary: "Tailnet listener only: download the archive of a turn's view built from trace documents; the request carries the turn's bearer token", Response: "", ResponseType: api.ViewArchiveType},
+	{Method: http.MethodPut, Path: api.Prefix + "/turns/{turn}/view", Summary: "Tailnet listener only: upload a turn's finished view as an archive, which is unpacked into a staging directory and handed to the turn; refused when any entry escapes the view root. The request is not JSON, it carries Content-Type " + api.ViewArchiveType + " and the turn's bearer token. The answer is accepted, already_recorded or superseded", Response: api.ViewUploadResponse{}, RequestType: api.ViewArchiveType},
 	{Method: http.MethodGet, Path: api.Prefix + "/engine/status", Summary: "Report Dagger engine mode, reachability, versions and cache size", Response: api.EngineStatus{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/restart", Summary: "Restart the managed Dagger engine when no checks or Dagger turns are active", Response: api.MutationResponse{}},
 	{Method: http.MethodPost, Path: api.Prefix + "/engine/prune", Summary: "Prune the managed Dagger engine cache when idle", Response: api.MutationResponse{}},
