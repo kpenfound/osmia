@@ -170,3 +170,16 @@ func (v *FileView) Put(name string, data []byte) error {
 	}
 	return v.root.WriteFile(name, data, 0600)
 }
+
+// Detach closes the view and leaves its directory and files in place. A client
+// detaches the view of a finished turn to keep it on disk until the service
+// has answered for it.
+func (v *FileView) Detach() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.closed {
+		return nil
+	}
+	v.closed = true
+	return v.root.Close()
+}

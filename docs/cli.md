@@ -251,6 +251,32 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   refused; a provably stale socket is recovered automatically. The service
   runs the architect, committee and chief-of-staff turns in each role's
   configured sandbox. A startup failure prints no detail; run `doctor`.
+- `client --server URL --slots N [--dir PATH]` runs model sessions on this
+  machine for the server at URL, which is the server's tailnet API. It runs on
+  Linux and macOS, in the foreground only, and takes flags only: it reads no
+  config file, has no profile settings and has no background or detached mode,
+  so `--detach`, `--background`, `--config` and the like are refused with a
+  message that says it runs in the foreground. Osmia ships no unit files for it;
+  keep it running with the machine's own tools. `--slots` is how many turns the
+  machine runs at once, whatever the role. `--dir` is where the client keeps its
+  cached clones, its session directories and any view or result the server has
+  not yet answered for; it defaults to `osmia-client` in the user's data
+  directory. The client checks each profile the server hands it with the tool
+  checks `doctor` runs, reports which it can and cannot run with the fix for
+  each missing tool, and checks again when the server reloads. It builds each
+  turn's view from a cached clone fetched over the server's read-only git route,
+  runs the session with this machine's own provider login (`sbx login`,
+  `sbx secret set`) and Dagger setting (`DAGGER_CLOUD_TOKEN`, or
+  `_EXPERIMENTAL_DAGGER_RUNNER_HOST`), forwards the sandbox's tool calls to the
+  server, and sends back the result and the finished view. It writes no trace
+  records and exports no telemetry; it logs to stderr only. The first Ctrl+C or
+  SIGTERM drains it: it takes no new turns, keeps its connection, lists the turns
+  still running and exits once their results are sent. A second Ctrl+C cancels the
+  running sessions and still sends each mason's files. When the connection drops
+  the client keeps its sessions running for the lease's grace window of about two
+  minutes and reattaches them by turn ID; after that it cancels them and keeps each
+  mason's files on disk, trying again until the server answers accepted, already
+  recorded or superseded.
 - `doctor [--json] [--root PATH]` checks what `serve` needs; see
   [doctor](#doctor).
 - `status` shows health, loaded configuration digest/root, each configuration

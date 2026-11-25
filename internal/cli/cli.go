@@ -30,6 +30,7 @@ import (
 const usage = `Usage: osmia <command> [--root PATH]
        osmia --version
   serve [--detach]
+  client --server URL --slots N [--dir PATH]  run sessions on this machine for a server; foreground only
   stop
   doctor [--json]
   engine status|restart|prune [--json]
@@ -98,6 +99,7 @@ Client commands also accept --socket PATH (relative to root).
 config validate reads only the top-level file: --config PATH, else the file --root resolves to.
 project settings works offline on the root's store and refuses while the service runs; use the Settings page then.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
+client runs in the foreground only, takes flags only and reads no config file; see osmia client --help.
 `
 
 type options struct {
@@ -248,6 +250,9 @@ func versionLine(b wire.Identity) string {
 // diagnostics to stderr, and returns a documented exit code. Client execution
 // never loads configuration or opens runtime files.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "client" {
+		return runClient(ctx, args[1:], stdout, stderr)
+	}
 	o, err := parse(args)
 	invalid := func() int { fmt.Fprintln(stderr, "invalid arguments; use osmia --help"); return 2 }
 	if err != nil {
