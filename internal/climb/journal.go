@@ -106,7 +106,12 @@ type Journal struct {
 	Guardrails  *Guardrails  `json:"guardrails,omitempty"`
 	Measurement *Measurement `json:"measurement,omitempty"`
 	Decision    *Decision    `json:"decision,omitempty"`
-	Review      *Review      `json:"review,omitempty"`
+	// DecidedRevision is the climb spec revision Decision was made under. A
+	// kept candidate whose decision rests on an older revision than the sealed
+	// one is decided again before it is reviewed or promoted when an amendment
+	// changed the guardrail checks or the bounds of a limit since.
+	DecidedRevision int     `json:"decided_revision,omitempty"`
+	Review          *Review `json:"review,omitempty"`
 
 	// SquashAt, Message and Squashed are the prepared promotion: the commit
 	// the climb branch is moved to, fixed before the branch moves.

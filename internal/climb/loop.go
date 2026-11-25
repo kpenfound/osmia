@@ -568,7 +568,7 @@ func (l *Loop) measure(ctx context.Context, c *cycle, j Journal) (bool, error) {
 }
 
 func (l *Loop) decided(ctx context.Context, c *cycle, j Journal, d Decision, g *Guardrails, m *Measurement) (bool, error) {
-	j.Guardrails, j.Measurement, j.Decision = g, m, &d
+	j.Guardrails, j.Measurement, j.Decision, j.DecidedRevision = g, m, &d, c.revision
 	if !d.Keep {
 		return l.finishDiscard(ctx, c, j, PhaseCaptured, d)
 	}
@@ -583,6 +583,10 @@ func (l *Loop) decided(ctx context.Context, c *cycle, j Journal, d Decision, g *
 func (l *Loop) measured(ctx context.Context, c *cycle, j Journal) (bool, error) {
 	if j.Decision == nil || !j.Decision.Keep {
 		return l.finishDiscard(ctx, c, j, PhaseMeasured, derefDecision(j.Decision))
+	}
+	j, ended, again, err := l.revalidate(ctx, c, j)
+	if ended || err != nil {
+		return again, err
 	}
 	diff, err := c.host.Diff(ctx, j.Parent, j.Candidate)
 	if err != nil {
@@ -611,6 +615,81 @@ func (l *Loop) measured(ctx context.Context, c *cycle, j Journal) (bool, error) 
 	return true, l.hook("climb:reviewed")
 }
 
+// revalidate decides again a kept candidate whose keep decision was made under
+// an older climb spec revision than the sealed one, when an amendment since
+// changed what the decision reads and applies in place: the guardrail checks or
+// the bounds of a secondary limit. Go does it from the recorded measurement
+// against the amended limits, and runs the checks again on the candidate when
+// they changed. A candidate that no longer keeps ends through the discard path,
+// whatever the reviewer's verdict is or will be, and one that still keeps
+// carries the new decision and the revision it was made under, so the checks
+// are not run again. A candidate whose decision stands is left as it is.
+func (l *Loop) revalidate(ctx context.Context, c *cycle, j Journal) (Journal, bool, bool, error) {
+	decided := j.DecidedRevision
+	if decided == 0 {
+		decided = j.SpecRevision
+	}
+	if decided == c.revision || j.Decision == nil || !j.Decision.Keep || j.Measurement == nil {
+		return j, false, false, nil
+	}
+	change, err := Drift(l.SpecAt, c.stream, decided, c.spec, c.revision)
+	if err != nil {
+		return j, false, false, err
+	}
+	checks, bounds := slices.Contains(change.InPlace, FieldChecks), slices.Contains(change.InPlace, FieldBounds)
+	if !checks && !bounds {
+		return j, false, false, nil
+	}
+	green := Guardrails{Green: true}
+	if j.Guardrails != nil {
+		green = *j.Guardrails
+	}
+	if checks {
+		green = Guardrails{Green: true}
+		if len(c.spec.Guardrails.Checks) > 0 {
+			if err := RecordRunning(ctx, l.Repository, c.stream, l.running(c, j, kinds.PhaseGuardrails, 0), l.now()); err != nil {
+				return j, false, false, err
+			}
+			if green, err = c.host.Guardrails(ctx, GuardrailRequest{Stream: c.stream, Number: j.Number, Candidate: j.Candidate, Checks: c.spec.Guardrails.Checks}); err != nil {
+				return j, false, false, err
+			}
+		}
+	}
+	d := Decide(Candidate{Measurement: *j.Measurement, Best: j.Best, Direction: c.spec.Metric.Direction, MinImprovement: c.spec.Metric.MinImprovement, ChecksGreen: green.Green, ChecksDetail: green.Detail, Limits: c.spec.Limits()})
+	j.Guardrails, j.Decision, j.DecidedRevision = &green, &d, c.revision
+	if !d.Keep {
+		d.Reason = fmt.Sprintf("an approved amendment changed %s after the keep decision, made under climb spec revision %d, and the candidate no longer keeps under revision %d: %s", strings.Join(change.InPlace, ", "), decided, c.revision, d.Reason)
+		again, err := l.finishDiscard(ctx, c, j, j.Phase, d)
+		return j, true, again, err
+	}
+	if err := l.restate(ctx, c, j); err != nil {
+		return j, false, false, err
+	}
+	return j, false, false, l.hook("climb:revalidated")
+}
+
+// restate records the journal of the open attempt as it stands, with the
+// running state of its phase, without moving the phase.
+func (l *Loop) restate(ctx context.Context, c *cycle, j Journal) error {
+	at := l.now()
+	jd, err := journalDocument(l.Repository, c.stream, j, at, string(j.Phase))
+	if err != nil {
+		return err
+	}
+	phase := kinds.PhaseReviewing
+	rd, err := RunningDocument(l.Repository, c.stream, l.running(c, j, phase, 0), at)
+	if err != nil {
+		return err
+	}
+	if err := l.Repository.RecordDocuments(ctx, []trace.Document{jd, rd}); err != nil {
+		if isConflict(err) {
+			return errMoved
+		}
+		return err
+	}
+	return nil
+}
+
 func derefDecision(d *Decision) Decision {
 	if d == nil {
 		return Decision{Cause: CauseInvalid, Reason: "no decision was recorded"}
@@ -629,6 +708,10 @@ func (l *Loop) reviewed(ctx context.Context, c *cycle, j Journal) (bool, error) 
 			reason += ": " + notes
 		}
 		return l.finishDiscard(ctx, c, j, PhaseReviewed, Decision{Cause: CauseRejected, Reason: reason})
+	}
+	j, ended, again, err := l.revalidate(ctx, c, j)
+	if ended || err != nil {
+		return again, err
 	}
 	if stale, err := l.stale(ctx, c, j); err != nil || stale {
 		if err != nil {

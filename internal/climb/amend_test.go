@@ -279,6 +279,8 @@ func TestAnAmendmentDuringClimbingWaitsForTheOpenAttemptThenCalibratesOnTheCurre
 func (r *loopRig) amend(change func(*Spec)) {
 	r.t.Helper()
 	next := r.spec
+	next.Guardrails.Checks = slices.Clone(r.spec.Guardrails.Checks)
+	next.Guardrails.Limits = slices.Clone(r.spec.Guardrails.Limits)
 	change(&next)
 	r.revision++
 	r.specs[r.revision] = next
