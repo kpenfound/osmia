@@ -12,6 +12,7 @@ import (
 	"github.com/kpenfound/osmia/internal/api"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/execution"
+	kindreg "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -75,6 +76,24 @@ func StageChiefDocuments(r *trace.Repository, stream config.WorkstreamID, worksp
 		}
 		if !slices.Contains(paths, "units") {
 			paths = append(paths, "units")
+		}
+	}
+	if kind, err := r.Kind(stream); err == nil && kind == kindreg.HillClimb {
+		if spec, _, err := climbSpecOf(r, stream); err == nil {
+			text, err := climbProgressText(r, stream, spec, time.Now())
+			if err != nil {
+				return nil, err
+			}
+			path := filepath.Join(workspace, "climb", "progress.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+				return nil, err
+			}
+			if !slices.Contains(paths, "climb") {
+				paths = append(paths, "climb")
+			}
 		}
 	}
 	return paths, nil

@@ -53,7 +53,9 @@ func EvaluatorUnit(s Spec) plan.Unit {
 }
 
 // EvaluatorPlan returns the one-unit plan the evaluator step runs.
-func EvaluatorPlan(s Spec) plan.Plan { return plan.Plan{Version: plan.Version, Units: []plan.Unit{EvaluatorUnit(s)}} }
+func EvaluatorPlan(s Spec) plan.Plan {
+	return plan.Plan{Version: plan.Version, Units: []plan.Unit{EvaluatorUnit(s)}}
+}
 
 const (
 	maxEvaluatorFiles    = 4000
@@ -156,4 +158,31 @@ func SealedEvaluatorPlan(r *trace.Repository, stream config.WorkstreamID, revisi
 		return plan.Plan{}, doc, err
 	}
 	return EvaluatorPlan(spec), doc, nil
+}
+
+// AttemptFootprint is the footprint of an attempt: the mason may change any
+// file of the project except the protected paths, which the service's gate
+// refuses before measurement.
+var AttemptFootprint = []string{"**"}
+
+// AttemptPlanUnit returns the unit an attempt's mason turn is built from. A
+// Hill Climb workstream has no sealed plan, so the unit is made from the
+// sealed climb spec each time it is read.
+func AttemptPlanUnit(s Spec, n int) plan.Unit {
+	var task strings.Builder
+	fmt.Fprintf(&task, "Make attempt %d of the climb: change the project so that the primary metric %q gets better, %s being better.\n\n", n, s.Metric.Name, s.Metric.Direction)
+	fmt.Fprintf(&task, "The climb's goal: %s\n\n", strings.TrimSpace(s.Goal))
+	task.WriteString("The attempt log, the steering notes and the reviewer's notes from a rejected attempt follow in the attempt brief. Propose one change worth measuring. The service measures it with the owner's approved evaluator, and Go decides whether it is kept; you never judge whether a score improved. Call done with your hypothesis, the change you made and the effect you expect.")
+	return plan.Unit{
+		ID: AttemptUnit(n), Title: fmt.Sprintf("Attempt %d", n),
+		Task: task.String(),
+		Acceptance: []string{
+			"The workspace holds one change that the hypothesis explains.",
+			"No protected path of the climb is changed.",
+			"The done report states the hypothesis, the change and the expected effect.",
+		},
+		Criteria: []string{}, DependsOn: []string{}, Footprint: slices.Clone(AttemptFootprint),
+		Constraints: []string{"Never change a protected path: the evaluator, its helpers, the oracle, the fixtures, dagger.toml and dagger.lock are frozen.", "Never game the metric: the reviewer rejects a change that improves the score without improving what the climb is for."},
+		Boundaries:  []string{"Measuring, deciding keep or discard, review and landing are the service's."},
+	}
 }

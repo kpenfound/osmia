@@ -54,7 +54,7 @@ func TestChiefSlotsCapAFakeHearsayNoticeReachingFourteenProjects(t *testing.T) {
 
 	intakefixture.Soon(t, "three chief turns running and eleven waiting", func() bool {
 		st := s.ChiefSlots()
-		return st.Used == 3 && len(st.Waiting) == 11
+		return st.Used == 3 && len(st.Waiting) == 11 && f.agent.runningCount() == 3
 	})
 	if running := f.agent.runningCount(); running != 3 {
 		t.Fatalf("%d chief turns running with the pool full", running)
@@ -355,7 +355,7 @@ func TestChiefSlotsRestartAdmitsFourteenInterruptedTurnsAgainstThePool(t *testin
 	}
 	intakefixture.Soon(t, "three recovery turns running and eleven waiting", func() bool {
 		st := s.ChiefSlots()
-		return st.Used == 3 && len(st.Waiting) == 11
+		return st.Used == 3 && len(st.Waiting) == 11 && f.agent.runningCount() == 3
 	})
 	if running := f.agent.runningCount(); running != 3 {
 		t.Fatalf("%d recovery turns re-dispatched at once", running)

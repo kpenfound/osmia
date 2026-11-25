@@ -931,6 +931,30 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		if id, ok := strings.CutSuffix(rest, "/conclude"); ok {
+			var v api.ClimbConcludeRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.concludeClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
+		if id, ok := strings.CutSuffix(rest, "/extend"); ok {
+			var v api.ClimbExtendRequest
+			if !decode(w, r, &v) {
+				return
+			}
+			if out, api := s.extendClimb(r.Context(), id, v); api != nil {
+				failWith(w, api)
+			} else {
+				respond(w, 200, out)
+			}
+			return
+		}
 	}
 	if id, ok := strings.CutPrefix(r.URL.Path, Prefix+"/recovery/"); ok && r.Method == http.MethodPost {
 		var v RecoveryRequest

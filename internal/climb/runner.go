@@ -85,6 +85,8 @@ type Request struct {
 	Expect Expectations
 	// Repeats is how many runs the measurement takes, at least 1.
 	Repeats int
+	// Progress, when set, is called before each run with the run's number.
+	Progress func(run int)
 }
 
 func (q Request) validate() error {
@@ -128,6 +130,9 @@ func (r Runner) Measure(ctx context.Context, req Request) (Measurement, error) {
 	}
 	var runs []Run
 	for number := 1; number <= req.Repeats; number++ {
+		if req.Progress != nil {
+			req.Progress(number)
+		}
 		run, err := r.once(ctx, req, number)
 		if err != nil {
 			return Measurement{}, err

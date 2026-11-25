@@ -692,7 +692,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 			return intakefixture.QuestionResult(req, "session-chief", "Nothing to do"), nil
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)
-		want := slices.Clone(service.ChiefOrdinaryTools)
+		want := service.ChiefOrdinaryToolsOf("feature")
 		slices.Sort(want)
 		if err != nil || !slices.Equal(names, want) {
 			problem("ordinary chief tools: %v %v, want %v", names, err, want)

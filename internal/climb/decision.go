@@ -24,6 +24,12 @@ const (
 	CauseNoCandidate Cause = "no-candidate"
 	// CauseRejected is a kept candidate that its reviewer rejected.
 	CauseRejected Cause = "review-rejected"
+	// CauseStale is an attempt whose parent is no longer the climb branch's
+	// tip, so its candidate could not land on the best.
+	CauseStale Cause = "stale-parent"
+	// CauseConcluded is an attempt still in flight when the climb was
+	// concluded.
+	CauseConcluded Cause = "concluded"
 )
 
 // Limit bounds a secondary metric. A nil bound is not checked, and a bound a

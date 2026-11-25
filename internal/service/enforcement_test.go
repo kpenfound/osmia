@@ -115,7 +115,7 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 			t.Errorf("project context effect %v, want read", tool.Effect)
 		}
 	}
-	want := slices.DeleteFunc(slices.Clone(ChiefOrdinaryTools), func(name string) bool { return name == "file_read" })
+	want := slices.DeleteFunc(ChiefOrdinaryToolsOf("feature"), func(name string) bool { return name == "file_read" })
 	slices.Sort(want)
 	registered := slices.Clone(names)
 	slices.Sort(registered)
@@ -135,7 +135,7 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		wrappedNames = append(wrappedNames, tool.Name)
 	}
 	slices.Sort(wrappedNames)
-	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool { return name == "file_read" })
+	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool { return name == "file_read" || name == climbSteerTool || name == climbConcludeTool })
 	slices.Sort(all)
 	if !slices.Equal(wrappedNames, all) {
 		t.Errorf("production chief registry %v, want %v", wrappedNames, all)

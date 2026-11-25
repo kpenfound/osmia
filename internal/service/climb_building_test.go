@@ -102,11 +102,41 @@ func (e *evaluatorEngine) recorded() []evaluatorCall {
 
 type climbFixture struct {
 	*shedFixture
-	engine  *evaluatorEngine
-	masons  *intakefixture.FakeMasons
-	skills  *turnSkills
-	jev     *gateJev
-	scans   *atomic.Int64
+	engine *evaluatorEngine
+	masons *intakefixture.FakeMasons
+	skills *turnSkills
+	jev    *gateJev
+	scans  *atomic.Int64
+	// prompts holds the prompt of each attempt turn and review turn by turn
+	// name, and rejects the finding a reviewer turn raises, by turn name
+	// prefix.
+	promptMu sync.Mutex
+	prompts  map[string]string
+	rejects  map[string]string
+}
+
+func (c *climbFixture) recordPrompt(req agent.Request) {
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+	c.prompts[req.Name] = req.Prompt
+}
+
+func (c *climbFixture) promptOf(name string) (string, bool) {
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+	p, ok := c.prompts[name]
+	return p, ok
+}
+
+func (c *climbFixture) reject(turn string) string {
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+	for prefix, note := range c.rejects {
+		if strings.HasPrefix(turn, prefix) {
+			return note
+		}
+	}
+	return ""
 }
 
 type turnSkills struct {
@@ -135,6 +165,11 @@ func (s *turnSkills) of(name string) ([]string, bool) {
 // the architect, the committee, the evaluator unit's mason and its reviewer.
 func newClimbFixture(t *testing.T, engine *evaluatorEngine, evaluatorPresent bool, jevProvider *gateJev) *climbFixture {
 	t.Helper()
+	return newClimbFixtureWith(t, engine, evaluatorPresent, jevProvider, climbBuildingSpec)
+}
+
+func newClimbFixtureWith(t *testing.T, engine *evaluatorEngine, evaluatorPresent bool, jevProvider *gateJev, spec string) *climbFixture {
+	t.Helper()
 	extra := intakefixture.MasonRoles + "[kinds.hill-climb]\nskills = [\"" + climbBuildingSkill + "\"]\n"
 	if jevProvider != nil {
 		extra += gateJevConfig(gateKey(t, true))
@@ -154,7 +189,7 @@ func newClimbFixture(t *testing.T, engine *evaluatorEngine, evaluatorPresent boo
 	f.engine.Mu.Lock()
 	f.engine.Skills = []string{t.TempDir()}
 	f.engine.Mu.Unlock()
-	f.script("draft-1-1", map[string]string{kindreg.ClimbSpecPath: climbBuildingSpec}, nil)
+	f.script("draft-1-1", map[string]string{kindreg.ClimbSpecPath: spec}, nil)
 	f.upstream(t)
 	module := climbNoEvaluator
 	if evaluatorPresent {
@@ -170,7 +205,7 @@ func newClimbFixture(t *testing.T, engine *evaluatorEngine, evaluatorPresent boo
 	fixturekit.DemoGit(t, home, "-C", f.clone, "-c", "user.name=Owner", "-c", "user.email=owner@example.invalid", "commit", "-qm", "add the dev module")
 	fixturekit.DemoGit(t, home, "-C", f.clone, "push", "-q", "upstream", "HEAD:refs/heads/main")
 
-	c := &climbFixture{shedFixture: f, engine: engine, jev: jevProvider, skills: &turnSkills{}}
+	c := &climbFixture{shedFixture: f, engine: engine, jev: jevProvider, skills: &turnSkills{}, prompts: map[string]string{}, rejects: map[string]string{}}
 	c.scans = scans
 	c.masons = intakefixture.ScriptMasons(f.engine, masonTurnID)
 	unit := climb.EvaluatorUnitID
@@ -185,6 +220,18 @@ func newClimbFixture(t *testing.T, engine *evaluatorEngine, evaluatorPresent boo
 	f.engine.Mu.Lock()
 	f.engine.Turns[masonTurnID(unit)] = c.masons.Turn
 	f.engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
+		if strings.HasPrefix(req.Name, "reviewer-climb-attempt-") {
+			c.recordPrompt(req)
+			verdict := map[string]any{"decision": "satisfactory", "summary": "The candidate is an honest improvement", "findings": []api.ReviewFinding{}}
+			if note := c.reject(req.Name); note != "" {
+				verdict = map[string]any{"decision": "material_findings", "summary": "The candidate games the metric", "findings": []api.ReviewFinding{{Severity: "high", Evidence: note, Action: "try an honest change"}}}
+			}
+			body, err := fixturekit.CallTool(ctx, tools, "verdict", verdict)
+			if err != nil || !strings.Contains(body, `"recorded":true`) {
+				return nil, fmt.Errorf("verdict %s: %v", body, err)
+			}
+			return &agent.Result{ClaudeID: "session-" + req.Name, ResultText: "Reviewed", SessionDir: req.SessionDir, NumTurns: 1}, nil
+		}
 		if strings.HasPrefix(req.Name, intake.ReviewerAgent(unit)+"-review-") {
 			c.skills.record("evaluator-reviewer", req)
 			body, err := fixturekit.CallTool(ctx, tools, "verdict", map[string]any{"decision": "satisfactory", "summary": "The evaluator does the task and its acceptance holds", "findings": []api.ReviewFinding{}})

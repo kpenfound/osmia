@@ -135,11 +135,6 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if allowed, err := f.driftAllowed(stream); err != nil {
-			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
-		} else if !allowed {
-			continue
-		}
 		if reason, err := (Drifter{f}).Building(stream); err != nil {
 			return nil, fmt.Errorf("workstream %s drift: %w", stream, err)
 		} else if reason != "" {
@@ -163,21 +158,6 @@ func (f *Foreman) RequestDrifts(ctx context.Context, due func(config.WorkstreamI
 		requested = append(requested, stream)
 	}
 	return requested, nil
-}
-
-// driftAllowed reports whether the workstream's kind takes upstream drift now:
-// a kind whose flags forbid it takes none while the workstream is building,
-// and a workstream of a kind this build does not register takes none.
-func (f *Foreman) driftAllowed(stream config.WorkstreamID) (bool, error) {
-	kind, _, ok, err := intake.WorkstreamKind(f.repository, stream)
-	if err != nil || !ok {
-		return false, err
-	}
-	if kind.Flags.UpstreamDrift {
-		return true, nil
-	}
-	feature, err := f.repository.Workflow(stream, trace.FeatureSubject)
-	return feature.Value != BuildingState, err
 }
 
 // DriftNumber returns the number of the drift rebase a value of the drift
@@ -662,7 +642,8 @@ func (d Drifter) Eligible(stream config.WorkstreamID) (string, error) {
 	return "", nil
 }
 
-// Building returns why the workstream cannot rebase its feature branch.
+// Building returns why the workstream cannot rebase its feature branch,
+// which includes a building workstream whose kind takes no upstream drift.
 func (d Drifter) Building(stream config.WorkstreamID) (string, error) {
 	feature, err := d.repository.Workflow(stream, trace.FeatureSubject)
 	if err != nil {
@@ -679,6 +660,25 @@ func (d Drifter) Building(stream config.WorkstreamID) (string, error) {
 	}
 	if feature.Value != BuildingState && feature.Value != AssembledState {
 		return fmt.Sprintf("the workstream is %s, not building, assembled or delivered with a pull request", featureState(feature.Value)), nil
+	}
+	if feature.Value == BuildingState {
+		return d.buildingDrift(stream)
+	}
+	return "", nil
+}
+
+// buildingDrift returns why the workstream's kind takes no upstream drift
+// while it is building: the kind's flags forbid it, or this build does not
+// register the kind.
+func (d Drifter) buildingDrift(stream config.WorkstreamID) (string, error) {
+	kind, stored, ok, err := intake.WorkstreamKind(d.repository, stream)
+	switch {
+	case err != nil:
+		return "", err
+	case !ok:
+		return fmt.Sprintf("the workstream's kind %q is not one this build runs", stored), nil
+	case !kind.Flags.UpstreamDrift:
+		return fmt.Sprintf("the %s kind takes no upstream drift while building", kind.Name), nil
 	}
 	return "", nil
 }

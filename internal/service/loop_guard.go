@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kpenfound/osmia/internal/climb"
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/runtime"
@@ -164,12 +165,19 @@ func lastProgress(repository *trace.Repository, stream config.WorkstreamID) (tim
 				mark(r.At, fmt.Sprintf("%s moving to %s", r.Subject, r.To))
 			case r.Subject == driftSubject && strings.HasPrefix(r.To, driftRebased+"-"):
 				mark(r.At, "a drift rebase")
+			case r.Subject == trace.ClimbSubject:
+				mark(r.At, "the climb moving to "+r.To)
+			case strings.HasPrefix(r.Subject, "climb-attempt-") && r.To == string(climb.PhaseRecorded):
+				mark(r.At, "a recorded climb attempt")
 			case r.Subject == loopGuardSubject && strings.HasPrefix(r.To, "released-"):
 				mark(r.At, "the owner resuming it")
 			}
 		case trace.Document:
 			if r.Actor.Kind == ownerActor.Kind {
 				mark(r.At, "an owner action")
+			}
+			if strings.HasPrefix(r.Path, trace.ClimbAttemptsDir+"/") {
+				mark(r.At, "a recorded climb attempt")
 			}
 		case trace.TurnRequest:
 			if r.Actor.Kind == ownerActor.Kind {

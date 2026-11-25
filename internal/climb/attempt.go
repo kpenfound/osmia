@@ -137,32 +137,43 @@ func (a Attempt) Validate() error {
 // attempt again is a no-op, which makes a retry after a restart safe, and
 // recording a different one under the same number is trace.ErrConflict.
 func RecordAttempt(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, a Attempt) error {
-	if err := a.Validate(); err != nil {
+	doc, recorded, err := AttemptDocument(r, stream, a)
+	if err != nil || recorded {
 		return err
+	}
+	return r.RecordDocuments(ctx, []trace.Document{doc})
+}
+
+// AttemptDocument returns the document that records the attempt, for a caller
+// that records it in the same commit as the move that ends the attempt. It
+// reports recorded when the same record is already there, and refuses a
+// different record under the same number with trace.ErrConflict.
+func AttemptDocument(r *trace.Repository, stream config.WorkstreamID, a Attempt) (doc trace.Document, recorded bool, err error) {
+	if err := a.Validate(); err != nil {
+		return trace.Document{}, false, err
 	}
 	data, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {
-		return err
+		return trace.Document{}, false, err
 	}
 	content := string(data) + "\n"
 	path := trace.ClimbAttemptPath(a.Number)
 	if existing, found, err := latestAttempt(r, stream, path); err != nil {
-		return err
+		return trace.Document{}, false, err
 	} else if found {
 		if existing.Content == content {
-			return nil
+			return existing, true, nil
 		}
-		return fmt.Errorf("%w: attempt %d is already recorded differently", trace.ErrConflict, a.Number)
+		return trace.Document{}, false, fmt.Errorf("%w: attempt %d is already recorded differently", trace.ErrConflict, a.Number)
 	}
 	at := a.FinishedAt
 	if at.IsZero() {
 		at = time.Now()
 	}
-	doc := trace.Document{
+	return trace.Document{
 		Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: trace.ClimbAttemptID(a.Number), Revision: 1, Project: r.Project(), Workstream: stream, At: at.UTC(), Actor: Actor, Cause: fmt.Sprintf("climb-attempt-%d", a.Number)},
 		Path:   path, Content: content,
-	}
-	return r.RecordDocuments(ctx, []trace.Document{doc})
+	}, false, nil
 }
 
 // ReadAttempt returns attempt n, and whether it is recorded.

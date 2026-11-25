@@ -33,3 +33,40 @@ type ClimbApprovalResponse struct {
 	Protected  []string            `json:"protected"`
 	At         time.Time           `json:"at"`
 }
+
+// ClimbConcludeRequest is the owner's decision to conclude a Hill Climb
+// workstream now, whatever its stop rules say.
+type ClimbConcludeRequest struct {
+	Note string `json:"note,omitempty" description:"Why the climb is concluded, which the chief of staff reads."`
+}
+
+// ClimbConcludeResponse reports a climb that moved to concluding: no attempt
+// starts again, an attempt in flight is discarded, and the branch goes on to its
+// rebase and delivery.
+type ClimbConcludeResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	State      string              `json:"state"`
+}
+
+// ClimbExtendRequest is the owner's extension of a climbing Hill Climb
+// workstream's budget, as a pinned owner move: more attempts, more cost, more
+// wall-clock time, or any of them. An extension is how a climb goes on past a
+// stop rule that is a hard budget.
+type ClimbExtendRequest struct {
+	Attempts  int     `json:"attempts,omitempty" description:"Further attempts the climb may make."`
+	CostUSD   float64 `json:"cost_usd,omitempty" description:"Further dollars the climb may spend."`
+	WallClock string  `json:"wall_clock,omitempty" description:"Further time the climb may run, as a duration such as 2h."`
+	Note      string  `json:"note,omitempty" description:"Why the budget is extended."`
+}
+
+// ClimbExtendResponse reports the extension that was recorded.
+type ClimbExtendResponse struct {
+	Project    config.ProjectID    `json:"project"`
+	Workstream config.WorkstreamID `json:"workstream"`
+	// Extension is the number of the extension among those granted.
+	Extension int     `json:"extension"`
+	Attempts  int     `json:"attempts,omitempty"`
+	CostUSD   float64 `json:"cost_usd,omitempty"`
+	WallClock string  `json:"wall_clock,omitempty"`
+}

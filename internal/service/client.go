@@ -537,6 +537,21 @@ func (c *Client) ApproveClimb(ctx context.Context, id config.WorkstreamID, req a
 	return v, err
 }
 
+// ConcludeClimb concludes a Hill Climb workstream now, as the owner's
+// conclude-now control does.
+func (c *Client) ConcludeClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbConcludeRequest) (api.ClimbConcludeResponse, error) {
+	var v api.ClimbConcludeResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/conclude", req, &v)
+	return v, err
+}
+
+// ExtendClimb extends a Hill Climb workstream's budget as a pinned owner move.
+func (c *Client) ExtendClimb(ctx context.Context, id config.WorkstreamID, req api.ClimbExtendRequest) (api.ClimbExtendResponse, error) {
+	var v api.ClimbExtendResponse
+	err := c.Do(ctx, "POST", api.Prefix+"/climb/"+url.PathEscape(string(id))+"/extend", req, &v)
+	return v, err
+}
+
 // Recovery approves the recovery move a recovery card pins.
 func (c *Client) Recovery(ctx context.Context, id config.WorkstreamID, req api.RecoveryRequest) (api.RecoveryResponse, error) {
 	var v api.RecoveryResponse

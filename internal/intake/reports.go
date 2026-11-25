@@ -30,6 +30,13 @@ func SealedUnit(repository *trace.Repository, scope coreadapter.Scope) (plan.Uni
 	if !found {
 		return plan.Unit{}, fmt.Errorf("workstream %s has no seal", stream)
 	}
+	if n, attempt := climb.AttemptNumber(scope.Unit); attempt {
+		spec, _, err := climb.SealedSpec(repository, stream, latest.Revision.Spec, climb.Defaults{})
+		if err != nil {
+			return plan.Unit{}, err
+		}
+		return climb.AttemptPlanUnit(spec, n), nil
+	}
 	p, err := sealedPlanOf(repository, stream, latest)
 	if err != nil {
 		return plan.Unit{}, err

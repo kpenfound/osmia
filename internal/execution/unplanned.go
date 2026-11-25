@@ -13,12 +13,16 @@ import (
 // plan for the unit machinery to read, so this is the adapter that lets the
 // ordinary mason, reviewer, checks and landing run it.
 func unplannedUnit(spec trace.Document, unit string) (plan.Unit, error) {
-	if unit != climb.EvaluatorUnitID {
-		return plan.Unit{}, fmt.Errorf("a Hill Climb workstream has no unit %q: its one unit is %s", unit, climb.EvaluatorUnitID)
+	n, attempt := climb.AttemptNumber(unit)
+	if unit != climb.EvaluatorUnitID && !attempt {
+		return plan.Unit{}, fmt.Errorf("a Hill Climb workstream has no unit %q: its units are %s and the attempts", unit, climb.EvaluatorUnitID)
 	}
 	s, err := climb.Parse([]byte(spec.Content), climb.Defaults{})
 	if err != nil {
 		return plan.Unit{}, fmt.Errorf("the sealed climb spec does not parse: %w", err)
+	}
+	if attempt {
+		return climb.AttemptPlanUnit(s, n), nil
 	}
 	return climb.EvaluatorUnit(s), nil
 }
