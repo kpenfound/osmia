@@ -2,6 +2,8 @@ package clientturns
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -340,5 +342,186 @@ func TestAHeldTurnIsReleasedWhenItsClientDoesNotReattachInTime(t *testing.T) {
 	}
 	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewSuperseded {
 		t.Fatalf("a result for a released turn: %q %v", answer, err)
+	}
+}
+
+func startRestarted(t *testing.T, accept bool) (*rig, *fakeClient, api.TurnOffer, *fakeClient, api.ClientConnectResponse) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	r := newRig(t, "mason")
+	c := r.client("node-a")
+	c.connect(api.ClientConnectRequest{})
+	c.serve()
+	r.place(c.node)
+	r.queue("t1")
+	r.run(ctx, "t1")
+	offer := c.nextOffer()
+	c.claim(offer, map[string]string{"src/main.go": "x"})
+	put(t, c.view, "src/main.go", "the view as the session left it")
+	if accept {
+		if answer, refusal := c.upload("t1", offer.ToolToken); refusal != nil || answer != api.ViewAccepted {
+			t.Fatalf("view before the restart: %q %v", answer, refusal)
+		}
+	}
+
+	must(t, r.repo.Close())
+	reopened, err := trace.Open(r.root, r.project)
+	must(t, err)
+	t.Cleanup(func() { reopened.Close() })
+	r.start("mason", reopened)
+	must(t, r.d.HoldFromTrace(project, reopened))
+
+	back := r.client("node-a")
+	back.view = c.view
+	resp := back.connect(api.ClientConnectRequest{Running: []string{"t1"}})
+	if len(resp.Turns) != 1 || resp.Turns[0].Answer != api.TurnReattached {
+		t.Fatalf("reattach: %+v", resp.Turns)
+	}
+	return r, c, offer, back, resp
+}
+
+func heartbeatPast(t *testing.T, r *rig, c *fakeClient, total time.Duration) {
+	t.Helper()
+	for elapsed := time.Duration(0); elapsed < total; elapsed += 30 * time.Second {
+		r.clock.advance(30 * time.Second)
+		if _, err := r.fleet.Heartbeat(c.lease, c.node, api.HeartbeatRequest{}); err != nil {
+			t.Fatalf("heartbeat: %v", err)
+		}
+		if expired := r.d.Sweep(); len(expired) != 0 {
+			t.Fatalf("a reattached turn whose client holds its lease expired: %+v", expired)
+		}
+	}
+}
+
+func TestAReattachedTurnOutlivesTheStartupHoldWhileItsClientHoldsItsLease(t *testing.T) {
+	t.Parallel()
+	r, _, _, back, resp := startRestarted(t, false)
+	heartbeatPast(t, r, back, 5*time.Minute)
+	if !r.d.Held("t1") {
+		t.Fatal("the reattached turn is not held while its client's lease is live")
+	}
+	if th := thread1(t, r); th.Status == "interrupted" || th.Active != "t1" {
+		t.Fatalf("the reattached turn is reported interrupted: %+v", th)
+	}
+	token := resp.Turns[0].Token
+	if answer, refusal := back.upload("t1", token); refusal != nil || answer != api.ViewAccepted {
+		t.Fatalf("view: %q %v", answer, refusal)
+	}
+	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewAccepted {
+		t.Fatalf("result: %q %v", answer, err)
+	}
+	th := thread1(t, r)
+	if len(th.Turns) != 1 || th.Turns[0].Response == nil || th.Turns[0].Response.Result.Cancelled || th.Turns[0].Response.Result.Outcome == nil ||
+		th.Turns[0].Status() != "idle" || len(th.Turns[0].Attempts) != 1 {
+		t.Fatalf("the turn was not recorded once, uninterrupted: %+v", th.Turns)
+	}
+	if captures := r.captures(); len(captures) != 1 || captures[0].files["src/main.go"] != "the view as the session left it" {
+		t.Fatalf("captures: %+v", captures)
+	}
+	if expired := r.d.Sweep(); len(expired) != 0 {
+		t.Fatalf("recovery started for a finished turn: %+v", expired)
+	}
+	if len(eventsOf(t, r, "t1", trace.ClientLate)) != 0 {
+		t.Fatal("a return of an uninterrupted turn was recorded as late")
+	}
+}
+
+func TestAReattachedTurnWhoseLeaseEndsWaitsForTheViewThenIsRecoveredAsInterrupted(t *testing.T) {
+	t.Parallel()
+	r, _, _, back, resp := startRestarted(t, false)
+	token := resp.Turns[0].Token
+	heartbeatPast(t, r, back, 3*time.Minute)
+	r.clock.advance(3 * time.Minute)
+	r.fleet.Expire()
+	if expired := r.d.Sweep(); len(expired) != 0 || !r.d.Held("t1") {
+		t.Fatalf("the turn was recovered without the bounded wait for the returned view: %+v", expired)
+	}
+	r.clock.advance(time.Second)
+	expired := r.d.Sweep()
+	if len(expired) != 1 || expired[0].Turn != "t1" || expired[0].Agent != "agent" || r.d.Held("t1") {
+		t.Fatalf("expired after the bounded wait: %+v", expired)
+	}
+	if th := thread1(t, r); th.Status != "interrupted" {
+		t.Fatalf("the turn is not interrupted: %+v", th)
+	}
+	back.connect(api.ClientConnectRequest{Running: []string{"t1"}})
+	if answer, refusal := back.upload("t1", token); refusal != nil || answer != api.ViewSuperseded {
+		t.Fatalf("the view after recovery began: %q %v", answer, refusal)
+	}
+	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewSuperseded {
+		t.Fatalf("the result after recovery began: %q %v", answer, err)
+	}
+	if len(r.captures()) != 0 {
+		t.Fatal("a late view was captured")
+	}
+	if th := thread1(t, r); len(th.Turns) != 1 || th.Turns[0].Response != nil && th.Turns[0].Response.Result.Outcome != nil {
+		t.Fatalf("a late return was recorded: %+v", th.Turns)
+	}
+	if entries, _ := trace.Read[trace.Transition](r.repo, stream); len(entries) != 0 {
+		t.Fatalf("losing a client raised a gate: %+v", entries)
+	}
+}
+
+func TestAReattachedTurnWhoseLeaseEndsIsRecoveredFromTheViewItReturnsInTheBoundedWait(t *testing.T) {
+	t.Parallel()
+	r, _, _, back, resp := startRestarted(t, false)
+	token := resp.Turns[0].Token
+	r.clock.advance(3 * time.Minute)
+	r.fleet.Expire()
+	if r.d.Sweep(); !r.d.Held("t1") {
+		t.Fatal("the turn was recovered before the client could return its view")
+	}
+	if answer, refusal := back.upload("t1", token); refusal != nil || answer != api.ViewAccepted {
+		t.Fatalf("the view inside the bounded wait: %q %v", answer, refusal)
+	}
+	expired := r.d.Sweep()
+	if len(expired) != 1 || expired[0].Turn != "t1" {
+		t.Fatalf("expired: %+v", expired)
+	}
+	ready, err := os.ReadFile(filepath.Join(r.root.String(), "views", string(project), string(stream), "thread", "t1", "ready"))
+	if err != nil {
+		t.Fatalf("the returned view is not kept for recovery: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(r.root.String(), "views", string(project), string(stream), "thread", "t1", string(ready), "src", "main.go"))
+	if err != nil || string(data) != "the view as the session left it" {
+		t.Fatalf("the kept view: %q %v", data, err)
+	}
+	if len(r.captures()) != 0 {
+		t.Fatal("the view was captured by the dispatcher instead of the recovery")
+	}
+}
+
+func TestAViewAcceptedBeforeARestartIsKeptSoTheResultAloneCompletesTheTurn(t *testing.T) {
+	t.Parallel()
+	r, _, _, back, resp := startRestarted(t, true)
+	if !r.d.Held("t1") {
+		t.Fatal("the turn is not held after the restart")
+	}
+	if len(r.captures()) != 0 {
+		t.Fatal("the view was captured before the result arrived")
+	}
+	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewAccepted {
+		t.Fatalf("result: %q %v", answer, err)
+	}
+	th := thread1(t, r)
+	if len(th.Turns) != 1 || th.Turns[0].Response == nil || th.Turns[0].Response.Result.Cancelled || th.Turns[0].Response.Result.Outcome == nil ||
+		th.Turns[0].Status() != "idle" || len(th.Turns[0].Attempts) != 1 || th.Active != "" {
+		t.Fatalf("the turn was not recorded once, uninterrupted: %+v", th)
+	}
+	if captures := r.captures(); len(captures) != 1 || captures[0].files["src/main.go"] != "the view as the session left it" {
+		t.Fatalf("captures: %+v", captures)
+	}
+	if answer, refusal := back.upload("t1", resp.Turns[0].Token); refusal != nil || answer != api.ViewAlreadyRecorded {
+		t.Fatalf("the view again: %q %v", answer, refusal)
+	}
+	if answer, err := back.result("t1", complete("done")); err != nil || answer != api.ViewAlreadyRecorded {
+		t.Fatalf("the result again: %q %v", answer, err)
+	}
+	if expired := r.d.Sweep(); len(expired) != 0 {
+		t.Fatalf("recovery started: %+v", expired)
+	}
+	if len(r.captures()) != 1 || len(thread1(t, r).Turns) != 1 || len(eventsOf(t, r, "t1", trace.ClientLate)) != 0 {
+		t.Fatal("a second copy recorded something")
 	}
 }

@@ -217,3 +217,31 @@ func TestAReservedSlotThatNeverStartsIsGivenBackAfterAWhile(t *testing.T) {
 		t.Fatalf("the slot of a turn that never started was not given back: %+v", got)
 	}
 }
+
+func TestAResumedTurnStaysPinnedToItsConnectedClientWhateverItsCapabilityReportSays(t *testing.T) {
+	t.Parallel()
+	p, r, _ := placementRig(t)
+	a, b := node("a"), node("b")
+	la := connect(t, r, a, 1)
+	report(t, r, la.Lease, a, runs("default"))
+	report(t, r, connect(t, r, b, 1).Lease, b, runs("default"))
+	turn := Turn{ID: "t1", Profile: "default", SessionClient: "a"}
+
+	report(t, r, la.Lease, a, api.ProfileCapability{Profile: "default", Problems: []api.ProfileProblem{{Check: "claude"}}})
+	if client, ok := p.Pinned(turn); !ok || client != "a" {
+		t.Fatalf("pinned to %q %v after its client stopped being able to run the profile", client, ok)
+	}
+	if c := p.Choose(turn); c.Client != "" || c.Pinned != "a" || c.Reason != WaitClient {
+		t.Fatalf("the turn did not wait on its client: %+v", c)
+	}
+	report(t, r, la.Lease, a, runs("default"))
+	if c := p.Choose(turn); c.Client != "a" || c.Pinned != "a" {
+		t.Fatalf("the turn did not start on its client once it could run the profile: %+v", c)
+	}
+	if err := r.Drain(la.Lease, a); err != nil {
+		t.Fatal(err)
+	}
+	if client, ok := p.Pinned(turn); ok {
+		t.Fatalf("a draining client still holds the pin: %q", client)
+	}
+}

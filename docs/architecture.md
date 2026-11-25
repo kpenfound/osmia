@@ -150,7 +150,11 @@ messages, so the service never needs its address. Its lease is kept by
 heartbeats that carry each running turn's progress into the activity registry.
 The service records each remote turn's client in a small file under the root's
 transfers directory, which is how it holds a turn for a client to reattach after
-a restart and hosts its tools again from the recorded grants. When a lease ends
+a restart and hosts its tools again from the recorded grants. That hold ends at
+a fixed deadline only for a turn whose client has not reattached; a reattached
+turn lives as long as its client's lease. A view the service accepted stays in
+the views directory, and a held turn rebuilt after a restart takes it back, so
+a result sent afterwards completes the turn. When a lease ends
 the service waits a bounded time for the client's view, then runs the existing
 recovery of an interrupted turn. A return for a turn whose recovery has begun is
 answered superseded and recorded, and a return sent twice is answered already

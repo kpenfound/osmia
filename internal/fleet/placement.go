@@ -269,15 +269,13 @@ func (p *Placement) pinned(t Turn, clients []Client) (string, bool) {
 	if c.Draining {
 		return "", false
 	}
-	if c.Capabilities != nil && !c.CanRun(t.Profile) && t.Profile != "" {
-		return "", false
-	}
 	return t.SessionClient, true
 }
 
 // Pinned returns the client a turn is pinned to: the one that holds the
 // session it resumes, while that client is connected and not draining, the
-// lease's grace window included. A resumed turn whose session client is gone,
+// lease's grace window included, whatever its capability report says; the turn
+// waits there for a runnable profile and a free slot. A resumed turn whose session client is gone,
 // draining, or the local client set to no slots is not pinned and is placed
 // round robin.
 func (p *Placement) Pinned(t Turn) (string, bool) {

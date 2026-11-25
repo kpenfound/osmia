@@ -257,6 +257,8 @@ type turnState struct {
 	resultTaken bool
 	finished    bool
 	adopted     bool
+	reattached  bool
+	leaseLost   bool
 	deadline    time.Time
 	endedAt     time.Time
 	release     []func()
@@ -513,9 +515,17 @@ func (st *turnState) name() string {
 
 func (d *Dispatcher) leaseEnded(_ fleet.Client, turns []string) {
 	for _, turn := range turns {
-		if st := d.liveState(turn); st != nil {
-			st.lostOnce.Do(func() { close(st.lost) })
+		st := d.liveState(turn)
+		if st == nil {
+			continue
 		}
+		st.mu.Lock()
+		if st.adopted && !st.finished && !st.leaseLost {
+			st.leaseLost = true
+			st.deadline = d.Now().Add(d.LateWait)
+		}
+		st.mu.Unlock()
+		st.lostOnce.Do(func() { close(st.lost) })
 	}
 }
 
@@ -593,13 +603,28 @@ func (d *Dispatcher) Held(turn string) bool {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.adopted && !st.finished && d.Now().Before(st.deadline)
+	return st.adopted && !st.finished && !d.expiredLocked(st)
+}
+
+// expiredLocked reports whether a held turn's wait is over. Before its client
+// reattaches, the turn waits until the startup hold deadline. Once reattached,
+// it lives as long as its client's lease; when that lease ends, it waits a
+// bounded time for the returned view, as any turn whose lease ended does.
+func (d *Dispatcher) expiredLocked(st *turnState) bool {
+	if st.leaseLost && (!st.rec.ReturnView || st.viewTaken) {
+		return true
+	}
+	if st.reattached && !st.leaseLost {
+		return false
+	}
+	return !d.Now().Before(st.deadline)
 }
 
 // HoldFromTrace holds the turns that a previous service session started on a
 // remote client and never captured a result for, so the clients that run them
-// can reattach within the hold window. It must run before the service
-// recovers its interrupted turns.
+// can reattach within the hold window. A turn whose view the previous session
+// accepted keeps that view. It must run before the service recovers its
+// interrupted turns.
 func (d *Dispatcher) HoldFromTrace(project config.ProjectID, repo *trace.Repository) error {
 	streams, err := repo.Workstreams()
 	if err != nil {
@@ -622,6 +647,7 @@ func (d *Dispatcher) HoldFromTrace(project config.ProjectID, repo *trace.Reposit
 				rec.Agent = th.Identity.ID
 				st := newState(d, rec)
 				st.adopted, st.deadline = true, d.Now().Add(d.Hold)
+				d.restoreView(st)
 				st.startedAt = q.Claim.At
 				d.mu.Lock()
 				d.states[rec.Turn] = st
@@ -630,6 +656,26 @@ func (d *Dispatcher) HoldFromTrace(project config.ProjectID, repo *trace.Reposit
 		}
 	}
 	return nil
+}
+
+// restoreView gives a rebuilt turn the view its previous session accepted: the
+// archive stored under the turn's views directory, which the service stores
+// before it answers a view as accepted.
+func (d *Dispatcher) restoreView(st *turnState) {
+	if !st.rec.ReturnView {
+		return
+	}
+	parent := filepath.Join(d.Views, st.rec.Project, st.rec.Workstream, st.rec.Thread, st.rec.Turn)
+	ready, err := os.ReadFile(filepath.Join(parent, "ready"))
+	if err != nil || !strings.HasPrefix(string(ready), "turn-") || string(ready) != filepath.Base(string(ready)) {
+		return
+	}
+	dir := filepath.Join(parent, string(ready))
+	if info, err := os.Lstat(dir); err != nil || !info.IsDir() {
+		return
+	}
+	st.viewDir, st.viewTaken = dir, true
+	close(st.viewReady)
 }
 
 // Expired is a held turn whose client did not reattach it in time.
@@ -658,7 +704,7 @@ func (d *Dispatcher) Sweep() []Expired {
 			delete(d.states, st.rec.Turn)
 			d.mu.Unlock()
 		}
-		expired := st.adopted && !st.finished && !d.Now().Before(st.deadline)
+		expired := st.adopted && !st.finished && d.expiredLocked(st)
 		if expired {
 			st.finished = true
 		}
@@ -679,7 +725,7 @@ func (d *Dispatcher) reattach(ctx context.Context, ident fleet.Identity, turn st
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if !st.adopted || st.finished || !d.Now().Before(st.deadline) || st.rec.Node != ident.ID {
+	if !st.adopted || st.finished || st.leaseLost || st.rec.Node != ident.ID || !st.reattached && !d.Now().Before(st.deadline) {
 		return "", false
 	}
 	token := randomToken()
@@ -697,6 +743,7 @@ func (d *Dispatcher) reattach(ctx context.Context, ident fleet.Identity, turn st
 		}
 		st.release = append(st.release, release, func() { _ = lease.Release(context.Background()) })
 	}
+	st.reattached, st.deadline = true, time.Time{}
 	st.rec.TokenSum = filetransport.TokenSum(token)
 	_ = d.saveRecord(st.rec)
 	if st.rec.ReturnView {

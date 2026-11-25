@@ -453,6 +453,61 @@ func TestAPinnedTurnGoesRoundRobinWhenItsClientsLeaseHasEnded(t *testing.T) {
 	}
 }
 
+func TestAPinnedTurnWaitsOnItsClientWhileItCannotRunTheProfileAndStartsThereOnceItCan(t *testing.T) {
+	t.Parallel()
+	r, a, b := resumedRig(t)
+	r.report("a", map[string]bool{"default": false})
+	second := r.queue(stream, "resumed", "two")
+	r.pass()
+	r.pass()
+	if got := r.where(second); got != "" {
+		t.Fatalf("the resumed turn started on %q while its client could not run the profile", got)
+	}
+	if r.used(b.ID) != 0 || r.isDispatched("resumed", second) {
+		t.Fatalf("the resumed turn left its client: %v", r.dispatched())
+	}
+	waits := r.pool.Slots([]config.ProjectID{project}).Waiting
+	if len(waits) != 1 || waits[0].Reason != WaitClient || waits[0].Client != a.ID {
+		t.Fatalf("waiting %+v", waits)
+	}
+	r.report("a", map[string]bool{"default": true})
+	r.pass()
+	if got := r.where(second); got != a.ID {
+		t.Fatalf("the turn went to %q once its client could run the profile, want %q", got, a.ID)
+	}
+}
+
+func TestAPinnedTurnWaitsOnItsClientForACapabilityAndAFreeSlot(t *testing.T) {
+	t.Parallel()
+	r, a, _ := resumedRig(t)
+	r.agent(stream, "busy1", "mason")
+	r.agent(stream, "busy2", "mason")
+	r.queue(stream, "busy1", "one")
+	r.queue(stream, "busy2", "one")
+	r.pass()
+	busyAgent := "busy1"
+	if r.where("busy2-one") == a.ID {
+		busyAgent = "busy2"
+	}
+	busy := busyAgent + "-one"
+	if got := r.where(busy); got != a.ID {
+		t.Fatalf("no filler turn is on %q: %q %q", a.ID, r.where("busy1-one"), r.where("busy2-one"))
+	}
+	r.report("a", map[string]bool{"default": false})
+	second := r.queue(stream, "resumed", "two")
+	r.pass()
+	r.report("a", map[string]bool{"default": true})
+	r.pass()
+	if got := r.where(second); got != "" {
+		t.Fatalf("the turn started on %q although its client's only slot was taken", got)
+	}
+	r.finish(stream, busyAgent, busy, a.ID)
+	r.pass()
+	if got := r.where(second); got != a.ID {
+		t.Fatalf("the turn went to %q once its client had a slot, want %q", got, a.ID)
+	}
+}
+
 func TestAPinnedTurnStillGoesToItsClientWhileTheLeaseIsLateWithinTheGraceWindow(t *testing.T) {
 	t.Parallel()
 	r, a, _ := resumedRig(t)
