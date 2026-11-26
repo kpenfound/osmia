@@ -72,18 +72,26 @@ func endingWithoutReport(q trace.QueuedTurn) (string, bool) {
 }
 
 func continuationPrompt(last trace.QueuedTurn, uncollected error) string {
+	return continuation(last, uncollected, "unit", "check the unit's acceptance, and call done again.", "Continue the unit from there, check its acceptance, and call done with the report when it holds; call ask if you need a decision.")
+}
+
+func attemptContinuationPrompt(last trace.QueuedTurn) string {
+	return continuation(last, nil, "attempt", "and call done again with your hypothesis, the change and the expected effect.", "Continue the attempt from there and call done with your hypothesis, the change you made and the effect you expect when the change is ready.")
+}
+
+func continuation(last trace.QueuedTurn, uncollected error, noun, again, carryOn string) string {
 	r := last.Response
 	switch {
 	case uncollected != nil:
-		return fmt.Sprintf("You reported this unit done and the service accepted the report, but your last turn then ended because %s, and the service could not take your workspace as the unit's candidate: %v. Your workspace includes the files left by that turn. Check that it is whole, check the unit's acceptance, and call done again.", endedBy(last), uncollected)
+		return fmt.Sprintf("You reported this %s done and the service accepted the report, but your last turn then ended because %s, and the service could not take your workspace as the %s's candidate: %v. Your workspace includes the files left by that turn. Check that it is whole, %s", noun, endedBy(last), noun, uncollected, again)
 	case r.Result.Refusal != "" && last.Status() == "idle":
-		return fmt.Sprintf("The service refused the report you made with done: %s. Correct that, check the unit's acceptance in your workspace, and call done again.", r.Result.Refusal)
+		return fmt.Sprintf("The service refused the report you made with done: %s. Correct that, %s", r.Result.Refusal, again)
 	}
 	prompt := "Your last turn ended without a report the service could take because " + endedBy(last) + "."
 	if r.Result.Refusal != "" {
 		prompt += " The service had refused the report you made with done: " + r.Result.Refusal + "."
 	}
-	return prompt + " Your workspace includes the files left by that turn. Continue the unit from there, check its acceptance, and call done with the required report when it holds; call ask if you need a decision."
+	return prompt + " Your workspace includes the files left by that turn. " + carryOn
 }
 
 func countsAsAttempt(th trace.Thread, unit string, q trace.QueuedTurn) bool {

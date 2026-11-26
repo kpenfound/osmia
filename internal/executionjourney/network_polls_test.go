@@ -92,7 +92,7 @@ func TestNetworkPollingKeepsPassesAndConversationsRunning(t *testing.T) {
 			for _, want := range []struct {
 				stream      config.WorkstreamID
 				agent, turn string
-			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.SessionAgentID, messaged.Turn}} {
+			}{{chiefStream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, messaged.Turn}} {
 				fixturekit.ConversationAwait(t, func() bool {
 					th, err := repo.Thread(want.stream, want.agent)
 					if err != nil {

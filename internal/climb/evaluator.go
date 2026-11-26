@@ -31,13 +31,21 @@ func EvaluatorUnit(s Spec) plan.Unit {
 	var task strings.Builder
 	fmt.Fprintf(&task, "Write the evaluator function %q in the project's dev module, the module dagger.toml marks `main = true`, and any fixtures it reads. The service calls the function to measure every attempt of this climb, and the owner approves it before any attempt starts.\n\n", s.Evaluator)
 	fmt.Fprintf(&task, "The climb's goal: %s\n\n", strings.TrimSpace(s.Goal))
-	fmt.Fprintf(&task, "The function is not a @check. It takes one caller argument, `run: String!`, and may also declare `ws: Workspace!`, which the engine fills in. It threads `run` into the operations it measures, so the engine's cache cannot replay an earlier result. It returns one JSON string and nothing else: {\"schema\": 1, \"valid\": <bool>, \"reason\": <string>, \"metrics\": {<name>: {\"value\": <number>, \"unit\": <string>, \"direction\": \"higher\" | \"lower\"}}}. A result that is incorrect but scores well is `valid: false` with a reason, never a score.\n\n")
-	fmt.Fprintf(&task, "It reports the primary metric %q with direction %q", s.Metric.Name, s.Metric.Direction)
+	task.WriteString("## The evaluator contract, schema 1\n")
+	task.WriteString("- Kind: the evaluator is a function of the dev module. It is not a @check and not an arbitrary shell command, because the service calls it by name and reads its return value.\n")
+	task.WriteString("- Arguments: one required caller argument, `run: String!`, and optionally `ws: Workspace!`, which the engine fills in. It takes no other required argument. Thread `run` into the operations it measures, so the engine's cache cannot replay an earlier result for a later run.\n")
+	task.WriteString("- Return value: one JSON string and nothing else: {\"schema\": 1, \"valid\": <bool>, \"reason\": <string>, \"metrics\": {<name>: {\"value\": <number>, \"unit\": <string>, \"direction\": \"higher\" | \"lower\"}}}. The service rejects any other shape and records the run as failed.\n")
+	fmt.Fprintf(&task, "- Metrics: it reports the primary metric %q with direction %q", s.Metric.Name, s.Metric.Direction)
 	for _, l := range s.Guardrails.Limits {
 		fmt.Fprintf(&task, ", the secondary metric %q with direction %q", l.Metric, l.Direction)
 	}
-	fmt.Fprintf(&task, ", and the same unit for each metric on every run. A run is the unit of measurement: repeated runs on unchanged code should agree to well within the minimum improvement of %v.\n\n", s.Metric.MinImprovement)
-	task.WriteString("The measurement machinery belongs inside the protected paths, which freeze when the owner approves the evaluator: the evaluator, its scoring and timing helpers, the correctness oracle, the fixtures and the workload. Keep the implementation being climbed outside them. Follow the hill-climb-evaluator skill when it is loaded.")
+	fmt.Fprintf(&task, ", and the same unit for each metric on every run, because the service compares runs and refuses a changed unit.\n")
+	task.WriteString("- Invalid runs: a result that is incorrect but scores well is `valid: false` with a reason, never a score. `valid: false` means the run is invalid, not that it scored badly.\n")
+	task.WriteString("- What the service does with a run that is invalid or fails: calibration runs the evaluator several times on the evaluator commit to set the baseline and the run-to-run spread, and one failed or invalid run there makes the metric broken, so there is no baseline and the climb is held. During the climb, a measurement in which any run failed or was invalid is invalid, and the attempt is discarded whatever the other runs scored.\n")
+	fmt.Fprintf(&task, "- Noise: repeated runs on unchanged code should agree to well within the minimum improvement of %v. A spread at or above it makes the metric too noisy to climb on, and the climb is held.\n", s.Metric.MinImprovement)
+	task.WriteString("- Who decides: the service measures and Go alone decides whether an attempt is kept, by arithmetic over the values the evaluator returns, so the evaluator reports measurements and never a verdict.\n\n")
+	task.WriteString("## Protected paths\n")
+	task.WriteString("The measurement machinery belongs inside the protected paths, which freeze when the owner approves the evaluator: dagger.toml, dagger.lock, the dev module's source, the fixtures the climb spec declares and any paths it adds. Put the evaluator, its scoring and timing helpers, the correctness oracle, the fixtures and the workload inside them, and keep the implementation being climbed outside them, because an attempt that changes a protected path is discarded and the climb could otherwise move its own measurement.")
 	acceptance := []string{
 		fmt.Sprintf("The dev module has a function named %q that takes `run: String!` and no other required argument.", s.Evaluator),
 		fmt.Sprintf("Calling it returns one JSON string with schema 1, valid, reason and metrics, reporting %q with direction %q.", s.Metric.Name, s.Metric.Direction),
@@ -172,7 +180,7 @@ func AttemptPlanUnit(s Spec, n int) plan.Unit {
 	var task strings.Builder
 	fmt.Fprintf(&task, "Make attempt %d of the climb: change the project so that the primary metric %q gets better, %s being better.\n\n", n, s.Metric.Name, s.Metric.Direction)
 	fmt.Fprintf(&task, "The climb's goal: %s\n\n", strings.TrimSpace(s.Goal))
-	task.WriteString("The attempt log, the steering notes and the reviewer's notes from a rejected attempt follow in the attempt brief. Propose one change worth measuring. The service measures it with the owner's approved evaluator, and Go decides whether it is kept; you never judge whether a score improved. Call done with your hypothesis, the change you made and the effect you expect.")
+	task.WriteString("The attempt brief that follows holds the attempt log, the steering notes and the reviewer's notes on a rejected attempt. Propose one change worth measuring, and state it as a hypothesis. The service measures the change with the owner's approved evaluator, and Go alone decides whether it is kept, by arithmetic over that measurement, so you never judge whether a score improved. Call done with your hypothesis, the change you made and the effect you expect.")
 	return plan.Unit{
 		ID: AttemptUnit(n), Title: fmt.Sprintf("Attempt %d", n),
 		Task: task.String(),
@@ -182,7 +190,7 @@ func AttemptPlanUnit(s Spec, n int) plan.Unit {
 			"The done report states the hypothesis, the change and the expected effect.",
 		},
 		Criteria: []string{}, DependsOn: []string{}, Footprint: slices.Clone(AttemptFootprint),
-		Constraints: []string{"Never change a protected path: the evaluator, its helpers, the oracle, the fixtures, dagger.toml and dagger.lock are frozen.", "Never game the metric: the reviewer rejects a change that improves the score without improving what the climb is for."},
+		Constraints: []string{"Do not change a protected path: the evaluator, its helpers, the oracle, the fixtures, dagger.toml and dagger.lock are frozen, and the service discards an attempt that changes one before it measures.", "Do not game the metric: the reviewer rejects a change that improves the score without improving what the climb is for."},
 		Boundaries:  []string{"Measuring, deciding keep or discard, review and landing are the service's."},
 	}
 }

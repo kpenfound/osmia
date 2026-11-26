@@ -707,13 +707,12 @@ func TestUnitReviewSystemPromptCarriesTheProtocol(t *testing.T) {
 	requireContains(t, "system prompt", req.SystemPrompt, []string{
 		"You are the unit reviewer",
 		"Review the exact candidate identity your prompt gives",
-		"the project's checks on this exact candidate", "cite it as evidence rather than re-deriving",
+		"the project's checks on this exact candidate", "as evidence rather than re-deriving",
 		"Test passing is decided by the service-owned check gate",
-		"rebased onto a feature branch that moved", "in scope",
-		"read-only view", "workstream_diff",
+		"read-only", "workstream_diff",
 		"factory_context", "record_discovery",
-		"Call ask when a decision is needed", "end the turn",
-		"Otherwise call verdict",
+		"ask puts a question to the chief of staff when a decision is needed", "review resumes when the answer arrives",
+		"verdict records your decision",
 	})
 }
 
@@ -730,7 +729,7 @@ func TestUnitReviewSystemPromptStatesWhenAFindingIsMaterial(t *testing.T) {
 		"when the task or an acceptance item does not hold",
 		"when the change reaches beyond what the task needs",
 		"when it breaks a written rule",
-		"the project's charter, its AGENTS.md or contributor documents, and the skills configured on your role",
+		"the project's charter, its AGENTS.md and contributor documents, and any instructions loaded for your role",
 		"never blocks", "decide satisfactory and note the call in the summary",
 		"Formatting and lint belong to the checks",
 		"report the breach as a failing part of the task, naming the rule and where it is written",
@@ -741,20 +740,36 @@ func TestUnitReviewPromptTreatsAWrittenRuleBreachAsAFailingTask(t *testing.T) {
 	t.Parallel()
 	req := unitReviewRequest(t, "review-rules")
 	requireContains(t, "review prompt", req.Prompt, []string{
-		"a candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or a skill configured on your role) does not do its task",
-		"naming the rule and where it is written",
+		"A candidate that breaks a written rule (the charter, AGENTS.md or contributor documents, or instructions loaded for your role) does not do its task",
+		"names the rule and where it is written",
 		"Code-smell calls that break no written rule do not block; note them in a satisfactory verdict's summary",
 	})
 }
 
-func TestUnitReviewSystemPromptHandsOffToConfiguredSkills(t *testing.T) {
+func TestUnitReviewSystemPromptKeepsItsProtocolOverLoadedInstructions(t *testing.T) {
 	t.Parallel()
-	req := unitReviewRequest(t, "review-skills")
+	req := unitReviewRequest(t, "review-precedence")
 	requireContains(t, "system prompt", req.SystemPrompt, []string{
-		"skills configured on your role", "pr-review", "file_read", "the path the skill list gives",
-		"When no skills are listed",
-		"Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask",
-		"you still call ask when you need a decision, and you report only through verdict",
+		"Instructions loaded for your role add to this prompt",
+		"this prompt wins", "the service reads only the verdict format",
+		"you cannot wait for a person inside a turn",
+	})
+	lower := strings.ToLower(req.SystemPrompt + req.Prompt)
+	for _, name := range []string{"skill", "pr-review", "simple-code", "no-deltas", "behavioral-testing", "hill-climb-evaluator"} {
+		if strings.Contains(lower, name) {
+			t.Errorf("the review turn names %q", name)
+		}
+	}
+}
+
+func TestUnitReviewSystemPromptHasEveryPart(t *testing.T) {
+	t.Parallel()
+	req := unitReviewRequest(t, "review-parts")
+	requireContains(t, "system prompt", req.SystemPrompt, []string{
+		"## Your role", "## Your setting", "## Your tools and gates", "## The check gate",
+		"## What makes a finding material", "## Where you act in the state machine",
+		"## Your verdict", "## When you are done",
+		"A material_findings verdict returns the unit to its mason",
 	})
 }
 
@@ -762,6 +777,6 @@ func TestVerdictToolDescriptionNamesTheUnmetPartOfTheTask(t *testing.T) {
 	t.Parallel()
 	scope := coreadapter.Scope{Workstream: "stream", Unit: "resume", Thread: "reviewer-resume", Turn: "review-1", Role: reviewerRole}
 	requireContains(t, "verdict tool description", (&reviewerReports{}).tool(scope).Description, []string{
-		"every acceptance item holds", "names the acceptance item or part of the task that does not hold",
+		"every acceptance item holds", "names the acceptance item or part of the task that does not hold", "Call verdict once per turn",
 	})
 }

@@ -1500,9 +1500,9 @@ const DisjointPlan = `{"version": 2, "units": [
 // AmendedSpec is ValidSpec with its first criterion rewritten.
 var AmendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
 
-// MasonRoles runs the chief of staff, mason and reviewer in containers, the
+// MasonRoles runs the chief of staff, designer, mason and reviewer in containers, the
 // sandbox the fake engine's boundary check accepts.
-const MasonRoles = ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+const MasonRoles = ChiefRole + "[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
 // TestDrift is the drift rebase request a test makes.
 func TestDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

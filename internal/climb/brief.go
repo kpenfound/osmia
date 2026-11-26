@@ -71,7 +71,7 @@ func (b Brief) Render() string {
 	}
 	line("")
 	line("## Rules of an attempt")
-	line("- You may run the evaluator %q in your own sandbox to learn, but only the service's measurement counts, and you never decide whether a score improved.", b.Spec.Evaluator)
+	line("- You may run the evaluator %q in your own sandbox to learn, but only the service's measurement counts, and you never decide whether a score improved: Go alone decides whether an attempt is kept, by arithmetic over that measurement.", b.Spec.Evaluator)
 	line("- These paths are frozen. An attempt that changes any of them is discarded before it is measured: %s.", strings.Join(b.Protected, ", "))
 	line("- Make one change worth measuring. Do not game the metric: the reviewer rejects a change that improves the score without improving what the climb is for.")
 	line("- When your change is ready, call done with your hypothesis, the change you made and the effect you expect, then end your turn. If you have no change worth measuring, leave the workspace as it is and say so.")

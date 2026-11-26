@@ -88,7 +88,7 @@ func TestConversationPathBypassesSchedulingAndOwnWorkflow(t *testing.T) {
 	for _, test := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{fixturekit.Stream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
+	}{{fixturekit.Stream, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session, service.SessionAgentID, sessionMessage.Turn}} {
 		fixturekit.ConversationAwait(t, func() bool {
 			th, err := repo.Thread(test.stream, test.agent)
 			if err != nil {

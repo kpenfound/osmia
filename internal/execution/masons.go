@@ -330,14 +330,14 @@ func (m *masons) Classify(ctx context.Context, stream config.WorkstreamID, unit 
 		return false, false, err
 	}
 	turnID := masonAgent(unit) + "-clarify-" + fmt.Sprint(last.Sequence)
-	prompt := "Your last turn ended without calling an outcome tool. Continue the unit from your workspace."
+	prompt := "Your last turn ended without calling done or ask, so the service has no report or question from it. Continue the unit from your workspace."
 	switch c.Class {
 	case "asked_in_prose":
-		prompt += " You asked a question in prose. Call ask with the question if you need an answer."
+		prompt += " You asked a question in prose, which the service does not route to anyone. Call ask with the question if you need an answer."
 	case "claims_done":
-		prompt += " You claimed completion in prose. Call done with the required report if the unit's acceptance holds."
+		prompt += " You claimed completion in prose, which the service does not take as a report. Call done with the report if the unit's acceptance holds."
 	default:
-		prompt += " Call ask if you need a decision, or done with the required report when the unit's acceptance holds."
+		prompt += " Call ask if you need a decision, or done with the report when the unit's acceptance holds."
 	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: m.repository.Project(), Workstream: stream, Unit: unit, At: m.s.Now(), Actor: masonActor, Cause: last.Response.ID, Depth: last.Request.Depth + 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turnID, Profile: profile, SystemPrompt: masonSystemPrompt(m.cfg.Project), Prompt: prompt}
 	err = m.EnqueueTurn(ctx, req)
@@ -885,7 +885,7 @@ func (m *masons) EnqueueTurn(ctx context.Context, req trace.TurnRequest) error {
 func masonPrompt(m bundle.Mason) string {
 	return fmt.Sprintf(`Build unit %s of this workstream.
 
-Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Do the unit's task below until every acceptance item holds, following the project's own conventions for tests. The unit's footprint schedules it; it does not limit what you change. The spec below is the one the owner ratified; build against it. When the task is done and its acceptance holds, call done with the outcome of your work: what it now does and how you checked the acceptance. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
+Your view holds the project's files as the feature branch had them when the unit started, with the work done on the unit since. Do the unit's task below until every acceptance item holds. The spec below is the one the owner ratified, so build against it. When the task is done and its acceptance holds, call done with the outcome of your work: what it now does and how you checked the acceptance. Add a short headline, what happened in concrete terms, and needs_you only when the owner has a specific action. Then end your turn.
 
 %s`, m.Unit, m.Render())
 }

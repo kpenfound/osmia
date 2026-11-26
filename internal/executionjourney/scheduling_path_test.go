@@ -244,7 +244,7 @@ func TestServiceHeldLandingAndStepAllowEveryConversation(t *testing.T) {
 	for _, q := range []struct {
 		stream      config.WorkstreamID
 		agent, turn string
-	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.ChiefOfStaff, designed.Turn}, {session.Session.Workstream, service.SessionAgentID, messaged.Turn}} {
+	}{{a, trace.ChiefOfStaff, chief.Turn}, {design.Design.Workstream, trace.Designer, designed.Turn}, {session.Session.Workstream, service.SessionAgentID, messaged.Turn}} {
 		pathAwait(t, f.S, "conversation waited for landing or scheduling", func() bool { return pathTurnDone(f.Repository(), q.stream, q.agent, q.turn) })
 	}
 	select {
