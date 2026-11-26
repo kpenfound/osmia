@@ -779,7 +779,7 @@ func TestOwnerConversationPromptCarriesTheStatusAndTheOpenEscalation(t *testing.
 	openMessage := f.send("What is waiting on me?")
 	f.await("owner reply with the open escalation", func() bool { return f.ownerDone(openMessage) && f.quiescent() })
 	f.mu.Lock()
-	openPrompt := f.prompts[openMessage.Turn].SystemPrompt
+	openPrompt := f.prompts[openMessage.Turn].Prompt
 	f.mu.Unlock()
 	for _, part := range []string{
 		"Goal: " + chiefDemoStatus.Goal,
@@ -924,10 +924,10 @@ func TestOwnerRulingReachesTheChiefsNextConversationAsANotice(t *testing.T) {
 	notice := "## Notices\n- workstreams/" + string(fixturekit.Stream) + "/questions/2/rulings.jsonl (record 2 revision 2, workstream " + string(fixturekit.Stream) + ")\n" + section
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if first := f.prompts[f.sent[0].Turn].SystemPrompt; strings.Contains(first, "questions/2/rulings.jsonl") || !strings.Contains(first, "The owner edited charter.md") {
+	if first := f.prompts[f.sent[0].Turn].Prompt; strings.Contains(first, "questions/2/rulings.jsonl") || !strings.Contains(first, "The owner edited charter.md") {
 		t.Fatalf("a notice before the ruling:\n%s", first)
 	}
-	if later := f.prompts[f.sent[1].Turn].SystemPrompt; !strings.Contains(later, notice) {
+	if later := f.prompts[f.sent[1].Turn].Prompt; !strings.Contains(later, notice) {
 		t.Fatalf("the later bundle lacks the notice:\n%s", later)
 	}
 	if len(f.problems) != 0 {

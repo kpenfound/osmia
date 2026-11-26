@@ -93,9 +93,13 @@ func TestConversationRunsMessagesInOrder(t *testing.T) {
 		if p.Prompt != prompt || p.Scope.Role != trace.ChiefOfStaff || p.Scope.Thread != trace.ChiefOfStaff || p.Profile.Name != "default" {
 			t.Fatalf("turn %d: %+v", i, p)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), "# Project context", "workstream: " + string(fixturekit.Stream), "charter#1 [Rules]: Keep the upload API stable.", "## Latest status", "## Open inbox escalations"} {
-			if !strings.Contains(p.SystemPrompt, part) {
-				t.Fatalf("turn %d system prompt lacks %q:\n%s", i, part, p.SystemPrompt)
+		if !strings.Contains(p.SystemPrompt, "You are the chief of staff for workstream "+string(fixturekit.Stream)) || strings.Contains(p.SystemPrompt, "# Project context") {
+			t.Fatalf("turn %d system prompt %q", i, p.SystemPrompt)
+		}
+		current := strings.Join(p.Context, "\n")
+		for _, part := range []string{"# Project context", "workstream: " + string(fixturekit.Stream), "charter#1 [Rules]: Keep the upload API stable.", "## Latest status", "## Open inbox escalations"} {
+			if !strings.Contains(current, part) {
+				t.Fatalf("turn %d context lacks %q:\n%s", i, part, current)
 			}
 		}
 	}

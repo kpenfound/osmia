@@ -25,7 +25,7 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
+const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context in the current turn context was assembled when the message was accepted."
 
 func chiefGuidance() string {
 	return strings.Join([]string{intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
@@ -150,7 +150,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	}
 	note := ""
 	if host != stream {
-		note = fmt.Sprintf(" The owner addressed workstream %s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\".", stream, stream)
+		note = fmt.Sprintf(addressedNote+"%s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\".", stream, stream)
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -176,7 +176,8 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefGuidance() + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + "\n\n" + chiefGuidance(),
+		Context:      strings.TrimSpace(note) + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {

@@ -325,19 +325,19 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.SystemPrompt, "1. Keep changes small.") {
+		if !strings.Contains(req.Prompt, "1. Keep changes small.") {
 			fail("missing project charter in design context")
 		}
 		for _, p := range s.Current().Projects {
 			row := fmt.Sprintf("%s | %s | %s | %t |", p.ID, p.Name, p.Upstream, p.ID == project)
-			if !strings.Contains(req.SystemPrompt, row) {
+			if !strings.Contains(req.Prompt, row) {
 				fail("missing catalog row %s", row)
 			}
 		}
-		if strings.Contains(req.SystemPrompt, "Keep the client API stable") {
+		if strings.Contains(req.Prompt, "Keep the client API stable") {
 			fail("non-brief charter was inlined")
 		}
-		if strings.Contains(req.SystemPrompt, "Conventions for repo "+string(second)) {
+		if strings.Contains(req.Prompt, "Conventions for repo "+string(second)) {
 			fail("non-brief entity map was inlined")
 		}
 		for _, name := range []string{"charter.md", "entities.md"} {
@@ -353,7 +353,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			}
 		}
 		for _, repo := range []config.ProjectID{project, second} {
-			if repo == project && !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
+			if repo == project && !strings.Contains(req.Prompt, "Conventions for repo "+string(repo)) {
 				fail("missing repo entity map in context: %s", repo)
 			}
 			out, err := fixturekit.CallTool(ctx, tools, intake.DesignReadRepoToolName, map[string]any{"repo": repo, "path": "README.md"})
@@ -402,8 +402,8 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		if want := []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}; !slices.Equal(g.Tools, want) {
 			fail("design session's native tools %v, want %v", g.Tools, want)
 		}
-		if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
-			fail("design session's system prompt lacks the web guidance after its role prompt")
+		if !strings.Contains(req.Prompt, isolation.WebGuidance) || req.SystemPrompt != intake.DesignRolePrompt {
+			fail("design session's system prompt is not exactly its role prompt, or its turn lacks the web guidance")
 		}
 		for _, m := range g.Mounts {
 

@@ -169,7 +169,7 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 	}
 	th, err = chief.ChiefOfStaffThread(member)
 	fixturekit.Must(t, err)
-	memberPrompt := th.Turns[len(th.Turns)-1].Request.SystemPrompt
+	memberPrompt := th.Turns[len(th.Turns)-1].Request.Context
 	_, _, repo, api := s.conversationTrace(string(member))
 	if api != nil {
 		t.Fatal(api)
@@ -202,7 +202,7 @@ func newWorkgroupFeedScenario(t *testing.T, cross bool) *workgroupFeedScenario {
 func TestAWorkgroupMessageQueuesOneDurableChiefTurnWithoutAMemberNote(t *testing.T) {
 	t.Parallel()
 	eachWorkgroupShape(t, func(t *testing.T, w *workgroupFeedScenario) {
-		if len(w.groupTurns) != 1 || strings.Contains(w.groupTurns[0].Request.SystemPrompt, "The owner addressed workstream") {
+		if len(w.groupTurns) != 1 || strings.Contains(w.groupTurns[0].Request.Context, "The owner addressed workstream") {
 			t.Fatalf("durable group turn: %+v", w.groupTurns)
 		}
 	})

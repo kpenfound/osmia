@@ -33,11 +33,11 @@ func (f *workgroupPageFixture) awaitOwnerTurn(t *testing.T, text string, member 
 				continue
 			}
 			note := "The owner addressed workstream "
-			if member == "" && strings.Contains(q.Request.SystemPrompt, note) {
-				t.Fatalf("whole-group message has member note: %s", q.Request.SystemPrompt)
+			if member == "" && strings.Contains(q.Request.Context, note) {
+				t.Fatalf("whole-group message has member note: %s", q.Request.Context)
 			}
-			if member != "" && !strings.Contains(q.Request.SystemPrompt, note+string(member)) {
-				t.Fatalf("member message lost note: %s", q.Request.SystemPrompt)
+			if member != "" && !strings.Contains(q.Request.Context, note+string(member)) {
+				t.Fatalf("member message lost note: %s", q.Request.Context)
 			}
 			return true
 		}

@@ -80,15 +80,28 @@ func AssertAcceptanceDraftInstructions(t *testing.T, prompt string) {
 	}
 }
 
-// OwnPrompt is the part of a turn prompt that is not the replayed log of an earlier session.
+// OwnPrompt is the part of a turn prompt that is the turn's own message: not
+// the executor's note about the read-only view, not the replayed log of an
+// earlier session and not the current turn context block.
 func OwnPrompt(prompt string) string {
-	if !strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
-		return prompt
+	if strings.HasPrefix(prompt, "Your view is the read-only directory ") {
+		if _, rest, ok := strings.Cut(prompt, "\n\n"); ok {
+			prompt = rest
+		}
 	}
-	if _, own, ok := strings.Cut(prompt, "\n\n"); ok {
-		return own
+	if strings.HasPrefix(prompt, `{"source":"osmia-owned-log"`) {
+		_, own, ok := strings.Cut(prompt, "\n\n")
+		if !ok {
+			return ""
+		}
+		prompt = own
 	}
-	return ""
+	if strings.HasPrefix(prompt, coreadapter.TurnContextHeader) {
+		if _, own, ok := strings.Cut(prompt, coreadapter.TurnContextFooter+"\n\n"); ok {
+			prompt = own
+		}
+	}
+	return prompt
 }
 
 func AssertCheckGateReviewInstructions(t *testing.T, prompt string) {

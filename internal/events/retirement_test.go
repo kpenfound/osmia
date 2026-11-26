@@ -30,7 +30,7 @@ func TestRetiredContextKeepsEventsPending(t *testing.T) {
 					return nil, func() {}, unavailable
 				}
 			} else {
-				opts.System = func(context.Context, config.WorkstreamID) (string, error) { return "", unavailable }
+				opts.System = func(context.Context, config.WorkstreamID) (string, string, error) { return "", "", unavailable }
 			}
 			d, err := New(repo, opts)
 			must(t, err)

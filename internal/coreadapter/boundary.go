@@ -336,7 +336,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 			return nil, err
 		}
 		req.Workspace = vcs.Directory(scratch)
-		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + viewLocation(iso.Workspace.Directory))
+		req.Prompt = viewLocation(iso.Workspace.Directory) + "\n\n" + req.Prompt
 	}
 	settings.Agent = req.Profile.Agent
 	if settings.Agent == "" {
@@ -356,7 +356,7 @@ func (e CoreExecutor) Run(ctx context.Context, req agent.Request, settings Execu
 	session, fallback, err := e.prepare(ctx, engine, full, reduced, settings)
 	if fallback {
 		full = *reduced
-		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n\n" + webUnavailable)
+		req.Prompt = webUnavailable + "\n\n" + req.Prompt
 		session, _, err = e.prepare(ctx, engine, full, nil, settings)
 	}
 	if err != nil {

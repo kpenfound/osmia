@@ -70,7 +70,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	f.opts = opts
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
+		if req.SystemPrompt != intake.DesignRolePrompt {
 			return &agent.Result{ClaudeID: "architect", ResultText: "drafting"}, nil
 		}
 		input := f.input.Load()

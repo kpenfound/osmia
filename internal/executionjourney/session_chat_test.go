@@ -113,8 +113,8 @@ func TestSessionTurnWorkspaceIsTheSessionWorktreeWithRestrictedSandbox(t *testin
 		if want := []string{"Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "mcp__osmia_0"}; !slices.Equal(req.Grants.Tools, want) {
 			t.Errorf("session native tools %v, want %v", req.Grants.Tools, want)
 		}
-		if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(req.SystemPrompt, service.SessionRolePrompt) {
-			t.Errorf("session system prompt lacks the web guidance after its role prompt: %q", req.SystemPrompt)
+		if !strings.Contains(req.Prompt, isolation.WebGuidance) || req.SystemPrompt != service.SessionRolePrompt {
+			t.Errorf("session system prompt %q, or its prompt lacks the web guidance: %q", req.SystemPrompt, req.Prompt)
 		}
 		if _, ok := req.Env[coreadapter.TokenEnvironment]; !ok {
 			t.Error("session attachment tool has no scoped MCP token")
@@ -208,7 +208,7 @@ func TestSessionSecondTurnResumesWithOnlyNewEntriesSincePreviousTurn(t *testing.
 	if strings.Contains(thirdPrompt, "Committed as abc123.") || strings.Contains(thirdPrompt, "Checks passed.") {
 		t.Fatalf("a service entry reached a second turn: %q", thirdPrompt)
 	}
-	if thirdPrompt != "Third message" {
+	if !strings.HasSuffix(thirdPrompt, coreadapter.TurnContextFooter+"\n\nThird message") || !strings.HasPrefix(thirdPrompt, coreadapter.TurnContextHeader) {
 		t.Fatalf("third turn prompt: %q", thirdPrompt)
 	}
 }
@@ -731,6 +731,7 @@ func TestResumeConfinedToSessionTurns(t *testing.T) {
 
 func normalizeReplayPrompt(prompt string) string {
 	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile(`Your view is the read-only directory \S+\.`),
 		regexp.MustCompile(`"id":"[^"]*"`),
 		regexp.MustCompile(`"turn_id":"[^"]*"`),
 		regexp.MustCompile(`"project":"[^"]*"`),

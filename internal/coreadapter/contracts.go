@@ -171,8 +171,12 @@ type PreparedTurn struct {
 	Sandbox                                         SandboxLease
 	MCP                                             []Endpoint
 	SessionDirectory, SystemPrompt, Prompt, History string
-	Resume                                          *BackendSession
-	AllowedOutcomes                                 []string
+	// Context holds the sections of the current turn context the request
+	// carries. The turn's executor places them, with the sections it adds
+	// itself, in one labelled block at the head of Prompt.
+	Context         []string
+	Resume          *BackendSession
+	AllowedOutcomes []string
 }
 
 // Card is the concise owner-facing account of a completed turn.

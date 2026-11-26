@@ -427,11 +427,14 @@ func DesignLock(repository *trace.Repository, stream config.WorkstreamID) *sync.
 	return v.(*sync.Mutex)
 }
 
-// DesignRolePrompt opens the system prompt of every design session turn. It
-// states the agent's read-only, gate-free standing and the readiness pass it
-// runs before handoff.
+// DesignRolePrompt is the system prompt of every design session turn, and all
+// of it: a design session's backend session keeps the prompt it began with, so
+// nothing that changes during the session belongs here. It states the agent's
+// read-only, gate-free standing and the readiness pass it runs before handoff.
+// The catalog, the brief's state and the workstream kinds reach the agent in
+// the current turn context that DesignContext builds for every turn.
 const DesignRolePrompt = "You are the design agent for a project the owner is scoping before any work starts. " +
-	"You have a catalog of every active project below. Brief projects have their charter and entity map inline; " +
+	"Every turn opens with a current turn context block that holds a catalog of every active project, the workstream kinds and the brief's current state. Brief projects have their charter and entity map inline; " +
 	"other projects have those documents in your view. Read any active project's committed source code through read_repo. You hold no write tool, no version control tool, no credential and no " +
 	"owner gate: you cannot write a file, commit, push, open a pull request, rule on anything or start work yourself.\n\n" +
 	"Run a readiness pass before handoff. Ask the owner only about choices that are expensive to undo (contracts, data " +
@@ -450,7 +453,7 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"because a public repo is published the moment it is created; set public only after that confirmation. A new project may " +
 	"stand alone or sit alongside existing projects. You create nothing and hold no credential: the repo is created by the " +
 	"service when the owner presses Start, never by you.\n\n" +
-	"Choose the workstream kind of the work with draft_brief kind, from the kinds listed under Workstream kinds below, and say in your reply which kind you chose and why. " +
+	"Choose the workstream kind of the work with draft_brief kind, from the kinds listed under Workstream kinds in the current turn context, and say in your reply which kind you chose and why. " +
 	"Omitting kind keeps the current kind, and a brief that never sets one is handed in as feature. The kind is fixed once the owner presses Start, and the architect never chooses it. " +
 	"Respect each kind's limits when you draft: draft_brief refuses a brief that breaks them.\n\n" +
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
@@ -461,15 +464,18 @@ const DesignRolePrompt = "You are the design agent for a project the owner is sc
 	"Write one short line for the owner naming what the session is about, in words: no identifiers, hashes, model names, URLs, file paths or branch names. " +
 	"Call it again to replace the title when the subject of the session changes materially. A title only names the session: it starts no work and does not change the brief."
 
-// DesignSystemPrompt includes the active catalog and only brief projects' full context.
-func (s *Controller) DesignSystemPrompt(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (string, error) {
+// DesignContext is what changes during a design session and a design turn must
+// still act on: the workstream kinds, the brief's current kind and new
+// project, the active catalog and only the brief projects' full context. It is
+// built from the session's state when the turn runs, and delivered at the head
+// of that turn's prompt, never in the system prompt.
+func (s *Controller) DesignContext(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (string, error) {
 	brief, _, err := LatestDesignBrief(repository, stream)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	b.WriteString(DesignRolePrompt)
-	b.WriteString("\n\n## Workstream kinds\n")
+	b.WriteString("## Workstream kinds\n")
 	b.WriteString(kinds.Catalog())
 	fmt.Fprintf(&b, "Current kind of the brief: %s\n", brief.BriefKind())
 	if brief.NewProject != nil {
@@ -562,7 +568,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 	if UnfinishedSessionTurn(th) {
 		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
-	prompt, err := s.DesignSystemPrompt(ctx, repository, stream)
+	current, err := s.DesignContext(ctx, repository, stream)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the active projects' charters and entity maps", stream)}
 	}
@@ -575,7 +581,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1,
 			Project: project, Workstream: stream, At: at, Actor: OwnerActor, Cause: "owner-message"},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_" + id,
-		Profile: profile, SystemPrompt: prompt, Prompt: text,
+		Profile: profile, SystemPrompt: DesignRolePrompt, Context: current, Prompt: text,
 	})
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}

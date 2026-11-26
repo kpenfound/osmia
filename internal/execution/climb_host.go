@@ -244,9 +244,6 @@ func (h *ClimbHost) enqueueFirst(ctx context.Context, req climb.MasonRequest, un
 	if err != nil {
 		return err
 	}
-	if th, err := m.repository.Thread(h.stream, ClimbMasonAgent); err == nil && len(th.Turns) > 0 {
-		tr.SystemPrompt = th.Turns[0].Request.SystemPrompt
-	}
 	return m.EnqueueTurn(ctx, tr)
 }
 
@@ -254,7 +251,7 @@ func (h *ClimbHost) enqueueContinuation(ctx context.Context, last trace.QueuedTu
 	prompt := continuationPrompt(last, nil)
 	prompt = strings.Replace(prompt, "Continue the unit from there, check its acceptance, and call done with the required report when it holds; call ask if you need a decision.", "Continue the attempt from there and call done with your hypothesis, the change you made and the effect you expect when the change is ready.", 1)
 	prompt = strings.Replace(prompt, "check the unit's acceptance, and call done again.", "and call done again with your hypothesis, the change and the expected effect.", 1)
-	tr, err := h.request(unit, fmt.Sprintf("climb-mason-%d-%d", n, k), last.Response.ID, last.Request.SystemPrompt, prompt, last.Request.Depth+1)
+	tr, err := h.request(unit, fmt.Sprintf("climb-mason-%d-%d", n, k), last.Response.ID, fmt.Sprintf(climbMasonSystemPrompt, h.m.cfg.Project.Name, h.m.cfg.Project.Upstream), prompt, last.Request.Depth+1)
 	if err != nil {
 		return err
 	}

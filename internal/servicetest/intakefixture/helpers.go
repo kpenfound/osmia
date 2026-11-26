@@ -207,8 +207,8 @@ func CheckReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch"}) {
 		fail("tools %v %v exceed the role grant", g.Tools, verified.Tools)
 	}
-	if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
-		fail("system prompt lacks the web guidance: %q", req.SystemPrompt)
+	if !strings.Contains(req.Prompt, isolation.WebGuidance) || strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
+		fail("the web guidance belongs in the turn's context, not its system prompt: %q / %q", req.SystemPrompt, req.Prompt)
 	}
 	for _, kv := range verified.Env {
 		key, value, _ := strings.Cut(kv, "=")

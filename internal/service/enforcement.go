@@ -318,6 +318,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			}
 		}
 		runner.ResumableRoles = resumableRole
+		runner.LegacyBaseline = legacyBaseline(turns.Grants)
 		if service := controls.service.Load(); service != nil && service.placement != nil {
 			runner.Place = service.placeTurn(r)
 		}

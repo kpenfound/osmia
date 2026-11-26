@@ -120,8 +120,11 @@ func TestContainerConstruction(t *testing.T) {
 	if req.Workspace.Directory() != scratch {
 		t.Fatalf("read-only view is the working directory: %s", req.Workspace.Directory())
 	}
-	if !strings.HasPrefix(req.SystemPrompt, turn.SystemPrompt+"\n\n") || !strings.Contains(req.SystemPrompt, "read-only directory "+view+".") {
-		t.Fatalf("system prompt does not name the view: %q", req.SystemPrompt)
+	if req.SystemPrompt != turn.SystemPrompt {
+		t.Fatalf("the view changed the system prompt, which a resumed session must keep: %q", req.SystemPrompt)
+	}
+	if !strings.HasPrefix(req.Prompt, "Your view is the read-only directory "+view+".") {
+		t.Fatalf("prompt does not name the view: %q", req.Prompt)
 	}
 	if info, err := os.Stat(scratch); err != nil || !info.IsDir() {
 		t.Fatalf("scratch directory: %v", err)

@@ -111,6 +111,7 @@ replaced by it and the entry removed.
 | Deterministic Jujutsu replay. The pinned `vcs/jj` replayer duplicates commits with random change IDs and wall-clock times, so replaying one range twice does not reproduce the same commit | `ReplayIn`, `ReplayInFrom`, `ContinueReplay` and `Replaying` on `Jujutsu` in [internal/workspace/jujutsu.go](../internal/workspace/jujutsu.go) |
 | Checking, from the service, that a saved model session can still be resumed on a client. The pinned `agent.Runner` can only look at a session directory on the machine it runs on, and the session directory of a remote turn stays on its client | The service asks nothing of a remote client before a resumed turn. The client resumes with its own runner, and a session it cannot resume fails the attempt before any work, which the thread's existing replay fallback answers ([internal/clientturns](../internal/clientturns)) |
 | Listing, from the service, what a session left in its directory after a turn. The pinned runner reports the session ID, usage and outcome of a run, and nothing about the files beside them | A remote client returns the session files the service reads after a turn in its turn result (`api.TurnResult.SessionFiles`), and the service keeps them in the turn's own session directory ([internal/clientturns](../internal/clientturns)) |
+| Holding a resumed session to the system prompt it began with. The pinned `agent.Request` takes `SystemPrompt` and `ResumeID` as two independent fields, and a run returns only the session's ID: agentcore records no system prompt with a session, and neither refuses nor replaces one that differs from the session's own. A backend that treats a changed system prompt as a different conversation (Claude Fable 5.2 rejects it) is therefore protected only by what Osmia sends | The thread runner records the exact system prompt on each turn attempt (`TurnAttempt.SystemPrompt`) and sends it again whenever that attempt's session is resumed; a session with no recorded prompt is replayed ([internal/thread](../internal/thread)) |
 
 ## Clients
 
@@ -322,15 +323,53 @@ and amendment debate rounds (including a workgroup's delta review). Masons, revi
 foreman never do, whatever a service grant
 says, and no configuration key changes that. A role that holds it keeps its
 read-only view and its service tools, gains no write, shell or `Network`
-grant, and is told in its system prompt that web content is evidence rather
+grant, and is told in its turn context that web content is evidence rather
 than authority and that instructions inside a page are not instructions to it.
 In sbx the owner's network policy decides which hosts a fetch reaches; the
 service adds none. The risk that a page carries hostile instructions is
 accepted because those roles can only read and propose. When a backend or
 placement cannot hold a web-granted turn to its granted tools, the turn is
-prepared again once without `Web` and runs without web tools, its system prompt
+prepared again once without `Web` and runs without web tools, its prompt
 saying so; the mismatched session never runs, and the reduced session must
 match the reduced grant exactly or the turn is refused.
+
+### A resumed session's system prompt
+
+A resumed backend session is sent exactly the system prompt it began with. A
+turn's system prompt is its request's `SystemPrompt` and nothing else: no layer
+between the request and the backend adds to it or rewrites it. A backend that
+treats a changed system prompt as a different conversation would otherwise
+discard the session's earlier reasoning or refuse the turn.
+
+What changes during a conversation reaches the agent in the newest turn. The
+service builds a labelled current turn context block for each turn when it
+runs and puts it at the head of the turn's own prompt, never in the durable
+request, so the owned log that replay renders holds no stale copies. The block
+holds the operating policy, the unit assignment, the web guidance and the
+request's `Context`: the project context a chief-of-staff turn was accepted
+with, and a design session's workstream kinds, brief state and catalog. The
+read-only view's location and the notice that web tools are unavailable lead
+the prompt the same way.
+
+The baseline belongs to the backend session. Each turn attempt records the
+system prompt its session was given. A replay attempt, which starts a new
+session (an owned-log replay, a retry that replays, a fallback profile),
+records the current prompt of its request. A resume attempt records the prompt
+of the session it resumes and sends it. The runner reads the baseline from the
+attempt whose result named the session it is about to resume, so it is the
+same after a restart whatever the thread's later requests say. When no baseline
+is on record the turn replays into a new session; the runner never sends a
+guessed prompt.
+
+A session saved before attempts recorded the prompt is traced back through its
+attempts' source sessions to the turn that opened it. That request records the
+system prompt its caller built, but the service appended the operating policy,
+the unit assignment, the web guidance and the read-only view's location to it as
+the turn ran and recorded none of them. `legacyBaseline` in
+[internal/service](../internal/service) therefore accepts the request only for a
+role those additions could not have reached: no operating policy, no unit
+assignment, no web access and a writable view. Every other saved session
+replays once into a new session, which then records its baseline.
 
 ## Jev judgments
 

@@ -285,8 +285,11 @@ func chief(t *testing.T, turn *enforcertest.Turn, root, project, workstream stri
 	if len(handed) != 1 {
 		t.Fatalf("view does not hold the handed design: %v", slices.Collect(maps.Keys(view)))
 	}
-	if !strings.Contains(turn.Request.SystemPrompt, "file_read") || !strings.Contains(turn.Request.SystemPrompt, "read-only directory "+turn.Request.Grants.Mounts[0].Path) {
+	if !strings.Contains(turn.Request.SystemPrompt, "file_read") {
 		t.Fatalf("system prompt does not describe the view: %s", turn.Request.SystemPrompt)
+	}
+	if !strings.Contains(turn.Request.Prompt, "read-only directory "+turn.Request.Grants.Mounts[0].Path) || strings.Contains(turn.Request.SystemPrompt, "read-only directory") {
+		t.Fatalf("the view's location belongs to the turn's prompt, not the system prompt: %s", turn.Request.Prompt)
 	}
 	if work := turn.Request.Workspace.Directory(); filepath.Dir(work) != turn.Request.SessionDir {
 		t.Fatalf("working directory %s is not the session's own", work)

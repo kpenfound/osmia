@@ -21,9 +21,15 @@ type TurnAttempt struct {
 	ReplayFrom     uint64                     `json:"replay_from"`
 	Omitted        int                        `json:"omitted"`
 	At             time.Time                  `json:"at"`
-	Result         *coreadapter.SessionResult `json:"result,omitempty"`
-	Failure        string                     `json:"failure,omitempty"`
-	FailureClass   coreadapter.FailureKind    `json:"failure_class,omitempty"`
+	// SystemPrompt is the exact system prompt the attempt's backend session
+	// was given. A replay attempt starts a session with the current prompt of
+	// its request; a resume attempt carries forward the prompt its source
+	// session began with. Records written before the field existed leave it
+	// nil, which differs from a recorded empty prompt.
+	SystemPrompt *string                    `json:"system_prompt,omitempty"`
+	Result       *coreadapter.SessionResult `json:"result,omitempty"`
+	Failure      string                     `json:"failure,omitempty"`
+	FailureClass coreadapter.FailureKind    `json:"failure_class,omitempty"`
 }
 
 // RecordAttempt appends a new intent or captures the exact current attempt.

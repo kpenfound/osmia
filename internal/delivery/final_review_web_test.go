@@ -54,8 +54,8 @@ func TestFinalReviewTurnHoldsNoWebTools(t *testing.T) {
 					t.Errorf("final review holds %s: %v", tool, got.Native)
 				}
 			}
-			if got.Capabilities.Web || !strings.HasPrefix(got.SystemPrompt, system) || strings.Contains(got.SystemPrompt, isolation.WebGuidance) {
-				t.Errorf("final review capabilities %+v, system prompt %q", got.Capabilities, got.SystemPrompt)
+			if got.Capabilities.Web || got.SystemPrompt != system || strings.Contains(got.Prompt, isolation.WebGuidance) {
+				t.Errorf("final review capabilities %+v, system prompt %q, prompt %q", got.Capabilities, got.SystemPrompt, got.Prompt)
 			}
 		})
 	}

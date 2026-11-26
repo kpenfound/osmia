@@ -48,8 +48,8 @@ func TestDraftBriefRecordsAndKeepsTheKind(t *testing.T) {
 	d := newDesignProjects(t)
 	d.script(func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, want := range []string{"## Workstream kinds", "- feature: use when", "Limits: none.", "Current kind of the brief: feature"} {
-			if !strings.Contains(req.SystemPrompt, want) {
-				return nil, fmt.Errorf("the design agent's instructions lack %q", want)
+			if !strings.Contains(req.Prompt, want) {
+				return nil, fmt.Errorf("the design agent's turn context lacks %q", want)
 			}
 		}
 		brief, revision, err := intake.LatestDesignBrief(d.repo, d.stream)

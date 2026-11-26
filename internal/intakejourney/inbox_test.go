@@ -120,8 +120,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 				return intakefixture.QuestionResult(req, "session-chief", "Already relayed"), nil
 			default:
 			}
-			if strings.Contains(req.SystemPrompt, "<<< osmia:owner_response") {
-				f.Problem("a notice before any notify ruling:\n%s", req.SystemPrompt)
+			if strings.Contains(req.Prompt, "<<< osmia:owner_response") {
+				f.Problem("a notice before any notify ruling:\n%s", req.Prompt)
 			}
 			for _, args := range []map[string]any{
 				{"question": "2", "text": "State and the log format are part of the contract.", "scope": "notify"},
@@ -141,8 +141,8 @@ func TestOwnerRulingResumesTheAskersAcrossRestarts(t *testing.T) {
 		case strings.Contains(req.Prompt, ", escalation_1 (questions 1): No new dependencies."):
 			defer f.Mu.Unlock()
 
-			if !strings.Contains(req.SystemPrompt, "## Notices\n"+notice) {
-				f.Problem("event turn system prompt lacks the notice:\n%s", req.SystemPrompt)
+			if !strings.Contains(req.Prompt, "## Notices\n"+notice) {
+				f.Problem("event turn context lacks the notice:\n%s", req.Prompt)
 			}
 			return intakefixture.QuestionResult(req, "session-chief", "Relayed"), f.Use(ctx, tools, "relay-local", "relay_ruling", map[string]any{"question": "1", "text": "Add no dependency.", "scope": "local"})
 		case strings.Contains(req.Prompt, "Where does state live?") && strings.Contains(req.Prompt, "Is the log format fixed?") && strings.Contains(req.Prompt, "is open"):

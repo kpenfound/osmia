@@ -171,8 +171,8 @@ func TestDesignTurnContextFollowsTheBriefsProjects(t *testing.T) {
 	}
 	recordDesignProjects(t, d.repo, d.stream, intakefixture.ProductionBrief, []config.ProjectID{d.other})
 	d.script(func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.SystemPrompt, "Client charter rule") || !strings.Contains(req.SystemPrompt, "Entity text for "+string(d.other)) || strings.Contains(req.SystemPrompt, "Keep changes small") || strings.Contains(req.SystemPrompt, "Entity text for "+string(d.home)) {
-			return nil, fmt.Errorf("context does not follow the brief's projects: %s", req.SystemPrompt)
+		if !strings.Contains(req.Prompt, "Client charter rule") || !strings.Contains(req.Prompt, "Entity text for "+string(d.other)) || strings.Contains(req.Prompt, "Keep changes small") || strings.Contains(req.Prompt, "Entity text for "+string(d.home)) || req.SystemPrompt != intake.DesignRolePrompt {
+			return nil, fmt.Errorf("context does not follow the brief's projects: %s", req.Prompt)
 		}
 		if _, err := intakefixture.ReadTool(ctx, tools, "projects/"+string(d.home)+"/charter.md"); err != nil {
 			return nil, err
