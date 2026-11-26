@@ -91,7 +91,7 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		return chiefTools(repository, agent, scope, now), nil
 	}
 	ask := coreadapter.Tool{Name: AskTool, Effect: coreadapter.ToolMemory,
-		Description: "Ask the chief of staff a question you cannot answer from your context. Say what you need decided and what it blocks. For a conflict between member charters, supply charter_conflict with both project-qualified rules; Go sends it directly to the owner. The question is recorded and your turn ends; end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
+		Description: "Ask the chief of staff a question you cannot settle from your own context, including when the task itself looks wrong. question: say what you need decided and what it blocks, so the chief can answer without re-reading your work. charter_conflict: only for a conflict between member charters; give both rules, each qualified with its project ID, and Go sends the question directly to the owner. The question is recorded and your turn ends, so end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"charter_conflict":{"type":"array","items":{"type":"string"},"minItems":2}},"required":["question"],"additionalProperties":false}`)}
 	ask.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {

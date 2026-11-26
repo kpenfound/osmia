@@ -13,7 +13,7 @@ func legacyBaseline(grants map[string]coreadapter.Capabilities) thread.LegacyBas
 		if !ok || prompt == "" || !grant.WriteFiles || grant.Web || (role != masonRole && role != sessionRole) {
 			return "", false
 		}
-		if FactoryInstructions(coreadapter.Scope{Role: role, Turn: opening.Request.TurnID}) != "" || (opening.Request.Unit != "" && role == masonRole) {
+		if hasPolicy(role) || (opening.Request.Unit != "" && role == masonRole) {
 			return "", false
 		}
 		return prompt, true

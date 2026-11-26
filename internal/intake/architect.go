@@ -948,10 +948,10 @@ type DraftStatus struct {
 }
 
 var DraftNext = map[string]string{
-	DraftValid:     "The draft as delivered passes validation. The service records it when your turn ends.",
-	DraftInvalid:   "The draft as delivered would not be accepted if your turn ended now. Deliver the missing or corrected files.",
-	DraftDeclined:  "Ending your turn declines the amendment with the reason in decline.txt.",
-	DraftUnchanged: "The delivered files match the current revision, so ending your turn leaves the revision as it is.",
+	DraftValid:     "Valid: the files delivered so far pass validation, and the service records them when your turn ends.",
+	DraftInvalid:   "Invalid: the files delivered so far would be refused if your turn ended now. Correct each listed problem, then deliver again every file that needs it.",
+	DraftDeclined:  "Declined: ending your turn declines the amendment, with the reason in decline.txt.",
+	DraftUnchanged: "Unchanged: the delivered files match the current revision, so ending your turn leaves the revision as it is.",
 }
 
 // Judge is the draftJudge of a workstream's own draft: both files must be
@@ -997,7 +997,7 @@ func (d *Drafter) DraftToolFor(kind kinds.Kind, scope coreadapter.Scope, attempt
 	paths := DraftPaths(kind)
 	names := strings.Join(paths, " or ")
 	enum, _ := json.Marshal(append(slices.Clone(paths), "decline.txt"))
-	return coreadapter.Tool{Name: DraftTool, Description: "Deliver " + strings.Join(paths, ", ") + ", or an amendment decline.txt. Returns the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined, or unchanged. The service records and validates the delivered files when your turn ends.", Effect: coreadapter.ToolMemory,
+	return coreadapter.Tool{Name: DraftTool, Description: fmt.Sprintf("Deliver one file of your draft: %s, or, on an amendment turn, decline.txt holding your reason for declining. path names the file and content is the whole file, at most %d bytes; delivering a path again replaces it. The result is the verdict the service would give everything delivered so far if your turn ended now: valid, invalid with its problems, declined or unchanged. The verdict is not final, because the service records and validates the delivered files when your turn ends.", strings.Join(paths, ", "), MaxHandedBytes), Effect: coreadapter.ToolMemory,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","enum":` + string(enum) + `},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var input struct{ Path, Content string }

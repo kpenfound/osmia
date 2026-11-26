@@ -25,15 +25,18 @@ func memberSchema(scope coreadapter.Scope, properties string) json.RawMessage {
 func chiefMember(r *trace.Repository, scope coreadapter.Scope, named config.WorkstreamID) (*trace.Repository, config.WorkstreamID, string, error) {
 	own := config.WorkstreamID(scope.Workstream)
 	if named != "" && named != own && scope.Role != trace.ChiefOfStaff {
-		return nil, "", "only the chief of staff names another workstream", nil
+		return nil, "", "only the chief of staff names another workstream; omit workstream to read your own", nil
 	}
 	return r.ChiefMember(own, named)
 }
 
 func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
-	description := "Read the workstream's durable factory records, including your current task in plan.json, spec.md, unit reports, check output, discoveries, and neighboring assignments. With no path list available documents and their latest revisions; a folder path such as discoveries lists the documents under it. Set revision to read earlier evidence. Use start and lines to select text. Large excerpts return next_offset; pass it as offset with the same line range to continue. This reads factory state, not target-project files."
+	description := "Read the workstream's durable factory records: spec.md, plan.json (your task and the neighboring assignments), unit reports, check output, discoveries and sources. This is factory state; use inspect_code or file_read for project code. " +
+		"Call it with no path to list every document with its latest revision. A folder path such as discoveries lists the documents under it, and a document path returns its text. " +
+		"revision reads an earlier revision of one document, which is how you compare evidence across rounds. start (a one-based line) and lines (default 200, maximum 1000) select part of the text. A long excerpt returns next_offset; pass it as offset with the same path, revision, start and lines to read on. " +
+		"An unknown path or revision returns an error that says how to correct the call."
 	if scope.Role == trace.ChiefOfStaff {
-		description += " workstream: a member workstream ID of your workgroup whose records to read; omit for this conversation's own workstream."
+		description += " workstream: a member workstream ID of your workgroup whose records to read. Omit it for this conversation's own workstream."
 	}
 	return coreadapter.Tool{Name: factoryContextTool, Effect: coreadapter.ToolRead,
 		Description: description,
@@ -67,7 +70,7 @@ func factoryContext(r *trace.Repository, scope coreadapter.Scope) coreadapter.To
 				in.Lines = 200
 			}
 			if in.Offset < 0 || in.Start < 1 || in.Lines < 1 || in.Lines > 1000 {
-				return nil, errors.New("invalid range")
+				return nil, errors.New("invalid range: start and lines must be at least 1, lines at most 1000, and offset not negative")
 			}
 			docs, err := trace.Read[trace.Document](target, stream)
 			if err != nil {
@@ -144,7 +147,7 @@ func assignmentContext(r *trace.Repository, scope coreadapter.Scope) (string, er
 		return "", err
 	}
 	data, _ := json.Marshal(unit)
-	out := fmt.Sprintf("\n\nCurrent assignment (plan revision %d; supersedes older assignment text):\n%s\nRead factory_context for spec.md, plan.json, prior reports and checks. Adapt implementation within these constraints. Coordinate before taking another unit's responsibility. Neighboring responsibilities:\n", current.Revision.Plan, data)
+	out := fmt.Sprintf("\n\n## Your assignment\nCurrent assignment (plan revision %d). It replaces any earlier assignment text in this conversation, because a plan revision can change it.\n%s\nRead spec.md, plan.json, prior reports and check results with factory_context. Adapt implementation within the unit's constraints. Ask for coordination before taking over another unit's outcome, so that no two units change the same outcome.\nNeighboring responsibilities:\n", current.Revision.Plan, data)
 	for _, u := range p.Units {
 		if u.ID != unit.ID {
 			out += fmt.Sprintf("- %s: %s; depends on %v; boundaries %v\n", u.ID, u.Task, u.DependsOn, u.Boundaries)

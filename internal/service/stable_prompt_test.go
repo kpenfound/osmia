@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/coreadapter/adaptertest"
 	"github.com/kpenfound/osmia/internal/isolation"
+	kindreg "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/servicetest/fixturekit"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
@@ -92,7 +93,7 @@ func TestResumedSessionsKeepTheirSystemPromptAfterPolicyAndPromptTextChange(t *t
 
 				policy := "policy v1"
 				previous := factoryInstructions
-				factoryInstructions = func(scope coreadapter.Scope) string {
+				factoryInstructions = func(scope coreadapter.Scope, _ kindreg.Kind) string {
 					return "\n\nCurrent factory operating policy for " + scope.Role + ": " + policy + "."
 				}
 				t.Cleanup(func() { factoryInstructions = previous })

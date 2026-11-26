@@ -381,7 +381,7 @@ func (h *ClimbHost) enqueueReview(ctx context.Context, req climb.ReviewRequest, 
 	fmt.Fprintf(&prompt, "\nThe climb's goal: %s\nThe protected paths, which no attempt may change: %s.\n", strings.TrimSpace(req.Brief.Spec.Goal), strings.Join(req.Brief.Protected, ", "))
 	fmt.Fprintf(&prompt, "\n%s", climbSpecText(req.Brief))
 	tr := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: m.repository.Project(), Workstream: h.stream, Unit: unit, At: m.s.Now(), Actor: ReviewerActor, Cause: trace.ClimbJournalID(j.Number), Depth: 1},
-		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: climbReviewerSystemPrompt + " " + unitReviewSkills + checkGateReviewInstructions, Prompt: prompt.String()}
+		AgentID: agent, ThreadID: agent, TurnID: turn, Profile: profile, SystemPrompt: climbReviewerSystemPrompt + " " + unitReviewSkills + CheckGateReviewInstructions, Prompt: prompt.String()}
 	_, err = m.repository.EnqueueTurn(ctx, tr)
 	return err
 }

@@ -470,9 +470,9 @@ func cmpOr(a, b string) string {
 
 func fileTools(files Files) []coreadapter.Tool {
 	view, skills := files.View, files.Skills
-	description := "Read a file in this turn's view, or list a directory's entries; \".\" is the view's root"
+	description := "Read one file in this turn's view, or list a directory's entries. path is relative to the view's root, and \".\" is the root itself. The view holds only the files the service scoped to this turn, so a path outside it is refused."
 	if skills != nil {
-		description += ". A file or directory inside one of this turn's skill directories is read at its absolute path"
+		description += " A file or directory inside one of this turn's skill directories is read at its absolute path."
 	}
 	return []coreadapter.Tool{
 		{Name: "file_read", Description: description, Effect: coreadapter.ToolRead,
@@ -494,7 +494,7 @@ func fileTools(files Files) []coreadapter.Tool {
 				}
 				return json.Marshal(string(data))
 			}},
-		{Name: "file_write", Description: "Write a file in this turn's view", Effect: coreadapter.ToolWrite,
+		{Name: "file_write", Description: "Write one file in this turn's view. path is relative to the view's root and content is the whole file. The result reports the path and the bytes written.", Effect: coreadapter.ToolWrite,
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}`),
 			Handle: func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 				var input struct{ Path, Content string }

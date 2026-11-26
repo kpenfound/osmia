@@ -10,19 +10,43 @@ import (
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/hearsay"
+	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	kindreg "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/redact"
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// factoryInstructions is the operating policy of a turn's role. Tests replace
-// it to stand for a deploy that changed the policy.
-var factoryInstructions = FactoryInstructions
+// factoryInstructions is the operating policy of a turn's role and workstream
+// kind. Tests replace it to stand for a deploy that changed the policy.
+var factoryInstructions = FactoryInstructionsFor
+
+// policyKind is the registered kind of the workstream a turn belongs to. A
+// scope with no workstream, and a stored kind this build does not register,
+// read the feature policy: an unregistered kind runs no turns.
+func policyKind(repo *trace.Repository, scope coreadapter.Scope) (kindreg.Kind, error) {
+	feature, _ := kindreg.Lookup(kindreg.Feature)
+	if scope.Workstream == "" || !hasPolicy(scope.Role) {
+		return feature, nil
+	}
+	kind, _, ok, err := intake.WorkstreamKind(repo, config.WorkstreamID(scope.Workstream))
+	if err != nil {
+		return kindreg.Kind{}, err
+	}
+	if !ok {
+		return feature, nil
+	}
+	return kind, nil
+}
 
 func memoryTurns(turns *isolation.Turns, cfg *config.Config, repo *trace.Repository) *isolation.Turns {
 	turns.Context = func(ctx context.Context, scope coreadapter.Scope) (string, error) {
+		kind, err := policyKind(repo, scope)
+		if err != nil {
+			return "", err
+		}
 		assignment, err := assignmentContext(repo, scope)
-		return factoryInstructions(scope) + assignment, err
+		return factoryInstructions(scope, kind) + assignment, err
 	}
 	turns.Audit = func(ctx context.Context, scope coreadapter.Scope, tool coreadapter.Tool, raw json.RawMessage) (func(context.Context, json.RawMessage, error) error, error) {
 		return repo.BeginTool(ctx, scope, tool, raw, func() time.Time { return time.Now().UTC() })
