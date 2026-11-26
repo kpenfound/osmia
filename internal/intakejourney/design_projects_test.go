@@ -93,7 +93,7 @@ func (d *designProjects) say(t *testing.T, message string, entries int) {
 		return len(r.Entries) == entries && r.Entries[len(r.Entries)-1].Kind == "response"
 	})
 	if conversation.Entries[len(conversation.Entries)-1].State == api.TurnFailed {
-		th, err := d.repo.ChiefOfStaffThread(d.stream)
+		th, err := d.repo.DesignerThread(d.stream)
 		fixturekit.Must(t, err)
 		t.Fatalf("design turn failed: %+v; response: %+v", conversation, th.Turns[len(th.Turns)-1].Response)
 	}

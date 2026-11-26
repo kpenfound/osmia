@@ -117,6 +117,9 @@ type DemoEngine struct {
 	// Skills are the directories the engine's prepared skills live in. An
 	// engine without any prepares none, and runs no turn that is given skills.
 	Skills []string
+	// Observe, when set, sees every turn before its script runs, with the
+	// tool session the turn was given (nil for a turn that has none).
+	Observe func(ctx context.Context, req agent.Request, tools *mcp.ClientSession)
 }
 
 // SkillDirs returns the directories the engine's prepared skills live in.
@@ -178,10 +181,14 @@ func (e *DemoEngine) Run(ctx context.Context, req agent.Request) (*agent.Result,
 	if turn == nil {
 		turn = e.Turns["*"]
 	}
+	observe := e.Observe
 	e.Mu.Unlock()
 	e.Sessions.Mu.Lock()
 	tools := e.Sessions.ByKey[req.Env["OSMIA_MCP_TOKEN"]]
 	e.Sessions.Mu.Unlock()
+	if observe != nil {
+		observe(ctx, req, tools)
+	}
 	if turn == nil || (tools == nil && req.Profile.Name != SessionRole) {
 		return nil, fmt.Errorf("unexpected turn %q", req.Name)
 	}
