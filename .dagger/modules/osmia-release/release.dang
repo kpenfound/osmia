@@ -132,7 +132,7 @@ type Release {
         "/src",
         ws.directory(
           "/",
-          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "LICENSE", "README.md"],
+          include: ["go.mod", "go.sum", "**/*.go", "internal/web/**", "internal/sandbox/guest/**", "LICENSE", "README.md"],
           exclude: [".bees/**", ".dagger/**"],
         ),
       )
