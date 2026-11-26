@@ -25,7 +25,7 @@ const pauseTool = "pause"
 
 const resumeTool = "resume"
 
-const pauseGuidance = "When the owner asks you to pause or resume work, call pause or resume with scope factory, project, or workstream. For a workstream include its ID; include the target project's ID when it is another project. Give a reason for a pause. These controls are attributed to the owner."
+const pauseGuidance = "## Pausing and resuming\nWhen the owner asks you to pause or resume work, call pause or resume with scope factory, project, or workstream. For a workstream include its ID; include the target project's ID when it is another project. Give a reason for a pause. These controls are attributed to the owner."
 
 func (c *runtimeControls) pauseControl(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time, resume bool) coreadapter.Tool {
 	name := pauseTool

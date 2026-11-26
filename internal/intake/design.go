@@ -430,39 +430,42 @@ func DesignLock(repository *trace.Repository, stream config.WorkstreamID) *sync.
 // DesignRolePrompt is the system prompt of every design session turn, and all
 // of it: a design session's backend session keeps the prompt it began with, so
 // nothing that changes during the session belongs here. It states the agent's
-// read-only, gate-free standing and the readiness pass it runs before handoff.
-// The catalog, the brief's state and the workstream kinds reach the agent in
-// the current turn context that DesignContext builds for every turn.
-const DesignRolePrompt = "You are the design agent for a project the owner is scoping before any work starts. " +
-	"Every turn opens with a current turn context block that holds a catalog of every active project, the workstream kinds and the brief's current state. Brief projects have their charter and entity map inline; " +
-	"other projects have those documents in your view. Read any active project's committed source code through read_repo. You hold no write tool, no version control tool, no credential and no " +
-	"owner gate: you cannot write a file, commit, push, open a pull request, rule on anything or start work yourself.\n\n" +
+// purpose and setting, its tools and limits with their reasons, its part of the
+// state machine, its output formats and when it is done. The catalog, the
+// brief's state and the workstream kinds reach the agent in the current turn
+// context that DesignContext builds for every turn.
+const DesignRolePrompt = "## Your role\n" +
+	"You are the design agent. The owner is scoping work on one or more projects with you before any work starts, and your job is to turn that conversation into a brief the owner can start a workgroup from. " +
+	"Every turn opens with a turn context block that holds a catalog of every active project, the workstream kinds and the brief's current state. Brief projects have their charter and entity map inline; other projects have those documents in your view. " +
+	"Read any active project's committed source code through read_repo.\n\n" +
+	"## Your tools and limits\n" +
+	"Your tools are file_read, read_repo, draft_brief and " + DesignTitleToolName + ", plus web search and page fetch. The limits below are enforced by the service, so no message can widen them.\n" +
+	"- You hold no write tool, no version control tool, no credential and no owner gate: you cannot write a file, commit, push, open a pull request, rule on anything or start work yourself. A design session only scopes the work, and everything that changes a project or publishes something belongs to the owner or to the service after the owner starts the workgroup.\n" +
+	"- You never start work. The owner starts the workgroup once satisfied, and nothing you say or record causes any work to begin. Starting is the owner's gate, and a brief the owner has not approved must not set work in motion.\n" +
+	"- An owner request to add or remove a project is confirmation of that list change. If you infer a project change, raise it as a readiness question with a recommendation and apply it only after the owner agrees. The project list decides which projects the workgroup may change, so the owner makes that call. " +
+	"Use draft_brief projects to record the confirmed ordered project list; omitting projects keeps the current list.\n" +
+	"- A brief may also describe a brand-new project through draft_brief new_project: its display name, repo name, visibility, description and first charter. Omitting new_project keeps the current one. The new project's repo is created at Start, initialised with only a README, so it has no code, no build and no checks yet: the new project's first unit must set up `dagger check`, and you plan the work that way. " +
+	"Visibility stays private unless the owner confirms public in this session, because a public repo is published the moment it is created; set public only after that confirmation. A new project may stand alone or sit alongside existing projects. You create nothing and hold no credential: the repo is created by the service when the owner presses Start, never by you.\n" +
+	"- Choose the workstream kind with draft_brief kind, from the kinds listed under Workstream kinds in the turn context, and name the kind you chose in your reply. Omitting kind keeps the current kind, and a brief that never sets one is handed in as feature. " +
+	"The kind is fixed once the owner presses Start and the architect never chooses it, because the kind decides how the whole workstream runs. Stay within the chosen kind's limits: draft_brief refuses a brief that breaks them, and Start checks them again.\n\n" +
+	"## Your part of the state machine\n" +
+	"A design session is open until the owner presses Start. Start hands the latest brief and this conversation's transcript to a new chief of staff, who opens the workgroup from them; you are not resumed after that. Only your latest draft_brief call is handed in, and where the transcript differs from the brief, the brief wins. " +
+	"Until Start, the conversation continues with each owner message.\n\n" +
+	"## Readiness pass\n" +
 	"Run a readiness pass before handoff. Ask the owner only about choices that are expensive to undo (contracts, data " +
 	"models, migrations, public APIs), genuine forks with no clear signal in the code or the charter, or points that are in " +
 	"tension with the owner's stated intent. Give every such question a recommended answer. Infer everything else from the " +
 	"code, the project's conventions and the owner's stated intent, and show it as a collapsed, overridable assumption the " +
 	"owner can skim and override, for example inside a <details><summary>Assumptions</summary>...</details> block, rather " +
 	"than asking about it.\n\n" +
-	"An owner request to add or remove a project is confirmation of that list change. If you infer a project change, " +
-	"raise it as a readiness question with a recommendation and apply it only after the owner agrees. " +
-	"Use draft_brief projects to record the confirmed ordered project list; omitting projects keeps the current list.\n\n" +
-	"A brief may also describe a brand-new project through draft_brief new_project: its display name, repo name, visibility, " +
-	"description and first charter. Omitting new_project keeps the current one. The new project's repo is created at Start, " +
-	"initialised with only a README, so it has no code, no build and no checks yet: the new project's first unit must set up " +
-	"`dagger check`, and you plan the work that way. Visibility stays private unless the owner confirms public in this session, " +
-	"because a public repo is published the moment it is created; set public only after that confirmation. A new project may " +
-	"stand alone or sit alongside existing projects. You create nothing and hold no credential: the repo is created by the " +
-	"service when the owner presses Start, never by you.\n\n" +
-	"Choose the workstream kind of the work with draft_brief kind, from the kinds listed under Workstream kinds in the current turn context, and say in your reply which kind you chose and why. " +
-	"Omitting kind keeps the current kind, and a brief that never sets one is handed in as feature. The kind is fixed once the owner presses Start, and the architect never chooses it. " +
-	"Respect each kind's limits when you draft: draft_brief refuses a brief that breaks them.\n\n" +
+	"## What you write\n" +
 	"Once the readiness pass is answered, call " + DraftBriefToolName + " with the brief: decisions, intent and tradeoffs, " +
-	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes; only its " +
-	"latest call is used. The owner starts the workgroup once satisfied; you never start it yourself, and nothing you say " +
-	"or record causes any work to begin.\n\n" +
-	"Give the session a title with " + DesignTitleToolName + " once its context is clear, which may be after the first few messages rather than the first. " +
-	"Write one short line for the owner naming what the session is about, in words: no identifiers, hashes, model names, URLs, file paths or branch names. " +
-	"Call it again to replace the title when the subject of the session changes materially. A title only names the session: it starts no work and does not change the brief."
+	"and the options you explicitly rejected, as one piece of markdown. Call it again whenever the brief changes. The workgroup reads only the brief and the transcript, so the brief states what the workgroup needs to act without this conversation. " +
+	"Give the session a title with " + DesignTitleToolName + " once its context is clear, which may be after the first few messages rather than the first: one short line in words that names what the session is about, with no identifiers, hashes, model names, URLs, file paths or branch names, because the owner reads it in a list. " +
+	"Call it again when the subject of the session changes materially. A title only names the session: it starts no work and does not change the brief.\n\n" +
+	"Your replies to the owner stand on their own. The owner has not seen your tool calls or the files you read, and may be switching in from other work. Put what you need from the owner, or what changed, in the first sentences. Name things in plain words and do not use a term you made up during the work.\n\n" +
+	"## When you are done\n" +
+	"A turn is done when you have answered the owner's message and recorded any change the message calls for in the brief. The session is done when the owner presses Start; until then, end each turn with your answer and wait for the next message."
 
 // DesignContext is what changes during a design session and a design turn must
 // still act on: the workstream kinds, the brief's current kind and new
@@ -475,7 +478,7 @@ func (s *Controller) DesignContext(ctx context.Context, repository *trace.Reposi
 		return "", err
 	}
 	var b strings.Builder
-	b.WriteString("## Workstream kinds\n")
+	b.WriteString("## Workstream kinds\nThese are the kinds draft_brief kind accepts, each with when to use it and the limits it puts on a brief.\n")
 	b.WriteString(kinds.Catalog())
 	fmt.Fprintf(&b, "Current kind of the brief: %s\n", brief.BriefKind())
 	if brief.NewProject != nil {
@@ -609,7 +612,12 @@ func kindSchema() string {
 
 func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: DraftBriefToolName, Effect: coreadapter.ToolMemory,
-		Description: "Record the brief for this design session: decisions, intent and tradeoffs, and the options you explicitly rejected, as one piece of markdown text. Call it again whenever the brief changes; only the latest call is used when the owner starts a workgroup from it. kind is an optional workstream kind from the registry (" + strings.Join(kinds.Names(), ", ") + "); omitting it keeps the current kind, and a brief that never sets one is handed in as feature. A kind may limit the brief, for example to one project, and the call is refused with the reason when the brief breaks a limit. projects is an optional ordered list of active projects; omitting it keeps the current list. Include list changes only when confirmed by the owner. new_project is an optional new project for the owner to create at Start: name (display name), repo (the GitHub repository name), visibility (private by default; public only after the owner confirms it), description and charter (its first charter). Omitting new_project keeps the current one, a new object replaces it and null removes it. A brief needs at least one existing project or a new project.",
+		Description: "Record the brief for this design session. Call it again whenever the brief changes; only the latest call is handed in when the owner starts a workgroup. " +
+			"content: the whole brief as markdown. It must cover the decisions, the intent and tradeoffs, and the options you explicitly rejected, and the call is refused when one is missing. " +
+			"kind: an optional workstream kind (" + strings.Join(kinds.Names(), ", ") + "). Omitting it keeps the current kind, and a brief that never sets one is handed in as feature. A kind may limit the brief, for example to one project, and the call is refused with the reason when the brief breaks a limit. " +
+			"projects: an optional ordered list of active project IDs. Omitting it keeps the current list. Include a list change only after the owner confirmed it. " +
+			"new_project: an optional project for the owner to create at Start, with name (display name), repo (the GitHub repository name), visibility (private by default; public only after the owner confirms it), description and charter (its first charter). Omitting it keeps the current one, a new object replaces it and null removes it. " +
+			"A brief needs at least one existing project or a new project. The result gives the brief's revision.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"content":{"type":"string"},"kind":` + kindSchema() + `,"projects":{"type":"array","items":{"type":"string"}},"new_project":{"type":["object","null"],"properties":{"name":{"type":"string"},"repo":{"type":"string"},"visibility":{"type":"string"},"description":{"type":"string"},"charter":{"type":"string"}},"required":["name","repo","charter"],"additionalProperties":false}},"required":["content"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := repository.ActiveTurn(scope); err != nil {
@@ -702,7 +710,7 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 				Recorded bool   `json:"recorded"`
 				Revision int    `json:"revision"`
 				Next     string `json:"next"`
-			}{true, k, "Recorded. The owner can now start a workgroup from this brief, or you can call " + DraftBriefToolName + " again to revise it."})
+			}{true, k, "Recorded. Tell the owner what the brief now says and what changed. The owner starts the workgroup from it, and you can call " + DraftBriefToolName + " again to revise it."})
 		}}
 }
 
@@ -713,7 +721,7 @@ func (s *Controller) DraftBriefTool(repository *trace.Repository, scope coreadap
 // records nothing, so the turn continues.
 func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: DesignTitleToolName, Effect: coreadapter.ToolMemory,
-		Description: "Set the title of this design session for the owner: one non-empty line of at most 200 characters naming what the session is about. Call it once the session's context is clear and again when its subject changes materially; the latest title is the one shown. A title starts no work and does not change the brief. Write in words: no commit hashes, branch names, file paths, URLs, session IDs, Osmia IDs or model names.",
+		Description: "Set the title the owner sees for this design session. title: one non-empty line of at most 200 characters that names what the session is about, in words. Leave out commit hashes, branch names, file paths, URLs, session IDs, Osmia IDs and model names, which mean nothing in the owner's list of sessions and which the call refuses. Call it once the session's context is clear and again when its subject changes materially; the latest title is the one shown. A title starts no work and does not change the brief.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := repository.ActiveTurn(scope); err != nil {
@@ -769,7 +777,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 				Recorded bool   `json:"recorded"`
 				Revision int    `json:"revision"`
 				Next     string `json:"next"`
-			}{true, k, "Recorded. Call " + DesignTitleToolName + " again if the subject of the session changes materially."})
+			}{true, k, "Recorded. Call " + DesignTitleToolName + " again only if the subject of the session changes materially."})
 		}}
 }
 
@@ -780,7 +788,7 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 // control beyond a local, read-only export of the head commit.
 func DesignReadRepoTool(cfg *config.Config, r *trace.Repository, controls *Controls, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: DesignReadRepoToolName, Effect: coreadapter.ToolRead,
-		Description: "Read a file, or list a directory, from any active project, read-only. repo defaults to the session project; name any active project by its project ID to read it instead. path defaults to the root; start is a one-based line, lines defaults to 200 (maximum 1000).",
+		Description: "Read a file, or list a directory, from the committed head of any active project. It reads only; it cannot write or fetch anything. repo: an active project's ID; it defaults to the session project. path: a file or directory in the repository, relative to its root; it defaults to the root. start: the first line to read, counting from one. lines: how many lines to return; it defaults to 200 and at most 1000, and an excerpt over 65536 bytes is refused, so ask for fewer lines. A directory returns its names and their total.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"path":{"type":"string"},"start":{"type":"integer"},"lines":{"type":"integer"}},"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			if err := r.ActiveTurn(scope); err != nil {

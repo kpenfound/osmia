@@ -25,10 +25,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context in the current turn context was assembled when the message was accepted."
+const chiefPrompt = "You are the chief of staff for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
 
 func chiefGuidance() string {
-	return strings.Join([]string{intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
+	return strings.Join([]string{intake.ChiefRolePrompt, intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
 }
 
 func (s *Service) now() time.Time {

@@ -352,7 +352,7 @@ const DecideAmendmentTool = "decide_amendment"
 // AmendmentGuidance tells the chief of staff when and how to use
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
-const AmendmentGuidance = "When the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
+const AmendmentGuidance = "## Amendments\nWhen the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
 	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
 // DecideAmendment returns the decide_amendment tool of one claimed

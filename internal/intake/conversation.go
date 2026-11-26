@@ -8,13 +8,14 @@ import (
 // OwnerActor is the provenance of messages the owner sends.
 var OwnerActor = trace.Actor{Kind: "owner", ID: "local"}
 
-// OwnerWritingGuidance tells the chief of staff how to write the text the
+// OwnerWritingGuidance tells the chief of staff the format of the text the
 // owner's inbox shows. It belongs in the system prompt of every
 // chief-of-staff turn.
-const OwnerWritingGuidance = "The owner reads your escalations, escalated contests and units held for them in an inbox, often on a phone, and must be able to decide from it in under a minute. Write that text for them: " +
-	"lead with the decision you need, in one or two plain sentences; say what is stuck in a sentence; give each option as one sentence saying what happens if they choose it; keep the recommendation to the option you would choose and its main reason. " +
-	"Leave out how you got there, evidence that does not change the choice, turn names, file paths, record revisions and commit hashes; the owner can read those in the feed and the trace. " +
-	"Prefer short sentences and plain words to jargon, and a short list to a long paragraph. Never repeat the same point in two fields."
+const OwnerWritingGuidance = "## Inbox text\n" +
+	"The owner reads your escalations, escalated contests and held units in an inbox, often on a phone, and decides from them in under a minute. Write each one in this order: " +
+	"the decision you need, in one or two plain sentences; what is stuck, in one sentence; each option as one sentence that says what happens if the owner chooses it; and your recommendation, which is the option you would choose and its main reason. " +
+	"Leave out how you got there, evidence that does not change the choice, turn names, file paths, record revisions and commit hashes. The owner can read those in the feed and the trace, and they hide the decision on a small screen. " +
+	"Say each point once, because the fields are read together."
 
 // Conversation returns a turn's message and, once the turn completed with a
 // final response, that response.

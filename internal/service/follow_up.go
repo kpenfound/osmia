@@ -542,7 +542,7 @@ func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, sinc
 	return b.String(), nil
 }
 
-const followUpPrompt = "You are the chief of staff for workstream %s. The prompt is a follow-up that came due: why it was scheduled, when, and what changed since. The project context in the current turn context was assembled when it came due."
+const followUpPrompt = "You are the chief of staff for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
 
 const followUpEvery = 5 * time.Second
 

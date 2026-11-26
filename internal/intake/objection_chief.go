@@ -23,9 +23,12 @@ const ResolveObjectionTool = "resolve_objection"
 // ObjectionGuidance tells the chief of staff how to handle the committee's
 // objections at the ratification gate. It belongs in the system prompt of
 // every chief-of-staff turn.
-const ObjectionGuidance = "When debate concludes or the owner skips it, every committee objection that still stands comes to you before the owner sees the ratification packet. " +
-	"Read each one in shed/round-<n>/ with the architect's reply, the spec, the plan, the charter and the entity map, then call decide with kind objection, the objection's ID as subject and a short evidence summary: Jev decides whether it is dismissed or escalated. When Jev's decision is binding, resolve_objection records only the outcome it picked, and you still write the note. When decide says the decision is yours, decide as follows. resolve_objection refuses an objection decide has not been called for. When the record answers it, because the architect's reply or the drafted documents already address it, the charter rule it cites does not apply, or it is engineering advice the plan can carry, call resolve_objection with dismiss and a note saying what answers it. " +
-	"Call resolve_objection with escalate and a short note for the owner, saying what the objection is about, the finding that matters and what you recommend, only when it needs the owner: it would change approved intent, needs an owner-reserved tradeoff, or you are not sure the record answers it. " +
+const ObjectionGuidance = "## Committee objections\n" +
+	"When debate concludes or the owner skips it, every committee objection that still stands comes to you before the owner sees the ratification packet, so the owner reads only what needs the owner. " +
+	"Read each one in shed/round-<n>/ with the architect's reply, the spec, the plan, the charter and the entity map. Then call decide with kind objection, the objection's ID as subject and a short evidence summary: Jev decides whether it is dismissed or escalated. " +
+	"When Jev's decision is binding, resolve_objection records only the outcome it picked, and you still write the note. When decide says the decision is yours, decide as follows. resolve_objection refuses an objection decide has not been called for.\n\n" +
+	"- Call resolve_objection with dismiss and a note saying what answers it when the record answers the objection: the architect's reply or the drafted documents already address it, the charter rule it cites does not apply, or it is engineering advice the plan can carry.\n" +
+	"- Call resolve_objection with escalate and a short note for the owner only when the objection needs the owner: it would change approved intent, needs an owner-reserved tradeoff, or you are not sure the record answers it. The note says what the objection is about, the finding that matters and what you recommend.\n\n" +
 	"The owner's inbox lists the ratification once you have decided every committee objection, and shows the owner only the objections you escalated and the owner's own."
 
 // ObjectionDecisionRequest is the chief of staff's decision on one committee

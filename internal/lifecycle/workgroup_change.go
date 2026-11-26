@@ -22,7 +22,7 @@ import (
 const ChangeBoundarySubject = "change-boundary"
 const RequestChangeTool = "request_change"
 const DecideChangeTool = "decide_change"
-const ChangeGuidance = "When the owner asks to amend or cancel, call request_change with a stable key, kind amend or cancel, scope workgroup or workstream, and the requested change. The committee debates only the delta. Present the single impact summary; call decide_change only from an explicit owner approval or rejection of its current revision. For cancellation ask at that time whether open PRs are closed or left as drafts. Merged work stays intact."
+const ChangeGuidance = "## Changing or cancelling a workgroup\nWhen the owner asks to amend or cancel, call request_change with a stable key, kind amend or cancel, scope workgroup or workstream, and the requested change. The committee debates only the delta. Present the single impact summary; call decide_change only from an explicit owner approval or rejection of its current revision. For cancellation ask at that time whether open PRs are closed or left as drafts. Merged work stays intact."
 
 // ChangeRequest is an owner request in the shared chat. Key makes a retried
 // Request idempotent; scope selects this member or the entire workgroup.
