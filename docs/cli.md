@@ -66,6 +66,8 @@ osmia profiles set mason default
 osmia profiles clear mason
 osmia config
 osmia config validate --config ./config.toml
+osmia sandbox build
+osmia sandbox check
 osmia reload
 osmia status --json
 ```
@@ -1106,6 +1108,39 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
     `api_key_env` and the like), so it passes whether or not the variable is
     set. It does not check the host, such as whether a clone exists or a port is
     free.
+- `sandbox build` builds the `osmia:latest` [sbx template](configuration.md#docker-sandboxes-sbx)
+  and `sandbox check` reports whether the template saved now can run Fable 5.2.
+  Both run on the host that owns the sbx templates, as the user that runs
+  Osmia. They are offline: no service, socket, root, configuration file or
+  secret is read, and they take no flag. They find `sbx` (and, for `build`,
+  `dagger`) on `PATH` and exit 1 naming the tool when one is missing. On
+  failure they print one line on stderr, `osmia sandbox <command>: <reason>`;
+  progress goes to stdout, and on success they exit 0. Exit 2 is a usage
+  error. A reason never contains a secret value.
+  - **`sandbox build`** does what `scripts/build-sandbox.sh` does, with every
+    one of its verifications: `sbx` and `dagger` are on `PATH`; the host's
+    Dagger release is read, installed in the template and verified there;
+    Docker Engine and the Docker CLI are removed; Codex is at least 0.136.0;
+    Claude Code is installed; and a probe finds no Docker Engine as root and as
+    the agent user. It saves `osmia:latest` only when all of them pass. A
+    refused build and a build whose save fails exit 1 with the reason and leave
+    the template saved before in place. The build creates, stops and removes
+    only its own temporary sandbox, named `osmia-build-` and eight hex digits,
+    so sandboxes already running from an earlier template are not disturbed.
+    It takes up to an hour and gives up after that; a typical build takes a few
+    minutes.
+  - **`sandbox check`** exits 0 only when the saved `osmia:latest` exists and its
+    Claude Code is 2.1.321 or later, the first release that runs Fable 5.2.
+    Otherwise it exits 1 with the reason: no saved template, a Claude Code
+    older than 2.1.321, or a version it cannot read. It judges the template
+    saved now and nothing else. It creates a short-lived sandbox named
+    `osmia-check-` and eight hex digits from the template, runs
+    `claude --version` in it and removes it, and it keeps no record of any
+    build. A template replaced by `scripts/build-sandbox.sh`, a removed
+    template and a template saved by an earlier build are each judged on what
+    is saved. A build that failed and left a healthy template in place
+    leaves the check passing. It takes seconds to a minute and gives up after
+    five minutes, so a deployment tool can use it as a health check.
 - `reload` asks the service to [reload its configuration](running.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
   to apply: <settings>` when the file changes settings that only a restart
@@ -1191,8 +1226,8 @@ osmia status --socket local.sock --json
 
 Clients never load configuration, runtime, trace or project files. They obtain
 the active project and effective values over HTTP using the service client.
-Two commands are offline and take no socket: `config validate` and
-`project settings`.
+Four commands are offline and take no socket: `config validate`,
+`project settings`, `sandbox build` and `sandbox check`.
 Changing socket configuration requires restarting the service and updating the
 client's `--socket` argument.
 

@@ -1,19 +1,70 @@
 #!/usr/bin/env bash
-# A stand-in for sbx that plays the build sandbox for scripts/build-sandbox.sh.
-# Every call is appended to $FAKE_SBX_LOG. The guest is the directory
-# $FAKE_GUEST_ROOT: the real guest probe script runs against it with
-# PROBE_ROOT/PROBE_PROC and sees $FAKE_GUEST_DOCKER_HOST as its DOCKER_HOST.
-# FAKE_SBX_PROBE selects a probe failure: fail (sbx exec exits non-zero),
-# silent (no output) or truncated (no "done" line).
+# A stand-in for sbx that plays the build sandbox for scripts/build-sandbox.sh
+# and for osmia sandbox build and check. Every call is appended to
+# $FAKE_SBX_LOG. Sandboxes and saved templates are files under $FAKE_SBX_STATE:
+# sandboxes/<name>/claude and templates/<name>/claude hold what `claude
+# --version` prints there, "MISSING" for no Claude Code at all.
+#
+# The guest is the directory $FAKE_GUEST_ROOT: the real guest probe script runs
+# against it with PROBE_ROOT/PROBE_PROC and sees $FAKE_GUEST_DOCKER_HOST as its
+# DOCKER_HOST. FAKE_SBX_PROBE selects a probe failure: fail (sbx exec exits
+# non-zero), silent (no output) or truncated (no "done" line).
+#
+# FAKE_SBX_CLAUDE sets what Claude Code prints in a sandbox made from the base
+# image, FAKE_SBX_NO_CLAUDE leaves it out, FAKE_SBX_SAVE_FAIL makes `template
+# save` fail without touching the saved template and FAKE_SBX_CREATE_FAIL makes
+# `create` fail.
 set -u
+state=${FAKE_SBX_STATE:?}
 printf '%s\n' "$*" >>"${FAKE_SBX_LOG:?}"
 
+fail() { echo "fake sbx: $*" >&2; exit 1; }
+slug() { echo "${1//[\/:]/_}"; }
+sandbox_dir() { echo "$state/sandboxes/$1"; }
+need_sandbox() { [[ -d $(sandbox_dir "$1") ]] || fail "no such sandbox: $1"; }
+
 case "${1:-}" in
-create | stop) exit 0 ;;
-rm) exit "${FAKE_SBX_RM_STATUS:-0}" ;;
-template) exit 0 ;;
+create)
+    shift
+    name= template=
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --name) name=$2; shift 2 ;;
+        --template) template=$2; shift 2 ;;
+        --skills | --pull | --cpus | --memory) shift 2 ;;
+        *) shift ;;
+        esac
+    done
+    [[ -z ${FAKE_SBX_CREATE_FAIL:-} ]] || fail "cannot create sandbox"
+    [[ -n $name ]] || fail "no sandbox name"
+    [[ ! -e $(sandbox_dir "$name") ]] || fail "sandbox $name already exists"
+    claude=${FAKE_SBX_CLAUDE:-2.1.321 (Claude Code)}
+    [[ -z ${FAKE_SBX_NO_CLAUDE:-} ]] || claude=MISSING
+    if [[ -n $template ]]; then
+        [[ -f $state/templates/$(slug "$template")/claude ]] || fail "template $template not found"
+        claude=$(cat "$state/templates/$(slug "$template")/claude")
+    fi
+    mkdir -p "$(sandbox_dir "$name")"
+    printf '%s\n' "$claude" >"$(sandbox_dir "$name")/claude"
+    exit 0 ;;
+stop)
+    need_sandbox "$2"
+    : >"$(sandbox_dir "$2")/stopped"
+    exit 0 ;;
+rm)
+    [[ ${FAKE_SBX_RM_STATUS:-0} -eq 0 ]] || exit "$FAKE_SBX_RM_STATUS"
+    rm -rf "$(sandbox_dir "${3:?}")"
+    exit 0 ;;
+template)
+    [[ ${2:-} == save ]] || fail "unexpected template command: $*"
+    [[ -z ${FAKE_SBX_SAVE_FAIL:-} ]] || fail "cannot save template"
+    need_sandbox "$3"
+    [[ -e $(sandbox_dir "$3")/stopped ]] || fail "sandbox $3 is still running"
+    mkdir -p "$state/templates/$(slug "$4")"
+    cp "$(sandbox_dir "$3")/claude" "$state/templates/$(slug "$4")/claude"
+    exit 0 ;;
 exec) ;;
-*) echo "fake sbx: unexpected command: $*" >&2; exit 2 ;;
+*) fail "unexpected command: $*" ;;
 esac
 
 shift
@@ -24,6 +75,8 @@ while [[ ${1:-} == -* ]]; do
     *) shift ;;
     esac
 done
+name=$1
+need_sandbox "$name"
 shift # the sandbox name
 
 case "$*" in
@@ -42,7 +95,10 @@ case "$*" in
     ;;
 *osmia-docker-removal*) cat >/dev/null ;;
 "codex --version") echo "${FAKE_SBX_CODEX_OUTPUT:-codex-cli 1.0.0}" ;;
-"claude --version") [[ -z ${FAKE_SBX_NO_CLAUDE:-} ]] || exit 127; echo "2.0.0 (Claude Code)" ;;
+"claude --version")
+    claude=$(cat "$(sandbox_dir "$name")/claude")
+    [[ $claude != MISSING ]] || exit 127
+    echo "$claude" ;;
 "dagger version") echo "version:     ${FAKE_SBX_DAGGER_VERSION:-v0.19.0}" ;;
 *) cat >/dev/null ;; # installer scripts piped on stdin
 esac

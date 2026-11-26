@@ -111,6 +111,11 @@ osmia serve
 each project's clone, remotes and GitHub access, and prints how to fix what it
 finds; see [`doctor`](cli.md#doctor). Run it whenever `osmia serve` fails.
 
+Roles that set `sandbox = "sbx"` use the `osmia:latest` template. Build it with
+`osmia sandbox build` before you start the service, and ask whether the saved
+template can run Fable 5.2 with `osmia sandbox check`; neither needs the service
+([the Osmia template](configuration.md#docker-sandboxes-sbx)).
+
 The service runs in the foreground; leave it running. In another terminal:
 
 ```sh

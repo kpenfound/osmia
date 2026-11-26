@@ -1,10 +1,7 @@
 package scripts
 
 import (
-	_ "embed"
-	"fmt"
 	"net"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -13,247 +10,61 @@ import (
 	"testing"
 )
 
-//go:embed build-sandbox.sh
-var buildScript []byte
-
-func scriptPath(t *testing.T) string {
+func eachBuild(t *testing.T, fn func(t *testing.T, p buildPath)) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "build-sandbox.sh")
-	must(os.WriteFile(path, buildScript, 0o755))
-	return path
-}
-
-type guest struct {
-	root       string
-	dockerHost string
-	probe      string
-	noClaude   bool
-	daggerTag  string
-	codexOut   string
-}
-
-func newGuest(t *testing.T) *guest {
-	t.Helper()
-	root, err := os.MkdirTemp("", "g")
-	if err != nil {
-		t.Fatal(err)
+	for _, p := range buildPaths {
+		t.Run(p.name, func(t *testing.T) { fn(t, p) })
 	}
-	t.Cleanup(func() { os.RemoveAll(root) })
-	g := &guest{root: root}
-	g.process(1, "systemd", "/sbin/init")
-	g.process(2, "bash", "bash")
-	for _, dir := range []string{"run", "tmp", "home/agent", "root", "usr/bin"} {
-		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
-			t.Fatal(err)
+}
+
+func TestBuildSavesCleanGuest(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		g := newGuest(t)
+		res := p.run(g, t)
+		res.wantSaved(t)
+
+		steps := []string{
+			"create --name",
+			"osmia-docker-removal",
+			"codex --version",
+			"claude --version",
+			"dagger version",
+			"-u root",
+			"osmia-docker-probe",
+			"stop ",
+			"template save ",
+			"rm --force",
 		}
-	}
-	return g
-}
-
-func (g *guest) process(pid int, comm, argv0 string) {
-	dir := filepath.Join(g.root, "proc", fmt.Sprint(pid))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		panic(err)
-	}
-	must(os.WriteFile(filepath.Join(dir, "comm"), []byte(comm+"\n"), 0o644))
-	must(os.WriteFile(filepath.Join(dir, "cmdline"), []byte(argv0+"\x00--flag\x00"), 0o644))
-}
-
-func (g *guest) file(rel string) {
-	path := filepath.Join(g.root, rel)
-	must(os.MkdirAll(filepath.Dir(path), 0o755))
-	must(os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
-}
-
-func must(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
-func (g *guest) serve(t *testing.T, rel string, handler http.Handler, stale bool) {
-	t.Helper()
-	path := filepath.Join(g.root, rel)
-	must(os.MkdirAll(filepath.Dir(path), 0o755))
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(!stale)
-	if stale {
-		ln.Close()
-		return
-	}
-	srv := &http.Server{Handler: handler}
-	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close() })
-}
-
-var pingOK = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/_ping" {
-		fmt.Fprint(w, "OK")
-		return
-	}
-	http.NotFound(w, r)
-})
-
-var pingBroken = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "boom", http.StatusInternalServerError)
-})
-
-type result struct {
-	output string
-	err    error
-	calls  []string
-	tmp    string
-}
-
-func (r result) count(prefix string) int {
-	n := 0
-	for _, c := range r.calls {
-		if strings.HasPrefix(c, prefix) {
-			n++
+		at := -1
+		for _, step := range steps {
+			next := -1
+			for i := at + 1; i < len(res.calls); i++ {
+				if strings.Contains(res.calls[i], step) {
+					next = i
+					break
+				}
+			}
+			if next < 0 {
+				t.Fatalf("no call containing %q after call %d in %v", step, at, res.calls)
+			}
+			at = next
 		}
-	}
-	return n
-}
-
-func (g *guest) run(t *testing.T) result {
-	t.Helper()
-	for _, tool := range []string{"bash", "curl", "find"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Fatalf("%s is required: %v", tool, err)
-		}
-	}
-	bin := t.TempDir()
-	fake, err := os.ReadFile("testdata/fake-sbx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	must(os.WriteFile(filepath.Join(bin, "sbx"), fake, 0o755))
-	must(os.WriteFile(filepath.Join(bin, "dagger"), []byte("#!/bin/sh\necho 'version:     v0.19.0'\n"), 0o755))
-	tmp := t.TempDir()
-	log := filepath.Join(t.TempDir(), "calls")
-	cmd := exec.Command("bash", scriptPath(t))
-	env := []string{
-		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"HOME=" + t.TempDir(),
-		"TMPDIR=" + tmp,
-		"FAKE_SBX_LOG=" + log,
-		"FAKE_GUEST_ROOT=" + g.root,
-		"FAKE_GUEST_DOCKER_HOST=" + g.dockerHost,
-		"FAKE_SBX_PROBE=" + g.probe,
-	}
-	if g.noClaude {
-		env = append(env, "FAKE_SBX_NO_CLAUDE=1")
-	}
-	if g.daggerTag != "" {
-		env = append(env, "FAKE_SBX_DAGGER_VERSION="+g.daggerTag)
-	}
-	if g.codexOut != "" {
-		env = append(env, "FAKE_SBX_CODEX_OUTPUT="+g.codexOut)
-	}
-	cmd.Env = env
-	out, runErr := cmd.CombinedOutput()
-	data, _ := os.ReadFile(log)
-	return result{output: string(out), err: runErr, calls: strings.Split(strings.TrimSpace(string(data)), "\n"), tmp: tmp}
-}
-
-func (r result) wantSaved(t *testing.T) {
-	t.Helper()
-	if r.err != nil {
-		t.Fatalf("script failed: %v\n%s", r.err, r.output)
-	}
-	if n := r.count("template save "); n != 1 {
-		t.Fatalf("template saves = %d, want 1\n%v", n, r.calls)
-	}
-	r.wantRemoved(t)
-}
-
-func (r result) wantRefused(t *testing.T, want ...string) {
-	t.Helper()
-	if r.err == nil {
-		t.Fatalf("script succeeded, want refusal\n%s", r.output)
-	}
-	if n := r.count("template save"); n != 0 {
-		t.Fatalf("template saved %d times on refusal\n%s", n, r.output)
-	}
-	if n := r.count("stop"); n != 0 {
-		t.Fatalf("sandbox stopped on refusal: %v", r.calls)
-	}
-	for _, w := range want {
-		if !strings.Contains(r.output, w) {
-			t.Errorf("output does not name %q:\n%s", w, r.output)
-		}
-	}
-	r.wantRemoved(t)
-}
-
-func (r result) wantRemoved(t *testing.T) {
-	t.Helper()
-	var created, removed string
-	for _, c := range r.calls {
-		if f := strings.Fields(c); len(f) > 2 && f[0] == "create" && f[1] == "--name" {
-			created = f[2]
-		}
-		if f := strings.Fields(c); len(f) == 3 && f[0] == "rm" && f[1] == "--force" {
-			removed = f[2]
-		}
-	}
-	if created == "" || created != removed {
-		t.Errorf("created sandbox %q, removed %q\n%v", created, removed, r.calls)
-	}
-	if entries, _ := os.ReadDir(r.tmp); len(entries) != 0 {
-		t.Errorf("temporary build directory left behind: %v", entries)
-	}
-}
-
-func TestBuildSandboxSavesCleanGuest(t *testing.T) {
-	g := newGuest(t)
-	res := g.run(t)
-	res.wantSaved(t)
-
-	steps := []string{
-		"create --name",
-		"osmia-docker-removal",
-		"codex --version",
-		"claude --version",
-		"dagger version",
-		"-u root",
-		"osmia-docker-probe",
-		"stop ",
-		"template save ",
-		"rm --force",
-	}
-	at := -1
-	for _, step := range steps {
-		next := -1
-		for i := at + 1; i < len(res.calls); i++ {
-			if strings.Contains(res.calls[i], step) {
-				next = i
-				break
+		probes := 0
+		for _, c := range res.calls {
+			if strings.Contains(c, "osmia-docker-probe") {
+				probes++
 			}
 		}
-		if next < 0 {
-			t.Fatalf("no call containing %q after call %d in %v", step, at, res.calls)
+		if probes != 2 {
+			t.Errorf("probe ran %d times, want once as root and once as the agent user: %v", probes, res.calls)
 		}
-		at = next
-	}
-	probes := 0
-	for _, c := range res.calls {
-		if strings.Contains(c, "osmia-docker-probe") {
-			probes++
+		if got := res.calls[len(res.calls)-1]; !strings.HasPrefix(got, "rm --force") {
+			t.Errorf("last call is %q, want the sandbox removal", got)
 		}
-	}
-	if probes != 2 {
-		t.Errorf("probe ran %d times, want once as root and once as the agent user: %v", probes, res.calls)
-	}
-	if got := res.calls[len(res.calls)-1]; !strings.HasPrefix(got, "rm --force") {
-		t.Errorf("last call is %q, want the sandbox removal", got)
-	}
+	})
 }
 
-func TestBuildSandboxHasNoDockerVariant(t *testing.T) {
+func TestBuildHasNoDockerVariant(t *testing.T) {
 	cmd := exec.Command("bash", scriptPath(t), "--docker")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	out, err := cmd.CombinedOutput()
@@ -262,157 +73,171 @@ func TestBuildSandboxHasNoDockerVariant(t *testing.T) {
 	}
 }
 
-func TestBuildSandboxRefusesRunningEngine(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(g *guest)
-		want  string
-	}{
-		{"dockerd", func(g *guest) { g.process(30, "dockerd", "/usr/bin/dockerd") }, "dockerd"},
-		{"containerd", func(g *guest) { g.process(31, "containerd", "/usr/bin/containerd") }, "containerd"},
-		{"containerd shim", func(g *guest) { g.process(32, "containerd-shim", "/usr/bin/containerd-shim-runc-v2") }, "containerd-shim"},
-		{"engine hidden behind another process name", func(g *guest) { g.process(33, "exe", "/usr/bin/dockerd") }, "found processes"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := newGuest(t)
-			tt.setup(g)
-			g.run(t).wantRefused(t, "Refusing to save template osmia:latest", "found processes", tt.want)
-		})
-	}
+func TestBuildRefusesRunningEngine(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		tests := []struct {
+			name  string
+			setup func(g *guest)
+			want  string
+		}{
+			{"dockerd", func(g *guest) { g.process(30, "dockerd", "/usr/bin/dockerd") }, "dockerd"},
+			{"containerd", func(g *guest) { g.process(31, "containerd", "/usr/bin/containerd") }, "containerd"},
+			{"containerd shim", func(g *guest) { g.process(32, "containerd-shim", "/usr/bin/containerd-shim-runc-v2") }, "containerd-shim"},
+			{"engine hidden behind another process name", func(g *guest) { g.process(33, "exe", "/usr/bin/dockerd") }, "found processes"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				g := newGuest(t)
+				tt.setup(g)
+				p.run(g, t).wantRefused(t, "Refusing to save template osmia:latest", "found processes", tt.want)
+			})
+		}
+	})
 }
 
-func TestBuildSandboxRefusesReachableDaemonWithoutDockerExecutable(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(t *testing.T, g *guest)
-	}{
-		{"default socket", func(t *testing.T, g *guest) { g.serve(t, "var/run/docker.sock", pingOK, false) }},
-		{"run socket", func(t *testing.T, g *guest) { g.serve(t, "run/docker.sock", pingOK, false) }},
-		{"DOCKER_HOST unix socket", func(t *testing.T, g *guest) {
-			g.serve(t, "tmp/custom.sock", pingOK, false)
-			g.dockerHost = "unix:///tmp/custom.sock"
-		}},
-		{"DOCKER_HOST tcp address", func(t *testing.T, g *guest) {
-			srv := httptest.NewServer(pingOK)
-			t.Cleanup(srv.Close)
-			g.dockerHost = "tcp://" + strings.TrimPrefix(srv.URL, "http://")
-		}},
-		{"forwarded socket under a user directory", func(t *testing.T, g *guest) {
-			g.serve(t, "run/user/1000/docker.sock", pingOK, false)
-		}},
-		{"relocated socket", func(t *testing.T, g *guest) { g.serve(t, "tmp/forwarded/dockerd-fwd.sock", pingOK, false) }},
-		{"containerd socket", func(t *testing.T, g *guest) { g.serve(t, "run/containerd/containerd.sock", pingBroken, false) }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := newGuest(t)
-			tt.setup(t, g)
-			if _, err := os.Stat(filepath.Join(g.root, "usr/bin/docker")); err == nil {
-				t.Fatal("the guest has a docker executable")
-			}
-			g.run(t).wantRefused(t, "Refusing to save template osmia:latest", "found endpoints")
-		})
-	}
-}
-
-func TestBuildSandboxRefusesLeftoverEngineExecutables(t *testing.T) {
-	for _, bin := range []string{"usr/bin/docker", "usr/bin/dockerd", "usr/local/bin/containerd"} {
-		t.Run(bin, func(t *testing.T) {
-			g := newGuest(t)
-			g.file(bin)
-			g.run(t).wantRefused(t, "found binaries", "/"+bin)
-		})
-	}
-}
-
-func TestBuildSandboxRefusesWhenAProbeCannotAnswer(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func(t *testing.T, g *guest)
-		want  string
-	}{
-		{"sbx exec fails", func(t *testing.T, g *guest) { g.probe = "fail" }, "the probe could not run"},
-		{"probe prints nothing", func(t *testing.T, g *guest) { g.probe = "silent" }, "gave no answer"},
-		{"probe stops early", func(t *testing.T, g *guest) { g.probe = "truncated" }, "did not run to completion"},
-		{"processes are not visible", func(t *testing.T, g *guest) {
-			must(os.RemoveAll(filepath.Join(g.root, "proc")))
-		}, "unknown processes"},
-		{"socket answers something else", func(t *testing.T, g *guest) { g.serve(t, "var/run/docker.sock", pingBroken, false) }, "unknown endpoints"},
-		{"DOCKER_HOST scheme cannot be asked", func(t *testing.T, g *guest) { g.dockerHost = "ssh://user@elsewhere" }, "unknown endpoints"},
-		{"socket path is not a socket", func(t *testing.T, g *guest) { g.file("var/run/docker.sock") }, "not a socket"},
-		{"DOCKER_HOST tcp address times out", func(t *testing.T, g *guest) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { ln.Close() })
-			go func() {
-				for {
-					c, err := ln.Accept()
-					if err != nil {
-						return
-					}
-					t.Cleanup(func() { c.Close() })
+func TestBuildRefusesReachableDaemonWithoutDockerExecutable(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		tests := []struct {
+			name  string
+			setup func(t *testing.T, g *guest)
+		}{
+			{"default socket", func(t *testing.T, g *guest) { g.serve(t, "var/run/docker.sock", pingOK, false) }},
+			{"run socket", func(t *testing.T, g *guest) { g.serve(t, "run/docker.sock", pingOK, false) }},
+			{"DOCKER_HOST unix socket", func(t *testing.T, g *guest) {
+				g.serve(t, "tmp/custom.sock", pingOK, false)
+				g.dockerHost = "unix:///tmp/custom.sock"
+			}},
+			{"DOCKER_HOST tcp address", func(t *testing.T, g *guest) {
+				srv := httptest.NewServer(pingOK)
+				t.Cleanup(srv.Close)
+				g.dockerHost = "tcp://" + strings.TrimPrefix(srv.URL, "http://")
+			}},
+			{"forwarded socket under a user directory", func(t *testing.T, g *guest) {
+				g.serve(t, "run/user/1000/docker.sock", pingOK, false)
+			}},
+			{"relocated socket", func(t *testing.T, g *guest) { g.serve(t, "tmp/forwarded/dockerd-fwd.sock", pingOK, false) }},
+			{"containerd socket", func(t *testing.T, g *guest) { g.serve(t, "run/containerd/containerd.sock", pingBroken, false) }},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				g := newGuest(t)
+				tt.setup(t, g)
+				if _, err := os.Stat(filepath.Join(g.root, "usr/bin/docker")); err == nil {
+					t.Fatal("the guest has a docker executable")
 				}
-			}()
-			g.dockerHost = "tcp://" + ln.Addr().String()
-		}, "curl exit 28"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := newGuest(t)
-			tt.setup(t, g)
-			g.run(t).wantRefused(t, "Refusing to save template osmia:latest", tt.want)
-		})
-	}
-}
-
-func TestBuildSandboxSavesWhenNoDaemonListens(t *testing.T) {
-	g := newGuest(t)
-	g.serve(t, "var/run/docker.sock", pingOK, true)
-	g.dockerHost = "tcp://127.0.0.1:1"
-	g.run(t).wantSaved(t)
-}
-
-func TestBuildSandboxKeepsVersionChecks(t *testing.T) {
-	t.Run("claude missing", func(t *testing.T) {
-		g := newGuest(t)
-		g.noClaude = true
-		g.run(t).wantRefused(t)
-	})
-	t.Run("wrong dagger release", func(t *testing.T) {
-		g := newGuest(t)
-		g.daggerTag = "v0.1.0"
-		g.run(t).wantRefused(t, "Expected Dagger v0.19.0")
+				p.run(g, t).wantRefused(t, "Refusing to save template osmia:latest", "found endpoints")
+			})
+		}
 	})
 }
 
-func TestBuildSandboxChecksTheCodexMinimum(t *testing.T) {
-	for _, tt := range []struct {
-		name, version string
-		saved         bool
-	}{
-		{"older release", "codex-cli 0.135.0", false},
-		{"older patch of an older minor", "codex-cli 0.99.9", false},
-		{"unreadable version", "codex-cli unknown", false},
-		{"minimum release", "codex-cli 0.136.0", true},
-		{"newer patch", "codex-cli 0.136.1", true},
-		{"newer minor with prerelease", "codex-cli 0.173.0-alpha.4", true},
-		{"newer major", "codex-cli 1.0.0", true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
+func TestBuildRefusesLeftoverEngineExecutables(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		for _, bin := range []string{"usr/bin/docker", "usr/bin/dockerd", "usr/local/bin/containerd"} {
+			t.Run(bin, func(t *testing.T) {
+				g := newGuest(t)
+				g.file(bin)
+				p.run(g, t).wantRefused(t, "found binaries", "/"+bin)
+			})
+		}
+	})
+}
+
+func TestBuildRefusesWhenAProbeCannotAnswer(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		tests := []struct {
+			name  string
+			setup func(t *testing.T, g *guest)
+			want  string
+		}{
+			{"sbx exec fails", func(t *testing.T, g *guest) { g.probe = "fail" }, "the probe could not run"},
+			{"probe prints nothing", func(t *testing.T, g *guest) { g.probe = "silent" }, "gave no answer"},
+			{"probe stops early", func(t *testing.T, g *guest) { g.probe = "truncated" }, "did not run to completion"},
+			{"processes are not visible", func(t *testing.T, g *guest) {
+				must(os.RemoveAll(filepath.Join(g.root, "proc")))
+			}, "unknown processes"},
+			{"socket answers something else", func(t *testing.T, g *guest) { g.serve(t, "var/run/docker.sock", pingBroken, false) }, "unknown endpoints"},
+			{"DOCKER_HOST scheme cannot be asked", func(t *testing.T, g *guest) { g.dockerHost = "ssh://user@elsewhere" }, "unknown endpoints"},
+			{"socket path is not a socket", func(t *testing.T, g *guest) { g.file("var/run/docker.sock") }, "not a socket"},
+			{"DOCKER_HOST tcp address times out", func(t *testing.T, g *guest) {
+				ln, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { ln.Close() })
+				go func() {
+					for {
+						c, err := ln.Accept()
+						if err != nil {
+							return
+						}
+						t.Cleanup(func() { c.Close() })
+					}
+				}()
+				g.dockerHost = "tcp://" + ln.Addr().String()
+			}, "curl exit 28"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				g := newGuest(t)
+				tt.setup(t, g)
+				p.run(g, t).wantRefused(t, "Refusing to save template osmia:latest", tt.want)
+			})
+		}
+	})
+}
+
+func TestBuildSavesWhenNoDaemonListens(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		g := newGuest(t)
+		g.serve(t, "var/run/docker.sock", pingOK, true)
+		g.dockerHost = "tcp://127.0.0.1:1"
+		p.run(g, t).wantSaved(t)
+	})
+}
+
+func TestBuildKeepsVersionChecks(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		t.Run("claude missing", func(t *testing.T) {
 			g := newGuest(t)
-			g.codexOut = tt.version
-			res := g.run(t)
-			if tt.saved {
-				res.wantSaved(t)
-				return
-			}
-			res.wantRefused(t, "0.136.0", "skills/extraRoots/set")
-			if n := res.count("claude --version"); n != 0 {
-				t.Errorf("build went on after the Codex check: %v", res.calls)
-			}
+			g.noClaude = true
+			p.run(g, t).wantRefused(t)
 		})
-	}
+		t.Run("wrong dagger release", func(t *testing.T) {
+			g := newGuest(t)
+			g.daggerTag = "v0.1.0"
+			p.run(g, t).wantRefused(t, "Expected Dagger v0.19.0")
+		})
+	})
+}
+
+func TestBuildChecksTheCodexMinimum(t *testing.T) {
+	eachBuild(t, func(t *testing.T, p buildPath) {
+		for _, tt := range []struct {
+			name, version string
+			saved         bool
+		}{
+			{"older release", "codex-cli 0.135.0", false},
+			{"older patch of an older minor", "codex-cli 0.99.9", false},
+			{"unreadable version", "codex-cli unknown", false},
+			{"minimum release", "codex-cli 0.136.0", true},
+			{"newer patch", "codex-cli 0.136.1", true},
+			{"newer minor with prerelease", "codex-cli 0.173.0-alpha.4", true},
+			{"newer major", "codex-cli 1.0.0", true},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				g := newGuest(t)
+				g.codexOut = tt.version
+				res := p.run(g, t)
+				if tt.saved {
+					res.wantSaved(t)
+					return
+				}
+				res.wantRefused(t, "0.136.0", "skills/extraRoots/set")
+				if n := res.count("claude --version"); n != 0 {
+					t.Errorf("build went on after the Codex check: %v", res.calls)
+				}
+			})
+		}
+	})
 }

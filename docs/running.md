@@ -897,6 +897,20 @@ and what to do when a mason runs out of memory are in
 [Sandbox size](configuration.md#sandbox-size). Osmia sets no `cpus` or `memory`
 of its own.
 
+## The sbx template
+
+Roles with `sandbox = "sbx"` run from the `osmia:latest` template, which
+`osmia sandbox build` builds and saves and `scripts/build-sandbox.sh` builds the
+same way by hand. Both run offline, as the user that runs Osmia, and neither
+disturbs sandboxes already running from an earlier template: a build creates,
+stops and removes only its own temporary sandbox. A deployment can run
+`osmia sandbox build` on each deploy and use `osmia sandbox check` as the health
+check: it exits zero only while the saved template's Claude Code is 2.1.321 or
+later, the first release that runs Fable 5.2, and judges the template saved at
+that moment, so a rebuild that failed and left a healthy template in place does
+not fail it. See [the template](configuration.md#docker-sandboxes-sbx) and
+[the commands](cli.md#commands-and-flags).
+
 ## Projects and their settings
 
 The active projects, in order, and every active project's settings live in
