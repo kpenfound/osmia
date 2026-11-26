@@ -1300,6 +1300,72 @@ To pick up a change sooner, set `refresh = "always"` and reload, or delete the
 clone under `<root>/skills/repos/`. The references are shown in `/v1/config`,
 so do not embed credentials in a URL.
 
+### Recommended skills
+
+Osmia ships with `skills = []` for every role and for `[kinds.hill-climb]`, and
+it never depends on a skills repository. Every prompt Osmia gives an agent is
+complete without skills, and a skill only adds to it. The lists below are
+documentation, not defaults: they follow the lab configuration, which refers to
+[the skills project](https://github.com/kpenfound/skills) by folder name. Copy
+the ones you want into your own `config.toml`.
+
+| Role | Recommended skills |
+| --- | --- |
+| `architect` | none (`skills = []`) |
+| `committee` | none (`skills = []`) |
+| `foreman` | none (`skills = []`) |
+| `chief_of_staff` | `handoff-reports`, `design-sketch` |
+| `designer` | `handoff-reports`, `design-sketch` |
+| `mason` | `behavioral-testing`, `simple-code`, `no-deltas`, `lint-discipline`, `unslop`, `typescript-best-practices`, `debugging`, `handoff-reports` |
+| `reviewer` | `pr-review`, `simple-code`, `no-deltas`, `behavioral-testing` |
+| `[kinds.hill-climb]` | `hill-climb-evaluator` |
+
+Each entry is the reference `https://github.com/kpenfound/skills#<folder>`:
+
+```toml
+[roles.chief_of_staff]
+skills = [
+  "https://github.com/kpenfound/skills#handoff-reports",
+  "https://github.com/kpenfound/skills#design-sketch",
+]
+
+[roles.designer]
+skills = [
+  "https://github.com/kpenfound/skills#handoff-reports",
+  "https://github.com/kpenfound/skills#design-sketch",
+]
+
+[roles.mason]
+skills = [
+  "https://github.com/kpenfound/skills#behavioral-testing",
+  "https://github.com/kpenfound/skills#simple-code",
+  "https://github.com/kpenfound/skills#no-deltas",
+  "https://github.com/kpenfound/skills#lint-discipline",
+  "https://github.com/kpenfound/skills#unslop",
+  "https://github.com/kpenfound/skills#typescript-best-practices",
+  "https://github.com/kpenfound/skills#debugging",
+  "https://github.com/kpenfound/skills#handoff-reports",
+]
+
+[roles.reviewer]
+skills = [
+  "https://github.com/kpenfound/skills#pr-review",
+  "https://github.com/kpenfound/skills#simple-code",
+  "https://github.com/kpenfound/skills#no-deltas",
+  "https://github.com/kpenfound/skills#behavioral-testing",
+]
+
+[kinds.hill-climb]
+skills = ["https://github.com/kpenfound/skills#hill-climb-evaluator"]
+```
+
+The architect, committee and foreman have no recommended skills, so leave
+their `skills` out or empty. Skills never replace a factory rule: owner gates,
+footprints, the check gate, the design agent's limits and the verdict formats
+come from Osmia's own prompts and enforcement. Kind skills load only on the
+turns [listed above](#workstream-kind-settings), never on designer or chief
+turns, so `designer` and `chief_of_staff` keep their own lists.
+
 ## Project registration
 
 `osmia project add <name> --upstream OWNER/REPO [--fork OWNER/REPO] --clone PATH`
