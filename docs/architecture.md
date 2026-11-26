@@ -29,7 +29,7 @@ as files. Every write is one database transaction. Go reads current state on eac
 an event wakes a pass early but does not carry the state transition.
 
 One owner start hands the design brief to production drafting and allocation;
-the actual design conversation becomes the shared chief thread. For several
+the chief of staff opens a new thread from the brief and the attached design transcript, and the design conversation's own thread, which belongs to the designer role, is not continued. For several
 selected projects, one ratification pins the workgroup spec and all member revisions. Until every pinned member seal
 completes, no member has effective group approval or can build or release a
 contract edge. Restart reconciles the same durable decision, without another

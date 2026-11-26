@@ -350,7 +350,7 @@ func chiefOwnerBehind(th trace.Thread, q trace.QueuedTurn) bool {
 
 func (s *Service) queuedReason(th trace.Thread, q trace.QueuedTurn) string {
 	reason := queuedReason(th, q)
-	if reason == "starting" && th.Identity.Role == trace.ChiefOfStaff && s.chief.waitingFor(q.Request.Workstream, th.Identity.ID, q.Request.TurnID) {
+	if reason == "starting" && trace.ChiefLike(th.Identity.Role) && s.chief.waitingFor(q.Request.Workstream, th.Identity.ID, q.Request.TurnID) {
 		return chiefSlotWaitReason
 	}
 	return reason

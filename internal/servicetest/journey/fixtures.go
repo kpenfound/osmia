@@ -432,6 +432,7 @@ type ProductionDesignFixture struct {
 	*CrossRepoRatifyFixture
 	Origin        config.WorkstreamID
 	Before        trace.Thread
+	Design        trace.Thread
 	Handed        trace.Document
 	Clock         *fixturekit.FixedClock
 	Hook          atomic.Pointer[intakefixture.DesignInterruption]
@@ -463,7 +464,7 @@ func (f *ProductionDesignFixture) SharedDesign() *intakefixture.ProductionDesign
 
 		Project: &f.Project, Project2: &f.Project2, Trace: &f.Trace,
 		Origin: &f.Origin, Stream1: &f.Stream1, Stream2: &f.Stream2,
-		Before: &f.Before, Handed: &f.Handed, Owner: &f.Owner, OwnerAddress: &f.OwnerAddress, Repos: &f.Repos, ContextMode: func(p config.ProjectID) bundle.Mode { return f.S.Context().Mode(p) },
+		Before: &f.Before, Design: &f.Design, Handed: &f.Handed, Owner: &f.Owner, OwnerAddress: &f.OwnerAddress, Repos: &f.Repos, ContextMode: func(p config.ProjectID) bundle.Mode { return f.S.Context().Mode(p) },
 		Clone: f.Clone, Engine: f.Engine, Clock: f.Clock, Dispatch: f.Dispatch,
 		Client:     func() intakefixture.ProductionDesignClient { return f.C },
 		Config:     func() *config.Config { return f.S.Current() },

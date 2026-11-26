@@ -1413,7 +1413,14 @@ func Await(t *testing.T, what string, ch chan struct{}) {
 func EqualJSONTest(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+	return emptyList(string(x)) == emptyList(string(y))
+}
+
+func emptyList(encoded string) string {
+	if encoded == "null" {
+		return "[]"
+	}
+	return encoded
 }
 
 func ErrorCode(t *testing.T, body []byte) api.Code {

@@ -508,9 +508,10 @@ func (c *changePass) requireDesignConversationUnchanged(t *testing.T) {
 	chief, err := authority.Thread(c.host, trace.ChiefOfStaff)
 	closeAuthority()
 	fixturekit.Must(t, err)
+	c.f.SharedDesign().RebaseChief(t)
 	before := c.f.Before
 	if !intakefixture.EqualJSONTest(before.Identity, chief.Identity) || len(chief.Turns) < len(before.Turns) || !intakefixture.EqualJSONTest(before.Turns, chief.Turns[:len(before.Turns)]) {
-		t.Fatal("retirement changed original conversation or design turns")
+		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d chief=%+v turns=%d", before.Identity, len(before.Turns), chief.Identity, len(chief.Turns))
 	}
 }
 

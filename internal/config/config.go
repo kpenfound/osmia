@@ -331,7 +331,7 @@ type ProjectCapacity struct {
 // DefaultGitOperations bounds one project's repository and GitHub operations.
 const DefaultGitOperations = 4
 
-var roleNames = []string{"architect", "chief_of_staff", "committee", "foreman", "mason", "reviewer"}
+var roleNames = []string{"architect", "chief_of_staff", "committee", "designer", "foreman", "mason", "reviewer"}
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 

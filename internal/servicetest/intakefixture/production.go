@@ -77,6 +77,7 @@ type ProductionDesign struct {
 	Trace                    *string
 	Origin, Stream1, Stream2 *config.WorkstreamID
 	Before                   *trace.Thread
+	Design                   *trace.Thread
 	Handed                   *trace.Document
 	Owner                    *api.ConversationEntry
 	OwnerAddress             *config.WorkstreamID
@@ -452,6 +453,7 @@ func (f *ProductionDesign) AwaitPacket(t *testing.T) api.PacketResponse {
 			}
 		}
 	}
+	f.RebaseChief(t)
 	return packet
 }
 
@@ -500,11 +502,13 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 		chief, err := target.Thread(host, trace.ChiefOfStaff)
 		close()
 		fixturekit.Must(t, err)
-		if len(chief.Turns) < len(f.Before.Turns) {
-			t.Fatal("design turns were lost")
+		if chief.Identity.Role != trace.ChiefOfStaff {
+			t.Fatalf("the workgroup's chief thread has role %q", chief.Identity.Role)
 		}
-		if !EqualJSONTest(f.Before.Identity, chief.Identity) || len(f.Before.Turns) > 0 && !EqualJSONTest(f.Before.Turns, chief.Turns[:len(f.Before.Turns)]) {
-			t.Fatal("design identity, requests, responses or recovery state changed at adoption")
+		for _, design := range f.Design.Turns {
+			if slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
+				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
+			}
 		}
 	}
 	repo, err := f.Repository(*f.Project)
@@ -541,9 +545,16 @@ func (f *ProductionDesign) CheckContinuation(t *testing.T) {
 	if _, err := repo.Thread(*f.Origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("source retains an authoritative queue")
 	}
+	if f.Design.Identity.Role == trace.Designer {
+		designed, err := repo.DesignerThread(*f.Origin)
+		fixturekit.Must(t, err)
+		if !EqualJSONTest(f.Design.Identity, designed.Identity) || !EqualJSONTest(f.Design.Turns, designed.Turns) {
+			t.Fatal("design identity, requests, responses or recovery state changed at adoption")
+		}
+	}
 	historical, err := trace.Read[trace.TurnRequest](repo, *f.Origin)
 	fixturekit.Must(t, err)
-	if len(f.Before.Turns) > 0 && !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Before.Turns[0].Request.ID }) {
+	if len(f.Design.Turns) > 0 && !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Design.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
 	chief, _, _, closeChief, err := f.ChiefRepository(ctx, repo, *f.Stream1)
@@ -643,6 +654,24 @@ func (f *ProductionDesign) AssertBarrier(t *testing.T) {
 	}
 }
 
+// RebaseChief makes the baseline of the chief of staff's thread the thread the
+// workgroup's chief opened at Start. A started design session's chief begins a
+// new thread, so only that thread's identity, not the design session's, holds
+// from here on.
+func (f *ProductionDesign) RebaseChief(t *testing.T) {
+	t.Helper()
+	repo, err := f.Repository(*f.Project)
+	fixturekit.Must(t, err)
+	chief, host, _, closeChief, err := f.ChiefRepository(context.Background(), repo, *f.Stream1)
+	fixturekit.Must(t, err)
+	th, err := chief.Thread(host, trace.ChiefOfStaff)
+	closeChief()
+	fixturekit.Must(t, err)
+	if !EqualJSONTest(f.Before.Identity, th.Identity) {
+		*f.Before = trace.Thread{Identity: th.Identity}
+	}
+}
+
 func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 	t.Helper()
 	f.Wait(t, "group approval completion", func() bool {
@@ -652,6 +681,7 @@ func (f *ProductionDesign) AwaitApproved(t *testing.T) {
 		fixturekit.Must(t, err)
 		return ok
 	})
+	f.RebaseChief(t)
 	for i, m := range []config.WorkstreamID{*f.Stream1, *f.Stream2} {
 		p := *f.Project
 		if i == 1 {
@@ -693,7 +723,7 @@ func ConfigureProductionDesign(t *testing.T, root string) {
 	t.Helper()
 	file, err := os.OpenFile(filepath.Join(root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0600)
 	fixturekit.Must(t, err)
-	_, err = file.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 2\n[shed]\nmax_rounds = 1\n")
+	_, err = file.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.committee]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[capacity]\ncommittee = 2\n[shed]\nmax_rounds = 1\n")
 	fixturekit.Must(t, errors.Join(err, file.Close()))
 }
 
@@ -846,6 +876,8 @@ func (f *ProductionDesign) Setup(t *testing.T, handIn bool) {
 	repo, err := f.Repository(*f.Project)
 	fixturekit.Must(t, err)
 	*f.Before, err = repo.ChiefOfStaffThread(*f.Origin)
+	fixturekit.Must(t, err)
+	*f.Design, err = repo.DesignerThread(*f.Origin)
 	fixturekit.Must(t, err)
 }
 

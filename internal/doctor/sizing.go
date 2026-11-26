@@ -61,7 +61,7 @@ func (r *run) sandboxMemory(cfg *config.Config) {
 		slots int
 	}{
 		{"mason", cfg.Capacity.Masons}, {"reviewer", cfg.Capacity.Reviewers}, {"committee", cfg.Capacity.Committee},
-		{"architect", 1}, {"chief_of_staff", 1}, {"foreman", 1},
+		{"architect", 1}, {"chief_of_staff", 1}, {"designer", 1}, {"foreman", 1},
 	} {
 		if role := cfg.Roles[p.name]; role.Sandbox == "sbx" {
 			roles = append(roles, sizedRole{name: p.name, slots: p.slots, sized: role.Memory != ""})

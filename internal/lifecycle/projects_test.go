@@ -84,7 +84,7 @@ func TestZeroProjectStart(t *testing.T) {
 	}
 	rt, err := c.Runtime(ctx)
 	fixturekit.Must(t, err)
-	if !intakefixture.HasDiagnostic(rt.Diagnostics, api.NoProject) || len(rt.Effective.Profiles) != 6 || rt.Projects == nil || len(rt.Projects) != 0 {
+	if !intakefixture.HasDiagnostic(rt.Diagnostics, api.NoProject) || len(rt.Effective.Profiles) != 7 || rt.Projects == nil || len(rt.Projects) != 0 {
 		t.Fatalf("%+v", rt)
 	}
 	if s.Sole() != nil {

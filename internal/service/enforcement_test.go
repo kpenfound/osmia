@@ -135,7 +135,9 @@ func TestChiefGrantNamesEveryChiefTool(t *testing.T) {
 		wrappedNames = append(wrappedNames, tool.Name)
 	}
 	slices.Sort(wrappedNames)
-	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool { return name == "file_read" || name == climbSteerTool || name == climbConcludeTool })
+	all := slices.DeleteFunc(slices.Clone(chiefGrant.Tools), func(name string) bool {
+		return name == "file_read" || name == climbSteerTool || name == climbConcludeTool
+	})
 	slices.Sort(all)
 	if !slices.Equal(wrappedNames, all) {
 		t.Errorf("production chief registry %v, want %v", wrappedNames, all)

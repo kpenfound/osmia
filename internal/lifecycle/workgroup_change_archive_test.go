@@ -349,11 +349,10 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 		chief, err := target.Thread(host, trace.ChiefOfStaff)
 		close()
 		fixturekit.Must(t, err)
-		if len(chief.Turns) < len(f.Before.Turns) {
-			t.Fatal("design turns were lost")
-		}
-		if !intakefixture.EqualJSONTest(f.Before.Identity, chief.Identity) || !intakefixture.EqualJSONTest(f.Before.Turns, chief.Turns[:len(f.Before.Turns)]) {
-			t.Fatal("design identity, requests, responses or recovery state changed at adoption")
+		for _, design := range f.Design.Turns {
+			if slices.ContainsFunc(chief.Turns, func(q trace.QueuedTurn) bool { return q.Request.ID == design.Request.ID }) {
+				t.Fatalf("design turn %s is on the chief's thread", design.Request.ID)
+			}
 		}
 	}
 	repo, err := f.S.Repository(f.Project)
@@ -390,9 +389,16 @@ func checkFollowupContinuation(t *testing.T, f *journey.ProductionDesignFixture,
 	if _, err := repo.Thread(f.Origin, trace.ChiefOfStaff); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("source retains an authoritative queue")
 	}
+	if f.Design.Identity.Role == trace.Designer {
+		designed, err := repo.DesignerThread(f.Origin)
+		fixturekit.Must(t, err)
+		if !intakefixture.EqualJSONTest(f.Design.Identity, designed.Identity) || !intakefixture.EqualJSONTest(f.Design.Turns, designed.Turns) {
+			t.Fatal("design identity, requests, responses or recovery state changed at adoption")
+		}
+	}
 	historical, err := trace.Read[trace.TurnRequest](repo, f.Origin)
 	fixturekit.Must(t, err)
-	if !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Before.Turns[0].Request.ID }) {
+	if !slices.ContainsFunc(historical, func(req trace.TurnRequest) bool { return req.ID == f.Design.Turns[0].Request.ID }) {
 		t.Fatal("historical design request was lost")
 	}
 	chief, _, _, closeChief, err := f.S.Lifecycle().ChiefRepository(ctx, repo, f.Stream1)

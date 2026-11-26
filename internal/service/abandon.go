@@ -183,7 +183,7 @@ func (a abandonable) Apply(ctx context.Context, op coreadapter.Operation) (corea
 	defer cancel()
 	running := runningTurn{project: a.repository.Project(), cancel: cancel}
 	th, err := a.repository.Thread(in.Workstream, in.Agent)
-	if err == nil && th.Identity.Role != trace.ChiefOfStaff {
+	if err == nil && !trace.ChiefLike(th.Identity.Role) {
 		ctx, running.stop = thread.Stoppable(ctx)
 	}
 	defer a.s.turns.track(in.Workstream, running)()

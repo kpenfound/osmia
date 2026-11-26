@@ -366,8 +366,9 @@ type DesignStartRequest struct {
 
 // DesignStartResponse names the workstream a design session's brief started
 // a workgroup on. Handed is the path of the recorded brief; Source names the
-// design session it came from. The same thread that held the design
-// conversation continues as the workgroup's chief-of-staff thread.
+// design session it came from. The workgroup's chief of staff opens a new
+// thread from that brief and the design transcript attached to it; the design
+// conversation's own thread is not continued.
 type DesignStartResponse struct {
 	Project    config.ProjectID    `json:"project"`
 	Workstream config.WorkstreamID `json:"workstream"`
@@ -969,12 +970,12 @@ type WorkstreamStatus struct {
 	// one. Profile, Base and Branch are set only for a session: its fixed
 	// profile, base commit and branch. Title is a session's optional title and
 	// a design session's latest title.
-	Kind          string            `json:"kind,omitempty"`
-	Profile       string            `json:"profile,omitempty"`
-	Base          string            `json:"base,omitempty"`
-	Branch        string            `json:"branch,omitempty"`
-	Title         string            `json:"title,omitempty"`
-	State *string `json:"state"`
+	Kind    string  `json:"kind,omitempty"`
+	Profile string  `json:"profile,omitempty"`
+	Base    string  `json:"base,omitempty"`
+	Branch  string  `json:"branch,omitempty"`
+	Title   string  `json:"title,omitempty"`
+	State   *string `json:"state"`
 	// WorkKind is the registered kind of a workstream that is not a feature,
 	// such as hill-climb. It is omitted for a feature workstream, a session
 	// and a design session.

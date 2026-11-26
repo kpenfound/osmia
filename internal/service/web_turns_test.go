@@ -157,7 +157,7 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 	}
 	turns, _, _ := enforcedTurns(t, f, repository)
 	for role, grant := range turns.Grants {
-		if grant.Web != (role == trace.ChiefOfStaff || role == sessionRole) {
+		if grant.Web != (role == trace.ChiefOfStaff || role == trace.Designer || role == sessionRole) {
 			t.Errorf("%s grant %+v", role, grant)
 		}
 	}

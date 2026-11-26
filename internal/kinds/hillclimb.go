@@ -184,8 +184,8 @@ var hillClimb = Kind{
 		Drafted: []string{ClimbSpecID}, Debated: []string{ClimbSpecID}, Ratified: []string{ClimbSpecID},
 		SpecPath: ClimbSpecPath,
 	},
-	Rounds: 1,
-	Loop:   Loop{Name: "climb", States: climbStates},
+	Rounds:             1,
+	Loop:               Loop{Name: "climb", States: climbStates},
 	PullRequestSection: func(pr PullRequest) string { return climbSection(pr.Climb) },
 	Progress: func(r Reading) Progress {
 		return Progress{Panel: "climb", Summary: climbSummary(r.Climb), Spark: climbSpark(r.Climb)}

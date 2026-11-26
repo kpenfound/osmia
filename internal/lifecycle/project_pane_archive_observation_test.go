@@ -217,7 +217,16 @@ func TestProjectPaneArchivedPublicationObservationAcrossRestart(t *testing.T) {
 					entries, err := service.ConversationEntries(authority, f.Origin)
 					fixturekit.Must(t, err)
 					fixturekit.Must(t, authority.Close())
-					if len(entries) < len(conversation.Entries) || !slices.Equal(entries[:len(conversation.Entries)], conversation.Entries) {
+					origin, err := f.S.Repository(f.Project)
+					fixturekit.Must(t, err)
+					design, err := origin.DesignerThread(f.Origin)
+					fixturekit.Must(t, err)
+					designed := map[string]bool{}
+					for _, q := range design.Turns {
+						designed[q.Request.TurnID] = true
+					}
+					shared := slices.DeleteFunc(slices.Clone(conversation.Entries), func(e api.ConversationEntry) bool { return designed[e.Turn] })
+					if len(entries) < len(shared) || !slices.Equal(entries[:len(shared)], shared) {
 						t.Fatal("workgroup lost the original shared conversation")
 					}
 				}

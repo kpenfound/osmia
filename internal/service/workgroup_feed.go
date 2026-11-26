@@ -167,7 +167,11 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		generations = append(generations, m.Project.Generation)
 	}
 	out, err := readview.Consistent(func() (WorkgroupFeedResponse, error) {
-		entries, err := chiefFeedEntries(a.chief, a.host)
+		designed, err := s.designHistory(a.chief, a.host)
+		if err != nil {
+			return WorkgroupFeedResponse{}, err
+		}
+		entries, err := chiefFeedEntries(a.chief, a.host, designed...)
 		if err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -318,7 +322,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 			summary.Units[u.State]++
 		}
 		for _, a := range w.Agents {
-			if a.Role != trace.ChiefOfStaff && (a.State == "running" || a.State == "captured") {
+			if !trace.ChiefLike(a.Role) && (a.State == "running" || a.State == "captured") {
 				summary.Running = true
 			}
 		}

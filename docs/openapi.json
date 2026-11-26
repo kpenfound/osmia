@@ -1985,7 +1985,7 @@
     },
     "/v1/design/{workstream}/start": {
       "post": {
-        "summary": "Start a workgroup from a design session's drafted brief; the same thread continues as the workgroup's chief of staff",
+        "summary": "Start a workgroup from a design session's drafted brief; the chief of staff opens a new thread from the brief and the design transcript",
         "operationId": "postDesignByWorkstreamStart",
         "parameters": [
           {

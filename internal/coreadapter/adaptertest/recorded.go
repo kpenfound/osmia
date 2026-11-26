@@ -53,8 +53,8 @@ type Turn struct {
 	// Prompt is the prompt the engine received: the current turn context
 	// block, then the turn's own prompt.
 	Prompt string
-	Mounts       []agent.Mount
-	VCS          bool
+	Mounts []agent.Mount
+	VCS    bool
 	// Capabilities are the permissions the host was told the turn holds.
 	Capabilities a.Capabilities
 }

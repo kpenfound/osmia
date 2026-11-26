@@ -232,7 +232,7 @@ func RenderDesignView(project config.ProjectID, w trace.WorkstreamStatus) Design
 }
 
 // OpenDesign opens a design session in a project: a new, ordinary workstream
-// with a chief-of-staff thread and no feature state, wrapped in its own
+// with a design thread of its own and no feature state, wrapped in its own
 // one-workstream workgroup like every other workstream. It takes no spec, no
 // plan and no units, and the owner's conversation with it never reaches the
 // tools or the context an ordinary chief of staff has.
@@ -264,7 +264,7 @@ func (s *Controller) OpenDesign(ctx context.Context, req DesignOpenRequest) (Des
 	if err := repository.CreateWorkstream(ctx, stream, now, OwnerActor); err != nil {
 		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot open design session %s; check the trace repository", stream)}
 	}
-	if _, err := repository.EnsureChiefOfStaff(ctx, stream, now, OwnerActor); err != nil {
+	if _, err := repository.EnsureDesigner(ctx, stream, now, OwnerActor); err != nil {
 		return DesignView{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot prepare the thread of design session %s; check the trace repository", stream)}
 	}
 	if _, err := trace.EnsureWorkgroups(ctx, repository, []config.WorkstreamID{stream}, now, OwnerActor, DesignOpenTransition); err != nil {
@@ -539,9 +539,9 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 		return ConversationEntry{}, &APIError{Code: Validation, Message: "text must not be empty"}
 	}
 	cfg := s.Current().For(project)
-	_, profile, err := s.ChiefOverride(cfg)
+	_, profile, err := s.DesignerOverride(cfg)
 	if err != nil {
-		return ConversationEntry{}, &APIError{Code: Internal, Message: "the chief-of-staff role has no usable profile; check osmia profiles"}
+		return ConversationEntry{}, &APIError{Code: Internal, Message: "the designer role has no usable profile; check osmia profiles"}
 	}
 	mu := DesignLock(repository, stream)
 	if !mu.TryLock() {
@@ -561,17 +561,26 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 		}
 	}
 	at := s.Now()
-	th, err := repository.EnsureChiefOfStaff(ctx, stream, at, OwnerActor)
+	th, err := repository.EnsureDesigner(ctx, stream, at, OwnerActor)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the message for design session %s; check the trace repository", stream)}
 	}
-	if UnfinishedSessionTurn(th) {
+	earlier, err := earlierDesignThread(repository, stream)
+	if err != nil {
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the earlier conversation of design session %s; check the trace repository", stream)}
+	}
+	if UnfinishedSessionTurn(th) || UnfinishedSessionTurn(earlier) {
 		return ConversationEntry{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	current, err := s.DesignContext(ctx, repository, stream)
 	if err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot assemble the context of design session %s; check the active projects' charters and entity maps", stream)}
 	}
+	history, err := designHistoryContext(repository, stream, th, earlier)
+	if err != nil {
+		return ConversationEntry{}, &APIError{Code: Internal, Message: fmt.Sprintf("cannot read the earlier conversation of design session %s; check the trace repository", stream)}
+	}
+	current += history
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return ConversationEntry{}, &APIError{Code: Internal, Message: "cannot generate a message ID"}
@@ -580,7 +589,7 @@ func (s *Controller) DesignMessage(ctx context.Context, raw string, req DesignMe
 	q, err := repository.EnqueueTurn(ctx, trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + id, Revision: 1,
 			Project: project, Workstream: stream, At: at, Actor: OwnerActor, Cause: "owner-message"},
-		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "message_" + id,
+		AgentID: trace.Designer, ThreadID: trace.Designer, TurnID: "message_" + id,
 		Profile: profile, SystemPrompt: DesignRolePrompt, Context: current, Prompt: text,
 	})
 	if err != nil {
@@ -725,16 +734,18 @@ func DesignTitleTool(repository *trace.Repository, scope coreadapter.Scope, now 
 				return nil, fmt.Errorf("%s sets the title of an open design session only", DesignTitleToolName)
 			}
 			known := []string{string(repository.Project()), string(stream)}
-			if th, err := repository.ChiefOfStaffThread(stream); err == nil {
-				known = append(known, th.Identity.ThreadID, th.Session.ID)
-				for _, turn := range th.Turns {
-					known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
-					if turn.Response != nil {
-						known = append(known, turn.Response.Result.Session.ID)
+			for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.DesignerThread, repository.ChiefOfStaffThread} {
+				if th, err := read(stream); err == nil {
+					known = append(known, th.Identity.ThreadID, th.Session.ID)
+					for _, turn := range th.Turns {
+						known = append(known, turn.Request.TurnID, turn.Request.Profile.Model)
+						if turn.Response != nil {
+							known = append(known, turn.Response.Result.Session.ID)
+						}
 					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return nil, err
 				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return nil, err
 			}
 			if err := status.CheckTitle(in.Title, known); err != nil {
 				return RefuseReport("%s", err.Error())
@@ -884,13 +895,34 @@ func (s *Controller) StageDesignWorkspace(ctx context.Context, repository *trace
 // for attaching to its brief as a reference the brief itself always wins
 // over.
 func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) (string, error) {
-	th, err := repository.ChiefOfStaffThread(stream)
-	if errors.Is(err, os.ErrNotExist) {
-		return "(no conversation recorded)\n", nil
-	}
+	earlier, err := earlierDesignThread(repository, stream)
 	if err != nil {
 		return "", err
 	}
+	th, err := repository.DesignerThread(stream)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	text := threadTranscript(earlier) + threadTranscript(th)
+	if text == "" {
+		return "(no conversation recorded)\n", nil
+	}
+	return text, nil
+}
+
+// earlierDesignThread is the chief-of-staff thread a design session opened
+// before design sessions had a thread of their own held its conversation on.
+// It is empty for every other session. Nothing is sent to it any more; its
+// messages are still read.
+func earlierDesignThread(repository *trace.Repository, stream config.WorkstreamID) (trace.Thread, error) {
+	th, err := repository.ChiefOfStaffThread(stream)
+	if errors.Is(err, os.ErrNotExist) {
+		return trace.Thread{}, nil
+	}
+	return th, err
+}
+
+func threadTranscript(th trace.Thread) string {
 	var b strings.Builder
 	for _, q := range th.Turns {
 		if q.Request.Actor == OwnerActor {
@@ -900,8 +932,31 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 			fmt.Fprintf(&b, "Agent: %s\n\n", q.Response.Result.FinalResponse)
 		}
 	}
-	if b.Len() == 0 {
-		return "(no conversation recorded)\n", nil
+	return b.String()
+}
+
+// designHistoryContext carries a design session's earlier conversation into
+// the turns of its design thread until one of them has answered. A session
+// opened before the design thread existed holds its conversation on the chief
+// of staff's thread, where this thread's backend session never saw it, so the
+// agent reads the conversation and its latest brief here.
+func designHistoryContext(repository *trace.Repository, stream config.WorkstreamID, designer, earlier trace.Thread) (string, error) {
+	if slices.ContainsFunc(designer.Turns, func(q trace.QueuedTurn) bool { return q.Status() == "idle" }) {
+		return "", nil
+	}
+	transcript := threadTranscript(earlier)
+	if transcript == "" {
+		return "", nil
+	}
+	brief, revision, err := LatestDesignBrief(repository, stream)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Earlier conversation\nThis session began before design sessions had a thread of their own. You wrote none of the messages below in this thread, but they are your conversation with the owner so far.\n\n")
+	b.WriteString(transcript)
+	if revision > 0 {
+		fmt.Fprintf(&b, "## Latest brief (revision %d)\n%s\n", revision, brief.Content)
 	}
 	return b.String(), nil
 }
@@ -909,8 +964,8 @@ func DesignTranscript(repository *trace.Repository, stream config.WorkstreamID) 
 // StartDesignWorkgroup hands a design session's latest drafted brief to the
 // architect flow: it records the brief, with the conversation transcript
 // attached for reference, as the workstream's handed input, exactly as an
-// ordinary hand-in does, so the same chief-of-staff thread that held the
-// design conversation continues as the workgroup's. It is refused, recording
+// ordinary hand-in does. The workgroup's chief of staff opens a new thread
+// from that brief and transcript and never resumes the design conversation. It is refused, recording
 // nothing, when the workstream is no longer a design session, a turn is
 // running, or the agent has not drafted a brief yet.
 func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, requests ...DesignStartRequest) (DesignStartResponse, *APIError) {
@@ -926,11 +981,15 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 	if _, _, _, api := s.DesignTrace(raw); api != nil {
 		return DesignStartResponse{}, api
 	}
-	th, err := repository.ChiefOfStaffThread(stream)
+	th, err := repository.DesignerThread(stream)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
-	if UnfinishedSessionTurn(th) {
+	earlier, err := earlierDesignThread(repository, stream)
+	if err != nil {
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+	}
+	if UnfinishedSessionTurn(th) || UnfinishedSessionTurn(earlier) {
 		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a turn is running for this design session; try again once it finishes"}
 	}
 	intent, found, err := DesignStartIntentOf(repository, stream)
@@ -1029,6 +1088,9 @@ func (s *Controller) StartDesignWorkgroup(ctx context.Context, raw string, reque
 		return DesignStartResponse{}, &APIError{Code: Conflict, Message: "a start is already pinned to another brief revision"}
 	}
 	if err := s.PreparePinnedDesignStart(ctx, repository, stream, intent); err != nil {
+		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
+	}
+	if err := repository.BeginFreshChiefOfStaff(ctx, stream); err != nil {
 		return DesignStartResponse{}, &APIError{Code: Internal, Message: err.Error()}
 	}
 	if err := s.ResumeHandedDesign(ctx, repository, stream, intent.Handed); err != nil {

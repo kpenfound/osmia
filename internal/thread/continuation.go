@@ -30,6 +30,9 @@ func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (pr
 		if q.Sequence >= before {
 			break
 		}
+		if q.Sequence < t.Epoch {
+			continue
+		}
 		cancelledBeforeSession := !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.Cancelled && !coreadapter.ValidSession(q.Response.Result.Session)
 		if cancelledBeforeSession && (q.Response.Stop != nil || resumableRoles != nil && resumableRoles(t.Identity.Role)) {
 			continue

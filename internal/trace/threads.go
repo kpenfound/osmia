@@ -23,7 +23,13 @@ type Thread struct {
 	Session  coreadapter.BackendSession `json:"session"`
 	Status   string                     `json:"status"`
 	Active   string                     `json:"active,omitempty"`
-	Turns    []QueuedTurn               `json:"turns,omitempty"`
+	// Epoch is the first sequence number of the thread's current run of turns,
+	// or zero when the thread has one run only. Turns before it belong to a
+	// conversation the thread's backend session and replayed history no longer
+	// continue: a design session that began on this thread starts the chief of
+	// staff's own conversation from its brief.
+	Epoch uint64       `json:"epoch,omitempty"`
+	Turns []QueuedTurn `json:"turns,omitempty"`
 }
 
 // Parked reports whether the thread's last turn ended waiting and no turn has
@@ -83,6 +89,7 @@ type storedThread struct {
 	Session  coreadapter.BackendSession `json:"session"`
 	Status   string                     `json:"status"`
 	Active   string                     `json:"active,omitempty"`
+	Epoch    uint64                     `json:"epoch,omitempty"`
 	Turns    []storedTurn               `json:"turns,omitempty"`
 }
 
@@ -101,7 +108,7 @@ func storeThreads(threads map[string]Thread) map[string]storedThread {
 	}
 	stored := make(map[string]storedThread, len(threads))
 	for id, t := range threads {
-		s := storedThread{Identity: t.Identity, Session: t.Session, Status: t.Status, Active: t.Active}
+		s := storedThread{Identity: t.Identity, Session: t.Session, Status: t.Status, Active: t.Active, Epoch: t.Epoch}
 		for _, q := range t.Turns {
 			turn := storedTurn{Attempts: q.Attempts, Sequence: q.Sequence, RequestID: q.Request.ID, Claim: q.Claim, CompletedAt: q.CompletedAt}
 			if q.Response != nil {
@@ -133,7 +140,7 @@ func loadThreads(stored map[string]storedThread, records []Record, stream config
 	}
 	threads := make(map[string]Thread, len(stored))
 	for id, s := range stored {
-		t := Thread{Identity: s.Identity, Session: s.Session, Status: s.Status, Active: s.Active}
+		t := Thread{Identity: s.Identity, Session: s.Session, Status: s.Status, Active: s.Active, Epoch: s.Epoch}
 		for _, turn := range s.Turns {
 			q := QueuedTurn{Attempts: turn.Attempts, Sequence: turn.Sequence, Claim: turn.Claim, CompletedAt: turn.CompletedAt}
 			if turn.RequestID == "" {
@@ -339,6 +346,83 @@ func (r *Repository) ensureChiefOfStaff(ctx context.Context, stream config.Works
 		return Thread{}, err
 	}
 	return t, nil
+}
+
+// Designer is the agent, thread and role ID of a design session's own thread.
+// The design conversation lives there, apart from the chief-of-staff thread
+// that continues a started workgroup.
+const Designer = "designer"
+
+// ChiefLike reports whether role is a role whose turns answer the owner in a
+// conversation: the chief of staff and the design agent. Neither holds a
+// capacity slot or waits for a factory pause the way the factory's own roles do.
+func ChiefLike(role string) bool { return role == ChiefOfStaff || role == Designer }
+
+// EnsureDesigner creates the design thread of the design session stream
+// unless it already exists, and returns the thread. The thread lives in
+// stream's own trace; the first creation fixes the identity's timestamp and
+// actor.
+func (r *Repository) EnsureDesigner(ctx context.Context, stream config.WorkstreamID, at time.Time, actor Actor) (Thread, error) {
+	sr, err := r.scoped(stream)
+	if err != nil {
+		return Thread{}, err
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	log, _, err := sr.loadWorkflow(stream)
+	if err != nil {
+		return Thread{}, err
+	}
+	if t, ok := log.Threads[Designer]; ok {
+		if t.Identity.Role != Designer || t.Identity.ThreadID != Designer {
+			return Thread{}, fmt.Errorf("%w: agent %s has another role", ErrConflict, Designer)
+		}
+		return sr.snapshot(t), nil
+	}
+	agent := Agent{Header: Header{Schema: "osmia.trace.agent", Version: Version, ID: Designer, Revision: 1, Project: sr.project, Workstream: stream, At: at, Actor: actor, Cause: "designer-create"}, Role: Designer, ThreadID: Designer}
+	if err := validate(agent); err != nil {
+		return Thread{}, err
+	}
+	if log.Threads == nil {
+		log.Threads = map[string]Thread{}
+	}
+	t := Thread{Identity: agent, Status: "idle"}
+	log.Threads[Designer] = t
+	if err := sr.saveThread(ctx, stream, log, agent); err != nil {
+		return Thread{}, err
+	}
+	return t, nil
+}
+
+// DesignerThread returns a snapshot of the design thread of the design session
+// stream, or os.ErrNotExist before it is created.
+func (r *Repository) DesignerThread(stream config.WorkstreamID) (Thread, error) {
+	return r.Thread(stream, Designer)
+}
+
+// BeginFreshChiefOfStaff starts a new conversation on stream's own
+// chief-of-staff thread when the thread already holds turns: later turns
+// resume none of the earlier backend sessions and replay none of the earlier
+// requests. A thread without turns, or one already begun afresh, is left as it
+// is. r must be the project's own repository.
+func (r *Repository) BeginFreshChiefOfStaff(ctx context.Context, stream config.WorkstreamID) error {
+	sr, err := r.scoped(stream)
+	if err != nil {
+		return err
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	log, _, err := sr.loadWorkflow(stream)
+	if err != nil {
+		return err
+	}
+	t, ok := log.Threads[ChiefOfStaff]
+	if !ok || t.Epoch != 0 || len(t.Turns) == 0 {
+		return nil
+	}
+	t.Epoch = uint64(len(t.Turns) + 1)
+	log.Threads[ChiefOfStaff] = t
+	return sr.saveThread(ctx, stream, log)
 }
 
 // RetractChiefOfStaff removes stream's own chief-of-staff thread identity,

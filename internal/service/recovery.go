@@ -89,9 +89,9 @@ func (s *Service) recoverThread(ctx context.Context, cfg *config.Config, reposit
 			}
 		}
 	}
-	if th.Identity.Role == trace.ChiefOfStaff && s.options.Threads != nil {
+	if trace.ChiefLike(th.Identity.Role) && s.options.Threads != nil {
 		if err := s.recoverContinuations(ctx, repository, stream, th.Identity.ID, func(turn string) error {
-			return s.recoverChief(ctx, repository, stream, th.Identity.ID, turn)
+			return s.recoverChief(ctx, repository, stream, th.Identity.Role, th.Identity.ID, turn)
 		}); err != nil {
 			return err
 		}
@@ -167,7 +167,7 @@ func (s *Service) recoverWorkgroupChiefSession(ctx context.Context, id config.Wo
 	if g.Conversation != nil {
 		for _, q := range th.Turns {
 			if q.Response != nil && q.Status() == "interrupted" && q.Response.Result.Cancelled && q.Response.Stop == nil {
-				if err := s.recoverChief(ctx, wt, host, trace.ChiefOfStaff, q.Request.TurnID); err != nil {
+				if err := s.recoverChief(ctx, wt, host, trace.ChiefOfStaff, trace.ChiefOfStaff, q.Request.TurnID); err != nil {
 					return err
 				}
 			}
@@ -312,8 +312,8 @@ func (s *Service) recoverContinuation(ctx context.Context, repository *trace.Rep
 	return "", nil
 }
 
-func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, agent, turn string) error {
-	profile, _, err := s.roleExecution(s.current(), trace.ChiefOfStaff)
+func (s *Service) recoverChief(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID, role, agent, turn string) error {
+	profile, _, err := s.roleExecution(s.current(), role)
 	if err != nil {
 		return err
 	}

@@ -40,25 +40,28 @@ const HandoffTitleOpening = "The owner started work from the design brief handed
 // HandoffTitleBody is the body of the notice that asks the chief of staff to
 // title the started work: a single workstream when workgroup is false,
 // otherwise the workgroup the brief was handed to every member of. The title
-// is the status goal, set with the status tool under its usual rules.
-func HandoffTitleBody(workgroup bool) string {
+// is the status goal, set with the status tool under its usual rules. handed
+// is the brief with the design transcript attached, which the new thread of the
+// chief of staff opens from.
+func HandoffTitleBody(workgroup bool, handed string) string {
 	subject := "this workstream"
 	if workgroup {
 		subject = "this workgroup, handed to every member"
 	}
-	return HandoffTitleOpening + " Title the started work for " + subject + ": call set_status now with a goal that is its title, one sentence written for the owner from the brief, and the rest of the status as its rules require."
+	return HandoffTitleOpening + " Title the started work for " + subject + ": call set_status now with a goal that is its title, one sentence written for the owner from the brief, and the rest of the status as its rules require." +
+		"\n\nThis is the start of your own conversation: the design conversation ran on the design agent's thread and none of it is continued here. The brief and the design transcript it was handed in with follow.\n\n" + handed
 }
 
 // RequestHandoffTitle records, in the trace of stream, the notice that asks
 // the chief of staff for the started work's title, once. The transition
 // carries the handed brief's timestamp, so a retry of the start repeats the
 // committed transition and records nothing more. stream is the workstream
-// whose chief-of-staff thread continues the conversation.
+// whose chief-of-staff thread opens from the brief.
 func (s *Controller) RequestHandoffTitle(ctx context.Context, r *trace.Repository, stream config.WorkstreamID, handed trace.Document, workgroup bool) error {
 	h := OwnerHeader(DesignHandoffTitleTransition, r.Project(), stream, DesignStartTransition, handed.At)
 	_, err := r.Transact(ctx, trace.Transaction{Transition: trace.Transition{Header: h, Subject: DesignHandoffTitleSubject, To: "requested",
 		Reason: "the owner started work from the design brief; the chief of staff titles it through its status"},
-		Events: []trace.Event{trace.Notice(h.ID, "title", HandoffTitleBody(workgroup))}})
+		Events: []trace.Event{trace.Notice(h.ID, "title", HandoffTitleBody(workgroup, handed.Content))}})
 	return err
 }
 
@@ -276,6 +279,9 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	if err != nil {
 		return err
 	}
+	if err := r.BeginFreshChiefOfStaff(ctx, stream); err != nil {
+		return err
+	}
 	if hasIntent {
 		if err := s.PreparePinnedDesignStart(ctx, r, stream, intent); err != nil {
 			return err
@@ -323,6 +329,9 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 	}
 	fromDesign := handed.Source == "design:"+string(stream)
 	if len(selected.Members) == 1 && selected.Members[0].Workstream == stream {
+		if _, err := r.EnsureChiefOfStaff(ctx, stream, handed.At, OwnerActor); err != nil {
+			return err
+		}
 		if fromDesign {
 			if err := s.RequestHandoffTitle(ctx, r, stream, handed, false); err != nil {
 				return err
@@ -439,7 +448,10 @@ func (s *Controller) ReconcileDesignStart(ctx context.Context, r *trace.Reposito
 			return err
 		}
 	}
-	if err := wt.AdoptDesignConversation(ctx, r, stream); err != nil {
+	if _, err := wt.EnsureChiefOfStaff(ctx, stream, handed.At, OwnerActor); err != nil {
+		return err
+	}
+	if err := wt.BeginFreshChiefOfStaff(ctx, stream); err != nil {
 		return err
 	}
 	if err := s.Step("design-conversation-imported"); err != nil {

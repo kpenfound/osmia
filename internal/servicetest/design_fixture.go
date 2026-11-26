@@ -29,17 +29,27 @@ type DesignEnforcement struct {
 	Enforcement service.Enforcement
 }
 
-// PrepareDesignEnforcement writes before and after around the chief-of-staff
-// role table of the root's configuration. The role runs in a container
-// sandbox, the only mode every platform can enforce.
+// PrepareDesignEnforcement writes before ahead of the chief-of-staff and
+// designer role tables of the root's configuration and after at the end of the
+// designer's. Both roles run in a container sandbox, the only mode every
+// platform can enforce.
 func PrepareDesignEnforcement(t *testing.T, before, after string) DesignEnforcement {
+	t.Helper()
+	return PrepareDesignEnforcementRoles(t, before, "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"+after)
+}
+
+// PrepareDesignEnforcementRoles is PrepareDesignEnforcement with the role
+// tables given in full: before ahead of them and roles in place of the
+// chief-of-staff and designer tables, so a configuration can leave either
+// role out.
+func PrepareDesignEnforcementRoles(t *testing.T, before, roles string) DesignEnforcement {
 	t.Helper()
 	opts, clone := ProjectFixture(t)
 	configFile, err := os.OpenFile(filepath.Join(opts.Config.Root, "config.toml"), os.O_APPEND|os.O_WRONLY, 0)
 	fixturekit.Must(t, err)
 	_, err = configFile.WriteString(before)
 	fixturekit.Must(t, err)
-	_, err = configFile.WriteString("[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n" + after)
+	_, err = configFile.WriteString(roles)
 	fixturekit.Must(t, errors.Join(err, configFile.Close()))
 	home := filepath.Dir(clone)
 	fixturekit.Must(t, os.WriteFile(filepath.Join(clone, "README.md"), []byte("hi\n"), 0600))

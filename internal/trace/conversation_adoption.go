@@ -21,6 +21,9 @@ type ConversationOrigin struct {
 	Workstream config.WorkstreamID `json:"workstream"`
 }
 
+// conversationImport lists the records a design start imported into a
+// workgroup trace before the chief of staff began a thread of its own at
+// Start. Such traces still hold them, and reading them keeps working.
 type conversationImport struct {
 	Origin  ConversationOrigin `json:"origin"`
 	Records map[string]string  `json:"records"`
@@ -81,93 +84,6 @@ func PrepareDesignWorkgroup(ctx context.Context, root config.Root, id config.Wor
 		return nil, Workgroup{}, errors.Join(err, r.Close())
 	}
 	return r, g, nil
-}
-
-// AdoptDesignConversation imports the durable queue and its exact original
-// records in one trace publication. Import fingerprints authorize only those
-// immutable foreign-scope records; they do not relax ordinary record writes.
-// The caller fences dispatch until the source queue is retired and routing is
-// committed. An exact retry leaves the imported queue unchanged.
-func (r *Repository) AdoptDesignConversation(ctx context.Context, source *Repository, stream config.WorkstreamID) error {
-	target, err := r.scoped(stream)
-	if err != nil {
-		return err
-	}
-	_, err = target.file("workstreams/" + string(stream) + "/" + conversationOriginPath)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	original, err := source.scoped(stream)
-	if err != nil {
-		return err
-	}
-	original.mu.Lock()
-	log, _, err := original.loadWorkflow(stream)
-	if err != nil {
-		original.mu.Unlock()
-		return err
-	}
-	chief, ok := log.Threads[ChiefOfStaff]
-	if !ok {
-		original.mu.Unlock()
-		return fmt.Errorf("design conversation is missing")
-	}
-	records, _, err := original.scan()
-	original.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	var imports []Record
-	for _, rec := range records {
-		switch v := rec.(type) {
-		case Agent:
-			if v.ID == ChiefOfStaff {
-				imports = append(imports, rec)
-			}
-		case TurnRequest:
-			if v.AgentID == ChiefOfStaff {
-				imports = append(imports, rec)
-			}
-		case TurnResponse:
-			if v.AgentID == ChiefOfStaff {
-				imports = append(imports, rec)
-			}
-		}
-	}
-	target.mu.Lock()
-	defer target.mu.Unlock()
-	if _, err := target.file("workstreams/" + string(stream) + "/" + conversationOriginPath); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	targetLog, _, err := target.loadWorkflow(stream)
-	if err != nil {
-		return err
-	}
-	old := targetLog.Threads[ChiefOfStaff]
-	if len(old.Turns) != 0 {
-		return ErrConflict
-	}
-	targetLog.Threads[ChiefOfStaff] = chief
-	imported := conversationImport{Origin: ConversationOrigin{Project: source.Project(), Workstream: stream}, Records: map[string]string{}}
-	for _, rec := range imports {
-		imported.Records[recordKey(rec)] = conversationRecordHash(rec)
-	}
-	content, err := json.Marshal(imported)
-	if err != nil {
-		return err
-	}
-	origin := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: "conversation-origin", Revision: 1, Project: r.Project(), Workstream: stream, At: chief.Identity.At, Actor: chief.Identity.Actor, Cause: "design-start"}, Path: conversationOriginPath, Content: string(content)}
-	if err := target.checkRevisions(ctx, []Record{origin}); err != nil {
-		return err
-	}
-	prefix := "workstreams/" + string(stream) + "/agents/" + ChiefOfStaff + "/"
-	c := change{replace: []string{prefix + "identity.jsonl", prefix + "log.jsonl"}, records: append([]Record{origin}, imports...), stream: stream, workflow: &targetLog, message: "Adopt design conversation"}
-	return target.publish(ctx, c)
 }
 
 func conversationRecordHash(rec Record) string {

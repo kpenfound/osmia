@@ -39,7 +39,7 @@ func sessionBaseline(t trace.Thread, before uint64, session coreadapter.BackendS
 func lastTurnOf(t trace.Thread, before uint64, session coreadapter.BackendSession) (trace.QueuedTurn, trace.TurnAttempt, bool) {
 	for i := len(t.Turns) - 1; i >= 0; i-- {
 		q := t.Turns[i]
-		if q.Sequence >= before || q.Response == nil || q.CompletedAt.IsZero() || len(q.Attempts) == 0 {
+		if q.Sequence >= before || q.Sequence < t.Epoch || q.Response == nil || q.CompletedAt.IsZero() || len(q.Attempts) == 0 {
 			continue
 		}
 		a := q.Attempts[len(q.Attempts)-1]

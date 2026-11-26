@@ -10,9 +10,9 @@ import (
 // covers the factory, a project or one of its workstreams; chief-of-staff turns
 // are never held, so the owner can still reach the chief of staff.
 func Held(pauses []runtime.Pause, project config.ProjectID, c Candidate) bool {
-	if c.Thread.Identity.Role == trace.ChiefOfStaff {
+	if trace.ChiefLike(c.Thread.Identity.Role) {
 		for _, p := range pauses {
-			if p.Target.Scope == "role" && p.Target.Role == trace.ChiefOfStaff {
+			if p.Target.Scope == "role" && p.Target.Role == c.Thread.Identity.Role {
 				return true
 			}
 		}

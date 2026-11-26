@@ -503,7 +503,7 @@ func (w stallWatch) readTurns(r *stallReading, stream config.WorkstreamID) error
 	}
 	r.live, r.done = map[string]time.Time{}, map[string]time.Time{}
 	for _, t := range threads {
-		if t.Identity.Role == trace.ChiefOfStaff {
+		if trace.ChiefLike(t.Identity.Role) {
 			continue
 		}
 		for _, q := range t.Turns {

@@ -27,11 +27,11 @@ Each member's own charter governs its slice, plan and units. The workgroup spec 
 
 The owner chooses an ordered project list at hand-in: API `projects` (`project` alone is a one-element shorthand), repeatable CLI `--with <project-id>`, or the web multi-select of all active projects. The first project is home for the shared chief and conversation. Go rejects an empty or duplicate list and inactive projects; paused projects are allowed. Several projects allocate and join one member each without an architect selection turn. One project retains the ordinary workflow. The list stays fixed until ratification; changing it requires abandoning and handing in again. After ratification, amend and cancel retain their existing rules. A selected project judged to need no change is escalated to the owner rather than dropped.
 
-The design agent uses the `chief_of_staff` profile, overrides and sandbox configuration, with no separate `design` binding. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
+The design agent is the `designer` role ([Roles](#roles)). It runs on `roles.designer`'s profile, sandbox, image and skills, and on a design thread of its own, never on the chief of staff's thread or settings. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access; Go enforces them at run time whichever prompt it is given. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
 
 A session's brief starts with its own project, including a brief without a list. Optional `draft_brief.projects` replaces the list under the hand-in validation rules; omitting it retains the list. The session's own project can be removed while another remains. An owner request confirms the change; inferred changes require a readiness question and owner agreement. The web's read-only Brief panel shows the latest revision, project names with home marked and collapsed text above Start, updating live. Design read returns `brief_revision`, `brief`, `projects` and, once the agent has set one, `title`; CLI read prints the revision and list, and CLI start reads and prints them before sending the pin. Start sends the displayed/read `brief_revision`; a stale pin returns `conflict` and allocates nothing. The web surfaces the conflict and refreshes the panel.
 
-Start durably binds the handed brief text, revision and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The session's project retains the conversation and continued shared chief even when it is not a member. See [design sessions](cli.md#design-sessions).
+Start durably binds the handed brief text, revision, workstream kind and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The chief of staff opens a new thread from the brief and the design transcript attached to it and never resumes the design session's backend session. The session's project retains the conversation and the shared chief even when it is not a member. A session opened before the design agent had a thread of its own keeps working: its earlier messages stay on the chief of staff's thread, where design read and the web conversation still show them, and its next turn goes to the design thread under the same limits, carrying the earlier conversation and the latest brief in that turn's context. See [design sessions](cli.md#design-sessions).
 
 The shared design is called the **workgroup spec**. Stored document paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the CLI flag `--project-spec-revision` keep their names. These names do not introduce another project grouping model.
 
@@ -653,9 +653,10 @@ provider at execution time, not through network access during loading.
 | `timeout` | `45m` | Positive Go duration; explicit empty values are invalid |
 | `max_turns` | `0` | Nonnegative; zero means no turn limit; only Claude supports a nonzero value through the pinned adapter |
 
-Roles are `architect`, `committee`, `chief_of_staff`, `foreman`, `mason` and
-`reviewer`. Every omitted role binding defaults to profile `default`.
-If there is no profile named `default`, bind all six roles explicitly. Role keys:
+Roles are `architect`, `committee`, `chief_of_staff`, `designer`, `foreman`,
+`mason` and `reviewer`. Every omitted role binding defaults to profile `default`
+and sandbox `none`. If there is no profile named `default`, bind all seven roles
+explicitly. A configuration that names any other role is refused. Role keys:
 
 | Role key | Default | Validation/meaning |
 | --- | --- | --- |
@@ -665,6 +666,16 @@ If there is no profile named `default`, bind all six roles explicitly. Role keys
 | `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `skills` | `[]` | Skills by git reference, given to the role's Claude and Codex turns; OpenCode and Pi turns get none; see [Role skills](#role-skills) |
+
+`designer` runs the design sessions' agent. It is a role like the others:
+without a `[roles.designer]` table its design turns run on the `default` profile
+with sandbox `none`, never on the settings of `chief_of_staff`, and an owner
+override of the chief of staff's profile does not reach it. It takes no
+`events_profile`, since only the chief of staff takes event turns. It holds the
+design tools and nothing more whatever its sandbox: no write, execution,
+version-control, credential or owner-gate tool, and none of the chief of
+staff's other tools. Kind skills never load on designer turns, as on chief
+turns.
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
@@ -689,7 +700,7 @@ sandbox = "sbx"
 sandbox = "sbx"
 ```
 
-All six roles support this mode with `claude`, `codex` or `opencode` profiles.
+All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
 An omitted `image` lets each fallback profile select its agent's default template.
 A custom template must support every agent in that role's fallback chain.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
@@ -734,7 +745,7 @@ cpus = 2
 memory = "4g"
 
 # The read-only roles: architect, reviewer, committee,
-# chief_of_staff and foreman.
+# chief_of_staff, designer and foreman.
 [roles.reviewer]
 sandbox = "sbx"
 cpus = 2
