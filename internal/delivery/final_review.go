@@ -1143,7 +1143,7 @@ func (a *FinalReviewer) Tool(stream config.WorkstreamID, turn string, report Fin
 	}
 	file := a.Output(stream, turn)
 	tool := coreadapter.Tool{Name: FinalReportTool, Effect: coreadapter.ToolMemory,
-		Description: "Record the final report on the whole branch: a summary and your findings. Each finding has a severity: blocking when the feature as a whole does not deliver the spec's intent, its units do not work together, or it breaks a charter rule; advisory for anything else worth the owner's attention. Give the criteria it concerns, cited as spec#<n>, what is wrong and the action it asks for. Record an empty list when there are no findings. A later call replaces an earlier one. End your turn once the report is recorded.",
+		Description: "Record your final report on the whole branch. summary: what you read and found, in a few sentences. findings: one item for each problem. severity: blocking when the work as a whole does not deliver the sealed intent or breaks a charter rule, advisory for anything else worth the owner's attention. criteria: the sealed spec's criteria it concerns, cited as spec#<n>, when the spec has criteria. finding: what is wrong, pointing at the place in the branch. action: what should change. Record an empty findings list when there are none. A later call replaces an earlier one. A refused report says what to correct; call again with the correction. End your turn once the report is recorded.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["blocking","advisory"]},"criteria":{"type":"array","items":{"type":"string"}},"finding":{"type":"string"},"action":{"type":"string"}},"required":["severity","finding"],"additionalProperties":false}}},"required":["summary","findings"],"additionalProperties":false}`)}
 	tool.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input FinalReportInput
@@ -1799,10 +1799,28 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func FinalSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the committee member who gives an assembled feature its final read for the %s project (%s). Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and Dagger Cloud ran the project's checks on the exact commit you read, with the result the service read from the pull request in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again: their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks. Your view is read-only. You record your report with %s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule; anything else worth the owner's attention is advisory. The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion. Report nothing you cannot point at in the branch.", p.Name, p.Upstream, FinalReportTool) + finalCheckReviewInstructions
+	return fmt.Sprintf(`You are the committee member who gives an assembled feature its final read for the %[1]s project (%[2]s).
+
+## Purpose and setting
+Every planned unit has landed on the feature branch after its own reviewer verified it in detail against its task and acceptance, and Dagger Cloud ran the project's checks on the exact commit you read, with the result the service read from the pull request in your evidence. You read the branch as a whole, at a high level, before the owner decides whether it is delivered. You judge whether the feature delivers the sealed spec's intent: its units work together in the running product rather than only in their own tests, no unit undoes or contradicts another, every criterion is served, and no charter rule is broken. You do not review units again, because their tests, edge cases, naming and internal structure were judged in their own reviews, and style, formatting and lint belong to the checks.
+
+## Tools and gates
+- Your view is read-only. The branch, the sealed spec and plan, and the unit reports are files in it, and the diff tool reads the change the branch makes to upstream.
+- %[3]s records your report. It is the only way your findings reach the owner.
+- %[4]s
+- The branch was rebased onto upstream: changes a rebase or a drift resolution needed so that both upstream's behaviour and the feature's stand are part of the feature branch whatever the sealed spec, plan or unit footprints name, and upstream's own changes are not the feature's. Neither is a finding on its own; judge them only where they break the feature or fail a criterion.
+
+## Your part of the state machine
+The final review runs once the last unit has landed. The chief of staff triages each blocking finding of your report, and the owner decides whether the work is delivered; advisory findings are noted for the owner to read.
+
+## Output format
+One report recorded with %[3]s: a summary and your findings. A finding is blocking only when the feature as a whole fails the spec's intent or breaks a charter rule, because the chief of staff must triage every blocking finding; anything else worth the owner's attention is advisory. Report nothing you cannot point at in the branch, so that the owner can check each finding.
+
+## When you are done
+You are done when %[3]s has recorded your report, with an empty findings list when there are none. End your turn then.`, p.Name, p.Upstream, FinalReportTool, finalCheckReviewInstructions)
 }
 
-const finalCheckReviewInstructions = " The check result of the commit you read is recorded by the service in the check result section of your prompt and in the final/checks file of your view; you cannot run checks. A recorded pass satisfies every criterion that needs tests or checks to pass: the pass is the evidence that the required tests ran and passed, so never raise a finding because you cannot run tests yourself or cannot see that a named test was selected. A recorded failure is evidence you may cite in a finding, with the failed checks it names. A result that says the final read continues without check results, or that no check results exist, is not a finding by itself; judge the feature from the branch."
+const finalCheckReviewInstructions = "The service recorded the check result of the commit you read in the check result section of your prompt and in the final/checks file of your view; you cannot run checks. A recorded pass satisfies every criterion that needs tests or checks to pass: the pass is the evidence that the required tests ran and passed, so do not raise a finding only because you cannot run tests yourself or cannot see that a named test was selected. A recorded failure is evidence you may cite in a finding, with the failed checks it names. A result that says the final read continues without check results, or that no check results exist, is not a finding by itself; judge from the branch."
 
 func FinalPrompt(report FinalReport, checks FinalCheckRun, driftNotes []string, coverage []FinalCriterion, previous FinalReport) string {
 	notes := ""

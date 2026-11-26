@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -14,7 +15,7 @@ import (
 
 // ChiefEvents opens the system prompt of every event turn; the question
 // guidance and the workstream's rendered bundle follow it.
-const ChiefEvents = "You are the chief of staff for workstream %s. The prompt lists service events. The project context below was assembled when the events were delivered."
+const ChiefEvents = "You are the chief of staff for workstream %s. This turn delivers service events, which the prompt lists. The project context in the turn context was assembled when the events were delivered."
 
 // ChiefEventsOtherMember notes, for a workgroup of more than one member,
 // that this delivery's events are about a member other than the chief's own
@@ -24,7 +25,11 @@ const ChiefEventsOtherMember = " These events are about workstream %s, a member 
 // FollowUpGuidance tells the chief of staff how to keep work moving: read the
 // work each action queued, and check back with follow_up instead of promising
 // the owner that work will happen.
-const FollowUpGuidance = "Events and messages are information you act on to keep the work moving. Every action tool's result lists under queued the work the service queued or is running because of it, or says under nothing_will_run why nothing will run and until when. Tell the owner work is under way only when a result shows it queued. When nothing is queued and you expect something to change later, call follow_up with after (5m to 24h), a reason and, for a shared chief, the workstream, and you get a turn back then with what changed; a newer follow_up for the same workstream replaces an unfired one, and your pending follow-ups are listed in the project context. When an action of yours starts no work and you schedule no follow_up, the service schedules one at the stall window."
+const FollowUpGuidance = "## Keeping work moving\n" +
+	"Events and messages are information you act on to keep the work moving. Every action tool's result lists under queued the work the service queued or is running because of it, or says under nothing_will_run why nothing will run and until when. " +
+	"Tell the owner work is under way only when a result shows it queued, because a promise the factory does not keep costs the owner's trust. " +
+	"When nothing is queued and you expect something to change later, call follow_up with after (5m to 24h), a reason and, for a shared chief, the workstream. You get a turn back then with what changed. A newer follow_up for the same workstream replaces an unfired one, and your pending follow-ups are listed in the project context. " +
+	"When an action of yours starts no work and you schedule no follow_up, the service schedules one at the stall window."
 
 func (s *Controller) ChiefEventsSkip(repository *trace.Repository) func(config.WorkstreamID) (bool, error) {
 	skip := ChiefOfStaffSkip(repository)
@@ -47,34 +52,36 @@ func (s *Controller) ChiefEventsSkip(repository *trace.Repository) func(config.W
 	}
 }
 
-// ChiefEventsPrompt returns the system prompt of a workstream's event turns.
+// ChiefEventsPrompt returns the system prompt of a workstream's event turns,
+// and the context they are delivered with: the project context and the note
+// about a member workstream, which change between turns.
 // The bundle is assembled from the project's files and the given trace only.
 // stream is the member whose events this delivery carries; the chief of
 // staff is identified by its workgroup's host, which may be a different
 // workstream when stream shares a chief of staff with others.
-func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, error) {
-	return func(ctx context.Context, stream config.WorkstreamID) (string, error) {
+func (s *Controller) ChiefEventsPrompt(project config.ProjectID, repository *trace.Repository) func(context.Context, config.WorkstreamID) (string, string, error) {
+	return func(ctx context.Context, stream config.WorkstreamID) (string, string, error) {
 		target, host, bundleStream, closeTarget, err := s.ChiefRepository(ctx, repository, stream)
 		if errors.Is(err, ErrWorkgroupJoining) {
-			return "", fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
+			return "", "", fmt.Errorf("%w: %v", events.ErrChiefUnavailable, err)
 		}
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		bundleRepo, err := target.ProjectFor(bundleStream)
 		if err != nil {
 			closeTarget()
-			return "", err
+			return "", "", err
 		}
 		context, err := s.ChiefContext(ctx, s.ContextFor(bundleRepo), target, closeTarget, bundleRepo.Project(), bundleStream)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		note := ""
 		if host != stream {
 			note = fmt.Sprintf(ChiefEventsOtherMember, stream, stream)
 		}
-		return fmt.Sprintf(ChiefEvents, host) + note + "\n\n" + FollowUpGuidance + "\n\n" + ChiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + AmendmentGuidance + "\n\n" + ContestGuidance + "\n\n" + ObjectionGuidance + "\n\n" + DriftHandbackGuidance + "\n\n" + OwnerWritingGuidance + "\n\n" + context, nil
+		return fmt.Sprintf(ChiefEvents, host) + "\n\n" + ChiefRolePrompt + "\n\n" + FollowUpGuidance + "\n\n" + ChiefDocumentsGuidance + "\n\n" + questions.Guidance + "\n\n" + AmendmentGuidance + "\n\n" + ContestGuidance + "\n\n" + ObjectionGuidance + "\n\n" + DriftHandbackGuidance + "\n\n" + OwnerWritingGuidance, strings.TrimSpace(note) + "\n\n" + context, nil
 	}
 }
 

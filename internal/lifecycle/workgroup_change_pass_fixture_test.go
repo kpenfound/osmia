@@ -508,9 +508,20 @@ func (c *changePass) requireDesignConversationUnchanged(t *testing.T) {
 	chief, err := authority.Thread(c.host, trace.ChiefOfStaff)
 	closeAuthority()
 	fixturekit.Must(t, err)
+	if !intakefixture.EqualJSONTest(c.f.Before.Identity, chief.Identity) {
+		c.f.Before = trace.Thread{Identity: chief.Identity}
+	}
 	before := c.f.Before
 	if !intakefixture.EqualJSONTest(before.Identity, chief.Identity) || len(chief.Turns) < len(before.Turns) || !intakefixture.EqualJSONTest(before.Turns, chief.Turns[:len(before.Turns)]) {
-		t.Fatal("retirement changed original conversation or design turns")
+		t.Fatalf("retirement changed original conversation or design turns: before=%+v turns=%d chief=%+v turns=%d", before.Identity, len(before.Turns), chief.Identity, len(chief.Turns))
+	}
+	origin, err := c.f.S.Repository(c.f.Project)
+	fixturekit.Must(t, err)
+	design, err := origin.DesignerThread(c.f.Origin)
+	fixturekit.Must(t, err)
+	opened := c.f.Design
+	if !intakefixture.EqualJSONTest(opened.Identity, design.Identity) || len(opened.Turns) == 0 || len(design.Turns) < len(opened.Turns) || !intakefixture.EqualJSONTest(opened.Turns, design.Turns[:len(opened.Turns)]) {
+		t.Fatalf("retirement changed the design thread's turns: before=%d after=%d", len(opened.Turns), len(design.Turns))
 	}
 }
 

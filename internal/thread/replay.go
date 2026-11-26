@@ -42,7 +42,7 @@ func Replay(t trace.Thread, before uint64, limits ReplayLimits) (string, uint64,
 		if q.Sequence >= before {
 			break
 		}
-		if q.Response == nil || q.CompletedAt.IsZero() {
+		if q.Sequence < t.Epoch || q.Response == nil || q.CompletedAt.IsZero() {
 			continue
 		}
 		r := q.Response

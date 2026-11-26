@@ -111,8 +111,11 @@ func (s *Controller) TriageSubject(ctx context.Context, repository *trace.Reposi
 // nothing.
 func TriageToolOf(load func() *Controller, repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: TriageToolName, Effect: coreadapter.ToolMemory,
-		Description: "Record how a blocking finding of the workstream's current final review is triaged, after you called decide for it. review: the final review's number; finding: the finding's ID as the final review notice gives it; decision: code (it needs code: the one plan revision you file with route_amendment takes it) or owner (it is mistaken or not worth building, so the owner reads it at delivery and can accept it); " +
-			"note: for code, what the repair is; for owner, why the finding is mistaken or not worth building, which the owner reads. When Jev's decision on the finding is binding, only the outcome it picked is recorded, with your note. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		Description: "Record how one blocking finding of the workstream's current final review is handled, after you called decide with kind final-review-triage for it. Triage each blocking finding with its own call. " +
+			"review: the final review's number. finding: the finding's ID as the final review notice gives it. " +
+			"decision: code when the finding needs code, so the one revision you file with route_amendment takes it; owner when the finding is mistaken or not worth building, so the owner reads it at delivery approval and can accept it. " +
+			"note: for code, what the repair is; for owner, why the finding is mistaken or not worth building, written for the owner. " +
+			"When Jev's decision on the finding is binding, only the outcome it picked is recorded, with your note. workstream: a member workstream ID of your workgroup; omit it for this conversation's own workstream.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"review":{"type":"integer","minimum":1},"finding":{"type":"string"},"decision":{"type":"string","enum":["code","owner"]},"note":{"type":"string"},"workstream":{"type":"string"}},"required":["review","finding","decision","note"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {

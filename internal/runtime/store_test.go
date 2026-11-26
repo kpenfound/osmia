@@ -494,7 +494,7 @@ func TestProjectlessInputs(t *testing.T) {
 	s := open(t, in)
 	must(t, s.Resolve(in))
 	effective, ds := s.Effective()
-	if len(ds) != 0 || len(effective.Profiles) != 6 || len(effective.Pauses) != 0 {
+	if len(ds) != 0 || len(effective.Profiles) != 7 || len(effective.Pauses) != 0 {
 		t.Fatalf("%+v %v", effective, ds)
 	}
 	if err := s.SetPriority(Priority{Project: pid, Workstreams: []config.WorkstreamID{}}); err == nil || !errors.Is(err, ErrValidation) {

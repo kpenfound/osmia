@@ -100,7 +100,7 @@ func TestDefaults(t *testing.T) {
 	if c.Project.Capacity.GitOperations != 4 {
 		t.Fatalf("git operation default: %+v", c.Project.Capacity)
 	}
-	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 6 {
+	if c.Profiles["default"].Timeout != "45m" || c.Profiles["default"].Effort != "medium" || len(c.Roles) != 7 {
 		t.Fatalf("profile defaults: %+v", c)
 	}
 	p, settings, err := c.Execution("mason", "default")
@@ -385,6 +385,8 @@ func TestInvalid(t *testing.T) {
 		{"self cycle", topConfig + "fallback = 'default'\n", "", "fallback cycle"},
 		{"indirect cycle", topConfig + "fallback = 'other'\n[profiles.other]\nagent = 'codex'\nmodel = 'test'\nfallback = 'default'\n", "", "fallback cycle"},
 		{"unknown role", topConfig + "[roles.fake]\nprofile = 'default'\n", "", "roles.fake"},
+		{"designer events profile", topConfig + "[roles.designer]\nevents_profile = 'default'\n", "", "roles.designer.events_profile"},
+		{"designer missing binding", topConfig + "[roles.designer]\nprofile = 'missing'\n", "", "roles.designer.profile"},
 		{"missing binding", topConfig + "[roles.mason]\nprofile = 'missing'\n", "", "roles.mason.profile"},
 		{"invalid sandbox", topConfig + "[roles.mason]\nsandbox = 'unsafe'\n", "", "roles.mason.sandbox"},
 		{"missing image", topConfig + "[roles.mason]\nsandbox = 'container'\n", "", "roles.mason.image"},
@@ -708,6 +710,29 @@ func TestBranchNames(t *testing.T) {
 	}
 }
 
+func TestDesignerRoleIsAnOrdinaryRoleThatNeverFallsBackToTheChiefOfStaff(t *testing.T) {
+	chief := topConfig + "[profiles.chief]\nagent = 'codex'\nmodel = 'chief-model'\n[roles.chief_of_staff]\nprofile = 'chief'\nsandbox = 'container'\nimage = 'chief-image'\nskills = ['https://github.com/example/skills#chief-skill']\n"
+	c, err := load(fixture(t, chief, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Roles["designer"]; got.Profile != "default" || got.Sandbox != "none" || got.Image != "" || got.EventsProfile != "" || len(got.Skills) != 0 {
+		t.Fatalf("an unconfigured designer: %+v", got)
+	}
+	if got := c.RoleExecution("designer"); got.Mode != "none" || got.Image != "" || len(got.Skills) != 0 {
+		t.Fatalf("an unconfigured designer's execution: %+v", got)
+	}
+	configured := chief + "[roles.designer]\nprofile = 'chief'\nsandbox = 'sbx'\nimage = 'osmia:latest'\nskills = ['https://github.com/example/skills#design-skill']\n"
+	c, err = load(fixture(t, configured, projectConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, settings, err := c.Execution("designer", "chief")
+	if err != nil || p.Backend != "codex" || settings.Mode != "sbx" || settings.Image != "osmia:latest" || !slices.Equal(settings.Skills, []string{"https://github.com/example/skills#design-skill"}) {
+		t.Fatalf("a configured designer: %+v %+v %v", p, settings, err)
+	}
+}
+
 func TestNamedBindings(t *testing.T) {
 	top := strings.Replace(topConfig, "profiles.default", "profiles.custom", 1)
 	top = strings.Replace(top, "claude", "opencode", 1)
@@ -718,7 +743,7 @@ func TestNamedBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Roles) != 6 || c.Roles["reviewer"].Profile != "custom" {
+	if len(c.Roles) != 7 || c.Roles["reviewer"].Profile != "custom" || c.Roles["designer"].Profile != "custom" {
 		t.Fatalf("bindings: %+v", c.Roles)
 	}
 }

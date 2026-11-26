@@ -45,9 +45,11 @@ type Options struct {
 	Lease time.Duration
 	// Profile returns the chief of staff's profile for a new turn.
 	Profile func() (coreadapter.Profile, error)
-	// System returns the system prompt of a new event turn of the workstream.
-	// Without it the turn has none.
-	System func(context.Context, config.WorkstreamID) (string, error)
+	// System returns the system prompt of a new event turn of the workstream,
+	// and the context the turn is delivered with: what changes between turns
+	// and so never belongs in the system prompt. Without it the turn has
+	// neither.
+	System func(context.Context, config.WorkstreamID) (system, turnContext string, err error)
 	// Skip reports a workstream whose events stay undelivered and
 	// unacknowledged. Without it no workstream is skipped.
 	Skip func(config.WorkstreamID) (bool, error)
@@ -227,9 +229,9 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	if err != nil {
 		return err
 	}
-	system := ""
+	system, turnContext := "", ""
 	if d.options.System != nil {
-		if system, err = d.options.System(ctx, stream); err != nil {
+		if system, turnContext, err = d.options.System(ctx, stream); err != nil {
 			if errors.Is(err, ErrChiefUnavailable) || errors.Is(err, trace.ErrLocked) || errors.Is(err, context.Canceled) || errors.Is(err, trace.ErrMemberRetired) {
 				return nil
 			}
@@ -275,7 +277,7 @@ func (d *Deliverer) deliver(ctx context.Context, stream config.WorkstreamID) err
 	req := trace.TurnRequest{
 		Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: turn, Revision: 1, Project: target.Project(), Workstream: stream,
 			At: now, Actor: Actor, Cause: claimed[0].TransitionID},
-		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: Prompt(claimed)}
+		AgentID: chief.Identity.ID, ThreadID: chief.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: Prompt(claimed)}
 	if _, err := target.EnqueueTurn(ctx, req); err != nil {
 		if errors.Is(err, os.ErrNotExist) && d.options.ChiefTarget != nil {
 			next, closeNext, resolveErr := d.deliveryTarget(ctx, stream)

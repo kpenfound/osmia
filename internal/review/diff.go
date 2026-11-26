@@ -96,7 +96,7 @@ type PinnedDiff struct {
 
 // DiffTool reads the pinned changes of a review, as git diff shows them.
 func DiffTool(diffs ...PinnedDiff) coreadapter.Tool {
-	description := "Read the exact diff this review is pinned to, as git diff shows it. With no fields it returns the whole diff. files_only lists the changed files with added and removed line counts. paths limits the diff to those files or directories. start and end keep only the hunks that touch those one-based lines, on the changed side, of the named paths. A response over 64 KiB is cut and says truncated; narrow paths or lines to read the rest."
+	description := "Read the exact diff this review is pinned to, as git diff shows it. Call it for the change under review; call file_read instead for a file's whole current content. With no fields it returns the whole diff. files_only: true lists the changed files with their added and removed line counts, which is the cheap way to plan a read. paths: limits the diff to those repository-relative files or directories. start and end: one-based line numbers on the changed side that keep only the hunks touching those lines of the named paths, so give them with paths. A response over 64 KiB is cut and says truncated; narrow paths or lines to read the rest."
 	schema := `{"type":"object","properties":{"files_only":{"type":"boolean"},"paths":{"type":"array","items":{"type":"string"}},"start":{"type":"integer"},"end":{"type":"integer"}},"additionalProperties":false}`
 	if len(diffs) > 1 {
 		var names, about []string
@@ -125,19 +125,19 @@ func DiffTool(diffs ...PinnedDiff) coreadapter.Tool {
 				i = 0
 			}
 			if i < 0 {
-				return nil, fmt.Errorf("change %q is not one this review reads", in.Change)
+				return nil, fmt.Errorf("change %q is not one this review reads: set change to one of %s", in.Change, strings.Join(changeNames(diffs), ", "))
 			}
 			for _, p := range in.Paths {
 				if !fs.ValidPath(p) {
-					return nil, fmt.Errorf("path %q is not a relative repository path", p)
+					return nil, fmt.Errorf("path %q is not a relative repository path: name a file or directory of the repository, such as src/main.go", p)
 				}
 			}
 			if in.Start != 0 || in.End != 0 {
 				if len(in.Paths) == 0 || in.FilesOnly {
-					return nil, errors.New("start and end select lines of named paths; give paths and leave files_only unset")
+					return nil, errors.New("start and end select lines of named paths: give paths, and leave files_only unset")
 				}
 				if in.Start < 1 || in.End < in.Start {
-					return nil, errors.New("start and end must be one-based lines with start at or before end")
+					return nil, errors.New("start and end must be one-based line numbers with start at or before end: for example start 10 and end 40")
 				}
 			}
 			diff, err := diffs[i].Read(ctx)
@@ -155,8 +155,16 @@ func DiffTool(diffs ...PinnedDiff) coreadapter.Tool {
 				Note      string        `json:"note,omitempty"`
 			}{Change: in.Change, From: diffs[i].From, To: diffs[i].To, Files: listed, Diff: text, Truncated: truncated}
 			if len(listed) == 0 && text == "" {
-				response.Note = "no changed file matches the selection"
+				response.Note = "no changed file matches the selection: call with files_only to list the changed files"
 			}
 			return json.Marshal(response)
 		}}
+}
+
+func changeNames(diffs []PinnedDiff) []string {
+	out := make([]string, len(diffs))
+	for i, d := range diffs {
+		out[i] = strconv.Quote(d.Name)
+	}
+	return out
 }

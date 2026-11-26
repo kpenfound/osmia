@@ -36,7 +36,7 @@ func decodeToolInput(raw json.RawMessage, v any) error {
 
 func (c *runtimeControls) climbSteer(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
 	return coreadapter.Tool{Name: climbSteerTool, Effect: coreadapter.ToolMemory,
-		Description: "Steer the climb's next attempt with a note: what the mason should try or avoid, from what the attempt log shows. The note reaches the mason's next attempt, which starts fresh from the current best, and stays in the log of notes every later attempt reads. You never judge whether a score improved and never decide whether an attempt is kept: Go does. note: at most 2000 characters.",
+		Description: "Steer the climb's next attempt with a note that says what the mason should try or avoid, based on what the attempt log shows. The note reaches the next attempt, which starts fresh from the current best, and stays in the log of notes that every later attempt reads. It cannot change whether an attempt is kept: Go decides that by arithmetic, so a steering note never claims a score improved. To stop the climb, use climb_conclude. note: at most 2000 characters.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}},"required":["note"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var in struct {
@@ -56,13 +56,13 @@ func (c *runtimeControls) climbSteer(r *trace.Repository, scope coreadapter.Scop
 			if s := c.service.Load(); s != nil {
 				s.kickClimb(r)
 			}
-			return json.Marshal(map[string]any{"recorded": true, "note": note.Number, "next": "The note reaches the mason's next attempt."})
+			return json.Marshal(map[string]any{"recorded": true, "note": note.Number, "next": "The note is recorded and reaches the mason's next attempt. Tell the owner what you steered."})
 		}}
 }
 
 func (c *runtimeControls) climbConclude(r *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	return coreadapter.Tool{Name: climbConcludeTool, Effect: coreadapter.ToolMemory,
-		Description: "Conclude the climb now: no attempt starts again, an attempt in flight is discarded, and the branch goes on to its rebase, final review and delivery. Use it when the attempt log shows the climb has run its course. note: why the climb is concluded.",
+		Description: "Conclude the climb now. No new attempt starts, an attempt in flight is discarded, and the branch goes on to its rebase, final review and delivery. Use it when the attempt log shows the climb has run its course, and use climb_steer instead to keep climbing in a new direction. note: why the climb is concluded, written for the owner.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"note":{"type":"string"}},"required":["note"],"additionalProperties":false}`),
 		Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			var in struct {
@@ -92,6 +92,6 @@ func (c *runtimeControls) climbConclude(r *trace.Repository, scope coreadapter.S
 				return priorityRefusal(fmt.Sprintf("the climb was not concluded: the router held it (%s). %s", res.Hold, res.Reason))
 			}
 			s.kickClimb(r)
-			return json.Marshal(map[string]any{"concluded": true, "state": climb.InnerConcluding})
+			return json.Marshal(map[string]any{"concluded": true, "state": climb.InnerConcluding, "next": "The climb is concluding and the branch goes on to its rebase, final review and delivery. Tell the owner the climb is concluded."})
 		}}
 }

@@ -20,7 +20,7 @@ import (
 
 const prioritiseTool = "prioritise"
 
-const priorityGuidance = "When the owner asks you to change which workstreams go first, call prioritise with the IDs of the target project's active workstreams in the order the owner wants, highest priority first. Set project to another active project ID for a factory-wide request. " +
+const priorityGuidance = "## Priority\nWhen the owner asks you to change which workstreams go first, call prioritise with the IDs of the target project's active workstreams in the order the owner wants, highest priority first. Set project to another active project ID for a factory-wide request. " +
 	"Workstreams you leave out come after the ones you name. Name each workstream once, and never a delivered or abandoned one. " +
 	"prioritise changes the order only: it does not pause, resume or abandon work, and it is the same order the owner sets with osmia priority."
 

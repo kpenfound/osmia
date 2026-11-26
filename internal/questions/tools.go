@@ -33,27 +33,30 @@ const (
 
 // Guidance tells the chief of staff what to do with a question. It belongs
 // in the system prompt of every turn that may carry one.
-const Guidance = "When a service event says a question is open, investigate it first (factory_context, inspect_code, read_remote_file), then call decide with kind question-routing, the question's number as subject, and a short evidence summary of what you found. " +
+const Guidance = "## Questions\n" +
+	"When a service event says a question is open, investigate it first (factory_context, inspect_code, read_remote_file), then call decide with kind question-routing, the question's number as subject, and a short evidence summary of what you found. " +
 	"decide asks Jev how the question is routed: answered within the approved intent, routed as an amendment, or escalated. " +
-	"When Jev's decision is binding, answer, route_amendment and escalate record only the outcome it picked, and you still write the text that outcome needs. When decide says the decision is yours, Jev did not reach the confidence needed or could not answer: choose as the record supports. " +
-	"answer, escalate and route_amendment refuse a question decide has not been called for. A question that decide refuses as not Jev's to route, such as one the architect asked, keeps the route it has: use the tools directly. " +
-	"Choose exactly once for a question. " +
-	"Call answer for engineering decisions within the approved intent, including equivalent evidence and necessary supporting changes within an assignment. Cite the requirements and evidence supporting your decision: " + CitationForms + ". " +
+	"When Jev's decision is binding, answer, route_amendment and escalate record only the outcome it picked, and you still write the text that outcome needs. When decide says the decision is yours, because Jev did not reach the confidence needed or could not answer, choose as the record supports. " +
+	"answer, escalate and route_amendment refuse a question decide has not been called for. A question that decide refuses as not Jev's to route, such as one the architect asked, keeps the route it has, so use the tools directly. " +
+	"Choose exactly once for a question, because a second outcome would contradict the first.\n\n" +
+	"### Answering\n" +
+	"Call answer for engineering decisions within the approved intent, including equivalent evidence and necessary supporting changes within an assignment. Cite the requirements and evidence supporting your decision: " + CitationForms + ". The asker acts on your answer, so it has to rest on records the asker can check.\n\n" +
+	"### Escalating\n" +
 	"Call escalate only when the answer would contradict or extend the agreed design: it changes owner intent, relaxes a constraint, contradicts an owner ruling, or needs an owner-reserved tradeoff. Missing context calls for investigation, not an intent decision. " +
 	"Structure every escalation: section cites the spec or plan passage in tension, conflict states the tension itself, options are the choices and recommendation is what you would decide. " +
-	"When a genuine gap affects more than one workstream or unit of your workgroup, escalate every affected question together as one consolidated batch, naming each with its own workstream when it is not your own: " +
-	"the owner's one answer resumes every one of them, and work unaffected by the gap is never held up for it. " +
-	"Call route_amendment for revised assignments, dependencies or newly discovered work. Plan-only revisions preserving approved intent are factory decisions; spec changes remain owner decisions. " +
-	"A question that would change a contract section of a member's slice is filed as a project-level amendment instead of a plan amendment, and is never applied inside that workstream; route_amendment does this for you. " +
-	"Log a judgment call you make within stated intent, rather than escalate or stay silent about it, with log_assumption: it appears in the affected workstreams' drafted pull request descriptions. Name affected members with workstreams; omit it for a workgroup-wide judgment. " +
-	"Never answer for the owner because time is passing; a question waits as long as it needs. " +
-	"Your workgroup may hold more than one workstream; a question number alone names one of your own workstream, and \"<workstream>:<number>\" names one of another member sharing you as its chief of staff. " +
-	"The tools that read or act on one workstream's records, units or code, such as factory_context, record_discovery, inspect_code, move_workstream, move_unit, resolve_contested, decide_amendment, resolve_objection and hand_back_drift, take workstream to name the member they concern; without it they act on this conversation's own workstream. " +
-	"When a service event says the owner ruled on an inbox entry, or that Jev decided it for the owner, call relay_ruling exactly once for it, naming one of its questions: rephrase the ruling for the askers without changing what it decides, " +
-	"and choose scope local when it matters only to them, or notify when it applies across the project. " +
-	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it with the rule as the charter should state it; " +
-	"For an amendment to another member charter, set amends to that project's qualified rule citation; the proposal is recorded and decided in that project. " +
-	"The owner ratifies or declines the proposal, so make it the attention of your status until they do."
+	"When a genuine gap affects more than one workstream or unit of your workgroup, escalate every affected question together as one consolidated batch, naming each with its own workstream when it is not your own. The owner's one answer then resumes every one of them, and work unaffected by the gap is never held up for it. " +
+	"A question waits as long as it needs for the owner. Do not answer for the owner because time is passing, because an answer the owner did not give is not the owner's decision.\n\n" +
+	"### Routing an amendment\n" +
+	"Call route_amendment for revised assignments, dependencies or newly discovered work. Plan-only revisions that preserve approved intent are factory decisions; spec changes remain owner decisions. " +
+	"A question that would change a contract section of a member's slice is filed as a project-level amendment instead of a plan amendment and is never applied inside that workstream, because the contract binds other members. route_amendment does this for you.\n\n" +
+	"### Logging assumptions\n" +
+	"When you make a judgment call within stated intent, log it with log_assumption instead of escalating or staying silent. It appears in the affected workstreams' drafted pull request descriptions, so reviewers can see it. Name the affected members with workstreams; omit it for a workgroup-wide judgment.\n\n" +
+	"### Workgroups and rulings\n" +
+	"Your workgroup may hold more than one workstream. A question number alone names a question of your own workstream, and \"<workstream>:<number>\" names one of another member that shares you as its chief of staff. " +
+	"The tools that read or act on one workstream's records, units or code, such as factory_context, record_discovery, inspect_code, move_workstream, move_unit, resolve_contested, decide_amendment, resolve_objection and hand_back_drift, take workstream to name the member they concern. Without it they act on this conversation's own workstream.\n" +
+	"When a service event says the owner ruled on an inbox entry, or that Jev decided it for the owner, call relay_ruling exactly once for it, naming one of its questions, so every asker hears it once. Rephrase the ruling for the askers without changing what it decides, and choose scope local when it matters only to them, or notify when it applies across the project. " +
+	"When the owner's ruling is a standing rule for the project rather than a decision about this feature, also call propose_charter once for it, with the rule as the charter should state it. For an amendment to another member's charter, set amends to that project's qualified rule citation; the proposal is recorded and decided in that project. " +
+	"The owner ratifies or declines the proposal, so make it the attention of your status until the owner does."
 
 // ChiefTools names the chief of staff's question tools.
 var ChiefTools = []string{AnswerTool, EscalateTool, RelayRulingTool, RouteAmendmentTool, ProposeCharterTool, LogAssumptionTool}
@@ -91,7 +94,7 @@ func tools(repository *trace.Repository, agent string, scope coreadapter.Scope, 
 		return chiefTools(repository, agent, scope, now), nil
 	}
 	ask := coreadapter.Tool{Name: AskTool, Effect: coreadapter.ToolMemory,
-		Description: "Ask the chief of staff a question you cannot answer from your context. Say what you need decided and what it blocks. For a conflict between member charters, supply charter_conflict with both project-qualified rules; Go sends it directly to the owner. The question is recorded and your turn ends; end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
+		Description: "Ask the chief of staff a question you cannot settle from your own context, including when the task itself looks wrong. question: say what you need decided and what it blocks, so the chief can answer without re-reading your work. charter_conflict: only for a conflict between member charters; give both rules, each qualified with its project ID, and Go sends the question directly to the owner. The question is recorded and your turn ends, so end it as soon as this returns. The answer arrives as your next turn on this thread, however long it takes.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"question":{"type":"string"},"charter_conflict":{"type":"array","items":{"type":"string"},"minItems":2}},"required":["question"],"additionalProperties":false}`)}
 	ask.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -127,11 +130,18 @@ func amendmentTool(repository *trace.Repository, agent string, scope coreadapter
 	if routed {
 		properties = `"question":{"type":"string"},"workstream":{"type":"string"},` + properties
 	}
-	description := "Request a revised plan or spec against spec#<n> and/or plan#<unit> citations. A chief may omit question to commission replanning or bounded investigation for discovered work. Give the proposed change and reason. The request is recorded; end this turn when accepted."
+	description := "Ask the chief of staff for a revision to the sealed spec or plan, citing the spec#<n> or plan#<unit> passages it changes. citations: at least one passage, each of which must exist. change: the proposed change. reason: why it is needed. The request is recorded, and your turn should end once it is accepted."
 	if routed {
-		description = "Commission a revised plan or spec against spec#<n> and/or plan#<unit> citations of a workstream: the architect drafts it and the committee examines it before it is decided. Name a question to route it, or omit question to commission replanning, new units or bounded investigation for discovered work on any member at any time, including a building workstream whose units have all merged, an assembled one or a delivered one whose pull request is open; workstream names the member, the turn's own by default, and citations resolve against that member's documents. Give the proposed change and reason."
+		description = "Commission a revision to a member workstream's ratified document: the architect drafts it and the committee examines it before it is decided. Use it for revised assignments, changed dependencies, newly discovered work or a bounded investigation. To answer a question inside the approved intent, call answer instead. " +
+			"question: the number of an open question to route, after you called decide for it; omit it to commission replanning, new units or an investigation at any time, including for a building workstream whose units have all merged, an assembled one or a delivered one whose pull request is open. " +
+			"workstream: the member the revision concerns; omit it for this conversation's own workstream. " +
+			"citations: one or more spec#<n> or plan#<unit> passages the revision changes; each must exist in that member's documents. change: the proposed change. reason: why it is needed. " +
+			"The result carries the amendment's ID and lists under queued what the service started. Tell the owner what you commissioned."
 	}
 	next := "End your turn now. The request is with the chief of staff."
+	if routed {
+		next = "The architect now drafts the revision and the committee examines it before it is decided. Tell the owner what you commissioned."
+	}
 	if move != nil {
 		description = fmt.Sprintf("File an amendment request when upstream's change from %s to %s alters what a sealed criterion means. Cite the sealed spec#<n> and/or plan#<unit> it changes, and give the proposed change and reason; the request cites upstream commit %s and goes to the owner. Nothing waits for it: finish the resolution against the sealed spec as it stands.", move.From, move.To, move.To)
 		next = "The request is with the chief of staff. Finish the resolution against the sealed spec as it stands, then call done."

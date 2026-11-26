@@ -104,7 +104,7 @@ func TurnKey(scope coreadapter.Scope) string {
 
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Give the outcome: what the work now does and how you checked the acceptance. Include an owner-facing headline (64 characters), what happened (140 characters), and needs_you (140 characters, empty unless the owner has an action). Write a single line per card field, in words without IDs, paths, URLs or model names. The service shortens a card field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or what happened it records no card. A needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
+		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Call it once per turn. outcome (required): what the work now does and how you checked each acceptance item. headline, happened and needs_you make the owner's card: headline up to 64 characters, happened up to 140 characters, and needs_you up to 140 characters and empty unless the owner has an action. Write each as one line in words without IDs, paths, URLs or model names. The service shortens a field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or happened it records no card. A non-empty needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
@@ -147,7 +147,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 			}
 		}
 		if !canReport {
-			return r.refuse(TurnKey(scope), fmt.Sprintf("unit %s is %s, not implementing", scope.Unit, state.Value))
+			return r.refuse(TurnKey(scope), fmt.Sprintf("unit %s is %s, not implementing: done is accepted only while the unit is implementing", scope.Unit, state.Value))
 		}
 		known := []string{scope.Project, scope.Workstream, scope.Unit, scope.Thread, scope.Turn}
 		threads, err := repository.Threads(config.WorkstreamID(scope.Workstream))
@@ -198,7 +198,7 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 // for its mason.
 func (r *masonReports) AttemptTool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
-		Description: "Report this attempt's change ready to be measured. Give the hypothesis you tested, the change you made and the effect you expect it to have on the metric. The service records the report, takes your workspace as the attempt's candidate, runs the protected-path gate and the guardrail checks, measures it with the approved evaluator and lets Go decide whether it is kept; you never judge whether a score improved. End your turn as soon as this returns.",
+		Description: "Report this attempt's change ready to be measured. hypothesis: what you tested. change: what you changed. expected_effect: the effect you expect on the metric. All three are required. The service records the report, takes your workspace as the attempt's candidate, runs the protected-path gate and the guardrail checks, measures it with the approved evaluator, and Go alone decides whether it is kept; you never judge whether a score improved. Call it once per attempt and end your turn as soon as it returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"hypothesis":{"type":"string"},"change":{"type":"string"},"expected_effect":{"type":"string"}},"required":["hypothesis","change","expected_effect"],"additionalProperties":false}`)}
 	done.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input AttemptReport
@@ -212,7 +212,7 @@ func (r *masonReports) AttemptTool(repository *trace.Repository, scope coreadapt
 		}
 		n, ok := climb.AttemptNumber(scope.Unit)
 		if !ok {
-			return r.refuse(TurnKey(scope), fmt.Sprintf("%s is not an attempt of a climb", scope.Unit))
+			return r.refuse(TurnKey(scope), fmt.Sprintf("%s is not an attempt of a climb: this report is for a climb's mason", scope.Unit))
 		}
 		stream := config.WorkstreamID(scope.Workstream)
 		state, err := repository.Workflow(stream, trace.ClimbAttemptSubject(n))
@@ -220,11 +220,11 @@ func (r *masonReports) AttemptTool(repository *trace.Repository, scope coreadapt
 			return nil, err
 		}
 		if state.Value != string(climb.PhaseStarted) {
-			return r.refuse(TurnKey(scope), fmt.Sprintf("attempt %d is %s, not waiting for its mason", n, state.Value))
+			return r.refuse(TurnKey(scope), fmt.Sprintf("attempt %d is %s, not waiting for its mason: done is accepted only while the attempt waits for its mason", n, state.Value))
 		}
 		for name, value := range map[string]string{"hypothesis": input.Hypothesis, "change": input.Change, "expected_effect": input.Expected} {
 			if strings.TrimSpace(value) == "" {
-				return r.refuse(TurnKey(scope), name+" is required: say what you tried, what you changed and the effect you expect")
+				return r.refuse(TurnKey(scope), name+" is required: give the hypothesis you tested, the change you made and the effect you expect, then call done again")
 			}
 		}
 		outcome := fmt.Sprintf("Hypothesis: %s\nChange: %s\nExpected effect: %s", strings.TrimSpace(input.Hypothesis), strings.TrimSpace(input.Change), strings.TrimSpace(input.Expected))

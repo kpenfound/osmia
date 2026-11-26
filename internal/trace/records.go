@@ -182,8 +182,14 @@ type TurnRequest struct {
 	Profile      coreadapter.Profile         `json:"profile"`
 	Resume       *coreadapter.BackendSession `json:"resume,omitempty"`
 	SystemPrompt string                      `json:"system_prompt"`
-	Prompt       string                      `json:"prompt"`
-	History      string                      `json:"history,omitempty"`
+	// Context is what the turn's agent must act on that changes during a
+	// conversation, such as the project context the owner's message was
+	// accepted with or a design session's catalog and brief. It reaches the
+	// agent in the labelled block that opens the turn's prompt, never in the
+	// system prompt, which a resumed session keeps as it began.
+	Context string `json:"context,omitempty"`
+	Prompt  string `json:"prompt"`
+	History string `json:"history,omitempty"`
 }
 
 func (TurnRequest) traceRecord() {}

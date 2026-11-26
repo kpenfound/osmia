@@ -144,7 +144,7 @@ func TestOrdinaryConversationRefusesADesignSessionAndDesignMessageRefusesAStarte
 	}
 }
 
-func TestStartDesignWorkgroupHandsOffBriefOnTheSameChiefOfStaffThread(t *testing.T) {
+func TestStartDesignWorkgroupHandsOffBriefToTheChiefOfStaffsOwnThread(t *testing.T) {
 	t.Parallel()
 	s, c, project := journey.NewDesignFixture(t)
 	opened, err := c.OpenDesign(context.Background(), project)
@@ -190,7 +190,7 @@ func TestStartDesignWorkgroupHandsOffBriefOnTheSameChiefOfStaffThread(t *testing
 	after, err := repository.ChiefOfStaffThread(stream)
 	fixturekit.Must(t, err)
 	if after.Identity.ID != before.Identity.ID || after.Identity.ThreadID != before.Identity.ThreadID {
-		t.Fatalf("starting the workgroup must continue the same thread: before %+v after %+v", before.Identity, after.Identity)
+		t.Fatalf("starting the workgroup must give the chief of staff its own thread, not a design thread: before %+v after %+v", before.Identity, after.Identity)
 	}
 	host, err := repository.ChiefOfStaffHost(stream)
 	fixturekit.Must(t, err)
@@ -325,19 +325,19 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, verified *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.SystemPrompt, "1. Keep changes small.") {
+		if !strings.Contains(req.Prompt, "1. Keep changes small.") {
 			fail("missing project charter in design context")
 		}
 		for _, p := range s.Current().Projects {
 			row := fmt.Sprintf("%s | %s | %s | %t |", p.ID, p.Name, p.Upstream, p.ID == project)
-			if !strings.Contains(req.SystemPrompt, row) {
+			if !strings.Contains(req.Prompt, row) {
 				fail("missing catalog row %s", row)
 			}
 		}
-		if strings.Contains(req.SystemPrompt, "Keep the client API stable") {
+		if strings.Contains(req.Prompt, "Keep the client API stable") {
 			fail("non-brief charter was inlined")
 		}
-		if strings.Contains(req.SystemPrompt, "Conventions for repo "+string(second)) {
+		if strings.Contains(req.Prompt, "Conventions for repo "+string(second)) {
 			fail("non-brief entity map was inlined")
 		}
 		for _, name := range []string{"charter.md", "entities.md"} {
@@ -353,7 +353,7 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 			}
 		}
 		for _, repo := range []config.ProjectID{project, second} {
-			if repo == project && !strings.Contains(req.SystemPrompt, "Conventions for repo "+string(repo)) {
+			if repo == project && !strings.Contains(req.Prompt, "Conventions for repo "+string(repo)) {
 				fail("missing repo entity map in context: %s", repo)
 			}
 			out, err := fixturekit.CallTool(ctx, tools, intake.DesignReadRepoToolName, map[string]any{"repo": repo, "path": "README.md"})
@@ -402,8 +402,8 @@ func TestDesignSessionProductionEnforcementGrantsOnlyReadOnlyTools(t *testing.T)
 		if want := []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}; !slices.Equal(g.Tools, want) {
 			fail("design session's native tools %v, want %v", g.Tools, want)
 		}
-		if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
-			fail("design session's system prompt lacks the web guidance after its role prompt")
+		if !strings.Contains(req.Prompt, isolation.WebGuidance) || req.SystemPrompt != intake.DesignRolePrompt {
+			fail("design session's system prompt is not exactly its role prompt, or its turn lacks the web guidance")
 		}
 		for _, m := range g.Mounts {
 
@@ -516,7 +516,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		turns.Workspaces, turns.Capture = intake.StagedWorkspaces{}, nil
 		selectChief := turns.Select
 		turns.Select = func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
-			if scope.Role == trace.ChiefOfStaff {
+			if scope.Role == trace.ChiefOfStaff || scope.Role == trace.Designer {
 				return selectChief(ctx, scope)
 			}
 			workspace := filepath.Join(cfg.Root.String(), "workers", scope.Thread)
@@ -525,7 +525,7 @@ func newDesignWorkgroupContinuationFixture(t *testing.T) (*journey.Service, *jou
 		}
 		chiefScoped := turns.Scoped
 		turns.Scoped = func(ctx context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
-			if scope.Role == trace.ChiefOfStaff {
+			if scope.Role == trace.ChiefOfStaff || scope.Role == trace.Designer {
 				return chiefScoped(ctx, scope)
 			}
 			return questions.Tools(r, designWorkerAgent, scope, clock.Now)
@@ -600,6 +600,11 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 				})
 			}
 			ready := len(chief.Turns) >= chiefCount && complete(chief)
+			if design, err := repository.DesignerThread(stream); err == nil {
+				ready = ready && len(design.Turns) > 0 && complete(design)
+			} else if !errors.Is(err, os.ErrNotExist) {
+				fixturekit.Must(t, err)
+			}
 			var worker trace.Thread
 			if workerCount > 0 {
 				worker, err = repository.Thread(stream, designWorkerAgent)
@@ -647,7 +652,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	engine.Mu.Unlock()
 	sent, err := c.DesignMessage(ctx, stream, designMessage)
 	fixturekit.Must(t, err)
-	waitCompleted("design reply", 1, 0, "")
+	waitCompleted("design reply", 0, 0, "")
 	designConversation := awaitDesignConversation(t, c, stream, func(r api.ConversationResponse) bool {
 		return len(r.Entries) == 2 && r.Entries[1].Kind == "response"
 	})
@@ -656,8 +661,10 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}
 	before, err := repository.ChiefOfStaffThread(stream)
 	fixturekit.Must(t, err)
-	if len(before.Turns) != 1 || before.Turns[0].Request.TurnID != sent.Turn || before.Turns[0].Response == nil || before.Turns[0].CompletedAt.IsZero() {
-		t.Fatalf("design exchange did not complete on its actual thread: %+v", before)
+	design, err := repository.DesignerThread(stream)
+	fixturekit.Must(t, err)
+	if len(design.Turns) != 1 || design.Turns[0].Request.TurnID != sent.Turn || design.Turns[0].Response == nil || design.Turns[0].CompletedAt.IsZero() || len(before.Turns) != 0 {
+		t.Fatalf("design exchange did not complete on the design thread: design %+v chief %+v", design, before)
 	}
 
 	started, err := c.DesignStart(ctx, stream)
@@ -718,11 +725,11 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	engine.Mu.Unlock()
 
 	clock.Advance(time.Minute)
-	waitCompleted("hand-off title", 2, 0, "")
+	waitCompleted("hand-off title", 1, 0, "")
 	titled, err := repository.ChiefOfStaffThread(stream)
 	fixturekit.Must(t, err)
-	if len(titled.Turns) != 2 || !strings.Contains(titled.Turns[1].Request.Prompt, intake.HandoffTitleOpening) {
-		t.Fatalf("the start's hand-off turn is not the second chief turn: %s", turnSummary(titled))
+	if len(titled.Turns) != 1 || !strings.Contains(titled.Turns[0].Request.Prompt, intake.HandoffTitleOpening) {
+		t.Fatalf("the start's hand-off turn is not the first chief turn: %s", turnSummary(titled))
 	}
 
 	now := clock.Now()
@@ -744,7 +751,7 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 
 	settle()
 	clock.Advance(time.Minute)
-	waitCompleted("worker ask and chief escalation", 3, 1, "waiting")
+	waitCompleted("worker ask and chief escalation", 2, 1, "waiting")
 
 	mu.Lock()
 	ranChief := acted
@@ -763,9 +770,11 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	if len(after.Turns) <= len(before.Turns) {
 		fatalf("no later turn landed on the continued thread: before %d turns, after %+v", len(before.Turns), after.Turns)
 	}
-	originalTurns, err := json.Marshal(before.Turns)
+	originalTurns, err := json.Marshal(design.Turns)
 	fixturekit.Must(t, err)
-	continuedTurns, err := json.Marshal(after.Turns[:len(before.Turns)])
+	designAfter, err := repository.DesignerThread(stream)
+	fixturekit.Must(t, err)
+	continuedTurns, err := json.Marshal(designAfter.Turns)
 	fixturekit.Must(t, err)
 	if string(originalTurns) != string(continuedTurns) {
 		fatalf("continuation changed the design turn's request, response or recovery state")
@@ -920,7 +929,9 @@ func TestDesignWorkgroupThreadCarriesALaterStatusAndEscalation(t *testing.T) {
 	}) {
 		fatalf("relay: want ruling linked to a completed chief turn on the actual design thread; ruling %+v; chief %s", ruling, turnSummary(ruledChief))
 	}
-	continuedTurns, err = json.Marshal(ruledChief.Turns[:len(before.Turns)])
+	ruledDesign, err := repository.DesignerThread(stream)
+	fixturekit.Must(t, err)
+	continuedTurns, err = json.Marshal(ruledDesign.Turns)
 	fixturekit.Must(t, err)
 	if string(originalTurns) != string(continuedTurns) {
 		fatalf("owner ruling changed the original design request, response or recovery state")

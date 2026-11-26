@@ -9,8 +9,8 @@ import (
 )
 
 // SchemaVersion is the evaluator contract version this build reads. The
-// hill-climb-evaluator skill teaches the same version; changing the contract
-// means changing both together and bumping this number.
+// evaluator unit's task states the same version; changing the contract means
+// changing both together and bumping this number.
 const SchemaVersion = 1
 
 // Direction names which way of a metric is better.

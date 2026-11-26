@@ -11,9 +11,9 @@ func resultsOf() ClimbResults {
 	return ClimbResults{
 		Metric: "wall_ms", Unit: "ms", Direction: "lower", MinImprovement: 5,
 		Baseline: 101, BaselineCommit: "evaluator0001abcd", Attempts: 3,
-		Kept:   []ClimbKept{{Number: 1, Commit: "kept0000001abcd", Hypothesis: "cache | the parsed\ncorpus", Score: 90, Change: -11, ChangePercent: ptr(-10.89)}},
-		Before: ClimbFinal{Commit: "kept0000001abcd", Score: 90, Valid: true},
-		After:  ClimbFinal{Commit: "rebased00001abcd", Score: 91, Valid: true},
+		Kept:           []ClimbKept{{Number: 1, Commit: "kept0000001abcd", Hypothesis: "cache | the parsed\ncorpus", Score: 90, Change: -11, ChangePercent: ptr(-10.89)}},
+		Before:         ClimbFinal{Commit: "kept0000001abcd", Score: 90, Valid: true},
+		After:          ClimbFinal{Commit: "rebased00001abcd", Score: 91, Valid: true},
 		UpstreamBranch: "main", UpstreamCommit: "upstream0001abcd",
 	}
 }

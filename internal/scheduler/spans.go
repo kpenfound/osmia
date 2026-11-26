@@ -40,7 +40,7 @@ func (l loaded) flight(stream config.WorkstreamID, t trace.Thread, q trace.Queue
 }
 
 func (u usage) addTurn(f flight) {
-	if f.role == trace.ChiefOfStaff {
+	if trace.ChiefLike(f.role) {
 		return
 	}
 	u.flights[turnKey{f.workstream, f.agent, f.turn}] = f

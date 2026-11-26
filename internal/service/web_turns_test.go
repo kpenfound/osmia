@@ -92,8 +92,8 @@ func TestOrdinaryChiefTurnHoldsWebTools(t *testing.T) {
 			if len(got.Mounts) == 0 || got.Mounts[0].Access != agent.ReadOnly || got.VCS {
 				t.Errorf("chief workspace %+v vcs=%v", got.Mounts, got.VCS)
 			}
-			if !strings.HasPrefix(got.SystemPrompt, "You are the chief_of_staff.") || !strings.Contains(got.SystemPrompt, isolation.WebGuidance) {
-				t.Errorf("chief system prompt lacks the web guidance: %q", got.SystemPrompt)
+			if got.SystemPrompt != "You are the chief_of_staff." || !strings.Contains(got.Prompt, isolation.WebGuidance) {
+				t.Errorf("chief system prompt %q, or its prompt lacks the web guidance: %q", got.SystemPrompt, got.Prompt)
 			}
 		})
 	}
@@ -149,15 +149,15 @@ func TestRolesWithoutWebGetNoWebTools(t *testing.T) {
 				if got.Capabilities.Web {
 					t.Errorf("host told %s holds Web: %+v", name, got.Capabilities)
 				}
-				if strings.Contains(got.SystemPrompt, isolation.WebGuidance) || !strings.HasPrefix(got.SystemPrompt, "You are the "+s.Role+".") {
-					t.Errorf("%s system prompt %q", name, got.SystemPrompt)
+				if strings.Contains(got.Prompt, isolation.WebGuidance) || got.SystemPrompt != "You are the "+s.Role+"." {
+					t.Errorf("%s system prompt %q, prompt %q", name, got.SystemPrompt, got.Prompt)
 				}
 			})
 		}
 	}
 	turns, _, _ := enforcedTurns(t, f, repository)
 	for role, grant := range turns.Grants {
-		if grant.Web != (role == trace.ChiefOfStaff || role == sessionRole) {
+		if grant.Web != (role == trace.ChiefOfStaff || role == trace.Designer || role == sessionRole) {
 			t.Errorf("%s grant %+v", role, grant)
 		}
 	}

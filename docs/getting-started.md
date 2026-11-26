@@ -111,6 +111,11 @@ osmia serve
 each project's clone, remotes and GitHub access, and prints how to fix what it
 finds; see [`doctor`](cli.md#doctor). Run it whenever `osmia serve` fails.
 
+Roles that set `sandbox = "sbx"` use the `osmia:latest` template. Build it with
+`osmia sandbox build` before you start the service, and ask whether the saved
+template can run Fable 5.2 with `osmia sandbox check`; neither needs the service
+([the Osmia template](configuration.md#docker-sandboxes-sbx)).
+
 The service runs in the foreground; leave it running. In another terminal:
 
 ```sh
@@ -219,9 +224,9 @@ osmia design read w_…
 osmia design start w_…
 ```
 
-The design agent can read any active project's committed source, with exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, and no write, VCS or credential access. Once it understands what the session is about it titles the session with `set_title`, and it retitles it when the subject changes; the title starts no work and leaves the brief and its revision alone. When you start work from the design, the chief of staff gets one turn that titles the started work from the handed brief through its status goal. It arrives on the thread that continues the conversation: the session's own chief thread when its project is the only one selected, and the workgroup's shared chief thread otherwise. Ask it to add or remove projects from the brief. An inferred change needs your agreement first. It asks material readiness questions with recommendations and records other assumptions for you to override.
+The design agent can read any active project's committed source, with exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, and no write, VCS or credential access. Once it understands what the session is about it titles the session with `set_title`, and it retitles it when the subject changes; the title starts no work and leaves the brief and its revision alone. When you start work from the design, the chief of staff gets one turn that titles the started work from the handed brief through its status goal. It arrives on a new chief-of-staff thread that opens from the handed brief and the design transcript: the session's own project's chief thread when it is the only one selected, and the workgroup's shared chief thread otherwise. The design conversation's own thread is not continued. Ask it to add or remove projects from the brief. An inferred change needs your agreement first. It asks material readiness questions with recommendations and records other assumptions for you to override.
 
-`design read` prints the session's title when one is set, then the latest brief revision and project list. `design start` reads them, prints the list it is starting with and sends that revision. On the web, the read-only Brief panel above Start shows project names with home marked and collapsed brief text, updating live. Start sends its displayed revision; a stale brief returns a conflict and starts nothing. The brief, revision and list stay bound through recovery. The conversation stays at the session's project even if the brief excludes it, then continues as the shared chief's thread. See [design sessions](cli.md#design-sessions).
+`design read` prints the session's title when one is set, then the latest brief revision and project list. `design start` reads them, prints the list it is starting with and sends that revision. On the web, the read-only Brief panel above Start shows project names with home marked and collapsed brief text, updating live. Start sends its displayed revision; a stale brief returns a conflict and starts nothing. The brief, revision and list stay bound through recovery. The conversation stays at the session's project even if the brief excludes it; the shared chief then opens a new thread from the brief and the design transcript. See [design sessions](cli.md#design-sessions).
 
 The architect drafts a spec and a plan of units, the committee debates them in
 the shed, and the chief of staff presents them to you. From then on Osmia stops

@@ -600,7 +600,7 @@ func rotationKey(project config.ProjectID, stream config.WorkstreamID, role stri
 }
 
 func (u usage) add(project config.ProjectID, stream config.WorkstreamID, role string) {
-	if role == trace.ChiefOfStaff {
+	if trace.ChiefLike(role) {
 		return
 	}
 	u.roles[role]++
@@ -622,7 +622,7 @@ func (u usage) merge(other usage) {
 
 func (s *Scheduler) refusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || role == trace.ChiefOfStaff {
+	if limits == nil || trace.ChiefLike(role) {
 		return ""
 	}
 	if used.streams[streamKey{c.Project, c.Workstream}] >= limits.PerWorkstream {
@@ -633,7 +633,7 @@ func (s *Scheduler) refusal(used usage, c Candidate) string {
 
 func (s *Scheduler) roleRefusal(used usage, c Candidate) string {
 	limits, role := s.options.Capacity, c.Thread.Identity.Role
-	if limits == nil || role == trace.ChiefOfStaff {
+	if limits == nil || trace.ChiefLike(role) {
 		return ""
 	}
 	fits := used.local[localKey{c.Project, c.Workstream, role}] < 1

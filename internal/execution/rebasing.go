@@ -363,10 +363,14 @@ func ResolvePrompt(unit string, paths []string, rebase UnitRebase, m bundle.Maso
 	}
 	return fmt.Sprintf(`Resolve the conflicts of unit %s.
 
+## Situation
 The workstream's feature branch moved to %s, and the service rebased your unit's workspace onto it. These files of your view are conflicted:
 %s
 
-%s Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that the unit's acceptance still holds, and call done with the outcome. The service sends the unit to review only once no conflicted file carries a marker.
+%s
+
+## What to do
+Resolve every conflict against the sealed spec below, so that what the feature branch holds and what your unit builds both stand, and remove every marker. Then check that the unit's acceptance still holds, and call done with the outcome. The service sends the unit to review only once no conflicted file carries a marker, so a marker left in a file stalls the unit.
 
 %s`, unit, rebase.Onto, "- "+strings.Join(paths, "\n- "), markers, m.Render())
 }

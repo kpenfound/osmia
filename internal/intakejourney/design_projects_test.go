@@ -93,7 +93,7 @@ func (d *designProjects) say(t *testing.T, message string, entries int) {
 		return len(r.Entries) == entries && r.Entries[len(r.Entries)-1].Kind == "response"
 	})
 	if conversation.Entries[len(conversation.Entries)-1].State == api.TurnFailed {
-		th, err := d.repo.ChiefOfStaffThread(d.stream)
+		th, err := d.repo.DesignerThread(d.stream)
 		fixturekit.Must(t, err)
 		t.Fatalf("design turn failed: %+v; response: %+v", conversation, th.Turns[len(th.Turns)-1].Response)
 	}
@@ -171,8 +171,8 @@ func TestDesignTurnContextFollowsTheBriefsProjects(t *testing.T) {
 	}
 	recordDesignProjects(t, d.repo, d.stream, intakefixture.ProductionBrief, []config.ProjectID{d.other})
 	d.script(func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.Contains(req.SystemPrompt, "Client charter rule") || !strings.Contains(req.SystemPrompt, "Entity text for "+string(d.other)) || strings.Contains(req.SystemPrompt, "Keep changes small") || strings.Contains(req.SystemPrompt, "Entity text for "+string(d.home)) {
-			return nil, fmt.Errorf("context does not follow the brief's projects: %s", req.SystemPrompt)
+		if !strings.Contains(req.Prompt, "Client charter rule") || !strings.Contains(req.Prompt, "Entity text for "+string(d.other)) || strings.Contains(req.Prompt, "Keep changes small") || strings.Contains(req.Prompt, "Entity text for "+string(d.home)) || req.SystemPrompt != intake.DesignRolePrompt {
+			return nil, fmt.Errorf("context does not follow the brief's projects: %s", req.Prompt)
 		}
 		if _, err := intakefixture.ReadTool(ctx, tools, "projects/"+string(d.home)+"/charter.md"); err != nil {
 			return nil, err
@@ -348,7 +348,7 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	origin := opened.Design.Workstream
 	r, err := s.Repository(home)
 	fixturekit.Must(t, err)
-	before, err := r.ChiefOfStaffThread(origin)
+	_, err = r.ChiefOfStaffThread(origin)
 	fixturekit.Must(t, err)
 	revision := recordDesignProjects(t, r, origin, intakefixture.ProductionBrief, []config.ProjectID{other})
 	engine.Mu.Lock()
@@ -379,8 +379,13 @@ func TestDesignStartExcludesConversationHomeAndContinuesSharedChief(t *testing.T
 	after, err := chief.Thread(host, trace.ChiefOfStaff)
 	close()
 	fixturekit.Must(t, err)
-	if !intakefixture.EqualJSONTest(before.Identity, after.Identity) {
-		t.Fatal("shared chief identity changed")
+	if after.Identity.Role != trace.ChiefOfStaff {
+		t.Fatalf("the shared chief's thread: %+v", after.Identity)
+	}
+	for _, q := range after.Turns {
+		if q.Request.AgentID != trace.ChiefOfStaff || q.Request.SystemPrompt == intake.DesignRolePrompt {
+			t.Fatalf("a design turn reached the shared chief's thread: %+v", q.Request)
+		}
 	}
 	_, err = c.Send(ctx, origin, "Continue the conversation at home.")
 	fixturekit.Must(t, err)

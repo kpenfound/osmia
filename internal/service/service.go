@@ -892,7 +892,7 @@ func (s *Service) admit(cfg *config.Config, repository *trace.Repository) func(c
 }
 
 func (s *Service) holds(project config.ProjectID, repository *trace.Repository, c scheduler.Candidate) (bool, error) {
-	if c.Thread.Identity.Role != trace.ChiefOfStaff {
+	if !trace.ChiefLike(c.Thread.Identity.Role) {
 		if held, err := changeHeld(repository, c.Workstream); err != nil || held {
 			return true, err
 		}
@@ -912,7 +912,7 @@ func (s *Service) holds(project config.ProjectID, repository *trace.Repository, 
 			return held, err
 		}
 	}
-	if c.Thread.Identity.Role != trace.ChiefOfStaff {
+	if !trace.ChiefLike(c.Thread.Identity.Role) {
 		if waiting, err := baseWaiting(repository, c.Workstream); err != nil || waiting {
 			return waiting, err
 		}
@@ -956,6 +956,20 @@ func (s *Service) chiefOverride(cfg *config.Config) (string, coreadapter.Profile
 	return name, profile, err
 }
 
+// designerOverride reads the profile design turns run on. The designer is a
+// role of its own: it never takes the chief of staff's profile or its
+// override, only its own configured profile, which is the default profile
+// when the configuration names none.
+func (s *Service) designerOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+	st, _ := s.effective()
+	name := st.Profiles[trace.Designer]
+	if name == "" {
+		name = cfg.Roles[trace.Designer].Profile
+	}
+	profile, err := cfg.NamedProfile(name)
+	return name, profile, err
+}
+
 func EnsureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at time.Time) error {
 	streams, err := repository.Workstreams()
 	if err != nil {
@@ -965,6 +979,11 @@ func EnsureChiefsOfStaff(ctx context.Context, repository *trace.Repository, at t
 		if session, err := intake.IsSession(repository, stream); err != nil {
 			return fmt.Errorf("workstream %s: %w", stream, err)
 		} else if session {
+			continue
+		}
+		if design, err := intake.IsDesignWorkstream(repository, stream); err != nil {
+			return fmt.Errorf("workstream %s: %w", stream, err)
+		} else if design {
 			continue
 		}
 		if id, err := repository.CrossRepoWorkgroupOf(stream); err != nil {
@@ -1277,7 +1296,7 @@ func operationClass(op coreadapter.Operation) trace.OperationClass {
 		switch op.Action {
 		case thread.TurnAction:
 			in, err := thread.DecodeTurn(op)
-			if err == nil && (in.Agent == trace.ChiefOfStaff || in.Agent == SessionAgentID) {
+			if err == nil && (trace.ChiefLike(in.Agent) || in.Agent == SessionAgentID) {
 				return trace.ConversationOperation
 			}
 			return trace.WorkerOperation

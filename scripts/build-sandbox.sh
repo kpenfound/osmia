@@ -364,6 +364,7 @@ if [[ ${#problems[@]} -gt 0 ]]; then
 fi
 printf 'No Docker Engine in the build sandbox: no dockerd or containerd process and no reachable daemon.\n'
 
-sbx stop "$sandbox"
-sbx template save "$sandbox" "$TEMPLATE"
+# A failed stop or save leaves the template saved before in place.
+sbx stop "$sandbox" || { printf 'Could not stop the build sandbox; the template %s saved before is unchanged.\n' "$TEMPLATE" >&2; exit 1; }
+sbx template save "$sandbox" "$TEMPLATE" || { printf 'Could not save template %s; the template saved before is unchanged.\n' "$TEMPLATE" >&2; exit 1; }
 printf 'Saved local template %s with Dagger v%s.\n' "$TEMPLATE" "$DAGGER_VERSION"

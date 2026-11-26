@@ -94,10 +94,12 @@ func unresolvedWork(r *trace.Repository, stream config.WorkstreamID) (bool, erro
 }
 
 func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() time.Time) coreadapter.Tool {
-	description := "Record newly discovered work without ending your turn. Use a stable key to avoid duplicates, description and criterion (spec#n). Default disposition is open. The chief of staff may assign an existing discovery to a unit, decline it with a reason, or retain it as an optional suggestion, after it called decide for the discovery (kind discovery-disposition, subject its id): when Jev's decision is binding, only the disposition it picked (assign, decline or retain) is recorded, with the chief of staff's reasoning. For updates pass id and revision from factory_context. Necessary open discoveries block completion; assigned discoveries remain required until their unit lands. Do not take another unit's work without coordination."
+	description := "Record work you found that the plan does not cover, without ending your turn. Give key (a stable name of your own, so recording the same work again does not duplicate it), description, and criterion (the spec#<n> it serves). It is recorded as open. A necessary open discovery blocks completion of the workstream, and an assigned one stays required until its unit lands. " +
+		"Do not take another unit's work without coordination: the chief of staff assigns discoveries. " +
+		"Only the chief of staff changes a discovery: pass its id and revision, as factory_context reads them, with a disposition (assigned with unit, declined, suggestion for optional work, or open) and a reason against the approved intent. Call decide for the discovery first (kind discovery-disposition, subject its id). When Jev's decision is binding, only the disposition Jev picked is recorded, with your reasoning."
 	properties := `"key":{"type":"string"},"id":{"type":"string"},"revision":{"type":"integer"},"description":{"type":"string"},"criterion":{"type":"string"},"disposition":{"type":"string","enum":["open","assigned","declined","suggestion"]},"unit":{"type":"string"},"reason":{"type":"string"}`
 	if scope.Role == trace.ChiefOfStaff {
-		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it; omit for this conversation's own workstream. owner_decided: true only to record a disposition the owner gave in the message this turn answers, which needs no decide result."
+		description += " workstream: the member workstream ID of your workgroup the discovery belongs to, as factory_context read it. Omit it for this conversation's own workstream. owner_decided: true only to record a disposition the owner gave in the message this turn answers; that needs no decide result."
 		properties += `,"owner_decided":{"type":"boolean"}`
 	}
 	return coreadapter.Tool{Name: discoveryTool, Effect: coreadapter.ToolMemory, Description: description, InputSchema: memberSchema(scope, properties), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
@@ -116,7 +118,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		}
 		in.DecidedBy, in.Judgment, in.HandedToOwner = "", "", ""
 		if scope.Role != trace.ChiefOfStaff && scope.Role != masonRole && scope.Role != reviewerRole {
-			return nil, errors.New("discovery recording is not granted")
+			return nil, errors.New("discovery recording is not granted to this role")
 		}
 		target, stream, refusal, err := chiefMember(r, scope, in.Workstream)
 		if err != nil {
@@ -141,7 +143,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 		requestedID := in.ID
 		if in.ID == "" {
 			if strings.TrimSpace(in.Key) == "" || strings.TrimSpace(in.Description) == "" || strings.TrimSpace(in.Criterion) == "" {
-				return priorityRefusal("key, description and criterion are required")
+				return priorityRefusal("key, description and criterion are all required to record new work")
 			}
 			in.ID = fmt.Sprintf("discovery-%x", sha256.Sum256([]byte(scope.Thread+"\n"+in.Key)))
 		}
@@ -151,17 +153,17 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			}
 		}
 		if !strings.HasPrefix(in.ID, "discovery-") || len(in.ID) != 74 {
-			return priorityRefusal("invalid discovery identity")
+			return priorityRefusal("invalid discovery id; pass an id exactly as factory_context lists it under discoveries")
 		}
 		if prior.Revision > 0 && prior.Path != "discoveries/"+in.ID+".json" {
-			return priorityRefusal("invalid discovery record")
+			return priorityRefusal("that id does not name a discovery; pass an id factory_context lists under discoveries")
 		}
 		if prior.Revision == 0 {
 			if requestedID != "" {
 				return priorityRefusal("discovery not found; create it with a stable key, description and criterion")
 			}
 			if err := questions.Resolve(ctx, target, stream, in.Criterion); err != nil || !strings.HasPrefix(in.Criterion, "spec#") {
-				return priorityRefusal("discovery requires an existing spec criterion")
+				return priorityRefusal("criterion must be an existing spec#<n> of this workstream; read spec.md with factory_context to find it")
 			}
 		}
 		if prior.Revision > 0 && in.Revision == 0 {
@@ -175,16 +177,16 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			return json.Marshal(map[string]any{"recorded": true, "id": in.ID, "revision": prior.Revision})
 		}
 		if in.Revision != prior.Revision {
-			return priorityRefusal("discovery changed; read its latest revision")
+			return priorityRefusal("discovery changed since you read it; read its latest revision with factory_context and pass that revision")
 		}
 		if prior.Revision > 0 && scope.Role != trace.ChiefOfStaff {
-			return priorityRefusal("the chief of staff coordinates discovery dispositions")
+			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
 		}
 		if in.Disposition == "" {
 			in.Disposition = "open"
 		}
 		if in.Disposition != "open" && scope.Role != trace.ChiefOfStaff {
-			return priorityRefusal("the chief of staff coordinates discovery dispositions")
+			return priorityRefusal("only the chief of staff changes a discovery or gives it a disposition other than open; a discovery you record stays open until the chief decides it")
 		}
 		var old workDiscovery
 		if prior.Revision > 0 {
@@ -198,7 +200,7 @@ func recordDiscovery(r *trace.Repository, scope coreadapter.Scope, now func() ti
 			return nil, errors.New("invalid discovery disposition")
 		}
 		if in.Disposition != "open" && strings.TrimSpace(in.Reason) == "" {
-			return priorityRefusal("a disposition requires reasoning against approved intent")
+			return priorityRefusal("a disposition other than open needs a reason; say why it follows from the approved intent")
 		}
 		if in.OwnerDecided {
 			if prior.Revision == 0 || scope.Role != trace.ChiefOfStaff {

@@ -298,7 +298,7 @@ type followUps struct {
 	now      func() time.Time
 	window   time.Duration
 	profile  func() (coreadapter.Profile, error)
-	system   func(ctx context.Context, r *trace.Repository, host config.WorkstreamID) (string, error)
+	system   func(ctx context.Context, r *trace.Repository, host config.WorkstreamID) (system, turnContext string, err error)
 	service  *Service
 	archived func(raw string) (runtime.Archive, bool)
 }
@@ -409,15 +409,15 @@ func (f followUps) fire(ctx context.Context, r *trace.Repository, host config.Wo
 		if err != nil {
 			return err
 		}
-		system := ""
+		system, turnContext := "", ""
 		if f.system != nil {
-			if system, err = f.system(ctx, r, host); err != nil {
+			if system, turnContext, err = f.system(ctx, r, host); err != nil {
 				return err
 			}
 		}
 		req := trace.TurnRequest{
 			Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.Project(), Workstream: host, At: now, Actor: followUpActor, Cause: x.ID},
-			AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: prompt}
+			AgentID: trace.ChiefOfStaff, ThreadID: th.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: system, Context: turnContext, Prompt: prompt}
 		if _, err := r.EnqueueTurn(ctx, req); err != nil && !errors.Is(err, trace.ErrConflict) {
 			return err
 		}
@@ -542,7 +542,7 @@ func (f followUps) summary(r *trace.Repository, stream config.WorkstreamID, sinc
 	return b.String(), nil
 }
 
-const followUpPrompt = "You are the chief of staff for workstream %s. The prompt is a follow-up that came due: why it was scheduled, when, and what changed since. The project context below was assembled when it came due."
+const followUpPrompt = "You are the chief of staff for workstream %s. This turn is a follow-up you scheduled that came due. The prompt says why it was scheduled, when, and what changed since. The project context in the turn context was assembled when it came due."
 
 const followUpEvery = 5 * time.Second
 
@@ -574,14 +574,14 @@ func (p *conversationPath) followUps(ctx context.Context, repository *trace.Repo
 	return f.pass(ctx, repository, streams)
 }
 
-func (s *Service) followUpSystem(ctx context.Context, target *trace.Repository, host config.WorkstreamID) (string, error) {
+func (s *Service) followUpSystem(ctx context.Context, target *trace.Repository, host config.WorkstreamID) (string, string, error) {
 	bundle, err := target.ProjectFor(host)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	context, err := chiefContext(ctx, s.Context(), target, func() {}, bundle.Project(), host)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + chiefGuidance() + "\n\n" + context, nil
+	return fmt.Sprintf(followUpPrompt, host) + "\n\n" + chiefGuidance(), context, nil
 }

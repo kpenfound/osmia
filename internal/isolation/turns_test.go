@@ -83,8 +83,11 @@ func TestCurrentInstructionsReachQueuedAndResumedTurns(t *testing.T) {
 		if _, err := r.Run(context.Background(), input); err != nil {
 			t.Fatal(err)
 		}
-		if len(engine.Requests) != 1 || !strings.HasPrefix(engine.Requests[0].SystemPrompt, input.SystemPrompt+"\nCurrent operating authority supersedes older instructions.") {
-			t.Fatalf("resumed=%v: current instructions never reached the backend", resumed)
+		if len(engine.Requests) != 1 || engine.Requests[0].SystemPrompt != input.SystemPrompt {
+			t.Fatalf("resumed=%v: the system prompt changed", resumed)
+		}
+		if got := engine.Requests[0].Prompt; !strings.Contains(got, a.TurnContextHeader) || !strings.Contains(got, "Current operating authority supersedes older instructions.") || !strings.HasSuffix(got, a.TurnContextFooter+"\n\n"+input.Prompt) {
+			t.Fatalf("resumed=%v: current instructions never reached the newest turn: %q", resumed, got)
 		}
 		if input.SystemPrompt != "Saved role instructions." {
 			t.Fatal("execution mutated the durable request")
@@ -789,12 +792,12 @@ func TestWebGuidanceReachesOnlyTurnsHoldingWeb(t *testing.T) {
 			if _, err := r.Run(context.Background(), input); err != nil {
 				t.Fatal(err)
 			}
-			prompt := engine.Requests[0].SystemPrompt
+			prompt := engine.Requests[0].Prompt
 			if got := strings.Contains(prompt, WebGuidance); got != test.want {
 				t.Fatalf("guidance present=%v, want %v in %q", got, test.want, prompt)
 			}
-			if !strings.HasPrefix(prompt, "You are the "+test.role+".") {
-				t.Fatalf("role prompt lost: %q", prompt)
+			if system := engine.Requests[0].SystemPrompt; system != "You are the "+test.role+"." {
+				t.Fatalf("the system prompt changed: %q", system)
 			}
 		})
 	}

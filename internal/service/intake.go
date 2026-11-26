@@ -326,6 +326,7 @@ func (s *Service) intake() *intake.Controller {
 		ChangeRepositoryHeld:     changeRepositoryHeld,
 		ChiefContext:             chiefContext,
 		ChiefOverride:            s.chiefOverride,
+		DesignerOverride:         s.designerOverride,
 		ChiefRepository:          s.chiefRepository,
 		ChiefRepositoryForRead:   s.chiefRepositoryForRead,
 		ContestedEntry:           s.contestedEntry,

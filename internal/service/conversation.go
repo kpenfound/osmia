@@ -25,10 +25,10 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-const chiefPrompt = "You are the chief of staff for workstream %s. The prompt is a message from the owner. The project context below was assembled when the message was accepted."
+const chiefPrompt = "You are the chief of staff for workstream %s. This turn answers a message from the owner, which is the prompt. The project context in the turn context was assembled when the message was accepted."
 
 func chiefGuidance() string {
-	return strings.Join([]string{intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
+	return strings.Join([]string{intake.ChiefRolePrompt, intake.FollowUpGuidance, intake.ChiefDocumentsGuidance, priorityGuidance, pauseGuidance, lifecycle.ChangeGuidance, amendmentGuidance, intake.CharterGuidance, intake.ContestGuidance, intake.ObjectionGuidance, intake.DriftHandbackGuidance, intake.OwnerWritingGuidance}, "\n\n")
 }
 
 func (s *Service) now() time.Time {
@@ -150,7 +150,7 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 	}
 	note := ""
 	if host != stream {
-		note = fmt.Sprintf(" The owner addressed workstream %s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\".", stream, stream)
+		note = fmt.Sprintf(addressedNote+"%s, a member of your workgroup; answer or escalate one of its questions as \"%s:<number>\".", stream, stream)
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -176,7 +176,8 @@ func (s *Service) sendChief(ctx context.Context, stream config.WorkstreamID, req
 		ThreadID:     trace.ChiefOfStaff,
 		TurnID:       "message_" + id,
 		Profile:      profile,
-		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + note + "\n\n" + chiefGuidance() + "\n\n" + context,
+		SystemPrompt: fmt.Sprintf(chiefPrompt, host) + "\n\n" + chiefGuidance(),
+		Context:      strings.TrimSpace(note) + "\n\n" + context,
 		Prompt:       req.Text,
 	})
 	if err != nil {
@@ -207,7 +208,11 @@ func (s *Service) conversationList(raw string) (ConversationResponse, *APIError)
 	}
 	defer closeTarget()
 	entries, err := readview.Consistent(func() ([]ConversationEntry, error) {
-		entries, err := ConversationEntries(target, thread)
+		designed, err := s.designHistory(target, thread)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := ConversationEntries(target, thread, designed...)
 		if err != nil {
 			return nil, err
 		}
@@ -245,15 +250,74 @@ func (s *Service) conversationTarget(ctx context.Context, repository *trace.Repo
 	return target, stream, closeTarget, err
 }
 
-func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID) ([]ConversationEntry, error) {
-	out := []ConversationEntry{}
-	t, err := repository.ChiefOfStaffThread(stream)
-	if errors.Is(err, os.ErrNotExist) {
+// ConversationEntries lists the owner's conversation of stream: the chief of
+// staff's thread and, when stream holds or held a design session, the design
+// thread. A session opened before design sessions had a thread of their own
+// holds its first messages on the chief's thread, so both are read and the
+// turns merged by when they were sent.
+//
+// earlier holds the turns of design sessions whose conversation a started
+// workgroup continues from another trace, merged in by when they were sent.
+func ConversationEntries(repository *trace.Repository, stream config.WorkstreamID, earlier ...[][]ConversationEntry) ([]ConversationEntry, error) {
+	threads := slices.Clone(earlier)
+	for _, read := range []func(config.WorkstreamID) (trace.Thread, error){repository.ChiefOfStaffThread, repository.DesignerThread} {
+		t, err := read(stream)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		threads = append(threads, threadTurns(t))
+	}
+	out := mergeTurns(threads)
+	if len(threads) == 0 {
 		return out, nil
+	}
+	actions, err := ChiefActions(repository, stream)
+	if err != nil {
+		return nil, err
+	}
+	return WithActions(out, actions), nil
+}
+
+// designHistory is the design thread of the design session that a workgroup
+// started from, read from the trace the session lives in when that is not
+// the trace holding the workgroup's chief of staff. Every endpoint of the
+// workgroup shows it ahead of the chief's own thread, so the owner reads one
+// conversation from the design through the build. Nothing is returned for a
+// workgroup that holds its design session's thread itself.
+func (s *Service) designHistory(chief *trace.Repository, host config.WorkstreamID) ([][][]ConversationEntry, error) {
+	groups, _, err := trace.Workgroups(chief)
+	if err != nil {
+		return nil, err
+	}
+	group, found := trace.WorkgroupOf(groups, host)
+	if !found || group.Conversation == nil {
+		return nil, nil
+	}
+	origin, err := s.repository(group.Conversation.Project)
+	if errors.Is(err, errNoActiveProject) || errors.Is(err, errNoTrace) {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if origin == chief {
+		return nil, nil
+	}
+	design, err := origin.DesignerThread(group.Conversation.Workstream)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return [][][]ConversationEntry{threadTurns(design)}, nil
+}
+
+func threadTurns(t trace.Thread) [][]ConversationEntry {
+	var turns [][]ConversationEntry
 	for _, q := range t.Turns {
 		if q.Request.Actor != ownerActor {
 			continue
@@ -265,13 +329,26 @@ func ConversationEntries(repository *trace.Repository, stream config.WorkstreamI
 				entries[i].State = TurnFailed
 			}
 		}
-		out = append(out, entries...)
+		turns = append(turns, entries)
 	}
-	actions, err := ChiefActions(repository, stream)
-	if err != nil {
-		return nil, err
+	return turns
+}
+
+func mergeTurns(threads [][][]ConversationEntry) []ConversationEntry {
+	out := []ConversationEntry{}
+	for {
+		next := -1
+		for i, turns := range threads {
+			if len(turns) > 0 && (next < 0 || turns[0][0].At.Before(threads[next][0][0].At)) {
+				next = i
+			}
+		}
+		if next < 0 {
+			return out
+		}
+		out = append(out, threads[next][0]...)
+		threads[next] = threads[next][1:]
 	}
-	return WithActions(out, actions), nil
 }
 
 type archiveAction struct {

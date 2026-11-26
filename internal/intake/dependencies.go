@@ -40,7 +40,10 @@ type Dependencies struct {
 	ChangeRepositoryHeld func(repo *trace.Repository, stream config.WorkstreamID, op coreadapter.Operation) (bool, error)
 	ChiefContext         func(ctx context.Context, provider bundle.Provider, repository *trace.Repository, closeRepository func(), project config.ProjectID, stream config.WorkstreamID) (string, error)
 	ChiefOverride        func(cfg *config.Config) (string, coreadapter.Profile, error)
-	ChiefRepository      func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
+	// DesignerOverride reads the profile a design turn runs on: the designer
+	// role's own, never the chief of staff's.
+	DesignerOverride func(cfg *config.Config) (string, coreadapter.Profile, error)
+	ChiefRepository  func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)
 	// ChiefRepositoryForRead is ChiefRepository for reading the chief of
 	// staff's thread; it needs no live member to supply context.
 	ChiefRepositoryForRead func(ctx context.Context, repository *trace.Repository, stream config.WorkstreamID) (target *trace.Repository, host config.WorkstreamID, bundleStream config.WorkstreamID, close func(), err error)

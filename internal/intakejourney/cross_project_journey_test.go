@@ -248,6 +248,8 @@ func TestCrossProjectDesignJourney(t *testing.T) {
 	fixturekit.Must(t, err)
 	j.Before, err = r.ChiefOfStaffThread(j.Origin)
 	fixturekit.Must(t, err)
+	j.Design, err = r.DesignerThread(j.Origin)
+	fixturekit.Must(t, err)
 	fixturekit.Must(t, j.C.Do(ctx, "POST", "/v1/design/"+string(j.Origin)+"/start", api.DesignStartRequest{BriefRevision: &displayed.Design.BriefRevision}, nil))
 	j.Handed, err = trace.Get[trace.Document](r, j.Origin, intake.HandedDocument, 1)
 	fixturekit.Must(t, err)

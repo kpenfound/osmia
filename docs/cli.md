@@ -66,6 +66,8 @@ osmia profiles set mason default
 osmia profiles clear mason
 osmia config
 osmia config validate --config ./config.toml
+osmia sandbox build
+osmia sandbox check
 osmia reload
 osmia status --json
 ```
@@ -91,7 +93,7 @@ placeholder after its image bytes have been removed.
 
 ## Design Sessions
 
-`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. A brief without a list also means the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
+`osmia design open <project-id>` opens a design conversation whose brief initially lists only that project. A brief without a list also means the session's project. The agent sees a catalog of all active project names, upstreams and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. It is the `designer` role, on a design thread of its own. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`. It can read committed source in any active project, with no source writes, VCS or credential access. It works without Hearsay. Exploratory `osmia session` chats keep their separate writable worktrees.
 
 Use `design send` and `design read` to discuss intent. The agent asks material readiness questions with recommended answers and collapses other assumptions on the web page. A direct owner request to add or remove a project confirms that change. An inferred change is raised as a readiness question and applied only after agreement. Optional `draft_brief.projects` replaces the list; omitting it keeps the current list. It must be nonempty, unique and active. Paused projects are allowed; the session's project can be removed while another remains.
 
@@ -103,7 +105,7 @@ The agent titles the session with `set_title` once its context is clear, and rep
 
 The web's read-only **Brief** panel above Start shows the latest revision and project names with home marked; brief text is collapsed by default. It refreshes when a brief is recorded. The project list is not editable there: request changes in the conversation. Start sends the displayed revision, surfaces a conflict and refreshes the panel when the brief changed.
 
-Start records the brief's ordered list as the owner's decision and allocates one member per project without an architect selection turn. The handed text, revision and list are durably bound through crashes and retries; recovery completes the exact start once or leaves it safely retryable with nothing allocated. The brief wins over its reference transcript. The conversation and shared chief stay at the session's project even when it is not a member. The original design ID continues to work for conversation, packet and ratification. One ratification approves the workgroup spec, graph and every slice; all members wait for seal completion. Project membership stays fixed until ratification; to change it, abandon and hand in again. Afterwards amend/cancel retain their existing behavior. Every member keeps its own delivery approval.
+Start records the brief's ordered list as the owner's decision and allocates one member per project without an architect selection turn. The handed text, revision and list are durably bound through crashes and retries; recovery completes the exact start once or leaves it safely retryable with nothing allocated. The brief wins over its reference transcript. The conversation and shared chief stay at the session's project even when it is not a member. The shared chief opens a new thread from the brief and the design transcript; the design agent's thread is not continued. The original design ID continues to work for conversation, packet and ratification. One ratification approves the workgroup spec, graph and every slice; all members wait for seal completion. Project membership stays fixed until ratification; to change it, abandon and hand in again. Afterwards amend/cancel retain their existing behavior. Every member keeps its own delivery approval.
 
 **Open a design session** uses `POST /v1/design`; the design read is `GET /v1/design/{workstream}`. All design commands support `--json`.
 
@@ -1106,6 +1108,39 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
     `api_key_env` and the like), so it passes whether or not the variable is
     set. It does not check the host, such as whether a clone exists or a port is
     free.
+- `sandbox build` builds the `osmia:latest` [sbx template](configuration.md#docker-sandboxes-sbx)
+  and `sandbox check` reports whether the template saved now can run Fable 5.2.
+  Both run on the host that owns the sbx templates, as the user that runs
+  Osmia. They are offline: no service, socket, root, configuration file or
+  secret is read, and they take no flag. They find `sbx` (and, for `build`,
+  `dagger`) on `PATH` and exit 1 naming the tool when one is missing. On
+  failure they print one line on stderr, `osmia sandbox <command>: <reason>`;
+  progress goes to stdout, and on success they exit 0. Exit 2 is a usage
+  error. A reason never contains a secret value.
+  - **`sandbox build`** does what `scripts/build-sandbox.sh` does, with every
+    one of its verifications: `sbx` and `dagger` are on `PATH`; the host's
+    Dagger release is read, installed in the template and verified there;
+    Docker Engine and the Docker CLI are removed; Codex is at least 0.136.0;
+    Claude Code is installed; and a probe finds no Docker Engine as root and as
+    the agent user. It saves `osmia:latest` only when all of them pass. A
+    refused build and a build whose save fails exit 1 with the reason and leave
+    the template saved before in place. The build creates, stops and removes
+    only its own temporary sandbox, named `osmia-build-` and eight hex digits,
+    so sandboxes already running from an earlier template are not disturbed.
+    It takes up to an hour and gives up after that; a typical build takes a few
+    minutes.
+  - **`sandbox check`** exits 0 only when the saved `osmia:latest` exists and its
+    Claude Code is 2.1.321 or later, the first release that runs Fable 5.2.
+    Otherwise it exits 1 with the reason: no saved template, a Claude Code
+    older than 2.1.321, or a version it cannot read. It judges the template
+    saved now and nothing else. It creates a short-lived sandbox named
+    `osmia-check-` and eight hex digits from the template, runs
+    `claude --version` in it and removes it, and it keeps no record of any
+    build. A template replaced by `scripts/build-sandbox.sh`, a removed
+    template and a template saved by an earlier build are each judged on what
+    is saved. A build that failed and left a healthy template in place
+    leaves the check passing. It takes seconds to a minute and gives up after
+    five minutes, so a deployment tool can use it as a health check.
 - `reload` asks the service to [reload its configuration](running.md#reload)
   and prints `Configuration reloaded: <digest>`, followed by `Restart required
   to apply: <settings>` when the file changes settings that only a restart
@@ -1191,8 +1226,8 @@ osmia status --socket local.sock --json
 
 Clients never load configuration, runtime, trace or project files. They obtain
 the active project and effective values over HTTP using the service client.
-Two commands are offline and take no socket: `config validate` and
-`project settings`.
+Four commands are offline and take no socket: `config validate`,
+`project settings`, `sandbox build` and `sandbox check`.
 Changing socket configuration requires restarting the service and updating the
 client's `--socket` argument.
 

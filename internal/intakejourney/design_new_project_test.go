@@ -60,7 +60,7 @@ func TestDraftBriefRecordsAndValidatesANewProject(t *testing.T) {
 				return nil, fmt.Errorf("design prompt lacks %q", want)
 			}
 		}
-		if !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
+		if req.SystemPrompt != intake.DesignRolePrompt {
 			return nil, fmt.Errorf("design prompt does not start with the role prompt")
 		}
 		names, err := intakefixture.ToolNames(ctx, tools)

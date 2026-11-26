@@ -77,9 +77,14 @@ func TestQuestionsAreAnsweredOrEscalatedAcrossRestarts(t *testing.T) {
 		if !slices.Equal(names, []string{"answer", "escalate", "file_read", "log_assumption", "propose_charter", "relay_ruling", "route_amendment"}) {
 			problem("chief of staff tools %v", names)
 		}
-		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), questions.Guidance, "- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {
+		for _, part := range []string{"You are the chief of staff for workstream " + string(fixturekit.Stream), questions.Guidance} {
 			if !strings.Contains(req.SystemPrompt, part) {
 				problem("event turn system prompt lacks %q:\n%s", part, req.SystemPrompt)
+			}
+		}
+		for _, part := range []string{"- charter#1 [Charter]: Keep state in files under the root.", "## Latest status", "## Open inbox escalations"} {
+			if !strings.Contains(req.Prompt, part) || strings.Contains(req.SystemPrompt, part) {
+				problem("event turn context lacks %q, or its system prompt carries it:\n%s", part, req.Prompt)
 			}
 		}
 		switch {

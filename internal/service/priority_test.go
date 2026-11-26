@@ -72,7 +72,7 @@ func newPriorityRig(t *testing.T) *priorityRig {
 	_, err = repo.EnqueueTurn(ctx, trace.TurnRequest{
 		Header:  trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_events_seed", Revision: 1, Project: fixturekit.Project, Workstream: fixturekit.Stream, At: fixturekit.DemoStart, Actor: serviceActor, Cause: "events"},
 		AgentID: trace.ChiefOfStaff, ThreadID: trace.ChiefOfStaff, TurnID: "events_seed", Profile: coreadapter.Profile{Name: "default", Backend: "claude", Model: "test"},
-		SystemPrompt: "You are the chief of staff.", Prompt: "A service event."})
+		SystemPrompt: fmt.Sprintf(followUpPrompt, fixturekit.Stream) + "\n\n" + chiefGuidance(), Prompt: "A service event."})
 	fixturekit.Must(t, err)
 	fixturekit.Must(t, repo.Close())
 
@@ -108,13 +108,14 @@ func newPriorityRig(t *testing.T) *priorityRig {
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		r.prompts[req.Prompt] = req.SystemPrompt
+		own := intakefixture.OwnPrompt(req.Prompt)
+		r.prompts[own] = req.SystemPrompt
 		all, err := session.ListTools(ctx, nil)
 		if err != nil {
 			return nil, err
 		}
 		r.listed = all.Tools
-		switch req.Prompt {
+		switch own {
 		case priorityInvalidPrompt:
 			for _, order := range [][]config.WorkstreamID{{}, {"quiet"}, {r.unknown}, {intakefixture.Quiet, intakefixture.Quiet}, {intakefixture.Quiet, r.delivered}, {r.gone}} {
 				ids := []string{}

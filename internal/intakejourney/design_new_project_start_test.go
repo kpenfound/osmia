@@ -58,7 +58,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	f.remote, f.readme = servicetest.SeedRemote(t, dir, "gadget", "main")
 	f.github.Remote = func(string) string { return f.remote }
 	opts.Repositories = f.github.Client()
-	text := "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+	text := "[roles.chief_of_staff]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 	if creation {
 		text += fmt.Sprintf("[projects]\nrepo_owner = \"owner\"\nclone_dir = %q\n", f.cloneDir)
 	}
@@ -70,7 +70,7 @@ func newNewProjectStartFixture(t *testing.T, creation bool) *newProjectStart {
 	f.opts = opts
 	engine.Mu.Lock()
 	engine.Turns["*"] = func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
-		if !strings.HasPrefix(req.SystemPrompt, intake.DesignRolePrompt) {
+		if req.SystemPrompt != intake.DesignRolePrompt {
 			return &agent.Result{ClaudeID: "architect", ResultText: "drafting"}, nil
 		}
 		input := f.input.Load()

@@ -38,6 +38,10 @@ type Runner struct {
 	// never changes whether CheckResume is asked, or what a CheckResume that
 	// answers for itself says. Nil means neither applies to any role.
 	ResumableRoles func(string) bool
+	// LegacyBaseline recovers the system prompt of a saved session whose
+	// attempts did not record it. Nil, or an answer of false, replays the
+	// turn into a new session instead of resuming with a guessed prompt.
+	LegacyBaseline LegacyBaseline
 	// Place chooses where a claimed turn runs, before it starts, and may wait for
 	// a client slot. A turn whose thread's saved session is on another client
 	// replays its log instead of resuming, and fallback profiles the client
@@ -101,6 +105,9 @@ func (r Runner) RunNext(ctx context.Context, stream config.WorkstreamID, agent s
 	req := q.Request
 	prepared.Scope = coreadapter.Scope{Project: string(r.Store.Project()), Workstream: string(stream), Unit: req.Unit, Thread: req.ThreadID, Turn: req.TurnID, Role: t.Identity.Role}
 	prepared.Profile, prepared.SystemPrompt, prepared.Prompt = req.Profile, req.SystemPrompt, req.Prompt
+	if req.Context != "" {
+		prepared.Context = []string{req.Context}
+	}
 	var advice string
 	if run := execution(ctx); r.Advise != nil && stopped(run) == nil {
 		if advice = r.Advise(run, req, prepared.Scope); stopped(run) != nil {

@@ -13,8 +13,9 @@ const FactoryPolicySubject = "factory-policy"
 
 const FactoryPolicyVersion = "adaptive"
 
-// AcceptanceDraftInstructions applies to every architect submission path.
-const AcceptanceDraftInstructions = "\n\nAcceptance states observable behaviours and may name tests the unit adds as evidence. Never require a whole-suite check pass or run. There is no need to list existing tests to keep passing: the factory's service-owned check gate catches regressions. The factory runs and selects checks itself, using smart-check selection. A passing service-owned check gate is the evidence that required tests ran and passed."
+// AcceptanceDraftInstructions applies to every architect submission path that
+// drafts acceptance.
+const AcceptanceDraftInstructions = "\n\n## Acceptance and the check gate\nAcceptance states observable behaviours and may name tests the unit adds as evidence. Do not require a whole-suite check pass or run in an acceptance item: the factory runs and selects checks itself, using smart-check selection, so no unit's own work can produce that evidence and the item could not be met. Do not list existing tests to keep passing either: the factory's service-owned check gate catches regressions. A passing service-owned check gate is the evidence that required tests ran and passed.\n"
 
 // RecordFactoryPolicy commits adoption and its recovery notice together. Repeating
 // reconciliation never loses the notice or creates another one after acknowledgment.

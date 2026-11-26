@@ -167,7 +167,11 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		generations = append(generations, m.Project.Generation)
 	}
 	out, err := readview.Consistent(func() (WorkgroupFeedResponse, error) {
-		entries, err := chiefFeedEntries(a.chief, a.host)
+		designed, err := s.designHistory(a.chief, a.host)
+		if err != nil {
+			return WorkgroupFeedResponse{}, err
+		}
+		entries, err := chiefFeedEntries(a.chief, a.host, designed...)
 		if err != nil {
 			return WorkgroupFeedResponse{}, err
 		}
@@ -181,10 +185,8 @@ func (s *Service) workgroupFeed(ctx context.Context, raw string) (WorkgroupFeedR
 		}
 		for _, q := range thread.Turns {
 			member := q.Request.Workstream
-			line, _, _ := strings.Cut(q.Request.SystemPrompt, "\n")
-			if _, tail, found := strings.Cut(line, " The owner addressed workstream "); found {
-				address, _, _ := strings.Cut(tail, ",")
-				if id, err := config.ParseWorkstreamID(address); err == nil {
+			if id, addressed := addressedMember(q.Request); addressed {
+				if id != "" {
 					member = id
 				}
 			} else if member == a.host {
@@ -320,7 +322,7 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 			summary.Units[u.State]++
 		}
 		for _, a := range w.Agents {
-			if a.Role != trace.ChiefOfStaff && (a.State == "running" || a.State == "captured") {
+			if !trace.ChiefLike(a.Role) && (a.State == "running" || a.State == "captured") {
 				summary.Running = true
 			}
 		}
@@ -342,4 +344,29 @@ func (s *Service) workgroupMemberSummary(m trace.CrossRepoMember) (WorkgroupMemb
 		return summary, nil
 	}
 	return summary, fmt.Errorf("%w: member %s has no live status", errWorkgroupJoining, m.Workstream)
+}
+
+const addressedNote = "The owner addressed workstream "
+
+// addressedMember reports whether the owner's message addressed a member of the
+// workgroup, and which one, from the note the chief's turn carries. The note
+// leads the request's context; a request saved before it moved there carries it
+// in the first line of its system prompt. The ID is empty when the note names
+// no valid workstream.
+func addressedMember(req trace.TurnRequest) (config.WorkstreamID, bool) {
+	line, _, _ := strings.Cut(req.Context, "\n")
+	tail, found := strings.CutPrefix(line, addressedNote)
+	if !found {
+		line, _, _ = strings.Cut(req.SystemPrompt, "\n")
+		_, tail, found = strings.Cut(line, " "+addressedNote)
+	}
+	if !found {
+		return "", false
+	}
+	address, _, _ := strings.Cut(tail, ",")
+	id, err := config.ParseWorkstreamID(address)
+	if err != nil {
+		return "", true
+	}
+	return id, true
 }

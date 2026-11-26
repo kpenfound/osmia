@@ -85,6 +85,9 @@ func (r *Repository) ReclaimTurn(ctx context.Context, stream config.WorkstreamID
 func (t Thread) SessionClient() (string, bool) {
 	for i := len(t.Turns) - 1; i >= 0; i-- {
 		q := t.Turns[i]
+		if q.Sequence < t.Epoch {
+			break
+		}
 		if q.Response == nil || q.CompletedAt.IsZero() || !coreadapter.ValidSession(q.Response.Result.Session) {
 			continue
 		}

@@ -65,8 +65,8 @@ func checkBoundary(ctx context.Context, req agent.Request, verified *agent.Turn,
 	}
 
 	fixturekit.CheckGrants(req, verified, clone, fail)
-	if strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
-		fail("mason system prompt carries the web guidance")
+	if strings.Contains(req.SystemPrompt, isolation.WebGuidance) || strings.Contains(req.Prompt, isolation.WebGuidance) {
+		fail("a mason turn carries the web guidance")
 	}
 	if _, err := os.Lstat(filepath.Join(req.Workspace.Directory(), ".git")); !errors.Is(err, fs.ErrNotExist) {
 		fail("view contains VCS metadata")

@@ -844,7 +844,7 @@ func StageProjectSpecView(members []trace.CrossRepoMember, workspace string, inp
 // completes. It returns the verdict the service would give the delivered
 // draft if the turn ended now.
 func (s *Controller) ProjectSpecDraftTool(wt *trace.Repository, g trace.Workgroup, host config.WorkstreamID, turn string) coreadapter.Tool {
-	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the project spec: behavior, contracts, graph and each member's own contract-criteria numbers. Returns the verdict the service would give the delivered project spec if your turn ended now: valid, or invalid with its problem.", Effect: coreadapter.ToolMemory, InputSchema: json.RawMessage(`{"type":"object","properties":{"behavior":{"type":"string"},"contracts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"],"additionalProperties":false}},"graph":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"type":{"type":"string"}},"required":["from","to","type"],"additionalProperties":false}},"slices":{"type":"array","items":{"type":"object","properties":{"workstream":{"type":"string"},"contract_criteria":{"type":"array","items":{"type":"integer"}}},"required":["workstream"],"additionalProperties":false}}},"required":["behavior","slices"],"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: ProjectSpecDraftTool, Description: "Deliver the workgroup's project spec. behavior: the intended cross-repo behaviour as prose. contracts: the named interfaces at the seams between members' repos, each with its full text. graph: optional dependency edges between members, each from, to and one of the types contract, hard_block or merge_order. slices: one entry per member, with contract_criteria listing the numbers of that member's own acceptance criteria that are contract sections. Delivering again replaces the earlier delivery. The result is the verdict the service would give the delivered project spec if your turn ended now: valid, or invalid with its problems, which you correct before you deliver again.", Effect: coreadapter.ToolMemory, InputSchema: json.RawMessage(`{"type":"object","properties":{"behavior":{"type":"string"},"contracts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"],"additionalProperties":false}},"graph":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"type":{"type":"string"}},"required":["from","to","type"],"additionalProperties":false}},"slices":{"type":"array","items":{"type":"object","properties":{"workstream":{"type":"string"},"contract_criteria":{"type":"array","items":{"type":"integer"}}},"required":["workstream"],"additionalProperties":false}}},"required":["behavior","slices"],"additionalProperties":false}`), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var draft ProjectSpecDraft
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
@@ -878,7 +878,25 @@ func (s *Controller) ProjectSpecDraftTool(wt *trace.Repository, g trace.Workgrou
 	}}
 }
 func ProjectSpecDraftSystemPrompt() string {
-	return fmt.Sprintf("You are the architect drafting the shared workgroup spec across the owner-selected projects. The member list is fixed: cover every selected project, with its workstream, contracts and graph. Never add or drop a member. Each member workstream's own spec and plan are already drafted and sketched, independently, in its own repo; your job is to add only what spans them: the intended cross-repo behaviour, the named contracts at the seams between repos, the dependency graph between members, and, for each member, which of its own already-numbered acceptance criteria are contract sections (read-only to that member's own workers). You hold no version-control tool and no way to ask a question in this step: use only what is in your view, and deliver with %s. Do not restate or retype a member's own spec or plan text; the service fills each member's own slice content in automatically from what is already recorded.", ProjectSpecDraftTool)
+	return fmt.Sprintf(`You are the architect drafting the shared workgroup spec across the owner-selected projects.
+
+## Purpose and setting
+Each member workstream's own spec and plan are already drafted and sketched, independently, in its own repo. Your job is to add only what spans them: the intended cross-repo behaviour, the named contracts at the seams between repos, the dependency graph between members and, for each member, which of its own already-numbered acceptance criteria are contract sections, read-only to that member's own workers. The owner ratifies the whole workgroup spec afterwards.
+
+## Tools and gates
+- %[1]s delivers the project spec. The service records and validates it. You hold no version control tool, because only the service records work.
+- You have no way to ask a question in this step: use only what is in your view.
+- The member list is fixed by the owner: cover every selected project, and do not add or drop a member, because membership is the owner's decision.
+- Do not restate or retype a member's own spec or plan text: the service fills each member's own slice in from what is already recorded.
+
+## Your part of the state machine
+This is the single drafting step for the workgroup spec. After it the owner reviews the spec and ratifies it, and the members' workstreams then proceed on their own plans.
+
+## Output format
+One %[1]s call, as the turn's prompt describes.
+
+## When you are done
+Finish the whole task in this turn: deliver a project spec whose verdict is valid, correcting any listed problem and delivering again, and then end your turn.`, ProjectSpecDraftTool)
 }
 func (s *Controller) ProjectSpecDraftPrompt(ctx context.Context, members []trace.CrossRepoMember, input ProjectSpecDraftInput) (string, error) {
 	var b strings.Builder

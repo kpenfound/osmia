@@ -207,8 +207,8 @@ func CheckReadOnlyGrants(req agent.Request, verified *agent.Turn, clone string, 
 	if !slices.Equal(g.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "mcp__osmia_0"}) || !slices.Equal(verified.Tools, []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch"}) {
 		fail("tools %v %v exceed the role grant", g.Tools, verified.Tools)
 	}
-	if !strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
-		fail("system prompt lacks the web guidance: %q", req.SystemPrompt)
+	if !strings.Contains(req.Prompt, isolation.WebGuidance) || strings.Contains(req.SystemPrompt, isolation.WebGuidance) {
+		fail("the web guidance belongs in the turn's context, not its system prompt: %q / %q", req.SystemPrompt, req.Prompt)
 	}
 	for _, kv := range verified.Env {
 		key, value, _ := strings.Cut(kv, "=")
@@ -1413,7 +1413,14 @@ func Await(t *testing.T, what string, ch chan struct{}) {
 func EqualJSONTest(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+	return emptyList(string(x)) == emptyList(string(y))
+}
+
+func emptyList(encoded string) string {
+	if encoded == "null" {
+		return "[]"
+	}
+	return encoded
 }
 
 func ErrorCode(t *testing.T, body []byte) api.Code {
@@ -1493,9 +1500,9 @@ const DisjointPlan = `{"version": 2, "units": [
 // AmendedSpec is ValidSpec with its first criterion rewritten.
 var AmendedSpec = strings.Replace(fixturekit.ValidSpec, "1. An interrupted upload resumes from the last acknowledged chunk.", "1. An interrupted upload resumes from a durable checkpoint.", 1)
 
-// MasonRoles runs the chief of staff, mason and reviewer in containers, the
+// MasonRoles runs the chief of staff, designer, mason and reviewer in containers, the
 // sandbox the fake engine's boundary check accepts.
-const MasonRoles = ChiefRole + "[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
+const MasonRoles = ChiefRole + "[roles.designer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.mason]\nsandbox = \"container\"\nimage = \"fixture-image\"\n[roles.reviewer]\nsandbox = \"container\"\nimage = \"fixture-image\"\n"
 
 // TestDrift is the drift rebase request a test makes.
 func TestDrift(config.WorkstreamID) (string, error) { return "the test asks for a drift rebase", nil }

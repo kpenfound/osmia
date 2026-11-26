@@ -87,7 +87,7 @@ func runCommitteeRound(t *testing.T) *committeeRound {
 		}
 		graph, err := intakefixture.ReadTool(ctx, tools, "plan.json")
 		mu.Lock()
-		r.reads[i] = seen{spec, graph, req.Prompt}
+		r.reads[i] = seen{spec, graph, intakefixture.OwnPrompt(req.Prompt)}
 		mu.Unlock()
 		return err
 	}

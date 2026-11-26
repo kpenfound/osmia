@@ -83,8 +83,8 @@ func TestReadOnlyWebTurnHoldsOnlyWebTools(t *testing.T) {
 			if req.Grants.Mounts[0].Path != view || req.Grants.Mounts[0].Access != agent.ReadOnly || req.Grants.Mounts[1].Access != agent.ReadOnly {
 				t.Fatalf("mounts %+v", req.Grants.Mounts)
 			}
-			if strings.Contains(req.SystemPrompt, "not available") {
-				t.Fatalf("web turn told it has no web: %q", req.SystemPrompt)
+			if strings.Contains(req.Prompt, "not available") {
+				t.Fatalf("web turn told it has no web: %q", req.Prompt)
 			}
 		})
 	}
@@ -178,8 +178,8 @@ func TestEngineRefusalOfWebGrantRunsTurnWithoutWeb(t *testing.T) {
 				if !reflect.DeepEqual(req.Grants.Tools, want) {
 					t.Fatalf("tools %v, want %v", req.Grants.Tools, want)
 				}
-				if !strings.HasPrefix(req.SystemPrompt, "You plan.") || !strings.Contains(req.SystemPrompt, "Web search and page fetching are not available on this turn") {
-					t.Fatalf("degradation is not stated: %q", req.SystemPrompt)
+				if req.SystemPrompt != "You plan." || !strings.Contains(req.Prompt, "Web search and page fetching are not available on this turn") {
+					t.Fatalf("degradation is not stated in the prompt, or it changed the system prompt: %q / %q", req.SystemPrompt, req.Prompt)
 				}
 				if req.Grants.Mounts[0].Access != agent.ReadOnly {
 					t.Fatalf("mounts %+v", req.Grants.Mounts)
@@ -212,8 +212,8 @@ func TestPolicyMismatchOfWebGrantRunsTurnWithoutWeb(t *testing.T) {
 				t.Fatalf("reduced session released=%v ran=%d", second[0].Released(), len(second[0].Requests()))
 			}
 			req := engine.Requests[0]
-			if !reflect.DeepEqual(req.Grants.Tools, want) || !strings.Contains(req.SystemPrompt, "not available on this turn") {
-				t.Fatalf("tools %v prompt %q", req.Grants.Tools, req.SystemPrompt)
+			if !reflect.DeepEqual(req.Grants.Tools, want) || !strings.Contains(req.Prompt, "not available on this turn") {
+				t.Fatalf("tools %v prompt %q", req.Grants.Tools, req.Prompt)
 			}
 		})
 	}

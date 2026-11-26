@@ -50,8 +50,11 @@ type Turn struct {
 	Native       []string
 	MCP          []string
 	SystemPrompt string
-	Mounts       []agent.Mount
-	VCS          bool
+	// Prompt is the prompt the engine received: the current turn context
+	// block, then the turn's own prompt.
+	Prompt string
+	Mounts []agent.Mount
+	VCS    bool
 	// Capabilities are the permissions the host was told the turn holds.
 	Capabilities a.Capabilities
 }
@@ -69,7 +72,7 @@ func LastTurn(engine *Engine, hosts *RecordingHosts) (Turn, bool) {
 		return Turn{}, false
 	}
 	req := engine.Requests[len(engine.Requests)-1]
-	turn := Turn{SystemPrompt: req.SystemPrompt}
+	turn := Turn{SystemPrompt: req.SystemPrompt, Prompt: req.Prompt}
 	if req.Grants != nil {
 		turn.Native, turn.Mounts, turn.VCS = slices.Clone(req.Grants.Tools), slices.Clone(req.Grants.Mounts), req.Grants.VCS
 	}

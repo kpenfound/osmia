@@ -315,8 +315,8 @@ func TestDraftBriefRefusesHillClimbBriefsTheKindCannotRun(t *testing.T) {
 	d := newDesignProjects(t)
 	d.script(func(ctx context.Context, req agent.Request, _ *agent.Turn, tools *mcp.ClientSession) (*agent.Result, error) {
 		for _, want := range []string{"- hill-climb: use when", "exactly one project", "no new_project"} {
-			if !strings.Contains(req.SystemPrompt, want) {
-				return nil, fmt.Errorf("the design agent's instructions lack %q", want)
+			if !strings.Contains(req.Prompt, want) {
+				return nil, fmt.Errorf("the design agent's turn context lacks %q", want)
 			}
 		}
 		for name, input := range map[string]map[string]any{

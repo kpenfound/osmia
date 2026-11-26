@@ -30,6 +30,9 @@ func source(t trace.Thread, before uint64, resumableRoles func(string) bool) (pr
 		if q.Sequence >= before {
 			break
 		}
+		if q.Sequence < t.Epoch {
+			continue
+		}
 		cancelledBeforeSession := !q.CompletedAt.IsZero() && q.Response != nil && q.Response.Result.Cancelled && !coreadapter.ValidSession(q.Response.Result.Session)
 		if cancelledBeforeSession && (q.Response.Stop != nil || resumableRoles != nil && resumableRoles(t.Identity.Role)) {
 			continue
@@ -110,6 +113,11 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	if err != nil {
 		return result, nil, err
 	}
+	current := prepared.SystemPrompt
+	baseline, baselined := "", false
+	if coreadapter.ValidSession(session) {
+		baseline, baselined = sessionBaseline(t, q.Sequence, session, r.LegacyBaseline)
+	}
 	attempts, tried := 1, map[string]bool{prepared.Profile.Name: true}
 	forceReplay := false
 	reason, retry := "no compatible completed session", ""
@@ -130,14 +138,16 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 	healthy := stoppedSource || cleanSource
 	fallbackAllowed := r.ResumableRoles != nil && r.ResumableRoles(t.Identity.Role)
 	for {
-		prepared.Resume, prepared.History = nil, history
+		prepared.Resume, prepared.History, prepared.SystemPrompt = nil, history, current
 		path := "replay"
 		if healthy && !forceReplay && coreadapter.ValidSession(session) && previous.Backend == prepared.Profile.Backend {
-			if checker, ok := r.Turns.(coreadapter.ResumeChecker); ok {
+			if !baselined {
+				reason = "the system prompt the saved session began with is not on record; replay"
+			} else if checker, ok := r.Turns.(coreadapter.ResumeChecker); ok {
 				err := checker.CheckResume(withResumeFallbackAllowed(ctx, fallbackAllowed), previous, prepared.Profile, session)
 				switch {
 				case err == nil:
-					prepared.Resume, prepared.History, path, reason = &session, "", "resume", "compatible available session"
+					prepared.Resume, prepared.History, prepared.SystemPrompt, path, reason = &session, "", baseline, "resume", "compatible available session"
 				case errors.Is(err, coreadapter.ErrResumeUnavailable), errors.Is(err, coreadapter.ErrUnsupported):
 					reason = err.Error()
 				default:
@@ -149,7 +159,8 @@ func (r Runner) execute(ctx context.Context, t trace.Thread, q *trace.QueuedTurn
 		if retry != "" {
 			why = retry + "; " + reason
 		}
-		a := trace.TurnAttempt{Number: len(q.Attempts) + 1, Profile: prepared.Profile, Path: path, Reason: why, SourceSession: session, SourceSequence: boundary, ReplayFrom: from, Omitted: omitted, At: r.Now()}
+		sent := prepared.SystemPrompt
+		a := trace.TurnAttempt{Number: len(q.Attempts) + 1, Profile: prepared.Profile, Path: path, Reason: why, SourceSession: session, SourceSequence: boundary, ReplayFrom: from, Omitted: omitted, SystemPrompt: &sent, At: r.Now()}
 		if path == "resume" {
 			a.ReplayFrom, a.Omitted = 0, 0
 		}

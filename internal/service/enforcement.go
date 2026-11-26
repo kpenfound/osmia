@@ -84,6 +84,12 @@ var designOnlyTools = []string{"file_read", draftBriefToolName, designReadRepoTo
 
 var designNarrow = coreadapter.Capabilities{Tools: designOnlyTools, Web: true}
 
+// designerGrant is everything a design turn is granted: the design tools and
+// web access. A design session's own agent never holds a write, execution,
+// version-control, credential or owner-gate tool, nor any other tool of the
+// chief of staff.
+var designerGrant = coreadapter.Capabilities{Tools: slices.Clone(designOnlyTools), Web: true}
+
 func chiefTools(cfg *config.Config, r *trace.Repository, controls *runtimeControls, scope coreadapter.Scope, now func() time.Time) ([]coreadapter.Tool, error) {
 	set, err := status.ToolHolding(r, trace.ChiefOfStaff, scope, now, controls.heldGates(r, config.WorkstreamID(scope.Workstream)))
 	if err != nil {
@@ -173,7 +179,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
-			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, cfg.RoleExecution(masonRole))
@@ -200,6 +206,20 @@ func Enforce(opts Options, e Enforcement) Options {
 				if scope.Role == reviewerRole {
 					return execution.UnitReviewerSelection(ctx, cfg, r, scope, settings)
 				}
+				if scope.Role == trace.Designer {
+					stream, err := config.ParseWorkstreamID(scope.Workstream)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
+					design, err := isDesignWorkstream(r, stream)
+					if err != nil {
+						return isolation.Selection{}, err
+					}
+					if !design {
+						return isolation.Selection{}, errors.New("a designer turn runs in an open design session only")
+					}
+					return designSelection(ctx, controls, r, root, project, stream, scope, settings)
+				}
 				if scope.Role == trace.ChiefOfStaff {
 					stream, err := config.ParseWorkstreamID(scope.Workstream)
 					if err != nil {
@@ -210,13 +230,7 @@ func Enforce(opts Options, e Enforcement) Options {
 						return isolation.Selection{}, err
 					}
 					if design {
-						workspace := filepath.Join(root, "design", project, scope.Workstream)
-						paths, err := controls.intake().Load().StageDesignWorkspace(ctx, r, stream, workspace)
-						if err != nil {
-							return isolation.Selection{}, err
-						}
-						return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings,
-							Narrow: &designNarrow}, nil
+						return designSelection(ctx, controls, r, root, project, stream, scope, settings)
 					}
 					workspace := filepath.Join(root, "chief_of_staff", project, scope.Workstream)
 					paths, err := StageChiefDocuments(r, stream, workspace)
@@ -263,6 +277,9 @@ func Enforce(opts Options, e Enforcement) Options {
 						return nil, identityErr
 					}
 					return append(ask, recordDiscovery(r, scope, now), factoryContext(r, scope), verdicts.Tool(scope), execution.ReviewDiffTool(cfg, r, scope, identity)), err
+				}
+				if scope.Role == trace.Designer {
+					return []coreadapter.Tool{controls.intake().Load().DraftBriefTool(r, scope, now), intake.DesignReadRepoTool(cfg, r, controls.intake(), scope), intake.DesignTitleTool(r, scope, now)}, nil
 				}
 				if scope.Role != trace.ChiefOfStaff {
 					return nil, nil
@@ -318,6 +335,7 @@ func Enforce(opts Options, e Enforcement) Options {
 			}
 		}
 		runner.ResumableRoles = resumableRole
+		runner.LegacyBaseline = legacyBaseline(turns.Grants)
 		if service := controls.service.Load(); service != nil && service.placement != nil {
 			runner.Place = service.placeTurn(r)
 		}
@@ -337,6 +355,18 @@ func Enforce(opts Options, e Enforcement) Options {
 			}}, nil
 	}
 	return opts
+}
+
+// designSelection is the view and the narrowing of a design turn: the staged
+// reference documents of the projects outside the brief, and exactly the
+// design tools.
+func designSelection(ctx context.Context, controls *runtimeControls, r *trace.Repository, root, project string, stream config.WorkstreamID, scope coreadapter.Scope, settings coreadapter.ExecutionSettings) (isolation.Selection, error) {
+	workspace := filepath.Join(root, "design", project, scope.Workstream)
+	paths, err := controls.intake().Load().StageDesignWorkspace(ctx, r, stream, workspace)
+	if err != nil {
+		return isolation.Selection{}, err
+	}
+	return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings, Narrow: &designNarrow}, nil
 }
 
 type threadWorkspaces struct {

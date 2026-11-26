@@ -13,6 +13,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/intake"
 	"github.com/kpenfound/osmia/internal/isolation"
+	kindreg "github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/trace"
 )
@@ -127,11 +128,119 @@ func TestResumedRolesReceiveCurrentFactoryInstructionsWithoutHearsay(t *testing.
 		}
 		current, err := turns.Context(context.Background(), scope)
 		fixturekit.Must(t, err)
-		if !strings.Contains(current, "takes precedence over older role instructions") || !strings.Contains(current, "owner controls intent") {
+		if !strings.Contains(current, "## Operating policy") || !strings.Contains(current, "owner controls intent") {
 			t.Fatalf("%s retains stale operating authority: %s", role, current)
 		}
 		if scope.Unit != "" && !strings.Contains(current, "Current assignment") {
 			t.Fatal("policy replaced rather than supplemented the current assignment")
+		}
+	}
+}
+
+var policyRoles = []string{trace.ChiefOfStaff, masonRole, reviewerRole, architectRole, committeeRole}
+
+func policyFor(t *testing.T, role, kind, turn string) string {
+	t.Helper()
+	k, ok := kindreg.Lookup(kind)
+	if !ok {
+		t.Fatalf("kind %q is not registered", kind)
+	}
+	return FactoryInstructionsFor(coreadapter.Scope{Role: role, Turn: turn}, k)
+}
+
+func TestHillClimbArchitectAndCommitteeReceiveNoPlanAdvice(t *testing.T) {
+	t.Parallel()
+	planAdvice := []string{"size each unit", "mason turn can complete", "connecting the feature", "whole check suite", "rewrite an existing plan", "plan revisions", "boundaries, constraints and adaptable guidance", "Plans and units", "footprint", "unit", "plan"}
+	for _, turn := range []struct{ role, turn string }{{architectRole, ""}, {committeeRole, "debate-1"}, {committeeRole, "final-3-committee-1-1"}} {
+		got := policyFor(t, turn.role, kindreg.HillClimb, turn.turn)
+		if !strings.Contains(got, "owner controls intent") {
+			t.Fatalf("hill-climb %s turn lost the authority rule: %s", turn.role, got)
+		}
+		for _, banned := range planAdvice {
+			if strings.Contains(strings.ToLower(got), strings.ToLower(banned)) {
+				t.Errorf("hill-climb %s turn %q receives plan advice %q: %s", turn.role, turn.turn, banned, got)
+			}
+		}
+	}
+	for _, role := range []string{trace.ChiefOfStaff, masonRole, reviewerRole} {
+		got := policyFor(t, role, kindreg.HillClimb, "")
+		for _, banned := range []string{"size each unit", "connecting the feature", "plan revisions", "Neighboring assignments", "Footprints schedule work", "Plans and units"} {
+			if strings.Contains(got, banned) {
+				t.Errorf("hill-climb %s turn receives feature-only advice %q: %s", role, banned, got)
+			}
+		}
+	}
+}
+
+func TestFeatureArchitectAndCommitteeStillReceivePlanAdvice(t *testing.T) {
+	t.Parallel()
+	for _, turn := range []struct{ role, turn string }{{architectRole, ""}, {committeeRole, "debate-1"}} {
+		got := policyFor(t, turn.role, kindreg.Feature, turn.turn)
+		for _, want := range []string{"size each unit so one mason turn can complete it", "connecting the feature's parts in the running product", "whole check suite to pass or run", "do not rewrite an existing plan merely to change its format"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("feature %s turn lacks %q: %s", turn.role, want, got)
+			}
+		}
+	}
+	final := policyFor(t, committeeRole, kindreg.Feature, "final-3-committee-1-1")
+	if strings.Contains(final, "whole check suite") || strings.Contains(final, "service-owned check gate") {
+		t.Errorf("a final committee turn receives unit-review wording: %s", final)
+	}
+	if got := policyFor(t, trace.ChiefOfStaff, kindreg.Feature, ""); !strings.Contains(got, "do not commission a revision only to widen one") || !strings.Contains(got, "approving a candidate stay the owner's") {
+		t.Errorf("feature chief lost its footprint or approval rule: %s", got)
+	}
+}
+
+func TestEveryOperatingPolicyRuleCarriesItsReasonAndNamesNoSkill(t *testing.T) {
+	t.Parallel()
+	skillNames := []string{"behavioral-testing", "simple-code", "no-deltas", "no-comments", "lint-discipline", "unslop", "typescript-best-practices", "debugging", "handoff-reports", "design-sketch", "hill-climb-evaluator", "pr-review", "pr-writing"}
+	for _, kind := range kindreg.Names() {
+		for _, role := range policyRoles {
+			got := policyFor(t, role, kind, "")
+			if !strings.Contains(got, "## Operating policy") || !strings.Contains(got, "### ") {
+				t.Errorf("%s/%s policy is not in sections: %s", kind, role, got)
+			}
+			for _, line := range strings.Split(got, "\n") {
+				if strings.HasPrefix(line, "- ") && !strings.Contains(line, " Reason: ") {
+					t.Errorf("%s/%s rule has no reason: %s", kind, role, line)
+				}
+			}
+			for _, name := range skillNames {
+				if strings.Contains(got, name) {
+					t.Errorf("%s/%s policy names the skill %q", kind, role, name)
+				}
+			}
+			for _, framing := range []string{"takes precedence over", "conversation history"} {
+				if strings.Contains(got, framing) {
+					t.Errorf("%s/%s policy keeps the framing %q", kind, role, framing)
+				}
+			}
+		}
+	}
+	if got := policyFor(t, "foreman", kindreg.Feature, ""); got != "" {
+		t.Errorf("foreman has no operating policy, got %q", got)
+	}
+}
+
+func TestTurnContextCarriesTheOperatingPolicyOfTheWorkstreamsKind(t *testing.T) {
+	t.Parallel()
+	f, feature, repo, _ := newFinalFixture(t, "policy-by-kind")
+	defer repo.Close()
+	ctx := context.Background()
+	climb, err := config.NewWorkstreamID()
+	fixturekit.Must(t, err)
+	fixturekit.Must(t, repo.CreateWorkstreamKind(ctx, climb, "", kindreg.HillClimb, f.s.now(), ownerActor))
+	turns := memoryTurns(&isolation.Turns{}, f.s.cfg, repo)
+	for _, role := range []string{architectRole, committeeRole} {
+		onClimb, err := turns.Context(ctx, coreadapter.Scope{Workstream: string(climb), Role: role})
+		fixturekit.Must(t, err)
+		onFeature, err := turns.Context(ctx, coreadapter.Scope{Workstream: string(feature), Role: role})
+		fixturekit.Must(t, err)
+		if !strings.Contains(onClimb, "owner controls intent") || strings.Contains(onClimb, "size each unit") || strings.Contains(onClimb, "whole check suite") {
+			t.Errorf("hill-climb %s turn context: %s", role, onClimb)
+		}
+		if !strings.Contains(onFeature, "size each unit so one mason turn can complete it") {
+			t.Errorf("feature %s turn context lacks the plan advice: %s", role, onFeature)
 		}
 	}
 }

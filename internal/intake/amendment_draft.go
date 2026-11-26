@@ -386,17 +386,56 @@ func (a *AmendmentDrafter) Enqueue(ctx context.Context, cfg *config.Config, stre
 		return err
 	}
 	if !kind.Documents.Planned() {
-		prompt := fmt.Sprintf("Draft amendment %s to the ratified climb spec. Read request.json, draft/%s, charter.md and context.md. Deliver the changed %s with %s, in the same JSON shape and under the same validation as the original: the owner has approved the evaluator and the protected paths of the climb spec as it stands, so say in your reply what the change alters and keep every field the request does not touch. To decline, deliver decline.txt with your reason. Do not edit code.", id, kinds.ClimbSpecPath, kinds.ClimbSpecPath, DraftTool) + Answered("amendment", answers)
+		prompt := fmt.Sprintf(`Draft amendment %s to the ratified climb spec.
+
+## Your view
+request.json, draft/%s, charter.md and context.md.
+
+## What to deliver
+Deliver the changed %s with %s, in the same JSON shape and under the same validation as the original. The owner has approved the evaluator and the protected paths of the climb spec as it stands, so keep every field the request does not touch, and say in your closing message what the change alters. To decline, deliver decline.txt with your reason.`, id, kinds.ClimbSpecPath, kinds.ClimbSpecPath, DraftTool) + Answered("amendment", answers)
 		req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1},
 			AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: ClimbSystemPrompt(cfg.Project), Prompt: prompt}
 		_, err = a.Repository.EnqueueTurn(ctx, req)
 		return err
 	}
-	prompt := fmt.Sprintf("Draft amendment %s. Read request.json, draft/spec.md, draft/plan.json, charter.md and context.md. Deliver only the changed spec.md and/or plan.json with %s; unchanged documents will be carried forward. To decline, deliver decline.txt with your reason. For engineering revisions preserve spec.md byte-for-byte: update only the execution plan within approved intent. Keep assignments outcome-focused with explicit neighboring ownership. Constraints hold only the owner's hard limits; put file-level pointers in guidance. Footprints schedule work and need no revision for a mason to change code outside them. Incorporate necessary discoveries by assigning them to an existing unit or adding a coherent unit; preserve started identities and keep merged units identical. Do not edit code. Every dependency must name an existing unit, the graph must be acyclic, and every footprint must resolve against the entity map.", id, DraftTool) + AcceptanceDraftInstructions + Answered("amendment", answers)
-	system := fmt.Sprintf("You are the architect of the %s project (%s). Draft a revision to the sealed spec and plan for the amendment request. Read only your scoped files, deliver through %s, and do not edit implementation code or use version control.", cfg.Project.Name, cfg.Project.Upstream, DraftTool)
+	prompt := fmt.Sprintf(`Draft amendment %s.
+
+## Your view
+request.json, draft/spec.md, draft/plan.json, charter.md and context.md.
+
+## What to deliver
+Deliver only the changed spec.md and/or plan.json with %s; unchanged documents are carried forward. To decline, deliver decline.txt with your reason.
+- For an engineering revision, keep spec.md byte-for-byte and update only the plan within approved intent, because the owner ratified the spec and only the owner changes intent.
+- Keep assignments outcome-focused, with neighboring ownership explicit. Constraints hold only the owner's hard limits; put file-level pointers in guidance.
+- A footprint needs no revision for a mason to change code outside it, because footprints schedule work and do not limit it.
+- Incorporate necessary discoveries by assigning them to an existing unit or adding a coherent unit. Keep the identity of every started unit and keep every merged unit identical, because their work is recorded under those identities.
+- Every dependency names an existing unit, the graph is acyclic, and every footprint resolves against the entity map.`, id, DraftTool) + AcceptanceDraftInstructions + Answered("amendment", answers)
+	system := AmendmentSystemPrompt(cfg.Project)
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: DraftingActor, Cause: operation, Depth: 1}, AgentID: ArchitectAgent, ThreadID: ArchitectThread, TurnID: turn, Profile: profile, SystemPrompt: system, Prompt: prompt}
 	_, err = a.Repository.EnqueueTurn(ctx, req)
 	return err
+}
+
+// AmendmentSystemPrompt is the architect's standing instruction when it drafts
+// an amendment to a sealed spec and plan.
+func AmendmentSystemPrompt(p config.Project) string {
+	return fmt.Sprintf(`You are the architect of the %[1]s project (%[2]s). Draft a revision to the sealed spec and plan for the amendment request.
+
+## Purpose and setting
+A sealed spec and plan are being built, and something changed what they need: a discovery, a unit's request or the owner. You revise the documents so the build can go on, within what the owner approved. The committee examines your revision, and the chief of staff or the owner decides it: the chief of staff decides plan-only engineering revisions that preserve approved intent, and a change to intent requires the owner.
+
+## Tools and gates
+- %[3]s delivers the changed files, or decline.txt when the request should not be applied. The service records and validates what you deliver. You do not edit implementation code and hold no version control tool, because only the service records work; your view is read-only.
+- When your view does not settle something you must know, call %[4]s: your work waits for the answer, which arrives as your next turn.
+
+## Your part of the state machine
+The amendment arrives after sealing. You draft once, the committee debates the revision in a round, you answer what stands, and the amendment is decided and the documents are resealed.
+
+## Output format
+spec.md and plan.json as the turn's prompt describes, or decline.txt holding your reason.
+
+## When you are done
+Finish the whole task in this turn: deliver every document the amendment changes, with a valid verdict from %[3]s, or decline with a reason. Do not stop at a partial revision.`, p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 type AmendmentAffected struct {

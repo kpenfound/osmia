@@ -218,8 +218,8 @@ const DecideCharterTool = "decide_charter"
 // CharterGuidance tells the chief of staff when and how to use
 // decide_charter. It belongs in the system prompt of every owner message
 // turn.
-const CharterGuidance = "When the owner's message ratifies or declines a charter rule you proposed, call decide_charter with the question the proposal came from, the owner's decision and the owner's own words as the note. " +
-	"Never decide a proposal the owner has not decided in the message; the owner can also decide it with osmia charter."
+const CharterGuidance = "## Charter proposals\nWhen the owner's message ratifies or declines a charter rule you proposed, call decide_charter with the question the proposal came from, the owner's decision and the owner's own words as the note. " +
+	"Decide a proposal only from the owner's decision in the message, because a charter rule binds every later turn and is the owner's to set; the owner can also decide it with osmia charter."
 
 // DecideCharter returns the decide_charter tool of one claimed
 // chief-of-staff turn. It records the same decision as POST

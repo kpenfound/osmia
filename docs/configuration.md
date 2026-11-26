@@ -27,11 +27,11 @@ Each member's own charter governs its slice, plan and units. The workgroup spec 
 
 The owner chooses an ordered project list at hand-in: API `projects` (`project` alone is a one-element shorthand), repeatable CLI `--with <project-id>`, or the web multi-select of all active projects. The first project is home for the shared chief and conversation. Go rejects an empty or duplicate list and inactive projects; paused projects are allowed. Several projects allocate and join one member each without an architect selection turn. One project retains the ordinary workflow. The list stays fixed until ratification; changing it requires abandoning and handing in again. After ratification, amend and cancel retain their existing rules. A selected project judged to need no change is escalated to the owner rather than dropped.
 
-The design agent uses the `chief_of_staff` profile, overrides and sandbox configuration, with no separate `design` binding. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
+The design agent is the `designer` role ([Roles](#roles)). It runs on `roles.designer`'s profile, sandbox, image and skills, and on a design thread of its own, never on the chief of staff's thread or settings. Its tools are exactly `file_read`, `read_repo`, `draft_brief` and `set_title`, without write, VCS or credential access; Go enforces them at run time whichever prompt it is given. `set_title` sets the open session's title and nothing else. It sees a catalog of every active project's name, upstream and in-brief status. Brief projects' charter and entity map are in context; other active projects' are files in its view. `read_repo` reads any active project and refuses others.
 
 A session's brief starts with its own project, including a brief without a list. Optional `draft_brief.projects` replaces the list under the hand-in validation rules; omitting it retains the list. The session's own project can be removed while another remains. An owner request confirms the change; inferred changes require a readiness question and owner agreement. The web's read-only Brief panel shows the latest revision, project names with home marked and collapsed text above Start, updating live. Design read returns `brief_revision`, `brief`, `projects` and, once the agent has set one, `title`; CLI read prints the revision and list, and CLI start reads and prints them before sending the pin. Start sends the displayed/read `brief_revision`; a stale pin returns `conflict` and allocates nothing. The web surfaces the conflict and refreshes the panel.
 
-Start durably binds the handed brief text, revision and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The session's project retains the conversation and continued shared chief even when it is not a member. See [design sessions](cli.md#design-sessions).
+Start durably binds the handed brief text, revision, workstream kind and ordered project list. Recovery completes that exact start once with stable members, or leaves it safely retryable without allocation. The chief of staff opens a new thread from the brief and the design transcript attached to it and never resumes the design session's backend session. The session's project retains the conversation and the shared chief even when it is not a member. A session opened before the design agent had a thread of its own keeps working: its earlier messages stay on the chief of staff's thread, where design read and the web conversation still show them, and its next turn goes to the design thread under the same limits, carrying the earlier conversation and the latest brief in that turn's context. See [design sessions](cli.md#design-sessions).
 
 The shared design is called the **workgroup spec**. Stored document paths such as `project-specs.json`, API fields such as `project_spec` and `project_spec_revision`, and the CLI flag `--project-spec-revision` keep their names. These names do not introduce another project grouping model.
 
@@ -610,8 +610,10 @@ A perspective is `correctness` (charter compliance, contradictions and
 verifiable acceptance), `integration` (fit with the project's recorded decisions,
 the existing code and the order of units) or `scope` (expansion beyond the
 handed design and unit size). It adds that focus to the member's shed system
-prompt, in debate and amendment rounds. Every member still applies the charter,
-fit, size and acceptance tests and may raise any objection. The list must not be
+prompt, in debate and amendment rounds of feature workstreams. A Hill Climb
+committee round tests only the metric, so its members get no perspective. Every
+member still applies the charter, fit, size and acceptance tests and may raise
+any objection. The list must not be
 empty, and any other name is an error that names the entry.
 
 Each entry of `committee.profiles` must name a configured profile. A member
@@ -653,9 +655,10 @@ provider at execution time, not through network access during loading.
 | `timeout` | `45m` | Positive Go duration; explicit empty values are invalid |
 | `max_turns` | `0` | Nonnegative; zero means no turn limit; only Claude supports a nonzero value through the pinned adapter |
 
-Roles are `architect`, `committee`, `chief_of_staff`, `foreman`, `mason` and
-`reviewer`. Every omitted role binding defaults to profile `default`.
-If there is no profile named `default`, bind all six roles explicitly. Role keys:
+Roles are `architect`, `committee`, `chief_of_staff`, `designer`, `foreman`,
+`mason` and `reviewer`. Every omitted role binding defaults to profile `default`
+and sandbox `none`. If there is no profile named `default`, bind all seven roles
+explicitly. A configuration that names any other role is refused. Role keys:
 
 | Role key | Default | Validation/meaning |
 | --- | --- | --- |
@@ -665,6 +668,16 @@ If there is no profile named `default`, bind all six roles explicitly. Role keys
 | `cpus` | unset | `sbx` only: a positive integer, the CPUs of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `memory` | unset | `sbx` only: a positive integer and the unit `m` or `g`, such as `512m` or `4g`, the memory of each of the role's sandboxes; see [Sandbox size](#sandbox-size) |
 | `skills` | `[]` | Skills by git reference, given to the role's Claude and Codex turns; OpenCode and Pi turns get none; see [Role skills](#role-skills) |
+
+`designer` runs the design sessions' agent. It is a role like the others:
+without a `[roles.designer]` table its design turns run on the `default` profile
+with sandbox `none`, never on the settings of `chief_of_staff`, and an owner
+override of the chief of staff's profile does not reach it. It takes no
+`events_profile`, since only the chief of staff takes event turns. It holds the
+design tools and nothing more whatever its sandbox: no write, execution,
+version-control, credential or owner-gate tool, and none of the chief of
+staff's other tools. Kind skills never load on designer turns, as on chief
+turns.
 
 A `claude` sandbox requires Claude in every profile in the role's fallback chain.
 No arbitrary mounts, credentials, environment, tools or capability grants are
@@ -689,7 +702,7 @@ sandbox = "sbx"
 sandbox = "sbx"
 ```
 
-All six roles support this mode with `claude`, `codex` or `opencode` profiles.
+All seven roles support this mode with `claude`, `codex` or `opencode` profiles.
 An omitted `image` lets each fallback profile select its agent's default template.
 A custom template must support every agent in that role's fallback chain.
 Reload applies role settings to subsequent turns; an active turn keeps its grants.
@@ -734,7 +747,7 @@ cpus = 2
 memory = "4g"
 
 # The read-only roles: architect, reviewer, committee,
-# chief_of_staff and foreman.
+# chief_of_staff, designer and foreman.
 [roles.reviewer]
 sandbox = "sbx"
 cpus = 2
@@ -756,21 +769,37 @@ reduce `capacity.masons` if the host cannot hold more).
 
 **Building the Osmia template**
 
-From the Osmia checkout, run:
+Build the template with the `osmia` command, or from the Osmia checkout with
+the script. Both make the same checks and save the same template:
 
 ```sh
+osmia sandbox build
 ./scripts/build-sandbox.sh
 ```
 
-The script requires a working `sbx` installation and the Dagger CLI on the
-host's `PATH`. It pulls the latest Codex template, which ships Codex, removes
-Docker Engine and the Docker CLI from it, installs the latest Claude Code with
-its native installer and the Dagger CLI release reported by the host's
-`dagger version`, verifies the tools, and saves the local template as
+`osmia sandbox build` needs no service, root or configuration file; see
+[its entry in the command line reference](cli.md#commands-and-flags). The
+script needs only a checkout. Both require a working `sbx` installation and the
+Dagger CLI on the host's `PATH`, and the build fails with a reason that names
+the tool when one is missing. They pull the latest Codex template, which ships
+Codex, remove Docker Engine and the Docker CLI from it, install the latest
+Claude Code with its native installer and the Dagger CLI release reported by the
+host's `dagger version`, verify the tools, and save the local template as
 `osmia:latest`. Tags such as `:latest` are supported for templates. Each run
 refreshes both agents and replaces that local tag. The temporary build sandbox
-has no workspace mounts and is removed when the script exits, including when it
-refuses to save.
+has no workspace mounts and is the only sandbox a build creates, stops or
+removes; sandboxes already running from an earlier template are not disturbed.
+It is removed when the build ends, including when it refuses to save.
+
+`osmia sandbox check` reports whether the saved `osmia:latest` can run Fable 5.2.
+It exits zero only when the template exists and its Claude Code is 2.1.321 or
+later, and otherwise exits non-zero with the reason on stderr. It starts a
+short-lived sandbox from the saved template, reads `claude --version` there and
+removes the sandbox, so it judges whatever template is saved at that moment and
+takes seconds to a minute. A template replaced by the script or removed is
+judged on what is saved. A build that failed and left a healthy template in
+place leaves the check passing. A deployment can run `osmia sandbox build` on
+each deploy and use `osmia sandbox check` as its health check.
 
 The template has no Docker Engine: no `dockerd` or `containerd` runs in a
 sandbox made from it, and it has no Docker CLI. There is one template for every
@@ -781,10 +810,11 @@ only cost host memory in every sandbox. Masons use this template; a mason
 `image` that carries Docker is the owner's own choice, outside what Osmia builds
 or supports.
 
-Before saving, the script proves inside the build sandbox, as root and as the
+Before saving, the build proves inside the build sandbox, as root and as the
 agent user, that the template is Docker-free, and otherwise it exits non-zero
-without saving, names what it found and still removes the build sandbox. It
-refuses when:
+without saving, names what it found and still removes the build sandbox. A
+failed save also exits non-zero with the reason and leaves the template saved
+before in place. It refuses when:
 
 - a `dockerd`, `containerd` or containerd shim process runs;
 - a `docker`, `dockerd`, `containerd` or related executable remains;
@@ -796,11 +826,11 @@ refuses when:
   else or an address scheme the probe cannot ask is a refusal.
 
 The reachability probe asks each socket or address directly with `curl`. It
-does not use the Docker CLI, whose absence would prove nothing. The script also
+does not use the Docker CLI, whose absence would prove nothing. The build also
 keeps its version checks for Codex, Claude Code and the host's Dagger release.
 Codex must be at least 0.136.0, the first release whose app-server answers
 `skills/extraRoots/set`, the request that gives a Codex turn its role's
-[skills](#role-skills); the script refuses to save the template with an older
+[skills](#role-skills); the build refuses to save the template with an older
 Codex. The release comes from the app-server protocol of
 [openai/codex](https://github.com/openai/codex): the method was added in pull
 request 24977 and first shipped in `rust-v0.136.0`.
@@ -1271,6 +1301,72 @@ reference pinned to a tag cannot be pulled, which is the point of pinning.
 To pick up a change sooner, set `refresh = "always"` and reload, or delete the
 clone under `<root>/skills/repos/`. The references are shown in `/v1/config`,
 so do not embed credentials in a URL.
+
+### Recommended skills
+
+Osmia ships with `skills = []` for every role and for `[kinds.hill-climb]`, and
+it never depends on a skills repository. Every prompt Osmia gives an agent is
+complete without skills, and a skill only adds to it. The lists below are
+documentation, not defaults: they follow the lab configuration, which refers to
+[the skills project](https://github.com/kpenfound/skills) by folder name. Copy
+the ones you want into your own `config.toml`.
+
+| Role | Recommended skills |
+| --- | --- |
+| `architect` | none (`skills = []`) |
+| `committee` | none (`skills = []`) |
+| `foreman` | none (`skills = []`) |
+| `chief_of_staff` | `handoff-reports`, `design-sketch` |
+| `designer` | `handoff-reports`, `design-sketch` |
+| `mason` | `behavioral-testing`, `simple-code`, `no-deltas`, `lint-discipline`, `unslop`, `typescript-best-practices`, `debugging`, `handoff-reports` |
+| `reviewer` | `pr-review`, `simple-code`, `no-deltas`, `behavioral-testing` |
+| `[kinds.hill-climb]` | `hill-climb-evaluator` |
+
+Each entry is the reference `https://github.com/kpenfound/skills#<folder>`:
+
+```toml
+[roles.chief_of_staff]
+skills = [
+  "https://github.com/kpenfound/skills#handoff-reports",
+  "https://github.com/kpenfound/skills#design-sketch",
+]
+
+[roles.designer]
+skills = [
+  "https://github.com/kpenfound/skills#handoff-reports",
+  "https://github.com/kpenfound/skills#design-sketch",
+]
+
+[roles.mason]
+skills = [
+  "https://github.com/kpenfound/skills#behavioral-testing",
+  "https://github.com/kpenfound/skills#simple-code",
+  "https://github.com/kpenfound/skills#no-deltas",
+  "https://github.com/kpenfound/skills#lint-discipline",
+  "https://github.com/kpenfound/skills#unslop",
+  "https://github.com/kpenfound/skills#typescript-best-practices",
+  "https://github.com/kpenfound/skills#debugging",
+  "https://github.com/kpenfound/skills#handoff-reports",
+]
+
+[roles.reviewer]
+skills = [
+  "https://github.com/kpenfound/skills#pr-review",
+  "https://github.com/kpenfound/skills#simple-code",
+  "https://github.com/kpenfound/skills#no-deltas",
+  "https://github.com/kpenfound/skills#behavioral-testing",
+]
+
+[kinds.hill-climb]
+skills = ["https://github.com/kpenfound/skills#hill-climb-evaluator"]
+```
+
+The architect, committee and foreman have no recommended skills, so leave
+their `skills` out or empty. Skills never replace a factory rule: owner gates,
+footprints, the check gate, the design agent's limits and the verdict formats
+come from Osmia's own prompts and enforcement. Kind skills load only on the
+turns [listed above](#workstream-kind-settings), never on designer or chief
+turns, so `designer` and `chief_of_staff` keep their own lists.
 
 ## Project registration
 

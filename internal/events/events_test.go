@@ -577,9 +577,9 @@ func TestSystemPromptIsBuiltPerWorkstreamWhenATurnIsQueued(t *testing.T) {
 	fail := errors.New("no context")
 	var failing error
 	d, err := New(repo, Options{Now: f.clock.Now, Window: time.Second, Profile: func() (coreadapter.Profile, error) { return profile, nil },
-		System: func(_ context.Context, s config.WorkstreamID) (string, error) {
+		System: func(_ context.Context, s config.WorkstreamID) (string, string, error) {
 			asked = append(asked, s)
-			return "Context of " + string(s), failing
+			return "System of " + string(s), "Context of " + string(s), failing
 		}})
 	must(t, err)
 	must(t, d.Pass(ctx))
@@ -599,7 +599,7 @@ func TestSystemPromptIsBuiltPerWorkstreamWhenATurnIsQueued(t *testing.T) {
 	failing = nil
 	must(t, d.Pass(ctx))
 	turns := eventTurns(t, repo)
-	if len(turns) != 1 || turns[0].Request.SystemPrompt != "Context of "+string(stream) || !slices.Equal(asked, []config.WorkstreamID{stream, stream}) {
+	if len(turns) != 1 || turns[0].Request.SystemPrompt != "System of "+string(stream) || turns[0].Request.Context != "Context of "+string(stream) || !slices.Equal(asked, []config.WorkstreamID{stream, stream}) {
 		t.Fatalf("turns %+v, asked %v", turns, asked)
 	}
 }

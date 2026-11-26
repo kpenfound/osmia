@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,11 +95,14 @@ const usage = `Usage: osmia <command> [--root PATH]
   design read <design-id> [--json]
   design start <design-id> [--json]  starts a workgroup from the drafted brief
   design destroy <design-id> [--json]
+  sandbox build  build and save the osmia:latest sbx template; refuses to save one with a Docker Engine
+  sandbox check  succeed only when the saved osmia:latest has Claude Code 2.1.321 or later, which runs Fable 5.2
   config [--json]
   config validate [--config PATH]  check a top-level config file offline; no service needed
   reload [--json]
 Client commands also accept --socket PATH (relative to root).
 config validate reads only the top-level file: --config PATH, else the file --root resolves to.
+sandbox build and sandbox check run offline on this host: they need sbx on PATH (build also dagger), take no flag and need no service, root or config. On failure they exit 1 with the reason on stderr.
 project settings works offline on the root's store and refuses while the service runs; use the Settings page then.
 serve runs in the foreground unless --detach is set. Detached logs are in root/service.log.
 client runs in the foreground only, takes flags only and reads no config file; see osmia client --help.
@@ -307,6 +311,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		valid = len(a) == 0
 	case "config":
 		valid = len(a) == 0 && o.config == "" || len(a) == 1 && a[0] == "validate" && !o.json && o.socket == ""
+	case "sandbox":
+		bare := o
+		bare.args = nil
+		valid = len(a) == 1 && (a[0] == "build" || a[0] == "check") && reflect.DeepEqual(bare, options{})
 	case "answer":
 		valid = o.accept && len(a) == 1 || !o.accept && len(a) == 2
 	case "charter":
@@ -351,6 +359,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	creatingProject := cmd == "project" && len(a) > 0 && a[0] == "create"
 	if !valid || cmd != "serve" && o.detach || cmd != "pause" && (o.hard || o.reasonSet) || !addingProject && o.target || !creatingProject && o.creating || cmd != "handin" && (o.skipDebate || o.base != "" || o.kind != "" || len(o.with) > 0) || cmd != "answer" && o.project != "" || cmd != "answer" && cmd != "approve" && cmd != "land" && o.accept || cmd == "serve" && (o.json || o.socket != "") || cmd == "doctor" && o.socket != "" || cmd != "session" && (o.profile != "" || o.title != "") || cmd != "edit" && o.from != "" || o.config != "" && cmd != "config" {
 		return invalid()
+	}
+	if cmd == "sandbox" {
+		return runSandbox(ctx, a[0], stdout, stderr)
 	}
 	if cmd == "config" && len(a) == 1 {
 		return runConfigValidate(o.root, o.config, stdout, stderr)

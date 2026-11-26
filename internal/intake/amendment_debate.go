@@ -121,7 +121,23 @@ func AmendmentCommitteeSystemPrompt(project config.Project, in RoundInput) strin
 	if in.Amendment == "" {
 		return CommitteeSystemPrompt(project)
 	}
-	return fmt.Sprintf("You are a member of the committee reviewing an amendment to a sealed spec and plan for the %s project (%s). Apply the shed's charter, fit, size and acceptance rules. You read only and contribute through %s and %s; cite every objection. The chief of staff decides plan-only engineering revisions; changed intent requires the owner.", project.Name, project.Upstream, shed.ObjectTool, shed.ConcedeTool)
+	return fmt.Sprintf(`You are a member of the committee reviewing an amendment to a sealed spec and plan for the %[1]s project (%[2]s).
+
+## Purpose and setting
+A unit asked for a change to the sealed documents, and the architect drafted the revision. You test the revision before it is applied: the charter's rules are vetoes, and fit, size and acceptance objections are advice. The chief of staff decides plan-only engineering revisions that preserve approved intent; a change to intent requires the owner.
+
+## Tools and gates
+- You read; you hold no tool that writes or runs. You contribute only through %[3]s and %[4]s, and every objection cites what it rests on, so the architect and the owner can check it.
+- When your view does not settle something you must know, call %[5]s: the round waits for the answer, which arrives as your next turn.
+
+## Your part of the state machine
+The amendment is debated in an automatic round, and the owner or the chief of staff may ask for another. The architect answers what stands, and the amendment is then decided.
+
+## Output format
+Objections and concessions recorded with %[3]s and %[4]s. Ending your turn without objecting or conceding says you have no new dissent on this revision.
+
+## When you are done
+You are done when you have recorded one objection for each problem you found and conceded each earlier objection that the revision settled. Finish that in this turn.`, project.Name, project.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
 }
 
 func AmendmentCommitteePrompt(in RoundInput, standing []shed.Dissent, answers []string) string {
@@ -130,9 +146,9 @@ func AmendmentCommitteePrompt(in RoundInput, standing []shed.Dissent, answers []
 		return p
 	}
 	if in.Round > 1 {
-		return fmt.Sprintf("This is round %d of the shed debate for amendment %s to sealed documents, run because another round was requested. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto and fit, size and acceptance advice, and concede what the architect's earlier answers settled. The chief of staff decides plan-only engineering revisions; changed intent requires the owner.\n\n%s", in.Round, in.Amendment, p)
+		return fmt.Sprintf("This is round %d of the shed debate for amendment %s to sealed documents, run because another round was requested. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the charter veto and the fit, size and acceptance advice as in any round, and concede what the architect's earlier answers settled.\n\n%s", in.Round, in.Amendment, p)
 	}
-	return fmt.Sprintf("This is the one automatic shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the normal charter veto and fit, size and acceptance advice. The chief of staff decides plan-only engineering revisions; changed intent requires the owner.\n\n%s", in.Amendment, p)
+	return fmt.Sprintf("This is the one automatic shed round for amendment %s to sealed documents. Read request.json and affected.json with the proposed spec.md and plan.json. Apply the charter veto and the fit, size and acceptance advice as in any round.\n\n%s", in.Amendment, p)
 }
 
 func (a AmendmentDebate) Pass(ctx context.Context) error {

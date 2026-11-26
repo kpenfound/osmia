@@ -69,6 +69,11 @@ func (a TestAccess) ChiefOverride(cfg *config.Config) (string, coreadapter.Profi
 	return a.s.chiefOverride(cfg)
 }
 
+// DesignerOverride reads the profile design turns run on.
+func (a TestAccess) DesignerOverride(cfg *config.Config) (string, coreadapter.Profile, error) {
+	return a.s.designerOverride(cfg)
+}
+
 var TestOperationClass = operationClass
 var TestConversationOperation = conversationOperation
 var TestEnsureSessionThread = ensureSessionThread

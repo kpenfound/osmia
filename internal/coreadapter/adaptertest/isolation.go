@@ -28,6 +28,9 @@ type Engine struct {
 	// PolicyFor alters the policy of a session by the grants it was prepared for.
 	PolicyFor func(agent.Grants, *agent.Policy)
 	OnRun     func() error
+	// SessionID names the session a request ends in. Without it every
+	// request ends in "fixture-session".
+	SessionID func(agent.Request) string
 	// Resume answers CheckResume when set; otherwise the saved session is unavailable.
 	Resume       func(previous, next a.Profile, session a.BackendSession) error
 	ResumeChecks int
@@ -101,7 +104,11 @@ func (f *Engine) Enforcer(settings a.ExecutionSettings) (agent.Enforcer, error) 
 			if f.RunErr != nil {
 				return nil, f.RunErr
 			}
-			return &agent.Result{ClaudeID: "fixture-session", ResultText: "fixture response", SessionDir: turn.Request.SessionDir}, nil
+			id := "fixture-session"
+			if f.SessionID != nil {
+				id = f.SessionID(turn.Request)
+			}
+			return &agent.Result{ClaudeID: id, ResultText: "fixture response", SessionDir: turn.Request.SessionDir}, nil
 		}}
 	f.mu.Lock()
 	f.Enforcers = append(f.Enforcers, fake)

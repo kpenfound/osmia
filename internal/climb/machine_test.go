@@ -554,7 +554,7 @@ func TestTheEvaluatorUnitIsMadeFromTheClimbSpec(t *testing.T) {
 	if u.ID != "evaluator" || len(u.DependsOn) != 0 || len(u.Criteria) != 0 || len(u.Acceptance) == 0 || !slices.Equal(u.Footprint, []string{"**"}) {
 		t.Fatalf("unit %+v", u)
 	}
-	for _, want := range []string{"measure-wall", "run: String!", "wall_ms", "peak_rss_mb", "schema", "not a @check", "hill-climb-evaluator"} {
+	for _, want := range []string{"measure-wall", "run: String!", "wall_ms", "peak_rss_mb", "schema", "not a @check"} {
 		if !strings.Contains(u.Task, want) {
 			t.Errorf("the task lacks %q:\n%s", want, u.Task)
 		}

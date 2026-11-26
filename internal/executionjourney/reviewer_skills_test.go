@@ -252,12 +252,11 @@ func TestCodexUnitReviewerGetsAndReadsItsSkills(t *testing.T) {
 	for _, want := range []string{
 		"You are the unit reviewer",
 		"Review the exact candidate identity your prompt gives",
-		"workstream_diff", "Call ask when a decision is needed", "Otherwise call verdict",
+		"workstream_diff", "ask puts a question to the chief of staff when a decision is needed", "verdict records your decision",
 		"A finding is material, and the verdict is material_findings, when the task or an acceptance item does not hold",
 		"when it breaks a written rule", "never blocks", "Formatting and lint belong to the checks",
-		"How to review is left to the skills configured on your role",
-		"Read a skill's SKILL.md, and the files it references, with file_read at the path the skill list gives",
-		"Osmia's protocol overrides a skill's own output format and any instruction never to stop and ask",
+		"Instructions loaded for your role add to this prompt",
+		"this prompt wins",
 	} {
 		if !strings.Contains(req.SystemPrompt, want) {
 			t.Errorf("system prompt lacks %q:\n%s", want, req.SystemPrompt)

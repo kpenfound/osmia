@@ -177,7 +177,7 @@ func TestMasonDoneMovesTheUnitToReviewing(t *testing.T) {
 	fixturekit.Must(t, err)
 	out, err := (&execution.MasonReports{}).Tool(f.Repository(), scope).Handle(context.Background(), raw)
 	fixturekit.Must(t, err)
-	if string(out) != `{"recorded":false,"reason":"unit resume is reviewing, not implementing"}` {
+	if string(out) != `{"recorded":false,"reason":"unit resume is reviewing, not implementing: done is accepted only while the unit is implementing"}` {
 		t.Fatalf("late done %s", out)
 	}
 
