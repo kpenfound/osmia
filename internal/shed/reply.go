@@ -168,7 +168,7 @@ func ReplyTools(t ReplyTurn) ([]coreadapter.Tool, error) {
 	}
 	var mu sync.Mutex
 	reply := coreadapter.Tool{Name: ReplyTool, Effect: coreadapter.ToolMemory,
-		Description: "Answer one objection that stands after this round. objection: its ID. answer: what you say to it, and what you changed if you redraft. Answering an objection again replaces your earlier answer.",
+		Description: "Answer one objection that stands after this round; call it once for each objection. objection: its ID, as the prompt lists it. answer: what you say to it, and what you changed if you redraft. Answering an objection again replaces your earlier answer. The result is recorded true, or recorded false with the reason, which you correct before you call again. Delivering a changed draft is a separate call to draft_write.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"objection":{"type":"string"},"answer":{"type":"string"}},"required":["objection","answer"],"additionalProperties":false}`)}
 	reply.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input Answer

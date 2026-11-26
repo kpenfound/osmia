@@ -136,7 +136,7 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 		}{true, o.ID})
 	}
 	concede := coreadapter.Tool{Name: ConcedeTool, Effect: coreadapter.ToolMemory,
-		Description: "Withdraw or settle one of your own objections that still stands. objection: its ID. reason: why it no longer stands, such as the architect's reply or a later revision.",
+		Description: "Withdraw or settle one of your own objections that still stands, when the architect's reply or a later revision has answered it. objection: its ID, as the objection tool or your standing-objections list gave it. reason: why it no longer stands. You can concede only your own objection, and a conflict between member charters only the owner resolves. The result is recorded true, or recorded false with the reason, which you correct before you call again.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"objection":{"type":"string"},"reason":{"type":"string"}},"required":["objection","reason"],"additionalProperties":false}`)}
 	concede.Handle = func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input Concession
@@ -164,12 +164,12 @@ func Tools(t Turn) ([]coreadapter.Tool, error) {
 
 func (t Turn) objectDescription() string {
 	if t.Climb {
-		return "Object to one part of the climb spec. kind: metric (the metric can be gamed, is too noisy to climb on, or the protected paths leave out something the evaluator or its fixtures depend on; advice), charter (the part violates a charter rule; a veto) or charter_conflict (two member charters conflict; cite both rules; only the owner resolves it). " +
-			"part: " + ClimbPartForms + ". argument: why. citations: at least one of " + ClimbCitationForms + "; each must exist, and a charter objection must cite the charter rule."
+		return "Record one objection to one part of the climb spec; call it once for each problem you find. kind: metric (the metric can be gamed, is too noisy to climb on, or the protected paths leave out something the evaluator or its fixtures depend on; advice to the owner), charter (the part violates a charter rule; a veto) or charter_conflict (two member charters conflict; cite both rules; only the owner resolves it). " +
+			"part: " + ClimbPartForms + ". argument: why, concretely enough that the architect can act on it. citations: at least one of " + ClimbCitationForms + "; each must exist, and a charter objection must cite the charter rule. The result is recorded true with the objection's ID, or recorded false with the reason, which you correct before you call again."
 	}
-	return "Object to one part of the spec or the plan. kind: charter_conflict (two member charters conflict; cite both rules; only the owner resolves it), charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
-		"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work). part: " + PartForms + "; size and acceptance objections name a unit. " +
-		"argument: why. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule."
+	return "Record one objection to one part of the spec or the plan; call it once for each problem you find. kind: charter_conflict (two member charters conflict; cite both rules; only the owner resolves it), charter (the part violates a charter rule; a veto), fit (the plan does not realise the handed design or works against a recorded decision; advice), " +
+		"size (splitting could improve practical capacity or reviewability; advice) or acceptance (a unit's task is unclear, or a reviewer could not verify its acceptance from the unit's work; advice). part: " + PartForms + "; size and acceptance objections name a unit. " +
+		"argument: why, concretely enough that the architect can act on it. citations: at least one of " + CitationForms + "; each must exist, and a charter objection must cite the charter rule. The result is recorded true with the objection's ID, or recorded false with the reason, which you correct before you call again."
 }
 
 func (t Turn) checkObjection(ctx context.Context, o Objection) error {

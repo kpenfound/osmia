@@ -1124,11 +1124,12 @@ func (d *Debate) Enqueue(ctx context.Context, cfg *config.Config, stream config.
 		return err
 	}
 	systemPrompt, prompt := AmendmentCommitteeSystemPrompt(cfg.Project, in), AmendmentCommitteePrompt(in, standing, answers)
+	perspective := "\n\n" + MemberPerspective(cfg, member)
 	if !kind.Documents.Planned() {
-		systemPrompt, prompt = ClimbCommitteeSystemPrompt(cfg.Project), ClimbCommitteePrompt(in, standing, answers)
+		systemPrompt, prompt, perspective = ClimbCommitteeSystemPrompt(cfg.Project), ClimbCommitteePrompt(in, standing, answers), ""
 	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: d.Repository.Project(), Workstream: stream, At: d.S.Now(), Actor: ShedActor, Cause: operation, Depth: 1},
-		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt + "\n\n" + MemberPerspective(cfg, member), Prompt: prompt}
+		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt + perspective, Prompt: prompt}
 	_, err = d.Repository.EnqueueTurn(ctx, req)
 	return err
 }
@@ -1501,33 +1502,51 @@ func (d *Debate) Record(ctx context.Context, operation string, stream config.Wor
 }
 
 func CommitteeSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are a member of the committee that debates one workstream's feature spec and plan for the %s project (%s) before anything is built. You test the draft against the project's charter, the owner's handed design and the recorded decisions. You read; you hold no tool that writes or runs. You contribute only through %s and %s, and every objection cites what it rests on. When your view does not settle something you must know to judge the revision, call %s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.", p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
+	return fmt.Sprintf(`You are a member of the committee that debates one workstream's feature spec and plan for the %[1]s project (%[2]s) before anything is built.
+
+## Purpose and setting
+You test the architect's draft against the project's charter, the owner's handed design and the recorded decisions, so that the owner ratifies a spec and plan that have been challenged. Several members read the same revision, each with its own perspective, and the architect replies to what stands after the round. The plan is a revisable engineering approach: the owner ratifies the spec, and engineering objections about size, acceptance or fit are advice, while charter objections block.
+
+## Tools and gates
+- You read; you hold no tool that writes or runs. You contribute only through %[3]s and %[4]s, and every objection cites what it rests on, so the architect and the owner can check it.
+- When your view does not settle something you must know to judge the revision, call %[5]s: the round waits for the answer, which arrives as your next turn, and your contributions so far are kept.
+
+## Your part of the state machine
+A round of debate follows each draft. After a round the architect answers every objection that stands and may redraft, and the chief of staff or the owner disposes of what still blocks before the owner ratifies. A charter objection is a veto on the part it names; fit, size and acceptance objections are advice.
+
+## Output format
+Objections and concessions recorded with %[3]s and %[4]s. Ending your turn without objecting or conceding says you have no new dissent on this revision.
+
+## When you are done
+You are done when you have recorded one objection for each problem you found and conceded each earlier objection that the revision or the architect's reply settled. Finish that in this turn.`, p.Name, p.Upstream, shed.ObjectTool, shed.ConcedeTool, questions.AskTool)
 }
 
 func CommitteePrompt(in RoundInput, standing []shed.Dissent, answers []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `Round %d of the shed. Every member reads the same revision: %s.
 
-Your view holds:
+## Your view
 - spec.md and plan.json: the revision under debate. Cite a criterion as spec#<n> and a unit as plan#<unit>.
 - handed/: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. Context labels all workgroup member charters by project ID. Each governs its member's slice, plan and units; check the workgroup spec and contracts against all of them. Cite another member as <project-id>/charter#<n>. Use kind charter_conflict and cite both rules when member charters conflict: only the owner resolves it.
+- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. Context labels all workgroup member charters by project ID. Each governs its member's slice, plan and units; check the workgroup spec and contracts against all of them. Cite another member as <project-id>/charter#<n>. Use kind charter_conflict and cite both rules when member charters conflict, because only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the entity map and the recorded decisions. Cite an entity as %s<entity>.
 - repo/: the tracked files of the owner's clone, read-only.
 - shed/round-<n>/: what every member contributed in earlier rounds, and the architect's reply to each as reply.json, when there are any.
 
-Apply two tests and one judgement, and call %s once for each thing you find:
+## What to look for
+Call %s once for each thing you find:
 - charter: a part that violates a charter rule. This is a veto on that part; cite the rule.
 - fit: the plan does not realise the handed design, or works against a recorded decision. This is advice to the owner.
-- size: a unit whose practical capacity or reviewability would improve enough from splitting to justify coordination; this is advice. Name the unit as the part.
-- acceptance: unclear outcomes, missing ownership boundaries or insufficient verification; this is engineering advice. Name the unit as the part.
+- size: a unit whose practical capacity or reviewability would improve enough from splitting to justify coordination. This is advice. Name the unit as the part.
+- acceptance: unclear outcomes, missing ownership boundaries or insufficient verification. This is engineering advice. Name the unit as the part.
 
-The plan is a revisable engineering approach. Challenge material risks and ownership gaps. Size and acceptance suggestions are advice, not owner gates. Prefer coherent outcomes and split only when coordination buys useful parallelism, reviewability or practical capacity; breadth alone is not a reason. Requirements belong in the spec; implementation guidance remains adaptable.
+Challenge material risks and ownership gaps. Requirements belong in the spec, and implementation guidance stays adaptable, so do not object to guidance that a mason may adapt.
 
-An objection that is refused comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to. Call %s when something you must know to judge the revision is not in your view: the round waits for the answer, which arrives as your next turn.
+## How the round ends
+A refused objection comes back with the reason; correct it and call again. Ending your turn without objecting or conceding says you have no new dissent on this revision, and that you accept it in place of any earlier revision you objected to. Call %s when something you must know to judge the revision is not in your view: the round waits for the answer, which arrives as your next turn.
 `, in.Round, in.Pin(), shed.EntityCitation, shed.ObjectTool, questions.AskTool)
 	if len(standing) > 0 {
-		fmt.Fprintf(&b, "\nYour objections that still stand. Call %s for each one that the revision or the debate has settled:\n", shed.ConcedeTool)
+		fmt.Fprintf(&b, "\n## Your objections that still stand\nCall %s for each one that the revision or the debate has settled:\n", shed.ConcedeTool)
 		for _, s := range standing {
 			fmt.Fprintf(&b, "- %s (%s, %s, made against %s): %s\n", s.ID, s.Kind, s.Part, s.Revision, s.Argument)
 		}

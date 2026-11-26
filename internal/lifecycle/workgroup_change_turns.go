@@ -576,7 +576,42 @@ func (s *Controller) AdvanceChanges(ctx context.Context, wt *trace.Repository, g
 // DeltaSystemPrompt is the role prompt of a delta debate turn. The web
 // guidance a turn holding Web is told is added when the turn runs.
 func DeltaSystemPrompt(role string) string {
-	return "You are the " + role + " considering a delta amendment. Hold approved text fixed except for the requested change; never edit code, use version control, publish or approve."
+	if role == architectRole {
+		return fmt.Sprintf(`You are the architect considering a delta amendment to a ratified workgroup spec.
+
+## Purpose and setting
+The owner or a member asked to change the ratified project spec, the shared behaviour, contracts and graph that span the workgroup's projects. You draft the changed text, and later answer the committee's assessment of it. Hold approved text fixed except for the requested change, because the owner ratified it and only the requested delta is up for decision.
+
+## Tools and gates
+- %[1]s records the full proposed project spec, and %[2]s records your answer to the committee's assessment. Each records durably and approves nothing: the owner decides the delta.
+- You never edit code, use version control, publish or approve. No owner gate is available in this turn.
+
+## Your part of the state machine
+A delta is drafted, assessed by the committee, answered by you and then presented to the owner. A turn handles one of those steps, and its prompt says which.
+
+## Output format
+The tool call the turn's prompt names, and nothing the service does not record.
+
+## When you are done
+Finish the whole task of the turn: call the tool the prompt names with a complete input, correct it if it is refused, and end your turn.`, DeltaDraftTool, DeltaReplyTool)
+	}
+	return fmt.Sprintf(`You are a member of the committee considering a delta amendment to a ratified workgroup spec.
+
+## Purpose and setting
+The owner or a member asked to change the ratified project spec, the shared behaviour, contracts and graph that span the workgroup's projects. You assess the delta only, because approved text outside it was already ratified. Your assessment goes to the architect, who answers it, and then to the owner, who decides.
+
+## Tools and gates
+- %[1]s records your objections and recommendations about the delta. It records durably and approves nothing.
+- You never edit code, use version control, publish or approve. No owner gate is available in this turn.
+
+## Your part of the state machine
+A delta is drafted by the architect, assessed by each committee member, answered by the architect and presented to the owner. Your turn is the assessment.
+
+## Output format
+One %[1]s call: a list of objections, each a statement the architect can answer, and a note.
+
+## When you are done
+You are done when %[1]s has recorded your assessment, with an empty objections list when you have none. End your turn then.`, DeltaReviewTool)
 }
 
 func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c WorkgroupChange, role, agent, tool string) error {
@@ -614,7 +649,18 @@ func (s *Controller) RunChangeTurn(ctx context.Context, wt *trace.Repository, c 
 		if err != nil {
 			return err
 		}
-		prompt := "Debate only the requested delta against before.json, the ratified project spec and slices. Unchanged assignments and intent are left alone. Read charters.md and check shared behaviour and contracts against every member charter. Read change.json for the request, proposed text, impact, committee objections and prior answers. Deliver a full proposed project spec with deliver_delta, preserving unchanged sections byte-for-byte. Every member needs a slice; changed and new sections need units. A member marked retired in change.json is archived: its slice is frozen and stays exactly as approved. With review_delta, record objections and recommendations about the delta only. With answer_delta, answer the committee's delta objections. No owner gate is available in this turn."
+		prompt := `Debate only the requested delta against before.json, the ratified project spec and slices. Text and assignments the delta does not touch stay as they are.
+
+## Your view
+- change.json: the request, the proposed text, the impact, the committee objections and the prior answers.
+- before.json: the ratified project spec and slices.
+- charters.md: every member's charter. Check shared behaviour and contracts against all of them, because each member charter governs its own slice and all govern the shared text.
+
+## What to do
+- Deliver a full proposed project spec with deliver_delta, keeping unchanged sections byte-for-byte. Every member needs a slice, and changed and new sections need units. A member marked retired in change.json is archived: its slice is frozen and stays exactly as approved.
+- With review_delta, record objections and recommendations about the delta only.
+- With answer_delta, answer the committee's delta objections.
+`
 		_, err = wt.EnqueueTurn(ctx, trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: wt.Project(), Workstream: c.Host, At: s.Now(), Actor: amendmentActor, Cause: WorkgroupChangeDocument(c.ID)}, AgentID: agent, ThreadID: identity, TurnID: turn, Profile: profile, SystemPrompt: DeltaSystemPrompt(role), Prompt: prompt + acceptanceDraftInstructions})
 		if err != nil {
 			return err
@@ -689,7 +735,7 @@ func (s *Controller) DeltaTool(wt *trace.Repository, c WorkgroupChange, agent, n
 	case DeltaReplyTool:
 		schema = `{"type":"object","properties":{"reply":{"type":"string"}},"required":["reply"],"additionalProperties":false}`
 	}
-	return coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory, Description: "Record the delta proposal, committee assessment or architect answer durably. This approves nothing.", InputSchema: json.RawMessage(schema), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	return coreadapter.Tool{Name: name, Effect: coreadapter.ToolMemory, Description: DeltaToolDescription(name), InputSchema: json.RawMessage(schema), Handle: func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		lock := s.GroupApprovalLock(group)
 		lock.Lock()
 		defer lock.Unlock()
@@ -896,4 +942,18 @@ func (s *Controller) ChangeTurns(ctx context.Context, wt *trace.Repository, c Wo
 		return []coreadapter.Tool{s.DeltaTool(wt, c, agent, tool)}, nil
 	}}
 	return turns, nil
+}
+
+// DeltaToolDescription describes the delta tool of the given name to the
+// agent that calls it.
+func DeltaToolDescription(name string) string {
+	switch name {
+	case DeltaDraftTool:
+		return "Record the architect's full proposed project spec for the delta: behavior, contracts, graph and a slice for every member. Keep sections the delta does not change byte-for-byte. The result is recorded true, or a refusal that names the problem with the proposal (an unresolvable charter citation, a spec or plan that fails validation, or no change to approved text); correct it and call again. This records the proposal and approves nothing: the committee assesses it and the owner decides."
+	case DeltaReviewTool:
+		return "Record your assessment of the delta: objections, a list of statements about the delta that the architect can answer, empty when you have none, and note, your recommendation for the owner. Call it once, after you have read the proposal against the ratified spec and every member charter. The result is recorded true, or a refusal that says why; correct it and call again. This records your assessment and approves nothing."
+	case DeltaReplyTool:
+		return "Record the architect's answer to the committee's assessment of the delta. reply is your answer to each objection, naming what you change or why you do not. The result is recorded true, or a refusal that says why; correct it and call again. This records the answer and approves nothing: the owner decides the delta."
+	}
+	return "Record a delta turn's contribution durably. This approves nothing."
 }

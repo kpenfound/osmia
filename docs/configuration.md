@@ -610,8 +610,10 @@ A perspective is `correctness` (charter compliance, contradictions and
 verifiable acceptance), `integration` (fit with the project's recorded decisions,
 the existing code and the order of units) or `scope` (expansion beyond the
 handed design and unit size). It adds that focus to the member's shed system
-prompt, in debate and amendment rounds. Every member still applies the charter,
-fit, size and acceptance tests and may raise any objection. The list must not be
+prompt, in debate and amendment rounds of feature workstreams. A Hill Climb
+committee round tests only the metric, so its members get no perspective. Every
+member still applies the charter, fit, size and acceptance tests and may raise
+any objection. The list must not be
 empty, and any other name is an error that names the entry.
 
 Each entry of `committee.profiles` must name a configured profile. A member

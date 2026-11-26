@@ -994,7 +994,7 @@ func ReplyPrompt(in RoundInput, latest shed.Pin, open []shed.Entry, problems []s
 	fmt.Fprintf(&b, "Round %d of the shed is heard. The committee debated %s. %d objections stand:\n", in.Round, in.Pin(), len(open))
 	b.WriteString(DissentList(open))
 	fmt.Fprintf(&b, `
-What each kind asks of you:
+## What each kind asks of you
 - charter: a veto on the part it names. It blocks until its member concedes it after a redraft, or the owner disposes of it.
 - size: assess whether splitting improves execution; broad coherent outcomes can remain one unit. This is engineering advice.
 - acceptance: clarify observable outcomes and ownership. Keep proposed evidence adaptable. This is engineering advice.
@@ -1002,6 +1002,7 @@ What each kind asks of you:
 - owner: the owner's own objection. It blocks until the owner disposes of it; answer it as you would a member's.
 
 %s
+## What to do
 This is your one reply to this round. Answer each objection with %s, giving its ID and your answer. When the objections call for a change, also deliver the changed spec.md, plan.json or both with %s: the redraft is validated by the rules your draft was, and a valid one is the revision the committee debates next. An invalid one comes back to you. Deliver nothing to leave the revision as it is.`, View(latest, redraft), shed.ReplyTool, DraftTool)
 	return b.String()
 }
@@ -1018,6 +1019,7 @@ func RedraftPrompt(in RoundInput, latest shed.Pin, open []shed.Entry, problems [
 	b.WriteString(DissentList(open))
 	fmt.Fprintf(&b, `
 %s
+## What to do
 Deliver the redrafted spec.md, plan.json or both with %s: the redraft is validated by the rules your draft was, and a valid one is the revision the committee debates in the round that follows. An invalid one comes back to you. Answer with %s an objection your redraft settles, giving its ID and your answer. Deliver nothing to leave the revision as it is; the owner's note is then unanswered.`, View(latest, redraft), DraftTool, shed.ReplyTool)
 	return b.String()
 }
@@ -1028,13 +1030,13 @@ func InvalidRedraft(problems []string) (returned, view string) {
 	if len(problems) == 0 {
 		return "", ""
 	}
-	return fmt.Sprintf("Your redraft was not accepted, and the committee will not read it:\n- %s\n\nWhat you delivered is in redraft/. Deliver every file of the redraft again with %s, corrected: only what this turn delivers counts. Deliver nothing to leave the revision as it is. Your answers so far are kept; answer an objection again only to replace what you said.\n\n", strings.Join(problems, "\n- "), DraftTool),
+	return fmt.Sprintf("Your redraft was not accepted, and the committee will not read it:\n- %s\n\nWhat you delivered is in redraft/. Deliver every file of the redraft again with %s, corrected, because only what this turn delivers counts. Deliver nothing to leave the revision as it is. Your answers so far are kept; answer an objection again only to replace what you said.\n\n", strings.Join(problems, "\n- "), DraftTool),
 		"- redraft/: the files of your redraft that was not accepted.\n"
 }
 
 // View describes what the architect's staged view holds.
 func View(latest shed.Pin, redraft string) string {
-	return fmt.Sprintf(`Your view holds:
+	return fmt.Sprintf(`## Your view
 - spec.md and plan.json: the latest recorded revision, %s.
 - handed/, charter.md and context.md: what you drafted from.
 - shed/round-<n>/: what every member contributed to each round, your earlier replies as reply.json, and the owner's own files of the round.

@@ -743,7 +743,7 @@ func (d Drifter) EnsureThread(ctx context.Context, stream config.WorkstreamID, a
 // workstream's original scope is not, on its own, a reason to reject the
 // Resolution. It belongs in the drift mason's and drift reviewer's system
 // prompts and in every resolution, fix and review prompt.
-const DriftScopeRule = "Conflicted paths, and any other change the rebased branch needs so that both upstream's and the feature branch's behaviour stand, are in scope of this drift rebase, whatever the workstream's sealed spec, plan or unit footprints name. A resolved path outside the workstream's original scope is not, on its own, a reason to reject it."
+const DriftScopeRule = "Conflicted paths, and any other change the rebased branch needs so that both upstream's and the feature branch's behaviour stand, are in scope of this drift rebase, whatever the workstream's sealed spec, plan or unit footprints name, because a rebase can need changes that nobody planned. A resolved path outside the workstream's original scope is not, on its own, a reason to reject it."
 
 // DriftReviewChecks names what the drift reviewer checks of a resolution:
 // both sides kept, nothing of the feature branch's change lost or altered,

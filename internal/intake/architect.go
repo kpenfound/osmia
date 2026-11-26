@@ -1007,10 +1007,10 @@ func (d *Drafter) DraftToolFor(kind kinds.Kind, scope coreadapter.Scope, attempt
 				return nil, err
 			}
 			if _, amending := AmendmentTurnID(attempt); !slices.Contains(paths, input.Path) && !(input.Path == "decline.txt" && amending) {
-				return nil, fmt.Errorf("path must be %s", names)
+				return nil, fmt.Errorf("path %q is not a file of this draft: deliver %s%s", input.Path, names, declineHint(attempt))
 			}
 			if len(input.Content) > MaxHandedBytes {
-				return nil, fmt.Errorf("%s is larger than %d bytes", input.Path, MaxHandedBytes)
+				return nil, fmt.Errorf("%s is larger than %d bytes: shorten it and deliver it again", input.Path, MaxHandedBytes)
 			}
 			if scope.Role != ArchitectRole || scope.Project != string(d.Repository.Project()) {
 				return nil, errors.New("turn scope denied")
@@ -1028,6 +1028,13 @@ func (d *Drafter) DraftToolFor(kind kinds.Kind, scope coreadapter.Scope, attempt
 			}
 			return json.Marshal(DraftStatus{Delivered: input.Path, Verdict: verdict, Problems: problems, Next: DraftNext[verdict]})
 		}}
+}
+
+func declineHint(attempt string) string {
+	if _, amending := AmendmentTurnID(attempt); amending {
+		return ", or decline.txt to decline the amendment"
+	}
+	return ""
 }
 
 // SelectView stages the architect's view for the claimed turn and selects all
@@ -1288,7 +1295,25 @@ func ArchitectGrant(tools ...string) coreadapter.Capabilities {
 }
 
 func ArchitectSystemPrompt(p config.Project) string {
-	return fmt.Sprintf("You are the architect of the %s project (%s). The owner fixed the selected projects. Draft every selected project's workstream, plus the workgroup spec, contracts and graph. Never add or drop a member. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner; keep the member while waiting for the owner. You draft this member's feature spec and plan from what the owner handed in, the project's charter and its entity map, in the vocabulary the entity map gives the project. Use inspect_code to read the repository, read_remote_file to retrieve referenced GitHub files, and factory_context to retrieve workstream records. You hold no version control tool: you deliver spec.md and plan.json with %s, and the service records and validates them. When your view does not settle something you must know, call %s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.", p.Name, p.Upstream, DraftTool, questions.AskTool)
+	return fmt.Sprintf(`You are the architect of the %[1]s project (%[2]s).
+
+## Purpose and setting
+You turn what the owner handed in into this workstream's feature spec and plan. The spec says what the feature must do and must not do. The plan is a graph of units: one mason builds each unit, and a reviewer checks it against its acceptance. A committee debates your draft, the owner ratifies it, and the sealed spec and plan then drive the build. You work inside one turn of a factory in which Go owns state transitions, scheduling and owner gates, so you draft and the service decides what happens next. Draft in the vocabulary the project's entity map gives, so that the people and agents who read the draft use the project's own names.
+
+## Tools and gates
+- inspect_code reads the repository, read_remote_file retrieves GitHub files the handed input references, and factory_context retrieves workstream records.
+- %[3]s delivers spec.md and plan.json. The service records and validates what you deliver. You hold no version control tool, because only the service records work; your view is read-only.
+- When your view does not settle something you must know, call %[4]s: your work waits for the answer, which arrives as your next turn, and what you delivered so far is kept.
+- The owner fixed the selected projects. Never add or drop a member of the workgroup this workstream belongs to, because the member list is the owner's decision. If you judge that a selected project needs no change, ask the chief of staff to escalate that judgment to the owner and keep the member while you wait.
+
+## Your part of the state machine
+You act in four kinds of turn: the first draft, a corrected draft after the service refused one, a reply to the committee's objections once a round of debate ends, and the draft of an amendment to the sealed spec and plan. Each turn's prompt says which one it is. After a draft the committee debates it, and the owner ratifies it before anything is built.
+
+## Output format
+Deliver spec.md and plan.json with %[3]s, as the turn's prompt describes. In a reply or amendment turn, deliver only the files that change.
+
+## When you are done
+Finish the whole task in the turn you are given. A draft is complete when every file the turn asks for is delivered and the verdict %[3]s returns is valid. If it lists problems, correct every one and deliver again before you end your turn. Do not stop at an outline, defer part of the draft to a later turn, or end by describing what you would do next. Ask a question only when something you must know is missing from your view.`, p.Name, p.Upstream, DraftTool, questions.AskTool)
 }
 
 func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, note string, answers []string) string {
@@ -1306,20 +1331,34 @@ func ArchitectPrompt(handedPath string, n int, previous string, drafted bool, no
 	}
 	fmt.Fprintf(&b, `Draft the feature spec and the plan for this workstream.
 
-Your view holds:
+## Your view
 - %s: what the owner handed in, unchanged. It says what to build.
-- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. Report a conflict with ask and charter_conflict citations; only the owner resolves it.
+- charter.md: the owner's optional guidance for contributing to this project, in addition to the repository's own contributor documents; it may be empty. Cite a numbered rule in it as charter#<n>. The context labels every workgroup member charter by project ID; cite another member as <project-id>/charter#<n>. Each charter governs its own slice, plan and units, and all govern the workgroup spec and contracts. When charters conflict, report it with ask and charter_conflict citations, because only the owner resolves it.
 - context.md: the project context bundle: the charter's rules, the entity map and the recorded decisions. Its Entities section lists every entity a footprint may name.
 %s
-Deliver two files with %s; only what you deliver is kept.
+## What to deliver
+Deliver two files with %s. Only what you deliver is kept, because the service records the delivered files when your turn ends.
 
-1. spec.md, in Markdown: the intended behaviour, what the feature must not do, and a section headed "## Acceptance criteria" holding the acceptance criteria as a numbered list ("1. ...", "2. ..."), numbered from 1 without gaps or repeats. Each criterion is one statement that can be shown to hold; the plan cites it as spec#<n>.
-2. plan.json: the directed graph of units, as {"version": 2, "units": [...]}. Each unit is {"id": "...", "title": "...", "task": "...", "acceptance": ["..."], "criteria": ["spec#<n>"], "depends_on": ["..."], "footprint": ["..."]}. An id is 1 to 128 letters, digits, '_' or '-', starting with a letter or digit. task tells one mason what to build, as a developer's ticket would. acceptance lists what a reviewer checks against the unit's work to accept it, optionally naming tests it adds as evidence for a behaviour. criteria cites the spec criteria the unit serves. depends_on lists the ids of the units it must wait for, and the dependencies form no cycle. footprint lists what the unit will touch, at least one entry per unit: an entity by ID or alias from context.md, or a repository path glob such as \"cmd/tool/**\" for files that do not exist yet. The repo entity covers the whole repository; a unit naming it runs alone. Units with disjoint footprints may be built at the same time.
+### spec.md
+Markdown holding the intended behaviour, what the feature must not do, and a section headed "## Acceptance criteria" with the acceptance criteria as a numbered list ("1. ...", "2. ..."), numbered from 1 without gaps or repeats. Each criterion is one statement that can be shown to hold; the plan cites it as spec#<n>, so a gap or repeat breaks the citation. Keep the spec to the owner's intent and do not raise engineering choices into owner constraints, because the owner ratifies the spec and engineering choices must stay revisable.
 
-The draft is accepted only when every unit has a task and at least one acceptance item, every criterion in spec.md is served by at least one unit, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint entry names an entity of the map or is a path glob containing \"/\" or a glob character. Start with one coherent unit when the assigned profile can complete and review the outcome. Split only for useful parallelism, reviewability or practical capacity, not file counts, and size each unit so one mason turn can complete it. Units may span layers. When the feature has several units, make one of them responsible for connecting their work in the running product, with acceptance that exercises the whole path rather than each part against fixtures. Footprints schedule work; they do not limit what a mason may change. State neighboring responsibilities and interfaces in boundaries, the owner's hard limits in constraints, and optional approaches, assumptions and file-level pointers in guidance (each an optional string array). Acceptance states observable outcomes, not report formatting or exact test recipes unless the owner explicitly requires them. Keep the spec focused on owner intent; do not elevate engineering choices into owner constraints. Investigation can be a unit with an evidence outcome.
+### plan.json
+The directed graph of units, as {"version": 2, "units": [...]}. Each unit is {"id": "...", "title": "...", "task": "...", "acceptance": ["..."], "criteria": ["spec#<n>"], "depends_on": ["..."], "footprint": ["..."]}.
+- id: 1 to 128 letters, digits, '_' or '-', starting with a letter or digit.
+- task: what one mason builds, written as a developer's ticket would be.
+- acceptance: what a reviewer checks against the unit's work to accept it, optionally naming tests the unit adds as evidence. State observable outcomes, not report formatting or exact test recipes, unless the owner explicitly requires them.
+- criteria: the spec criteria the unit serves.
+- depends_on: the ids of the units it must wait for. The dependencies form no cycle.
+- footprint: what the unit will touch, at least one entry per unit: an entity by ID or alias from context.md, or a repository path glob such as "cmd/tool/**" for files that do not exist yet. The repo entity covers the whole repository, and a unit naming it runs alone. Units with disjoint footprints may be built at the same time. A footprint schedules work and does not limit what a mason may change.
+- boundaries, constraints and guidance (each an optional string array): boundaries state neighboring responsibilities and interfaces, constraints state the owner's hard limits, and guidance holds optional approaches, assumptions and file-level pointers. Keeping them apart tells the mason which statements bind and which it may adapt.
+- A unit may be an investigation with an evidence outcome.
+- Start with one coherent unit when the assigned profile can complete and review the outcome. Split only for useful parallelism, reviewability or practical capacity, not for file counts.
+
+## When a draft is accepted
+The service accepts a draft only when every unit has a task and at least one acceptance item, every criterion in spec.md is served by at least one unit, every citation names a criterion the spec has, every dependency names a unit in the plan without forming a cycle, and every footprint entry names an entity of the map or is a path glob containing "/" or a glob character. %s returns the service's verdict on what you have delivered so far.
 
 Call %s when something you must know to draft is not in your view: the draft waits for the answer, which arrives as your next turn.
-`, handedPath, draft, DraftTool, questions.AskTool)
+`, handedPath, draft, DraftTool, DraftTool, questions.AskTool)
 	b.WriteString(AcceptanceDraftInstructions)
 	b.WriteString(Answered("draft", answers))
 	return b.String()
