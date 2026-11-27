@@ -604,6 +604,11 @@ func (c *checkers) Apply(ctx context.Context, op coreadapter.Operation) (coreada
 	if run.Status, run.Failed, err = checkrun.ClassifyChecks(result, err); run.Status == ChecksIncomplete {
 		return incomplete(err)
 	}
+	if run.Status == ChecksPassed {
+		if err := c.rerunDeclared(ctx, in, g); err != nil && ctx.Err() != nil {
+			return coreadapter.OperationResult{}, ctx.Err()
+		}
+	}
 	return c.record(ctx, in, run, captured)
 }
 

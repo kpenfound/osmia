@@ -5,8 +5,10 @@ package execution
 import (
 	api "github.com/kpenfound/osmia/internal/api"
 	checks "github.com/kpenfound/osmia/internal/checks"
+	"github.com/kpenfound/osmia/internal/config"
 	intake "github.com/kpenfound/osmia/internal/intake"
 	reviewtools "github.com/kpenfound/osmia/internal/review"
+	"github.com/kpenfound/osmia/internal/verifytool"
 )
 
 const AssembledState = intake.AssembledState
@@ -71,7 +73,13 @@ var isSession = intake.IsSession
 var landingCriteria = intake.LandingCriteria
 var masonActor = intake.MasonActor
 var masonAgent = intake.MasonAgent
-var masonSystemPrompt = intake.MasonSystemPrompt
+func masonSystemPrompt(p config.Project) string {
+	prompt := intake.MasonSystemPrompt(p)
+	if p.Verification.Enabled() {
+		return prompt + "\n\n" + verifytool.MasonGuidance
+	}
+	return prompt
+}
 var ownerActor = intake.OwnerActor
 var priorityRefusal = intake.PriorityRefusal
 var refuseReport = intake.RefuseReport

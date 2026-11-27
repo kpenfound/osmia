@@ -30,6 +30,10 @@ type ToolCall struct {
 	Failed bool                   `json:"failed,omitempty"`
 }
 
+// idempotentTool names the tools whose record is keyed by the call itself, so
+// a retried call finds its own record and a completed one is not recorded again.
+func idempotentTool(name string) bool { return name == "preview" || name == "verify" }
+
 func toolPayload(raw []byte) ToolPayload {
 	out := ToolPayload{SHA256: fmt.Sprintf("%x", sha256.Sum256(raw)), Bytes: len(raw)}
 	if len(raw) <= 65536 {
@@ -88,7 +92,7 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		return nil, err
 	}
 	id := fmt.Sprintf("%s%d", prefix, sequence+1)
-	if tool.Name == "preview" {
+	if idempotentTool(tool.Name) {
 		id = ToolCallID(scope, tool.Name, raw)
 	}
 	call := ToolCall{Scope: scope, Name: tool.Name, Effect: tool.Effect, Input: toolPayload(raw), State: "started"}
@@ -98,7 +102,7 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 	}
 	doc := Document{Header: Header{Schema: "osmia.trace.document", Version: Version, ID: id, Revision: 1, Project: r.project, Workstream: stream, Unit: scope.Unit, At: now(), Actor: Actor{Kind: "agent", ID: actor}, Cause: turn.Request.ID, Depth: turn.Request.Depth + 1}, Path: "tools/" + id + ".json", Content: string(data)}
 	existing := false
-	if tool.Name == "preview" {
+	if idempotentTool(tool.Name) {
 		previous, err := r.latestRevision(ctx, r.db, doc)
 		if err != nil {
 			return nil, err
@@ -120,7 +124,7 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 		}
 	}
 	return func(ctx context.Context, output json.RawMessage, callErr error) error {
-		if tool.Name == "preview" {
+		if idempotentTool(tool.Name) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			if r.db == nil {
@@ -142,7 +146,7 @@ func (r *Repository) BeginTool(ctx context.Context, scope coreadapter.Scope, too
 			return err
 		}
 		doc.Revision, doc.At, doc.Content = 2, now(), string(data)
-		if tool.Name == "preview" {
+		if idempotentTool(tool.Name) {
 			files, err := r.documentFiles(ctx, []Document{doc})
 			if err != nil {
 				return err

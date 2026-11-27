@@ -708,6 +708,9 @@ func dependencyOrder(p plan.Plan) []plan.Unit {
 
 func (m *masons) Bundle(ctx context.Context, stream config.WorkstreamID, unit string) (bundle.Mason, error) {
 	files := bundle.Files{Provider: m.s.ContextFor(m.repository), Role: "mason", Repository: func(config.ProjectID) (*trace.Repository, error) { return m.repository, nil }, Unplanned: unplannedUnit}
+	if m.verifying() {
+		files.Verification = m.verificationBrief
+	}
 	return files.Mason(ctx, m.repository.Project(), stream, unit)
 }
 

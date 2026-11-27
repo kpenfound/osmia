@@ -1,0 +1,9 @@
+{
+  "name": "osmia-web-driver",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright driver for the Osmia shared web-driver Dagger module",
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

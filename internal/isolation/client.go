@@ -70,6 +70,10 @@ type ClientTurn struct {
 	// Start is where a remote client builds its view from when it holds the
 	// project's commit; nil when the view comes as an archive.
 	Start *StartView
+	// Overlay holds the files the service seeded for a turn whose remote client
+	// builds its view from Start: the client places them over the view it
+	// builds. Nil when the turn has none, and always nil with Start nil.
+	Overlay *FileView
 	// SkillRefs are the skill references the turn is given.
 	SkillRefs []string
 	// ReturnView says whether the finished view comes back and is captured.

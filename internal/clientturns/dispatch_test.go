@@ -48,6 +48,43 @@ func thread1(t *testing.T, r *rig) trace.Thread {
 	return th
 }
 
+func TestFilesTheServerSeedsReachAClientThatBuildsItsViewFromACommit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	r := newRig(t, "mason")
+	r.seed = map[string]string{".osmia-verify/run1/images/shot.png": "png bytes", ".osmia-verify/run1/notes/log.txt": "text evidence", ".osmia-verify/results.json": "[]"}
+	c := r.client("node-a")
+	c.connect(api.ClientConnectRequest{})
+	c.serve()
+	r.place(c.node)
+	r.queue("t1")
+	done := r.run(ctx, "t1")
+
+	offer := c.nextOffer()
+	wantView := api.TurnView{Kind: api.ViewGit, Project: string(project), Commit: startCommit, Paths: []string{"src", "docs"}, Overlay: true}
+	if !reflect.DeepEqual(offer.View, wantView) {
+		t.Fatalf("view: %+v", offer.View)
+	}
+	c.claim(offer, map[string]string{"src/main.go": "package main\n"})
+	for name, want := range r.seed {
+		if got := read(t, c.view, name); got != want {
+			t.Fatalf("%s in the client's view: %q", name, got)
+		}
+	}
+	if _, refusal := c.upload("t1", offer.ToolToken); refusal != nil {
+		t.Fatal(refusal.Message)
+	}
+	if _, err := c.result("t1", complete("done")); err != nil {
+		t.Fatal(err)
+	}
+	if out := waitFor(t, done, "the turn"); out.err != nil {
+		t.Fatal(out.err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(r.root.String(), "build")); err != nil || len(entries) != 0 {
+		t.Fatalf("the seeded overlay was left on the server: %v %v", entries, err)
+	}
+}
+
 func TestARemoteMasonTurnRunsOnItsClientsViewAndItsFinishedViewIsCaptured(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

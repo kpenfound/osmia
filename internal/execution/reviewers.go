@@ -20,6 +20,7 @@ import (
 	"github.com/kpenfound/osmia/internal/router"
 	"github.com/kpenfound/osmia/internal/scheduler"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verifytool"
 )
 
 const VerdictTool = "verdict"
@@ -136,6 +137,13 @@ Call verdict with decision satisfactory or material_findings, a summary that say
 
 ## When you are done
 The turn is done when the service accepts your verdict, or when you have called ask. Then end the turn. A refused verdict says why, so correct it and call again.`
+
+func reviewerSystemPrompt(p config.Project) string {
+	if p.Verification.Enabled() {
+		return unitReviewerSystemPrompt + "\n\n" + verifytool.ReviewGuidance + " Every verify result you obtain goes to the mason in full if you send the unit back."
+	}
+	return unitReviewerSystemPrompt
+}
 
 const reviewerPrecedence = "Instructions loaded for your role add to this prompt. Where they suggest another output format, or tell you never to stop and ask, this prompt wins, because the service reads only the verdict format and you cannot wait for a person inside a turn."
 
@@ -439,7 +447,7 @@ func (r *reviewers) one(ctx context.Context, stream config.WorkstreamID, unit st
 	for _, item := range req.Context {
 		prompt += "\n\n" + item.Source + ":\n" + item.Content
 	}
-	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: unitReviewerSystemPrompt, Prompt: prompt}
+	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turnID, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit), Depth: 1}, AgentID: agent, ThreadID: agent, TurnID: turnID, Profile: profile, SystemPrompt: reviewerSystemPrompt(r.cfg.Project), Prompt: prompt}
 	if r.s.Step != nil {
 		if err := r.s.Step("unit-role-enqueue:" + string(stream) + ":" + unit); err != nil {
 			return err
@@ -751,7 +759,13 @@ func (r *reviewers) ApplyReview(ctx context.Context, stream config.WorkstreamID,
 		Evidence: router.Evidence{Facts: map[string]any{"send_backs": result.Bounces, "max_send_backs": r.cfg.Shed.MaxBounces, "findings": len(result.Verdict.Findings)},
 			Records: []router.Entry{{Kind: "verdict", ID: ReviewDocument(unit), Text: verdictText(result.Verdict)}}},
 	}
+	if err := r.recordUnitMeasure(ctx, stream, unit, result); err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if result.Verdict.Decision == "satisfactory" {
+		if err := r.recordFeatureAssociation(ctx, stream, unit, result); err != nil {
+			return fmt.Errorf("record the feature association of unit %s: %w", unit, err)
+		}
 		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", ReviewDocument(unit), revision), Valid: r.verdictHolds(stream, unit, result)}
 	}
 	res, err := r.s.raise(ctx, true, in)
@@ -959,6 +973,18 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		}
 		if i := slices.IndexFunc(runs, func(run UnitCheckRun) bool { return run.Unit == unit && run.Run == result.Checks }); i >= 0 {
 			prompt += checkrun.OutputEvidence(runs[i].Output, runs[i].OutputPath, runs[i].OutputRevision, runs[i].Truncated)
+		}
+	}
+	verified, err := verifytool.ReviewerRuns(r.repository, stream, unit, result.Identity.Candidate.Revision)
+	if err != nil {
+		return err
+	}
+	prompt += verifytool.SendBack(verified)
+	if r.verifying() {
+		if mason, err := r.Bundle(ctx, stream, unit); err == nil && mason.Verification != nil {
+			prompt += "\n\n" + mason.Verification.Render()
+		} else if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}

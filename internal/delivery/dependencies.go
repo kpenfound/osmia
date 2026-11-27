@@ -19,6 +19,7 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verifytool"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
@@ -44,7 +45,11 @@ type Dependencies struct {
 	MemoryTurns       func(*isolation.Turns, *config.Config, *trace.Repository) *isolation.Turns
 	Step              func(string) error
 	Committee         *intake.Committee
-	Jev               *jev.Judge
+	// VerifySlots holds a checks slot for a verify run of the final reviewer.
+	// It is nil when none can be held, and the final reviewer is then not
+	// offered verify.
+	VerifySlots verifytool.Slots
+	Jev         *jev.Judge
 	// Router applies the delivery decisions the owner gives and routes the exits
 	// of the final review's rounds. A reconcile pass that raises an exit hands
 	// it to the router's worker.

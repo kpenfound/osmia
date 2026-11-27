@@ -429,7 +429,7 @@ func unitPath(parts []string) bool {
 	if contest, ok := strings.CutPrefix(parts[2], "chief-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
 		return true
 	}
-	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "change.json" || parts[2] == "dispatch.json" {
+	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "change.json" || parts[2] == "dispatch.json" || parts[2] == "verification.json" || parts[2] == "features.json" || parts[2] == "verification-measure.json" {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")
@@ -460,6 +460,9 @@ func finalPath(parts []string) bool {
 		return true
 	}
 	if brief, ok := strings.CutPrefix(parts[1], "brief-"); ok && strings.HasSuffix(brief, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(brief, ".json")) {
+		return true
+	}
+	if measure, ok := strings.CutPrefix(parts[1], "verification-"); ok && strings.HasSuffix(measure, ".json") && shedRound.MatchString("round-"+strings.TrimSuffix(measure, ".json")) {
 		return true
 	}
 	return parts[1] == "rebase.json" || parts[1] == "report.json" || parts[1] == "followups.json" || parts[1] == "triage.json" || parts[1] == "delivery.json" || parts[1] == "publication.json" || parts[1] == "ready.json" || parts[1] == "merge.json" || parts[1] == "landing.json" || parts[1] == "landing-intent.json" || parts[1] == "landing-route.json" || parts[1] == "decline.json"

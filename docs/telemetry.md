@@ -11,6 +11,11 @@ by queries over the spans alone:
 4. How a workstream's time divides across its stages.
 5. How often Jev departs from the default next state, and how the units and
    workstreams that departed fared against those that followed it.
+6. For a project with a [verification setting](configuration.md), how many
+   verify runs each unit had and what they found, which flows its mason
+   declared against which its reviewers ran, which units touched the lever or
+   the map, and which units passed unit review and then failed a flow at final
+   review.
 
 [Configuration](configuration.md#optional-telemetry) turns telemetry on and
 points it at a collector. Spans go over OTLP to an OpenTelemetry collector
@@ -66,6 +71,10 @@ state spans.
 | `osmia.service.uptime` | none | service start to shutdown | service run |
 | `osmia.loop_guard.trip` | `osmia.service.uptime` | an instant | loop-guard pause |
 | `osmia.transition.route` | root | the recorded time the exit was raised to the time it was decided | exit the transition router decided: one for each exit, a held exit included |
+| `osmia.verify.unit` | root | an instant: the time the unit's verification measure was recorded | measure of a unit, for a project with the verification setting: see [verification measures](#verification-measures) |
+| `osmia.verify.final` | root | an instant: the time the final review's measure was recorded | final review round of a project with the verification setting |
+| `osmia.verify.final_flow` | root | the same instant | failed flow and inconclusive flow of a final review round |
+| `osmia.verify.final_unit` | root | the same instant | unit attributed a failed or an inconclusive flow at a final review round |
 
 State spans abut: each one ends where the next begins, so a workstream's state
 spans cover its life without a gap, from its recorded creation to the end of
@@ -108,6 +117,7 @@ single identifier-shaped word, is dropped before the span is sent.
 | `osmia.wait_reason` | `capacity`, `workstream-cap`, `client`, `no-client` | `osmia.slot.wait` |
 | `osmia.pause.scope` | `factory`, `role`, `project`, `workstream` | `osmia.pause`, `osmia.loop_guard.trip` |
 | `osmia.pause.source` | `owner`, `daily-budget`, `provider-usage-limit`, `loop-guard` | `osmia.pause`, `osmia.loop_guard.trip` |
+| `osmia.verify.*` | the counts, flags and flow of [verification measures](#verification-measures) | `osmia.verify.unit`, `osmia.verify.final`, `osmia.verify.final_flow`, `osmia.verify.final_unit` |
 
 An unbounded pool never carries `osmia.pool.limit`, and no span ever carries a
 limit of zero: a zero would read as "no capacity" when it means "no limit".
@@ -278,6 +288,8 @@ A span for a trigger, outcome or band outside these lists is not sent.
 | `osmia.pause` | `released`, `replaced` (the same target was paused again) |
 | `osmia.transition.route` | `followed`, `departed`, `held`, `fallback` (see [route spans](#route-spans)) |
 | `osmia.service.uptime` | `shutdown`, `interrupted` |
+| `osmia.verify.final_flow` | `fail`, `inconclusive` |
+| `osmia.verify.final_unit` | `fail`, `inconclusive` |
 
 Slot spans cover client slots as well as the role pools. A turn holds a slot
 of the client it runs on for as long as it holds its role slot, and a turn
@@ -299,6 +311,60 @@ restart left open ends by what became of its operation: see
 `interrupted` is a span that an earlier run left open and no one closed: a
 service that stopped without shutting down, or a slot interval a restart did
 not carry over. See [Restarts](#restarts).
+
+### Verification measures
+
+A project with the [verification setting](configuration.md) records what its
+verify runs found. The measures are spans of no duration, one for each measure
+record the service wrote to the trace, so the trace and telemetry hold the same
+numbers. They are measures only: nothing in them moves a unit or a workstream,
+and a project without the setting sends none of them. The lever contract that
+defines runs, claims, flow tags and `inconclusive` is in
+[testing](testing.md#verification-lever-contract).
+
+`osmia.verify.unit` has one span per measure record of a unit, written when the
+unit's reviewer decides. It counts every verify run recorded for the unit on any
+of its candidates: the service's reruns of the invocations its mason declared
+and the verify calls its reviewer made. It carries `osmia.unit.id` and:
+
+| Attribute | Value |
+| --- | --- |
+| `osmia.verify.runs` | runs that produced a report |
+| `osmia.verify.pass`, `osmia.verify.fail`, `osmia.verify.inconclusive` | those runs by status. A run is `pass` only when it has a claim and every claim passes, and a rejected report is `inconclusive`, so inconclusive is never part of `pass` |
+| `osmia.verify.limited` | runs that produced no report: refused, failed or timed out. Never a pass |
+| `osmia.verify.declared_runs`, `osmia.verify.reviewer_runs` | runs with a report, by who made them: a service rerun of a declared invocation, or a verify call of the unit's reviewer |
+| `osmia.verify.declared_flows`, `osmia.verify.reviewer_flows` | distinct flows tagged in those runs' claims. Flows come only from claim `flow` tags and are never inferred from arguments |
+| `osmia.verify.declared_untagged`, `osmia.verify.reviewer_untagged` | runs with a report whose claims carry no flow tag, so they cover no flow |
+| `osmia.verify.skipped`, `osmia.verify.refused` | declared invocations the service did not run: past the rerun bound, or refused by the argument rules |
+| `osmia.verify.lever_touched`, `osmia.verify.map_touched` | `true` when the candidate's diff touched the lever's source globs or the feature-map directory |
+
+`osmia.verify.final` has one span per final review round, written with the
+round's report. For each flow it takes the worst status any of the round's verify
+runs on the reviewed head gave it, then attributes it to the approved units
+whose recorded feature association names the flow. Its attributes are the run
+counts above for the round and:
+
+| Attribute | Value |
+| --- | --- |
+| `osmia.verify.failed_flows` | failed flows, each counted once at the flow level however many units share it |
+| `osmia.verify.inconclusive_flows` | inconclusive flows, a separate measure that is never a failure |
+| `osmia.verify.unattributed_failures` | failed flows no unit's association names, plus failing claims with no flow tag |
+| `osmia.verify.failing_units` | units that passed unit review and have at least one failed flow attributed to them |
+| `osmia.verify.inconclusive_units` | units attributed an inconclusive flow |
+
+`osmia.verify.final_flow` has one span for each failed flow
+(`osmia.outcome=fail`) and one for each inconclusive flow
+(`osmia.outcome=inconclusive`). It carries `osmia.verify.flow`, the units it is
+attributed to in `osmia.verify.units`, `osmia.verify.shared` (`true` when more
+than one unit is associated, so the failure is shared and still one span) and
+`osmia.verify.unattributed` (`true` when no unit is associated). A flow name
+that is not identifier-shaped is dropped from the span, and the span is still
+sent. `osmia.verify.final_unit` has one span for each unit attributed a failed
+or an inconclusive flow, with `osmia.unit.id`, `osmia.outcome` and
+`osmia.verify.shared`.
+
+Failing claims with no flow tag have no flow to attribute, so they appear only in
+the count `osmia.verify.unattributed_failures`.
 
 ## IDs
 

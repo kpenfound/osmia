@@ -30,6 +30,7 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verifytool"
 	"github.com/kpenfound/osmia/internal/workspace"
 )
 
@@ -1013,6 +1014,9 @@ func (a *FinalReviewer) Enqueue(ctx context.Context, cfg *config.Config, stream 
 		}
 		systemPrompt, prompt = ClimbFinalSystemPrompt(cfg.Project), ClimbFinalPrompt(report, checks, notes, previous, results)
 	}
+	if sweep := a.sweep(ctx, cfg, stream, report); sweep != "" {
+		prompt += "\n" + sweep
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: transition, Depth: 1},
 		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt, Prompt: prompt}
 	_, err = a.Repository.EnqueueTurn(ctx, req)
@@ -1045,13 +1049,32 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 	if c := a.S.Committee; c != nil {
 		engine, hosts = c.Engine, c.Hosts
 	}
+	grant := []string{"file_read", FinalReportTool, reviewtools.DiffToolName, checks.TraceToolName}
+	verifyEnv := a.verifyEnv(stream, report)
+	if verifyEnv.Config != nil {
+		grant = append(grant, verifytool.ToolName)
+	}
 	turns := &isolation.Turns{
 		Workspaces: stagedWorkspaces{},
 		Views:      isolation.Views{Directory: filepath.Join(a.S.Current().Root.String(), "views")},
 		Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 			return a.SelectView(ctx, scope, stream, report)
 		},
-		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: []string{"file_read", FinalReportTool, reviewtools.DiffToolName, checks.TraceToolName}}},
+		Grants: map[string]coreadapter.Capabilities{committeeRole: {Tools: grant}},
+		ViewTools: func(_ context.Context, scope coreadapter.Scope, view isolation.View) ([]coreadapter.Tool, error) {
+			if verifyEnv.Config == nil || scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.Repository.Project()) || !strings.HasPrefix(scope.Turn, FinalTurnPrefix(in.Review, report.Reader)) {
+				return nil, nil
+			}
+			env := verifyEnv
+			env.Scope, env.View = scope, view
+			return []coreadapter.Tool{verifytool.Tool(env)}, nil
+		},
+		Seed: func(ctx context.Context, scope coreadapter.Scope, view isolation.View) error {
+			if verifyEnv.Config == nil || scope.Role != committeeRole || scope.Workstream != string(stream) {
+				return nil
+			}
+			return verifytool.Restore(ctx, a.Repository, scope, view, a.S.Now)
+		},
 		Scoped: func(_ context.Context, scope coreadapter.Scope) ([]coreadapter.Tool, error) {
 			if scope.Role != committeeRole || scope.Workstream != string(stream) || scope.Project != string(a.Repository.Project()) || !strings.HasPrefix(scope.Turn, FinalTurnPrefix(in.Review, report.Reader)) {
 				return nil, errors.New("turn scope denied")
@@ -1084,6 +1107,22 @@ func (a *FinalReviewer) Turns(stream config.WorkstreamID, in FinalReviewInput, r
 		Engine: engine,
 	}
 	return a.S.MemoryTurns(turns, a.S.About(a.Repository), a.Repository)
+}
+
+func (a *FinalReviewer) verifyEnv(stream config.WorkstreamID, report FinalReport) verifytool.Env {
+	cfg := a.S.About(a.Repository)
+	if a.S.VerifySlots == nil || cfg == nil || !cfg.HasProject() || !cfg.Project.Verification.Enabled() {
+		return verifytool.Env{}
+	}
+	return verifytool.Env{Config: cfg, Repo: a.Repository, Now: a.S.Now, Slots: a.S.VerifySlots,
+		About: "the feature-branch head this review reads, " + report.Commit,
+		Resolve: func(context.Context, verifytool.Input) (verifytool.Target, string, error) {
+			g, err := featureWorkspaces(cfg, a.Repository).Of(stream)
+			if err != nil {
+				return verifytool.Target{}, "", err
+			}
+			return verifytool.Target{Repo: a.Repository, Stream: stream, Config: cfg, Commit: report.Commit, Export: g.ExportValidated}, "", nil
+		}}
 }
 
 // SealedCriteria returns the criteria of the review's sealed spec revision,
@@ -1399,6 +1438,9 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
 		Events: []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
+	if measure, ok := a.finalMeasure(stream, report); ok {
+		documents = append(documents, measure)
+	}
 	var followups []trace.Transaction
 	if report.Outcome == FinalReviewed && report.Maintenance && edgePending {
 		added, found, err := a.Followup(stream, report, revision)
@@ -1802,6 +1844,14 @@ func (a *FinalReviewer) FinalGate(ctx context.Context, stream config.WorkstreamI
 }
 
 func FinalSystemPrompt(p config.Project) string {
+	prompt := finalSystemPrompt(p)
+	if p.Verification.Enabled() {
+		prompt += "\n\n" + verifytool.ReviewGuidance + " Your verify calls run on the feature-branch head you read."
+	}
+	return prompt
+}
+
+func finalSystemPrompt(p config.Project) string {
 	return fmt.Sprintf(`You are the committee member who gives an assembled feature its final read for the %[1]s project (%[2]s).
 
 ## Purpose and setting

@@ -209,23 +209,65 @@ func TestWhatTheServiceSeedsIsInTheViewARemoteClientReceives(t *testing.T) {
 	}
 }
 
-func TestARemoteClientIsNotAskedToSeedAViewItBuildsFromACommit(t *testing.T) {
+func TestWhatTheServiceSeedsTravelsAsAnOverlayOfAViewARemoteClientBuildsFromACommit(t *testing.T) {
 	r, _, _, _, input := fixture(t, "mason", "none")
 	stub := &remoteStub{view: &memView{files: map[string]string{}}}
 	r.Select = func(context.Context, a.Scope) (Selection, error) {
 		return Selection{Paths: []string{"src"}, Commit: "abc123", Execution: a.ExecutionSettings{Mode: "none"}}, nil
 	}
 	r.Clients = func(context.Context, a.Scope, a.Profile) (Client, error) { return stub, nil }
-	r.Seed = func(context.Context, a.Scope, View) error {
-		t.Fatal("a view the client builds from a commit was seeded")
-		return nil
+	r.Seed = func(_ context.Context, _ a.Scope, view View) error {
+		if err := view.Put(".osmia-verify/run1/images/shot.png", []byte("png")); err != nil {
+			return err
+		}
+		return view.Put(".osmia-verify/run1/notes/log.txt", []byte("text"))
 	}
-	stub.finish = func(ClientTurn) (ClientRun, error) {
+	var overlay string
+	stub.finish = func(turn ClientTurn) (ClientRun, error) {
+		if turn.View != nil || turn.Start == nil || turn.Overlay == nil {
+			t.Fatalf("the seeded files did not travel with the start view: %+v", turn)
+		}
+		overlay = turn.Overlay.Workspace().Directory
+		for name, want := range map[string]string{".osmia-verify/run1/images/shot.png": "png", ".osmia-verify/run1/notes/log.txt": "text"} {
+			if data, err := os.ReadFile(filepath.Join(overlay, name)); err != nil || string(data) != want {
+				t.Fatalf("%s: %q %v", name, data, err)
+			}
+		}
 		return ClientRun{Result: a.SessionResult{Session: a.BackendSession{Backend: "claude", ID: "s"}}}, nil
 	}
 	input.Scope.Project = "p_one"
 	if _, err := r.Run(context.Background(), input); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(overlay); !os.IsNotExist(err) {
+		t.Fatalf("the overlay outlived the turn: %v", err)
+	}
+	if len(stub.view.puts) != 0 {
+		t.Fatalf("the service wrote to the client's view: %v", stub.view.puts)
+	}
+}
+
+func TestATurnWhoseSeedAddsNothingHasNoOverlayForAViewBuiltFromACommit(t *testing.T) {
+	r, _, _, _, input := fixture(t, "mason", "none")
+	stub := &remoteStub{view: &memView{files: map[string]string{}}}
+	r.Select = func(context.Context, a.Scope) (Selection, error) {
+		return Selection{Paths: []string{"src"}, Commit: "abc123", Execution: a.ExecutionSettings{Mode: "none"}}, nil
+	}
+	r.Clients = func(context.Context, a.Scope, a.Profile) (Client, error) { return stub, nil }
+	seeded := 0
+	r.Seed = func(context.Context, a.Scope, View) error {
+		seeded++
+		return nil
+	}
+	stub.finish = func(turn ClientTurn) (ClientRun, error) {
+		if turn.Overlay != nil {
+			t.Fatalf("an overlay with no files was offered: %+v", turn.Overlay)
+		}
+		return ClientRun{Result: a.SessionResult{Session: a.BackendSession{Backend: "claude", ID: "s"}}}, nil
+	}
+	input.Scope.Project = "p_one"
+	if _, err := r.Run(context.Background(), input); err != nil || seeded != 1 {
+		t.Fatalf("%v %d", err, seeded)
 	}
 }
 

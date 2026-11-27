@@ -233,6 +233,9 @@ type TurnView struct {
 	Project string   `json:"project,omitempty"`
 	Commit  string   `json:"commit,omitempty"`
 	Paths   []string `json:"paths,omitempty"`
+	// Overlay says the server holds files to place over the built view, which
+	// the client downloads as an archive from the turn's view route.
+	Overlay bool `json:"overlay,omitempty"`
 }
 
 // TurnOffer offers a turn to a client. The client answers with a claim.

@@ -456,7 +456,7 @@ func prune(from, to *os.Root, dir string, inSrc bool) (bool, error) {
 }
 
 func copied(name string, info fs.FileInfo) bool {
-	return !isolation.VCSMetadata(filepath.Base(name)) && (info.IsDir() || info.Mode().IsRegular())
+	return !isolation.VCSMetadata(filepath.Base(name)) && !isolation.ServiceEvidence(name) && (info.IsDir() || info.Mode().IsRegular())
 }
 
 var UnitMasonGrant = coreadapter.Capabilities{Tools: []string{"file_read", "file_write", questions.AskTool, "factory_context", "project_context", "record_discovery", DoneTool}, WriteFiles: true, Execute: true}

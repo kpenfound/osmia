@@ -62,7 +62,7 @@ func (c *remote) offer(t isolation.ClientTurn, token string) api.TurnOffer {
 		offer.ToolEndpoint = api.MCPPath(scope.Turn)
 	}
 	if t.Start != nil {
-		offer.View = api.TurnView{Kind: api.ViewGit, Project: t.Start.Project, Commit: t.Start.Commit, Paths: t.Start.Paths}
+		offer.View = api.TurnView{Kind: api.ViewGit, Project: t.Start.Project, Commit: t.Start.Commit, Paths: t.Start.Paths, Overlay: t.Overlay != nil}
 	}
 	return offer
 }
@@ -110,6 +110,8 @@ func (c *remote) Run(ctx context.Context, t isolation.ClientTurn) (isolation.Cli
 	transfer := filetransport.Turn{Token: token}
 	if t.View != nil {
 		transfer.Download = t.View.Workspace().Directory
+	} else if t.Overlay != nil {
+		transfer.Download = t.Overlay.Workspace().Directory
 	}
 	if t.ReturnView {
 		transfer.Upload = d.upload

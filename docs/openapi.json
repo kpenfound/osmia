@@ -7201,6 +7201,9 @@
           "upstream_rebase": {
             "type": "string"
           },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationSetting"
+          },
           "version": {
             "type": "integer"
           }
@@ -11282,6 +11285,10 @@
           "unit": {
             "type": "string"
           },
+          "verify": {
+            "description": "True for a waiting service-run verify call.",
+            "type": "boolean"
+          },
           "workstream": {
             "type": "string"
           }
@@ -12224,6 +12231,9 @@
             ],
             "type": "string"
           },
+          "overlay": {
+            "type": "boolean"
+          },
           "paths": {
             "items": {
               "type": "string"
@@ -12539,6 +12549,26 @@
             "type": "integer"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "VerificationSetting": {
+        "properties": {
+          "call": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lever_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "map_dir": {
             "type": "string"
           }
         },

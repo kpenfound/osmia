@@ -169,6 +169,7 @@ type rig struct {
 	capture []captured
 	backend string
 	skills  []string
+	seed    map[string]string
 }
 
 func judge() *jev.Judge {
@@ -239,6 +240,16 @@ func (r *rig) start(role string, repo *trace.Repository) {
 			r.mu.Lock()
 			r.capture = append(r.capture, captured{scope, files})
 			r.mu.Unlock()
+			return nil
+		},
+		Seed: func(_ context.Context, _ coreadapter.Scope, view isolation.View) error {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			for name, data := range r.seed {
+				if err := view.Put(name, []byte(data)); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 		Chain: func(string) []string { return []string{"fallback"} },
@@ -463,6 +474,15 @@ func (c *fakeClient) claim(offer api.TurnOffer, files map[string]string) {
 	default:
 		for name, data := range files {
 			put(c.r.t, c.view, name, data)
+		}
+		if offer.View.Overlay {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, api.ViewPath(offer.Turn), nil)
+			req.Header.Set("Authorization", "Bearer "+offer.ToolToken)
+			if refusal := c.r.transfers.Download(w, req, offer.Turn); refusal != nil {
+				c.r.t.Fatalf("overlay download refused: %s", refusal.Message)
+			}
+			must(c.r.t, filetransport.Unpack(w.Body, c.view))
 		}
 	}
 }

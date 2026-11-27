@@ -257,6 +257,224 @@ the caller explicitly selects a shuffle setting.
 running-service fixtures and share the same harness;
 `TestMain` closes Chromium after each package's tests finish.
 
+## Verification lever contract
+
+This section is the one description of the verification lever contract, version
+1. [configuration](configuration.md#verification), [design](design.md#97-verification),
+[telemetry](telemetry.md#verification-measures), the
+[web-driver module](../modules/web-driver/README.md) and the
+[verification fixture](../testdata/verification-fixture/README.md) link here
+and do not restate it.
+
+A **lever** is a Dagger function in a product's repository that drives the
+running build and returns a Directory of evidence. A product that has one sets
+the [verification setting](configuration.md#verification). The service then
+reruns the invocations a mason verified with, offers `verify` to reviewers, and
+records what it saw. The service never knows or branches on whether the product
+is a web UI, an API or a CLI, and it never interprets what the arguments mean:
+a named flow and an ad-hoc step list are both just lever arguments, whose
+syntax belongs to the product's lever.
+
+### Invocation
+
+An invocation is an argument list that an agent writes, such as
+`["verify", "--flow=home-page"]`. It is never a command line or a shell string.
+The service runs, in an export of the target commit and without a shell:
+
+```
+dagger call <base arguments> --run-id <run ID> <agent arguments> export --path <temporary directory>
+```
+
+The base arguments come from the project's setting and select the lever, for
+example the module name. The `export` step is the service's own: agent
+arguments may not contain one. The service publishes no host port: the product's
+Service is started and bound inside the lever's driver container.
+
+Before any run, the service validates the agent argument list with the same
+rules `preview` applies to its `call`
+(`ValidatePreviewCall`, then `ValidatePreviewSource` against the exported
+source): no CLI options, provider schemes, client environment names, `:` in
+values, escaping paths or symlinks, and no host-writing or interactive chain
+steps. The rules fail closed. A refused list comes back as a limitation and
+starts no Dagger call. The same rules hold for the base arguments at config
+load.
+
+### Run ID and freshness
+
+Every lever run, whether a `verify` call or a service rerun of a declared
+invocation, gets a new service-generated run ID: `v` and a random token of
+letters and digits. The service passes it in one form, `--run-id <run ID>`
+immediately after the base arguments, so the lever's selected object takes it
+as a constructor argument. Agent arguments and the project's base arguments may
+not set it, in any spelling.
+
+**The lever must use the run ID so that, for that run, the product's Service
+starts anew and the driver executes anew.** Two runs on the same commit with
+the same arguments must each start the app and drive it, so an agent that wants
+to explore runs again with more steps. Declaring the function uncached is not
+enough on its own, because Dagger still caches the operations inside it. The
+lever folds the run ID into the inputs of the app container and of the driver
+execution, for example as an environment variable, so those executions are
+unique to the run while image pulls and builds stay cached. The
+[web-driver module](#the-shared-web-driver-module) does this for a product that
+builds on it.
+
+### The Directory result
+
+The returned Directory must hold `report.json`. It may hold evidence files:
+screenshots, accessibility snapshots, logs, HTTP responses and CLI output.
+
+### `report.json` version 1
+
+```json
+{
+  "version": 1,
+  "claims": [
+    {"name": "step 01 goto .", "status": "pass", "detail": "loaded", "evidence": ["screenshots/01.png", "log.txt"], "flow": "home-page"}
+  ]
+}
+```
+
+`status` is `pass`, `fail` or `inconclusive`. `evidence` lists paths relative to
+the Directory, each naming a regular file that exists there. `flow` is optional.
+`detail` is text. The report is UTF-8 text of at most 64 KiB.
+
+The service **rejects** a report that is missing, is not valid JSON of this
+shape, has no version or a version other than 1, has no claims list, has a claim
+without a name or with an unknown status or an empty flow tag, or names an
+evidence path that is absolute, escapes the Directory or does not exist there.
+A rejected run is recorded as `inconclusive`, carries the reason, has no
+claims and covers no flow.
+
+### Flow tags and attribution
+
+Only a claim's `flow` tag says which flow a run covered. The service never
+infers a flow from argument text.
+
+- A run's status for a flow comes from the claims that name it: `fail` if any
+  failed, else `inconclusive` if any is inconclusive, else `pass`.
+- A run's overall status is `pass` only when it has at least one claim and
+  every claim passes. Any failed claim makes it `fail`. Anything else,
+  including no claims and a rejected report, is `inconclusive`.
+- Claims without a `flow` count toward the run's overall status and cover no
+  flow. Bundles show them as untagged claims.
+- A flow tag that is missing from the lever's `list` is shown under its tag as
+  an unlisted flow.
+- When several recorded runs on the same commit cover a flow, each run is shown
+  and the flow's summary status is the worst of them: `fail`, then
+  `inconclusive`, then `pass`.
+- The final review attributes a failed flow to the approved units whose
+  recorded feature association names it: see
+  [final attribution](design.md#97-verification).
+
+### `list`
+
+The lever's `list` function, called as `dagger call <base arguments> list`
+without a run ID, returns its named flows as a JSON array of strings, at most
+64 KiB. The service uses it only to check the [feature map](#the-feature-map)
+and to label flow tags.
+
+### `inconclusive`
+
+`inconclusive` is neither a pass nor a failure. It never counts as a pass in any
+summary, count, bundle or flow status, and it is never counted as a failure in
+the failed-flow measure. A missing, failed or inconclusive result on a
+user-visible acceptance item is a review finding, which the reviewer decides:
+verify results, notes, flags and measures never move a unit or a workstream
+between states by themselves.
+
+### Limits and redaction
+
+| Limit | Value |
+| --- | --- |
+| One image in the Directory | 5 MiB |
+| The exported Directory | 20 MiB |
+| `report.json` | 64 KiB |
+| Diagnostics kept from a run | 16 KiB, the tail of its output |
+| Declared invocations a unit has rerun | 5, in the order declared |
+| `verify` timeout | 5 minutes by default, 1 to 30 minutes |
+
+A Directory over a size limit is refused with a limitation. Known secrets are
+removed from the report, from every text file of the Directory and from the
+diagnostics. Each run and `list` call holds a `capacity.checks` slot.
+
+### Evidence retention
+
+Before the temporary export is removed, the service copies `report.json` and
+every file the report references, images and other files alike, into the
+workstream's trace evidence store under the Osmia root, keyed by the run ID and
+tied to the run's trace record. Nothing is written into the target repository.
+The record holds the target commit, the arguments and the run ID, so the run is
+reproducible.
+
+The retained files are placed in a read-only agent view under
+`.osmia-verify/<run ID>/`, at the paths the result's `evidence` gives, and
+images also under `images/<run ID>-<name>`. The caller's view gets them when it
+makes the run, when an interrupted turn is recovered and, for a reviewer's runs,
+in the mason's view with a send-back that carries them. A reviewer's view gets
+the service reruns of the unit's candidate. Recovery and placement run no lever:
+a recorded `verify` call returns its recorded result.
+
+### The feature map
+
+Each `<map dir>/<feature>.md` starts with a frontmatter header of `feature`,
+`paths` (repository globs) and `flows` (names the lever's `list` returns), and
+has four body sections: What exists, How a user reaches it, How to drive it and
+What usually breaks. `<map dir>/README.md` lists the features in the order of a
+full regression sweep and is not a feature. The directory is the setting's
+`map_dir`, `docs/verification` by default.
+
+The service matches files to `paths` by plain glob matching, with no model
+call. Before a candidate exists, a unit's files come from its footprint: entity
+IDs resolve to their paths through the entity map, path globs are used as
+written, and the `repo` entity matches every feature. A feature applies when a
+file in the base tree matches both a footprint pattern and one of its `paths`,
+or when a footprint pattern matches no existing file and shares a literal prefix,
+before its first glob character, with one of the feature's globs. The rule
+names too many features rather than too few. On rework the candidate's changed
+files are matched as well. The union of all `flows` is the final reviewer's
+regression sweep. A structure check reports a header that does not parse and a
+flow missing from `list` as notes for the reviewer, and blocks nothing. A diff
+that touches the setting's `lever_paths` or the map directory is flagged in the
+review bundle and is not rejected. Whether the map's prose is stale is the
+reviewer's judgement. A change to a feature's behaviour, entry points or flows
+updates its map file and the lever in the same change.
+
+### The shared web-driver module
+
+[`modules/web-driver`](../modules/web-driver) is a Dagger module that drives a
+bound Service with Playwright and Chromium, from an image pinned by digest
+(amd64 only). Products install it by git ref. It takes the run ID and a step
+list of `goto`, `click`, `fill`, `press`, `snapshot`, `screenshot`, `console`
+and `requests`, and returns a Directory in this contract's shape. Its step
+list is encoded to pass the argument rules above. The module's own page
+documents the steps. Osmia's Go code never imports or interprets it.
+
+### How the contract is tested
+
+- `internal/verification` and `internal/checks` tests cover the report rules,
+  attribution, the runner's refusals and limits and `list`, with a fake Dagger
+  client.
+- `TestVerificationJourney` in
+  [executionjourney](../internal/executionjourney/verification_journey_test.go)
+  runs the whole path through the running service with fake agents and a fake
+  Dagger client that returns the report shapes of the
+  [fixture](../testdata/verification-fixture): the setting, the mason's
+  pointers, reruns in the review bundle, a reviewer's ad-hoc `verify`, a
+  send-back that carries the results and evidence, recovery of an interrupted
+  call without a new run, the final reviewer's sweep, and the recorded
+  measurements and attribution. The same journey on a project without the
+  setting shows no `verify`, no reminder and unchanged bundles.
+- `TestRealDaggerCLIVerificationLever` in
+  [daggercli_test.go](../internal/checks/daggercli_test.go), run by the
+  `dagger-cli-contract` check with the real Dagger CLI, runs the service's
+  lever runner and `list` call against the fixture's `verify` through the
+  web-driver module, with no fakes. It runs the same flow and arguments twice
+  with two run IDs and compares the instance tokens in the retained evidence:
+  they differ, which shows that the app and the browser ran anew.
+- The `web-driver-fixture` check runs the fixture's `verify` for real through
+  the module and checks its reports.
+
 ## Routing journeys
 
 Five journeys run the transition router through the running service rather

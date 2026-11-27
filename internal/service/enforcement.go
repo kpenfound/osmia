@@ -27,6 +27,7 @@ import (
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/thread"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verifytool"
 )
 
 // Enforcement is what a service runs its role turns through: the engine that
@@ -173,13 +174,19 @@ func Enforce(opts Options, e Enforcement) Options {
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg, r)
 		drifts := resolutions{StreamWorkspaces: driftWorkspaces(cfg, r)}
-		reports := &execution.MasonReports{}
+		reports := &execution.MasonReports{Verification: func() bool { return controls.currentConfig(r, cfg).Project.Verification.Enabled() }}
 		verdicts := &execution.ReviewerReports{}
 		turns := &isolation.Turns{
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},
 			Views:              isolation.Views{Directory: views},
 			PreserveMasonViews: true,
 			Grants:             map[string]coreadapter.Capabilities{trace.ChiefOfStaff: chiefGrant, trace.Designer: designerGrant, masonRole: masonGrant, reviewerRole: reviewerGrant, sessionRole: {WriteFiles: true, Execute: true, Web: true, Tools: []string{"show_image"}}},
+			Offered: func(_ context.Context, scope coreadapter.Scope) []string {
+				if verifyOffered(controls.currentConfig(r, cfg), scope) {
+					return []string{verifytool.ToolName}
+				}
+				return nil
+			},
 			Select: func(ctx context.Context, scope coreadapter.Scope) (isolation.Selection, error) {
 				if scope.Role == sessionRole && scope.Project == project {
 					return sessionSelection(ctx, cfg, scope, cfg.RoleExecution(masonRole))
@@ -241,8 +248,12 @@ func Enforce(opts Options, e Enforcement) Options {
 					if err != nil {
 						return isolation.Selection{}, err
 					}
+					tools := ChiefOrdinaryToolsOf(stored)
+					if verifyOffered(controls.currentConfig(r, cfg), scope) {
+						tools = append(tools, verifytool.ToolName)
+					}
 					return isolation.Selection{Workspace: coreadapter.WorkspaceRequest{SourceDirectory: workspace, Directory: workspace}, Paths: paths, Execution: settings,
-						Narrow: &coreadapter.Capabilities{Tools: ChiefOrdinaryToolsOf(stored), Web: true}}, nil
+						Narrow: &coreadapter.Capabilities{Tools: tools, Web: true}}, nil
 				}
 				return isolation.Selection{}, errors.New("view selection denied")
 			},
@@ -295,15 +306,24 @@ func Enforce(opts Options, e Enforcement) Options {
 					return []coreadapter.Tool{showImageTool(r, scope, view, now)}, nil
 				}
 				if scope.Role == trace.ChiefOfStaff {
-					return []coreadapter.Tool{controls.preview(cfg, r, scope, view, now)}, nil
+					tools := []coreadapter.Tool{controls.preview(cfg, r, scope, view, now)}
+					if verifyOffered(controls.currentConfig(r, cfg), scope) {
+						tools = append(tools, controls.verify(cfg, r, scope, view, now))
+					}
+					return tools, nil
+				}
+				if verifyOffered(controls.currentConfig(r, cfg), scope) {
+					return []coreadapter.Tool{controls.verify(cfg, r, scope, view, now)}, nil
 				}
 				return nil, nil
 			},
 			Seed: func(ctx context.Context, scope coreadapter.Scope, view isolation.View) error {
 				if scope.Role == trace.ChiefOfStaff {
-					return restorePreviewImages(ctx, cfg, controls, r, scope, view, now)
+					if err := restorePreviewImages(ctx, cfg, controls, r, scope, view, now); err != nil {
+						return err
+					}
 				}
-				return nil
+				return controls.seedVerification(ctx, cfg, r, scope, view, now)
 			},
 			Hosts:  e.Hosts,
 			Engine: resumableEngine{e.Engine},

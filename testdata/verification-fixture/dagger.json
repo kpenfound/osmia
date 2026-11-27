@@ -1,0 +1,13 @@
+{
+  "name": "verification-fixture",
+  "engineVersion": "v1.0.0-beta.27",
+  "sdk": {
+    "source": "go"
+  },
+  "dependencies": [
+    {
+      "name": "web-driver",
+      "source": "../../modules/web-driver"
+    }
+  ]
+}

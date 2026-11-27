@@ -13,7 +13,7 @@ import (
 )
 
 // CheckSlotRun identifies a service check run waiting for or holding capacity.
-// Exactly one of Unit, Review, Session or Preview identifies the kind of run.
+// Exactly one of Unit, Review, Session, Preview or Verify identifies the kind of run.
 type CheckSlotRun struct {
 	Project    config.ProjectID
 	Workstream config.WorkstreamID
@@ -21,6 +21,7 @@ type CheckSlotRun struct {
 	Review     int
 	Session    bool
 	Preview    bool
+	Verify     bool
 }
 
 // CheckSlotStatus is an in-memory snapshot of factory-wide check admission.

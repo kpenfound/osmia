@@ -16,6 +16,7 @@ import (
 	"github.com/kpenfound/osmia/internal/plan"
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verification"
 )
 
 // Mason is the bundle a mason builds one unit of a sealed workstream from:
@@ -41,9 +42,30 @@ type Mason struct {
 	// Amendments are the approved amendments that rework the unit or
 	// change its plan entry, in the order they were applied.
 	Amendments []AmendmentNotice `json:"amendments,omitempty"`
+	// Verification names the feature-map files that apply to the unit. It is
+	// nil for a project without the verification setting.
+	Verification *Verification `json:"verification,omitempty"`
 	// Context holds the charter and the entity map context of the unit's
 	// footprint.
 	Context Bundle `json:"context"`
+}
+
+// Verification is what a mason is told about the project's verification
+// lever: the feature files that apply to its unit, found by plain glob
+// matching, and what to keep current with its change.
+type Verification struct {
+	// MapDir is the project's feature-map directory.
+	MapDir string `json:"map_dir"`
+	// Features are the feature files whose paths globs match the unit's files.
+	Features []FeaturePointer `json:"features,omitempty"`
+}
+
+// FeaturePointer names one feature file of the map.
+type FeaturePointer struct {
+	File    string   `json:"file"`
+	Feature string   `json:"feature"`
+	Paths   []string `json:"paths"`
+	Flows   []string `json:"flows,omitempty"`
 }
 
 // SealedDocument is the revision of spec.md or plan.json the seal ratified.
@@ -204,6 +226,11 @@ func (f Files) Mason(ctx context.Context, project config.ProjectID, stream confi
 	if provider == nil {
 		provider = f
 	}
+	if f.Verification != nil {
+		if m.Verification, err = f.Verification(ctx, stream, m.Unit, m.Footprint); err != nil {
+			return Mason{}, err
+		}
+	}
 	if m.Context, err = provider.Assemble(ctx, project, Scope{Role: f.Role, Entities: m.Footprint, Workstream: stream}); err != nil {
 		return Mason{}, err
 	}
@@ -272,6 +299,10 @@ func (m Mason) Render() string {
 	line("## Footprint")
 	for _, e := range m.Footprint {
 		line("- %s", e)
+	}
+	if m.Verification != nil {
+		line("")
+		w.WriteString(m.Verification.Render())
 	}
 	if len(m.Amendments) > 0 {
 		line("")
@@ -362,4 +393,36 @@ func (m Mason) RenderAmendments() string {
 		w.WriteString(rendered)
 	}
 	return w.String()
+}
+
+// Render returns the verification section of the mason bundle: the feature
+// files that apply, and the reminder to keep the lever and the map current in
+// the same change and to list the invocations the mason verified with.
+func (v Verification) Render() string {
+	var w strings.Builder
+	line := func(format string, args ...any) { fmt.Fprintf(&w, format+"\n", args...) }
+	line("## Verification")
+	line("This project has a verification lever and a feature map in %s. Keep the lever and the map current in the same change as the behaviour they describe, and list the lever invocations you verified with in the done report's invocations field, one argument list each. The service reruns up to %d of them, in the order you give, on your candidate, and the reviewer judges those service runs, not your own.", v.MapDir, verification.MaxRerunsPerUnit)
+	if len(v.Features) == 0 {
+		line("No feature file's paths match this unit's footprint or files, so none applies yet. If your change adds behaviour a user reaches, add its feature file.")
+		return w.String()
+	}
+	line("These feature files apply to this unit, found by matching its files against their paths globs:")
+	for _, f := range v.Features {
+		flows := "no flows"
+		if len(f.Flows) > 0 {
+			flows = "flows " + strings.Join(f.Flows, ", ")
+		}
+		line("- %s (%s; paths %s; %s)", f.File, f.Feature, strings.Join(f.Paths, ", "), flows)
+	}
+	return w.String()
+}
+
+// Pointers converts features of the map to the pointers a mason bundle names.
+func Pointers(features []verification.Feature) []FeaturePointer {
+	out := make([]FeaturePointer, 0, len(features))
+	for _, f := range features {
+		out = append(out, FeaturePointer{File: f.File, Feature: f.Name, Paths: slices.Clone(f.Paths), Flows: slices.Clone(f.Flows)})
+	}
+	return out
 }

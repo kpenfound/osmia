@@ -207,6 +207,44 @@ func TestAViewBuiltFromTheCachedCloneHoldsTheFilesOfTheServersViewAndLaterTurnsF
 	}
 }
 
+func TestFilesTheServerSeededAreAddedToAViewBuiltFromACommit(t *testing.T) {
+	r := newRig(t, fleet.Options{})
+	c, err := newClient(r.options())
+	must(t, err)
+	overlay := t.TempDir()
+	put(t, overlay, ".osmia-verify/run1/evidence/shot.png", "png bytes")
+	put(t, overlay, ".osmia-verify/run1/images/shot.png", "png bytes")
+	put(t, overlay, ".osmia-verify/run1/notes/log.txt", "text evidence")
+	put(t, overlay, ".osmia-verify/results.json", "[]")
+	r.srv.register("turn-overlay", "token-turn-overlay", overlay)
+	offer := r.offer("turn-overlay", func(o *api.TurnOffer) { o.View.Overlay = true })
+	view, err := c.buildView(context.Background(), offer, offer.ToolToken, filepath.Join(c.dir, "turns", offer.Turn, "views"))
+	must(t, err)
+	dir := view.Workspace().Directory
+	for name, want := range map[string]string{".osmia-verify/run1/evidence/shot.png": "png bytes", ".osmia-verify/run1/images/shot.png": "png bytes",
+		".osmia-verify/run1/notes/log.txt": "text evidence", ".osmia-verify/results.json": "[]"} {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(data) != want {
+			t.Fatalf("%s: %q %v", name, data, err)
+		}
+	}
+	if _, err := os.ReadFile(filepath.Join(dir, "src/main.go")); err != nil {
+		t.Fatalf("the commit's files are not in the view: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	must(t, err)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "overlay-") {
+			t.Fatalf("the downloaded overlay was left in the view: %s", entry.Name())
+		}
+	}
+	plain := r.offer("turn-plain")
+	view, err = c.buildView(context.Background(), plain, plain.ToolToken, filepath.Join(c.dir, "turns", plain.Turn, "views"))
+	must(t, err)
+	if _, err := os.Stat(filepath.Join(view.Workspace().Directory, ".osmia-verify")); !os.IsNotExist(err) {
+		t.Fatalf("a view with no seeded files holds some: %v", err)
+	}
+}
+
 func TestAViewOfTraceDocumentsIsUnpackedFromItsArchive(t *testing.T) {
 	r := newRig(t, fleet.Options{})
 	c, err := newClient(r.options())
