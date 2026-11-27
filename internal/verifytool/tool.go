@@ -91,6 +91,9 @@ type Operation struct {
 	// with a run of its own; until then it is the same call, and a replay of
 	// it returns what was recorded and runs nothing.
 	Finished bool `json:"finished,omitempty"`
+	// Rerun is set for a service rerun of an invocation a mason declared: the
+	// operation is then recorded by the service, not by a tool call.
+	Rerun *Rerun `json:"rerun,omitempty"`
 }
 
 // BuildResult is the result a recorded operation gives its caller. It reads
@@ -354,53 +357,90 @@ func (e Env) write(ctx context.Context, doc *trace.Document, op Operation) error
 }
 
 func (e Env) execute(ctx context.Context, t Target, op Operation) Outcome {
-	fail := func(message string) Outcome { return Outcome{Limitation: Diagnostic(message)} }
 	duration, err := time.ParseDuration(op.Timeout)
 	if err != nil || duration <= 0 {
-		return fail("verify timeout is invalid")
+		return limited("verify timeout is invalid")
 	}
 	if e.Slots == nil {
-		return fail("verify service is unavailable")
+		return limited("verify service is unavailable")
 	}
 	release, err := e.Slots(ctx, t.Repo.Project(), t.Stream)
 	if err != nil {
-		return fail("verify cancelled while waiting: " + err.Error())
+		return limited("verify cancelled while waiting: " + err.Error())
 	}
 	defer release()
+	return RunOperation(ctx, t, op)
+}
+
+func limited(message string) Outcome { return Outcome{Limitation: Diagnostic(message)} }
+
+// RunOperation exports the commit of op, runs the lever once under op's run ID
+// within op's timeout, and retains the report and the files it references. It
+// holds no checks slot: the caller does. Every way it can fail is a limitation
+// in the returned Outcome.
+func RunOperation(ctx context.Context, t Target, op Operation) Outcome {
+	return bounded(ctx, op, func(ctx context.Context, timedOut func(error) Outcome) Outcome {
+		dir, err := os.MkdirTemp("", "osmia-verify-source-")
+		if err != nil {
+			return limited(err.Error())
+		}
+		defer os.RemoveAll(dir)
+		if err := t.Export(ctx, op.Commit, dir, nil); err != nil {
+			return timedOut(fmt.Errorf("verify source export: %w", err))
+		}
+		return runIn(ctx, timedOut, t, dir, op)
+	})
+}
+
+// RunExported runs the lever once in dir, an export of op's commit the caller
+// made, under op's run ID and timeout, and retains the report and the files it
+// references. It holds no checks slot.
+func RunExported(ctx context.Context, t Target, dir string, op Operation) Outcome {
+	return bounded(ctx, op, func(ctx context.Context, timedOut func(error) Outcome) Outcome {
+		return runIn(ctx, timedOut, t, dir, op)
+	})
+}
+
+func bounded(ctx context.Context, op Operation, run func(context.Context, func(error) Outcome) Outcome) Outcome {
+	duration, err := time.ParseDuration(op.Timeout)
+	if err != nil || duration <= 0 {
+		return limited("verify timeout is invalid")
+	}
 	outer := ctx
 	ctx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
-	timedOut := func(err error) Outcome {
+	return run(ctx, func(err error) Outcome {
 		if outer.Err() == nil && ctx.Err() != nil {
-			return fail("verify timed out after " + duration.String())
+			return limited("verify timed out after " + duration.String())
 		}
-		return fail(err.Error())
-	}
-	dir, err := os.MkdirTemp("", "osmia-verify-source-")
-	if err != nil {
-		return fail(err.Error())
-	}
-	defer os.RemoveAll(dir)
-	if err := t.Export(ctx, op.Commit, dir, nil); err != nil {
-		return timedOut(fmt.Errorf("verify source export: %w", err))
-	}
-	resolved := t.Config.Dagger.Resolve()
-	token := os.Getenv(resolved.CloudComputeTokenEnv)
-	redact.Register(token)
-	selection := string(resolved.Mode)
-	if resolved.Address != "" {
-		selection = resolved.Address
-	}
-	run, err := (checks.DaggerChecks{Engine: selection, CloudToken: token}).RunLever(ctx, dir, checks.LeverCall{Base: t.Config.Project.Verification.Call, Args: op.Args, RunID: op.RunID})
+		return limited(err.Error())
+	})
+}
+
+func runIn(ctx context.Context, timedOut func(error) Outcome, t Target, dir string, op Operation) Outcome {
+	run, err := Dagger(t.Config).RunLever(ctx, dir, checks.LeverCall{Base: t.Config.Project.Verification.Call, Args: op.Args, RunID: op.RunID})
 	if err != nil {
 		return timedOut(err)
 	}
 	defer run.Close()
 	outcome, err := Retain(t.Repo, t.Stream, op.RunID, run, Outcome{Result: run.Result, Diagnostics: run.Diagnostics})
 	if err != nil {
-		return fail("the run's evidence could not be retained: " + err.Error())
+		return limited("the run's evidence could not be retained: " + err.Error())
 	}
 	return outcome
+}
+
+// Dagger returns the Dagger runner a lever run of cfg's project uses, with
+// the cloud token registered for redaction.
+func Dagger(cfg *config.Config) checks.DaggerChecks {
+	resolved := cfg.Dagger.Resolve()
+	token := os.Getenv(resolved.CloudComputeTokenEnv)
+	redact.Register(token)
+	selection := string(resolved.Mode)
+	if resolved.Address != "" {
+		selection = resolved.Address
+	}
+	return checks.DaggerChecks{Engine: selection, CloudToken: token}
 }
 
 // Operations returns the verify calls recorded in stream's trace, each at its

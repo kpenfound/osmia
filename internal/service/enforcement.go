@@ -174,7 +174,7 @@ func Enforce(opts Options, e Enforcement) Options {
 		project := string(r.Project())
 		units := newUnitWorkspaces(cfg, r)
 		drifts := resolutions{StreamWorkspaces: driftWorkspaces(cfg, r)}
-		reports := &execution.MasonReports{}
+		reports := &execution.MasonReports{Verification: func() bool { return controls.currentConfig(r, cfg).Project.Verification.Enabled() }}
 		verdicts := &execution.ReviewerReports{}
 		turns := &isolation.Turns{
 			Workspaces:         threadWorkspaces{units: units, drifts: drifts, sessions: sessionWorkspaces{cfg: cfg}},

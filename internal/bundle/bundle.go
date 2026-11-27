@@ -216,6 +216,11 @@ type Files struct {
 	// builds, from the sealed document of its spec slot. It is called only for
 	// such a workstream.
 	Unplanned func(spec trace.Document, unit string) (plan.Unit, error)
+	// Verification returns what a mason of a project with the verification
+	// setting is told about the feature map for a unit with this footprint. It
+	// is nil for a project without the setting, and then the bundle carries
+	// nothing about verification.
+	Verification func(ctx context.Context, stream config.WorkstreamID, unit string, footprint []string) (*Verification, error)
 }
 
 // UnplannedDocument and UnplannedPath name the one-unit plan a workstream of a

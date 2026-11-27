@@ -118,7 +118,17 @@ func (c *runtimeControls) seedVerification(ctx context.Context, cfg *config.Conf
 	}
 	switch {
 	case verifyOffered(cfg, scope):
-		return verifytool.Restore(ctx, repo, scope, view, now)
+		if err := verifytool.Restore(ctx, repo, scope, view, now); err != nil {
+			return err
+		}
+		if scope.Role == reviewerRole {
+			identity, err := execution.UnitReviewerIdentity(repo, scope)
+			if err != nil {
+				return err
+			}
+			return verifytool.PlaceReruns(repo, config.WorkstreamID(scope.Workstream), scope.Unit, identity.Candidate.Revision, view)
+		}
+		return nil
 	case scope.Role == masonRole && scope.Unit != "" && scope.Thread != driftMasonAgent:
 		return execution.PlaceReviewerVerification(repo, config.WorkstreamID(scope.Workstream), scope.Unit, view)
 	}

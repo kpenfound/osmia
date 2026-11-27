@@ -429,7 +429,7 @@ func unitPath(parts []string) bool {
 	if contest, ok := strings.CutPrefix(parts[2], "chief-"); ok && strings.HasSuffix(contest, ".json") && key(strings.TrimSuffix(contest, ".json")) {
 		return true
 	}
-	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "change.json" || parts[2] == "dispatch.json" {
+	if parts[2] == "report.json" || parts[2] == "review.json" || parts[2] == "landing.json" || parts[2] == "rebase.json" || parts[2] == "change.json" || parts[2] == "dispatch.json" || parts[2] == "verification.json" || parts[2] == "features.json" {
 		return true
 	}
 	n := strings.TrimSuffix(strings.TrimPrefix(parts[2], "ruling-"), ".json")

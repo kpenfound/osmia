@@ -180,6 +180,13 @@ func (m *masons) CandidateEvidence(ctx context.Context, stream config.Workstream
 		items = append(items, coreadapter.ContextItem{Source: "amendment notices", Content: notices})
 	}
 	items = append(items, coreadapter.ContextItem{Source: "local context", Content: mason.Context.Brief()})
+	if m.verifying() {
+		sections, err := m.verificationSections(ctx, g, stream, unit, report)
+		if err != nil {
+			return coreadapter.ReviewRequest{}, UnitReviewIdentity{}, err
+		}
+		items = append(items, coreadapter.ContextItem{Source: "verification (service-recorded)", Content: sections})
+	}
 	return coreadapter.ReviewRequest{Subject: identity.Subject, Candidate: identity.Candidate, Diff: diff, Context: items}, identity, nil
 }
 

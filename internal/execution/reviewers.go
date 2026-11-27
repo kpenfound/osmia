@@ -760,6 +760,9 @@ func (r *reviewers) ApplyReview(ctx context.Context, stream config.WorkstreamID,
 			Records: []router.Entry{{Kind: "verdict", ID: ReviewDocument(unit), Text: verdictText(result.Verdict)}}},
 	}
 	if result.Verdict.Decision == "satisfactory" {
+		if err := r.recordFeatureAssociation(ctx, stream, unit, result); err != nil {
+			return fmt.Errorf("record the feature association of unit %s: %w", unit, err)
+		}
 		in.Authority = &router.Authority{Kind: router.AuthorityReviewer, Target: UnitApproved, Ref: fmt.Sprintf("%s revision %d", ReviewDocument(unit), revision), Valid: r.verdictHolds(stream, unit, result)}
 	}
 	res, err := r.s.raise(ctx, true, in)
@@ -974,6 +977,13 @@ func (r *reviewers) enqueueFindings(ctx context.Context, stream config.Workstrea
 		return err
 	}
 	prompt += verifytool.SendBack(verified)
+	if r.verifying() {
+		if mason, err := r.Bundle(ctx, stream, unit); err == nil && mason.Verification != nil {
+			prompt += "\n\n" + mason.Verification.Render()
+		} else if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
 	request := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: actor, Cause: result.Turn, Depth: 1}, AgentID: masonAgent(unit), ThreadID: masonAgent(unit), TurnID: turn, Profile: profile, SystemPrompt: masonSystemPrompt(r.cfg.Project), Prompt: prompt}
 	ruling, found, err := LatestContestedRuling(r.repository, stream, unit, result.Bounces)
 	if err != nil {

@@ -20,6 +20,8 @@ import (
 	"github.com/kpenfound/osmia/internal/seal"
 	"github.com/kpenfound/osmia/internal/status"
 	"github.com/kpenfound/osmia/internal/trace"
+	"github.com/kpenfound/osmia/internal/verification"
+	"github.com/kpenfound/osmia/internal/verifytool"
 )
 
 const (
@@ -32,6 +34,9 @@ const (
 // what the unit's work now does and how the mason checked its acceptance.
 type MasonReport struct {
 	Outcome string `json:"outcome"`
+	// Invocations are the lever invocations the mason verified with, each an
+	// argument list. Only a project with the verification setting takes them.
+	Invocations [][]string `json:"invocations,omitempty"`
 }
 
 type doneReport struct {
@@ -67,6 +72,9 @@ type UnitReport struct {
 	Branch    string            `json:"branch"`
 	Base      string            `json:"base"`
 	Candidate string            `json:"candidate"`
+	// Invocations are the lever invocations the mason declared, each an
+	// argument list.
+	Invocations [][]string `json:"invocations,omitempty"`
 }
 
 func ReportDocument(unit string) string { return trace.UnitSubject(unit) + "-report" }
@@ -76,7 +84,10 @@ func CheckingTransitionID(unit string, k int) string {
 }
 
 type masonReports struct {
-	mu       sync.Mutex
+	// Verification reports whether the project has the verification setting,
+	// which lets a done report declare lever invocations. Nil means it has not.
+	Verification func() bool
+	mu           sync.Mutex
 	accepted map[string]reportedDone
 	refused  map[string]string
 }
@@ -103,9 +114,14 @@ func TurnKey(scope coreadapter.Scope) string {
 }
 
 func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
+	verifying := r.Verification != nil && r.Verification()
 	done := coreadapter.Tool{Name: DoneTool, Effect: coreadapter.ToolMemory,
 		Description: "Report your unit's work done, once its task is done and every acceptance item holds. Call it once per turn. outcome (required): what the work now does and how you checked each acceptance item. headline, happened and needs_you make the owner's card: headline up to 64 characters, happened up to 140 characters, and needs_you up to 140 characters and empty unless the owner has an action. Write each as one line in words without IDs, paths, URLs or model names. The service shortens a field that is too long, joins one written over several lines, and leaves out one it cannot show; without a headline or happened it records no card. A non-empty needs_you always tells the owner there is an action. The service records the report, takes your workspace as the unit's candidate, runs the project's checks on it and sends it to review; end your turn as soon as this returns.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"}},"required":["outcome"],"additionalProperties":false}`)}
+	if verifying {
+		done.Description += " invocations (optional) lists the lever invocations you verified with, as a list of argument lists, each the arguments that follow the project's configured lever call. The service reruns up to " + fmt.Sprint(verification.MaxRerunsPerUnit) + " of them in the order you give on your candidate and records any it skips; your own runs while you work are not evidence."
+		done.InputSchema = json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"headline":{"type":"string"},"happened":{"type":"string"},"needs_you":{"type":"string"},"invocations":{"type":"array","items":{"type":"array","items":{"type":"string"}}}},"required":["outcome"],"additionalProperties":false}`)
+	}
 	done.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			MasonReport
@@ -162,6 +178,9 @@ func (r *masonReports) tool(repository *trace.Repository, scope coreadapter.Scop
 					known = append(known, turn.Response.Result.Session.ID)
 				}
 			}
+		}
+		if len(input.Invocations) != 0 && !verifying {
+			return nil, errors.New(`tool input: json: unknown field "invocations"`)
 		}
 		if reason := checkReport(input.MasonReport); reason != "" {
 			return r.refuse(TurnKey(scope), reason)
@@ -283,6 +302,9 @@ func (r *masonReports) DriftTool(scope coreadapter.Scope) coreadapter.Tool {
 func checkReport(report MasonReport) string {
 	if strings.TrimSpace(report.Outcome) == "" {
 		return "outcome is required: say what the unit's work now does and how you checked its acceptance"
+	}
+	if len(report.Invocations) > verifytool.MaxDeclared {
+		return fmt.Sprintf("invocations lists %d argument lists: list at most %d, the ones you verified with", len(report.Invocations), verifytool.MaxDeclared)
 	}
 	return ""
 }
@@ -452,7 +474,7 @@ func (m *masons) finishReport(ctx context.Context, b building, unit string) (mov
 	if err != nil {
 		return false, false, nil, err
 	}
-	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Card: card, Branch: w.Branch, Base: base, Candidate: candidate}, "", "  ")
+	content, err := json.MarshalIndent(UnitReport{Unit: unit, Turn: turn.Request.TurnID, Seal: latest.Seal, Outcome: report.Outcome, Card: card, Branch: w.Branch, Base: base, Candidate: candidate, Invocations: report.Invocations}, "", "  ")
 	if err != nil {
 		return false, false, nil, err
 	}
