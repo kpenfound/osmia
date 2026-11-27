@@ -22,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/kinds"
 	"github.com/kpenfound/osmia/internal/skills"
+	"github.com/kpenfound/osmia/internal/verification"
 )
 
 // Options locates the configuration. File, when set, is the top-level file in
@@ -293,6 +294,10 @@ type Project struct {
 	// take.
 	ChecksTimeout string          `toml:"checks_timeout" json:"checks_timeout"`
 	Capacity      ProjectCapacity `toml:"capacity" json:"capacity"`
+	// Verification is the optional [verification] table that selects the
+	// project's verification lever. A project without the table has the zero,
+	// disabled setting.
+	Verification verification.Setting `toml:"verification" json:"verification,omitzero"`
 }
 
 // DefaultChecksTimeout and MaxChecksTimeout bound one run of a candidate's
@@ -654,6 +659,11 @@ func (p *Project) validate(root Root, id ProjectID, home, projectPath string) er
 	if p.Capacity.GitOperations <= 0 {
 		return fieldError(projectPath, "capacity.git_operations", "must be positive")
 	}
+	setting, field, reason := p.Verification.Validate()
+	if field != "" {
+		return fieldError(projectPath, "verification."+field, reason)
+	}
+	p.Verification = setting
 	return nil
 }
 
@@ -794,7 +804,7 @@ func knownKey(key toml.Key, project bool) bool {
 		if len(key) == 2 && key[0] == "hearsay_entities" {
 			return true
 		}
-		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations"}, path)
+		return slices.Contains([]string{"hearsay_scope", "hearsay_entities", "hearsay_declare_repo", "flake_fixes", "version", "name", "upstream", "fork", "clone", "base_branch", "landing", "delivery", "upstream_rebase", "pull_request_poll", "checks_timeout", "capacity", "capacity.per_workstream", "capacity.git_operations", "verification", "verification.call", "verification.map_dir", "verification.lever_paths"}, path)
 	}
 	if key[0] == "kinds" {
 		if len(key) == 1 {

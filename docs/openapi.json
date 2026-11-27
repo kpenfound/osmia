@@ -7201,6 +7201,9 @@
           "upstream_rebase": {
             "type": "string"
           },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationSetting"
+          },
           "version": {
             "type": "integer"
           }
@@ -12539,6 +12542,26 @@
             "type": "integer"
           },
           "workstream": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "VerificationSetting": {
+        "properties": {
+          "call": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lever_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "map_dir": {
             "type": "string"
           }
         },

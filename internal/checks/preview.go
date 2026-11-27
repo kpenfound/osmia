@@ -31,31 +31,7 @@ type PreviewCapture struct {
 func (d DaggerChecks) Preview(ctx context.Context, dir string, in PreviewCapture) ([]byte, error) {
 	output := &checkOutput{limit: 16 << 10}
 	fail := func(err error) ([]byte, error) {
-		secrets := redact.KnownSecrets()
-		tail := output.String()
-		if output.truncated {
-			for _, secret := range secrets {
-				for i := 1; i < len(secret); i++ {
-					if strings.HasPrefix(tail, secret[i:]) {
-						tail = "[redacted]" + tail[len(secret)-i:]
-						break
-					}
-				}
-			}
-		}
-		prefix := "preview capture: " + redact.Secrets(err.Error(), secrets...)
-		if len(prefix) > 1024 {
-			prefix = prefix[:1024]
-		}
-		tail = redact.Secrets(tail, secrets...)
-		budget := (16 << 10) - len(prefix) - 1
-		if len(tail) > budget {
-			tail = tail[len(tail)-budget:]
-			for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
-				tail = tail[1:]
-			}
-		}
-		return nil, fmt.Errorf("%s", strings.TrimSpace(prefix+"\n"+tail))
+		return nil, redactedFailure("preview capture", err, output)
 	}
 	id := &checkOutput{limit: 64 << 10}
 	args := append(append([]string{"call"}, in.Call...), "id")
@@ -121,4 +97,43 @@ func (d DaggerChecks) Preview(ctx context.Context, dir string, in PreviewCapture
 		return fail(fmt.Errorf("preview image exceeds 5 MiB"))
 	}
 	return data, nil
+}
+
+// redactedFailure is the error of a failed Dagger operation: the label and
+// the error text, then the tail of the operation's output, all within the text
+// output limit and with known secrets removed, including a secret cut in two by
+// the output's truncation.
+func redactedFailure(label string, err error, output *checkOutput) error {
+	secrets := redact.KnownSecrets()
+	tail := redactedTail(output, secrets)
+	prefix := label + ": " + redact.Secrets(err.Error(), secrets...)
+	if len(prefix) > 1024 {
+		prefix = prefix[:1024]
+	}
+	budget := (16 << 10) - len(prefix) - 1
+	if len(tail) > budget {
+		tail = tail[len(tail)-budget:]
+		for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+			tail = tail[1:]
+		}
+	}
+	return fmt.Errorf("%s", strings.TrimSpace(prefix+"\n"+tail))
+}
+
+// redactedTail is the output with known secrets removed. When the output lost
+// its beginning, a secret may start before the kept text, so a kept prefix that
+// is the end of a secret is redacted too.
+func redactedTail(output *checkOutput, secrets []string) string {
+	tail := output.String()
+	if output.truncated {
+		for _, secret := range secrets {
+			for i := 1; i < len(secret); i++ {
+				if strings.HasPrefix(tail, secret[i:]) {
+					tail = "[redacted]" + tail[len(secret)-i:]
+					break
+				}
+			}
+		}
+	}
+	return redact.Secrets(tail, secrets...)
 }
