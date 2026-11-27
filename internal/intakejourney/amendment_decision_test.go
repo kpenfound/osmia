@@ -73,6 +73,7 @@ func TestRefusedAmendmentDecisionsRecordNothing(t *testing.T) {
 		"unknown":   {"9", api.AmendmentDecisionRequest{Decision: intake.AmendmentApprove, Packet: 1}, api.NotFound},
 		"overrule":  {"1", api.AmendmentDecisionRequest{Decision: intake.AmendmentOverrule, Packet: 1}, api.Conflict},
 		"round cap": {"1", api.AmendmentDecisionRequest{Decision: intake.AmendmentRound, Packet: 1}, api.Conflict},
+		"withdraw":  {"1", api.AmendmentDecisionRequest{Decision: intake.AmendmentWithdraw}, api.Conflict},
 	} {
 		if _, err := f.C.DecideAmendment(ctx, stream, tc.amendment, tc.req); !intakefixture.Failed(err, tc.code) {
 			t.Fatalf("%s: %v, want %s", name, err, tc.code)

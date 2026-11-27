@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestDispatcherFollowsDurableQueue(t *testing.T) {
 		t.Fatalf("unclaimed turn reported: %v", err)
 	}
 	observe(t, d, second, coreadapter.EffectUnknown)
-	if _, err := d.Apply(ctx, second); err == nil || calls != 0 {
+	if _, err := d.Apply(ctx, second); err == nil || calls != 0 || !strings.Contains(err.Error(), "turn second on agent's thread is not eligible to run: it waits behind turn first, queued and never started since") {
 		t.Fatalf("successor ran before its predecessor: %v", err)
 	}
 	observe(t, d, first, coreadapter.EffectAbsent)

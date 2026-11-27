@@ -62,7 +62,7 @@ const usage = `Usage: osmia <command> [--root PATH]
   shed redraft <workstream-id> <note> [--json]
   packet <workstream-id> [--json]
   ratify <workstream-id> [--project-spec-revision N --spec-revision N --plan-revision N] [--json]
-  amendment <workstream-id> <n> [approve|reject|round|overrule [note]] [--json]
+  amendment <workstream-id> <n> [approve|reject|round|overrule|withdraw [note]] [--json]
   delivery <workstream-id> [--json]
   merged <workstream-id> [--json]
   rebase <workstream-id> [--json]
@@ -296,7 +296,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "packet", "ratify", "archive", "unarchive", "merged", "rebase":
 		valid = len(a) == 1
 	case "amendment":
-		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule}, a[2])
+		valid = len(a) == 2 || (len(a) == 3 || len(a) == 4) && slices.Contains([]string{service.AmendmentApprove, service.AmendmentReject, service.AmendmentRound, service.AmendmentOverrule, service.AmendmentWithdraw}, a[2])
 	case "delivery":
 		valid = len(a) == 1
 	case "trace":

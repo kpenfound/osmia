@@ -25,13 +25,19 @@ import (
 	"github.com/kpenfound/osmia/internal/trace"
 )
 
-// The owner's decisions on a presented amendment.
+// The owner's decisions on a presented amendment, and withdraw, which ends
+// one that is still being drafted or debated.
 const (
 	AmendmentApprove  = "approve"
 	AmendmentReject   = "reject"
 	AmendmentRound    = "round"
 	AmendmentOverrule = "overrule"
+	AmendmentWithdraw = "withdraw"
 )
+
+// AmendmentWithdrawable are the states of an amendment that has not been
+// presented yet, in which it can be withdrawn.
+var AmendmentWithdrawable = []string{"filed", "drafting", AmendmentWaiting, "proposed", "debating", "heard", "answering", "answered"}
 
 // Amendment subject states after a recorded decision.
 const (
@@ -206,7 +212,9 @@ func (s *Controller) DecideAmendment(ctx context.Context, raw, id string, req Am
 
 // RecordAmendmentDecision records one decision on an amendment, as the
 // actor, and moves the amendment to what the decision asks for: approved,
-// rejected, or proposed again for another debate round. A decision on a
+// rejected, or proposed again for another debate round. Withdraw rejects an
+// amendment that has not been presented, in whatever drafting or debate
+// state it is held, and needs no packet. A decision on a
 // packet revision already decided returns that decision when it
 // is the same and is refused when it differs, so a retry never decides
 // twice. Approval is refused while an objection blocks it, and approval or
@@ -225,10 +233,13 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 	}
 	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the decision on amendment %s of workstream %s; check the trace repository", id, stream)}
 	decision := strings.TrimSpace(req.Decision)
-	if !slices.Contains([]string{AmendmentApprove, AmendmentReject, AmendmentRound, AmendmentOverrule}, decision) {
-		return AmendmentResponse{}, &APIError{Code: Validation, Message: "an amendment decision is approve, reject, round or overrule"}
+	if !slices.Contains([]string{AmendmentApprove, AmendmentReject, AmendmentRound, AmendmentOverrule, AmendmentWithdraw}, decision) {
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "an amendment decision is approve, reject, round, overrule or withdraw"}
 	}
-	if req.Packet < 1 {
+	if decision == AmendmentWithdraw && judgment != "" {
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "Jev decides presented amendments; withdraw is the owner's or the chief of staff's"}
+	}
+	if req.Packet < 1 && decision != AmendmentWithdraw {
 		return AmendmentResponse{}, &APIError{Code: Validation, Message: "name the revision of the amendment's packet the decision is on; read it with osmia amendment"}
 	}
 	feature, err := repository.Workflow(stream, trace.FeatureSubject)
@@ -245,6 +256,9 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 	if !found {
 		return AmendmentResponse{}, &APIError{Code: NotFound, Message: fmt.Sprintf("workstream %s has no amendment %s", stream, id)}
 	}
+	if decision == AmendmentWithdraw {
+		return s.withdrawAmendment(ctx, project, stream, repository, c, id, strings.TrimSpace(req.Note), actor, cause)
+	}
 	for _, d := range c.Decisions {
 		if d.Packet != req.Packet {
 			continue
@@ -255,7 +269,11 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("packet revision %d of amendment %s is already decided: %s", req.Packet, id, d.Decision)}
 	}
 	if c.State.Value != AmendmentPresented || c.Packet.Revision == 0 {
-		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s of workstream %s is %s; it can be decided once its packet is presented", id, stream, FeatureState(c.State.Value))}
+		message := fmt.Sprintf("amendment %s of workstream %s is %s; it can be decided once its packet is presented", id, stream, FeatureState(c.State.Value))
+		if slices.Contains(AmendmentWithdrawable, c.State.Value) {
+			message += ", or withdrawn now with decision withdraw, which keeps the sealed spec and plan in force"
+		}
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: message}
 	}
 	if req.Packet != c.Packet.Revision {
 		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("packet revision %d of amendment %s is not the latest; revision %d is presented, read it with osmia amendment", req.Packet, id, c.Packet.Revision)}
@@ -345,6 +363,55 @@ func (s *Controller) RecordAmendmentDecisionBy(ctx context.Context, project conf
 	return c.Response(project, stream, reason), nil
 }
 
+func (s *Controller) withdrawAmendment(ctx context.Context, project config.ProjectID, stream config.WorkstreamID, repository *trace.Repository, c AmendmentCase, id, note string, actor trace.Actor, cause string) (AmendmentResponse, *APIError) {
+	if n := len(c.Decisions); n > 0 && c.Decisions[n-1].Decision == AmendmentWithdraw {
+		return c.Response(project, stream, fmt.Sprintf("amendment %s is already withdrawn", id)), nil
+	}
+	if c.State.Value == AmendmentPresented {
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s of workstream %s is presented; reject it instead of withdrawing it", id, stream)}
+	}
+	if !slices.Contains(AmendmentWithdrawable, c.State.Value) {
+		return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s of workstream %s is %s; only an amendment still being drafted or debated can be withdrawn", id, stream, FeatureState(c.State.Value))}
+	}
+	if note == "" && actor.Kind != "owner" {
+		return AmendmentResponse{}, &APIError{Code: Validation, Message: "a withdrawal needs a note saying why the amendment cannot or should not finish its debate"}
+	}
+	failed := &APIError{Code: Internal, Message: fmt.Sprintf("cannot record the withdrawal of amendment %s of workstream %s; check the trace repository", id, stream)}
+	_, sealDoc, sealed, err := seal.Latest(repository, stream)
+	if err != nil || !sealed {
+		return AmendmentResponse{}, failed
+	}
+	who := "the owner"
+	if actor.Kind != "owner" {
+		who = "the chief of staff"
+	}
+	reason := fmt.Sprintf("%s withdrew amendment %s while it was %s; the sealed spec and plan stay in force", who, id, FeatureState(c.State.Value))
+	if note != "" {
+		reason += ": " + note
+	}
+	record := AmendmentDecision{Actor: actor.ID, Decision: AmendmentWithdraw, Note: note, Round: c.Round, Packet: c.Packet.Revision, Spec: c.Spec.Revision, Plan: c.Plan.Revision, SealRevision: sealDoc.Revision}
+	content, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return AmendmentResponse{}, failed
+	}
+	k := len(c.Decisions) + 1
+	at := s.Now()
+	doc := trace.Document{Header: trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: AmendmentDecisionID(id), Revision: k, Project: project, Workstream: stream, Unit: c.Request.Unit, At: at, Actor: actor, Cause: cause}, Path: AmendmentDecisionPath(id), Content: string(content) + "\n"}
+	transition := AmendmentDecided(id, k)
+	tx := trace.Transaction{ExpectedVersion: c.State.Version,
+		Transition: trace.Transition{Header: trace.Header{Schema: "osmia.trace.transition", Version: trace.Version, ID: transition, Revision: 1, Project: project, Workstream: stream, Unit: c.Request.Unit, At: at, Actor: actor, Cause: cause}, Subject: AmendmentSubject(id), From: c.State.Value, To: AmendmentRejected, Reason: reason},
+		Events:     []trace.Event{trace.Notice(transition, "amendment", reason)}}
+	if _, err := repository.RecordDocumentsWith(ctx, []trace.Document{doc}, tx); err != nil {
+		if errors.Is(err, trace.ErrConflict) {
+			return AmendmentResponse{}, &APIError{Code: Conflict, Message: fmt.Sprintf("amendment %s changed while the withdrawal was recorded; read it again with osmia amendment and retry", id)}
+		}
+		return AmendmentResponse{}, failed
+	}
+	c.State = trace.WorkflowState{Value: AmendmentRejected, Version: c.State.Version + 1}
+	c.Decisions = append(c.Decisions, record)
+	return c.Response(project, stream, reason), nil
+}
+
 // DecideAmendmentTool records a decision on an amendment that the
 // owner gave the chief of staff in a message.
 const DecideAmendmentTool = "decide_amendment"
@@ -353,7 +420,7 @@ const DecideAmendmentTool = "decide_amendment"
 // decide_amendment. It belongs in the system prompt of every owner message
 // turn.
 const AmendmentGuidance = "## Amendments\nWhen the owner's message decides an amendment you presented, call decide_amendment with the amendment's number, the packet revision you presented, the owner's decision and the owner's own words as the note. " +
-	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
+	"The decisions are approve, reject, round for one more bounded debate round, and overrule to approve over the objections that still stand. withdraw ends an amendment that was never presented, whose drafting or debate cannot finish or no longer should; it is your own decision, needs no packet and no decide call, and takes your reason as the note. For a plan-only revision preserving approved intent, call decide with kind plan-amendment and the amendment's number as subject first: Jev decides whether it is approved or declined. When Jev's decision is binding, decide_amendment records only the outcome it picked (approve, or reject to decline), with your note; otherwise decide it yourself. Call decide_amendment with owner_decided false and explain why the revised assignments still fulfill the spec; it refuses a plan-only revision decide has not been called for. Investigate engineering disagreements and discovered work internally. Spec changes and charter exceptions require an owner decision; use owner_decided true only to relay the decision in this owner message."
 
 // DecideAmendment returns the decide_amendment tool of one claimed
 // chief-of-staff turn. It records the same decision as POST
@@ -363,9 +430,10 @@ const AmendmentGuidance = "## Amendments\nWhen the owner's message decides an am
 // shared chief of staff names the member whose amendment it decides.
 func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapter.Scope) coreadapter.Tool {
 	tool := coreadapter.Tool{Name: DecideAmendmentTool, Effect: coreadapter.ToolMemory,
-		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round) or overrule (approve over the objections that stand); note: engineering reasoning, or the owner's words when relaying an owner decision. " +
-			"A plan-only revision needs a decide result first (kind plan-amendment), and a binding Jev decision allows only its own outcome. Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["amendment","packet","decision"],"additionalProperties":false}`)}
+		Description: "Decide a plan-only engineering revision that preserves approved intent, with a reason. Set owner_decided true only to relay an explicit owner decision on this turn; spec changes require it. amendment: its number; packet: the presented packet revision; decision: approve, reject, round (one more bounded debate round), overrule (approve over the objections that stand) or withdraw; note: engineering reasoning, or the owner's words when relaying an owner decision. " +
+			"A plan-only revision needs a decide result first (kind plan-amendment), and a binding Jev decision allows only its own outcome. Approval versions the spec and plan and reseals; rejection keeps the sealed documents; either way the requester receives the ruling and its unit resumes. " +
+			"withdraw is your own recovery decision for an amendment that has not been presented and cannot or should not finish its drafting or debate, for example a round that keeps failing: it needs no packet and no decide call, takes a note saying why, cancels the amendment's queued turns, keeps the sealed spec and plan in force and delivers the ruling like a rejection. workstream: a member workstream ID of your workgroup to act on; omit for this conversation's own workstream.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"amendment":{"type":"string"},"packet":{"type":"integer","minimum":1},"decision":{"type":"string","enum":["approve","reject","round","overrule","withdraw"]},"note":{"type":"string"},"owner_decided":{"type":"boolean"},"workstream":{"type":"string"}},"required":["amendment","decision"],"additionalProperties":false}`)}
 	tool.Handle = func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var input struct {
 			Amendment    string              `json:"amendment"`
@@ -408,7 +476,7 @@ func (c *Controls) DecideAmendment(repository *trace.Repository, scope coreadapt
 		var api *APIError
 		if input.OwnerDecided {
 			actor = request.Actor
-		} else {
+		} else if input.Decision != AmendmentWithdraw {
 			if bound, refusal, err = s.requirePlanAmendment(target, stream, input.Amendment, input.Decision); err != nil {
 				return nil, err
 			}
@@ -723,6 +791,9 @@ func (a AmendmentDebate) Rule(ctx context.Context, stream config.WorkstreamID, r
 		return err
 	}
 	verb := map[string]string{AmendmentApplied: "approved", AmendmentRejected: "rejected", AmendmentUnapplied: "approved but could not apply"}[state.Value]
+	if d.Decision == AmendmentWithdraw {
+		verb = "withdrew"
+	}
 	if err := a.ResumeUnit(ctx, stream, req, cause, verb, d.Actor, transitions); err != nil {
 		return err
 	}

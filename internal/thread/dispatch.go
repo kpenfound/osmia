@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kpenfound/osmia/internal/config"
 	"github.com/kpenfound/osmia/internal/coreadapter"
@@ -160,7 +161,7 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 				return coreadapter.OperationResult{}, err
 			}
 		case q.Claim != nil || !ready:
-			return coreadapter.OperationResult{}, errors.New("turn is not eligible to run")
+			return coreadapter.OperationResult{}, ineligible(t, q)
 		default:
 			if d.Prepare == nil {
 				return coreadapter.OperationResult{}, errors.New("dispatcher requires turn preparation")
@@ -185,4 +186,23 @@ func (d Dispatcher) Apply(ctx context.Context, op coreadapter.Operation) (coread
 		}
 	}
 	return turnResult(q), nil
+}
+
+func ineligible(t trace.Thread, q trace.QueuedTurn) error {
+	if q.Claim != nil {
+		return fmt.Errorf("turn %s on %s's thread is not eligible to run: it was claimed at %s without a captured result", q.Request.TurnID, t.Identity.ID, q.Claim.At.UTC().Format(time.RFC3339))
+	}
+	for _, earlier := range t.Turns {
+		if earlier.Request.TurnID == q.Request.TurnID {
+			break
+		}
+		if earlier.CompletedAt.IsZero() {
+			state := "queued and never started"
+			if earlier.Claim != nil {
+				state = "claimed without a captured result"
+			}
+			return fmt.Errorf("turn %s on %s's thread is not eligible to run: it waits behind turn %s, %s since %s, and a thread runs its turns in order", q.Request.TurnID, t.Identity.ID, earlier.Request.TurnID, state, earlier.Request.At.UTC().Format(time.RFC3339))
+		}
+	}
+	return fmt.Errorf("turn %s on %s's thread is not eligible to run", q.Request.TurnID, t.Identity.ID)
 }

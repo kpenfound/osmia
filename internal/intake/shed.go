@@ -954,6 +954,9 @@ func (d *Debate) Hear(ctx context.Context, op coreadapter.Operation, stream conf
 // answer to the member's question, through the dispatcher.
 func (d *Debate) Member(ctx, running context.Context, cfg *config.Config, stream config.WorkstreamID, operation string, in RoundInput, member string) (shed.Record, string, error) {
 	empty := shed.Record{Version: shed.Version, Round: in.Round, Member: member, Revision: in.Pin()}
+	if err := SettleCommitteeAnswers(ctx, d.Repository, stream, member, d.S.Now()); err != nil {
+		return empty, "", err
+	}
 	for {
 		if in.Amendment != "" {
 			if result, err := AmendmentRetirementOutcome(d.Repository, stream, in.Amendment); err != nil || result != nil {

@@ -719,7 +719,7 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   assembled workstream: its state, the debate round it reached, the packet the
   chief of staff presented (when available) with its revision, and the latest
   decision with its actor, labelled `(decided by Jev)` when Jev made it.
-  `amendment <workstream-id> <n> <approve|reject|round|overrule> [note]`
+  `amendment <workstream-id> <n> <approve|reject|round|overrule|withdraw> [note]`
   decides it. Cards recommend `approve` or `do not approve yet` using these
   amendment decisions; ratification packets still recommend `ratify`.
   The command reads the packet first and decides exactly that
@@ -733,7 +733,12 @@ Use `project add` for each repo and hand-in project lists for coordinated work.
   turn and the unit it parked resumes its stage. The note is optional and is
   one argument; quote it. Deciding the same packet revision again the same way
   prints the recorded decision; another decision on it, an amendment that is
-  not presented, and a refused approval fail with `conflict` (exit 5). An
+  not presented, and a refused approval fail with `conflict` (exit 5).
+  `withdraw` ends an amendment that has not been presented yet, whatever
+  drafting or debate state it is held in, such as a debate round that cannot
+  finish. It needs no packet, cancels the amendment's queued turns, leaves the
+  sealed spec and plan in force and delivers the ruling to the requester like
+  a rejection. A presented amendment is rejected instead. An
   unknown amendment fails with `not_found` (exit 4). You can also tell the
   workstream's chief of staff your decision with `send`.
   While building or assembled, the service retires every undecided amendment
