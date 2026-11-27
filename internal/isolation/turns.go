@@ -50,7 +50,12 @@ type Turns struct {
 	PreserveMasonViews bool
 	Select             func(context.Context, coreadapter.Scope) (Selection, error)
 	Grants             map[string]coreadapter.Capabilities
-	Tools              []coreadapter.Tool
+	// Offered names the tools added to the role's grant for this turn, such as
+	// a tool only a project with a given setting offers. The role's rules still
+	// decide whether the role may hold them, and ViewTools or Scoped must
+	// supply their handlers. Nil adds nothing.
+	Offered func(context.Context, coreadapter.Scope) []string
+	Tools   []coreadapter.Tool
 	// Scoped supplies trusted handlers bound to one claimed turn, such as private
 	// role notes. They join the same registry and grant checks as Tools.
 	Scoped func(context.Context, coreadapter.Scope) ([]coreadapter.Tool, error)
@@ -60,8 +65,9 @@ type Turns struct {
 	ViewTools func(context.Context, coreadapter.Scope, View) ([]coreadapter.Tool, error)
 	// Seed adds to the view the service builds for a turn the files its role's
 	// tools expect to find there. It runs before the view is handed to the
-	// turn's client, which a remote client receives as its starting files. It
-	// does not run for a view a remote client builds from a commit.
+	// turn's client, which a remote client receives as its starting files. For a
+	// view a remote client builds from a commit it runs on an overlay of only the
+	// files it adds, which the client places over the view it builds.
 	Seed   func(context.Context, coreadapter.Scope, View) error
 	Hosts  coreadapter.MCPHosts
 	Engine coreadapter.Engine
@@ -114,7 +120,8 @@ func roleRestrictedTool(role, name string) bool {
 		name == "factory_context" && role != "chief_of_staff" && role != "architect" && role != "mason" && role != "reviewer" ||
 		name == "record_discovery" && role != "chief_of_staff" && role != "mason" && role != "reviewer" ||
 		name == "amend" && role != "mason" ||
-		name == "workstream_diff" && role != "reviewer" && role != "committee"
+		name == "workstream_diff" && role != "reviewer" && role != "committee" ||
+		name == "verify" && role != "chief_of_staff" && role != "reviewer" && role != "committee"
 }
 
 // WebGuidance is part of the current turn context of every turn that holds the
@@ -181,6 +188,9 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 	grant, ok := r.Grants[input.Scope.Role]
 	if !ok {
 		return result, errors.New("role has no service grant")
+	}
+	if r.Offered != nil {
+		grant.Tools = append(slices.Clone(grant.Tools), r.Offered(ctx, input.Scope)...)
 	}
 	grant, err = roleGrant(input.Scope.Role, grant)
 	if err != nil {
@@ -268,12 +278,21 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 			}
 		}
 	}
+	var overlay *FileView
 	if view != nil && r.Seed != nil {
 		if err = r.Seed(ctx, input.Scope, view); err != nil {
 			return result, err
 		}
 	}
-	turn := ClientTurn{Capabilities: capabilities, Environment: env, View: view, Start: start, ReturnView: capabilities.WriteFiles, RunsDagger: selected.Execution.RunsDagger(),
+	if start != nil && r.Seed != nil {
+		if overlay, err = r.seedOverlay(ctx, input.Scope); err != nil {
+			return result, err
+		}
+		if overlay != nil {
+			defer func() { err = errors.Join(err, overlay.Release(context.WithoutCancel(ctx))) }()
+		}
+	}
+	turn := ClientTurn{Capabilities: capabilities, Environment: env, View: view, Start: start, Overlay: overlay, ReturnView: capabilities.WriteFiles, RunsDagger: selected.Execution.RunsDagger(),
 		SkillRefs: coreadapter.TurnSkills(selected.Execution, input.Profile.Backend), Pinned: []string{workspace.Workspace.Directory}}
 	if r.Chain != nil {
 		turn.Fallbacks = r.Chain(input.Profile.Name)
@@ -342,6 +361,30 @@ func (r *Turns) Run(ctx context.Context, input coreadapter.PreparedTurn) (result
 		}
 	}
 	return result, err
+}
+
+// seedOverlay runs Seed on an empty view and returns it when Seed added files,
+// or nil when it added none.
+func (r *Turns) seedOverlay(ctx context.Context, scope coreadapter.Scope) (*FileView, error) {
+	if err := os.MkdirAll(r.Views.Directory, 0700); err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp(r.Views.Directory, "overlay-")
+	if err != nil {
+		return nil, err
+	}
+	overlay, err := AdoptView(dir, coreadapter.ReadWrite)
+	if err != nil {
+		return nil, errors.Join(err, os.RemoveAll(dir))
+	}
+	if err := r.Seed(ctx, scope, overlay); err != nil {
+		return nil, errors.Join(err, overlay.Release(context.WithoutCancel(ctx)))
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return nil, errors.Join(err, overlay.Release(context.WithoutCancel(ctx)))
+	}
+	return overlay, nil
 }
 
 // tally counts the calls a turn's tools receive.

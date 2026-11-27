@@ -668,6 +668,19 @@ func TestPreviewIsChiefServiceTool(t *testing.T) {
 	}
 }
 
+func TestVerifyIsOnlyForTheChiefAndTheReviewingRoles(t *testing.T) {
+	for _, role := range []string{"chief_of_staff", "architect", "mason", "reviewer", "committee", "foreman", "session"} {
+		grant, err := roleGrant(role, a.Capabilities{Tools: []string{"verify"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := role == "chief_of_staff" || role == "reviewer" || role == "committee"
+		if slices.Contains(grant.Tools, "verify") != want {
+			t.Fatalf("verify grant for %s: %+v", role, grant)
+		}
+	}
+}
+
 func TestRoleGrantKeepsWebOnlyForPlanningRoles(t *testing.T) {
 	for role, keeps := range map[string]bool{"chief_of_staff": true, "architect": true, "committee": true, "session": true,
 		"mason": false, "reviewer": false, "foreman": false} {

@@ -11285,6 +11285,10 @@
           "unit": {
             "type": "string"
           },
+          "verify": {
+            "description": "True for a waiting service-run verify call.",
+            "type": "boolean"
+          },
           "workstream": {
             "type": "string"
           }
@@ -12226,6 +12230,9 @@
               "archive"
             ],
             "type": "string"
+          },
+          "overlay": {
+            "type": "boolean"
           },
           "paths": {
             "items": {

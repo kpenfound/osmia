@@ -891,7 +891,7 @@ const UnboundedScope = "per_workstream"
 const UnboundedNote = "No factory-wide limit: this pool runs at most one turn per workstream, and no configuration setting controls it. Nothing to raise; it is not zero capacity."
 
 // SlotWait identifies a queued turn, a deferred ready unit, or a check run.
-// For check runs, exactly one of Unit, Review, Session or Preview identifies the kind.
+// For check runs, exactly one of Unit, Review, Session, Preview or Verify identifies the kind.
 // Reason is capacity when every slot of the pool is taken, priority when
 // higher-priority workstreams start a unit first, and workstream-cap when the
 // workstream holds capacity.per_workstream agent turns. A queued turn whose
@@ -906,6 +906,7 @@ type SlotWait struct {
 	Review     int                 `json:"review,omitempty" description:"Final review number for a waiting final-review check run."`
 	Session    bool                `json:"session,omitempty" description:"True for a waiting session check run; workstream identifies the session."`
 	Preview    bool                `json:"preview,omitempty" description:"True for a waiting service-run chief preview."`
+	Verify     bool                `json:"verify,omitempty" description:"True for a waiting service-run verify call."`
 	Agent      string              `json:"agent,omitempty"`
 	Turn       string              `json:"turn,omitempty"`
 	Reason     string              `json:"reason"`

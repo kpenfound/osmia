@@ -40,6 +40,18 @@ func VCSMetadata(name string) bool {
 	return false
 }
 
+// EvidenceDirectory is the top-level directory of a view where the service
+// places the retained files of verification runs. A view's files are captured
+// back into a mason's workspace, and this directory never is.
+const EvidenceDirectory = ".osmia-verify"
+
+// ServiceEvidence reports whether a view path is the evidence directory or
+// lies inside it.
+func ServiceEvidence(name string) bool {
+	name = strings.TrimPrefix(filepath.ToSlash(name), "./")
+	return name == EvidenceDirectory || strings.HasPrefix(name, EvidenceDirectory+"/")
+}
+
 func validPath(name string) error {
 	if !fs.ValidPath(name) || name == "." || strings.ContainsAny(name, "\\:\x00") {
 		return errors.New("file view requires a relative path without traversal")

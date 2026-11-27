@@ -200,6 +200,10 @@ func isImage(name string, head []byte) bool {
 	return imageExtensions[strings.ToLower(filepath.Ext(name))] || strings.HasPrefix(http.DetectContentType(head), "image/")
 }
 
+// IsImageFile reports whether a lever evidence file is an image, by its
+// extension or the type its first bytes show.
+func IsImageFile(name string, head []byte) bool { return isImage(name, head) }
+
 func readLeverHead(name string) ([]byte, error) {
 	f, err := os.Open(name)
 	if err != nil {

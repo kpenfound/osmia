@@ -1942,6 +1942,8 @@ func showCapacity(w io.Writer, c *wire.CapacityStatus) {
 				what = fmt.Sprintf("final review %d", wait.Review)
 			} else if wait.Preview {
 				what = "preview"
+			} else if wait.Verify {
+				what = "verify"
 			} else if wait.Session {
 				what = "session"
 			}

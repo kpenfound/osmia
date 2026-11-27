@@ -42,6 +42,8 @@ func (e *EngineBusyError) Error() string {
 		kind := "session"
 		if run.Preview {
 			kind = "preview"
+		} else if run.Verify {
+			kind = "verify"
 		} else if run.Unit != "" {
 			kind = "unit " + run.Unit
 		} else if run.Review != 0 {

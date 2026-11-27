@@ -256,6 +256,11 @@ func (c *Client) buildView(ctx context.Context, offer api.TurnOffer, token, view
 		if err != nil {
 			return nil, err
 		}
+		if offer.View.Overlay {
+			if err := c.placeOverlay(ctx, offer.Turn, token, stage, view); err != nil {
+				return nil, errors.Join(err, view.Release(context.WithoutCancel(ctx)))
+			}
+		}
 	case api.ViewArchive:
 		dir, err := os.MkdirTemp(views, "turn-")
 		if err != nil {
@@ -279,6 +284,36 @@ func (c *Client) buildView(ctx context.Context, offer api.TurnOffer, token, view
 		}
 	}
 	return view, nil
+}
+
+// placeOverlay downloads the files the server seeded for the turn and puts each
+// into view at its path.
+func (c *Client) placeOverlay(ctx context.Context, turn, token, stage string, view *isolation.FileView) error {
+	dir, err := os.MkdirTemp(stage, "overlay-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	if err := c.download(ctx, turn, token, dir); err != nil {
+		return err
+	}
+	return filepath.WalkDir(dir, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("the turn's seeded files hold %s, which is not a regular file", name)
+		}
+		rel, err := filepath.Rel(dir, name)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		return view.Put(filepath.ToSlash(rel), data)
+	})
 }
 
 func (c *Client) download(ctx context.Context, turn, token, dest string) error {
