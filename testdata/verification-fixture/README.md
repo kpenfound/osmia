@@ -1,7 +1,8 @@
 # Verification fixture
 
 A tiny project that Osmia's tests use to prove the verification lever against a
-real running service. It is not a product.
+real running service. It is not a product. The lever contract it follows is
+described in [docs/testing.md](../../docs/testing.md#verification-lever-contract).
 
 - `app/server.js` is the service. It shows an instance token, a random value
   generated when the service starts, and keeps notes in memory.
@@ -11,7 +12,10 @@ real running service. It is not a product.
   as JSON.
 - `docs/verification` is the feature map.
 - `check.sh` runs the lever for real and checks the reports. The
-  `web-driver-fixture` Dagger check runs it.
+  `web-driver-fixture` Dagger check runs it. `TestRealDaggerCLIVerificationLever`, run by
+  the `dagger-cli-contract` check, runs Osmia's own lever runner against it, and
+  the `TestVerificationJourney` service test replays its report shapes through
+  the running service.
 
 The lever takes the run ID as a constructor argument, before the function:
 

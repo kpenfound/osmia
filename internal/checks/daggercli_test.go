@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/kpenfound/osmia/internal/checkselect"
 	"github.com/kpenfound/osmia/internal/coreadapter"
 	"github.com/kpenfound/osmia/internal/isolation"
+	"github.com/kpenfound/osmia/internal/verification"
 )
 
 func realCLIWorkspace(t *testing.T) string {
@@ -519,4 +521,120 @@ func TestRealDaggerCLIViewRepository(t *testing.T) {
 			t.Fatalf("dagger generate exited %d", exit)
 		}
 	})
+}
+
+func verificationProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	must(t, os.CopyFS(root, os.DirFS(filepath.Join("..", "..", "testdata", "verification-fixture"))))
+	must(t, os.CopyFS(filepath.Join(root, "modules", "web-driver"), os.DirFS(filepath.Join("..", "..", "modules", "web-driver"))))
+	manifest := filepath.Join(root, "dagger.json")
+	data, err := os.ReadFile(manifest)
+	must(t, err)
+	local := strings.ReplaceAll(string(data), "../../modules/web-driver", "modules/web-driver")
+	if local == string(data) {
+		t.Fatal("the fixture no longer depends on ../../modules/web-driver")
+	}
+	must(t, os.WriteFile(manifest, []byte(local), 0o600))
+	return root
+}
+
+var instanceToken = regexp.MustCompile(`code \[ref=e[0-9]+\]: ([0-9a-f]{16})`)
+
+func runInstanceToken(t *testing.T, run *LeverRun) string {
+	t.Helper()
+	var tokens []string
+	for _, name := range run.EvidencePaths() {
+		if filepath.Ext(name) != ".yml" {
+			continue
+		}
+		data, err := os.ReadFile(name)
+		must(t, err)
+		if m := instanceToken.FindSubmatch(data); m != nil {
+			tokens = append(tokens, string(m[1]))
+		}
+	}
+	if len(tokens) == 0 {
+		t.Fatalf("no snapshot evidence shows an instance token: %q", run.EvidencePaths())
+	}
+	return tokens[0]
+}
+
+func TestRealDaggerCLIVerificationLever(t *testing.T) {
+	installNestedDagger(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
+	defer cancel()
+	fixture := verificationProject(t)
+	checks := DaggerChecks{}
+	base := []string{"verification-fixture"}
+
+	flows, err := checks.LeverFlows(ctx, fixture, base)
+	must(t, err)
+	for _, want := range []string{"home-page", "add-note"} {
+		if !slices.Contains(flows, want) {
+			t.Fatalf("the fixture lists %q, lacking %s", flows, want)
+		}
+	}
+
+	lever := func(runID string, args ...string) *LeverRun {
+		t.Helper()
+		run, err := checks.RunLever(ctx, fixture, LeverCall{Base: base, Args: args, RunID: runID})
+		must(t, err)
+		t.Cleanup(func() { run.Close() })
+		return run
+	}
+	first := lever("e2e-first", "verify", "--flow=home-page")
+	second := lever("e2e-second", "verify", "--flow=home-page")
+
+	for name, run := range map[string]*LeverRun{"first": first, "second": second} {
+		if run.Result.Rejected != "" || len(run.Result.Claims) == 0 || run.Result.Status() != verification.Pass {
+			t.Fatalf("%s run: rejected %q, status %s, claims %+v\n%s", name, run.Result.Rejected, run.Result.Status(), run.Result.Claims, run.Diagnostics)
+		}
+		report, err := os.ReadFile(filepath.Join(run.Dir, verification.ReportFile))
+		must(t, err)
+		var head struct{ Version int }
+		must(t, json.Unmarshal(report, &head))
+		if head.Version != verification.ReportVersion {
+			t.Fatalf("%s report version %d", name, head.Version)
+		}
+		for _, claim := range run.Result.Claims {
+			if claim.Flow != "home-page" || claim.Detail == "" || len(claim.Evidence) == 0 {
+				t.Fatalf("%s claim %+v", name, claim)
+			}
+		}
+		var png, snapshot, text bool
+		for _, evidence := range run.Result.Evidence {
+			data, err := os.ReadFile(filepath.Join(run.Dir, filepath.FromSlash(evidence)))
+			if err != nil || len(data) == 0 {
+				t.Fatalf("%s evidence %s: %v", name, evidence, err)
+			}
+			png = png || bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n"))
+			snapshot = snapshot || bytes.Contains(data, []byte("ref=e1]"))
+			text = text || strings.HasSuffix(evidence, ".txt")
+		}
+		if !png || !snapshot || !text {
+			t.Fatalf("%s evidence %q lacks a screenshot (%v), a snapshot (%v) or a text log (%v)", name, run.Result.Evidence, png, snapshot, text)
+		}
+	}
+	a, b := runInstanceToken(t, first), runInstanceToken(t, second)
+	if a == b {
+		t.Fatalf("two run IDs showed the same instance token %s: the app or the browser did not run anew", a)
+	}
+	t.Logf("instance tokens %s and %s differ", a, b)
+
+	adhoc := lever("e2e-adhoc", "verify", "--steps=goto notes; snapshot")
+	if adhoc.Result.Rejected != "" || adhoc.Result.Status() != verification.Pass || len(adhoc.Result.Claims) == 0 {
+		t.Fatalf("ad-hoc run: %+v\n%s", adhoc.Result, adhoc.Diagnostics)
+	}
+	for _, claim := range adhoc.Result.Claims {
+		if claim.Flow != "" {
+			t.Fatalf("an ad-hoc claim carries the flow %q", claim.Flow)
+		}
+	}
+
+	_, err = checks.RunLever(ctx, fixture, LeverCall{Base: base, Args: []string{"verify", "--run-id=mine", "--flow=home-page"}, RunID: "e2e-refused"})
+	var limited *LeverLimitation
+	if !errors.As(err, &limited) {
+		t.Fatalf("an argument list that sets the run ID gave %v", err)
+	}
 }

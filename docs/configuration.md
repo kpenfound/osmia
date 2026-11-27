@@ -1487,6 +1487,11 @@ flake_fixes = false                 # default; true turns flake-fix workstreams 
 [capacity]
 per_workstream = 2                  # defaults to top-level capacity.per_workstream
 git_operations = 4                  # concurrent Git/GitHub operations in this project
+
+[verification]                      # optional; see Verification below
+call = ["my-lever"]                 # base `dagger call` arguments that select the lever
+map_dir = "docs/verification"       # default; the feature-map directory
+lever_paths = ["lever/**"]          # globs of the lever's source, for flagging
 ```
 
 Repository references contain two nonempty owner/repository components using
@@ -1705,6 +1710,44 @@ comma-separated elements and surrounding whitespace as Dagger reads them.
 Checks fail closed, so even a legitimate value containing `:` can be refused;
 the chief can use a module default or explain the limitation. Only a verified
 engine Service ID reaches the capture command.
+
+### Verification
+
+A project whose repository has a verification lever, a Dagger function that
+drives the running build and returns a report with evidence, sets the optional
+`[verification]` table. A project without the table behaves exactly as before:
+masons get no verification reminder or feature pointers, no role is offered
+`verify`, and review bundles carry no verification sections.
+
+| Key | Meaning |
+| --- | --- |
+| `call` | The base arguments of `dagger call` that select the lever, such as the module name. Required when the table is present. |
+| `map_dir` | The repository-relative [feature-map](testing.md#the-feature-map) directory. Defaults to `docs/verification`. |
+| `lever_paths` | Repository path globs of the lever's source. A unit diff that touches them, or the map directory, is flagged in its review bundle. Never a rejection. |
+
+Load refuses the table with an error naming the field when `call` is empty,
+when its arguments break the agent-argument rules `preview` enforces (including
+setting the run ID), when `map_dir` or a `lever_paths` glob is not a clean
+relative path inside the repository, when `map_dir` is a glob, or when a glob is
+not valid. The setting needs no restart-time provisioning beyond a reload.
+
+With the setting present:
+
+- the mason's bundle names the feature files that apply to its unit and reminds
+  it to keep the lever and the map current, and its done report may list the
+  lever invocations it verified with;
+- the service reruns up to five of them on the captured candidate and shows the
+  results in the unit review bundle as service-recorded evidence;
+- unit reviewers, the final reviewer and the chief of staff are offered
+  `verify`, which runs the lever on the service; masons never are;
+- the final reviewer gets the regression sweep, and the trace and telemetry
+  record [verification measures](telemetry.md#verification-measures).
+
+The roles are described in [design](design.md#97-verification). How the lever is
+invoked, the run ID it receives, the report it returns, flow tags, limits and
+evidence retention are in the
+[verification lever contract](testing.md#verification-lever-contract), the one
+place that describes them.
 
 ## Configuration and restart behavior
 

@@ -4,7 +4,7 @@ A Dagger module that drives a web service with Playwright and Chromium and
 returns the Directory of Osmia's verification lever contract: a version 1
 `report.json` and the evidence files its claims name. The contract itself, with
 the run ID, flow tags, limits and `list`, is described once in
-[docs/testing.md](../../docs/testing.md). This page covers only what the module
+[docs/testing.md](../../docs/testing.md#verification-lever-contract). This page covers only what the module
 adds.
 
 Install it in a product by git ref and call it from the product's verify

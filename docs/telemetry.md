@@ -320,7 +320,7 @@ record the service wrote to the trace, so the trace and telemetry hold the same
 numbers. They are measures only: nothing in them moves a unit or a workstream,
 and a project without the setting sends none of them. The lever contract that
 defines runs, claims, flow tags and `inconclusive` is in
-[testing](testing.md).
+[testing](testing.md#verification-lever-contract).
 
 `osmia.verify.unit` has one span per measure record of a unit, written when the
 unit's reviewer decides. It counts every verify run recorded for the unit on any
