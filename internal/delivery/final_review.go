@@ -825,6 +825,9 @@ func (a *FinalReviewer) Read(ctx context.Context, cfg *config.Config, stream con
 	}
 	member := committeeAgent(1)
 	report.Reader = member
+	if err := intake.SettleCommitteeAnswers(ctx, a.Repository, stream, member, a.S.Now()); err != nil {
+		return coreadapter.OperationResult{}, err
+	}
 	running, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer a.S.TrackTurn(stream, cancel)()

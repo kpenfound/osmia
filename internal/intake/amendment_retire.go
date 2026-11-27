@@ -64,14 +64,15 @@ func (s *Controller) RetireStaleAmendment(ctx context.Context, repository *trace
 }
 
 // AmendmentRetirementOutcome settles operations superseded by a service
-// retirement, even when their own transition was never recorded.
+// retirement or by a withdrawal before the amendment was presented, even
+// when their own transition was never recorded.
 func AmendmentRetirementOutcome(repository *trace.Repository, stream config.WorkstreamID, id string) (*coreadapter.OperationResult, error) {
 	transitions, err := trace.Read[trace.Transition](repository, stream)
 	if err != nil {
 		return nil, err
 	}
 	for _, t := range transitions {
-		if t.Subject == AmendmentSubject(id) && t.To == AmendmentRejected && t.Actor == AmendmentActor {
+		if t.Subject == AmendmentSubject(id) && t.To == AmendmentRejected && (t.Actor == AmendmentActor || t.From != AmendmentPresented) {
 			return &coreadapter.OperationResult{Outcome: "succeeded", Evidence: t.Reason}, nil
 		}
 	}

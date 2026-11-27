@@ -42,6 +42,8 @@ const AmendmentRound = intake.AmendmentRound
 
 const AmendmentOverrule = intake.AmendmentOverrule
 
+const AmendmentWithdraw = intake.AmendmentWithdraw
+
 const amendmentRuled = intake.AmendmentRuled
 
 func (s *Service) decideAmendment(ctx context.Context, raw string, id string, req AmendmentDecisionRequest) (AmendmentResponse, *APIError) {

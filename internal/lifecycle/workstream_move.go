@@ -596,7 +596,7 @@ func (s *Controller) Assemblable(repo *trace.Repository, stream config.Workstrea
 	if pending, err := s.UnresolvedWork(repo, stream); err != nil {
 		return &APIError{Code: Internal, Message: "cannot read the workstream's discoveries and revisions"}
 	} else if pending {
-		return &APIError{Code: Conflict, Message: "an open discovery or a pending revision prevents assembly"}
+		return &APIError{Code: Conflict, Message: "an open discovery or a pending revision prevents assembly; a revision that was never presented and whose drafting or debate cannot finish is withdrawn with decide_amendment decision withdraw, which keeps the sealed spec and plan"}
 	}
 	return nil
 }
