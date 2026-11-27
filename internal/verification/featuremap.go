@@ -321,3 +321,91 @@ func (m FeatureMap) Check(listed []string) []Note {
 	sort.SliceStable(notes, func(i, j int) bool { return notes[i].File < notes[j].File })
 	return notes
 }
+
+// ReadIndex returns the text of the map directory's README.md, the index that
+// lists the features in the order of a full regression sweep. It returns false
+// when the file cannot be read.
+func ReadIndex(fsys fs.FS, dir string) (string, bool) {
+	data, err := readHead(fsys, path.Join(dir, "README.md"))
+	if err != nil || !utf8.Valid(data) {
+		return "", false
+	}
+	return string(data), true
+}
+
+// Ordered returns the features in the order the index lists them: each list
+// item of the index names the feature whose file name or feature name appears
+// first in it, and a feature the index does not name follows, in file-name
+// order. An index that cannot be read leaves file-name order.
+func (m FeatureMap) Ordered(index string) []Feature {
+	remaining := append([]Feature(nil), m.Features...)
+	var out []Feature
+	for _, line := range strings.Split(index, "\n") {
+		if !isListItem(line) {
+			continue
+		}
+		lower := strings.ToLower(line)
+		best, at := -1, len(lower)+1
+		for i, f := range remaining {
+			if pos := firstMention(lower, f); pos >= 0 && pos < at {
+				best, at = i, pos
+			}
+		}
+		if best >= 0 {
+			out = append(out, remaining[best])
+			remaining = append(remaining[:best], remaining[best+1:]...)
+		}
+	}
+	return append(out, remaining...)
+}
+
+func isListItem(line string) bool {
+	line = strings.TrimSpace(line)
+	if rest, ok := strings.CutPrefix(line, "-"); ok {
+		return strings.HasPrefix(rest, " ")
+	}
+	for _, bullet := range []string{"*", "+"} {
+		if rest, ok := strings.CutPrefix(line, bullet); ok {
+			return strings.HasPrefix(rest, " ")
+		}
+	}
+	digits := strings.TrimLeft(line, "0123456789")
+	if digits == line {
+		return false
+	}
+	return strings.HasPrefix(digits, ". ") || strings.HasPrefix(digits, ") ")
+}
+
+func firstMention(line string, f Feature) int {
+	base := strings.ToLower(strings.TrimSuffix(path.Base(f.File), ".md"))
+	best := -1
+	for _, key := range []string{base, strings.ToLower(f.Name)} {
+		if key == "" {
+			continue
+		}
+		if pos := indexWord(line, key); pos >= 0 && (best < 0 || pos < best) {
+			best = pos
+		}
+	}
+	return best
+}
+
+func indexWord(line, key string) int {
+	for from := 0; from < len(line); {
+		i := strings.Index(line[from:], key)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		end := i + len(key)
+		if (i == 0 || !wordByte(line[i-1])) && (end == len(line) || !wordByte(line[end])) {
+			return i
+		}
+		from = i + 1
+	}
+	return -1
+}
+
+func wordByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
+}

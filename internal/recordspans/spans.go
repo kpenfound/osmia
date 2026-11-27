@@ -68,6 +68,7 @@ func (r Recorder) Observe(d trace.CommitDetail) {
 	}
 	for _, doc := range d.Documents {
 		r.check(d, doc)
+		r.verification(d, doc)
 	}
 }
 

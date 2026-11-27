@@ -1014,6 +1014,9 @@ func (a *FinalReviewer) Enqueue(ctx context.Context, cfg *config.Config, stream 
 		}
 		systemPrompt, prompt = ClimbFinalSystemPrompt(cfg.Project), ClimbFinalPrompt(report, checks, notes, previous, results)
 	}
+	if sweep := a.sweep(ctx, cfg, stream, report); sweep != "" {
+		prompt += "\n" + sweep
+	}
 	req := trace.TurnRequest{Header: trace.Header{Schema: "osmia.trace.turn-request", Version: trace.Version, ID: "request_" + turn, Revision: 1, Project: a.Repository.Project(), Workstream: stream, At: a.S.Now(), Actor: FinalReviewActor, Cause: transition, Depth: 1},
 		AgentID: member, ThreadID: t.Identity.ThreadID, TurnID: turn, Profile: profile, SystemPrompt: systemPrompt, Prompt: prompt}
 	_, err = a.Repository.EnqueueTurn(ctx, req)
@@ -1435,6 +1438,9 @@ func (a *FinalReviewer) Record(ctx context.Context, stream config.WorkstreamID, 
 			Subject: FinalReviewSubject, From: state.Value, To: fmt.Sprintf("%s-%d", report.Outcome, report.Review), Reason: reason},
 		Events: []trace.Event{trace.Notice(id, "chief", body)}}
 	documents := []trace.Document{doc}
+	if measure, ok := a.finalMeasure(stream, report); ok {
+		documents = append(documents, measure)
+	}
 	var followups []trace.Transaction
 	if report.Outcome == FinalReviewed && report.Maintenance && edgePending {
 		added, found, err := a.Followup(stream, report, revision)

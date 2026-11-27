@@ -203,3 +203,32 @@ func TestParseFlowList(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderedFollowsTheIndexAndPutsUnlistedFeaturesLastInFileOrder(t *testing.T) {
+	m := ReadMap(newMap(), "docs/verification")
+	if got := names(m.Ordered("# Features\n- checkout\n- admin\n")); !slices.Equal(got, []string{"Checkout", "Admin"}) {
+		t.Fatalf("%v", got)
+	}
+	linked := "Features, in order:\n\n1. [admin](admin.md): admin pages that also use checkout.\n2. [checkout](checkout.md): the cart\n"
+	if got := names(m.Ordered(linked)); !slices.Equal(got, []string{"Admin", "Checkout"}) {
+		t.Fatalf("%v", got)
+	}
+	if got := names(m.Ordered("- checkout\n")); !slices.Equal(got, []string{"Checkout", "Admin"}) {
+		t.Fatalf("%v", got)
+	}
+	if got := names(m.Ordered("checkout comes first in this paragraph\n- admin\n")); !slices.Equal(got, []string{"Admin", "Checkout"}) {
+		t.Fatalf("%v", got)
+	}
+	if got := names(m.Ordered("")); !slices.Equal(got, []string{"Admin", "Checkout"}) {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestReadIndexReadsTheReadme(t *testing.T) {
+	if text, ok := ReadIndex(newMap(), "docs/verification"); !ok || !strings.Contains(text, "- admin") {
+		t.Fatalf("%q %v", text, ok)
+	}
+	if _, ok := ReadIndex(newMap(), "docs/other"); ok {
+		t.Fatal("an index was read from a missing directory")
+	}
+}

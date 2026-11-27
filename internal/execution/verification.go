@@ -126,6 +126,38 @@ func ReadFeatureAssociation(repo *trace.Repository, stream config.WorkstreamID, 
 	return association, true, nil
 }
 
+// ReadFeatureAssociations returns the latest feature association recorded for
+// each unit of stream whose candidate passed unit review, in the order the
+// units' records were first written.
+func ReadFeatureAssociations(repo *trace.Repository, stream config.WorkstreamID) ([]FeatureAssociation, error) {
+	docs, err := trace.Read[trace.Document](repo, stream)
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]trace.Document{}
+	var order []string
+	for _, d := range docs {
+		if d.Unit == "" || d.ID != FeaturesDocument(d.Unit) {
+			continue
+		}
+		if _, seen := latest[d.ID]; !seen {
+			order = append(order, d.ID)
+		}
+		if d.Revision >= latest[d.ID].Revision {
+			latest[d.ID] = d
+		}
+	}
+	var out []FeatureAssociation
+	for _, id := range order {
+		var association FeatureAssociation
+		if err := json.Unmarshal([]byte(latest[id].Content), &association); err != nil {
+			return nil, err
+		}
+		out = append(out, association)
+	}
+	return out, nil
+}
+
 func readUnitVerification(repo *trace.Repository, stream config.WorkstreamID, unit, candidate string) (UnitVerification, bool, error) {
 	doc, err := latestDocumentOf(repo, stream, VerificationDocument(unit))
 	if err != nil || doc.Revision == 0 {
@@ -354,4 +386,49 @@ func (r *reviewers) recordFeatureAssociation(ctx context.Context, stream config.
 	}
 	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: FeaturesDocument(unit), Revision: latest.Revision + 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit)}
 	return r.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: featuresPath(unit), Content: string(data) + "\n"}})
+}
+
+// UnitMeasureDocument is the trace record ID of a unit's verification measure.
+func UnitMeasureDocument(unit string) string { return trace.UnitSubject(unit) + "-verification-measure" }
+
+func (r *reviewers) recordUnitMeasure(ctx context.Context, stream config.WorkstreamID, unit string, result UnitReviewResult) error {
+	if !r.verifying() {
+		return nil
+	}
+	candidate, base := result.Identity.Candidate.Revision, result.Identity.Candidate.BaseRevision
+	revision, err := r.reviewRevision(stream, unit)
+	if err != nil {
+		return err
+	}
+	latest, err := latestDocumentOf(r.repository, stream, UnitMeasureDocument(unit))
+	if err != nil {
+		return err
+	}
+	if latest.Revision > 0 {
+		var prior verification.UnitMeasure
+		if json.Unmarshal([]byte(latest.Content), &prior) == nil && prior.Review == revision && prior.Candidate == candidate {
+			return nil
+		}
+	}
+	g, err := NewUnitWorkspaces(r.cfg, r.repository).Of(stream)
+	if err != nil {
+		return err
+	}
+	changed, err := g.ChangedPaths(ctx, base, candidate)
+	if err != nil {
+		return fmt.Errorf("candidate changed files: %w", err)
+	}
+	runs, err := verifytool.UnitRuns(r.repository, stream, unit)
+	if err != nil {
+		return err
+	}
+	measure := verification.MeasureUnit(unit, runs)
+	lever, mapDir := touched(r.cfg.Project.Verification, changed)
+	measure.Review, measure.Candidate, measure.LeverTouched, measure.MapTouched = revision, candidate, len(lever) != 0, len(mapDir) != 0
+	data, err := json.MarshalIndent(measure, "", "  ")
+	if err != nil {
+		return err
+	}
+	h := trace.Header{Schema: "osmia.trace.document", Version: trace.Version, ID: UnitMeasureDocument(unit), Revision: latest.Revision + 1, Project: r.repository.Project(), Workstream: stream, Unit: unit, At: r.s.Now(), Actor: ReviewerActor, Cause: ReviewDocument(unit)}
+	return r.repository.RecordDocuments(ctx, []trace.Document{{Header: h, Path: verification.UnitMeasurePath(unit), Content: string(data) + "\n"}})
 }

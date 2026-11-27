@@ -40,11 +40,16 @@ func TestTelemetryPageListsWhatTheCodeSends(t *testing.T) {
 		telemetry.SpanName("service", "uptime").String(),
 		telemetry.SpanName("loop_guard", "trip").String(),
 		telemetry.SpanName("transition", "route").String(),
+		telemetry.SpanName("verify", "unit").String(),
+		telemetry.SpanName("verify", "final").String(),
+		telemetry.SpanName("verify", "final_flow").String(),
+		telemetry.SpanName("verify", "final_unit").String(),
 	)
 	documented(t, "attribute", telemetry.AttributeKeys()...)
 	documented(t, "unit cause", recordspans.UnitCauses...)
 	documented(t, "workstream cause", recordspans.CauseOwner, recordspans.CauseChief, recordspans.CauseService, recordspans.CauseAgent, recordspans.Archived, recordspans.Removed)
 	documented(t, "turn outcome", recordspans.TurnCompleted, recordspans.TurnWaiting, recordspans.TurnFailed, recordspans.TurnCancelled)
+	documented(t, "verification flow outcome", recordspans.FlowFail, recordspans.FlowInconclusive)
 	documented(t, "check kind", recordspans.CheckUnit, recordspans.CheckFinal, recordspans.CheckSession)
 	documented(t, "slot outcome", slotspans.Released, slotspans.Granted, slotspans.Canceled, slotspans.Removed, slotspans.Blocked, slotspans.Abandoned, slotspans.Interrupted)
 	documented(t, "wait reason", slotspans.ReasonCapacity, slotspans.ReasonWorkstreamCap, slotspans.ReasonClient, slotspans.ReasonNoClient)

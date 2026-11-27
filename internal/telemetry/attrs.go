@@ -46,6 +46,31 @@ var (
 	KeyTrigger       = Key("trigger")
 	KeyConfidence    = Key("confidence")
 	KeyJudgment      = Key("judgment")
+
+	KeyVerifyRuns              = Key("verify", "runs")
+	KeyVerifyPass              = Key("verify", "pass")
+	KeyVerifyFail              = Key("verify", "fail")
+	KeyVerifyInconclusive      = Key("verify", "inconclusive")
+	KeyVerifyLimited           = Key("verify", "limited")
+	KeyVerifyDeclaredRuns      = Key("verify", "declared_runs")
+	KeyVerifyDeclaredFlows     = Key("verify", "declared_flows")
+	KeyVerifyDeclaredUntagged  = Key("verify", "declared_untagged")
+	KeyVerifyReviewerRuns      = Key("verify", "reviewer_runs")
+	KeyVerifyReviewerFlows     = Key("verify", "reviewer_flows")
+	KeyVerifyReviewerUntagged  = Key("verify", "reviewer_untagged")
+	KeyVerifySkipped           = Key("verify", "skipped")
+	KeyVerifyRefused           = Key("verify", "refused")
+	KeyVerifyLeverTouched      = Key("verify", "lever_touched")
+	KeyVerifyMapTouched        = Key("verify", "map_touched")
+	KeyVerifyFlow              = Key("verify", "flow")
+	KeyVerifyUnits             = Key("verify", "units")
+	KeyVerifyShared            = Key("verify", "shared")
+	KeyVerifyUnattributed      = Key("verify", "unattributed")
+	KeyVerifyFailedFlows       = Key("verify", "failed_flows")
+	KeyVerifyInconclusiveFlows = Key("verify", "inconclusive_flows")
+	KeyVerifyUnattributedFails = Key("verify", "unattributed_failures")
+	KeyVerifyFailingUnits      = Key("verify", "failing_units")
+	KeyVerifyInconclusiveUnits = Key("verify", "inconclusive_units")
 )
 
 // The OpenTelemetry GenAI convention attributes a turn span may carry. They
@@ -81,6 +106,14 @@ var allowed = map[string]kind{
 	KeyTrigger: kindToken, KeyConfidence: kindToken, KeyJudgment: kindID,
 	KeyGenAIOperation: kindToken, KeyGenAIProvider: kindID, KeyGenAIModel: kindID,
 	KeyGenAIAgentName: kindID, KeyGenAIAgentID: kindID,
+
+	KeyVerifyRuns: kindInt, KeyVerifyPass: kindInt, KeyVerifyFail: kindInt, KeyVerifyInconclusive: kindInt, KeyVerifyLimited: kindInt,
+	KeyVerifyDeclaredRuns: kindInt, KeyVerifyDeclaredFlows: kindInt, KeyVerifyDeclaredUntagged: kindInt,
+	KeyVerifyReviewerRuns: kindInt, KeyVerifyReviewerFlows: kindInt, KeyVerifyReviewerUntagged: kindInt,
+	KeyVerifySkipped: kindInt, KeyVerifyRefused: kindInt, KeyVerifyLeverTouched: kindBool, KeyVerifyMapTouched: kindBool,
+	KeyVerifyFlow: kindID, KeyVerifyUnits: kindIDs, KeyVerifyShared: kindBool, KeyVerifyUnattributed: kindBool,
+	KeyVerifyFailedFlows: kindInt, KeyVerifyInconclusiveFlows: kindInt, KeyVerifyUnattributedFails: kindInt,
+	KeyVerifyFailingUnits: kindInt, KeyVerifyInconclusiveUnits: kindInt,
 }
 
 // AttributeKeys lists every attribute key a span may carry, sorted.
@@ -285,3 +318,19 @@ func GenAIAgentName(name string) Attr { return String(KeyGenAIAgentName, name) }
 
 // GenAIAgentID is the gen_ai.agent.id of a turn span.
 func GenAIAgentID(id string) Attr { return String(KeyGenAIAgentID, id) }
+
+// VerifyCount is one of the integer measures of verification, given by its
+// key: a run count, a flow count or a unit count.
+func VerifyCount(key string, n int) Attr { return Int(key, int64(n)) }
+
+// VerifyFlow is the flow a final measure span covers.
+func VerifyFlow(flow string) Attr { return String(KeyVerifyFlow, flow) }
+
+// VerifyUnits lists the approved units a final failure or an inconclusive flow
+// is attributed to.
+func VerifyUnits(units []string) Attr { return Strings(KeyVerifyUnits, units) }
+
+// VerifyFlag is one of the boolean markers of verification, given by its key:
+// the lever or the map was touched, or a final failure is shared or
+// unattributed.
+func VerifyFlag(key string, set bool) Attr { return Bool(key, set) }

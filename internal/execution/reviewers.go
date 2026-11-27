@@ -759,6 +759,9 @@ func (r *reviewers) ApplyReview(ctx context.Context, stream config.WorkstreamID,
 		Evidence: router.Evidence{Facts: map[string]any{"send_backs": result.Bounces, "max_send_backs": r.cfg.Shed.MaxBounces, "findings": len(result.Verdict.Findings)},
 			Records: []router.Entry{{Kind: "verdict", ID: ReviewDocument(unit), Text: verdictText(result.Verdict)}}},
 	}
+	if err := r.recordUnitMeasure(ctx, stream, unit, result); err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if result.Verdict.Decision == "satisfactory" {
 		if err := r.recordFeatureAssociation(ctx, stream, unit, result); err != nil {
 			return fmt.Errorf("record the feature association of unit %s: %w", unit, err)
