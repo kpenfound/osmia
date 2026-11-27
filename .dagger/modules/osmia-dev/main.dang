@@ -51,6 +51,40 @@ type OsmiaDev {
       .sync
     null
   }
+
+  """
+  Run the verification fixture's verify function for real through the shared
+  web-driver module, in a nested Dagger session, and check what it returns: a
+  version 1 report of flow-tagged claims with a screenshot, an accessibility
+  snapshot and a text log, different instance tokens for two run IDs, a failing
+  claim for a missing element, the fixture's flow list against its feature map,
+  the digest-pinned image and no published port.
+  """
+  pub webDriverFixture(ws: Workspace!): Void @check {
+    let result = container
+      .from("golang:1.26-bookworm")
+      .withExec([
+        "sh", "-c",
+        "apt-get update && apt-get install -y --no-install-recommends jq && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withEnvVariable("DAGGER_VERSION", version)
+      .withExec(["sh", "-c", cliInstall])
+      .withDirectory(
+        "/src",
+        ws.directory("/", include: ["modules/web-driver/**", "testdata/verification-fixture/**"]),
+      )
+      .withWorkdir("/src")
+      .withExec([
+        "sh", "-c",
+        "git init -q . && git add -A && git -c user.name=osmia -c user.email=osmia@example.invalid commit -q -m fixture",
+      ])
+      .withExec(
+        ["sh", "testdata/verification-fixture/check.sh"],
+        experimentalPrivilegedNesting: true,
+      )
+      .sync
+    null
+  }
 }
 
 """

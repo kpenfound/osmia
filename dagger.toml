@@ -13,9 +13,12 @@ base = "dag://osmia-dev/test-runtime"
 # tests' log outgrows the engine's memory.
 goflags = "-count=1 -timeout=30m"
 # Keep factory state and local agent worktrees out of module discovery,
-# including any go.mod files left in session directories.
-test = ["**", "!.bees", "!.claude"]
-generate = ["**", "!.bees/**", "!.claude/**"]
+# including any go.mod files left in session directories. The web-driver module
+# and the verification fixture are Dagger modules whose SDK code the engine
+# generates when it loads them, so the Go checks skip them; the
+# web-driver-fixture check exercises them.
+test = ["**", "!.bees", "!.claude", "!modules/web-driver", "!testdata/verification-fixture"]
+generate = ["**", "!.bees/**", "!.claude/**", "!modules/web-driver/**", "!testdata/verification-fixture/**", "!modules/web-driver", "!testdata/verification-fixture"]
 
 [modules.release]
 source = ".dagger/modules/osmia-release"
@@ -44,3 +47,10 @@ goflags = "-count=5 -timeout=30m"
 
 [modules.staticcheck]
 source = "dagger.io/go/staticcheck"
+
+[modules.staticcheck.settings]
+# The web-driver module and the verification fixture generate their SDK code
+# when the engine loads them, so lint skips them. Each has its own
+# staticcheck.conf so that it is a separate project the root project leaves out;
+# the web-driver-fixture check exercises them.
+lint = ["**", "!.bees", "!.claude", "!modules/web-driver", "!testdata/verification-fixture"]

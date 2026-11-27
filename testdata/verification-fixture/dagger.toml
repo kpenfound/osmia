@@ -1,0 +1,2 @@
+[modules.verification-fixture]
+source = "."
