@@ -23,7 +23,7 @@ func TestMeasureUnitCountsRunsByStatusAndKeepsInconclusiveApartFromPass(t *testi
 		{Source: SourceReviewer, Outcome: OutcomeResult, Result: claims("y", Fail)},
 		{Source: SourceReviewer, Outcome: OutcomeResult, Result: claims("", Pass)},
 		{Source: SourceReviewer, Outcome: OutcomeLimited},
-		{Source: "chief", Outcome: OutcomeResult, Result: claims("z", Pass)},
+		{Source: "manager", Outcome: OutcomeResult, Result: claims("z", Pass)},
 	})
 	if m.Runs != (Counts{Pass: 2, Fail: 1, Inconclusive: 2}) || m.Limited != 1 {
 		t.Fatalf("runs %+v limited %d", m.Runs, m.Limited)
